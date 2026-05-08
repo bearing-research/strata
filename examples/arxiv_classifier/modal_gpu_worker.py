@@ -27,7 +27,7 @@ import modal
 
 # Install Strata itself. Pin to a commit or tag for reproducible builds.
 # PyPI users will just write "strata" here.
-PROJECT_GIT_URL = "strata[notebook] @ git+https://github.com/forge-labs-dev/strata.git@c597d09"
+PROJECT_GIT_URL = "strata[notebook] @ git+https://github.com/bearing-research/strata.git@7d29f01"
 
 # Dependencies needed by cells that run on this worker. Keep this list
 # tight — the image rebuilds when it changes.

@@ -91,7 +91,7 @@ URL that disappears when you Ctrl-C. No `modal deploy` needed.
 
 ## Updating after Strata source changes
 
-The Modal image installs Strata from `git+https://github.com/forge-labs-dev/strata.git@main`.
+The Modal image installs Strata from `git+https://github.com/bearing-research/strata.git@main`.
 After pushing a new commit to `main`, redeploy to pick it up:
 
 ```bash
@@ -100,4 +100,4 @@ modal deploy examples/arxiv_classifier/modal_gpu_worker.py
 
 To pin to a specific tag for stability before YC review, edit
 `modal_gpu_worker.py` and change the dependency to
-`strata @ git+https://github.com/forge-labs-dev/strata.git@v0.X.Y`.
+`strata @ git+https://github.com/bearing-research/strata.git@v0.X.Y`.

@@ -1,8 +1,8 @@
 # Strata
 
-[![CI](https://github.com/forge-labs-dev/strata/actions/workflows/ci.yml/badge.svg)](https://github.com/forge-labs-dev/strata/actions/workflows/ci.yml)
-[![Pre-commit](https://github.com/forge-labs-dev/strata/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/forge-labs-dev/strata/actions/workflows/pre-commit.yml)
-[![Docker](https://github.com/forge-labs-dev/strata/actions/workflows/docker.yml/badge.svg)](https://github.com/forge-labs-dev/strata/actions/workflows/docker.yml)
+[![CI](https://github.com/bearing-research/strata/actions/workflows/ci.yml/badge.svg)](https://github.com/bearing-research/strata/actions/workflows/ci.yml)
+[![Pre-commit](https://github.com/bearing-research/strata/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/bearing-research/strata/actions/workflows/pre-commit.yml)
+[![Docker](https://github.com/bearing-research/strata/actions/workflows/docker.yml/badge.svg)](https://github.com/bearing-research/strata/actions/workflows/docker.yml)
 
 **Content-addressed notebooks for ML and data workflows.**
 
@@ -15,7 +15,7 @@ One source annotation (`# @worker gpu-fly`) dispatches a cell to a remote
 GPU. Another (`# @mount data s3://bucket/prefix ro`) makes an S3 prefix
 available as a local `pathlib.Path` inside the cell. No glue code.
 
-**Docs:** [forge-labs-dev.github.io/strata](https://forge-labs-dev.github.io/strata/)
+**Docs:** [bearing-research.github.io/strata](https://bearing-research.github.io/strata/)
 
 ## Quick Start
 
@@ -37,17 +37,17 @@ PyPI publishing is pending. Until then, install directly from Git:
 
 ```bash
 # Strata core (materialization, artifact store, Iceberg scanning):
-pip install "strata @ git+https://github.com/forge-labs-dev/strata.git"
+pip install "strata @ git+https://github.com/bearing-research/strata.git"
 
 # Strata Notebook adds DataFrame/Series/ndarray serialization, display
 # outputs, and the cloudpickle-backed object codec:
-pip install "strata[notebook] @ git+https://github.com/forge-labs-dev/strata.git"
+pip install "strata[notebook] @ git+https://github.com/bearing-research/strata.git"
 
 # Or with uv:
-uv add "strata[notebook] @ git+https://github.com/forge-labs-dev/strata.git"
+uv add "strata[notebook] @ git+https://github.com/bearing-research/strata.git"
 
 # Pin to a specific commit for reproducibility:
-pip install "strata @ git+https://github.com/forge-labs-dev/strata.git@<sha>"
+pip install "strata @ git+https://github.com/bearing-research/strata.git@<sha>"
 ```
 
 ## Notebook Features
@@ -174,7 +174,7 @@ artifacts, lineage tracking, Iceberg table scanning with row-group
 caching, pluggable blob storage (local/S3/GCS/Azure), multi-tenancy,
 trusted proxy auth, and an executor protocol for external compute.
 
-**[Core documentation →](https://forge-labs-dev.github.io/strata/getting-started/core/)**
+**[Core documentation →](https://bearing-research.github.io/strata/getting-started/core/)**
 
 ---
 

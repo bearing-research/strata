@@ -1,8 +1,8 @@
 site_name: Strata
-site_url: https://forge-labs-dev.github.io/strata/
+site_url: https://bearing-research.github.io/strata/
 site_description: Persistence substrate and notebook runtime for long-horizon computation
-repo_url: https://github.com/forge-labs-dev/strata
-repo_name: forge-labs-dev/strata
+repo_url: https://github.com/bearing-research/strata
+repo_name: bearing-research/strata
 
 theme:
   name: material

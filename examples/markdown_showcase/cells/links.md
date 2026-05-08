@@ -1,11 +1,11 @@
 ## Inline links
 
-Standard markdown link: [Strata homepage](https://forge-labs-dev.github.io/strata/).
+Standard markdown link: [Strata homepage](https://bearing-research.github.io/strata/).
 
 Link with a query string:
 [search](https://example.com/search?q=strata&page=2).
 
-Link to a fragment: [strata install](https://forge-labs-dev.github.io/strata/getting-started/installation/#prerequisites).
+Link to a fragment: [strata install](https://bearing-research.github.io/strata/getting-started/installation/#prerequisites).
 
 ## Autolinks (CommonMark)
 
@@ -23,7 +23,7 @@ The old hand-rolled parser missed this case.
 
 Reference-style: [Strata][nb] uses an artifact store at its core.
 
-[nb]: https://forge-labs-dev.github.io/strata/
+[nb]: https://bearing-research.github.io/strata/
 
 ## Link safety
 
