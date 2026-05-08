@@ -19,15 +19,19 @@ available as a local `pathlib.Path` inside the cell. No glue code.
 
 ## Quick Start
 
+Both paths below run in **personal mode** — single-user, writes enabled, no
+proxy auth. For multi-tenant or hosted deployments, see
+[Deployment Modes](https://bearing-research.github.io/strata/deployment/modes/).
+
 ```bash
-# Docker (recommended)
+# Docker (recommended) — docker-compose.yml sets personal mode for you
 docker compose up -d --build
 # Then open http://localhost:8765
 
-# Or from source
+# Or from source — set personal mode explicitly
 uv sync
 cd frontend && npm ci && npm run build && cd ..
-uv run strata-server
+STRATA_DEPLOYMENT_MODE=personal uv run strata-server
 # Then open http://localhost:8765
 ```
 
@@ -144,16 +148,16 @@ it on first read and caches the bytes locally for the session.
 
 ## Examples
 
-| Example | What it shows |
-|---|---|
-| [pandas_basics](examples/pandas_basics) | Linear DataFrame chain — caching, staleness propagation |
-| [iris_classification](examples/iris_classification) | End-to-end ML, DAG branching, mixed output types |
-| [titanic_ml](examples/titanic_ml) | Feature engineering + model comparison |
-| [s3_mount](examples/s3_mount) | Reading a public S3 bucket via a mount |
-| [arxiv_classifier](examples/arxiv_classifier) | Distributed execution via `@worker` + Modal GPU + Fly cluster |
-| [markdown_showcase](examples/markdown_showcase) | Markdown cells, dynamic `Markdown(...)` outputs, security cases |
-| [library_cells](examples/library_cells) | Cross-cell library code: pure module cells, mixed runtime+library cells, the limits |
-| [news_alpha_trader](examples/news_alpha_trader) | Multi-stage trading pipeline with prompt cells and structured LLM outputs |
+| Example                                             | What it shows                                                                       |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [pandas_basics](examples/pandas_basics)             | Linear DataFrame chain — caching, staleness propagation                             |
+| [iris_classification](examples/iris_classification) | End-to-end ML, DAG branching, mixed output types                                    |
+| [titanic_ml](examples/titanic_ml)                   | Feature engineering + model comparison                                              |
+| [s3_mount](examples/s3_mount)                       | Reading a public S3 bucket via a mount                                              |
+| [arxiv_classifier](examples/arxiv_classifier)       | Distributed execution via `@worker` + Modal GPU + Fly cluster                       |
+| [markdown_showcase](examples/markdown_showcase)     | Markdown cells, dynamic `Markdown(...)` outputs, security cases                     |
+| [library_cells](examples/library_cells)             | Cross-cell library code: pure module cells, mixed runtime+library cells, the limits |
+| [news_alpha_trader](examples/news_alpha_trader)     | Multi-stage trading pipeline with prompt cells and structured LLM outputs           |
 
 ---
 
