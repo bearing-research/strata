@@ -2,12 +2,12 @@
 
 Strata Notebook has four cell kinds:
 
-| Kind       | What it runs                              | Created by                                                          |
-| ---------- | ----------------------------------------- | ------------------------------------------------------------------- |
-| **Python** | Python source in the notebook's venv      | The default — pick **Python** from the **+ Add cell** menu          |
-| **Prompt** | A text template sent to an LLM            | Pick **Prompt** from the **+ Add cell** menu                        |
-| **SQL**    | A query against a connected database      | Pick **SQL** from the **+ Add cell** menu                           |
-| **Loop**   | A Python cell executed N times in a row   | Add a Python cell, then put a `# @loop` annotation at the top       |
+| Kind       | What it runs                            | Created by                                                    |
+| ---------- | --------------------------------------- | ------------------------------------------------------------- |
+| **Python** | Python source in the notebook's venv    | The default — pick **Python** from the **+ Add cell** menu    |
+| **Prompt** | A text template sent to an LLM          | Pick **Prompt** from the **+ Add cell** menu                  |
+| **SQL**    | A query against a connected database    | Pick **SQL** from the **+ Add cell** menu                     |
+| **Loop**   | A Python cell executed N times in a row | Add a Python cell, then put a `# @loop` annotation at the top |
 
 All four participate in the DAG, cache by provenance hash, and can be routed to remote workers. Pick the kind that matches the shape of the computation — this page walks through each.
 
@@ -28,7 +28,7 @@ sales = pd.read_parquet("https://example.com/sales.parquet")
 by_region = sales.groupby("region")["total"].sum()
 ```
 
-This cell *defines* `sales` and `by_region`. A downstream cell that references either name will automatically depend on this one.
+This cell _defines_ `sales` and `by_region`. A downstream cell that references either name will automatically depend on this one.
 
 ```python
 # downstream cell — reads by_region from upstream
@@ -124,7 +124,7 @@ When a downstream cell references `is_outlier`, you'll see:
 
 > This cell defines reusable code used downstream (`is_outlier`), but it cannot be shared across cells yet: function `is_outlier` references names not defined or imported in this cell: runtime_threshold
 
-The same diagnostic also surfaces as a `module_export_blocked` annotation on the cell *before* you run it — pre-flight warning, not just a runtime surprise.
+The same diagnostic also surfaces as a `module_export_blocked` annotation on the cell _before_ you run it — pre-flight warning, not just a runtime surprise.
 
 There are a few other shapes that block:
 
@@ -161,14 +161,14 @@ Warnings surface as a pill on the cell and a structured entry in the execution l
 
 ### Python-cell annotations
 
-| Annotation         | What it does                                         |
-| ------------------ | ---------------------------------------------------- |
-| `# @name X`        | Display name for the DAG view                        |
-| `# @worker X`      | Route execution to a named remote worker             |
-| `# @timeout 60`    | Override execution timeout (seconds, default 30)     |
-| `# @env KEY=value` | Set an env var for this cell only                    |
-| `# @mount …`       | Attach a filesystem mount (see [Annotations][a])     |
-| `# @loop …`        | Turn the cell into a [loop cell](#loop-cells)        |
+| Annotation         | What it does                                     |
+| ------------------ | ------------------------------------------------ |
+| `# @name X`        | Display name for the DAG view                    |
+| `# @worker X`      | Route execution to a named remote worker         |
+| `# @timeout 60`    | Override execution timeout (seconds, default 30) |
+| `# @env KEY=value` | Set an env var for this cell only                |
+| `# @mount …`       | Attach a filesystem mount (see [Annotations][a]) |
+| `# @loop …`        | Turn the cell into a [loop cell](#loop-cells)    |
 
 See [Cell Annotations][a] for the full reference.
 
@@ -199,13 +199,13 @@ Summarize this dataset and return the top 3 findings as a numbered list:
 
 Variables are injected with `{{ expression }}`. The expression is resolved against upstream cell outputs and converted to text using type-specific rules:
 
-| Upstream type     | Text representation                         |
-| ----------------- | ------------------------------------------- |
-| pandas DataFrame  | Markdown table (first 20 rows)              |
-| pandas Series     | String representation (first 20 values)     |
-| numpy ndarray     | Shape + dtype + first 10 elements           |
-| dict / list       | JSON, indented                              |
-| str / int / float | Direct string conversion                    |
+| Upstream type     | Text representation                     |
+| ----------------- | --------------------------------------- |
+| pandas DataFrame  | Markdown table (first 20 rows)          |
+| pandas Series     | String representation (first 20 values) |
+| numpy ndarray     | Shape + dtype + first 10 elements       |
+| dict / list       | JSON, indented                          |
+| str / int / float | Direct string conversion                |
 
 Each variable has a 2,000-token budget per template render. Oversized values are truncated with a `... (truncated)` marker.
 
@@ -222,16 +222,16 @@ Only a small set of methods is permitted (`describe`, `head`, `tail` on pandas o
 
 ### Prompt-cell annotations
 
-| Annotation               | What it does                                                               | Default               |
-| ------------------------ | -------------------------------------------------------------------------- | --------------------- |
-| `# @name <identifier>`   | Output variable name; must be a Python identifier                          | `result`              |
-| `# @model <model_id>`    | Override the notebook-level LLM model                                      | From provider config  |
-| `# @temperature <float>` | Sampling temperature (0.0 = deterministic; see [Caching](#caching) below)  | `0.0`                 |
-| `# @max_tokens <int>`    | Response token ceiling                                                     | `4096`                |
-| `# @system <text>`       | System prompt prepended to the request                                     | None                  |
-| `# @output json\|text`   | Coerce the response to JSON (or keep as free-form text)                    | `text`                |
-| `# @output_schema {…}`   | Inline JSON Schema pinning the response shape                              | None                  |
-| `# @validate_retries N`  | Total attempts for the validate-and-retry loop (1 initial + N−1 retries)   | `3`                   |
+| Annotation               | What it does                                                              | Default              |
+| ------------------------ | ------------------------------------------------------------------------- | -------------------- |
+| `# @name <identifier>`   | Output variable name; must be a Python identifier                         | `result`             |
+| `# @model <model_id>`    | Override the notebook-level LLM model                                     | From provider config |
+| `# @temperature <float>` | Sampling temperature (0.0 = deterministic; see [Caching](#caching) below) | `0.0`                |
+| `# @max_tokens <int>`    | Response token ceiling                                                    | `4096`               |
+| `# @system <text>`       | System prompt prepended to the request                                    | None                 |
+| `# @output json\|text`   | Coerce the response to JSON (or keep as free-form text)                   | `text`               |
+| `# @output_schema {…}`   | Inline JSON Schema pinning the response shape                             | None                 |
+| `# @validate_retries N`  | Total attempts for the validate-and-retry loop (1 initial + N−1 retries)  | `3`                  |
 
 Example using several at once:
 
@@ -252,17 +252,17 @@ Return a JSON object mapping paper ID to topic.
 
 `# @output_schema {...}` pins the shape of the LLM response to an inline JSON Schema. Strata picks the best provider-native path:
 
-| Provider                                          | Enforcement                                                                                    |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **OpenAI**                                        | Native `response_format: {type: "json_schema"}`. `additionalProperties: false` is auto-injected at every `object` node; strict mode is used when the user's `required` list covers every property (otherwise relaxed to `strict: false`). |
-| **Anthropic**                                     | Native `/v1/messages` with tool-use: the schema is sent as a tool's `input_schema` and `tool_choice` is forced to that tool. The returned `tool_use.input` is extracted verbatim. |
-| **Gemini / Mistral / Ollama / vLLM**              | Fallback to `response_format: {type: "json_object"}` — valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap. |
+| Provider                             | Enforcement                                                                                                                                                                                                                               |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **OpenAI**                           | Native `response_format: {type: "json_schema"}`. `additionalProperties: false` is auto-injected at every `object` node; strict mode is used when the user's `required` list covers every property (otherwise relaxed to `strict: false`). |
+| **Anthropic**                        | Native `/v1/messages` with tool-use: the schema is sent as a tool's `input_schema` and `tool_choice` is forced to that tool. The returned `tool_use.input` is extracted verbatim.                                                         |
+| **Gemini / Mistral / Ollama / vLLM** | Fallback to `response_format: {type: "json_object"}` — valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap.                                                                           |
 
 Setting `@output_schema` implies `@output json`; you don't need both.
 
 Example — triage each review into a structured record:
 
-````
+```
 # @name triage
 # @output_schema {"type":"object","properties":{"items":{"type":"array","items":{"type":"object","properties":{"sentiment":{"type":"string","enum":["positive","negative","neutral"]},"priority":{"type":"string","enum":["low","medium","high"]},"tags":{"type":"array","items":{"type":"string"}}},"required":["sentiment","priority","tags"]}}},"required":["items"]}
 Triage these customer reviews:
@@ -270,7 +270,7 @@ Triage these customer reviews:
 {{ reviews }}
 
 For each review return sentiment, priority, and 1–3 short tags.
-````
+```
 
 A downstream cell can then destructure without regex-wrangling:
 
@@ -291,7 +291,7 @@ When `@output_schema` is set, Strata runs a **validate-and-retry loop** after ev
 
 The default is 3 total attempts (1 initial + 2 retries). Override with `# @validate_retries N`. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (`validation_retries`) — the UI shows "validated after N retries" when non-zero.
 
-Retries are mostly invisible on OpenAI-strict and Anthropic-native paths because the provider enforces the schema at decode time. They earn their keep on the `json_object` fallback path (Gemini, Mistral, Ollama) where the provider only guarantees *syntactic* JSON.
+Retries are mostly invisible on OpenAI-strict and Anthropic-native paths because the provider enforces the schema at decode time. They earn their keep on the `json_object` fallback path (Gemini, Mistral, Ollama) where the provider only guarantees _syntactic_ JSON.
 
 ### Caching
 
@@ -307,7 +307,7 @@ A prompt cell's provenance hash mixes together:
 Editing any of these invalidates the cache. In particular, tweaking `@output_schema` on a cached cell forces a fresh call — exactly what you want when iterating on the response shape.
 
 !!! tip "Keep temperature at 0.0 for prompt cells"
-    With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache — future runs return the stored stochastic sample rather than re-sampling.
+With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache — future runs return the stored stochastic sample rather than re-sampling.
 
 See [LLM Integration](llm.md) for provider configuration and the conversational AI assistant.
 
@@ -330,7 +330,7 @@ The cell above pulls `min_amount` from an upstream Python cell, sends a paramete
 
 ### Connections
 
-A SQL cell references a **named connection**. Connections live in `notebook.toml` under `[connections.<name>]`, but you don't need to edit the file by hand — open the **Connections panel** in the right sidebar, click `+ Add connection`, fill in the form. The driver dropdown picks the per-driver field layout (path for SQLite; URI + auth + role + search_path for PostgreSQL).
+A SQL cell references a **named connection**. Connections live in `notebook.toml` under `[connections.<name>]`, but you don't need to edit that file by hand. Open the **Connections panel** in the right sidebar, click `+ Add connection`, and fill in the form. The driver dropdown switches the field layout per backend (path for SQLite; URI + auth + role + search path for PostgreSQL; account / warehouse / database / schema for Snowflake; project / dataset / credentials for BigQuery).
 
 ```toml
 [connections.warehouse]
@@ -351,11 +351,11 @@ Notes:
 - **Driver-specific extras** (e.g. `options.search_path`, `options.warehouse` for Snowflake, future driver-specific keys) round-trip through the editor unchanged. The form editorializes the keys it knows; everything else is preserved.
 - **Auth values use `${VAR}` indirection.** Literal credentials get blanked when `notebook.toml` is saved, so committing the file never leaks secrets. The form shows a warning border on a literal value so you know to switch it to a variable reference.
 - **Relative `path` values are notebook-local.** `path = "analytics.db"` resolves against the notebook directory at execution time. The on-disk value stays relative so a notebook moves cleanly between machines.
-- **Currently shipped drivers**: SQLite, PostgreSQL, Snowflake, and BigQuery. All ADBC-backed (`adbc-driver-sqlite`, `adbc-driver-postgresql`, `adbc-driver-snowflake`, `adbc-driver-bigquery`). For Snowflake, read-only enforcement is role-based — configure `role` with SELECT-only grants for read cells, optionally pair with `write_role` for `# @sql write=true`. For BigQuery the same shape applies via service-account credentials: `credentials_path` for read cells (a SA with `roles/bigquery.dataViewer`), optionally `write_credentials_path` for write cells (a SA with `roles/bigquery.dataEditor`). Both clouds lack a session-level read-only flag like Postgres's `SET default_transaction_read_only = on`.
+- **Currently shipped drivers**: SQLite, PostgreSQL, Snowflake, and BigQuery. All are ADBC-backed (`adbc-driver-sqlite`, `adbc-driver-postgresql`, `adbc-driver-snowflake`, `adbc-driver-bigquery`). For Snowflake, read cells use `role`; `write=true` cells switch to `write_role` when configured, otherwise they reuse `role`. For BigQuery, read cells use `credentials_path`; `write=true` cells switch to `write_credentials_path` when configured, otherwise they reuse `credentials_path`. Snowflake and BigQuery do not have a session-level read-only flag like PostgreSQL's `SET default_transaction_read_only = on`, so the safety boundary is the grants on the configured role or service account.
 
 ### Schema discovery
 
-The **Schema panel** in the sidebar shows the tables and columns of every declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The `↻` button re-fetches when the underlying database has changed externally. No SQL cell needs to be written to drive the discovery — the panel uses each driver's catalog query directly (`sqlite_master` for SQLite, `information_schema.tables JOIN columns` for PostgreSQL).
+The **Schema panel** in the sidebar shows the tables and columns visible through each declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The `↻` button re-fetches when the underlying database has changed externally. No SQL cell needs to run for this — the panel talks directly to each driver's catalog query surface (`sqlite_master` for SQLite, `information_schema.tables JOIN columns` for PostgreSQL, and the driver-specific catalog queries for Snowflake and BigQuery).
 
 ### Bind parameters
 
@@ -387,13 +387,13 @@ A SQL cell's **provenance hash** folds together:
 
 `# @cache` controls how DB-side state factors in. Default is `fingerprint`.
 
-| Policy            | Behavior                                                            | When to use                              |
-| ----------------- | ------------------------------------------------------------------- | ---------------------------------------- |
-| `fingerprint`     | Default. Probe-derived freshness token + schema fingerprint folded in. | Most queries.                            |
-| `forever`         | Static salt; never invalidates from DB-side state.                  | True reference data. User asserts.       |
-| `session`         | Session-unique salt; invalidates across sessions.                   | Always-fresh queries / dashboards.       |
-| `ttl=<seconds>`   | `floor(now / ttl)` in the salt; bucketed time-based invalidation.    | Stale-tolerant aggregations.             |
-| `snapshot`        | Probe MUST return a durable snapshot ID. Errors at execute time if the driver can't (SQLite/Postgres can't; Iceberg can). | Reproducibility-critical reads.          |
+| Policy          | Behavior                                                                                                                  | When to use                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `fingerprint`   | Default. Probe-derived freshness token + schema fingerprint folded in.                                                    | Most queries.                      |
+| `forever`       | Static salt; never invalidates from DB-side state.                                                                        | True reference data. User asserts. |
+| `session`       | Session-unique salt; invalidates across sessions.                                                                         | Always-fresh queries / dashboards. |
+| `ttl=<seconds>` | `floor(now / ttl)` in the salt; bucketed time-based invalidation.                                                         | Stale-tolerant aggregations.       |
+| `snapshot`      | Probe MUST return a durable snapshot ID. Errors at execute time if the driver can't (SQLite/Postgres can't; Iceberg can). | Reproducibility-critical reads.    |
 
 ```sql
 # @sql connection=warehouse
@@ -405,18 +405,25 @@ SELECT * FROM dim_country
 
 `fingerprint` correctness depends on what the driver can probe.
 
-| Driver       | Probe                                              | Granularity      | Notes                                        |
-| ------------ | -------------------------------------------------- | ---------------- | -------------------------------------------- |
-| PostgreSQL   | `pg_stat_user_tables` + `pg_class.relfilenode`     | per-table        | Up to ~500 ms stats-collector lag.           |
-| SQLite       | `PRAGMA data_version` + `PRAGMA schema_version`    | **DB-wide**      | DML cross-process needs the probe connection open across the write — `data_version` resets on a fresh connection. DDL (schema change) invalidates cleanly. |
-| Snowflake    | `INFORMATION_SCHEMA.TABLES.LAST_ALTERED`           | per-table        | Per-database scoping (one query per touched database). Bills cloud-services credits but each query is small. `LAST_ALTERED` updates even on 0-row DML — safe direction (over-invalidates, never under). |
-| BigQuery     | `__TABLES__.last_modified_time`                    | per-table        | Per-dataset scoping. `__TABLES__` is the legacy-but-stable view; `INFORMATION_SCHEMA.TABLES` doesn't expose `last_modified_time`. **Streaming-buffer caveat**: tables receiving streaming inserts have `last_modified_time` lag by minutes-to-90-min until the buffer flushes — pin `# @cache session` on those queries. Permissions: `bigquery.tables.get`. |
+| Driver     | Probe                                           | Granularity | Notes                                                                                                                                                                                                                                                                                                                                                        |
+| ---------- | ----------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PostgreSQL | `pg_stat_user_tables` + `pg_class.relfilenode`  | per-table   | Up to ~500 ms stats-collector lag.                                                                                                                                                                                                                                                                                                                           |
+| SQLite     | `PRAGMA data_version` + `PRAGMA schema_version` | **DB-wide** | DML cross-process needs the probe connection open across the write — `data_version` resets on a fresh connection. DDL (schema change) invalidates cleanly.                                                                                                                                                                                                   |
+| Snowflake  | `INFORMATION_SCHEMA.TABLES.LAST_ALTERED`        | per-table   | Per-database scoping (one query per touched database). Bills cloud-services credits but each query is small. `LAST_ALTERED` updates even on 0-row DML — safe direction (over-invalidates, never under).                                                                                                                                                      |
+| BigQuery   | `__TABLES__.last_modified_time`                 | per-table   | Per-dataset scoping. `__TABLES__` is the legacy-but-stable view; `INFORMATION_SCHEMA.TABLES` doesn't expose `last_modified_time`. **Streaming-buffer caveat**: tables receiving streaming inserts have `last_modified_time` lag by minutes-to-90-min until the buffer flushes — pin `# @cache session` on those queries. Permissions: `bigquery.tables.get`. |
 
 The schema fingerprint catches metadata-only changes (`ADD COLUMN`, type changes, nullability flips) that the freshness token would miss.
 
 ### Read-only by default
 
-A SQL cell opens its connection in **enforced read-only mode** — SQLite gets `mode=ro` plus `PRAGMA query_only=ON`; PostgreSQL gets `SET default_transaction_read_only = on`. Any `INSERT`/`UPDATE`/`DELETE`/`CREATE`/`DROP` errors before mutating the database. This is the security boundary, not text-level keyword filtering.
+SQL cells are **read-only by default**, but the enforcement mechanism depends on the backend:
+
+- **SQLite**: `mode=ro` plus `PRAGMA query_only=ON`
+- **PostgreSQL**: `SET default_transaction_read_only = on`
+- **Snowflake**: the configured `role` must be read-only
+- **BigQuery**: the configured `credentials_path` must point at a read-only service account
+
+For SQLite and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into `write=true`.”
 
 ### Write cells
 
@@ -438,7 +445,7 @@ INSERT INTO orders VALUES (1, 'alice', 25.50), (2, 'bob', 199.99);
 - The default cache policy is `session` (one execution per session; same body in the same session is a cache hit).
 - `# @cache fingerprint` and `# @cache snapshot` error early on write cells — probe-based invalidation has no anchor when the cell mutates state.
 - The cell still produces an Arrow artifact: a per-statement status table with `stmt`, `kind` (`CREATE TABLE`, `INSERT`, …), and `rows_affected` (nullable; `null` for DDL).
-- Read cells using the same connection stay read-only — the override is per-cell.
+- Read cells using the same connection stay on the read path — the override is per-cell.
 
 ### `# @name` and downstream consumption
 
@@ -481,12 +488,12 @@ The [`sql_orders_report`](../../examples/sql_orders_report) example notebook wal
 
 ### SQL-cell annotations
 
-| Annotation                                | What it does                                             |
-| ----------------------------------------- | -------------------------------------------------------- |
-| `# @sql connection=<name> [write=true]`   | Mark the cell as SQL; reference a declared connection    |
-| `# @cache <policy>`                       | Override the default `fingerprint` cache policy          |
-| `# @name <identifier>`                    | Name the output variable (default: `result`)             |
-| `# @after <cell-id>`                      | Add an ordering-only DAG edge to an upstream cell        |
+| Annotation                              | What it does                                          |
+| --------------------------------------- | ----------------------------------------------------- |
+| `# @sql connection=<name> [write=true]` | Mark the cell as SQL; reference a declared connection |
+| `# @cache <policy>`                     | Override the default `fingerprint` cache policy       |
+| `# @name <identifier>`                  | Name the output variable (default: `result`)          |
+| `# @after <cell-id>`                    | Add an ordering-only DAG edge to an upstream cell     |
 
 See [Cell Annotations][a] for the full reference.
 
@@ -526,19 +533,19 @@ After execution, `state` holds the final iteration's value and every intermediat
 
 ### Required directives
 
-| Directive                | What it does                                                      |
-| ------------------------ | ----------------------------------------------------------------- |
-| `# @loop max_iter=N`     | Hard cap on iterations. Required — the safety bound on the loop.  |
-| `# @loop carry=VAR`      | The variable threaded between iterations. Required. Must be re-bound by the cell body each iteration, and seeded by an upstream cell on iteration 0. |
+| Directive            | What it does                                                                                                                                         |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `# @loop max_iter=N` | Hard cap on iterations. Required — the safety bound on the loop.                                                                                     |
+| `# @loop carry=VAR`  | The variable threaded between iterations. Required. Must be re-bound by the cell body each iteration, and seeded by an upstream cell on iteration 0. |
 
 These can be on the same line: `# @loop max_iter=40 carry=state`.
 
 ### Optional directives
 
-| Directive                         | What it does                                                                          |
-| --------------------------------- | ------------------------------------------------------------------------------------- |
-| `# @loop_until <expr>`            | Early termination when `<expr>` is truthy (evaluated against the current `state`)     |
-| `# @loop start_from=<cell>@iter=k` | Seed iteration 0 from a specific prior iteration's artifact — used for forking runs   |
+| Directive                          | What it does                                                                        |
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
+| `# @loop_until <expr>`             | Early termination when `<expr>` is truthy (evaluated against the current `state`)   |
+| `# @loop start_from=<cell>@iter=k` | Seed iteration 0 from a specific prior iteration's artifact — used for forking runs |
 
 ### Per-iteration artifacts
 
@@ -568,12 +575,12 @@ happens if you push harder from that exact state with a different step size.
 2. Add a new loop cell below. Reference the original cell's ID (not the full
    URI) in `start_from`:
 
-    ```python
-    # new loop cell — continues from iteration 17 of the previous run
-    # @loop max_iter=20 carry=state start_from=hill_climb@iter=17
-    state["step_size"] *= 0.5  # smaller steps from here on
-    state = sample_and_score(state)
-    ```
+   ```python
+   # new loop cell — continues from iteration 17 of the previous run
+   # @loop max_iter=20 carry=state start_from=hill_climb@iter=17
+   state["step_size"] *= 0.5  # smaller steps from here on
+   state = sample_and_score(state)
+   ```
 
 3. Run the new cell. It reads iteration 17's carry value as its seed, runs up
    to 20 more iterations under the modified strategy, and stores those
@@ -598,11 +605,11 @@ Reach for loop cells when **being able to inspect or fork from iteration k matte
 
 ## Choosing between kinds
 
-| Reach for a…  | When you want…                                                                                           |
-| ------------- | -------------------------------------------------------------------------------------------------------- |
-| Python cell   | Ordinary computation. Default.                                                                           |
-| Prompt cell   | An LLM response as a first-class, cached, DAG-participating artifact.                                    |
-| SQL cell      | A query against a connected database, with bind parameters, schema discovery, and probe-based caching.   |
-| Loop cell     | Iterative refinement where pausing or forking from an intermediate state matters.                        |
+| Reach for a… | When you want…                                                                                         |
+| ------------ | ------------------------------------------------------------------------------------------------------ |
+| Python cell  | Ordinary computation. Default.                                                                         |
+| Prompt cell  | An LLM response as a first-class, cached, DAG-participating artifact.                                  |
+| SQL cell     | A query against a connected database, with bind parameters, schema discovery, and probe-based caching. |
+| Loop cell    | Iterative refinement where pausing or forking from an intermediate state matters.                      |
 
 Mixing is encouraged — a typical pipeline might be a SQL cell for extraction → Python cells for transformation → a prompt cell for narrative summarization.

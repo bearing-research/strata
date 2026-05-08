@@ -13,14 +13,16 @@ Strata Notebook is an interactive notebook with content-addressed caching, autom
 === "From source"
 
     ```bash
-    uv run strata-server
+    uv sync
+    cd frontend && npm ci && npm run build && cd ..
+    STRATA_DEPLOYMENT_MODE=personal uv run strata-server
     ```
 
 Open [http://localhost:8765](http://localhost:8765).
 
 ## 2. Create a Notebook
 
-Click **New Notebook** on the landing page. Choose a name and parent directory.
+Click **New Notebook** on the landing page. Choose a name and a parent directory under the notebook storage root.
 
 Each notebook gets its own Python environment (managed by `uv`), so packages installed in one notebook don't affect others.
 
@@ -152,16 +154,16 @@ Then use **Open Existing** and open:
 
 Other bundled examples:
 
-| Directory                     | What it shows                                               |
-| ----------------------------- | ----------------------------------------------------------- |
-| `examples/iris_classification` | Basic ML workflow with sklearn                              |
-| `examples/pandas_basics`       | DataFrame manipulation and plotting                         |
-| `examples/titanic_ml`          | End-to-end classifier                                       |
-| `examples/arxiv_classifier`    | LLM-powered paper classification (prompt cells)             |
-| `examples/review_triage`       | Structured-output prompt cells with `@output_schema`        |
-| `examples/loop_hill_climb`     | `@loop` cell with carry state and termination predicate     |
-| `examples/news_alpha_trader`   | Secret manager, LLM pricing lookup, multi-cell DAG          |
-| `examples/s3_mount`            | `@mount` annotations for S3 / file access                   |
+| Directory                      | What it shows                                           |
+| ------------------------------ | ------------------------------------------------------- |
+| `examples/iris_classification` | Basic ML workflow with sklearn                          |
+| `examples/pandas_basics`       | DataFrame manipulation and plotting                     |
+| `examples/titanic_ml`          | End-to-end classifier                                   |
+| `examples/arxiv_classifier`    | LLM-powered paper classification (prompt cells)         |
+| `examples/review_triage`       | Structured-output prompt cells with `@output_schema`    |
+| `examples/loop_hill_climb`     | `@loop` cell with carry state and termination predicate |
+| `examples/news_alpha_trader`   | Secret manager, LLM pricing lookup, multi-cell DAG      |
+| `examples/s3_mount`            | `@mount` annotations for S3 / file access               |
 
 See the `examples/` directory in the repo for the full list.
 

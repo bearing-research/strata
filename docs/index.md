@@ -68,7 +68,7 @@ table = client.fetch(artifact.uri)
     ```bash
     uv sync
     cd frontend && npm ci && npm run build && cd ..
-    uv run strata-server
+    STRATA_DEPLOYMENT_MODE=personal uv run strata-server
     ```
 
     Then open [http://localhost:8765](http://localhost:8765).

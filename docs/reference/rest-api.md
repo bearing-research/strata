@@ -118,9 +118,12 @@ POST /v1/notebooks/{session_id}/cells
 
 ```json
 {
-  "after_cell_id": "optional-cell-id"
+  "after_cell_id": "optional-cell-id",
+  "language": "python"
 }
 ```
+
+`language` may be `python`, `prompt`, `markdown`, or `sql`. Defaults to `python`.
 
 ### Update Cell Source
 
@@ -320,6 +323,71 @@ PUT /v1/notebooks/{session_id}/workers
 PUT /v1/notebooks/{session_id}/mounts
 ```
 
+## Connections
+
+### List Notebook Connections
+
+```
+GET /v1/notebooks/{session_id}/connections
+```
+
+Returns:
+
+```json
+{
+  "connections": [
+    {
+      "name": "warehouse",
+      "driver": "sqlite",
+      "path": "analytics.db"
+    }
+  ]
+}
+```
+
+### Replace Notebook Connections
+
+```
+PUT /v1/notebooks/{session_id}/connections
+```
+
+```json
+{
+  "connections": [
+    {
+      "name": "warehouse",
+      "driver": "sqlite",
+      "path": "analytics.db"
+    }
+  ]
+}
+```
+
+The list is canonical: sending an empty list deletes the entire `[connections]`
+block. Literal auth values are blanked on disk during the write round-trip, but
+kept in-memory until the session reloads.
+
+Returns:
+
+```json
+{
+  "connections": [...],
+  "malformed_connections": [...],
+  "cells": [...]
+}
+```
+
+### Enumerate Connection Schema
+
+```
+GET /v1/notebooks/{session_id}/connections/{name}/schema
+```
+
+Enumerates the tables and columns visible through the named connection. Used by
+the schema sidebar. Opens the connection on the read path and returns backend
+errors directly as `4xx` so auth / driver / connectivity failures are visible
+to the UI.
+
 ## Export
 
 ### Export Notebook Bundle
@@ -375,6 +443,14 @@ Server-Sent Events stream with `delta`, `done`, and `error` events.
 ```
 POST /v1/notebooks/{session_id}/ai/agent
 ```
+
+### Reset Agent Session
+
+```
+POST /v1/notebooks/{session_id}/ai/agent/reset
+```
+
+Clears the assistant's in-memory conversation / tool session for that notebook.
 
 ## Runtime
 
