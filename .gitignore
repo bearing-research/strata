@@ -232,5 +232,9 @@ experiments/**/uv.lock
 experiments/**/*.db
 experiments/**/*.duckdb
 
+# Frontend build output, copied into the package by the release
+# workflow. Source of truth lives at frontend/dist/.
+src/strata/_frontend/
+
 # Claude Code session state
 .claude/

@@ -6191,11 +6191,21 @@ async def _finalize_stream_artifact(stream_state: StreamState, data: bytes, row_
 
 
 def _mount_frontend(application: FastAPI) -> None:
-    """Mount the frontend SPA if the dist directory exists."""
+    """Mount the frontend SPA if the dist directory exists.
 
-    # Look for frontend dist relative to the project root
-    # Try several locations
+    Lookup order:
+    1. ``src/strata/_frontend/`` — bundled into the wheel by the
+       release workflow (copy of ``frontend/dist`` made before
+       ``uv build``). This is the only path that works for users
+       who installed via ``pip install strata-notebook``.
+    2. ``<repo_root>/frontend/dist/`` — editable / source-tree
+       installs. ``__file__`` is ``<repo>/src/strata/server.py``,
+       so three parents up is the repo root.
+    3. ``<cwd>/frontend/dist/`` — last-resort fallback for
+       deployments that drop the dist next to the working dir.
+    """
     candidates = [
+        Path(__file__).resolve().parent / "_frontend",
         Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
         Path.cwd() / "frontend" / "dist",
     ]

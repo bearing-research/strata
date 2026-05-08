@@ -115,6 +115,13 @@ strata = "strata.cli:main"
 strata-server = "strata.server:main"
 strata-worker = "strata.notebook.remote_executor:main"
 
+[project.urls]
+Homepage = "https://bearing-research.github.io/strata/"
+Documentation = "https://bearing-research.github.io/strata/"
+Repository = "https://github.com/bearing-research/strata"
+Issues = "https://github.com/bearing-research/strata/issues"
+Changelog = "https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"
+
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
@@ -129,6 +136,13 @@ manifest-path = "rust/Cargo.toml"
 python-source = "src"
 module-name = "strata._strata_core"
 features = ["pyo3/extension-module"]
+# python-source picks up .py files automatically, but the
+# bundled-frontend SPA is non-Python and needs explicit
+# inclusion. Release CI copies frontend/dist/ to
+# src/strata/_frontend/ before building.
+include = [
+    { path = "src/strata/_frontend/**/*", format = ["sdist", "wheel"] },
+]
 
 [tool.ruff]
 line-length = 100
