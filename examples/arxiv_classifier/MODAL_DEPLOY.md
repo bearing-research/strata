@@ -100,4 +100,4 @@ modal deploy examples/arxiv_classifier/modal_gpu_worker.py
 
 To pin to a specific tag for stability before YC review, edit
 `modal_gpu_worker.py` and change the dependency to
-`strata @ git+https://github.com/bearing-research/strata.git@v0.X.Y`.
+`strata-notebook @ git+https://github.com/bearing-research/strata.git@v0.X.Y`.

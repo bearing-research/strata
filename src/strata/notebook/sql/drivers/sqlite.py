@@ -315,7 +315,7 @@ class SqliteAdapter:
         except ImportError as exc:
             raise RuntimeError(
                 "adbc-driver-sqlite is not installed; install with "
-                "`uv pip install 'strata[sql-sqlite]'`"
+                "`uv pip install 'strata-notebook[sql-sqlite]'`"
             ) from exc
         return adbc_sqlite.connect(uri)
 

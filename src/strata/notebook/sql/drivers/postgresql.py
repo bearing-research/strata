@@ -242,7 +242,7 @@ class PostgresAdapter:
         except ImportError as exc:
             raise RuntimeError(
                 "adbc-driver-postgresql is not installed; install with "
-                "`uv pip install 'strata[sql-postgres]'`"
+                "`uv pip install 'strata-notebook[sql-postgres]'`"
             ) from exc
         return adbc_postgres.connect(uri)
 

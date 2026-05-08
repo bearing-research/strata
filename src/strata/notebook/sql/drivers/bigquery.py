@@ -260,7 +260,7 @@ class BigQueryAdapter:
         except ImportError as exc:
             raise RuntimeError(
                 "adbc-driver-bigquery is not installed; install with "
-                "`uv pip install 'strata[sql-bigquery]'`"
+                "`uv pip install 'strata-notebook[sql-bigquery]'`"
             ) from exc
         return adbc_bigquery.connect(db_kwargs=kwargs)
 

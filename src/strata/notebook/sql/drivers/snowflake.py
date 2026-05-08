@@ -342,7 +342,7 @@ class SnowflakeAdapter:
         except ImportError as exc:
             raise RuntimeError(
                 "adbc-driver-snowflake is not installed; install with "
-                "`uv pip install 'strata[sql-snowflake]'`"
+                "`uv pip install 'strata-notebook[sql-snowflake]'`"
             ) from exc
         return adbc_snowflake.connect(uri)
 

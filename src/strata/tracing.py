@@ -2,7 +2,7 @@
 
 This module provides distributed tracing integration using OpenTelemetry.
 Tracing is optional and only enabled when:
-1. The 'otel' extras are installed: pip install strata[otel]
+1. The 'otel' extras are installed: pip install strata-notebook[otel]
 2. OTEL_EXPORTER_OTLP_ENDPOINT is set (or tracing is explicitly configured)
 
 Usage:

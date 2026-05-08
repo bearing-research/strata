@@ -668,7 +668,7 @@ class AzureBlobStore(BlobStore):
     - DefaultAzureCredential (managed identity, environment vars, CLI, etc.)
 
     Requires the `azure` optional dependency:
-        pip install strata[azure]
+        pip install strata-notebook[azure]
     """
 
     def __init__(
@@ -699,7 +699,7 @@ class AzureBlobStore(BlobStore):
         except ImportError as e:
             raise ImportError(
                 "Azure Blob Storage support requires the 'azure' extra. "
-                "Install with: pip install strata[azure]"
+                "Install with: pip install strata-notebook[azure]"
             ) from e
 
         self.account_name = account_name

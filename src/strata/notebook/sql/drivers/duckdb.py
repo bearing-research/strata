@@ -184,7 +184,8 @@ class DuckDBAdapter:
             import duckdb
         except ImportError as exc:
             raise RuntimeError(
-                "duckdb is not installed; install with `uv pip install 'strata[sql-duckdb]'`"
+                "duckdb is not installed; install with "
+                "`uv pip install 'strata-notebook[sql-duckdb]'`"
             ) from exc
         return duckdb.connect(path, read_only=read_only)
 

@@ -33,21 +33,26 @@ uv run strata-server
 
 ### Install as a dependency
 
-PyPI publishing is pending. Until then, install directly from Git:
-
 ```bash
 # Strata core (materialization, artifact store, Iceberg scanning):
-pip install "strata @ git+https://github.com/bearing-research/strata.git"
+pip install strata-notebook
 
-# Strata Notebook adds DataFrame/Series/ndarray serialization, display
-# outputs, and the cloudpickle-backed object codec:
-pip install "strata[notebook] @ git+https://github.com/bearing-research/strata.git"
+# Add the notebook display + serialization stack
+# (DataFrame/Series/ndarray, cloudpickle, matplotlib):
+pip install "strata-notebook[notebook]"
 
 # Or with uv:
-uv add "strata[notebook] @ git+https://github.com/bearing-research/strata.git"
+uv add "strata-notebook[notebook]"
 
-# Pin to a specific commit for reproducibility:
-pip install "strata @ git+https://github.com/bearing-research/strata.git@<sha>"
+# Install from Git (e.g., to track main between releases):
+pip install "strata-notebook @ git+https://github.com/bearing-research/strata.git"
+pip install "strata-notebook @ git+https://github.com/bearing-research/strata.git@<sha>"
+```
+
+The Python module is still imported as `strata`:
+
+```python
+from strata.client import StrataClient
 ```
 
 ## Notebook Features

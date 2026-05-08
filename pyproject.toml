@@ -1,5 +1,5 @@
 [project]
-name = "strata"
+name = "strata-notebook"
 version = "0.1.0"
 description = "Persistence substrate and notebook runtime for long-horizon computation"
 readme = "README.md"

@@ -95,7 +95,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PATH="/root/.cargo/bin:$PATH"
 
 RUN pip install --no-cache-dir \
-    "strata @ git+https://github.com/bearing-research/strata.git@main" \
+    "strata-notebook @ git+https://github.com/bearing-research/strata.git@main" \
     "datafusion>=42" \
     "pandas>=2" \
     "pyarrow>=18"
@@ -128,7 +128,7 @@ gpu_image = (
         "python-multipart>=0.0.9",
         "pyarrow>=18.0.0", "pandas>=2.0.0", "numpy>=1.26.0",
         "torch>=2.3", "sentence-transformers>=3.0", "scikit-learn>=1.5",
-        "strata @ git+https://github.com/bearing-research/strata.git@main",
+        "strata-notebook @ git+https://github.com/bearing-research/strata.git@main",
     )
 )
 

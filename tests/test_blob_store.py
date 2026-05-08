@@ -760,7 +760,7 @@ class TestAzureBlobStore:
 
         source = inspect.getsource(AzureBlobStore.__init__)
         assert "azure" in source.lower()
-        assert "pip install strata[azure]" in source
+        assert "pip install strata-notebook[azure]" in source
 
     @pytest.mark.skip(reason="Requires actual Azure Storage or Azurite emulator")
     def test_write_and_read_blob_integration(self):
