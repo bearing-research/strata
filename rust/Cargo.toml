@@ -10,7 +10,7 @@ name = "strata_core"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.27", features = ["extension-module"] }
+pyo3 = { version = "0.27", features = ["extension-module", "abi3-py312"] }
 arrow = { version = "57", features = ["ipc"] }
 memmap2 = "0.9"
 thiserror = "1.0"

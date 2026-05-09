@@ -1,0 +1,203 @@
+name: Release
+
+# Tag-driven release pipeline. Pushing a `v*` tag fires the build,
+# which:
+#   1. compiles the frontend SPA and stages it inside the package,
+#   2. builds platform wheels via maturin (abi3-py312 means one
+#      wheel per platform covers Python 3.12+),
+#   3. builds an sdist on Linux x86_64,
+#   4. publishes everything to TestPyPI via OIDC trusted publishing,
+#   5. waits for manual approval on the protected `pypi` environment,
+#      then publishes to PyPI.
+#
+# OIDC trusted publishers must be configured on PyPI and TestPyPI
+# (Owner: bearing-research, Repo: strata, Workflow: release.yml,
+# Environment: testpypi / pypi) before the publish jobs can run.
+#
+# The protected `pypi` environment in GitHub repo settings should
+# require manual approval; that's the human gate between TestPyPI
+# validation and the real PyPI upload.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual fallback for re-publishing without re-tagging — useful
+  # if a publish job hits a transient PyPI/TestPyPI hiccup.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # --- frontend bundling ---------------------------------------------
+  # Build the SPA once and stage it as an artifact. Each platform's
+  # wheel job downloads it and copies it into src/strata/_frontend
+  # before maturin runs. Doing it once avoids 5x npm cold installs.
+  frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install + build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+
+  # --- linux wheels (x86_64 + aarch64) -------------------------------
+  linux:
+    name: wheel · linux ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    needs: frontend
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: src/strata/_frontend
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          # Linux x86_64 also produces the sdist (one source tarball
+          # is enough; the contents are identical regardless of host).
+          # `manylinux: auto` picks the most permissive manylinux tag
+          # the toolchain can satisfy.
+          args: >-
+            --release --out dist
+            ${{ matrix.target == 'x86_64' && '--sdist' || '' }}
+          sccache: 'true'
+          manylinux: auto
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux-${{ matrix.target }}
+          path: dist
+          if-no-files-found: error
+
+  # --- macos wheels (intel + apple silicon) --------------------------
+  macos:
+    name: wheel · macos ${{ matrix.target }}
+    runs-on: macos-latest
+    needs: frontend
+    strategy:
+      matrix:
+        target: [x86_64, aarch64]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: src/strata/_frontend
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          sccache: 'true'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos-${{ matrix.target }}
+          path: dist
+          if-no-files-found: error
+
+  # --- windows wheels ------------------------------------------------
+  windows:
+    name: wheel · windows ${{ matrix.target }}
+    runs-on: windows-latest
+    needs: frontend
+    strategy:
+      matrix:
+        target: [x64]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: src/strata/_frontend
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          sccache: 'true'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows-${{ matrix.target }}
+          path: dist
+          if-no-files-found: error
+
+  # --- TestPyPI publish (auto on tag) --------------------------------
+  testpypi:
+    name: Publish to TestPyPI
+    runs-on: ubuntu-latest
+    needs: [linux, macos, windows]
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/strata-notebook
+    permissions:
+      id-token: write   # OIDC token for trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          # All dist-* artifacts get merged into a single dist/ dir
+          # so the publish action sees every wheel + the sdist.
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # Skip if the version already exists — useful on
+          # workflow_dispatch re-runs after a partial failure.
+          skip-existing: true
+
+  # --- PyPI publish (gated by manual approval) -----------------------
+  # The `pypi` environment in repo Settings → Environments should
+  # have a required reviewer. The promotion job sits in `waiting`
+  # state until you click "Approve and deploy" in the workflow run UI.
+  pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: testpypi
+    environment:
+      name: pypi
+      url: https://pypi.org/p/strata-notebook
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
