@@ -25,6 +25,8 @@ from collections.abc import Iterable, Iterator
 import pyarrow as pa
 import pyarrow.ipc as ipc
 
+type _BytesLike = bytes | bytearray | memoryview
+
 # Try to import Rust module for fast byte manipulation
 _RUST_AVAILABLE = False
 _rust_module = None
@@ -79,7 +81,7 @@ def read_file_mmap(path: str) -> bytes:
     return Path(path).read_bytes()
 
 
-def _concat_stream_bytes_pyarrow(segments: list[bytes]) -> bytes:
+def _concat_stream_bytes_pyarrow(segments: list[_BytesLike]) -> bytes:
     """PyArrow implementation of concat_stream_bytes.
 
     Parses each segment and re-serializes batches. Slower but handles
@@ -107,11 +109,13 @@ def _concat_stream_bytes_pyarrow(segments: list[bytes]) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
-def _concat_stream_bytes_rust(segments: list[bytes]) -> bytes:
+def _concat_stream_bytes_rust(segments: list[_BytesLike]) -> bytes:
     """Rust implementation of concat_stream_bytes.
 
     Uses byte manipulation to concatenate streams without parsing Arrow data.
     Much faster for cache hits since it avoids deserialize/reserialize overhead.
+    Accepts generic C-contiguous bytes-like segments so callers can hand Rust
+    existing buffers without forcing an extra Python-side ``bytes()`` copy.
 
     Falls back to PyArrow if Rust module unavailable or on error.
     """
@@ -126,7 +130,7 @@ def _concat_stream_bytes_rust(segments: list[bytes]) -> bytes:
         return _concat_stream_bytes_pyarrow(segments)
 
 
-def concat_stream_bytes(segments: list[bytes]) -> bytes:
+def concat_stream_bytes(segments: Iterable[_BytesLike]) -> bytes:
     """Concatenate multiple Arrow IPC stream segments into one.
 
     When serving multiple cached row groups, we need to combine them
@@ -137,29 +141,23 @@ def concat_stream_bytes(segments: list[bytes]) -> bytes:
     - STRATA_FAST_CONCAT=pyarrow: Full Arrow parsing (slower, handles edge cases)
 
     Args:
-        segments: List of Arrow IPC stream bytes
+        segments: Iterable of Arrow IPC stream segments. Each segment may be
+            ``bytes``, ``bytearray``, or ``memoryview``.
 
     Returns:
         bytes: Single combined IPC stream
     """
-    if not segments:
+    segment_list = [s for s in segments if s]
+    if not segment_list:
         return b""
 
-    if len(segments) == 1:
-        return segments[0]
-
-    # Filter empty segments
-    segments = [s for s in segments if s]
-    if not segments:
-        return b""
-
-    if len(segments) == 1:
-        return segments[0]
+    if len(segment_list) == 1:
+        return bytes(segment_list[0])
 
     if _FAST_CONCAT_MODE == "rust":
-        return _concat_stream_bytes_rust(segments)
+        return _concat_stream_bytes_rust(segment_list)
     else:
-        return _concat_stream_bytes_pyarrow(segments)
+        return _concat_stream_bytes_pyarrow(segment_list)
 
 
 class _StreamingBuffer:

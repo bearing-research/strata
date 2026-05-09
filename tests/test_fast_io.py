@@ -108,6 +108,91 @@ class TestConcatStreamBytes:
         result = fast_io.concat_stream_bytes([b"", b"", b""])
         assert result == b""
 
+    def test_concat_accepts_bytearray_segments(self):
+        """Bytearray inputs should round-trip through the concat path."""
+        batch1 = pa.RecordBatch.from_pydict({"id": [1, 2]})
+        batch2 = pa.RecordBatch.from_pydict({"id": [3, 4]})
+
+        segments = [
+            bytearray(create_stream_bytes(batch1)),
+            bytearray(create_stream_bytes(batch2)),
+        ]
+
+        result = fast_io.concat_stream_bytes(segments)
+
+        reader = ipc.open_stream(pa.BufferReader(result))
+        batches = list(reader)
+        assert len(batches) == 2
+        assert batches[0].column("id").to_pylist() == [1, 2]
+        assert batches[1].column("id").to_pylist() == [3, 4]
+
+    def test_concat_accepts_memoryview_segments(self):
+        """Memoryview inputs should avoid a Python-side bytes coercion step."""
+        batch1 = pa.RecordBatch.from_pydict({"id": [10]})
+        batch2 = pa.RecordBatch.from_pydict({"id": [20, 30]})
+
+        segments = [
+            memoryview(create_stream_bytes(batch1)),
+            memoryview(create_stream_bytes(batch2)),
+        ]
+
+        result = fast_io.concat_stream_bytes(segments)
+
+        reader = ipc.open_stream(pa.BufferReader(result))
+        batches = list(reader)
+        assert len(batches) == 2
+        assert batches[0].column("id").to_pylist() == [10]
+        assert batches[1].column("id").to_pylist() == [20, 30]
+
+    def test_concat_accepts_mixed_bytes_like_segments(self):
+        """Mixed bytes / bytearray / memoryview inputs should dispatch cleanly."""
+        batch1 = pa.RecordBatch.from_pydict({"id": [1]})
+        batch2 = pa.RecordBatch.from_pydict({"id": [2, 3]})
+        batch3 = pa.RecordBatch.from_pydict({"id": [4, 5, 6]})
+
+        segments = [
+            create_stream_bytes(batch1),
+            bytearray(create_stream_bytes(batch2)),
+            memoryview(create_stream_bytes(batch3)),
+        ]
+
+        result = fast_io.concat_stream_bytes(segments)
+
+        reader = ipc.open_stream(pa.BufferReader(result))
+        batches = list(reader)
+        assert [b.column("id").to_pylist() for b in batches] == [[1], [2, 3], [4, 5, 6]]
+
+    def test_concat_accepts_non_contiguous_memoryview_segments(self):
+        """Non-contiguous memoryviews should copy through the fallback path."""
+        batch = pa.RecordBatch.from_pydict({"id": [7, 8, 9]})
+        original = create_stream_bytes(batch)
+
+        doubled = bytearray()
+        for value in original:
+            doubled.extend((value, value))
+        non_contiguous = memoryview(doubled)[::2]
+
+        result = fast_io.concat_stream_bytes([non_contiguous, original])
+
+        reader = ipc.open_stream(pa.BufferReader(result))
+        batches = list(reader)
+        assert len(batches) == 2
+        assert batches[0].column("id").to_pylist() == [7, 8, 9]
+        assert batches[1].column("id").to_pylist() == [7, 8, 9]
+
+    def test_concat_single_memoryview_returns_bytes(self):
+        """Single-segment fast path should still normalize to bytes."""
+        batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
+        segment = memoryview(create_stream_bytes(batch))
+
+        result = fast_io.concat_stream_bytes([segment])
+
+        assert isinstance(result, bytes)
+        reader = ipc.open_stream(pa.BufferReader(result))
+        batches = list(reader)
+        assert len(batches) == 1
+        assert batches[0].column("id").to_pylist() == [1, 2, 3]
+
     def test_concat_preserves_data_values(self):
         """Test that concatenation preserves actual data values."""
         batch1 = pa.RecordBatch.from_pydict({"id": [1, 2], "value": ["a", "b"]})

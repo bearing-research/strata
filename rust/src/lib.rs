@@ -16,9 +16,11 @@
 use arrow::ipc::reader::StreamReader;
 use arrow::ipc::writer::StreamWriter;
 use memmap2::Mmap;
+use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::{PyIOError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::pybacked::PyBackedBytes;
+use pyo3::types::{PyAny, PyBytes};
 use std::fs::File;
 use std::io::Cursor;
 use thiserror::Error;
@@ -73,13 +75,13 @@ fn read_file_bytes<'py>(py: Python<'py>, path: &str) -> PyResult<Bound<'py, PyBy
 ///
 /// To concatenate streams: take schema from first, strip schema from rest,
 /// combine all record batches, add single EOS.
-fn concat_streams_fast(segments: &[Vec<u8>]) -> Result<Vec<u8>, StrataError> {
+fn concat_streams_fast(segments: &[&[u8]]) -> Result<Vec<u8>, StrataError> {
     if segments.is_empty() {
         return Ok(Vec::new());
     }
 
     if segments.len() == 1 {
-        return Ok(segments[0].clone());
+        return Ok(segments[0].to_vec());
     }
 
     // Estimate total size
@@ -95,7 +97,9 @@ fn concat_streams_fast(segments: &[Vec<u8>]) -> Result<Vec<u8>, StrataError> {
 
     // Verify EOS marker at end of first segment
     if &first[first.len() - 8..] != &EOS_MARKER {
-        return Err(StrataError::InvalidFile("First segment missing EOS marker".into()));
+        return Err(StrataError::InvalidFile(
+            "First segment missing EOS marker".into(),
+        ));
     }
 
     // Copy first segment without EOS
@@ -109,7 +113,9 @@ fn concat_streams_fast(segments: &[Vec<u8>]) -> Result<Vec<u8>, StrataError> {
 
         // Verify EOS marker
         if &segment[segment.len() - 8..] != &EOS_MARKER {
-            return Err(StrataError::InvalidFile("Segment missing EOS marker".into()));
+            return Err(StrataError::InvalidFile(
+                "Segment missing EOS marker".into(),
+            ));
         }
 
         // Find where record batches start by parsing message headers
@@ -148,6 +154,50 @@ fn concat_streams_fast(segments: &[Vec<u8>]) -> Result<Vec<u8>, StrataError> {
     Ok(result)
 }
 
+enum BytesLikeInput {
+    Backed(PyBackedBytes),
+    Buffer(PyBuffer<u8>),
+    Owned(Vec<u8>),
+}
+
+impl BytesLikeInput {
+    fn extract(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Self> {
+        if let Ok(bytes) = obj.extract::<PyBackedBytes>() {
+            return Ok(Self::Backed(bytes));
+        }
+
+        let buffer = PyBuffer::<u8>::get(obj)?;
+        if buffer.as_slice(py).is_some() {
+            return Ok(Self::Buffer(buffer));
+        }
+
+        // Fallback for non-contiguous buffer-protocol inputs. This copies into
+        // owned Rust memory so the rest of the concat path can operate on a
+        // plain byte slice. If the object cannot be exported as a contiguous
+        // u8 buffer at all, ``to_vec(py)?`` raises and the Python exception
+        // bubbles back to the caller unchanged.
+        Ok(Self::Owned(buffer.to_vec(py)?))
+    }
+
+    fn as_slice<'py>(&'py self, py: Python<'py>) -> PyResult<&'py [u8]> {
+        match self {
+            Self::Backed(bytes) => Ok(bytes.as_ref()),
+            Self::Buffer(buffer) => {
+                let cells = buffer.as_slice(py).ok_or_else(|| {
+                    PyValueError::new_err("bytes-like segment must be C-contiguous")
+                })?;
+                // SAFETY: ReadOnlyCell<u8> is repr(transparent) over a single
+                // byte cell. We hold the PyBuffer for the lifetime of the
+                // returned slice and never call back into Python while the
+                // slice is in use, so the backing memory stays valid for this
+                // FFI call.
+                Ok(unsafe { std::slice::from_raw_parts(cells.as_ptr().cast::<u8>(), cells.len()) })
+            }
+            Self::Owned(bytes) => Ok(bytes.as_slice()),
+        }
+    }
+}
+
 /// Concatenate multiple Arrow IPC stream segments into one.
 ///
 /// When serving multiple row groups, we need to combine them into
@@ -155,33 +205,48 @@ fn concat_streams_fast(segments: &[Vec<u8>]) -> Result<Vec<u8>, StrataError> {
 /// byte manipulation rather than full Arrow parsing.
 ///
 /// Args:
-///     segments: List of Arrow IPC stream bytes
+///     segments: Iterable of bytes-like Arrow IPC stream segments
+///         (``bytes``, ``bytearray``, or ``memoryview``)
 ///
 /// Returns:
 ///     bytes: Single combined Arrow IPC stream
 #[pyfunction]
-fn concat_ipc_streams<'py>(py: Python<'py>, segments: Vec<Vec<u8>>) -> PyResult<Bound<'py, PyBytes>> {
+fn concat_ipc_streams<'py>(
+    py: Python<'py>,
+    segments: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let mut extracted = Vec::new();
+    for item in segments.try_iter()? {
+        let item = item?;
+        extracted.push(BytesLikeInput::extract(py, &item)?);
+    }
+
+    let segment_slices: Vec<&[u8]> = extracted
+        .iter()
+        .map(|segment| segment.as_slice(py))
+        .collect::<PyResult<_>>()?;
+
     // Try fast path first (byte manipulation)
-    match concat_streams_fast(&segments) {
+    match concat_streams_fast(&segment_slices) {
         Ok(result) => return Ok(PyBytes::new(py, &result)),
         Err(_) => {
             // Fall back to full Arrow parsing (slower but handles edge cases)
         }
     }
 
-    if segments.is_empty() {
+    if segment_slices.is_empty() {
         return Ok(PyBytes::new(py, &[]));
     }
 
     // Read first segment to get schema
-    let first_cursor = Cursor::new(&segments[0]);
+    let first_cursor = Cursor::new(segment_slices[0]);
     let first_reader = StreamReader::try_new(first_cursor, None).map_err(StrataError::from)?;
     let schema = first_reader.schema();
 
     // Collect all batches
     let mut all_batches = Vec::new();
 
-    for segment in &segments {
+    for segment in &segment_slices {
         let cursor = Cursor::new(segment);
         let reader = StreamReader::try_new(cursor, None).map_err(StrataError::from)?;
 
@@ -192,7 +257,7 @@ fn concat_ipc_streams<'py>(py: Python<'py>, segments: Vec<Vec<u8>>) -> PyResult<
     }
 
     // Write combined stream
-    let estimated_size: usize = segments.iter().map(|s| s.len()).sum();
+    let estimated_size: usize = segment_slices.iter().map(|s| s.len()).sum();
     let mut buffer = Vec::with_capacity(estimated_size);
 
     {
