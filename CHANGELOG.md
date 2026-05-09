@@ -7,60 +7,126 @@ release framing rather than exhaustive commit history.
 
 ## Unreleased
 
+## 0.1.0 — 2026-05-08
+
+First public release of Strata Notebook. The package is published on PyPI as
+`strata-notebook`; the Python module is imported as `strata`. Wheels ship for
+Linux (x86_64, aarch64), macOS (x86_64, arm64), and Windows (x86_64) and are
+abi3-compatible from Python 3.12 onward.
+
 ### Added
 
-- notebook home/create/open flows with recent-notebook tracking
-- notebook rename, delete, and duplicate-style management improvements in the UI
-- notebook environment status, sync, import/export, and async environment jobs
-- notebook Python version selection in the new-notebook flow
-- inline notebook display outputs for:
-  - PNG images
-  - markdown
-  - `display(...)` side effects
-  - `plt.show()` / `Figure.show()`
-  - ordered multiple visible outputs per cell
-- local service-mode demo stack, smoke script, and deployment guide
-- notebook create/open timing instrumentation and browser benchmark tooling
-- markdown cell language for prose / documentation cells
+#### Notebook UI and lifecycle
+
+- notebook home / create / open flows with recent-notebook tracking
+- notebook rename, delete, duplicate, and management improvements
+- per-notebook Python environments (managed by `uv`) with status, sync,
+  import / export, and async environment jobs
+- Python-version selection in the new-notebook flow
+- inline cell display outputs: PNG images, markdown, `display(...)` side
+  effects, `plt.show()` / `Figure.show()`, ordered multiple visible outputs
+  per cell
+- markdown cells for prose / documentation
+- timing instrumentation and a browser benchmark for create / open flows
+
+#### SQL cells
+
+- SQL cell language with `# @sql connection=<name>` annotation, named-bind
+  parameters resolved from upstream cells, and an Arrow-IPC artifact
+  produced per query
+- per-driver `DriverAdapter` Protocol with capability flags (per-table
+  freshness, snapshot support, separate probe connection requirement)
+- five built-in driver adapters:
+  - **PostgreSQL** via ADBC, freshness via `pg_stat_user_tables`
+  - **SQLite** via ADBC, freshness via `PRAGMA data_version` /
+    `schema_version`, read-only via URI `mode=ro` plus `PRAGMA query_only`
+  - **Snowflake** via ADBC, URI-as-identity, runtime schema resolution,
+    `write_role` for read / write principal split
+  - **BigQuery** via ADBC, credentials principal in identity, ambient-ADC
+    sentinel, notebook-relative credential paths, `write_credentials_path`
+    for read / write principal split
+  - **DuckDB** (embedded) via the native DuckDB DBAPI, layered RO
+    enforcement (file flag + cursor-level `BEGIN TRANSACTION READ ONLY`)
+- write cells via `# @sql write=true`, with per-statement status tables
+- `# @cache fingerprint | forever | session | ttl=N | snapshot` policies
+- `# @after <cell>` ordering-only DAG annotation
+- Connections panel + REST API for managing `[connections.<name>]` blocks,
+  with literal auth values blanked on disk during the write round-trip
+- schema-discovery sidebar enumerating tables and columns visible through
+  each connection
+- `sql_orders_report` example notebook demonstrating a five-cell SQL pipeline
+
+#### Module export and cross-cell library code
+
+- cells that mix runtime work and library code (defs, classes, literal
+  constants) can now share the library code across cells; the planner
+  slices the cell's AST, keeps the shareable parts, and validates the
+  slice with `symtable` so each kept def / class is self-contained
+- `module_export_blocked` diagnostic surfaces pre-flight on cell open and
+  names the specific function and unresolved variable
+- `from __future__ import annotations` correctly relaxes cross-cell
+  type-hint references (PEP 563 stringifies annotations, so the
+  free-variable check drops them)
+- module-level globals written from inside a function are detected
+- comprehension elements walk with loop targets locally scoped
 - `library_cells` example notebook walking through cross-cell library code
+
+#### Deployment
+
+- local service-mode demo stack, smoke script, and deployment guide
+- Fly-hosted notebook defaults use persistent notebook storage and a
+  larger auto-extending volume configuration
+- Docker builds reuse uv and Cargo caches more effectively for faster
+  local iteration
+
+#### Release infrastructure
+
+- `pip install strata-notebook` / `uv add strata-notebook` (the bare
+  `strata` name on PyPI was held by an unrelated config framework)
+- wheel ships the frontend SPA bundled at `strata/_frontend/`, so
+  `strata-server` works out of the box without a separate frontend build
+- abi3-py312 wheel format — one wheel per platform covers Python 3.12+
+- tag-driven release workflow with TestPyPI auto-publish and
+  PyPI publish gated by a protected GitHub Environment
 
 ### Changed
 
-- cells that mix runtime work and library code (defs, classes, literal
-  constants) can now share the library code across cells. The planner
-  slices the cell's AST, keeps the shareable parts, and validates the
-  slice with `symtable` to make sure each kept def/class is
-  self-contained. Runtime values flow through the regular artifact
-  path; previously a single `df = load()` line would block every def
-  in the same cell from being shared.
-- the `module_export_blocked` diagnostic now names the specific
-  function and unresolved variable instead of the generic "top-level
-  runtime state" message, so the fix is obvious.
-- `from __future__ import annotations` now correctly relaxes
-  cross-cell type-hint references (PEP 563 stringifies annotations,
-  so the free-variable check drops them).
-- the markdown renderer is now `markdown-it` + `DOMPurify` rather than
-  hand-rolled, with consistent output between in-place cell preview
-  and `Markdown(...)` display outputs
-- the docs are now split into separate Strata Core and Strata Notebook
-  quickstarts, with the root README acting as an umbrella landing page
-- notebook create now bootstraps the initial environment asynchronously, which
-  makes first open substantially faster
-- notebook open/create flows reuse prefetched state and lazy-load secondary
-  panels to reduce perceived latency
-- Fly-hosted notebook defaults now use persistent notebook storage and a larger
-  auto-extending volume configuration
-- Docker builds now reuse uv and Cargo caches more effectively for faster local
-  iteration
+- markdown rendering uses `markdown-it` + `DOMPurify` rather than a
+  hand-rolled renderer, with consistent output between in-place cell
+  preview and `Markdown(...)` display outputs
+- docs split into separate Strata Core and Strata Notebook quickstarts;
+  the root README is an umbrella landing page
+- notebook create bootstraps the initial environment asynchronously,
+  making first open substantially faster
+- notebook open / create flows reuse prefetched state and lazy-load
+  secondary panels to reduce perceived latency
+- add-cell UI replaces per-type buttons with a unified menu
+- write-cell status table preserves per-statement rowcounts and is no
+  longer truncated to a default cap
+- connection-editor UI fixed for round-trip fidelity (auth blanking,
+  driver-specific extras, theme correctness) and dark-mode parity
 
 ### Fixed
 
-- service-mode session discovery/reconnect policy and related UX regressions
+- service-mode session discovery / reconnect policy and related UX
+  regressions
 - reconnect metadata loss for remote execution state
 - run-all only executing the first cell
 - missing-package install UX in the cell output area
 - local service-mode browser routing and notebook creation flow
+- relative connection paths now resolve against the notebook directory,
+  not the server CWD
+- timing-based perf assertion in `test_concurrent_scans_dont_block_each_other`
+  replaced with a structural correctness check (no more CI flakes from
+  runner load)
 
-## 0.1.0
+### Security
 
-- initial alpha release
+- read-only enforcement for SQL cells is layered (file-handle flag +
+  session-level guard) rather than SQL-text keyword filtering — a SQL
+  cell cannot write to the database regardless of how the connection
+  was specified
+- BigQuery / Snowflake adapters route reads and writes through different
+  principals when configured (`write_credentials_path`, `write_role`),
+  with `read_only` kwarg on `canonicalize_connection_id` so changing the
+  write principal does not invalidate read-cell caches
