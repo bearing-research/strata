@@ -1,0 +1,84 @@
+name: Examples
+
+# Runs the key-free notebook examples end-to-end via `strata run`.
+# Catches regressions where a cell-executor / DAG / runtime change
+# breaks a real notebook even though the unit tests stay green.
+#
+# Examples that need API keys or remote workers are intentionally
+# excluded:
+#   - review_triage          → ANTHROPIC_API_KEY or OPENAI_API_KEY
+#   - news_alpha_trader      → ALPACA_API_KEY + LLM key
+#   - arxiv_classifier       → custom remote workers (Modal, Fly)
+#   - library_cells          → demonstrates a deliberate failure
+#                              (the `blocked` cell is the teaching
+#                              moment); the headless runner can't
+#                              tell that's expected, so this stays
+#                              interactive-only
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'rust/**'
+      - 'examples/**'
+      - 'pyproject.toml'
+      - 'Cargo.toml'
+      - 'uv.lock'
+      - '.github/workflows/examples.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'rust/**'
+      - 'examples/**'
+      - 'pyproject.toml'
+      - 'Cargo.toml'
+      - 'uv.lock'
+      - '.github/workflows/examples.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  examples:
+    name: example · ${{ matrix.example }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel the others on a single failure — a flaky
+      # public S3 read shouldn't hide a real failure in a different
+      # example.
+      fail-fast: false
+      matrix:
+        example:
+          - iris_classification
+          - pandas_basics
+          - loop_hill_climb
+          - markdown_showcase
+          - titanic_ml
+          - sql_orders_report
+          - s3_mount
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          version: 'latest'
+
+      - name: Build Strata (and the Rust extension)
+        run: uv sync --python 3.13 --all-extras
+
+      - name: Sync the example's per-notebook venv
+        working-directory: examples/${{ matrix.example }}
+        run: uv sync --python 3.13
+
+      # ``strata run`` with --no-sync because the env was already
+      # synced above. Ignoring cache (--force) so cached artifacts
+      # from a previous run don't mask cell-execution regressions.
+      - name: Run notebook
+        run: uv run strata run examples/${{ matrix.example }} --no-sync --force
