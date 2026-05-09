@@ -254,7 +254,7 @@ async def _run_async(args: argparse.Namespace) -> int:
             continue
 
         # Skip languages we can't execute headlessly.
-        if cell.language not in {"python", "prompt"}:
+        if cell.language not in {"python", "prompt", "sql"}:
             entry = {
                 "id": cell_id,
                 "label": f"[{cell.language}] {_cell_label(cell.source)}",
