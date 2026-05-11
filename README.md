@@ -4,16 +4,21 @@
 [![Pre-commit](https://github.com/bearing-research/strata/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/bearing-research/strata/actions/workflows/pre-commit.yml)
 [![Docker](https://github.com/bearing-research/strata/actions/workflows/docker.yml/badge.svg)](https://github.com/bearing-research/strata/actions/workflows/docker.yml)
 
-**Content-addressed notebooks for ML and data workflows.**
+**Notebooks for long-running ML, AI, and data work — cached, distributed, and git-friendly.**
 
-Strata Notebook treats every cell output as an immutable, content-addressed
-artifact. Same code + same inputs = instant cache hit. Change one cell, and
-only that cell and its dependents re-execute — everything else is served
-from the artifact store in milliseconds.
+Strata is designed for work that runs longer than a single keystroke. Every
+cell output becomes a content-addressed artifact, so re-runs are cache hits
+when nothing's changed and the DAG cascade re-executes only what did.
+Provenance is automatic — Strata reads each cell's AST, links references
+back to their producers, and invalidates downstream cells when an upstream
+source changes.
 
-One source annotation (`# @worker gpu-fly`) dispatches a cell to a remote
-GPU. Another (`# @mount data s3://bucket/prefix ro`) makes an S3 prefix
-available as a local `pathlib.Path` inside the cell. No glue code.
+Prompt cells make AI calls first-class DAG nodes — cached by template,
+inputs, and model config. `# @worker gpu-fly` dispatches a cell to a remote
+GPU. `# @mount data s3://bucket/prefix ro` makes an S3 prefix available as a
+local `pathlib.Path` inside the cell. The whole notebook is plain `.py`
+files plus a manifest — git-diffable, no JSON blobs, no execution metadata
+bleeding into commits.
 
 **Docs:** [bearing-research.github.io/strata](https://bearing-research.github.io/strata/)
 

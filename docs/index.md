@@ -1,21 +1,20 @@
 # Strata
 
-**Content-addressed notebooks for ML and data workflows.**
+**Notebooks for long-running ML, AI, and data work — cached, distributed, and git-friendly.**
 
-Strata Notebook is an interactive notebook where every cell output is an
-artifact. Same code + same inputs = instant cache hit. Change one cell,
-and only that cell and its dependents re-execute — everything else is
-served from the artifact store in milliseconds.
+Strata is designed for work that runs longer than a single keystroke. Every
+cell output becomes a content-addressed artifact, so re-runs are cache hits
+when nothing's changed and the DAG cascade re-executes only what did. Prompt
+cells make AI calls first-class participants; `# @worker gpu-fly` dispatches
+a cell to a remote GPU; and the whole notebook is plain `.py` files plus a
+manifest — git-diffable, no JSON blobs.
 
 ---
 
 ## Strata Notebook
 
-An interactive notebook with content-addressed caching, automatic
-dependency tracking, and cascade execution. Each cell output is an
-artifact. Change upstream code, and downstream cells automatically
-invalidate — but everything that hasn't changed is served instantly
-from cache.
+The interactive notebook surface: Python, prompt, SQL, and loop cells, each
+producing artifacts that flow through an auto-built DAG.
 
 **Key features:**
 
