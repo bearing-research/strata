@@ -76,7 +76,34 @@ text file per notebook but still keep all cells together.
   *staleness* (the DAG updates, downstream cells flip to stale on every
   source change) but execution is explicit — you press Run.
 - **Hosted offerings.** Google Colab, Deepnote, Hex, and Databricks
-  Notebooks all bundle a hosted runtime; Strata is self-hosted.
+  Notebooks all bundle a hosted runtime; Strata is self-hosted (see
+  the section below on where these fit).
+
+## Where the hosted offerings fit
+
+Most managed notebook services are JupyterLab in a hosted wrapper. Their
+files are `.ipynb`, their kernels are IPython, and they differentiate on
+compute provisioning (GPUs, identity, billing) rather than on the
+notebook runtime itself:
+
+| Offering | Runtime | File format |
+|---|---|---|
+| Google Colab | Jupyter | `.ipynb` |
+| Kaggle Notebooks | Jupyter | `.ipynb` |
+| AWS SageMaker Studio | JupyterLab | `.ipynb` |
+| Azure ML Notebooks | Jupyter / JupyterLab | `.ipynb` |
+| Databricks Notebooks | Custom UI on IPython kernel | `.ipynb` (default), `.dbc` legacy |
+
+None of them have automatic content-addressed caching, per-cell remote
+dispatch, or first-class AI cells — because the underlying Jupyter
+runtime doesn't.
+
+The smaller "we-rejected-Jupyter" cohort (Marimo, Observable, Deepnote,
+Hex) explicitly stepped away from `.ipynb` to redesign the runtime —
+reactive execution, real-time collaboration, multi-language cells, app
+deployment. That cohort is Strata's natural competitive set; the
+JupyterLab-wrapper hosted offerings are an orthogonal category whose
+moat is compute provisioning, not notebook-engine innovation.
 
 ## When to pick Strata
 
