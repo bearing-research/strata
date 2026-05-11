@@ -5,7 +5,7 @@ Strata Notebook has four cell kinds:
 | Kind       | What it runs                            | Created by                                                    |
 | ---------- | --------------------------------------- | ------------------------------------------------------------- |
 | **Python** | Python source in the notebook's venv    | The default — pick **Python** from the **+ Add cell** menu    |
-| **Prompt** | A text template sent to an LLM          | Pick **Prompt** from the **+ Add cell** menu                  |
+| **Prompt** | A text template sent to an AI model     | Pick **Prompt** from the **+ Add cell** menu                  |
 | **SQL**    | A query against a connected database    | Pick **SQL** from the **+ Add cell** menu                     |
 | **Loop**   | A Python cell executed N times in a row | Add a Python cell, then put a `# @loop` annotation at the top |
 
@@ -150,7 +150,7 @@ See [Cell Annotations][a] for the full reference.
 
 ## Prompt Cells
 
-A prompt cell is a text template that gets rendered with upstream variable values, sent to an LLM, and the response stored as an artifact. Prompt cells participate in the DAG and cache by provenance exactly like Python cells — same inputs + same template + same model config = cache hit, no LLM call.
+A prompt cell is a text template that gets rendered with upstream variable values, sent to an AI model, and the response stored as an artifact. Prompt cells participate in the DAG and cache by provenance exactly like Python cells — same inputs + same template + same model config = cache hit, no API call.
 
 Create a prompt cell with the **"Add Prompt Cell"** button in the UI — the same toolbar that adds a Python cell. You never need to touch `notebook.toml` directly; editing the cell's source, wiring it into the DAG, and persisting the result all happen through the UI.
 
@@ -163,8 +163,8 @@ Summarize this dataset and return the top 3 findings as a numbered list:
 {{ df }}
 ```
 
-- `{{ df }}` is replaced with a text representation of the upstream variable `df` before sending to the LLM.
-- The LLM's response is stored as an artifact named `summary` (from `# @name`).
+- `{{ df }}` is replaced with a text representation of the upstream variable `df` before sending to the model.
+- The model's response is stored as an artifact named `summary` (from `# @name`).
 - Downstream cells can read `summary` like any other upstream variable.
 
 ### Template syntax
@@ -197,7 +197,7 @@ Only a small set of methods is permitted (`describe`, `head`, `tail` on pandas o
 | Annotation               | What it does                                                              | Default              |
 | ------------------------ | ------------------------------------------------------------------------- | -------------------- |
 | `# @name <identifier>`   | Output variable name; must be a Python identifier                         | `result`             |
-| `# @model <model_id>`    | Override the notebook-level LLM model                                     | From provider config |
+| `# @model <model_id>`    | Override the notebook-level AI model                                      | From provider config |
 | `# @temperature <float>` | Sampling temperature (0.0 = deterministic; see [Caching](#caching) below) | `0.0`                |
 | `# @max_tokens <int>`    | Response token ceiling                                                    | `4096`               |
 | `# @system <text>`       | System prompt prepended to the request                                    | None                 |
@@ -222,7 +222,7 @@ Return a JSON object mapping paper ID to topic.
 
 ### Schema-constrained output
 
-`# @output_schema {...}` pins the shape of the LLM response to an inline JSON Schema. Strata picks the best provider-native path:
+`# @output_schema {...}` pins the shape of the model response to an inline JSON Schema. Strata picks the best provider-native path:
 
 | Provider                             | Enforcement                                                                                                                                                                                                                               |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -254,7 +254,7 @@ print(df["priority"].value_counts())
 
 ### Validate-and-retry
 
-When `@output_schema` is set, Strata runs a **validate-and-retry loop** after every LLM call:
+When `@output_schema` is set, Strata runs a **validate-and-retry loop** after every model call:
 
 1. Parse the response as JSON and run it through `jsonschema`.
 2. On success → store the artifact and return.
@@ -281,7 +281,7 @@ Editing any of these invalidates the cache. In particular, tweaking `@output_sch
 !!! tip "Keep temperature at 0.0 for prompt cells"
 With `temperature=0.0` the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache — future runs return the stored stochastic sample rather than re-sampling.
 
-See [LLM Integration](llm.md) for provider configuration and the conversational AI assistant.
+See [AI Integration](ai.md) for provider configuration and the conversational AI assistant.
 
 ---
 
@@ -580,7 +580,7 @@ Reach for loop cells when **being able to inspect or fork from iteration k matte
 | Reach for a… | When you want…                                                                                         |
 | ------------ | ------------------------------------------------------------------------------------------------------ |
 | Python cell  | Ordinary computation. Default.                                                                         |
-| Prompt cell  | An LLM response as a first-class, cached, DAG-participating artifact.                                  |
+| Prompt cell  | An AI response as a first-class, cached, DAG-participating artifact.                                   |
 | SQL cell     | A query against a connected database, with bind parameters, schema discovery, and probe-based caching. |
 | Loop cell    | Iterative refinement where pausing or forking from an intermediate state matters.                      |
 

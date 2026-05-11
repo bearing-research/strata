@@ -24,7 +24,7 @@ from cache.
 - Git-friendly format — cells are plain `.py` files, outputs and runtime
   state live outside the committed tree (no JSON blobs, no diffs on every run)
 - Distributed workers (`@worker gpu-fly` dispatches to remote GPU)
-- Prompt cells with `{{ variable }}` LLM injection
+- Prompt cells with `{{ variable }}` injection into AI calls
 - AI assistant with streaming chat and agent mode
 - Per-notebook Python environments via uv
 - Headless runner (`strata run`) for CI

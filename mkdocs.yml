@@ -61,7 +61,7 @@ nav:
     - Cell Types: notebook/cells.md
     - Cell Annotations: notebook/annotations.md
     - Distributed Workers: notebook/workers.md
-    - LLM Integration: notebook/llm.md
+    - AI Integration: notebook/ai.md
     - Environment: notebook/environment.md
     - Secret Manager: notebook/secrets.md
     - Headless Runner: notebook/cli.md

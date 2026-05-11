@@ -1,6 +1,6 @@
-# LLM Integration
+# AI Integration
 
-Strata Notebook has two ways to use LLMs: **prompt cells** (declarative, part of the DAG) and the **AI assistant** (conversational, in a sidebar panel). Both use the same provider configuration and support any OpenAI-compatible API.
+Strata Notebook has two ways to use AI: **prompt cells** (declarative, part of the DAG) and the **AI assistant** (conversational, in a sidebar panel). Both use the same provider configuration and support any OpenAI-compatible API.
 
 This page covers provider configuration and the AI assistant. For the prompt-cell template syntax, annotations, schema-constrained output, and validate-and-retry loop, see [Cell Types](cells.md#prompt-cells).
 
@@ -27,7 +27,7 @@ Set an API key in the **Runtime panel** under Environment Variables. The key det
 For standard providers you only need step 2: drop your API key into the Runtime panel and Strata auto-picks the matching default base URL and model. The AI panel's model picker lets you switch models without leaving the UI (it persists the choice to `[ai].model`).
 
 !!! note "Process environment is not consulted"
-A shell-exported `OPENAI_API_KEY` does **not** leak into notebooks. This is intentional — each notebook must explicitly opt in to an LLM provider. See the [Annotations](annotations.md) page for how env vars flow.
+A shell-exported `OPENAI_API_KEY` does **not** leak into notebooks. This is intentional — each notebook must explicitly opt in to an AI provider. See the [Annotations](annotations.md) page for how env vars flow.
 
 ### Custom Provider Configuration
 
@@ -63,13 +63,13 @@ Any service that implements the OpenAI `/v1/chat/completions` endpoint works, in
 
 ## AI Assistant
 
-The AI assistant is a sidebar panel (toggle with the **AI Assistant** button) that provides conversational access to an LLM. It operates outside the DAG — it doesn't create artifacts or participate in caching.
+The AI assistant is a sidebar panel (toggle with the **AI Assistant** button) that provides conversational access to a model. It operates outside the DAG — it doesn't create artifacts or participate in caching.
 
 ### Chat Mode (Enter)
 
 Type a message and press Enter. The assistant streams a response with full conversation context:
 
-- **Conversation memory**: prior turns are sent back to the LLM so follow-up questions work ("give an example of that", "now do it for column X")
+- **Conversation memory**: prior turns are sent back to the model so follow-up questions work ("give an example of that", "now do it for column X")
 - **Notebook context**: the current notebook state (cell sources, variable definitions, packages) is included in every request as a system prompt
 - **Cell context**: optionally select a cell from the dropdown to focus the conversation on that cell's code and errors
 - **Code insertion**: assistant responses with fenced code blocks show an "Insert Cell" button to add the code as a new notebook cell

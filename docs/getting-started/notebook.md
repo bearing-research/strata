@@ -121,7 +121,7 @@ create artifacts.
 
 Requires `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or
 `MISTRAL_API_KEY` in the Runtime panel. See
-[LLM Integration](../notebook/llm.md) for full details.
+[AI Integration](../notebook/ai.md) for full details.
 
 ## 9. Appearance
 
@@ -153,10 +153,10 @@ Other bundled examples:
 | `examples/iris_classification` | Basic ML workflow with sklearn                          |
 | `examples/pandas_basics`       | DataFrame manipulation and plotting                     |
 | `examples/titanic_ml`          | End-to-end classifier                                   |
-| `examples/arxiv_classifier`    | LLM-powered paper classification (prompt cells)         |
+| `examples/arxiv_classifier`    | AI-powered paper classification (prompt cells)          |
 | `examples/review_triage`       | Structured-output prompt cells with `@output_schema`    |
 | `examples/loop_hill_climb`     | `@loop` cell with carry state and termination predicate |
-| `examples/news_alpha_trader`   | Secret manager, LLM pricing lookup, multi-cell DAG      |
+| `examples/news_alpha_trader`   | Secret manager, AI pricing lookup, multi-cell DAG       |
 | `examples/s3_mount`            | `@mount` annotations for S3 / file access               |
 
 See the `examples/` directory in the repo for the full list.

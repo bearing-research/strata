@@ -122,7 +122,7 @@ Strata is configured via environment variables (prefixed with `STRATA_`) or a `[
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `None`   | OTLP collector endpoint |
 | `OTEL_SERVICE_NAME`           | `strata` | Service name for traces |
 
-## AI / LLM Assistant
+## AI Assistant
 
 | Variable                       | Default  | Description                                                  |
 | ------------------------------ | -------- | ------------------------------------------------------------ |
@@ -131,7 +131,7 @@ Strata is configured via environment variables (prefixed with `STRATA_`) or a `[
 | `STRATA_AI_API_KEY`            | `None`   | API key (generic, works with any provider)                   |
 | `STRATA_AI_MAX_CONTEXT_TOKENS` | `100000` | Max context tokens sent to the model                         |
 | `STRATA_AI_MAX_OUTPUT_TOKENS`  | `4096`   | Max output tokens requested                                  |
-| `STRATA_AI_TIMEOUT_SECONDS`    | `60.0`   | LLM request timeout                                          |
+| `STRATA_AI_TIMEOUT_SECONDS`    | `60.0`   | AI request timeout                                           |
 | `ANTHROPIC_API_KEY`            | `None`   | Anthropic API key (auto-sets base URL + model)               |
 | `OPENAI_API_KEY`               | `None`   | OpenAI API key (auto-sets base URL + model)                  |
 | `GEMINI_API_KEY`               | `None`   | Google Gemini API key (auto-sets base URL + model)           |

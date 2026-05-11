@@ -120,11 +120,11 @@ Format: `# @mount <name> <uri> [ro|rw]`. Defaults to `ro` (read-only) if the mod
 ## Prompt Cell Annotations
 
 Prompt cells (language `prompt`) accept an additional set of annotations that
-configure the LLM call.
+configure the AI call.
 
 ### `@model`
 
-Override the notebook-level LLM model for this cell only.
+Override the notebook-level AI model for this cell only.
 
 ```
 # @model claude-sonnet-4-20250514
@@ -382,7 +382,7 @@ which is fine; only the *values* the cells produce need to match.
 A variant group can mix any cell kinds. A Python variant and a prompt
 variant can sit in the same group as long as they both produce the
 contract names — e.g. one variant calls a deterministic regex
-classifier, another asks an LLM to classify.
+classifier, another asks an AI model to classify.
 
 ### Adding and removing variants
 

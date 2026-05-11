@@ -131,7 +131,7 @@ What changes when the header is set:
 What does *not* change:
 - Concurrent edits to the same notebook still race (no per-user sessions).
 - The artifact store is shared; provenance hashes don't include the caller.
-- The LLM API key pool (`STRATA_AI_*`) is shared across all users.
+- The AI API key pool (`STRATA_AI_*`) is shared across all users.
 - Unowned (legacy) notebooks remain visible and deletable by everyone.
 
 This shape is the right answer for a 5–20 person trusted group. For untrusted
