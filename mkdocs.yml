@@ -58,6 +58,7 @@ nav:
   - Notebook:
     - Quickstart: getting-started/notebook.md
     - Concepts: notebook/concepts.md
+    - vs Jupyter, Marimo, Pluto: notebook/comparison.md
     - Cell Types: notebook/cells.md
     - Cell Annotations: notebook/annotations.md
     - Distributed Workers: notebook/workers.md
