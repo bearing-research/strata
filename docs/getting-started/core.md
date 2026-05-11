@@ -1,6 +1,6 @@
 # Core API Quickstart
 
-Strata Core is the programmatic materialization and artifact layer. Use this if you want the `materialize()` API, artifact caching, lineage, and executor integration.
+Strata Core is the programmatic materialization and artifact layer. Use this when you want the `materialize()` API, artifact caching, lineage tracking, or snapshot-aware Iceberg table scanning — without the notebook UI on top.
 
 ## The primitive
 
@@ -15,6 +15,8 @@ This gives you:
 - Explicit lineage
 - Safe reuse across runs and processes
 
+Reading from an Iceberg table is itself a `materialize` call with the built-in `scan@v1` transform: inputs are the table URIs, params hold optional projections and filters. The cache key includes the table's snapshot ID, so once you've scanned a snapshot the result is reusable forever — there's no invalidation problem.
+
 ## 1. Start the server
 
 ```bash
@@ -27,7 +29,15 @@ uv run strata-server
 uv run python examples/hello_world.py
 ```
 
-This creates a demo Iceberg table and exercises the cold → warm → restart cache path.
+This creates a local Iceberg table with 100K rows and times three reads against it:
+
+```
+Cold run     (no cache)             ~500ms   — read Parquet, cache as Arrow IPC
+Warm run     (in-memory cache hit)  ~50ms    — serve from process memory
+Restart run  (disk cache hit)       ~60ms    — serve from on-disk Arrow IPC
+```
+
+Same inputs, same transform, three different cache states — and the third is still ~10× faster than the first because the disk cache survives restarts.
 
 ## 3. Materialize a result
 
@@ -80,7 +90,8 @@ df = table.to_pandas()
     from strata.integration.duckdb import StrataScanner
     with StrataScanner() as scanner:
         scanner.register("events", "file:///warehouse#db.events")
-        result = scanner.query("SELECT * FROM events WHERE id > 100")
+        result = scanner.query("SELECT category, COUNT(*) FROM events GROUP BY category")
+        print(result.to_pandas())
     ```
 
 ## Core behaviors
@@ -92,5 +103,6 @@ df = table.to_pandas()
 
 ## What's next
 
-- [Configuration reference](../reference/configuration.md) — all environment variables
-- [REST API reference](../reference/rest-api.md) — the full API surface
+- [Configuration](../reference/configuration.md) — all environment variables (cache, fetcher, S3 / GCS / Azure, auth, timeouts)
+- [Deployment Modes](../deployment/modes.md) — `personal` vs `service` mode and the auth boundary
+- [REST API](../reference/rest-api.md) — notebook protocol surface (separate from the `/v1/materialize` endpoint this page calls into)
