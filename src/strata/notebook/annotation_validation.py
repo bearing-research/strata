@@ -23,15 +23,21 @@ def validate_cell_annotations(
     notebook_state: NotebookState,
 ) -> list[AnnotationDiagnostic]:
     """Validate a cell's annotations against notebook-wide context."""
+    # Variant validation is language-agnostic: any cell language can be
+    # a variant member, so the cross-sibling checks run before language
+    # dispatch.
+    variant_diagnostics = _validate_variant_annotation(
+        cell, parse_annotations(cell.source), notebook_state
+    )
     if cell.language == "prompt":
-        return _validate_prompt_cell_annotations(cell)
+        return variant_diagnostics + _validate_prompt_cell_annotations(cell)
     if cell.language == "sql":
-        return _validate_sql_cell_annotations(cell, notebook_state)
+        return variant_diagnostics + _validate_sql_cell_annotations(cell, notebook_state)
     if cell.language == "markdown":
         # Markdown cells are pure prose; ``# @worker`` etc. would be a
         # markdown heading, not an annotation. No validation applies.
-        return []
-    diagnostics: list[AnnotationDiagnostic] = []
+        return variant_diagnostics
+    diagnostics: list[AnnotationDiagnostic] = list(variant_diagnostics)
     diagnostics.extend(_validate_module_export(cell, notebook_state))
     annotations = parse_annotations(cell.source)
 
@@ -551,6 +557,126 @@ def _validate_loop_annotation(
             )
 
     return diagnostics
+
+
+def _validate_variant_annotation(
+    cell: CellState,
+    annotations,
+    notebook_state: NotebookState,
+) -> list[AnnotationDiagnostic]:
+    """Validate ``# @variant`` membership against siblings and toml.
+
+    - ``variant_contract_mismatch`` — this variant's defines diverge from
+      the union of its siblings (computed against active members so the
+      diagnostic surfaces on the *outlier*, not on the rest).
+    - ``variant_active_unknown`` — notebook.toml selects a variant name
+      that no cell in the group provides.
+    - ``variant_malformed`` — the ``@variant`` line is present but didn't
+      parse into a (group, name) pair.
+    """
+    diagnostics: list[AnnotationDiagnostic] = []
+    variant_line = _find_annotation_line(cell.source, "variant")
+
+    # Detect the malformed case: a ``@variant`` line is present but
+    # parse_annotations rejected it (wrong number of tokens, or non-
+    # identifier values).
+    if variant_line is not None and annotations.variant is None:
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity="warn",
+                code="variant_malformed",
+                message=(
+                    "`@variant` requires `group` and `name`, both Python "
+                    "identifiers: `# @variant <group> <name>`."
+                ),
+                line=variant_line,
+            )
+        )
+        return diagnostics
+
+    if annotations.variant is None:
+        return diagnostics
+
+    group_id = annotations.variant.group
+    siblings = [
+        c
+        for c in notebook_state.cells
+        if c.id != cell.id and c.variant_group == group_id and c.variant_name is not None
+    ]
+
+    # variant_contract_mismatch — siblings disagree on defines.
+    # Compare *value defines* only: imports are scaffolding (a variant
+    # using sklearn.linear_model vs sklearn.ensemble is a means, not an
+    # interface). Downstream cells reference produced values, never the
+    # variant's import names, so excluding imports gives the same
+    # correctness guarantee with much less friction.
+    if siblings:
+        own_imports = _collect_top_level_imports(cell.source)
+        own_defines = set(cell.defines) - own_imports
+        for sibling in siblings:
+            sibling_imports = _collect_top_level_imports(sibling.source)
+            sibling_defines = set(sibling.defines) - sibling_imports
+            missing = sibling_defines - own_defines
+            extra = own_defines - sibling_defines
+            if missing or extra:
+                diff_parts = []
+                if missing:
+                    diff_parts.append(f"missing {sorted(missing)}")
+                if extra:
+                    diff_parts.append(f"extra {sorted(extra)}")
+                diagnostics.append(
+                    AnnotationDiagnostic(
+                        severity="warn",
+                        code="variant_contract_mismatch",
+                        message=(
+                            f"Variant `{annotations.variant.name}` defines a different "
+                            f"set of names than sibling `{sibling.variant_name}` in "
+                            f"group `{group_id}` ({', '.join(diff_parts)}). All variants "
+                            "in a group must share the same defines contract."
+                        ),
+                        line=variant_line,
+                    )
+                )
+                break
+
+    # variant_active_unknown — toml selects a variant that doesn't exist
+    # in this group. Surface on every member so the user sees it on
+    # whichever variant they're looking at.
+    selected = notebook_state.variant_active_selections.get(group_id)
+    if selected is not None:
+        all_members = [annotations.variant.name] + [s.variant_name for s in siblings]
+        if selected not in all_members:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity="warn",
+                    code="variant_active_unknown",
+                    message=(
+                        f"notebook.toml selects variant `{selected}` for group "
+                        f"`{group_id}`, but no cell in the group has that name. "
+                        f"Falling back to the first variant in source order."
+                    ),
+                    line=variant_line,
+                )
+            )
+
+    return diagnostics
+
+
+def _collect_top_level_imports(source: str) -> set[str]:
+    """Return module-scope names bound by ``import`` / ``from import`` statements."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+    return names
 
 
 def _find_annotation_line(source: str, directive: str, needle: str | None = None) -> int | None:

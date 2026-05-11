@@ -17,6 +17,7 @@ from strata.notebook.models import (
     MountSpec,
     NotebookState,
     NotebookToml,
+    VariantGroupConfig,
     WorkerSpec,
 )
 
@@ -158,6 +159,7 @@ def parse_notebook(directory: Path) -> NotebookState:
         updated_at = datetime.now(tz=UTC)
 
     _parsed_connections, _parsed_malformed = _parse_connections(toml_data)
+    _parsed_variant_groups = _parse_variant_groups(toml_data)
 
     notebook_toml = NotebookToml(
         notebook_id=toml_data.get("notebook_id", ""),
@@ -172,6 +174,7 @@ def parse_notebook(directory: Path) -> NotebookState:
         mounts=[MountSpec(**m) for m in toml_data.get("mounts", [])],
         connections=_parsed_connections,
         malformed_connections=_parsed_malformed,
+        variant_groups=_parsed_variant_groups,
         ai=toml_data.get("ai", {}),
         secret_manager=toml_data.get("secret_manager", {}),
         artifacts=toml_data.get("artifacts", {}),
@@ -276,10 +279,33 @@ def parse_notebook(directory: Path) -> NotebookState:
         malformed_connections=list(notebook_toml.malformed_connections),
         secret_manager_config=dict(notebook_toml.secret_manager),
         cells=cell_states,
+        variant_active_selections={vg.group: vg.active for vg in notebook_toml.variant_groups},
         path=directory,
         created_at=notebook_toml.created_at,
         updated_at=notebook_toml.updated_at,
     )
+
+
+def _parse_variant_groups(toml_data: dict) -> list[VariantGroupConfig]:
+    """Parse ``[[variant_group]]`` entries into VariantGroupConfig.
+
+    Malformed entries (missing ``group`` / ``active``, or values that
+    don't match the identifier pattern) are dropped silently here;
+    annotation_validation surfaces a ``variant_active_unknown`` diagnostic
+    if the named active variant doesn't exist in the cells.
+    """
+    raw = toml_data.get("variant_group")
+    if not isinstance(raw, list):
+        return []
+    out: list[VariantGroupConfig] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            out.append(VariantGroupConfig(group=entry.get("group", ""), active=entry.get("active", "")))
+        except Exception:
+            continue
+    return out
 
 
 def _rewrite_notebook_toml(path: Path, toml_data: dict) -> None:

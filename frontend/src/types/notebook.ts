@@ -98,6 +98,28 @@ export interface CellAnnotations {
   mounts: MountSpec[]
   /** Loop cell annotations — present only when the cell declares ``# @loop``. */
   loop?: LoopAnnotationInfo | null
+  /** Variant grouping — present only when the cell declares ``# @variant``. */
+  variant?: VariantAnnotationInfo | null
+}
+
+export interface VariantAnnotationInfo {
+  group: string
+  name: string
+}
+
+/** A single variant in a group — surfaced for tab rendering. */
+export interface VariantMember {
+  cellId: CellId
+  name: string
+  isActive: boolean
+}
+
+/** Resolved variant group state from the backend. */
+export interface VariantGroup {
+  group: string
+  activeName: string
+  activeCellId: CellId
+  members: VariantMember[]
 }
 
 export interface LoopAnnotationInfo {
@@ -260,6 +282,13 @@ export interface Cell {
   /** Symbols exported by this cell when it's a module cell — shown in the
    * module pill's tooltip so users see what crosses the cell boundary. */
   moduleExports?: Array<{ name: string; kind: string }>
+  /** Variant group ID parsed from ``# @variant <group> <name>``. Null for
+   * cells that aren't members of a group. */
+  variantGroup?: string | null
+  /** Variant name within ``variantGroup``. */
+  variantName?: string | null
+  /** False for inactive variants (shadowed in the DAG). True otherwise. */
+  variantActive?: boolean
 }
 
 /** A warning or info about a source annotation. */
@@ -460,6 +489,8 @@ export interface Notebook {
    * notebook has no [connections.<name>] blocks. */
   connections: ConnectionSpec[]
   cells: Cell[]
+  /** Resolved variant groups; one entry per group declared by ``# @variant``. */
+  variantGroups: VariantGroup[]
   /** Environment info */
   environment: NotebookEnvironment
   /** Published outputs exposed as stable endpoints */
@@ -562,6 +593,8 @@ export type WsClientMessageType =
   | 'dependency_remove' // Remove a package dependency
   | 'agent_cancel' // Cancel a running agent loop
   | 'agent_confirm_response' // User approved/declined a destructive tool call
+  | 'variant_set_active' // Switch the active variant in a group
+  | 'variant_add' // Add a new sibling variant to a group (clones active)
 
 /** WebSocket message types: server → client */
 export type WsServerMessageType =

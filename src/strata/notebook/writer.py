@@ -314,6 +314,15 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
             if toml.connections or toml.malformed_connections
             else {}
         ),
+        **(
+            {
+                "variant_group": [
+                    {"group": vg.group, "active": vg.active} for vg in toml.variant_groups
+                ]
+            }
+            if toml.variant_groups
+            else {}
+        ),
         **({"ai": toml.ai} if toml.ai else {}),
         **({"secret_manager": toml.secret_manager} if toml.secret_manager else {}),
         # Runtime state that used to live in this file — ``artifacts``
@@ -594,12 +603,25 @@ def add_cell_to_notebook(
     with open(notebook_toml_path, "rb") as f:
         toml_data = tomllib.load(f)
 
-    # Calculate order
+    # Calculate order. "Right after X" means landing between X and the
+    # next cell in source order — a plain ``X.order + 0.5`` collides
+    # whenever two inserts target the same parent (the second insert
+    # ends up tied with the first, and stable sort makes "after X"
+    # actually mean "after the cell that was added previously"). Use
+    # the midpoint to the next cell instead.
     cells_data = toml_data.get("cells", [])
     if after_cell_id:
         idx = next((i for i, c in enumerate(cells_data) if c.get("id") == after_cell_id), None)
         if idx is not None:
-            order = cells_data[idx].get("order", 0) + 0.5
+            after_order = cells_data[idx].get("order", 0)
+            next_order = None
+            for other in cells_data:
+                other_order = other.get("order", 0)
+                if other_order > after_order and (
+                    next_order is None or other_order < next_order
+                ):
+                    next_order = other_order
+            order = after_order + 1.0 if next_order is None else (after_order + next_order) / 2.0
         else:
             order = len(cells_data)
     else:
@@ -942,6 +964,69 @@ def update_cell_display_outputs(
 
 
 _SECRET_MANAGER_CONFIG_KEYS = ("provider", "project_id", "environment", "path", "base_url")
+
+
+def set_variant_active(
+    notebook_dir: Path,
+    group: str,
+    variant_name: str,
+) -> None:
+    """Set the active variant for ``group`` in notebook.toml.
+
+    Updates the matching ``[[variant_group]]`` entry, or appends one if
+    none exists. Bumps ``updated_at`` (variant selection is a structural
+    change — it changes which cells participate in the executable graph).
+
+    Group membership itself is declared by ``# @variant`` annotations in
+    cell source; this function only persists the active-variant pointer.
+    Validation that ``variant_name`` actually matches a member of the
+    group is left to ``annotation_validation`` (``variant_active_unknown``
+    surfaces the drift if the user picks a name no cell provides).
+    """
+
+    def mutate(toml_data: dict[str, Any]) -> bool:
+        entries = toml_data.get("variant_group", [])
+        if not isinstance(entries, list):
+            entries = []
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("group") == group:
+                if entry.get("active") == variant_name:
+                    return False
+                entry["active"] = variant_name
+                toml_data["variant_group"] = entries
+                return True
+        entries.append({"group": group, "active": variant_name})
+        toml_data["variant_group"] = entries
+        return True
+
+    _apply_notebook_toml_update(notebook_dir, mutate)
+
+
+def remove_variant_group_entry(notebook_dir: Path, group: str) -> None:
+    """Drop the ``[[variant_group]]`` entry for ``group``, if any.
+
+    Used when the last member of a variant group is removed — there's
+    no group left to point at, so the toml entry is no longer meaningful.
+    """
+
+    def mutate(toml_data: dict[str, Any]) -> bool:
+        entries = toml_data.get("variant_group")
+        if not isinstance(entries, list):
+            return False
+        new_entries = [
+            entry
+            for entry in entries
+            if not (isinstance(entry, dict) and entry.get("group") == group)
+        ]
+        if len(new_entries) == len(entries):
+            return False
+        if new_entries:
+            toml_data["variant_group"] = new_entries
+        else:
+            toml_data.pop("variant_group", None)
+        return True
+
+    _apply_notebook_toml_update(notebook_dir, mutate)
 
 
 def update_notebook_secret_manager(notebook_dir: Path, config: dict[str, Any]) -> None:

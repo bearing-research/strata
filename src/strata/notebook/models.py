@@ -203,6 +203,51 @@ class ArtifactInfo(BaseModel):
     created_at: float = Field(..., description="Creation timestamp")
 
 
+class VariantGroupConfig(BaseModel):
+    """Persisted active-variant pointer for one variant group.
+
+    Group membership itself is declared by ``# @variant`` annotations in
+    cell source; this entry only records which variant is currently active.
+    Stored under ``[[variant_group]]`` in notebook.toml.
+    """
+
+    group: str = Field(
+        ...,
+        description="Variant group identifier (matches ``# @variant <group> <name>``)",
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+    )
+    active: str = Field(
+        ...,
+        description="Active variant name within the group",
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+    )
+
+
+class VariantMember(BaseModel):
+    """One member of a variant group, surfaced for frontend rendering."""
+
+    cell_id: str = Field(..., description="Cell ID")
+    name: str = Field(..., description="Variant name within the group")
+    is_active: bool = Field(..., description="Whether this is the active variant")
+
+
+class VariantGroupState(BaseModel):
+    """Resolved variant-group state attached to NotebookState.
+
+    ``members`` is in source order (matches the order the cells appear in
+    ``notebook.toml``'s ``cells`` list); the frontend uses this for
+    variant-tab ordering.
+    """
+
+    group: str = Field(..., description="Variant group identifier")
+    active_name: str = Field(..., description="Active variant name")
+    active_cell_id: str = Field(..., description="Active variant's cell ID")
+    members: list[VariantMember] = Field(
+        default_factory=list,
+        description="All members of this group, in source order",
+    )
+
+
 class CellMeta(BaseModel):
     """Metadata for a single cell in notebook.toml."""
 
@@ -277,6 +322,14 @@ class NotebookToml(BaseModel):
             "Connection blocks that failed to parse. Preserved verbatim "
             "across saves so users don't lose hand-edited config to a "
             "transient typo."
+        ),
+    )
+    variant_groups: list[VariantGroupConfig] = Field(
+        default_factory=list,
+        description=(
+            "Active-variant pointers for variant groups. Group membership "
+            "is declared in cell source via ``# @variant``; only the "
+            "active selection per group is committed here."
         ),
     )
     ai: dict[str, Any] = Field(
@@ -394,6 +447,25 @@ class CellState(BaseModel):
     mount_overrides: list[MountSpec] = Field(
         default_factory=list,
         description="Persisted cell-level mount overrides from notebook.toml",
+    )
+    variant_group: str | None = Field(
+        default=None,
+        description=(
+            "Variant group ID parsed from ``# @variant <group> <name>``. "
+            "None for cells that aren't part of a group."
+        ),
+    )
+    variant_name: str | None = Field(
+        default=None,
+        description="Variant name within ``variant_group``, parsed from source.",
+    )
+    variant_active: bool = Field(
+        default=True,
+        description=(
+            "True for cells that aren't grouped or for the active member "
+            "of a group. False for inactive variants — these are excluded "
+            "from the producer map and consumed_variables."
+        ),
     )
     annotation_diagnostics: list[AnnotationDiagnostic] = Field(
         default_factory=list,
@@ -545,6 +617,23 @@ class NotebookState(BaseModel):
         ),
     )
     cells: list[CellState] = Field(default_factory=list, description="Cells with source")
+    variant_groups: list[VariantGroupState] = Field(
+        default_factory=list,
+        description=(
+            "Resolved variant groups, one entry per group declared in any "
+            "cell's ``# @variant`` annotation. Frontend renders these as "
+            "tabbed groups; inactive members are not part of the DAG."
+        ),
+    )
+    variant_active_selections: dict[str, str] = Field(
+        default_factory=dict,
+        exclude=True,
+        description=(
+            "Raw {group: active_name} selections from notebook.toml's "
+            "[[variant_group]] entries. Populated by the parser; consumed "
+            "by session DAG build to resolve into ``variant_groups``."
+        ),
+    )
     path: Path | None = Field(
         default=None,
         exclude=True,

@@ -225,6 +225,44 @@ class TestLoopAnnotation:
         assert cell["annotations"]["loop"] is None
 
 
+class TestVariantAnnotation:
+    """Tests for the @variant grouping annotation."""
+
+    def test_variant_parses_group_and_name(self):
+        result = parse_annotations("# @variant model_choice gpt4\nx = 1")
+        assert result.variant is not None
+        assert result.variant.group == "model_choice"
+        assert result.variant.name == "gpt4"
+
+    def test_variant_absent_when_not_set(self):
+        result = parse_annotations("x = 1")
+        assert result.variant is None
+
+    def test_variant_missing_name_is_dropped(self):
+        result = parse_annotations("# @variant model_choice\nx = 1")
+        assert result.variant is None
+
+    def test_variant_extra_tokens_dropped(self):
+        result = parse_annotations("# @variant model_choice gpt4 extra\nx = 1")
+        assert result.variant is None
+
+    def test_variant_non_identifier_group_dropped(self):
+        result = parse_annotations("# @variant model-choice gpt4\nx = 1")
+        assert result.variant is None
+
+    def test_variant_non_identifier_name_dropped(self):
+        result = parse_annotations("# @variant model_choice gpt-4\nx = 1")
+        assert result.variant is None
+
+    def test_variant_coexists_with_other_annotations(self):
+        source = "# @name GPT-4 model\n# @variant model_choice gpt4\nx = 1"
+        result = parse_annotations(source)
+        assert result.variant is not None
+        assert result.variant.group == "model_choice"
+        assert result.variant.name == "gpt4"
+        assert result.name == "GPT-4 model"
+
+
 class TestAfterAnnotation:
     """Tests for the @after ordering-dependency annotation."""
 

@@ -385,6 +385,83 @@ class TestModuleExportBlockedDiagnostic:
         assert "module_export_blocked" not in codes
 
 
+class TestVariantDiagnostics:
+    """``# @variant`` validation: malformed lines, sibling contract, toml drift."""
+
+    def _group_nb(self, cells: list[CellState], selections: dict[str, str] | None = None):
+        nb = _nb()
+        nb.cells = cells
+        if selections:
+            nb.variant_active_selections = dict(selections)
+        return nb
+
+    def test_well_formed_solo_variant_no_diagnostic(self):
+        cell = _cell(
+            "# @variant model gpt4\npreds = run()\n",
+            cell_id="c1",
+        )
+        cell.defines = ["preds"]
+        cell.variant_group = "model"
+        cell.variant_name = "gpt4"
+        nb = self._group_nb([cell])
+        assert _codes(cell, nb) == []
+
+    def test_malformed_variant_line(self):
+        cell = _cell(
+            "# @variant model\npreds = run()\n",
+            cell_id="c1",
+        )
+        codes = _codes(cell, nb := _nb())
+        assert "variant_malformed" in codes
+        assert nb is not None  # silence unused var warning
+
+    def test_contract_mismatch_surfaces_on_outlier(self):
+        a = _cell(
+            "# @variant model gpt4\npreds = 1\nextra = 2\n",
+            cell_id="a",
+        )
+        a.defines = ["preds", "extra"]
+        a.variant_group = "model"
+        a.variant_name = "gpt4"
+
+        b = _cell(
+            "# @variant model claude\npreds = 1\n",
+            cell_id="b",
+        )
+        b.defines = ["preds"]
+        b.variant_group = "model"
+        b.variant_name = "claude"
+
+        nb = self._group_nb([a, b])
+        # Outlier a (defines extra) gets the diagnostic when compared to b
+        assert "variant_contract_mismatch" in _codes(a, nb)
+
+    def test_active_unknown_when_toml_names_missing_variant(self):
+        a = _cell(
+            "# @variant model gpt4\npreds = 1\n",
+            cell_id="a",
+        )
+        a.defines = ["preds"]
+        a.variant_group = "model"
+        a.variant_name = "gpt4"
+
+        nb = self._group_nb([a], selections={"model": "ghost"})
+        assert "variant_active_unknown" in _codes(a, nb)
+
+    def test_active_known_emits_no_diagnostic(self):
+        a = _cell(
+            "# @variant model gpt4\npreds = 1\n",
+            cell_id="a",
+        )
+        a.defines = ["preds"]
+        a.variant_group = "model"
+        a.variant_name = "gpt4"
+
+        nb = self._group_nb([a], selections={"model": "gpt4"})
+        codes = _codes(a, nb)
+        assert "variant_active_unknown" not in codes
+
+
 class TestPromptOutputSchemaDiagnostics:
     """Prompt cells surface malformed ``@output_schema`` as a warning."""
 

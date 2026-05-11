@@ -302,6 +302,21 @@ export function useWebSocket(notebookId: string) {
   }
 
   /**
+   * Switch the active variant for a group.
+   */
+  function setVariantActive(group: string, name: string): void {
+    send('variant_set_active', { group, name })
+  }
+
+  /**
+   * Add a new variant to an existing group; the backend auto-names it
+   * and switches it to active.
+   */
+  function addVariant(group: string): void {
+    send('variant_add', { group })
+  }
+
+  /**
    * Debounced source update (for editor changes).
    */
   function debounceSourceUpdate(cellId: string, source: string, delayMs: number = 500): () => void {
@@ -380,5 +395,7 @@ export function useWebSocket(notebookId: string) {
     inspectClose,
     addDependency,
     removeDependency,
+    setVariantActive,
+    addVariant,
   }
 }

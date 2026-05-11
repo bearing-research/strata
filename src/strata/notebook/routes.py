@@ -41,7 +41,6 @@ from strata.notebook.writer import (
     add_cell_to_notebook,
     create_notebook,
     delete_notebook_directory,
-    remove_cell_from_notebook,
     rename_notebook,
     reorder_cells,
     update_notebook_connections,
@@ -570,6 +569,12 @@ class TimeoutConfigRequest(BaseModel):
     """Request to replace a timeout setting."""
 
     timeout: float | None = Field(default=None, gt=0, le=86_400)
+
+
+class VariantActiveRequest(BaseModel):
+    """Request to switch the active variant in a group."""
+
+    active: str = Field(..., pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 class EnvConfigRequest(BaseModel):
@@ -1726,6 +1731,67 @@ async def update_notebook_timeout_endpoint(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.post("/{notebook_id}/variant-groups/{group_id}/variants")
+async def add_variant_endpoint(
+    notebook_id: str,
+    group_id: str,
+) -> dict:
+    """Add a sibling variant to an existing group.
+
+    Clones the active variant's body and rewrites the ``# @variant``
+    annotation to a fresh auto-generated name. The new variant becomes
+    active on creation so the user can immediately edit it; renaming
+    happens by editing the annotation line in source.
+    """
+    session = _session_manager.get_session(notebook_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    try:
+        new_name, new_cell_id = session.add_variant(group_id)
+        return {
+            "new_variant_name": new_name,
+            "new_cell_id": new_cell_id,
+            "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
+            "cells": session.serialize_cells(),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception:
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.put("/{notebook_id}/variant-groups/{group_id}")
+async def set_variant_active_endpoint(
+    notebook_id: str,
+    group_id: str,
+    req: VariantActiveRequest,
+) -> dict:
+    """Switch the active variant for a group.
+
+    The group itself must be declared by ``# @variant`` annotations in
+    cell source — this endpoint only updates the persisted active-variant
+    pointer in notebook.toml. Picking a name that no cell provides is
+    accepted (write succeeds), but ``annotation_validation`` will surface
+    a ``variant_active_unknown`` diagnostic and the DAG falls back to
+    the first variant in source order.
+    """
+    session = _session_manager.get_session(notebook_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    try:
+        session.set_variant_active(group_id, req.active)
+        return {
+            "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
+            "cells": session.serialize_cells(),
+        }
+    except Exception:
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.put("/{notebook_id}/env")
 async def update_notebook_env_endpoint(
     notebook_id: str,
@@ -1911,13 +1977,36 @@ async def delete_cell(notebook_id: str, cell_id: str) -> dict:
         if not any(c.id == cell_id for c in session.notebook_state.cells):
             raise HTTPException(status_code=404, detail="Cell not found")
 
-        # Remove from notebook
-        remove_cell_from_notebook(session.path, cell_id)
+        # Variant-aware delete: when the cell is part of a variant group,
+        # session.remove_cell promotes the next variant to active (or
+        # dissolves the group on the last delete) so the toml pointer
+        # stays consistent. Non-variant cells take the same code path
+        # with no extra work.
+        session.remove_cell(cell_id)
 
-        # Reload notebook state
-        session.reload()
+        # Return the refreshed variant_groups + serialized cells *and*
+        # the DAG so the client can resync without a separate round-trip.
+        # Deleting a variant member can promote a sibling to active and
+        # re-wire downstream producers; without ``dag`` in the response
+        # the DAG view ends up rendering stale edges and the group
+        # appears orphaned until the next reload.
+        from strata.notebook.ws import _serialize_dag_edges
 
-        return {"message": "Cell deleted", "cell_id": cell_id}
+        return {
+            "message": "Cell deleted",
+            "cell_id": cell_id,
+            "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
+            "cells": session.serialize_cells(),
+            "dag": {
+                "edges": _serialize_dag_edges(session),
+                "roots": list(session.dag.roots) if session.dag else [],
+                "leaves": list(session.dag.leaves) if session.dag else [],
+                "topological_order": session.dag.topological_order if session.dag else [],
+                "variant_groups": [
+                    vg.model_dump() for vg in session.notebook_state.variant_groups
+                ],
+            },
+        }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception:

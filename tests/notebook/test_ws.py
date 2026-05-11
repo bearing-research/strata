@@ -1995,3 +1995,47 @@ class TestRunningPayloadHelper:
 
         payload = _running_payload(session, "c1", "q = 5")
         assert payload["remote_worker"] == "df-cluster"
+
+
+def test_variant_add_broadcasts_new_cell(client, app):
+    """variant_add must broadcast notebook_state (with the new cell's full
+    payload), not just dag_update — otherwise the frontend skips the new
+    cell and the user sees the active variant 'disappear'."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "variant_ws", initialize_environment=False)
+        add_cell_to_notebook(notebook_dir, "model_a")
+        write_cell(notebook_dir, "model_a", "# @variant g a\npreds = 1\n")
+
+        from strata.notebook.routes import get_session_manager
+
+        session = get_session_manager().open_notebook(notebook_dir)
+        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws:
+            ws.send_json(
+                {
+                    "type": "variant_add",
+                    "seq": 1,
+                    "ts": "2026-05-10T00:00:00Z",
+                    "payload": {"group": "g"},
+                }
+            )
+            # Look for the notebook_state broadcast (other messages like
+            # cell_status may interleave).
+            for _ in range(10):
+                response = ws.receive_json()
+                if response["type"] == "notebook_state":
+                    break
+            else:
+                raise AssertionError("Never received notebook_state for variant_add")
+
+        state = response["payload"]
+        cells = state["cells"]
+        # Both the original and the new variant must be in the payload
+        # with full source attached.
+        new_cells = [c for c in cells if c.get("variant_name") == "a_copy"]
+        assert len(new_cells) == 1
+        assert "# @variant g a_copy" in new_cells[0]["source"]
+        assert "preds = 1" in new_cells[0]["source"]
+        # New variant is active; old becomes inactive.
+        assert new_cells[0]["variant_active"] is True
+        old = next(c for c in cells if c.get("variant_name") == "a")
+        assert old["variant_active"] is False

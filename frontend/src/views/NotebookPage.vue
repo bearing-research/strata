@@ -52,6 +52,13 @@ const {
 
 const editingName = ref(false)
 const nameInput = ref<HTMLInputElement | null>(null)
+
+// Variant cells: only the active variant of each group renders. The
+// CellEditor for the active cell shows the tab strip; switching variants
+// re-renders this list with a different cell visible.
+const renderedCells = computed(() =>
+  orderedCells.value.filter((cell) => cell.variantActive !== false),
+)
 const nameDraft = ref('')
 const loading = ref(true)
 const renamingNotebook = ref(false)
@@ -561,7 +568,7 @@ function goHome() {
         <!-- Cells -->
         <div class="cells-panel" data-testid="notebook-cells-panel">
           <CellEditor
-            v-for="cell in orderedCells"
+            v-for="cell in renderedCells"
             :key="cell.id"
             :cell="cell"
             @run="runCell"

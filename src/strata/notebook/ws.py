@@ -560,6 +560,14 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                 await _handle_dependency_remove(
                     websocket, session, payload, execution_state, notebook_id
                 )
+            elif msg_type == "variant_set_active":
+                await _handle_variant_set_active(
+                    websocket, session, payload, execution_state, notebook_id
+                )
+            elif msg_type == "variant_add":
+                await _handle_variant_add(
+                    websocket, session, payload, execution_state, notebook_id
+                )
             else:
                 # Unknown message type
                 await websocket.send_text(
@@ -729,7 +737,14 @@ async def _handle_notebook_run_all(
     execution_state["sequence"] += 1
     seq = execution_state["sequence"]
 
-    runnable_cells = [cell.id for cell in session.notebook_state.cells if cell.source.strip()]
+    # Skip inactive variants — they aren't in the DAG, so their references
+    # don't resolve (e.g. `X_train` would NameError because the upstream
+    # split cell wasn't wired to them).
+    runnable_cells = [
+        cell.id
+        for cell in session.notebook_state.cells
+        if cell.source.strip() and cell.variant_active
+    ]
     if not runnable_cells:
         return
 
@@ -1062,6 +1077,9 @@ async def _handle_cell_source_update(
                 "downstream_ids": cell.downstream_ids,
                 "is_leaf": cell.is_leaf,
                 "annotation_diagnostics": [d.model_dump() for d in cell.annotation_diagnostics],
+                "variant_group": cell.variant_group,
+                "variant_name": cell.variant_name,
+                "variant_active": cell.variant_active,
             }
             if cell.language == "python":
                 plan = build_module_export_plan(cell.source)
@@ -1090,12 +1108,203 @@ async def _handle_cell_source_update(
                     "leaves": list(session.dag.leaves) if session.dag else [],
                     "topological_order": (session.dag.topological_order if session.dag else []),
                     "cells": cells_analysis,
+                    "variant_groups": [
+                        vg.model_dump() for vg in session.notebook_state.variant_groups
+                    ],
                 },
             },
         )
 
         await _broadcast_staleness_updates(session, notebook_id, seq, staleness_map)
 
+    except Exception as e:
+        await websocket.send_text(
+            _json_encode(
+                {
+                    "type": "error",
+                    "seq": seq,
+                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
+                    "payload": {"error": str(e)},
+                }
+            )
+        )
+
+
+async def _handle_variant_set_active(
+    websocket: WebSocket,
+    session: NotebookSession,
+    payload: dict[str, Any],
+    execution_state: dict[str, Any],
+    notebook_id: str,
+) -> None:
+    """Switch the active variant for a group, then broadcast a dag_update.
+
+    Reuses the same broadcast shape as ``cell_source_update`` since the
+    effect on the DAG is the same: a different cell becomes the producer
+    for the group's defines, downstream cells go stale.
+    """
+    group = payload.get("group")
+    variant_name = payload.get("name")
+
+    if not isinstance(group, str) or not isinstance(variant_name, str):
+        await websocket.send_text(
+            _json_encode(
+                {
+                    "type": "error",
+                    "seq": execution_state["sequence"],
+                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
+                    "payload": {"error": "Missing group or name"},
+                }
+            )
+        )
+        return
+
+    execution_state["sequence"] += 1
+    seq = execution_state["sequence"]
+
+    try:
+        session.set_variant_active(group, variant_name)
+        staleness_map = session.compute_staleness()
+
+        dag_edges = _serialize_dag_edges(session)
+        from strata.notebook.module_export import build_module_export_plan
+
+        cells_analysis = []
+        for cell in session.notebook_state.cells:
+            entry: dict[str, Any] = {
+                "id": cell.id,
+                "defines": cell.defines,
+                "references": cell.references,
+                "upstream_ids": cell.upstream_ids,
+                "downstream_ids": cell.downstream_ids,
+                "is_leaf": cell.is_leaf,
+                "annotation_diagnostics": [d.model_dump() for d in cell.annotation_diagnostics],
+                "variant_group": cell.variant_group,
+                "variant_name": cell.variant_name,
+                "variant_active": cell.variant_active,
+            }
+            if cell.language == "python":
+                plan = build_module_export_plan(cell.source)
+                has_code_export = any(
+                    s.kind in ("function", "async function", "class")
+                    for s in plan.exported_symbols.values()
+                )
+                entry["is_module_cell"] = plan.is_exportable and has_code_export
+                if entry["is_module_cell"]:
+                    entry["module_exports"] = [
+                        {"name": name, "kind": sym.kind}
+                        for name, sym in sorted(plan.exported_symbols.items())
+                    ]
+            cells_analysis.append(entry)
+
+        await _broadcast_message(
+            notebook_id,
+            {
+                "type": "dag_update",
+                "seq": seq,
+                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
+                "payload": {
+                    "edges": dag_edges,
+                    "roots": list(session.dag.roots) if session.dag else [],
+                    "leaves": list(session.dag.leaves) if session.dag else [],
+                    "topological_order": (session.dag.topological_order if session.dag else []),
+                    "cells": cells_analysis,
+                    "variant_groups": [
+                        vg.model_dump() for vg in session.notebook_state.variant_groups
+                    ],
+                },
+            },
+        )
+
+        await _broadcast_staleness_updates(session, notebook_id, seq, staleness_map)
+
+    except Exception as e:
+        await websocket.send_text(
+            _json_encode(
+                {
+                    "type": "error",
+                    "seq": seq,
+                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
+                    "payload": {"error": str(e)},
+                }
+            )
+        )
+
+
+async def _handle_variant_add(
+    websocket: WebSocket,
+    session: NotebookSession,
+    payload: dict[str, Any],
+    execution_state: dict[str, Any],
+    notebook_id: str,
+) -> None:
+    """Add a sibling variant to a group, then broadcast a dag_update.
+
+    Same broadcast shape as ``variant_set_active`` since the effect on
+    the DAG is identical: a new cell appears, and (because the new
+    variant becomes active) the producer for the group's defines moves.
+    """
+    group = payload.get("group")
+    if not isinstance(group, str):
+        await websocket.send_text(
+            _json_encode(
+                {
+                    "type": "error",
+                    "seq": execution_state["sequence"],
+                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
+                    "payload": {"error": "Missing group"},
+                }
+            )
+        )
+        return
+
+    execution_state["sequence"] += 1
+    seq = execution_state["sequence"]
+
+    try:
+        session.add_variant(group)
+        staleness_map = session.compute_staleness()
+
+        # variant_add creates a new cell, so the frontend store needs
+        # the full cell payload (source, language, order, ...). The
+        # dag_update broadcast only updates *existing* cells — it would
+        # silently drop the new variant. Send notebook_state instead,
+        # which the frontend handler treats as authoritative when cells
+        # are added or removed.
+        state_payload = session.serialize_notebook_state()
+        state_payload["dag"] = {
+            "edges": _serialize_dag_edges(session),
+            "roots": list(session.dag.roots) if session.dag else [],
+            "leaves": list(session.dag.leaves) if session.dag else [],
+            "topological_order": session.dag.topological_order if session.dag else [],
+            "variant_groups": [
+                vg.model_dump() for vg in session.notebook_state.variant_groups
+            ],
+        }
+
+        await _broadcast_message(
+            notebook_id,
+            {
+                "type": "notebook_state",
+                "seq": seq,
+                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
+                "payload": state_payload,
+            },
+        )
+
+        await _broadcast_staleness_updates(session, notebook_id, seq, staleness_map)
+
+    except ValueError as e:
+        await websocket.send_text(
+            _json_encode(
+                {
+                    "type": "error",
+                    "seq": seq,
+                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
+                    "payload": {"error": str(e)},
+                }
+            )
+        )
     except Exception as e:
         await websocket.send_text(
             _json_encode(

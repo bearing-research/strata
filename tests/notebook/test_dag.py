@@ -1,8 +1,11 @@
 """Tests for DAG construction and analysis."""
 
+import pytest
+
 from strata.notebook.dag import (
     CellAnalysisWithId,
     DagEdge,
+    VariantNameCollisionError,
     build_dag,
     detect_cycles,
     get_cascade_plan,
@@ -506,11 +509,192 @@ class TestAfterEdges:
 
     def test_after_cycle_still_detected(self):
         """Ordering edges feed cycle detection same as variable edges."""
-        import pytest
-
         cells = [
             CellAnalysisWithId(id="a", defines=[], references=[], after=["b"]),
             CellAnalysisWithId(id="b", defines=[], references=[], after=["a"]),
         ]
         with pytest.raises(ValueError, match="Cycle"):
             build_dag(cells)
+
+
+class TestVariantGroups:
+    """Variant cells share a defines contract; only the active variant is in the DAG."""
+
+    def test_inactive_variant_excluded_from_producer_map(self):
+        """Downstream references resolve to the active variant only."""
+        cells = [
+            CellAnalysisWithId(id="load", defines=["X"], references=[]),
+            CellAnalysisWithId(
+                id="model_a",
+                defines=["preds"],
+                references=["X"],
+                variant_group="model",
+                variant_name="a",
+            ),
+            CellAnalysisWithId(
+                id="model_b",
+                defines=["preds"],
+                references=["X"],
+                variant_group="model",
+                variant_name="b",
+            ),
+            CellAnalysisWithId(id="post", defines=["score"], references=["preds"]),
+        ]
+        dag = build_dag(cells, variant_active_selections={"model": "b"})
+
+        assert dag.variable_producer["preds"] == "model_b"
+        assert dag.cell_upstream["post"] == ["model_b"]
+        assert "model_a" in dag.inactive_cells
+        assert "model_b" not in dag.inactive_cells
+        # Inactive variant has no edges and isn't a leaf/root
+        assert dag.cell_upstream["model_a"] == []
+        assert dag.cell_downstream["model_a"] == []
+        assert "model_a" not in dag.leaves
+        assert "model_a" not in dag.roots
+        assert "model_a" not in dag.topological_order
+
+    def test_first_in_source_order_when_toml_silent(self):
+        """No selection in toml → first variant in source order is active."""
+        cells = [
+            CellAnalysisWithId(
+                id="model_a",
+                defines=["preds"],
+                references=[],
+                variant_group="model",
+                variant_name="a",
+            ),
+            CellAnalysisWithId(
+                id="model_b",
+                defines=["preds"],
+                references=[],
+                variant_group="model",
+                variant_name="b",
+            ),
+        ]
+        dag = build_dag(cells)
+
+        assert dag.variable_producer["preds"] == "model_a"
+        assert "model_b" in dag.inactive_cells
+
+    def test_unknown_active_falls_back_to_first(self):
+        """toml names a nonexistent variant → fall back to source-order first."""
+        cells = [
+            CellAnalysisWithId(
+                id="model_a",
+                defines=["preds"],
+                references=[],
+                variant_group="model",
+                variant_name="a",
+            ),
+            CellAnalysisWithId(
+                id="model_b",
+                defines=["preds"],
+                references=[],
+                variant_group="model",
+                variant_name="b",
+            ),
+        ]
+        dag = build_dag(cells, variant_active_selections={"model": "ghost"})
+
+        assert dag.variable_producer["preds"] == "model_a"
+
+    def test_consumed_variables_only_for_active(self):
+        """Inactive variants never appear as producers, so consumed_variables is empty for them."""
+        cells = [
+            CellAnalysisWithId(id="load", defines=["X"], references=[]),
+            CellAnalysisWithId(
+                id="model_a",
+                defines=["preds"],
+                references=["X"],
+                variant_group="model",
+                variant_name="a",
+            ),
+            CellAnalysisWithId(
+                id="model_b",
+                defines=["preds"],
+                references=["X"],
+                variant_group="model",
+                variant_name="b",
+            ),
+            CellAnalysisWithId(id="post", defines=[], references=["preds"]),
+        ]
+        dag = build_dag(cells, variant_active_selections={"model": "a"})
+
+        assert dag.consumed_variables["model_a"] == {"preds"}
+        assert dag.consumed_variables["model_b"] == set()
+        # The inactive variant's reference to X also doesn't drag load into consumed
+        assert dag.consumed_variables["load"] == {"X"}
+
+    def test_name_collision_raises(self):
+        """Two cells with same (group, variant_name) is irrecoverable."""
+        cells = [
+            CellAnalysisWithId(
+                id="c1",
+                defines=["preds"],
+                references=[],
+                variant_group="model",
+                variant_name="a",
+            ),
+            CellAnalysisWithId(
+                id="c2",
+                defines=["preds"],
+                references=[],
+                variant_group="model",
+                variant_name="a",
+            ),
+        ]
+        with pytest.raises(VariantNameCollisionError):
+            build_dag(cells)
+
+    def test_variant_groups_resolution_surface(self):
+        """Resolved groups expose members in source order with the active flag."""
+        cells = [
+            CellAnalysisWithId(
+                id="model_a",
+                defines=["preds"],
+                references=[],
+                variant_group="model",
+                variant_name="a",
+            ),
+            CellAnalysisWithId(
+                id="model_b",
+                defines=["preds"],
+                references=[],
+                variant_group="model",
+                variant_name="b",
+            ),
+        ]
+        dag = build_dag(cells, variant_active_selections={"model": "b"})
+
+        assert len(dag.variant_groups) == 1
+        group = dag.variant_groups[0]
+        assert group.group == "model"
+        assert group.active_name == "b"
+        assert group.active_cell_id == "model_b"
+        assert group.members == [("model_a", "a"), ("model_b", "b")]
+
+    def test_switching_variant_redirects_downstream(self):
+        """Same cells, different active selection → producer map changes."""
+        cells = [
+            CellAnalysisWithId(
+                id="model_a",
+                defines=["preds"],
+                references=[],
+                variant_group="model",
+                variant_name="a",
+            ),
+            CellAnalysisWithId(
+                id="model_b",
+                defines=["preds"],
+                references=[],
+                variant_group="model",
+                variant_name="b",
+            ),
+            CellAnalysisWithId(id="post", defines=[], references=["preds"]),
+        ]
+
+        dag_a = build_dag(cells, variant_active_selections={"model": "a"})
+        dag_b = build_dag(cells, variant_active_selections={"model": "b"})
+
+        assert dag_a.cell_upstream["post"] == ["model_a"]
+        assert dag_b.cell_upstream["post"] == ["model_b"]

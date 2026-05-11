@@ -537,13 +537,17 @@ async function addCell(
   return readJson<AddCellResponse>(resp)
 }
 
-async function removeCell(notebookId: string, cellId: string): Promise<void> {
+async function removeCell(notebookId: string, cellId: string): Promise<unknown> {
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${notebookId}/cells/${cellId}`, {
     method: 'DELETE',
   })
   if (!resp.ok) {
     throw new Error(`Failed to remove cell: ${resp.status}`)
   }
+  // Body carries refreshed variant_groups + cells for variant-aware
+  // delete cleanup. Caller picks them up; returning a parsed value
+  // instead of void is backwards compatible.
+  return resp.json().catch(() => null)
 }
 
 async function reorderCells(notebookId: string, cellIds: string[]): Promise<void> {

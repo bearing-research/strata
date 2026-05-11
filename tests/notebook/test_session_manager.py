@@ -555,3 +555,166 @@ def test_serialize_cell_does_not_flag_pure_data_cell_as_module(tmp_path: Path):
     cell = next(c for c in session.notebook_state.cells if c.id == "c1")
     payload = session.serialize_cell(cell)
     assert payload["is_module_cell"] is False
+
+
+def test_variant_group_resolution_from_source_annotations(tmp_path: Path):
+    """End-to-end: cells with `# @variant` form groups; only active is in DAG."""
+    nb_dir = create_notebook(tmp_path, "variants", initialize_environment=False)
+    add_cell_to_notebook(nb_dir, "load")
+    write_cell(nb_dir, "load", "X = 1\n")
+    add_cell_to_notebook(nb_dir, "model_a", after_cell_id="load")
+    write_cell(nb_dir, "model_a", "# @variant model gpt4\npreds = X * 2\n")
+    add_cell_to_notebook(nb_dir, "model_b", after_cell_id="model_a")
+    write_cell(nb_dir, "model_b", "# @variant model claude\npreds = X * 3\n")
+    add_cell_to_notebook(nb_dir, "post", after_cell_id="model_b")
+    write_cell(nb_dir, "post", "score = preds + 1\n")
+
+    session = SessionManager().open_notebook(nb_dir)
+
+    # Group is resolved; first variant in source order is active by default.
+    assert len(session.notebook_state.variant_groups) == 1
+    group = session.notebook_state.variant_groups[0]
+    assert group.group == "model"
+    assert group.active_name == "gpt4"
+    assert group.active_cell_id == "model_a"
+
+    # Per-cell variant flags
+    cells_by_id = {c.id: c for c in session.notebook_state.cells}
+    assert cells_by_id["model_a"].variant_active is True
+    assert cells_by_id["model_b"].variant_active is False
+    assert cells_by_id["post"].upstream_ids == ["model_a"]
+
+
+def test_remove_active_variant_promotes_sibling(tmp_path: Path):
+    """Deleting the active variant promotes the next-in-source-order survivor."""
+    nb_dir = create_notebook(tmp_path, "variants_del_active", initialize_environment=False)
+    add_cell_to_notebook(nb_dir, "a")
+    write_cell(nb_dir, "a", "# @variant g a\npreds = 1\n")
+    add_cell_to_notebook(nb_dir, "b", after_cell_id="a")
+    write_cell(nb_dir, "b", "# @variant g b\npreds = 2\n")
+    add_cell_to_notebook(nb_dir, "c", after_cell_id="b")
+    write_cell(nb_dir, "c", "# @variant g c\npreds = 3\n")
+
+    session = SessionManager().open_notebook(nb_dir)
+    # a is active by default (first in source order).
+    session.remove_cell("a")
+
+    ids = [c.id for c in session.notebook_state.cells]
+    assert "a" not in ids
+    # b promotes to active.
+    group = session.notebook_state.variant_groups[0]
+    assert group.active_name == "b"
+    assert group.active_cell_id == "b"
+
+
+def test_remove_inactive_variant_keeps_active(tmp_path: Path):
+    """Deleting an inactive variant leaves the active selection alone."""
+    nb_dir = create_notebook(tmp_path, "variants_del_inactive", initialize_environment=False)
+    add_cell_to_notebook(nb_dir, "a")
+    write_cell(nb_dir, "a", "# @variant g a\npreds = 1\n")
+    add_cell_to_notebook(nb_dir, "b", after_cell_id="a")
+    write_cell(nb_dir, "b", "# @variant g b\npreds = 2\n")
+
+    session = SessionManager().open_notebook(nb_dir)
+    session.set_variant_active("g", "a")  # explicit, just to be sure
+    session.remove_cell("b")  # b is inactive
+
+    ids = [c.id for c in session.notebook_state.cells]
+    assert "b" not in ids
+    group = session.notebook_state.variant_groups[0]
+    assert group.active_name == "a"
+
+
+def test_remove_last_variant_dissolves_group(tmp_path: Path):
+    """Deleting the last variant removes the cell *and* the variant_group entry."""
+    import tomllib
+
+    nb_dir = create_notebook(tmp_path, "variants_del_last", initialize_environment=False)
+    add_cell_to_notebook(nb_dir, "a")
+    write_cell(nb_dir, "a", "# @variant g a\npreds = 1\n")
+
+    session = SessionManager().open_notebook(nb_dir)
+    assert len(session.notebook_state.variant_groups) == 1
+
+    session.remove_cell("a")
+
+    assert session.notebook_state.variant_groups == []
+    with open(nb_dir / "notebook.toml", "rb") as f:
+        data = tomllib.load(f)
+    assert "variant_group" not in data
+
+
+def test_add_variant_clones_active_and_switches(tmp_path: Path):
+    """Add a sibling variant: cloned body, auto-generated name, becomes active."""
+    nb_dir = create_notebook(tmp_path, "variants_add", initialize_environment=False)
+    add_cell_to_notebook(nb_dir, "load")
+    write_cell(nb_dir, "load", "X = 1\n")
+    add_cell_to_notebook(nb_dir, "model_a", after_cell_id="load")
+    write_cell(nb_dir, "model_a", "# @variant model gpt4\npreds = X * 2\n")
+    add_cell_to_notebook(nb_dir, "post", after_cell_id="model_a")
+    write_cell(nb_dir, "post", "score = preds + 1\n")
+
+    session = SessionManager().open_notebook(nb_dir)
+    new_name, new_cell_id = session.add_variant("model")
+
+    # Auto-generated name follows <active>_copy convention
+    assert new_name == "gpt4_copy"
+    assert new_cell_id != "model_a"
+
+    # New variant is active
+    group = session.notebook_state.variant_groups[0]
+    assert group.active_name == "gpt4_copy"
+    assert group.active_cell_id == new_cell_id
+
+    # New variant inherits the active variant's body, with the
+    # @variant line rewritten to the new name
+    new_cell = next(c for c in session.notebook_state.cells if c.id == new_cell_id)
+    assert "# @variant model gpt4_copy" in new_cell.source
+    assert "# @variant model gpt4" not in new_cell.source.replace("gpt4_copy", "")
+    assert "preds = X * 2" in new_cell.source
+
+    # Group has two members; downstream now points at the new variant
+    assert len(group.members) == 2
+    cells_by_id = {c.id: c for c in session.notebook_state.cells}
+    assert cells_by_id["post"].upstream_ids == [new_cell_id]
+    assert cells_by_id["model_a"].variant_active is False
+    assert cells_by_id[new_cell_id].variant_active is True
+
+
+def test_add_variant_collision_uses_numeric_suffix(tmp_path: Path):
+    """If <active>_copy already exists as a sibling, fall through to _copy2."""
+    nb_dir = create_notebook(tmp_path, "variants_collision", initialize_environment=False)
+    add_cell_to_notebook(nb_dir, "a")
+    write_cell(nb_dir, "a", "# @variant model gpt4\npreds = 1\n")
+    add_cell_to_notebook(nb_dir, "b", after_cell_id="a")
+    write_cell(nb_dir, "b", "# @variant model gpt4_copy\npreds = 2\n")
+
+    session = SessionManager().open_notebook(nb_dir)
+    # Active is the first in source order: gpt4.
+    new_name, _ = session.add_variant("model")
+    assert new_name == "gpt4_copy2"
+
+
+def test_set_variant_active_redirects_downstream(tmp_path: Path):
+    """Switching variant changes the producer for the downstream cell."""
+    nb_dir = create_notebook(tmp_path, "variants_switch", initialize_environment=False)
+    add_cell_to_notebook(nb_dir, "load")
+    write_cell(nb_dir, "load", "X = 1\n")
+    add_cell_to_notebook(nb_dir, "model_a", after_cell_id="load")
+    write_cell(nb_dir, "model_a", "# @variant model gpt4\npreds = X * 2\n")
+    add_cell_to_notebook(nb_dir, "model_b", after_cell_id="model_a")
+    write_cell(nb_dir, "model_b", "# @variant model claude\npreds = X * 3\n")
+    add_cell_to_notebook(nb_dir, "post", after_cell_id="model_b")
+    write_cell(nb_dir, "post", "score = preds + 1\n")
+
+    session = SessionManager().open_notebook(nb_dir)
+    cells_by_id = {c.id: c for c in session.notebook_state.cells}
+    assert cells_by_id["post"].upstream_ids == ["model_a"]
+
+    session.set_variant_active("model", "claude")
+
+    cells_by_id = {c.id: c for c in session.notebook_state.cells}
+    assert cells_by_id["model_a"].variant_active is False
+    assert cells_by_id["model_b"].variant_active is True
+    assert cells_by_id["post"].upstream_ids == ["model_b"]
+    assert session.notebook_state.variant_groups[0].active_name == "claude"

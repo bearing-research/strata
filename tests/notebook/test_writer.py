@@ -21,8 +21,10 @@ from strata.notebook.writer import (
     add_cell_to_notebook,
     create_notebook,
     remove_cell_from_notebook,
+    remove_variant_group_entry,
     rename_notebook,
     reorder_cells,
+    set_variant_active,
     update_environment_metadata,
     update_notebook_connections,
     update_notebook_env,
@@ -648,6 +650,64 @@ def test_update_notebook_connections_blanks_literal_secrets():
         # ${PGUSER} round-trips. "hunter2" is blanked.
         assert db.auth["user"] == "${PGUSER}"
         assert db.auth["password"] == ""
+
+
+def test_set_variant_active_appends_entry():
+    """First call appends a [[variant_group]] entry to notebook.toml."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Variants")
+        set_variant_active(notebook_dir, "model", "gpt4")
+
+        with open(notebook_dir / "notebook.toml", "rb") as f:
+            data = tomllib.load(f)
+        assert data["variant_group"] == [{"group": "model", "active": "gpt4"}]
+
+
+def test_set_variant_active_updates_existing_entry():
+    """Second call to same group updates the existing entry in place."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Variants")
+        set_variant_active(notebook_dir, "model", "gpt4")
+        set_variant_active(notebook_dir, "model", "claude")
+
+        with open(notebook_dir / "notebook.toml", "rb") as f:
+            data = tomllib.load(f)
+        assert data["variant_group"] == [{"group": "model", "active": "claude"}]
+
+
+def test_set_variant_active_no_op_when_unchanged():
+    """Repeated identical writes don't bump updated_at."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Variants")
+        set_variant_active(notebook_dir, "model", "gpt4")
+        with open(notebook_dir / "notebook.toml", "rb") as f:
+            first = tomllib.load(f)["updated_at"]
+
+        set_variant_active(notebook_dir, "model", "gpt4")
+        with open(notebook_dir / "notebook.toml", "rb") as f:
+            second = tomllib.load(f)["updated_at"]
+        assert first == second
+
+
+def test_remove_variant_group_entry_drops_block_when_empty():
+    """Removing the last group deletes the [[variant_group]] table entirely."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Variants")
+        set_variant_active(notebook_dir, "model", "gpt4")
+        remove_variant_group_entry(notebook_dir, "model")
+
+        with open(notebook_dir / "notebook.toml", "rb") as f:
+            data = tomllib.load(f)
+        assert "variant_group" not in data
+
+
+def test_set_variant_active_round_trips_through_parse():
+    """Parser surfaces variant_active_selections from notebook.toml."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Variants")
+        set_variant_active(notebook_dir, "model", "claude")
+        state = parse_notebook(notebook_dir)
+        assert state.variant_active_selections == {"model": "claude"}
 
 
 def test_update_notebook_connections_empty_drops_block():

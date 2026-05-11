@@ -21,6 +21,8 @@ import type {
   ManagedWorkerSpec,
   NotebookEnvironment,
   NotebookRuntimeConfig,
+  VariantGroup,
+  VariantMember,
   WorkerCatalogEntry,
   WorkerHealth,
   WorkerHealthHistoryEntry,
@@ -63,6 +65,7 @@ const notebook = reactive<Notebook>({
   mounts: [],
   connections: [],
   cells: [],
+  variantGroups: [],
   environment: {
     pythonVersion: '',
     requestedPythonVersion: '',
@@ -168,11 +171,33 @@ function removeCell(id: CellId) {
   const strata = useStrata()
   strata
     .removeCell(sid, id)
-    .then(() => {
+    .then((response: any) => {
       const idx = notebook.cells.findIndex((c) => c.id === id)
       if (idx >= 0) {
         notebook.cells.splice(idx, 1)
         notebook.updatedAt = Date.now()
+      }
+      // Variant cleanup: when the deleted cell was part of a group, the
+      // backend may have promoted a sibling to active (its variantActive
+      // flips true) or dissolved the group entirely. Sync from the
+      // response so the tab strip + variant flags + DAG edges reflect
+      // the new state without waiting for a manual reload.
+      if (response && typeof response === 'object') {
+        if (Array.isArray(response.variant_groups)) {
+          notebook.variantGroups = parseBackendVariantGroups(response.variant_groups)
+          syncCellVariantFlagsFromGroups()
+        }
+        if (Array.isArray(response.cells)) {
+          for (const sc of response.cells) {
+            const cell = cellMap.value.get(sc.id as CellId)
+            if (!cell) continue
+            if (Array.isArray(sc.upstream_ids)) cell.upstreamIds = sc.upstream_ids
+            if (Array.isArray(sc.downstream_ids)) cell.downstreamIds = sc.downstream_ids
+          }
+        }
+        if (response.dag && typeof response.dag === 'object') {
+          applyBackendDag(response.dag)
+        }
       }
     })
     .catch((err) => {
@@ -610,7 +635,40 @@ function parseBackendAnnotations(raw: any): CellAnnotations | undefined {
     env: raw.env || {},
     mounts: Array.isArray(raw.mounts) ? raw.mounts.map(parseMountSpec) : [],
     loop: parseBackendLoopAnnotation(raw.loop),
+    variant: parseBackendVariantAnnotation(raw.variant),
   }
+}
+
+function parseBackendVariantAnnotation(raw: any): CellAnnotations['variant'] {
+  if (!raw || typeof raw !== 'object') return null
+  const group = typeof raw.group === 'string' ? raw.group : ''
+  const name = typeof raw.name === 'string' ? raw.name : ''
+  if (!group || !name) return null
+  return { group, name }
+}
+
+function parseBackendVariantGroups(raw: any): VariantGroup[] {
+  if (!Array.isArray(raw)) return []
+  const out: VariantGroup[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const group = typeof entry.group === 'string' ? entry.group : ''
+    const activeName = typeof entry.active_name === 'string' ? entry.active_name : ''
+    const activeCellId = typeof entry.active_cell_id === 'string' ? entry.active_cell_id : ''
+    if (!group || !activeName || !activeCellId) continue
+    const members: VariantMember[] = []
+    if (Array.isArray(entry.members)) {
+      for (const m of entry.members) {
+        if (!m || typeof m !== 'object') continue
+        const cellId = typeof m.cell_id === 'string' ? m.cell_id : ''
+        const name = typeof m.name === 'string' ? m.name : ''
+        if (!cellId || !name) continue
+        members.push({ cellId, name, isActive: Boolean(m.is_active) })
+      }
+    }
+    out.push({ group, activeName, activeCellId, members })
+  }
+  return out
 }
 
 function parseBackendLoopAnnotation(raw: any): CellAnnotations['loop'] {
@@ -1056,6 +1114,9 @@ function parseBackendCellPayload(raw: any): Cell {
       : undefined,
     output: undefined,
     displayOutputs: [],
+    variantGroup: typeof raw.variant_group === 'string' ? raw.variant_group : null,
+    variantName: typeof raw.variant_name === 'string' ? raw.variant_name : null,
+    variantActive: raw.variant_active !== false,
   }
 
   applyDisplayOutputsToCell(
@@ -1097,6 +1158,7 @@ function loadNotebookStateFromBackend(data: any) {
 
   notebook.cells = (data.cells || []).map(parseBackendCellPayload)
   notebook.cells.sort((a, b) => a.order - b.order)
+  notebook.variantGroups = parseBackendVariantGroups(data.variant_groups)
   if (data.dag) {
     applyBackendDag(data.dag)
   }
@@ -1170,6 +1232,29 @@ function applyBackendDag(backendDag: any) {
     }
   }
   backendDagEdges.value = edges
+  if (backendDag.variant_groups !== undefined) {
+    notebook.variantGroups = parseBackendVariantGroups(backendDag.variant_groups)
+    syncCellVariantFlagsFromGroups()
+  }
+}
+
+/** Re-derive cell.variantActive from notebook.variantGroups so cells and
+ *  groups never drift. The backend is authoritative; this just mirrors. */
+function syncCellVariantFlagsFromGroups() {
+  const activeIds = new Set<CellId>()
+  for (const group of notebook.variantGroups) {
+    activeIds.add(group.activeCellId)
+  }
+  const groupedIds = new Set<CellId>()
+  for (const group of notebook.variantGroups) {
+    for (const member of group.members) {
+      groupedIds.add(member.cellId)
+    }
+  }
+  for (const cell of notebook.cells) {
+    if (!groupedIds.has(cell.id)) continue
+    cell.variantActive = activeIds.has(cell.id)
+  }
 }
 
 // --- API Integration -------------------------------------------------------
@@ -1692,6 +1777,7 @@ function initializeWebSocket() {
           leaves: dagData.leaves,
           roots: dagData.roots,
           topological_order: dagData.topological_order,
+          variant_groups: dagData.variant_groups,
         })
       }
       // Merge authoritative cell analysis from backend (defines,
@@ -1723,6 +1809,18 @@ function initializeWebSocket() {
                   .filter((e: any) => e && typeof e.name === 'string')
                   .map((e: any) => ({ name: String(e.name), kind: String(e.kind ?? '') }))
               : undefined
+          }
+          // Variant fields update when the user edits a `# @variant`
+          // annotation in source; for plain switches the values are
+          // unchanged but still safe to overwrite.
+          if (sc.variant_group !== undefined) {
+            cell.variantGroup = typeof sc.variant_group === 'string' ? sc.variant_group : null
+          }
+          if (sc.variant_name !== undefined) {
+            cell.variantName = typeof sc.variant_name === 'string' ? sc.variant_name : null
+          }
+          if (typeof sc.variant_active === 'boolean') {
+            cell.variantActive = sc.variant_active
           }
         }
       }
@@ -2035,6 +2133,16 @@ function cleanupWebSocket() {
     wsInstance.cleanup()
     wsInstance = null
   }
+}
+
+function setVariantActive(group: string, name: string): void {
+  if (!wsInstance) return
+  wsInstance.setVariantActive(group, name)
+}
+
+function addVariant(group: string): void {
+  if (!wsInstance) return
+  wsInstance.addVariant(group)
 }
 
 async function executeCellWebSocket(cellId: CellId) {
@@ -3073,6 +3181,8 @@ export function useNotebook() {
     executeForceWebSocket,
     cancelCellWebSocket,
     updateSourceWebSocket,
+    setVariantActive,
+    addVariant,
     // v1.1: Impact Preview, Profiling
     currentImpactPreview,
     profilingSummary,

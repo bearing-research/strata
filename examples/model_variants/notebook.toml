@@ -1,0 +1,17 @@
+notebook_id = "model-variants-001"
+name = "Model Variants"
+created_at = 2026-05-09 00:00:00+00:00
+updated_at = 2026-05-09 00:00:00+00:00
+cells = [
+    { id = "load-data", file = "load_data.py", language = "python", order = 0 },
+    { id = "train-test", file = "train_test.py", language = "python", order = 1 },
+    { id = "train-logreg", file = "train_logreg.py", language = "python", order = 2 },
+    { id = "train-rf", file = "train_rf.py", language = "python", order = 2.1 },
+    { id = "train-gbm", file = "train_gbm.py", language = "python", order = 2.2 },
+    { id = "evaluate", file = "evaluate.py", language = "python", order = 3 },
+    { id = "confusion", file = "confusion.py", language = "python", order = 4 },
+]
+
+[[variant_group]]
+group = "classifier"
+active = "logreg"

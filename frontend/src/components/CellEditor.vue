@@ -25,6 +25,7 @@ const emit = defineEmits<{
 }>()
 
 const {
+  notebook,
   environmentMutationActive,
   environmentLastAction,
   environmentOperation,
@@ -35,7 +36,14 @@ const {
   closeInspect,
   availableWorkers,
   addDependencyAction,
+  setVariantActive,
+  addVariant,
 } = useNotebook()
+
+const variantGroup = computed(() => {
+  if (!props.cell.variantGroup) return null
+  return notebook.variantGroups.find((g) => g.group === props.cell.variantGroup) ?? null
+})
 
 const isInspecting = computed(() => storeIsInspecting(props.cell.id))
 
@@ -528,6 +536,35 @@ function outputKey(output: CellOutput, index: number): string {
 
     <!-- Editor + output -->
     <div class="cell-body">
+      <!-- Variant tab strip — shown when this cell is part of a variant group -->
+      <div v-if="variantGroup" class="variant-tabs" data-testid="variant-tabs">
+        <button
+          v-for="member in variantGroup.members"
+          :key="member.cellId"
+          class="variant-tab"
+          :class="{ active: member.cellId === variantGroup.activeCellId }"
+          :title="
+            member.cellId === variantGroup.activeCellId
+              ? `Active variant: ${member.name}`
+              : `Switch to ${member.name}`
+          "
+          :data-variant-name="member.name"
+          @click="setVariantActive(variantGroup.group, member.name)"
+        >
+          {{ member.name }}
+        </button>
+        <button
+          class="variant-tab variant-tab-add"
+          title="Add a new variant (clones the active one)"
+          data-testid="variant-tab-add"
+          @click="addVariant(variantGroup.group)"
+        >
+          +
+        </button>
+        <span class="variant-group-label" :title="`Variant group: ${variantGroup.group}`">
+          {{ variantGroup.group }}
+        </span>
+      </div>
       <div class="cell-meta">
         <!-- Line 1: identity — name, defines, reads -->
         <div class="cell-meta-row">
@@ -1172,6 +1209,52 @@ function outputKey(output: CellOutput, index: number): string {
 .cell-body {
   flex: 1;
   min-width: 0;
+}
+
+.variant-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.variant-tab {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  border: 1px solid var(--border-subtle);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.variant-tab:hover {
+  color: var(--text-default);
+  background: var(--background-hover, rgba(127, 127, 127, 0.08));
+}
+.variant-tab.active {
+  background: var(--background-elevated, var(--background-default));
+  color: var(--text-default);
+  border-color: var(--accent-primary, var(--border-strong));
+  font-weight: 600;
+}
+.variant-tab-add {
+  padding: 3px 8px;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.variant-tab-add:hover {
+  color: var(--accent-primary, var(--text-default));
+}
+.variant-group-label {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
 }
 
 .cell-meta {

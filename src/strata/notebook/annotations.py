@@ -11,6 +11,9 @@ Supported annotations::
     # @timeout <seconds>          — Override execution timeout (per iteration for loops)
     # @mount <name> <uri> [mode]  — Add/override a filesystem mount
     # @env <KEY>=<value>          — Set an environment variable for this cell
+    # @variant <group> <name>     — Mark this cell as a variant in <group>; siblings
+                                    in the same group share a defines contract and
+                                    only the active variant participates in the DAG.
     # @loop max_iter=<N> carry=<var> [start_from=<cell>@iter=<k>]
                                   — Mark the cell as a loop; run the body up to N times,
                                     threading `carry` between iterations.
@@ -63,6 +66,20 @@ class SqlAnnotation:
 
 
 @dataclass
+class VariantAnnotation:
+    """Parsed ``# @variant <group> <name>`` directive.
+
+    Membership in a variant group is declared by source annotation only.
+    All cells sharing ``group`` form one group; ``name`` is the variant's
+    identifier within the group and must be unique across siblings. The
+    active variant per group is tracked separately in ``notebook.toml``.
+    """
+
+    group: str
+    name: str
+
+
+@dataclass
 class LoopAnnotation:
     """Parsed ``@loop`` / ``@loop_until`` directives for a loop cell.
 
@@ -112,6 +129,9 @@ class CellAnnotations:
     # SQL cell annotations
     sql: SqlAnnotation | None = None
     cache: CachePolicy | None = None
+
+    # Variant grouping
+    variant: VariantAnnotation | None = None
 
     # Explicit ordering dependencies. ``# @after <cell-id>`` adds a DAG
     # edge from ``<cell-id>`` to this cell without requiring a shared
@@ -211,6 +231,11 @@ def parse_annotations(source: str) -> CellAnnotations:
                     result.loop = LoopAnnotation(max_iter=0, carry="", until_expr=value)
                 else:
                     result.loop.until_expr = value
+
+        elif key == "variant":
+            variant = _parse_variant_annotation(value)
+            if variant is not None:
+                result.variant = variant
 
         elif key == "after":
             # ``# @after <cell-id>`` declares an ordering dependency
@@ -321,6 +346,23 @@ def _merge_loop_annotation(result: CellAnnotations, value: str) -> None:
                 except ValueError:
                     loop.start_from_cell = None
                     loop.start_from_iter = None
+
+
+def _parse_variant_annotation(value: str) -> VariantAnnotation | None:
+    """Parse ``# @variant <group> <name>``.
+
+    Both ``group`` and ``name`` must be valid Python identifiers so they
+    survive notebook-toml round-trips and frontend rendering without
+    escaping. Malformed values yield ``None``; annotation_validation
+    surfaces a diagnostic so the user sees the issue.
+    """
+    parts = value.split()
+    if len(parts) != 2:
+        return None
+    group, name = parts
+    if not group.isidentifier() or not name.isidentifier():
+        return None
+    return VariantAnnotation(group=group, name=name)
 
 
 def _parse_mount_annotation(value: str) -> MountSpec | None:

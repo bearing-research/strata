@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import subprocess
 import threading
 import time as _time
@@ -43,6 +44,8 @@ from strata.notebook.models import (
     CellStaleness,
     CellStatus,
     NotebookState,
+    VariantGroupState,
+    VariantMember,
 )
 from strata.notebook.mounts import MountFingerprinter, resolve_cell_mounts
 from strata.notebook.parser import parse_notebook
@@ -70,6 +73,37 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _ENVIRONMENT_JOB_HISTORY_LIMIT = 8
+
+_VARIANT_LINE_RE = re.compile(
+    r"^(\s*#\s*@variant\s+\S+\s+)\S+(.*)$",
+    re.MULTILINE,
+)
+
+
+def _next_variant_name(active_name: str, taken: set[str]) -> str:
+    """Return ``<active>_copy`` (or ``<active>_copy2``, ``_copy3``, …)."""
+    candidate = f"{active_name}_copy"
+    if candidate not in taken:
+        return candidate
+    n = 2
+    while f"{active_name}_copy{n}" in taken:
+        n += 1
+    return f"{active_name}_copy{n}"
+
+
+def _rewrite_variant_annotation(source: str, group: str, new_name: str) -> str:
+    """Replace the first ``# @variant <group> <old>`` line with ``<new>``.
+
+    If the source doesn't already contain a variant annotation (the
+    active cell somehow lost its annotation), prepend a fresh one so the
+    new sibling still joins the group.
+    """
+    new_source, count = _VARIANT_LINE_RE.subn(
+        rf"\g<1>{new_name}\g<2>", source, count=1
+    )
+    if count == 0:
+        return f"# @variant {group} {new_name}\n{source}"
+    return new_source
 
 
 @dataclass
@@ -307,6 +341,130 @@ class NotebookSession:
         """Record recent activity for TTL accounting."""
         self.last_accessed = _time.time()
 
+    def set_variant_active(self, group: str, variant_name: str) -> None:
+        """Switch the active variant for ``group``.
+
+        Persists the selection to ``notebook.toml`` and reloads so the
+        DAG, cell-level ``variant_active`` flags, and downstream
+        staleness all recompute against the new selection. Reloading
+        already handles "downstream provenance hashes change because
+        their input artifact ID points at a different cell" correctly,
+        so cells that need re-running are marked STALE in the usual way.
+        """
+        from strata.notebook.writer import set_variant_active as _set_variant_active
+
+        _set_variant_active(self.path, group, variant_name)
+        self.reload()
+
+    def remove_cell(self, cell_id: str) -> None:
+        """Delete a cell, with variant-aware cleanup.
+
+        When the deleted cell is part of a variant group:
+
+        - Group has other members: just remove the cell. If it was the
+          active variant, promote the next member in source order so the
+          toml's ``active`` pointer doesn't dangle.
+        - Group has only this member: remove the cell *and* drop the
+          ``[[variant_group]]`` entry — the group dissolves.
+
+        Non-variant cells take the unchanged code path: remove and reload.
+        """
+        from strata.notebook.writer import (
+            remove_cell_from_notebook,
+            remove_variant_group_entry,
+        )
+        from strata.notebook.writer import (
+            set_variant_active as _set_variant_active,
+        )
+
+        cell = next((c for c in self.notebook_state.cells if c.id == cell_id), None)
+        if cell is None:
+            raise ValueError(f"Cell {cell_id} not found")
+
+        group_id = cell.variant_group
+        resolved = None
+        if group_id is not None:
+            resolved = next(
+                (g for g in self.notebook_state.variant_groups if g.group == group_id),
+                None,
+            )
+
+        # Decide the variant_group toml fixup *before* the cell goes away,
+        # while we still have the resolved group's member ordering.
+        promote_to: str | None = None
+        drop_group = False
+        if resolved is not None:
+            remaining = [m for m in resolved.members if m.cell_id != cell_id]
+            if not remaining:
+                drop_group = True
+            elif cell.id == resolved.active_cell_id:
+                # The active variant is going away — promote the
+                # first-in-source-order survivor so the toml pointer stays
+                # valid (otherwise reload would emit variant_active_unknown
+                # and fall back implicitly, which works but is noisy).
+                promote_to = remaining[0].name
+
+        remove_cell_from_notebook(self.path, cell_id)
+
+        if drop_group and group_id is not None:
+            remove_variant_group_entry(self.path, group_id)
+        elif promote_to is not None and group_id is not None:
+            _set_variant_active(self.path, group_id, promote_to)
+
+        self.reload()
+
+    def add_variant(self, group: str) -> tuple[str, str]:
+        """Add a sibling variant to ``group``, cloning the active variant.
+
+        Returns ``(new_variant_name, new_cell_id)``. The new variant is
+        placed immediately after the last existing member in source order,
+        becomes active on creation, and starts as a copy of the active
+        variant's body with the ``# @variant`` line rewritten to its name.
+
+        Names auto-generate as ``<active>_copy``, ``<active>_copy2``, …
+        — the user renames by editing the annotation line in source,
+        which is consistent with how every other cell-metadata edit works.
+
+        Raises ``ValueError`` if ``group`` doesn't exist in the resolved
+        variant groups (caller should surface a 404 / WS error).
+        """
+        from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+        resolved = next(
+            (g for g in self.notebook_state.variant_groups if g.group == group),
+            None,
+        )
+        if resolved is None:
+            raise ValueError(f"Variant group {group!r} does not exist")
+
+        active_cell = next(
+            (c for c in self.notebook_state.cells if c.id == resolved.active_cell_id),
+            None,
+        )
+        if active_cell is None:
+            # Defensive: resolution gave us an active_cell_id that doesn't
+            # match any cell. Shouldn't happen but bail cleanly if it does.
+            raise ValueError(f"Active variant cell for group {group!r} not found")
+
+        taken = {m.name for m in resolved.members}
+        new_name = _next_variant_name(resolved.active_name, taken)
+        new_cell_id = uuid.uuid4().hex[:8]
+        last_member_cell_id = resolved.members[-1].cell_id
+
+        add_cell_to_notebook(
+            self.path,
+            new_cell_id,
+            after_cell_id=last_member_cell_id,
+            language=active_cell.language,
+        )
+        new_source = _rewrite_variant_annotation(active_cell.source, group, new_name)
+        write_cell(self.path, new_cell_id, new_source)
+
+        # Switch active to the new variant. set_variant_active reloads,
+        # so the DAG / staleness / variant flags refresh in one pass.
+        self.set_variant_active(group, new_name)
+        return new_name, new_cell_id
+
     def reload(self) -> None:
         """Reload notebook state from disk."""
         previous_cells = {cell.id: cell.model_copy(deep=True) for cell in self.notebook_state.cells}
@@ -384,32 +542,66 @@ class NotebookSession:
             ):
                 references = references + [annotations.loop.carry]
 
+            variant_group = (
+                annotations.variant.group if annotations.variant is not None else None
+            )
+            variant_name = (
+                annotations.variant.name if annotations.variant is not None else None
+            )
             cell_analyses.append(
                 CellAnalysisWithId(
                     id=cell.id,
                     defines=defines,
                     references=references,
                     after=list(annotations.after),
+                    variant_group=variant_group,
+                    variant_name=variant_name,
                 )
             )
             # Update cell with analysis results
             cell.defines = defines
             cell.references = references
             cell.mutation_defines = mutation_defines
+            cell.variant_group = variant_group
+            cell.variant_name = variant_name
+            # Default to active until the DAG resolution proves otherwise.
+            cell.variant_active = True
 
         # Build DAG
         try:
-            self.dag = build_dag(cell_analyses)
+            self.dag = build_dag(
+                cell_analyses,
+                variant_active_selections=self.notebook_state.variant_active_selections,
+            )
 
             # Update cells with DAG information
             for cell in self.notebook_state.cells:
                 cell.upstream_ids = self.dag.cell_upstream.get(cell.id, [])
                 cell.downstream_ids = self.dag.cell_downstream.get(cell.id, [])
                 cell.is_leaf = cell.id in self.dag.leaves
+                cell.variant_active = cell.id not in self.dag.inactive_cells
+
+            # Surface resolved variant groups for the API/frontend.
+            self.notebook_state.variant_groups = [
+                VariantGroupState(
+                    group=group.group,
+                    active_name=group.active_name,
+                    active_cell_id=group.active_cell_id,
+                    members=[
+                        VariantMember(
+                            cell_id=cid,
+                            name=name,
+                            is_active=(cid == group.active_cell_id),
+                        )
+                        for cid, name in group.members
+                    ],
+                )
+                for group in self.dag.variant_groups
+            ]
 
         except ValueError as e:
-            # Cycle detected — log but don't crash
-            logger.warning("Cycle detected in DAG: %s", e)
+            # Cycle detected or variant collision — log but don't crash.
+            logger.warning("DAG build failed: %s", e)
             self.dag = None
 
     def _restore_execution_history(self, previous_cells: dict[str, Any]) -> None:
@@ -832,6 +1024,12 @@ class NotebookSession:
                 "start_from_cell": annotations.loop.start_from_cell,
                 "start_from_iter": annotations.loop.start_from_iter,
             }
+        variant_payload: dict[str, str] | None = None
+        if annotations.variant is not None:
+            variant_payload = {
+                "group": annotations.variant.group,
+                "name": annotations.variant.name,
+            }
         data["annotations"] = {
             "name": annotations.name,
             "worker": annotations.worker,
@@ -839,6 +1037,7 @@ class NotebookSession:
             "env": annotations.env,
             "mounts": [mount.model_dump() for mount in annotations.mounts],
             "loop": loop_payload,
+            "variant": variant_payload,
         }
         causality = self.causality_map.get(cell.id)
         if causality is not None:

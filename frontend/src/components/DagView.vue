@@ -4,7 +4,7 @@ import { computed, reactive, ref } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import type { Cell, CellId } from '../types/notebook'
 
-const { orderedCells, dagEdges } = useNotebook()
+const { notebook, orderedCells, dagEdges } = useNotebook()
 
 interface NodeLayout {
   id: CellId
@@ -14,6 +14,11 @@ interface NodeLayout {
   label: string
   fullLabel: string
   status: Cell['status']
+  /** When this cell is the active variant of a group, the count of
+   * sibling variants. Drives the "stacked card" visual + tooltip. */
+  variantSiblings: number
+  variantGroup: string | null
+  variantName: string | null
 }
 
 interface EdgeLayout {
@@ -43,8 +48,16 @@ function widthForLabel(label: string): number {
 
 // Layout using dagre
 const layout = computed(() => {
-  const cells = orderedCells.value
+  // Inactive variants aren't part of the executable graph — they have
+  // no edges and would render as orphan nodes. Hide them; the active
+  // variant gets a stacked-card visual indicating siblings exist.
+  const cells = orderedCells.value.filter((c) => c.variantActive !== false)
   if (cells.length === 0) return { nodes: [] as NodeLayout[], edges: [] as EdgeLayout[] }
+
+  const variantGroupSizes = new Map<string, number>()
+  for (const g of notebook.variantGroups) {
+    variantGroupSizes.set(g.group, g.members.length)
+  }
 
   const g = new dagre.graphlib.Graph()
   g.setGraph({
@@ -96,6 +109,7 @@ const layout = computed(() => {
     const label =
       rawLabel.length > maxLabelLen ? rawLabel.slice(0, maxLabelLen - 1) + '\u2026' : rawLabel
 
+    const groupSize = c.variantGroup ? (variantGroupSizes.get(c.variantGroup) ?? 0) : 0
     const node: NodeLayout = {
       id: c.id,
       x: dagreNode.x,
@@ -104,6 +118,9 @@ const layout = computed(() => {
       label,
       fullLabel: rawLabel,
       status: c.status,
+      variantSiblings: groupSize > 1 ? groupSize - 1 : 0,
+      variantGroup: c.variantGroup ?? null,
+      variantName: c.variantName ?? null,
     }
     nodes.push(node)
     nodeMap.set(c.id, node)
@@ -337,6 +354,32 @@ function edgePath(points: { x: number; y: number }[]): string {
 
         <!-- Nodes -->
         <g v-for="n in nodes" :key="n.id" class="dag-node" @dblclick.stop="scrollToCell(n.id)">
+          <!-- Stacked-card hint for variant groups: two offset shadow
+               rects behind the active node convey "there are alternatives". -->
+          <template v-if="n.variantSiblings > 0">
+            <rect
+              :x="n.x - n.width / 2 + 6"
+              :y="n.y - nodeHeight / 2 + 6"
+              :width="n.width"
+              :height="nodeHeight"
+              rx="6"
+              :fill="statusFill(n.status)"
+              :stroke="statusStroke(n.status)"
+              stroke-width="1"
+              opacity="0.35"
+            />
+            <rect
+              :x="n.x - n.width / 2 + 3"
+              :y="n.y - nodeHeight / 2 + 3"
+              :width="n.width"
+              :height="nodeHeight"
+              rx="6"
+              :fill="statusFill(n.status)"
+              :stroke="statusStroke(n.status)"
+              stroke-width="1"
+              opacity="0.65"
+            />
+          </template>
           <rect
             :x="n.x - n.width / 2"
             :y="n.y - nodeHeight / 2"
@@ -355,9 +398,38 @@ function edgePath(points: { x: number; y: number }[]): string {
             font-size="11"
             font-family="JetBrains Mono, Fira Code, monospace"
           >
-            <title>{{ n.fullLabel }}</title>
+            <title>
+              {{
+                n.variantSiblings > 0
+                  ? `${n.fullLabel}\nVariant: ${n.variantName} (${n.variantSiblings + 1} options in ${n.variantGroup})`
+                  : n.fullLabel
+              }}
+            </title>
             {{ n.label }}
           </text>
+          <!-- Variant badge: small chip in the top-right corner -->
+          <g v-if="n.variantSiblings > 0">
+            <rect
+              :x="n.x + n.width / 2 - 36"
+              :y="n.y - nodeHeight / 2 - 6"
+              width="34"
+              height="14"
+              rx="3"
+              fill="var(--accent-primary, #4c8bf5)"
+              opacity="0.9"
+            />
+            <text
+              :x="n.x + n.width / 2 - 19"
+              :y="n.y - nodeHeight / 2 + 4"
+              text-anchor="middle"
+              fill="white"
+              font-size="9"
+              font-family="JetBrains Mono, Fira Code, monospace"
+              font-weight="600"
+            >
+              {{ n.variantName }}
+            </text>
+          </g>
         </g>
       </svg>
     </div>

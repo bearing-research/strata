@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass
@@ -25,6 +22,23 @@ class DagEdge:
 
 
 @dataclass
+class VariantGroupResolution:
+    """Resolved state for a single variant group.
+
+    ``members`` is in source order; ``active_cell_id`` is the cell whose
+    defines flow into the producer map. Inactive members are tracked here
+    so the frontend can render them as tabs but they are excluded from
+    everything DAG-related (producer map, edges, consumed_variables).
+    """
+
+    group: str
+    active_name: str
+    active_cell_id: str
+    members: list[tuple[str, str]] = field(default_factory=list)
+    """List of (cell_id, variant_name) in source order."""
+
+
+@dataclass
 class NotebookDag:
     """The complete DAG for a notebook.
 
@@ -37,6 +51,8 @@ class NotebookDag:
         topological_order: Cells in valid execution order
         variable_producer: For each variable, which cell produces it (last in cell order wins)
         consumed_variables: For each cell, set of variable names consumed by downstream cells
+        variant_groups: Resolved variant groups, in source-order of first member
+        inactive_cells: Cell IDs that are inactive variants (excluded from edges/producer map)
     """
 
     edges: list[DagEdge] = field(default_factory=list)
@@ -49,6 +65,8 @@ class NotebookDag:
     consumed_variables: dict[str, set[str]] = field(default_factory=dict)
     shadow_warnings: dict[str, list[str]] = field(default_factory=dict)
     """Maps cell_id -> list of warning messages about shadowed variables."""
+    variant_groups: list[VariantGroupResolution] = field(default_factory=list)
+    inactive_cells: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -62,27 +80,60 @@ class CellAnalysisWithId:
         after: Explicit ordering dependencies (``# @after <cell-id>``).
             Each entry is an upstream cell ID; the DAG edge is
             ordering-only (no variable flows along it).
+        variant_group: Variant group ID parsed from ``# @variant``, or None
+        variant_name: Variant name within the group, or None
     """
 
     id: str
     defines: list[str]
     references: list[str]
     after: list[str] = field(default_factory=list)
+    variant_group: str | None = None
+    variant_name: str | None = None
 
 
-def build_dag(cells: list[CellAnalysisWithId]) -> NotebookDag:
+class VariantNameCollisionError(ValueError):
+    """Raised when two cells claim the same (variant_group, variant_name).
+
+    Recovery requires the user to rename one of the variants — there is
+    no defensible default the system can pick.
+    """
+
+
+def build_dag(
+    cells: list[CellAnalysisWithId],
+    variant_active_selections: Mapping[str, str] | None = None,
+) -> NotebookDag:
     """Build the DAG from cell analyses.
 
     Args:
-        cells: List of cells with their analysis results, in execution order
+        cells: List of cells with their analysis results, in source order
+        variant_active_selections: Per-group active variant name from
+            notebook.toml. If a group is missing here, the first variant
+            in source order is implicitly active.
 
     Returns:
-        NotebookDag with edges, upstream/downstream relations, and metadata
+        NotebookDag with edges, upstream/downstream relations, and metadata.
+        Inactive variants are entirely shadowed: they're recorded in
+        ``inactive_cells`` and ``variant_groups`` for the frontend, but
+        they don't produce edges or appear in the producer map.
+
+    Raises:
+        VariantNameCollisionError: If two cells share (group, variant_name).
+        ValueError: If the resulting DAG (over active cells) contains a cycle.
     """
     dag = NotebookDag()
     cell_ids = [c.id for c in cells]
 
-    # Initialize structures
+    # Resolve variant groups and figure out which cells to skip in the
+    # variable-producer pass. Groups are derived from source annotations;
+    # the active selection comes from notebook.toml.
+    selections = dict(variant_active_selections or {})
+    dag.variant_groups, dag.inactive_cells = _resolve_variant_groups(cells, selections)
+    inactive = dag.inactive_cells
+
+    # Initialize structures (every cell gets entries — even inactive ones,
+    # so the frontend can index into the maps without special-casing).
     for cell_id in cell_ids:
         dag.cell_upstream[cell_id] = []
         dag.cell_downstream[cell_id] = []
@@ -94,7 +145,14 @@ def build_dag(cells: list[CellAnalysisWithId]) -> NotebookDag:
     # after. This lets a mutating cell (``sales["col"] = ...``) both
     # reference the prior ``sales`` and become the producer for
     # downstream cells, without a spurious self-cycle error.
+    #
+    # Inactive variants are skipped entirely: they don't resolve
+    # references against the producer map and they don't update it.
+    # This keeps them out of the executable graph while leaving them
+    # visible to the frontend through ``variant_groups``.
     for cell in cells:
+        if cell.id in inactive:
+            continue
         # Resolve references against the producer map as it stands before
         # this cell's defines are applied.
         for var in cell.references:
@@ -154,20 +212,86 @@ def build_dag(cells: list[CellAnalysisWithId]) -> NotebookDag:
                 dag.shadow_warnings.setdefault(cell.id, []).append(warning)
             dag.variable_producer[var] = cell.id
 
+    # Inactive variants are excluded from leaves / roots / topological
+    # order — they're shadow cells, not real graph members. Frontend
+    # discovers them via ``variant_groups`` instead.
+    active_cell_ids = [cid for cid in cell_ids if cid not in inactive]
+
     # Identify leaves (cells with no downstream consumers)
-    for cell_id in cell_ids:
+    for cell_id in active_cell_ids:
         if not dag.cell_downstream[cell_id]:
             dag.leaves.add(cell_id)
 
     # Identify roots (cells with no upstream dependencies)
-    for cell_id in cell_ids:
+    for cell_id in active_cell_ids:
         if not dag.cell_upstream[cell_id]:
             dag.roots.add(cell_id)
 
-    # Topological sort
-    dag.topological_order = topological_sort(dag, cell_ids)
+    # Topological sort over the active subgraph
+    dag.topological_order = topological_sort(dag, active_cell_ids)
 
     return dag
+
+
+def _resolve_variant_groups(
+    cells: list[CellAnalysisWithId],
+    selections: Mapping[str, str],
+) -> tuple[list[VariantGroupResolution], set[str]]:
+    """Group cells by ``variant_group``, resolve active per group.
+
+    Returns the resolved groups (in source order of first member) and the
+    set of cell IDs that are inactive variants. Cells without a variant
+    group always count as active.
+
+    Raises:
+        VariantNameCollisionError: If two cells share (group, variant_name).
+    """
+    # Walk cells in source order, collecting groups.
+    grouped: dict[str, list[tuple[str, str]]] = {}
+    group_order: list[str] = []
+    for cell in cells:
+        if cell.variant_group is None or cell.variant_name is None:
+            continue
+        members = grouped.setdefault(cell.variant_group, [])
+        for existing_id, existing_name in members:
+            if existing_name == cell.variant_name:
+                raise VariantNameCollisionError(
+                    f"Variant name '{cell.variant_name}' is used by both "
+                    f"cell {existing_id[:8]} and cell {cell.id[:8]} in "
+                    f"group '{cell.variant_group}'"
+                )
+        if not members:
+            group_order.append(cell.variant_group)
+        members.append((cell.id, cell.variant_name))
+
+    resolutions: list[VariantGroupResolution] = []
+    inactive: set[str] = set()
+    for group_id in group_order:
+        members = grouped[group_id]
+        wanted_name = selections.get(group_id)
+        # Pick the active member: toml selection if it points at a real
+        # variant, otherwise the first variant in source order. The
+        # ``variant_active_unknown`` diagnostic surfaces toml drift.
+        active_cell_id, active_name = members[0]
+        if wanted_name is not None:
+            for cid, name in members:
+                if name == wanted_name:
+                    active_cell_id, active_name = cid, name
+                    break
+
+        resolutions.append(
+            VariantGroupResolution(
+                group=group_id,
+                active_name=active_name,
+                active_cell_id=active_cell_id,
+                members=list(members),
+            )
+        )
+        for cid, _ in members:
+            if cid != active_cell_id:
+                inactive.add(cid)
+
+    return resolutions, inactive
 
 
 def topological_sort(dag: NotebookDag, cell_ids: list[str]) -> list[str]:
