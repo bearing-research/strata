@@ -315,6 +315,100 @@ pandas DataFrame.
 
 ---
 
+## Variant Cells
+
+Variant cells let you keep multiple alternative implementations of the
+same DAG slot side by side and switch between them. The canonical use
+case is "we want to try three models for this experiment": three
+training cells all produce a `model` variable, and downstream cells
+reference `model` without caring which variant produced it.
+
+```python
+# @variant classifier logreg
+from sklearn.linear_model import LogisticRegression
+model = LogisticRegression(max_iter=1000).fit(X_train, y_train)
+```
+
+```python
+# @variant classifier rf
+from sklearn.ensemble import RandomForestClassifier
+model = RandomForestClassifier(n_estimators=200).fit(X_train, y_train)
+```
+
+Both cells declare `# @variant <group> <name>` with the same group
+(`classifier`) and different names (`logreg`, `rf`). At any given time
+exactly one variant is **active**; only the active variant participates
+in the DAG, so downstream cells see one producer for `model`. In the UI
+the group renders as a tab strip — clicking a tab switches the active
+variant, and the cell editor shows that variant's source.
+
+### Switching variants
+
+The active variant per group is persisted in `notebook.toml`:
+
+```toml
+[[variant_group]]
+group = "classifier"
+active = "rf"
+```
+
+Switching is a one-line diff. Each variant carries its own provenance
+hash, so re-running a variant you've already trained is a cache hit —
+flip-flopping between two variants is free after each has run once.
+Downstream cells go stale on switch (their input artifact comes from
+a different upstream cell) but become cache hits on the way back.
+
+If `notebook.toml` doesn't pin a selection — or pins a name no cell
+provides — the DAG falls back to the **first variant in source order**.
+A `variant_active_unknown` diagnostic surfaces in the UI when the
+selection drifts (e.g. you renamed a variant in source without updating
+the toml entry).
+
+### Defines contract
+
+All variants in a group must produce the same set of top-level
+bindings. The validator compares each variant's `defines` against its
+siblings and flags `variant_contract_mismatch` on any outlier — if
+`logreg` exposes only `model` and `rf` exposes `model + feature_importance`,
+downstream cells that depend on the missing name would break under one
+selection but not the other.
+
+Imports don't count toward the contract — they're scaffolding, not
+interface. The variants above each bring in a different sklearn class,
+which is fine; only the *values* the cells produce need to match.
+
+### Mixing cell kinds
+
+A variant group can mix any cell kinds. A Python variant and a prompt
+variant can sit in the same group as long as they both produce the
+contract names — e.g. one variant calls a deterministic regex
+classifier, another asks an LLM to classify.
+
+### Adding and removing variants
+
+The variant tab strip carries a `+` button that clones the active
+variant as a sibling. The new cell starts as a copy of the active
+body with the `# @variant` line rewritten to an auto-generated name
+(`<active>_copy`, then `_copy2`, `_copy3`, …). Rename happens by
+editing the annotation line in source — the standard
+annotation-as-truth pattern, no separate rename UI.
+
+Deleting a variant tab removes only that variant. If you delete the
+active one, the next variant in source order auto-promotes. Deleting
+the last variant in a group removes the cell entirely *and* drops the
+`[[variant_group]]` entry — the group dissolves.
+
+### Bootstrapping
+
+The first variant of a new group is created by typing the annotation:
+add `# @variant <new_group> <variant_name>` to any existing cell, save
+it, then use the `+` tab to add siblings. (There's no UI affordance for
+the bootstrap step — source is the only place a group comes into
+existence, which keeps `notebook.toml` honest about *which* groups
+exist.)
+
+---
+
 ## Cross-Cell Ordering
 
 ### `@after`

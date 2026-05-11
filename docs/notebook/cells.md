@@ -613,3 +613,5 @@ Reach for loop cells when **being able to inspect or fork from iteration k matte
 | Loop cell    | Iterative refinement where pausing or forking from an intermediate state matters.                      |
 
 Mixing is encouraged — a typical pipeline might be a SQL cell for extraction → Python cells for transformation → a prompt cell for narrative summarization.
+
+Any kind of cell can also live inside a [variant group](annotations.md#variant-cells) — a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.

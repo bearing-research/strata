@@ -99,9 +99,10 @@ re-run — a Strata notebook is just a directory of plain text:
   on a pull request, syntax highlighting in every IDE. Reordering a cell
   edits one number in `notebook.toml`, not a giant JSON re-serialize.
 - **`notebook.toml` is the manifest.** Stable config only — cell list,
-  workers, mounts, env, AI defaults, and (with [variant cells](annotations.md))
-  the active variant per group. Reviewers see exactly what changed about
-  the notebook's *shape*, not its execution history.
+  workers, mounts, env, AI defaults, and the active variant per group
+  (see [Variant Cells](annotations.md#variant-cells)). Reviewers see
+  exactly what changed about the notebook's *shape*, not its execution
+  history.
 - **`.strata/` is gitignored.** Display outputs, console snapshots, the
   `uv sync` timestamp, per-cell provenance hashes, the artifact store —
   none of it touches commits. Re-running a cell never changes the tracked
