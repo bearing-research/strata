@@ -47,13 +47,30 @@ feature_names = iris.feature_names
 df.head()
 ```
 
-Press ++shift+enter++. The first run pauses ~2 seconds (the simulated fetch) and a DataFrame preview renders below the cell.
+```text title="Output"
+   sepal length (cm)  sepal width (cm)  petal length (cm)  petal width (cm)  target species
+0                5.1               3.5                1.4               0.2       0  setosa
+1                4.9               3.0                1.4               0.2       0  setosa
+2                4.7               3.2                1.3               0.2       0  setosa
+3                4.6               3.1                1.5               0.2       0  setosa
+4                5.0               3.6                1.4               0.2       0  setosa
+```
+
+Press ++shift+enter++. The first run pauses ~2 seconds (the simulated fetch) and the DataFrame preview renders below the cell.
 
 ### Summarize by species
 
 ```python
 stats = df.groupby("species", observed=True)[feature_names].mean().round(2)
 stats
+```
+
+```text title="Output"
+            sepal length (cm)  sepal width (cm)  petal length (cm)  petal width (cm)
+species
+setosa                   5.01              3.43               1.46              0.25
+versicolor               5.94              2.77               4.26              1.33
+virginica                6.59              2.97               5.55              2.03
 ```
 
 Strata reads this cell's AST, sees it references `df` and `feature_names` from the loader, and wires an edge. The DAG view in the sidebar shows the dependency.

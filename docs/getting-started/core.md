@@ -61,11 +61,28 @@ print(f"URI: {artifact.uri}")
 print(f"Cache hit: {artifact.cache_hit}")
 ```
 
+```text title="Output"
+URI: strata://artifact/scan_a7b3c9d1e5f2@v=1
+Cache hit: False
+```
+
+Re-running the same call returns the same URI with `Cache hit: True`.
+
 ## 4. Fetch the result
 
 ```python
 table = client.fetch(artifact.uri)
 df = table.to_pandas()
+print(df.head())
+```
+
+```text title="Output (illustrative)"
+     id    value
+0   101   142.50
+1   102   178.30
+2   103   215.75
+3   104   311.20
+4   105   168.40
 ```
 
 ## 5. Integration with data libraries

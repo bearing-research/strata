@@ -36,6 +36,10 @@ top_region = by_region.idxmax()
 print(f"Top region: {top_region}")
 ```
 
+```text title="Output"
+Top region: West
+```
+
 ### Variable flow and the DAG
 
 Strata analyzes each cell's AST to extract:
@@ -85,6 +89,10 @@ CLAMP_MAX = 100.0
 
 def clamp(value):
     return max(CLAMP_MIN, min(CLAMP_MAX, value))
+```
+
+```text title="Output"
+loaded raw bounds: [-43.98, 100.53]
 ```
 
 A downstream cell can call `clamp(raw_max)` — `clamp` and `CLAMP_MIN/MAX` come from the synthetic module, `raw_max` from the artifact path.
@@ -161,6 +169,12 @@ Create a prompt cell with the **"Add Prompt Cell"** button in the UI — the sam
 Summarize this dataset and return the top 3 findings as a numbered list:
 
 {{ df }}
+```
+
+```text title="Output (illustrative model response)"
+1. Setosa is linearly separable from versicolor and virginica based on petal dimensions alone.
+2. Versicolor and virginica overlap moderately on sepal width but separate well by petal length.
+3. The dataset is balanced — 50 samples per species, no missing values.
 ```
 
 - `{{ df }}` is replaced with a text representation of the upstream variable `df` before sending to the model.
@@ -252,6 +266,14 @@ df = pd.DataFrame(triage["items"])
 print(df["priority"].value_counts())
 ```
 
+```text title="Output"
+priority
+high      4
+medium    2
+low       1
+Name: count, dtype: int64
+```
+
 ### Validate-and-retry
 
 When `@output_schema` is set, Strata runs a **validate-and-retry loop** after every model call:
@@ -298,6 +320,13 @@ GROUP BY customer
 ORDER BY total DESC
 ```
 
+```text title="Output (illustrative result rows)"
+       customer     total
+0      acme_inc  18420.50
+1   north_winds   9112.75
+2  bright_solar   6033.10
+```
+
 The cell above pulls `min_amount` from an upstream Python cell, sends a parameterized query through the `warehouse` connection, and stores the resulting rows as an Arrow Table that any downstream cell can consume as a pandas DataFrame.
 
 ### Connections
@@ -341,6 +370,13 @@ min_amount = 100
 ```sql
 # @sql connection=warehouse
 SELECT * FROM orders WHERE amount > :min_amount
+```
+
+```text title="Output (illustrative result rows)"
+   order_id  customer_id  amount       placed_at
+0      1042            7   245.99  2026-04-12
+1      1093           14   180.50  2026-04-13
+2      1117            3   299.00  2026-04-14
 ```
 
 The DAG links the SQL cell to the Python cell automatically — same edge logic Strata uses for Python free variables.
