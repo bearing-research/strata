@@ -21,6 +21,8 @@ from cache.
 
 - Content-addressed caching (same code + inputs = cache hit)
 - Automatic DAG from variable analysis
+- Git-friendly format — cells are plain `.py` files, outputs and runtime
+  state live outside the committed tree (no JSON blobs, no diffs on every run)
 - Distributed workers (`@worker gpu-fly` dispatches to remote GPU)
 - Prompt cells with `{{ variable }}` LLM injection
 - AI assistant with streaming chat and agent mode
