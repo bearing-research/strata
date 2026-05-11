@@ -565,9 +565,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                     websocket, session, payload, execution_state, notebook_id
                 )
             elif msg_type == "variant_add":
-                await _handle_variant_add(
-                    websocket, session, payload, execution_state, notebook_id
-                )
+                await _handle_variant_add(websocket, session, payload, execution_state, notebook_id)
             else:
                 # Unknown message type
                 await websocket.send_text(
@@ -1277,9 +1275,7 @@ async def _handle_variant_add(
             "roots": list(session.dag.roots) if session.dag else [],
             "leaves": list(session.dag.leaves) if session.dag else [],
             "topological_order": session.dag.topological_order if session.dag else [],
-            "variant_groups": [
-                vg.model_dump() for vg in session.notebook_state.variant_groups
-            ],
+            "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
         }
 
         await _broadcast_message(

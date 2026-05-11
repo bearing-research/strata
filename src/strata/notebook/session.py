@@ -98,9 +98,7 @@ def _rewrite_variant_annotation(source: str, group: str, new_name: str) -> str:
     active cell somehow lost its annotation), prepend a fresh one so the
     new sibling still joins the group.
     """
-    new_source, count = _VARIANT_LINE_RE.subn(
-        rf"\g<1>{new_name}\g<2>", source, count=1
-    )
+    new_source, count = _VARIANT_LINE_RE.subn(rf"\g<1>{new_name}\g<2>", source, count=1)
     if count == 0:
         return f"# @variant {group} {new_name}\n{source}"
     return new_source
@@ -542,12 +540,8 @@ class NotebookSession:
             ):
                 references = references + [annotations.loop.carry]
 
-            variant_group = (
-                annotations.variant.group if annotations.variant is not None else None
-            )
-            variant_name = (
-                annotations.variant.name if annotations.variant is not None else None
-            )
+            variant_group = annotations.variant.group if annotations.variant is not None else None
+            variant_name = annotations.variant.name if annotations.variant is not None else None
             cell_analyses.append(
                 CellAnalysisWithId(
                     id=cell.id,

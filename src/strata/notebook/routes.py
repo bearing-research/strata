@@ -2002,9 +2002,7 @@ async def delete_cell(notebook_id: str, cell_id: str) -> dict:
                 "roots": list(session.dag.roots) if session.dag else [],
                 "leaves": list(session.dag.leaves) if session.dag else [],
                 "topological_order": session.dag.topological_order if session.dag else [],
-                "variant_groups": [
-                    vg.model_dump() for vg in session.notebook_state.variant_groups
-                ],
+                "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
             },
         }
     except ValueError as e:

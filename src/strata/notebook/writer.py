@@ -617,9 +617,7 @@ def add_cell_to_notebook(
             next_order = None
             for other in cells_data:
                 other_order = other.get("order", 0)
-                if other_order > after_order and (
-                    next_order is None or other_order < next_order
-                ):
+                if other_order > after_order and (next_order is None or other_order < next_order):
                     next_order = other_order
             order = after_order + 1.0 if next_order is None else (after_order + next_order) / 2.0
         else:

@@ -302,7 +302,9 @@ def _parse_variant_groups(toml_data: dict) -> list[VariantGroupConfig]:
         if not isinstance(entry, dict):
             continue
         try:
-            out.append(VariantGroupConfig(group=entry.get("group", ""), active=entry.get("active", "")))
+            out.append(
+                VariantGroupConfig(group=entry.get("group", ""), active=entry.get("active", ""))
+            )
         except Exception:
             continue
     return out
