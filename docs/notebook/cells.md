@@ -49,10 +49,9 @@ Only variables that a downstream cell actually references get stored as artifact
 
 ### Library cells (cross-cell defs and classes)
 
-Top-level `def` and `class` definitions can be shared across cells. Strata serializes them as a synthetic Python module that downstream cells import transparently — so you can write a helper once and call it from anywhere in the notebook.
+Top-level `def` and `class` definitions are shared across cells via a synthetic Python module — write a helper once, call it anywhere.
 
 ```python
-# defines area, perimeter, CIRCLE_PRECISION
 import math
 
 CIRCLE_PRECISION = 4
@@ -64,39 +63,23 @@ def perimeter(r):
     return round(2 * math.pi * r, CIRCLE_PRECISION)
 ```
 
-Downstream cells can then reference `area(7.5)`, `perimeter(7.5)`, or `CIRCLE_PRECISION` directly.
+Downstream cells reference `area(7.5)`, `perimeter(7.5)`, and `CIRCLE_PRECISION` directly.
 
 #### How sharing works (slicing)
 
-Defs and classes can't be pickled reliably across the subprocess boundary, so they round-trip via **source reconstitution** — Strata writes a slice of the cell's source to disk, re-executes that slice in a fresh module on the consumer side, and hands the downstream cell the resulting module attribute. That only works if the slice has no side effects.
+Defs and classes don't pickle reliably across the subprocess boundary, so they round-trip via **source reconstitution**: Strata writes a slice of the cell's source to disk, re-executes it in a fresh module on the consumer side, and hands the downstream cell the resulting attribute. The slice must be side-effect-free.
 
-To find the shareable code, Strata **slices the cell's AST** before writing the synthetic module. The slice keeps:
+The slice keeps the module docstring, `import` / `from import` (no `from X import *`), `def` / `async def`, `class`, and assignments whose RHS is a **literal constant** — numbers, strings, bools, `None`, bytes, negations of literals, and nested tuples/lists/sets/dicts of literals. Everything else (non-literal assignments, augmented assigns, expression statements, control flow, bare annotations) is dropped from the slice but stays in the cell's runtime execution.
 
-- Module docstring
-- `import X` / `from X import Y` (but not `from X import *`)
-- `def` / `async def`
-- `class`
-- Assignments whose right-hand side is a **literal constant** — numbers, strings, bools, `None`, bytes, and nested tuples/lists/sets/dicts of literals. Negations of literals (`-1`, `~0`) count.
-
-Everything else is **dropped from the slice** but stays in the cell's runtime execution. Concretely, the slicer drops:
-
-- Assignments with a non-literal right-hand side: `x = compute()`, `PI = math.pi`, `X = y + 1`
-- Augmented assignments: `x += 1`
-- Expression statements: `print("hi")`, a bare trailing expression
-- Control flow: `for`, `while`, `if`, `with`, `try`, `match`
-- Bare annotations without a value: `x: int`
-- `from … import *`
-
-This means a single cell can mix runtime work and library code:
+A single cell can therefore mix runtime work and library code:
 
 ```python
-# Runtime setup — dropped from the slice, but the values still flow
-# through the regular artifact path so downstream cells see them.
+# Runtime — dropped from the slice; flows through the artifact path.
 raw_min = round(-math.tau * 7, 2)
 raw_max = round(math.tau * 16, 2)
 print(f"loaded raw bounds: [{raw_min}, {raw_max}]")
 
-# Library code — kept in the slice, exported as a synthetic module.
+# Library — kept in the slice, exported as a synthetic module.
 CLAMP_MIN = 0.0
 CLAMP_MAX = 100.0
 
@@ -104,47 +87,36 @@ def clamp(value):
     return max(CLAMP_MIN, min(CLAMP_MAX, value))
 ```
 
-A downstream cell can call `clamp(raw_max)` — `clamp` and `CLAMP_MIN/MAX` come from the synthetic module, while `raw_max` is delivered through the regular artifact path.
+A downstream cell can call `clamp(raw_max)` — `clamp` and `CLAMP_MIN/MAX` come from the synthetic module, `raw_max` from the artifact path.
 
-#### When export still fails
+#### When the slice isn't self-contained
 
-Slicing isn't a free pass. The slice has to be **self-contained**: every name a kept def or class references must be bound by something else in the same slice (or a Python builtin). When it isn't, Strata blocks the export with a precise diagnostic.
+Every name a kept def or class references must be bound by something else in the slice (or a Python builtin). When it isn't, Strata blocks the export with a `module_export_blocked` diagnostic — surfaced pre-flight, not just at run time.
 
 ```python
-# The slice keeps `def is_outlier`, but `runtime_threshold` is dropped
-# (it's a non-literal assignment). The synthetic module would NameError
-# the moment a downstream cell called is_outlier, so we block.
-runtime_threshold = math.sqrt(9)
+runtime_threshold = math.sqrt(9)   # dropped — non-literal RHS
 
 def is_outlier(value):
     return value > runtime_threshold
 ```
 
-When a downstream cell references `is_outlier`, you'll see:
+> `is_outlier` references names not defined or imported in this cell: runtime_threshold
 
-> This cell defines reusable code used downstream (`is_outlier`), but it cannot be shared across cells yet: function `is_outlier` references names not defined or imported in this cell: runtime_threshold
+Other shapes that block on the same principle:
 
-The same diagnostic also surfaces as a `module_export_blocked` annotation on the cell _before_ you run it — pre-flight warning, not just a runtime surprise.
+- **Decorators / default values / base classes** evaluated at module load: `@my_decorator` where `my_decorator` isn't imported in the same cell, or `class Child(Parent)` where `Parent` is computed at runtime.
+- **Divergence**: a name kept by the slice is also reassigned by dropped runtime code, so the synthetic module's value would differ from the cell's final state. `def f(): ...; f = wrap(f)` exports the unwrapped `f`.
+- **Lambda assignments**: `add = lambda x: x + 1` — even though `cloudpickle` could serialize the value, the synthetic-module path is reserved for source-backed library code.
 
-There are a few other shapes that block:
+The fix is usually one of: move the runtime line into its own cell, add the missing import to the same cell as the def, or take the dependency as a function argument.
 
-- **Decorators / default values / base classes** evaluated at module load: `@my_decorator` where `my_decorator` isn't imported in the same cell, `class Child(Parent)` where `Parent` is computed at runtime.
-- **Divergence**: a name kept by the slice is also reassigned by dropped runtime code. `def f(): ...; f = wrap(f)` would have the slice export the unwrapped `f` while the cell's runtime `f` is wrapped.
-- **Lambda assignments**: `add = lambda x: x + 1` — even though `cloudpickle` could serialize the lambda, the synthetic-module path is reserved for source-backed library code.
+#### Single-cell scope
 
-The fix is usually one of: move the runtime line into its own cell, add the missing import to the same cell as the def, or rewrite the closure to take its dependency as a function argument.
+The synthetic module is built from one cell's source only — no transitive composition across cells. A def can't reach a name imported or defined in a different cell; each cell that hosts library code carries its own imports.
 
-#### Limitations
-
-The slice has **single-cell scope**. The synthetic module is built from one cell's source only — there is no transitive composition across cells. Three concrete consequences:
-
-- A def can't reference a name imported in a different cell. Each cell that hosts library code carries its own imports.
-- A def can't call a helper function defined in a different cell. Move the helper into the same cell, or duplicate it.
-- Type annotations that reference names not in the slice block by default — but adding `from __future__ import annotations` to the cell relaxes this. PEP 563 stringifies annotations and the free-variable check correctly drops them, so cross-cell type hints "just work" with the future import.
+One concession: annotations that reference names outside the slice would normally block, but adding `from __future__ import annotations` relaxes this. PEP 563 stringifies annotations and the free-variable check drops them, so cross-cell type hints "just work" with the future import.
 
 Walked through end-to-end in the [`library_cells`](../../examples/library_cells) example notebook.
-
-Plain-data cells (no defs or classes, just values) don't go through module export at all — `THRESHOLD = 42` in its own cell serializes as a regular int and flows through the normal artifact path.
 
 ### Mutation warnings
 
