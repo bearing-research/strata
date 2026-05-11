@@ -68,11 +68,12 @@ nav:
     - Keyboard Shortcuts: notebook/keyboard.md
   - Core:
     - Quickstart: getting-started/core.md
-    - Configuration: reference/configuration.md
+  - API Reference:
     - REST API: reference/rest-api.md
     - WebSocket Protocol: reference/websocket.md
   - Deployment:
     - Installation: getting-started/installation.md
+    - Configuration: reference/configuration.md
     - Deployment Modes: deployment/modes.md
     - Docker: deployment/docker.md
     - Fly.io: deployment/fly.md

@@ -1,6 +1,6 @@
 # REST API Reference
 
-All notebook endpoints are under `/v1/notebooks`.
+This page documents the **notebook** REST surface, mounted under `/v1/notebooks`. Strata Core also exposes a `POST /v1/materialize` endpoint for direct artifact materialization — see the [Core Quickstart](../getting-started/core.md) for that surface.
 
 !!! note "Session ID vs Notebook ID"
 Route parameters use the **session ID** (a UUID generated when the notebook is opened), not the persistent `notebook_id` from `notebook.toml`. The session ID is returned by the `open` and `create` endpoints.
