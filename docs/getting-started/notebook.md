@@ -26,92 +26,86 @@ Click **New Notebook** on the landing page. Choose a name and a parent directory
 
 Each notebook gets its own Python environment (managed by `uv`), so packages installed in one notebook don't affect others.
 
-## 3. Write and Run Cells
+## 3. Walk Through a Pipeline
 
-Add a cell and type:
+We'll load the classic iris dataset, summarize it by species, and plot a scatter. Three cells, one real DAG — enough to exercise caching, cascading, and rich displays in motion.
 
-```python
-x = 1
-x + 1
-```
+Open the **Environment** panel in the sidebar and add `scikit-learn`, `pandas`, and `matplotlib`.
 
-Press ++shift+enter++ to run. The result appears below the cell.
-
-## 4. Multi-Cell Dependencies
-
-Add a second cell:
+### Load the data
 
 ```python
-y = x * 10
-print(f"y = {y}")
+import time
+import pandas as pd
+from sklearn.datasets import load_iris
+
+time.sleep(2)  # pretend this is an expensive fetch
+iris = load_iris(as_frame=True)
+df = iris.frame.copy()
+df["species"] = pd.Categorical.from_codes(df["target"], iris.target_names)
+feature_names = iris.feature_names
+df.head()
 ```
 
-Strata automatically detects that this cell references `x` from the first cell. The DAG in the sidebar shows the dependency arrow.
+Press ++shift+enter++. The first run pauses ~2 seconds (the simulated fetch) and a DataFrame preview renders below the cell.
 
-!!! info "Cascade execution"
-If you change the first cell and re-run the second, Strata detects the staleness and offers to cascade-execute both cells in the correct order.
-
-## 5. Rich Display Outputs
-
-### Markdown
-
-The `Markdown` helper is injected into every cell's namespace:
+### Summarize by species
 
 ```python
-Markdown("# Hello\n\n- item one\n- item two")
+stats = df.groupby("species", observed=True)[feature_names].mean().round(2)
+stats
 ```
 
-### Matplotlib
+Strata reads this cell's AST, sees it references `df` and `feature_names` from the loader, and wires an edge. The DAG view in the sidebar shows the dependency.
+
+### Plot
 
 ```python
 import matplotlib.pyplot as plt
 
-plt.plot([1, 2, 3], [1, 4, 9])
-plt.show()
+fig, ax = plt.subplots(figsize=(6, 4))
+for species, group in df.groupby("species", observed=True):
+    ax.scatter(
+        group["sepal length (cm)"],
+        group["petal length (cm)"],
+        label=str(species),
+        alpha=0.7,
+    )
+ax.set_xlabel("Sepal length (cm)")
+ax.set_ylabel("Petal length (cm)")
+ax.legend()
+fig
 ```
 
-!!! tip "Install matplotlib first"
-Open the **Environment** panel in the sidebar and add `matplotlib` before running plot cells.
+The matplotlib figure renders inline as a PNG.
 
-### Multiple Outputs
+## 4. Re-run for cache hits
 
-A cell can produce multiple visible outputs:
+Press ++shift+enter++ on the loader cell again. The 2-second pause is gone — Strata returned the cached `df` instantly and the cell badge reads **⚡ cached**.
 
-```python
-display(Markdown("## Summary"))
-42
-```
+Caching is content-addressed: the cache key is a hash of the cell's source, its upstream artifacts, and the environment lockfile. Re-running with the same three is always a cache hit. No `@memoize`, no manual invalidation, and the cached result is byte-identical to what produced it.
 
-### DataFrames
+## 5. Edit upstream, watch the cascade
 
-```python
-import pandas as pd
+Edit the loader — say, change `time.sleep(2)` to `time.sleep(1)`. Strata re-analyzes the source, computes a new provenance hash, and marks the loader **stale**. The summary and plot cells flip stale too: they referenced `df`, which is no longer the cached value.
 
-df = pd.DataFrame({
-    "name": ["Alice", "Bob", "Carol"],
-    "score": [95, 87, 92],
-})
-df
-```
+Now press ++shift+enter++ on the plot cell. Strata builds a **cascade plan** — loader → summary → plot — and runs them in topological order. Revert the edit and re-run: every cell becomes a cache hit on the way through, no work happens, the cascade short-circuits to milliseconds.
 
-DataFrames render as scrollable tables with column headers and row counts.
+## 6. Other display types
 
-## 6. Manage Packages
+The loader and summary cells above used a trailing expression for the DataFrame render; the plot cell did the same with a matplotlib `Figure`. A few more shapes you can put at the end of any cell:
 
-Open the **Environment** panel in the sidebar to:
+| Use this              | Renders as                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------------- |
+| Any value (trailing)  | Its `repr`. DataFrames → scrollable tables, matplotlib `Figure` → inline PNG, dict → JSON. |
+| `display(x)`          | Emits one display output; call it multiple times in one cell to stack outputs.            |
+| `Markdown("**hi**")`  | The `Markdown` helper is injected into every cell's namespace and renders as HTML.        |
 
-- Install and remove packages
-- Import from `requirements.txt`
-- Export dependencies
-- Sync or rebuild the environment
+## 7. Manage Packages
+
+The **Environment** panel in the sidebar lets you install/remove packages, import from `requirements.txt`, export dependencies, and sync the environment. Each notebook has its own venv (managed by `uv`) so packages don't cross-contaminate.
 
 See [Environment Management](../notebook/environment.md) for details.
-
-## 7. Caching
-
-When you re-run a cell with the same inputs and source, Strata returns the cached result instantly. The cell shows a **⚡ cached** badge with timing.
-
-Change the source or any upstream cell, and the cache is automatically invalidated.
 
 ## 8. AI Assistant
 
