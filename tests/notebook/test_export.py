@@ -324,8 +324,8 @@ def test_export_sanitizes_active_html_in_markdown_cells(tmp_path: Path) -> None:
         "danger",
         "## Sanitization\n\n"
         "<script>alert('xss')</script>\n\n"
-        "<img src=\"x\" onerror=\"alert('attr')\">\n\n"
-        "<iframe src=\"//evil\"></iframe>\n\n"
+        '<img src="x" onerror="alert(\'attr\')">\n\n'
+        '<iframe src="//evil"></iframe>\n\n'
         "[click](javascript:alert(1))\n\n"
         "[doc](data:text/html;base64,PHNjcmlwdD4=)\n",
     )
