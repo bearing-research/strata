@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import tomli_w
+
 from strata.notebook.writer import (
     add_cell_to_notebook,
     create_notebook,
@@ -45,6 +47,10 @@ _SUPPRESSION_TAIL_RE = re.compile(r";[ \t]*(?:#[^\n]*)?\s*\Z")
 _LINE_MAGIC_RE = re.compile(r"^(\s*)%([a-zA-Z_]\w*)([^\n]*)$")
 _CELL_MAGIC_RE = re.compile(r"\A[ \t]*%%([a-zA-Z_]\w*)([^\n]*)\n?")
 _SHELL_RE = re.compile(r"^(\s*)!(.*)$")
+# Assignment-form shell escape: ``files = !ls /data``. IPython supports
+# this and binds the lhs to a list of stdout lines. Without explicit
+# handling the line passes through and breaks Python's parser.
+_SHELL_ASSIGN_RE = re.compile(r"^(\s*)([A-Za-z_]\w*)(\s*=\s*)!(.+)$")
 _PIP_INSTALL_RE = re.compile(
     r"^\s*(?:pip|pip3|python\s+-m\s+pip|uv\s+pip)\s+install\s+(.+)$",
 )
@@ -167,13 +173,24 @@ def import_notebook(
             result.skipped_cells.append(str(cell_type))
 
     # Merge captured deps into the new notebook's pyproject.toml.
-    # uv sync on first run will resolve them; we deliberately don't
-    # run `uv add` here — that's slow, networked, and can fail
-    # partially, and our job is to set up source for the user.
+    # Filter pip-only forms (editable installs, bare URLs, paths) that
+    # pyproject.toml dependencies can't represent — those would either
+    # be rejected by uv at sync time or, worse, slip through and corrupt
+    # the TOML (a "; python_version < '3.10'" marker contains literal
+    # characters that need proper escaping).
     all_deps = _dedupe_preserve_order([*sibling_deps, *cell_deps])
-    if all_deps:
-        _merge_pyproject_deps(notebook_dir, all_deps)
-        result.captured_deps = all_deps
+    valid_deps = [d for d in all_deps if _is_valid_pep508_dep(d)]
+    rejected_deps = [d for d in all_deps if not _is_valid_pep508_dep(d)]
+    if valid_deps:
+        _merge_pyproject_deps(notebook_dir, valid_deps)
+    result.captured_deps = valid_deps
+    if rejected_deps:
+        sample = ", ".join(repr(d) for d in rejected_deps[:3])
+        more = "" if len(rejected_deps) <= 3 else f" (+{len(rejected_deps) - 3} more)"
+        result.warnings.append(
+            f"{len(rejected_deps)} pip-only dep spec(s) skipped — pyproject.toml "
+            f"requires PEP 508 specifiers: {sample}{more}"
+        )
 
     return result
 
@@ -238,6 +255,18 @@ def _convert_code_source(source: str) -> _CellConversion:
             replacement = _translate_line_magic(
                 magic_name,
                 magic_args.lstrip(),
+                indent,
+                conv,
+            )
+            out_lines.extend(replacement)
+            continue
+        shell_assign = _SHELL_ASSIGN_RE.match(line_no_eol)
+        if shell_assign:
+            indent, target, eq, cmd = shell_assign.groups()
+            replacement = _translate_shell_assignment(
+                target,
+                eq,
+                cmd.strip(),
                 indent,
                 conv,
             )
@@ -369,7 +398,11 @@ def _lm_env(name: str, args: str, indent: str, conv: _CellConversion) -> list[st
 
 
 def _lm_run(name: str, args: str, indent: str, conv: _CellConversion) -> list[str]:
-    """``%run script.py`` → ``exec`` of the script's text (best effort)."""
+    """``%run script.py`` → ``exec`` of the script's text (best effort).
+
+    Uses an aliased ``pathlib.Path`` import so the generated code
+    works even if the cell hasn't imported ``Path`` itself.
+    """
     target = args.strip()
     if not target:
         conv.dropped_magics.append(f"%{name} (no target)")
@@ -377,7 +410,8 @@ def _lm_run(name: str, args: str, indent: str, conv: _CellConversion) -> list[st
     conv.translated_magics.append(f"%{name} {target}")
     return [
         f"{indent}# strata: %run translated — verify the path resolves at runtime\n",
-        f"{indent}exec(Path({target!r}).read_text())\n",
+        f"{indent}from pathlib import Path as _strata_path\n",
+        f"{indent}exec(_strata_path({target!r}).read_text())\n",
     ]
 
 
@@ -466,6 +500,41 @@ def _translate_shell(cmd: str, indent: str, conv: _CellConversion) -> list[str]:
         return []
     conv.dropped_shells.append(f"!{cmd}")
     return [f"{indent}# strata: shell command dropped: !{cmd}\n"]
+
+
+def _translate_shell_assignment(
+    target: str,
+    eq: str,
+    cmd: str,
+    indent: str,
+    conv: _CellConversion,
+) -> list[str]:
+    """``target = !cmd`` — IPython binds ``target`` to stdout lines.
+
+    Auto-running arbitrary shell from an imported notebook is a real
+    hazard (untrusted-corpus stress tests are a primary use case), so
+    we don't translate to a live subprocess call. Instead we drop the
+    command and stub the binding with ``[]`` so downstream Python
+    still parses and references to ``target`` resolve. The user can
+    swap in a real ``subprocess.run`` if the shell escape matters.
+
+    ``!pip install`` in this form is rare but still captures the
+    package — the lhs gets the same empty-list stub.
+    """
+    pip = _PIP_INSTALL_RE.match(cmd)
+    if pip:
+        packages = _parse_pip_install(pip.group(1))
+        conv.deps.extend(packages)
+        conv.translated_magics.append(f"{target} = !{cmd}")
+        return [
+            f"{indent}{target}{eq}[]  # strata: '{target} = !pip install ...' captured to deps\n",
+        ]
+    conv.dropped_shells.append(f"{target} = !{cmd}")
+    stub = (
+        f"{indent}{target}{eq}[]  "
+        f"# strata: shell escape '!{cmd}' dropped; restore with subprocess.run if needed\n"
+    )
+    return [stub]
 
 
 # ---------------------------------------------------------------------------
@@ -561,41 +630,58 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
     return out
 
 
-def _merge_pyproject_deps(notebook_dir: Path, new_deps: list[str]) -> None:
-    """Append captured deps to the new notebook's ``pyproject.toml``.
+def _is_valid_pep508_dep(spec: str) -> bool:
+    """Filter out specifiers that pyproject.toml ``dependencies`` won't accept.
 
-    The notebook venv hasn't been created yet (we passed
-    ``initialize_environment=False`` to ``create_notebook``), so first
-    ``uv sync`` will pick the deps up naturally. We don't call
-    ``uv add`` ourselves — that's slow, networked, and partial-
-    failure-prone, and the user is going to run sync anyway when
-    they open or run the imported notebook.
+    pyproject.toml's ``project.dependencies`` requires PEP 508
+    specifiers — ``name``, ``name==1.2``, ``name[extras]``, ``name @ url``,
+    optionally with a marker. Pip-only forms (editable installs,
+    bare URLs, local paths) are rejected here so they don't get
+    serialized into invalid TOML or get rejected later by uv.
+    """
+    spec = spec.strip()
+    if not spec or spec.startswith("-"):
+        return False
+    if spec.startswith(
+        ("git+", "hg+", "svn+", "bzr+", "file:", "http://", "https://", "/", "./", "../")
+    ):
+        return False
+    # PEP 508 names start with a letter/digit. Anything else (bare URL
+    # fragments, `.`-style paths sneaking past the prefix list, etc.) is
+    # rejected.
+    return re.match(r"^[A-Za-z0-9]", spec) is not None
 
-    Edits the file textually to avoid round-tripping through
-    ``tomli_w`` (which would normalize formatting on every import).
+
+def _merge_pyproject_deps(notebook_dir: Path, new_deps: list[str]) -> list[str]:
+    """Add captured deps to the new notebook's ``pyproject.toml``.
+
+    Round-trips through ``tomllib`` + ``tomli_w`` so any string with
+    embedded quotes / backslashes / etc. (e.g. environment markers like
+    ``importlib-metadata; python_version < "3.10"``) is properly escaped
+    by the serializer — manual string interpolation would emit invalid
+    TOML.
+
+    The notebook venv hasn't been created yet, so first ``uv sync``
+    will resolve the deps. We deliberately don't run ``uv add`` here —
+    that's slow, networked, and partial-failure-prone.
+
+    Returns the deps actually added (skipping ones already present).
     """
     pyproject = notebook_dir / "pyproject.toml"
     if not pyproject.is_file():
-        return
-    text = pyproject.read_text(encoding="utf-8")
-    # Find the dependencies = [ ... ] block. The notebook template
-    # writes it as a single multi-line block.
-    match = re.search(r"(dependencies\s*=\s*\[)([^\]]*)(\])", text, flags=re.DOTALL)
-    if not match:
-        return
-    existing_block = match.group(2)
-    existing = set()
-    for line in existing_block.splitlines():
-        m = re.match(r'\s*"([^"]+)"', line)
-        if m:
-            existing.add(m.group(1))
-    additions = [d for d in new_deps if d not in existing]
+        return []
+
+    with pyproject.open("rb") as f:
+        data = tomllib.load(f)
+
+    project = data.setdefault("project", {})
+    existing = list(project.get("dependencies") or [])
+    existing_set = {d.strip() for d in existing if isinstance(d, str)}
+    additions = [d for d in new_deps if d.strip() not in existing_set]
     if not additions:
-        return
-    new_lines = "\n".join(f'    "{d}",' for d in additions)
-    # Preserve trailing newline before the closing bracket.
-    suffix = "\n" if existing_block.rstrip("\n").endswith(",") else ",\n"
-    rebuilt = (
-        match.group(1) + existing_block.rstrip("\n") + suffix + new_lines + "\n" + match.group(3)
-    )
-    pyproject.write_text(text[: match.start()] + rebuilt + text[match.end() :], encoding="utf-8")
+        return []
+
+    project["dependencies"] = existing + additions
+    with pyproject.open("wb") as f:
+        tomli_w.dump(data, f)
+    return additions

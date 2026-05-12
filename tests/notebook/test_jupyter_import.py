@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -499,6 +500,123 @@ def test_deduplicates_deps_across_sources(tmp_path: Path) -> None:
     result = import_notebook(ipynb)
     assert result.captured_deps.count("requests") == 1
     assert "pandas" in result.captured_deps
+
+
+def test_shell_assignment_form_does_not_produce_invalid_python(tmp_path: Path) -> None:
+    """Jupyter also supports ``files = !ls`` — assignment form of !cmd.
+    Letting it pass through produces invalid Python and breaks the
+    imported cell. We drop the command with a stub binding so the
+    cell still parses and downstream references resolve."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("files = !ls /data\nfor f in files:\n    print(f)\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    # Must not contain raw '!ls' — that's a SyntaxError.
+    assert "= !" not in src
+    # Cell parses.
+    import ast as _ast
+
+    _ast.parse(src)
+    # files is bound to something downstream code can iterate.
+    assert "files = []" in src or "files=[]" in src
+    assert any("!ls" in s for s in result.dropped_shells)
+
+
+def test_shell_assignment_with_pip_install_captures_deps_and_stubs_target(
+    tmp_path: Path,
+) -> None:
+    """``out = !pip install requests`` — rare but legal. Capture the
+    package; stub the lhs with []."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("out = !pip install requests\nprint(out)\n")],
+    )
+    result = import_notebook(ipynb)
+    assert "requests" in result.captured_deps
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    import ast as _ast
+
+    _ast.parse(src)
+    assert "out = []" in src or "out=[]" in src
+
+
+def test_run_magic_generates_self_contained_path_import(tmp_path: Path) -> None:
+    """%run script.py expands to an exec(Path(...).read_text()) call;
+    the generated code has to import Path itself or the cell raises
+    NameError at runtime."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell("%run setup.py\nx = 1\n")])
+    result = import_notebook(ipynb)
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    # No bare Path — must be either an import or an alias.
+    assert "from pathlib import Path" in src
+    assert "exec(" in src
+    # Cell parses cleanly.
+    import ast as _ast
+
+    _ast.parse(src)
+
+
+def test_pyproject_serialization_handles_specs_with_quotes(tmp_path: Path) -> None:
+    """A common Kaggle dep is something like
+    ``importlib-metadata; python_version < "3.10"``. Manual string
+    interpolation breaks the TOML — round-trip through tomllib /
+    tomli_w handles the escaping."""
+    (tmp_path / "requirements.txt").write_text(
+        'importlib-metadata; python_version < "3.10"\nrequests\n',
+        encoding="utf-8",
+    )
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
+
+    result = import_notebook(ipynb)
+    pyproject_text = (result.notebook_dir / "pyproject.toml").read_text()
+    # Resulting TOML must parse — manual interpolation would have produced
+    # `"importlib-metadata; python_version < "3.10""` which is invalid.
+    parsed = tomllib.loads(pyproject_text)
+    deps = parsed["project"]["dependencies"]
+    assert any("importlib-metadata" in d for d in deps)
+    assert "requests" in deps
+
+
+def test_pyproject_skips_pip_only_specs(tmp_path: Path) -> None:
+    """``-e .`` and bare ``git+https://...`` aren't PEP 508 specifiers;
+    pyproject.toml ``dependencies`` won't accept them. Filter at the
+    boundary so we don't write invalid TOML or surface confusing
+    uv-sync errors later."""
+    (tmp_path / "requirements.txt").write_text(
+        "-e .\ngit+https://github.com/psf/requests\nrequests==2.31.0\n",
+        encoding="utf-8",
+    )
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("!pip install git+https://example.com/pkg ./local-pkg\n")],
+    )
+    result = import_notebook(ipynb)
+
+    assert "requests==2.31.0" in result.captured_deps
+    # All four pip-only forms are filtered out.
+    for bad in (
+        "-e .",
+        "git+https://github.com/psf/requests",
+        "git+https://example.com/pkg",
+        "./local-pkg",
+    ):
+        assert bad not in result.captured_deps
+
+    pyproject_text = (result.notebook_dir / "pyproject.toml").read_text()
+    assert "requests==2.31.0" in pyproject_text
+    assert "-e ." not in pyproject_text
+    assert "git+https" not in pyproject_text
+
+    # The user is told what was skipped.
+    assert any("pip-only" in w for w in result.warnings)
 
 
 def test_suppression_still_works_after_magic_translation(tmp_path: Path) -> None:
