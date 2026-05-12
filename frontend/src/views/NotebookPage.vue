@@ -5,8 +5,10 @@ import { useNotebook } from '../stores/notebook'
 import { useRecentNotebooks } from '../stores/recentNotebooks'
 import AddCellMenu from '../components/AddCellMenu.vue'
 import CellEditor from '../components/CellEditor.vue'
+import ExportMenu from '../components/ExportMenu.vue'
 import KeyboardShortcutsModal from '../components/KeyboardShortcutsModal.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
+import { useStrata } from '../composables/useStrata'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 
 const DagView = defineAsyncComponent(() => import('../components/DagView.vue'))
@@ -444,6 +446,13 @@ async function runAll() {
   await executeNotebookRunAllWebSocket()
 }
 
+function exportNotebook(format: 'markdown' | 'html') {
+  const sid = (notebook as any).sessionId as string | undefined
+  if (!sid) return
+  const strata = useStrata()
+  strata.downloadExport(sid, format)
+}
+
 function goHome() {
   router.push({ name: 'home' })
 }
@@ -499,6 +508,11 @@ function goHome() {
           data-testid="notebook-add-cell"
           :disabled="!connected"
           @select="(language) => addCell(undefined, language)"
+        />
+        <ExportMenu
+          data-testid="notebook-export"
+          :disabled="!notebook.id"
+          @select="exportNotebook"
         />
         <button
           class="btn btn-danger"

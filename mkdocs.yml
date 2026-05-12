@@ -70,6 +70,7 @@ nav:
     - Environment: notebook/environment.md
     - Secret Manager: notebook/secrets.md
     - Headless Runner: notebook/cli.md
+    - Export: notebook/export.md
     - Keyboard Shortcuts: notebook/keyboard.md
   - Core:
     - Quickstart: getting-started/core.md

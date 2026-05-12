@@ -2308,24 +2308,88 @@ async def execute_cell(notebook_id: str, cell_id: str) -> dict:
         raise HTTPException(status_code=500, detail="Execution failed")
 
 
-@router.get("/{notebook_id}/export")
-async def export_notebook(notebook_id: str) -> StreamingResponse:
-    """Export a reproducible notebook bundle as a zip archive.
+def _render_notebook_export(
+    session,
+    *,
+    fmt: str,
+    include_inactive_variants: bool,
+):
+    """Render a notebook to a single shareable markdown/HTML file.
 
-    The zip contains:
-    - notebook.toml
-    - pyproject.toml
-    - uv.lock (if present)
-    - cells/*.py
-    - provenance.json (DAG + per-cell provenance hashes)
-
-    This is everything needed to reproduce the notebook environment
-    and computations on another machine.
+    Mirrors ``strata export`` (the CLI). Response is the rendered body
+    plus a ``Content-Disposition: attachment`` header so the browser
+    triggers a download rather than displaying inline.
     """
+    from fastapi.responses import Response
+
+    from strata.notebook.export import ExportOptions, export_notebook
+
+    try:
+        options = ExportOptions(
+            output_format=fmt,  # type: ignore[arg-type]
+            include_inactive_variants=bool(include_inactive_variants),
+        )
+        body = export_notebook(session.path, options)
+    except Exception:
+        logger.exception("render export failed for notebook %s", session.id)
+        raise HTTPException(status_code=500, detail="Export failed")
+
+    safe_name = session.path.name or "notebook"
+    extension = "html" if fmt == "html" else "md"
+    media_type = "text/html; charset=utf-8" if fmt == "html" else "text/markdown; charset=utf-8"
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.{extension}"',
+        },
+    )
+
+
+@router.get("/{notebook_id}/export")
+async def export_notebook(
+    notebook_id: str,
+    fmt: str = "zip",
+    include_inactive_variants: bool = False,
+):
+    """Export the notebook in the requested format.
+
+    Default (``fmt=zip``): a reproducible bundle containing
+    ``notebook.toml``, ``pyproject.toml``, ``uv.lock`` (if present),
+    every cell source file, and ``provenance.json`` (DAG + per-cell
+    provenance hashes). This is the original endpoint behavior — kept
+    as the default so callers and tooling that didn't specify a format
+    continue to receive a ZIP.
+
+    ``fmt=markdown`` and ``fmt=html`` return a rendered single-file
+    export of the notebook produced by
+    :func:`strata.notebook.export.export_notebook`. Prompt cell
+    responses are intentionally excluded; see
+    ``docs/internal/design-notebook-export.md``.
+
+    Query parameters:
+        fmt: one of ``zip`` (default), ``markdown``, ``html``.
+        include_inactive_variants: only relevant for markdown/html
+            renderings; stacks all variants of every group when true.
+    """
+    if fmt not in {"zip", "markdown", "html"}:
+        raise HTTPException(
+            status_code=400,
+            detail="fmt must be one of 'zip', 'markdown', 'html'",
+        )
+
     session = _session_manager.get_session(notebook_id)
     if not session:
         raise HTTPException(status_code=404, detail="Notebook not found")
 
+    if fmt in {"markdown", "html"}:
+        return _render_notebook_export(
+            session,
+            fmt=fmt,
+            include_inactive_variants=bool(include_inactive_variants),
+        )
+
+    # Default: ZIP bundle.
     nb_dir = session.path
     buf = io.BytesIO()
 

@@ -390,13 +390,21 @@ to the UI.
 
 ## Export
 
-### Export Notebook Bundle
+### Export Notebook
 
 ```
-GET /v1/notebooks/{session_id}/export
+GET /v1/notebooks/{session_id}/export?fmt={zip,markdown,html}
 ```
 
-Returns a zip bundle containing `notebook.toml`, cells, and environment files.
+One endpoint, three output formats:
+
+| `fmt`        | Returns                                                                                                  |
+| ------------ | -------------------------------------------------------------------------------------------------------- |
+| `zip` *(default)* | Reproducible bundle — `notebook.toml`, `pyproject.toml`, `uv.lock`, cells, `provenance.json`.        |
+| `markdown`   | Single-file rendering for sharing / docs ingestion. Same engine as `strata export`.                      |
+| `html`       | Standalone HTML with embedded CSS + Pygments syntax highlighting.                                        |
+
+Markdown and HTML renderings additionally accept `include_inactive_variants=true` to stack all variants of every group. Prompt-cell responses are intentionally excluded from rendered formats (see [Export](../notebook/export.md)).
 
 ## AI
 

@@ -2368,3 +2368,74 @@ def test_get_connection_schema_endpoint_unknown_connection_404(tmp_path):
     resp = client.get(f"/v1/notebooks/{nb_id}/connections/nope/schema")
     assert resp.status_code == 404
     assert "nope" in resp.json()["detail"]
+
+
+def test_export_endpoint_defaults_to_zip(tmp_path):
+    """No fmt param -> ZIP bundle (backward-compatible default)."""
+    client = TestClient(create_test_app())
+    notebook_dir = create_notebook(tmp_path, "ExportZipDefault", initialize_environment=False)
+
+    opened = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+    nb_id = opened.json()["session_id"]
+
+    resp = client.get(f"/v1/notebooks/{nb_id}/export")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    assert ".zip" in resp.headers["content-disposition"]
+
+
+def test_export_endpoint_returns_markdown_when_requested(tmp_path):
+    """fmt=markdown -> rendered markdown with the right headers."""
+    from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+    client = TestClient(create_test_app())
+    notebook_dir = create_notebook(tmp_path, "ExportRoute", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1\n")
+
+    opened = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+    nb_id = opened.json()["session_id"]
+
+    resp = client.get(f"/v1/notebooks/{nb_id}/export?fmt=markdown")
+    assert resp.status_code == 200
+    assert "text/markdown" in resp.headers["content-type"]
+    assert "attachment" in resp.headers["content-disposition"]
+    # Filename is the notebook directory name, not the session UUID
+    assert notebook_dir.name in resp.headers["content-disposition"]
+    assert ".md" in resp.headers["content-disposition"]
+    assert "x = 1" in resp.text
+
+
+def test_export_endpoint_html_format(tmp_path):
+    from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+    client = TestClient(create_test_app())
+    notebook_dir = create_notebook(tmp_path, "ExportHTML", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1\n")
+
+    opened = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+    nb_id = opened.json()["session_id"]
+
+    resp = client.get(f"/v1/notebooks/{nb_id}/export?fmt=html")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert resp.text.startswith("<!doctype html>")
+    assert ".html" in resp.headers["content-disposition"]
+
+
+def test_export_endpoint_rejects_unknown_format(tmp_path):
+    client = TestClient(create_test_app())
+    notebook_dir = create_notebook(tmp_path, "ExportBadFmt", initialize_environment=False)
+
+    opened = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+    nb_id = opened.json()["session_id"]
+
+    resp = client.get(f"/v1/notebooks/{nb_id}/export?fmt=pdf")
+    assert resp.status_code == 400
+
+
+def test_export_endpoint_missing_notebook_404():
+    client = TestClient(create_test_app())
+    resp = client.get("/v1/notebooks/not-a-real-session/export")
+    assert resp.status_code == 404

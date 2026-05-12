@@ -161,7 +161,12 @@ def test_image_output_renders_when_inline_data_url_present() -> None:
         inline_data_url=data_url,
     )
 
-    blocks = _render_display_output(output, notebook_dir=Path("."), notebook_id="dummy")
+    blocks = _render_display_output(
+        output,
+        notebook_dir=Path("."),
+        notebook_id="dummy",
+        max_bytes=0,
+    )
     from strata.notebook.export import ImageBlock
 
     assert len(blocks) == 1
@@ -327,6 +332,57 @@ def test_export_strips_ansi_escape_codes_from_console(tmp_path: Path) -> None:
     assert "[31m" not in rendered  # raw escape leftover
 
 
+def test_export_truncates_console_over_byte_cap(tmp_path: Path) -> None:
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "print('x')\n")
+    long_stdout = "noise\n" * 5000  # ~30 KB, comfortably above 1 KB cap
+    update_cell_console_output(nb_dir, "c1", long_stdout, "")
+
+    rendered = export_notebook(nb_dir, ExportOptions(max_output_bytes=1024))
+    assert "more bytes truncated" in rendered
+    # The "noise" prefix still appears
+    assert "noise" in rendered
+
+
+def test_export_truncation_disabled_when_max_bytes_zero(tmp_path: Path) -> None:
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "print('x')\n")
+    long_stdout = "noise\n" * 5000
+    update_cell_console_output(nb_dir, "c1", long_stdout, "")
+
+    rendered = export_notebook(nb_dir, ExportOptions(max_output_bytes=0))
+    assert "more bytes truncated" not in rendered
+
+
+def test_export_swaps_oversized_image_for_size_note(tmp_path: Path) -> None:
+    """An inline image larger than the cap is replaced with a friendly note,
+    not silently dropped. Tests the renderer directly since we can't easily
+    persist a 1 MB data URL through update_cell_display_outputs (writer
+    strips it as transient)."""
+    from strata.notebook.export import _render_display_output
+    from strata.notebook.models import CellOutput
+
+    # 200 KB data URL
+    huge = "data:image/png;base64," + ("A" * 200_000)
+    output = CellOutput(content_type="image/png", inline_data_url=huge)
+
+    blocks = _render_display_output(
+        output,
+        notebook_dir=Path("."),
+        notebook_id="dummy",
+        max_bytes=100_000,  # below the 200 KB image
+    )
+
+    # No ImageBlock; one NoteBlock explaining the size issue.
+    from strata.notebook.export import ImageBlock, NoteBlock
+
+    assert all(not isinstance(b, ImageBlock) for b in blocks)
+    note = next(b for b in blocks if isinstance(b, NoteBlock))
+    assert "too large to inline" in note.text
+
+
 def test_export_pickle_placeholder_includes_type_hint(tmp_path: Path) -> None:
     nb_dir = _make_notebook(tmp_path)
     add_cell_to_notebook(nb_dir, "c1")
@@ -418,6 +474,107 @@ def test_export_renders_against_existing_example(tmp_path: Path, monkeypatch) ->
         assert "\n# " in rendered or rendered.startswith("# "), (
             f"export for {nb_dir.name} has no top-level heading"
         )
+
+
+def test_strata_export_cli_writes_markdown_to_stdout(tmp_path: Path) -> None:
+    """End-to-end: shell out to `strata export <dir>` and verify stdout."""
+    import subprocess
+
+    nb_dir = _make_notebook(tmp_path, name="cli_smoke")
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "x = 1\n")
+
+    result = subprocess.run(
+        ["strata", "export", str(nb_dir)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "## c1" in result.stdout
+    assert "```python" in result.stdout
+    assert "x = 1" in result.stdout
+
+
+def test_strata_export_cli_writes_html_to_out_path(tmp_path: Path) -> None:
+    """--to html --out <path>: produces a standalone HTML file."""
+    import subprocess
+
+    nb_dir = _make_notebook(tmp_path, name="cli_html")
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "x = 1\n")
+
+    out_path = tmp_path / "out.html"
+    result = subprocess.run(
+        [
+            "strata",
+            "export",
+            str(nb_dir),
+            "--to",
+            "html",
+            "--out",
+            str(out_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""  # nothing on stdout when --out is set
+    body = out_path.read_text(encoding="utf-8")
+    assert body.startswith("<!doctype html>")
+    assert 'class="codehilite"' in body
+
+
+def test_strata_export_cli_returns_2_on_bad_path(tmp_path: Path) -> None:
+    """Non-notebook path produces a clean error + non-zero exit."""
+    import subprocess
+
+    result = subprocess.run(
+        ["strata", "export", str(tmp_path / "does-not-exist")],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 2
+    assert "not a notebook directory" in result.stderr.lower()
+
+
+def test_strata_export_cli_include_inactive_variants_flag(tmp_path: Path) -> None:
+    """--include-inactive-variants stacks all variants in the output."""
+    import subprocess
+
+    nb_dir = _make_notebook(tmp_path, name="cli_variants")
+    add_cell_to_notebook(nb_dir, "model_a")
+    write_cell(nb_dir, "model_a", "# @variant model gpt4\npreds = 1\n")
+    add_cell_to_notebook(nb_dir, "model_b", after_cell_id="model_a")
+    write_cell(nb_dir, "model_b", "# @variant model claude\npreds = 2\n")
+    set_variant_active(nb_dir, "model", "gpt4")
+
+    # Default: only the active variant
+    result = subprocess.run(
+        ["strata", "export", str(nb_dir)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "## model_a" in result.stdout
+    assert "## model_b" not in result.stdout
+
+    # With flag: both
+    result = subprocess.run(
+        ["strata", "export", str(nb_dir), "--include-inactive-variants"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "## model_a" in result.stdout
+    assert "## model_b" in result.stdout
 
 
 def test_export_never_emits_prompt_response_marker_for_real_examples() -> None:

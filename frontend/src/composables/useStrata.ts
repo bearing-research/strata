@@ -537,6 +537,25 @@ async function addCell(
   return readJson<AddCellResponse>(resp)
 }
 
+/**
+ * Trigger a browser download of the notebook's export. Hits the
+ * server-side `GET /export?fmt=...` endpoint, which returns the
+ * rendered content with `Content-Disposition: attachment` so the
+ * browser handles the save dialog. No file is buffered in JS.
+ */
+function downloadExport(notebookId: string, format: 'markdown' | 'html'): void {
+  const url = `${STRATA_BASE}/v1/notebooks/${notebookId}/export?fmt=${format}`
+  // A hidden anchor click is the canonical "start a download" trick;
+  // window.open would briefly flash a tab, window.location would
+  // navigate away. The anchor stays invisible.
+  const link = document.createElement('a')
+  link.href = url
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
+
 async function removeCell(notebookId: string, cellId: string): Promise<unknown> {
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${notebookId}/cells/${cellId}`, {
     method: 'DELETE',
@@ -1248,6 +1267,7 @@ export function useStrata() {
     updateCellSource,
     addCell,
     removeCell,
+    downloadExport,
     reorderCells,
     listCellIterations,
     updateNotebookMounts,

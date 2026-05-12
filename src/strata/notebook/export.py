@@ -30,6 +30,8 @@ from typing import Literal
 from strata.notebook.models import CellOutput, CellState, NotebookState
 from strata.notebook.parser import parse_notebook
 
+_DEFAULT_MAX_OUTPUT_BYTES = 1_048_576  # 1 MB per individual rendered output
+
 
 @dataclass
 class ExportOptions:
@@ -38,6 +40,11 @@ class ExportOptions:
     output_format: Literal["markdown", "html"] = "markdown"
     include_inactive_variants: bool = False
     include_console: bool = True
+    # Per-output byte cap. Affects console snapshots, JSON previews,
+    # and inline image data URLs. DataFrame previews are row-capped
+    # separately (20 rows) so the byte cap rarely binds on them.
+    # Zero disables the cap.
+    max_output_bytes: int = _DEFAULT_MAX_OUTPUT_BYTES
 
 
 def export_notebook(
@@ -195,16 +202,34 @@ def _render_cell(
                 output,
                 notebook_dir=notebook_dir,
                 notebook_id=state.id,
+                max_bytes=options.max_output_bytes,
             )
         )
 
     if options.include_console:
-        blocks.extend(_render_console(cell))
+        blocks.extend(_render_console(cell, max_bytes=options.max_output_bytes))
 
     return blocks
 
 
 _ANSI_ESCAPE_RE = None  # lazy-compiled in _strip_ansi
+
+
+def _truncate_text(text: str, max_bytes: int) -> str:
+    """Truncate ``text`` to roughly ``max_bytes`` UTF-8 bytes.
+
+    Truncates on a character boundary so the result is valid UTF-8.
+    Appends a marker telling the reader how much was dropped.
+    ``max_bytes <= 0`` disables truncation.
+    """
+    if max_bytes <= 0:
+        return text
+    encoded = text.encode("utf-8", errors="replace")
+    if len(encoded) <= max_bytes:
+        return text
+    head = encoded[:max_bytes].decode("utf-8", errors="ignore")
+    omitted = len(encoded) - len(head.encode("utf-8"))
+    return f"{head}\n\n… {omitted} more bytes truncated"
 
 
 def _strip_ansi(text: str) -> str:
@@ -233,11 +258,11 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text)
 
 
-def _render_console(cell: CellState) -> list[Block]:
+def _render_console(cell: CellState, *, max_bytes: int) -> list[Block]:
     """Render persisted stdout/stderr snapshots, with ANSI codes stripped."""
     blocks: list[Block] = []
-    stdout = _strip_ansi(cell.console_stdout or "").rstrip()
-    stderr = _strip_ansi(cell.console_stderr or "").rstrip()
+    stdout = _truncate_text(_strip_ansi(cell.console_stdout or "").rstrip(), max_bytes)
+    stderr = _truncate_text(_strip_ansi(cell.console_stderr or "").rstrip(), max_bytes)
     if stdout:
         blocks.append(CodeBlock(language="text", body=stdout, title="stdout"))
     if stderr:
@@ -253,6 +278,7 @@ def _render_display_output(
     *,
     notebook_dir: Path,
     notebook_id: str,
+    max_bytes: int,
 ) -> list[Block]:
     """Per-content-type renderer for one persisted cell output.
 
@@ -270,7 +296,17 @@ def _render_display_output(
     ctype = output.content_type
 
     if ctype == "image/png" and output.inline_data_url:
-        return [ImageBlock(data_url=output.inline_data_url, alt="cell output")]
+        data_url = output.inline_data_url
+        if max_bytes > 0 and len(data_url) > max_bytes:
+            kb = len(data_url) // 1024
+            return [
+                NoteBlock(
+                    f"Image output ({kb} KB) — too large to inline at the "
+                    f"current size cap. Re-export with "
+                    f"`--max-output-bytes {len(data_url) + 1024}` to include it."
+                )
+            ]
+        return [ImageBlock(data_url=data_url, alt="cell output")]
 
     if ctype == "text/markdown" and output.markdown_text is not None:
         return [MarkdownBlock(output.markdown_text)]
@@ -293,7 +329,7 @@ def _render_display_output(
         # No columns — fall through to scalar/repr below.
 
     if ctype == "json/object":
-        body = _format_json_preview(output.preview)
+        body = _truncate_text(_format_json_preview(output.preview), max_bytes)
         return [CodeBlock(language="json", body=body, title="Output")]
 
     if ctype == "pickle/object":
@@ -311,7 +347,7 @@ def _render_display_output(
     preview = output.preview
     if preview is None:
         return []
-    body = _format_scalar_preview(preview)
+    body = _truncate_text(_format_scalar_preview(preview), max_bytes)
     return [CodeBlock(language="text", body=body, title="Output")]
 
 

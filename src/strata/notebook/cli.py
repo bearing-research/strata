@@ -410,6 +410,16 @@ def add_export_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Skip the per-cell console (stdout/stderr) snapshots",
     )
+    parser.add_argument(
+        "--max-output-bytes",
+        type=int,
+        default=None,
+        help=(
+            "Per-output byte cap; truncates console snapshots, JSON previews, "
+            "and inline image data URLs. Default 1048576 (1 MB). "
+            "Pass 0 to disable."
+        ),
+    )
 
 
 def export_main(args: argparse.Namespace) -> int:
@@ -426,11 +436,14 @@ def export_main(args: argparse.Namespace) -> int:
         print(f"error: {path} is not a notebook directory (no notebook.toml)", file=sys.stderr)
         return 2
 
-    options = ExportOptions(
-        output_format=args.output_format,
-        include_inactive_variants=bool(args.include_inactive_variants),
-        include_console=not bool(args.no_console),
-    )
+    option_kwargs: dict[str, object] = {
+        "output_format": args.output_format,
+        "include_inactive_variants": bool(args.include_inactive_variants),
+        "include_console": not bool(args.no_console),
+    }
+    if args.max_output_bytes is not None:
+        option_kwargs["max_output_bytes"] = int(args.max_output_bytes)
+    options = ExportOptions(**option_kwargs)
     rendered = export_notebook(path, options)
 
     out_path = args.output_path

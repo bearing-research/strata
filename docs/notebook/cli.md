@@ -4,6 +4,10 @@
 server or opening the UI. Useful for CI, scheduled jobs, and sanity-checking
 that a notebook still works after a dependency bump.
 
+For rendering a notebook to a shareable markdown or HTML file (without
+executing anything), see [Export](export.md) and its `strata export`
+sibling command.
+
 It reuses the same `NotebookSession` and `CellExecutor` the UI uses, so the
 execution path is identical — artifact cache hits, cascade ordering, worker
 dispatch, and mount resolution all behave the same way.
