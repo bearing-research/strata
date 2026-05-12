@@ -312,6 +312,80 @@ def test_export_markdown_cell_renders_without_cell_banner(tmp_path: Path) -> Non
     assert "**kind** markdown" not in rendered
 
 
+def test_export_sanitizes_active_html_in_markdown_cells(tmp_path: Path) -> None:
+    """Markdown cells are user-authored content; the notebook UI runs them
+    through DOMPurify, and the export must match that guarantee before the
+    body reaches python-markdown (which would otherwise pass raw HTML
+    straight through into the published page)."""
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "danger", language="markdown")
+    write_cell(
+        nb_dir,
+        "danger",
+        "## Sanitization\n\n"
+        "<script>alert('xss')</script>\n\n"
+        "<img src=\"x\" onerror=\"alert('attr')\">\n\n"
+        "<iframe src=\"//evil\"></iframe>\n\n"
+        "[click](javascript:alert(1))\n\n"
+        "[doc](data:text/html;base64,PHNjcmlwdD4=)\n",
+    )
+
+    rendered = export_notebook(nb_dir)
+
+    # Heading still survives — sanitizer must be surgical, not nuke
+    # benign markdown formatting around it.
+    assert "## Sanitization" in rendered
+
+    # All four attack vectors are neutralized: script/iframe tags
+    # escaped to entity form (display as literal text, not live HTML),
+    # on* handlers escaped, dangerous link schemes rewritten to "#".
+    # ``onerror=`` survives only inside the entity-escaped img tag.
+    assert "<script>" not in rendered
+    assert "&lt;script&gt;" in rendered
+    assert "<iframe" not in rendered
+    assert "&lt;iframe" in rendered
+    assert "<img " not in rendered
+    assert "&lt;img" in rendered
+    assert "javascript:" not in rendered
+    assert "data:text/html" not in rendered
+    assert "](#)" in rendered
+
+
+def test_export_sanitizes_active_html_in_readme(tmp_path: Path) -> None:
+    """The README intro flows through the same MarkdownBlock path and
+    must be sanitized too — otherwise an untrusted notebook's README
+    becomes an XSS vector against viewers of the exported docs."""
+    nb_dir = _make_notebook(tmp_path)
+    (nb_dir / "README.md").write_text(
+        "# Demo\n\n<script>alert('readme')</script>\n",
+        encoding="utf-8",
+    )
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "x = 1\n")
+
+    rendered = export_notebook(nb_dir)
+    assert "<script>" not in rendered
+    assert "&lt;script&gt;alert(&#x27;readme&#x27;)&lt;/script&gt;" in rendered
+
+
+def test_export_preserves_benign_inline_html(tmp_path: Path) -> None:
+    """Don't over-escape: ``<sub>``, ``<details>``, ``<sup>`` etc. are
+    common in technical writing and must still flow through unchanged."""
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "ok", language="markdown")
+    write_cell(
+        nb_dir,
+        "ok",
+        "## Notes\n\nWater is H<sub>2</sub>O.\n\n"
+        "<details><summary>more</summary>hidden text</details>\n",
+    )
+
+    rendered = export_notebook(nb_dir)
+    assert "<sub>2</sub>" in rendered
+    assert "<details>" in rendered
+    assert "<summary>more</summary>" in rendered
+
+
 def test_export_renders_readme_intro_when_present(tmp_path: Path) -> None:
     nb_dir = _make_notebook(tmp_path)
     (nb_dir / "README.md").write_text(

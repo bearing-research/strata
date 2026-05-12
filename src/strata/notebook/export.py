@@ -217,6 +217,56 @@ def _render_cell(
 
 
 _ANSI_ESCAPE_RE = None  # lazy-compiled in _strip_ansi
+_SANITIZE_RES: tuple[object, ...] | None = None  # lazy-compiled in _sanitize_markdown_body
+
+
+def _sanitize_markdown_body(body: str) -> str:
+    """Neutralize active-content HTML in user-authored markdown.
+
+    The notebook UI renders markdown through DOMPurify; this is the
+    equivalent guarantee on the export side, where the same markdown
+    is handed to python-markdown / mkdocs and would otherwise reach
+    the published page as live HTML.
+
+    Strategy: HTML-escape the dangerous tag verbatim so the reader
+    sees the literal source text (matching the in-app behavior) while
+    benign inline HTML (``<sub>``, ``<details>``, etc.) still flows
+    through. javascript: / data:text/html link targets are replaced
+    with ``#``.
+    """
+    global _SANITIZE_RES
+    if _SANITIZE_RES is None:
+        import re
+
+        flags = re.IGNORECASE | re.DOTALL
+        _SANITIZE_RES = (
+            # Whole-block dangerous tags — escape opening + contents + closer.
+            re.compile(
+                r"<\s*(script|style|iframe|object|embed)\b[^>]*>.*?<\s*/\s*\1\s*>",
+                flags,
+            ),
+            # Self-closing or unclosed dangerous tags (no body to swallow).
+            re.compile(
+                r"<\s*(script|style|iframe|object|embed|meta|link|base)\b[^>]*/?>",
+                flags,
+            ),
+            # Any tag carrying an on*= event handler.
+            re.compile(r"<[^>]*\son[a-z]+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)[^>]*>", flags),
+            # Markdown link with a javascript: or data:text/html target.
+            re.compile(
+                r"\]\(\s*(?:javascript|data\s*:\s*text/html)[^)]*\)",
+                flags,
+            ),
+        )
+
+    from html import escape
+
+    block_re, void_re, on_re, link_re = _SANITIZE_RES  # type: ignore[misc]
+    body = block_re.sub(lambda m: escape(m.group(0)), body)  # type: ignore[union-attr]
+    body = void_re.sub(lambda m: escape(m.group(0)), body)  # type: ignore[union-attr]
+    body = on_re.sub(lambda m: escape(m.group(0)), body)  # type: ignore[union-attr]
+    body = link_re.sub("](#)", body)  # type: ignore[union-attr]
+    return body
 
 
 def _truncate_text(text: str, max_bytes: int) -> str:
@@ -552,7 +602,7 @@ def _emit_markdown(blocks: list[Block]) -> str:
         if isinstance(block, HeadingBlock):
             pieces.append(f"{'#' * block.level} {block.text}")
         elif isinstance(block, MarkdownBlock):
-            pieces.append(block.body.rstrip("\n"))
+            pieces.append(_sanitize_markdown_body(block.body).rstrip("\n"))
         elif isinstance(block, CodeBlock):
             fence = "`" * _fence_length_for(block.body)
             title_suffix = f' title="{block.title}"' if block.title else ""
