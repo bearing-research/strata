@@ -66,9 +66,11 @@ def export_notebook(
     blocks: list[Block] = []
     readme = _load_readme(notebook_dir)
     if readme is not None:
+        # README already opens with its own h1; adding a "Notebook: <name>"
+        # header on top would create two competing page titles in mkdocs.
         blocks.append(MarkdownBlock(readme))
-
-    blocks.append(HeadingBlock(f"Notebook: {state.name}", level=1))
+    else:
+        blocks.append(HeadingBlock(f"Notebook: {state.name}", level=1))
 
     for cell in state.cells:
         if not options.include_inactive_variants and cell.variant_active is False:
@@ -202,11 +204,40 @@ def _render_cell(
     return blocks
 
 
+_ANSI_ESCAPE_RE = None  # lazy-compiled in _strip_ansi
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI CSI/OSC escape sequences from terminal output.
+
+    Cells using ``rich``, ``colorama``, ``click.echo(..., color=True)``
+    or progress bars emit escape sequences into stdout. They render as
+    colours in a terminal but as ``\\x1b[31m...`` noise in a markdown or
+    HTML reader. Strip them before persisting into the export so
+    console snapshots stay readable.
+    """
+    global _ANSI_ESCAPE_RE
+    if _ANSI_ESCAPE_RE is None:
+        import re
+
+        _ANSI_ESCAPE_RE = re.compile(
+            r"\x1B"  # ESC
+            r"(?:"
+            r"[@-Z\\-_]"  # 2-byte CSI introducers
+            r"|"
+            r"\[[0-?]*[ -/]*[@-~]"  # CSI ... final byte
+            r"|"
+            r"\][^\x07\x1B]*(?:\x07|\x1B\\)"  # OSC ... ST/BEL
+            r")"
+        )
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
 def _render_console(cell: CellState) -> list[Block]:
-    """Render persisted stdout/stderr snapshots."""
+    """Render persisted stdout/stderr snapshots, with ANSI codes stripped."""
     blocks: list[Block] = []
-    stdout = (cell.console_stdout or "").rstrip()
-    stderr = (cell.console_stderr or "").rstrip()
+    stdout = _strip_ansi(cell.console_stdout or "").rstrip()
+    stderr = _strip_ansi(cell.console_stderr or "").rstrip()
     if stdout:
         blocks.append(CodeBlock(language="text", body=stdout, title="stdout"))
     if stderr:
@@ -245,26 +276,33 @@ def _render_display_output(
         return [MarkdownBlock(output.markdown_text)]
 
     if ctype == "arrow/ipc":
-        rows = output.preview if isinstance(output.preview, list) else None
-        columns = output.columns or []
-        if rows and columns:
-            truncated_to = min(len(rows), _PREVIEW_ROW_LIMIT)
+        columns = list(output.columns or [])
+        if columns:
+            preview = output.preview if isinstance(output.preview, list) else []
+            normalized = _normalize_table_preview(preview, columns)
+            truncated_to = min(len(normalized), _PREVIEW_ROW_LIMIT)
             return [
                 TableBlock(
-                    columns=list(columns),
-                    rows=[dict(r) for r in rows[:truncated_to] if isinstance(r, dict)],
+                    columns=columns,
+                    rows=normalized[:truncated_to],
                     title="Output",
                     truncated_to=truncated_to,
                     total_rows=output.rows,
                 )
             ]
-        # Empty / unrenderable table — fall through to the scalar path.
+        # No columns — fall through to scalar/repr below.
 
     if ctype == "json/object":
         body = _format_json_preview(output.preview)
         return [CodeBlock(language="json", body=body, title="Output")]
 
     if ctype == "pickle/object":
+        # serializer.py stores a "<TypeName object>" hint in preview for
+        # pickled values; surface it so the reader knows what kind of
+        # opaque blob the cell produced.
+        hint = output.preview if isinstance(output.preview, str) else None
+        if hint:
+            return [NoteBlock(f"Pickled output ({hint}) — not rendered in export.")]
         return [NoteBlock("Pickled output — not rendered in export.")]
 
     # Fallback: render the preview as text. Covers scalars (json content
@@ -285,6 +323,36 @@ def _format_json_preview(value: object) -> str:
         return json.dumps(value, indent=2, default=str, sort_keys=False)
     except (TypeError, ValueError):
         return repr(value)
+
+
+def _normalize_table_preview(
+    preview: list,
+    columns: list[str],
+) -> list[dict[str, object]]:
+    """Coerce serialized table-preview rows into dict-keyed rows.
+
+    The serializer at ``serializer.py`` emits rows as positional lists
+    (one entry per column). Some callers — and our own tests — emit
+    them as dicts already. Accept either shape so the table emitter
+    always works against the same dict-of-cells representation.
+
+    Rows shorter than ``columns`` get missing cells coerced to None;
+    rows longer are truncated. Non-list / non-dict entries are
+    skipped silently.
+    """
+    out: list[dict[str, object]] = []
+    for row in preview:
+        if isinstance(row, dict):
+            out.append(dict(row))
+        elif isinstance(row, (list, tuple)):
+            padded = list(row[: len(columns)])
+            while len(padded) < len(columns):
+                padded.append(None)
+            out.append(dict(zip(columns, padded)))
+        # Anything else (a stray scalar that snuck into the preview
+        # list) is silently dropped — better to render a small table
+        # than to error during export.
+    return out
 
 
 def _format_scalar_preview(value: object) -> str:
@@ -446,9 +514,10 @@ def _emit_markdown(blocks: list[Block]) -> str:
         elif isinstance(block, MarkdownBlock):
             pieces.append(block.body.rstrip("\n"))
         elif isinstance(block, CodeBlock):
+            fence = "`" * _fence_length_for(block.body)
             title_suffix = f' title="{block.title}"' if block.title else ""
             pieces.append(
-                f"```{block.language}{title_suffix}\n{block.body.rstrip()}\n```",
+                f"{fence}{block.language}{title_suffix}\n{block.body.rstrip()}\n{fence}",
             )
         elif isinstance(block, ChipsBlock):
             chip_text = "  ·  ".join(f"**{k}** {v}" for k, v in block.items)
@@ -482,6 +551,23 @@ def _emit_markdown_table(block: TableBlock) -> str:
 
     title_line = f"**{block.title}**\n\n" if block.title else ""
     return title_line + "\n".join([header, separator, *body_lines]) + suffix
+
+
+def _fence_length_for(body: str) -> int:
+    """Return the minimum number of backticks needed to fence ``body``.
+
+    CommonMark requires the closing fence to be at least as long as the
+    opening one. If the body contains a run of N backticks, the fence
+    must be longer than N or it'll close early and corrupt the markdown.
+    Prompt cells routinely embed fenced examples inside their templates,
+    so this is a real concern, not a theoretical one.
+    """
+    import re
+
+    longest = 0
+    for match in re.finditer(r"`+", body):
+        longest = max(longest, len(match.group()))
+    return max(3, longest + 1)
 
 
 def _format_table_cell(value: object) -> str:

@@ -64,6 +64,86 @@ def test_export_renders_arrow_table_preview_as_markdown_table(tmp_path: Path) ->
     assert "| Carol | 92 |" in rendered
 
 
+def test_export_renders_arrow_table_with_positional_rows(tmp_path: Path) -> None:
+    """The serializer emits preview rows as positional lists (one entry per
+    column), not dicts. This is the *real* on-disk shape — the dict-row
+    test above mirrors what a hand-written test fixture might look like.
+    """
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "df = pd.DataFrame(...)\n")
+
+    update_cell_display_outputs(
+        nb_dir,
+        "c1",
+        [
+            {
+                "content_type": "arrow/ipc",
+                "rows": 3,
+                "columns": ["name", "score"],
+                "preview": [
+                    ["Alice", 95],
+                    ["Bob", 87],
+                    ["Carol", 92],
+                ],
+                "bytes": 0,
+            }
+        ],
+    )
+
+    rendered = export_notebook(nb_dir)
+    assert "| name | score |" in rendered
+    assert "| Alice | 95 |" in rendered
+    assert "| Carol | 92 |" in rendered
+
+
+def test_export_renders_empty_table_with_header(tmp_path: Path) -> None:
+    """A table with columns but no preview rows still emits the header row,
+    so the reader can see what columns the cell produces."""
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "df = pd.DataFrame(columns=['name', 'score'])\n")
+
+    update_cell_display_outputs(
+        nb_dir,
+        "c1",
+        [
+            {
+                "content_type": "arrow/ipc",
+                "rows": 0,
+                "columns": ["name", "score"],
+                "preview": [],
+                "bytes": 0,
+            }
+        ],
+    )
+
+    rendered = export_notebook(nb_dir)
+    assert "| name | score |" in rendered  # header still present
+    assert "| --- | --- |" in rendered  # separator still present
+
+
+def test_export_code_fence_grows_when_body_contains_triple_backticks(
+    tmp_path: Path,
+) -> None:
+    """Cells that embed fenced markdown examples (typical for prompt cells
+    or library cells documenting their interface) would corrupt the export
+    if we always used three backticks. The fence has to be longer than the
+    longest backtick run in the body.
+    """
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "c1")
+    source = '"""Example doc:\n\n```python\nx = 1\n```\n"""\nx = 1\n'
+    write_cell(nb_dir, "c1", source)
+
+    rendered = export_notebook(nb_dir)
+    # Outer fence is four backticks; inner ```python survives intact.
+    assert "````python" in rendered
+    assert "```python\nx = 1\n```" in rendered  # inner fence untouched
+    # And the outer fence properly closes
+    assert rendered.rstrip().endswith("````\n") or "\n````" in rendered
+
+
 def test_image_output_renders_when_inline_data_url_present() -> None:
     """Direct renderer test — bypasses the writer's transient-field strip.
 
@@ -219,6 +299,54 @@ def test_export_renders_readme_intro_when_present(tmp_path: Path) -> None:
     rendered = export_notebook(nb_dir)
     assert "# My Demo Notebook" in rendered
     assert "Walks through the cool feature." in rendered
+    # Don't add a duplicate H1 — README already owns the page title.
+    assert "# Notebook:" not in rendered
+
+
+def test_export_falls_back_to_notebook_heading_when_no_readme(tmp_path: Path) -> None:
+    """Without a README, the export needs its own H1 so the page has a title."""
+    nb_dir = _make_notebook(tmp_path, name="HeadlessNB")
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "x = 1\n")
+
+    rendered = export_notebook(nb_dir)
+    assert "# Notebook: HeadlessNB" in rendered
+
+
+def test_export_strips_ansi_escape_codes_from_console(tmp_path: Path) -> None:
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "print('hi')\n")
+    # ANSI-colored "RED" string, the kind rich/colorama emits
+    ansi_stdout = "\x1b[31mRED\x1b[0m output\n"
+    update_cell_console_output(nb_dir, "c1", ansi_stdout, "")
+
+    rendered = export_notebook(nb_dir)
+    assert "RED output" in rendered
+    assert "\x1b[" not in rendered
+    assert "[31m" not in rendered  # raw escape leftover
+
+
+def test_export_pickle_placeholder_includes_type_hint(tmp_path: Path) -> None:
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "obj = MyThing()\n")
+
+    update_cell_display_outputs(
+        nb_dir,
+        "c1",
+        [
+            {
+                "content_type": "pickle/object",
+                "preview": "<MyThing object>",
+                "bytes": 0,
+            }
+        ],
+    )
+
+    rendered = export_notebook(nb_dir)
+    assert "<MyThing object>" in rendered
+    assert "not rendered" in rendered.lower()
 
 
 def test_export_html_format_returns_html_envelope(tmp_path: Path) -> None:
@@ -284,7 +412,12 @@ def test_export_renders_against_existing_example(tmp_path: Path, monkeypatch) ->
     for nb_dir in notebooks:
         rendered = export_notebook(nb_dir)
         assert rendered.strip(), f"export produced empty output for {nb_dir.name}"
-        assert "# Notebook:" in rendered or nb_dir.name in rendered.lower()
+        # Every export carries at least one heading — either from the
+        # README's h1 or from the fallback "Notebook: <name>" we emit
+        # when there's no README.
+        assert "\n# " in rendered or rendered.startswith("# "), (
+            f"export for {nb_dir.name} has no top-level heading"
+        )
 
 
 def test_export_never_emits_prompt_response_marker_for_real_examples() -> None:
