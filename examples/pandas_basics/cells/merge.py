@@ -1,4 +1,4 @@
-# Merge with region metadata
+# @name Merge with region metadata
 region_info = pd.DataFrame(
     {
         "region": ["North", "South", "East", "West"],

@@ -148,26 +148,20 @@ OS's `prefers-color-scheme` and flips automatically when it changes.
 
 ## 10. Try an Example
 
-Example notebooks must live under the configured notebook storage root
-(`STRATA_NOTEBOOK_STORAGE_DIR`, default `/tmp/strata-notebooks`).
-
-Copy one of the bundled examples there first:
+Point the server's storage root at the repo's `examples/` directory
+and every bundled example appears on the home page:
 
 ```bash
-cp -R examples/iris_classification /tmp/strata-notebooks/
-```
-
-Then use **Open Existing** and open:
-
-```text
-/tmp/strata-notebooks/iris_classification
+STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples \
+STRATA_DEPLOYMENT_MODE=personal \
+  uv run strata-server
 ```
 
 See the [Examples catalog](../notebook/examples.md) for the full list,
 grouped by which feature each one demonstrates (variant cells, prompt
 cells, SQL cells, loop cells, library cells, mounts, AI integration).
 Every example is also rendered into the docs site so you can read the
-cells before deciding which to copy.
+cells before deciding which to open.
 
 ## Cell Operations
 

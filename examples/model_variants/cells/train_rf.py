@@ -1,4 +1,5 @@
 # @variant classifier rf
+# @name Random forest
 # Random forest — more capacity, slower to train.
 from sklearn.ensemble import RandomForestClassifier
 

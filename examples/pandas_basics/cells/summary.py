@@ -1,4 +1,5 @@
-# Final summary: top product by revenue in each region
+# @name Top product per region
+# Top product by revenue in each region.
 top_products = (
     sales.groupby(["region", "product"])["revenue"]
     .sum()

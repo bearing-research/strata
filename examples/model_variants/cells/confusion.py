@@ -1,4 +1,5 @@
-# Confusion-matrix heatmap for the active classifier
+# @name Confusion matrix
+# Confusion-matrix heatmap for the active classifier.
 import matplotlib
 
 matplotlib.use("Agg")

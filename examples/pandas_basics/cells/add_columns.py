@@ -1,4 +1,4 @@
-# Add computed columns
+# @name Add computed columns
 sales["revenue"] = sales["units"] * sales["price"]
 sales["month"] = sales["date"].dt.to_period("M").astype(str)
 

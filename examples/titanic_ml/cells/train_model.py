@@ -1,4 +1,5 @@
-# Train multiple classifiers
+# @name Train classifiers
+# Train logistic regression, random forest, and gradient boosting; keep all three.
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 

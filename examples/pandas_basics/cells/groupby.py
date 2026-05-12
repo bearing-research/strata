@@ -1,4 +1,4 @@
-# Revenue by region and product
+# @name Revenue by region and product
 region_product = (
     sales.groupby(["region", "product"])["revenue"]
     .agg(["sum", "mean", "count"])

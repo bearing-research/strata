@@ -1,4 +1,5 @@
-# Confusion matrix heatmap
+# @name Confusion matrix
+# Confusion matrix heatmap.
 import matplotlib
 import seaborn as sns
 from sklearn.metrics import confusion_matrix

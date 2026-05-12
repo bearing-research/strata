@@ -1,4 +1,5 @@
-# Train a Random Forest classifier
+# @name Train random forest classifier
+# Train a Random Forest classifier.
 from sklearn.ensemble import RandomForestClassifier
 
 model = RandomForestClassifier(n_estimators=100, random_state=42)

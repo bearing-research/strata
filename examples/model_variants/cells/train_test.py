@@ -1,4 +1,5 @@
-# 80/20 train-test split, stratified on species
+# @name Train / test split
+# 80/20 train-test split, stratified on species.
 from sklearn.model_selection import train_test_split
 
 X = df[feature_names]

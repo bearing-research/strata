@@ -1,4 +1,5 @@
-# Split into training and test sets
+# @name Train / test split
+# Split into training and test sets.
 from sklearn.model_selection import train_test_split
 
 X = df[feature_names]

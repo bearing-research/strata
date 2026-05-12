@@ -1,3 +1,4 @@
+# @name Monthly weather summary
 monthly = (
     weather.assign(month=weather["DATE"].dt.to_period("M").astype(str))
     .groupby("month", as_index=False)

@@ -1,4 +1,5 @@
-# Detailed evaluation of the best model
+# @name Evaluate best model
+# Detailed evaluation of the best model.
 from sklearn.metrics import classification_report
 
 best_name = max(results, key=lambda k: results[k]["test"])

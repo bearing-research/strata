@@ -1,4 +1,4 @@
-# Monthly revenue pivot table
+# @name Monthly revenue pivot
 monthly_pivot = sales.pivot_table(
     values="revenue",
     index="month",

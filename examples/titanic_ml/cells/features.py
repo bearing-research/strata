@@ -1,4 +1,4 @@
-# Feature engineering
+# @name Feature engineering
 from sklearn.model_selection import train_test_split
 
 feature_cols = ["pclass", "sex", "age", "sibsp", "parch", "fare"]

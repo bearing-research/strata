@@ -1,4 +1,5 @@
 # @variant classifier gbm
+# @name Gradient boosting
 # Gradient boosting — sequential weak learners.
 from sklearn.ensemble import GradientBoostingClassifier
 

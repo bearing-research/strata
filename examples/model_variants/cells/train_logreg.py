@@ -1,4 +1,5 @@
 # @variant classifier logreg
+# @name Logistic regression
 # Logistic regression baseline.
 from sklearn.linear_model import LogisticRegression
 

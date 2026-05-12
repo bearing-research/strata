@@ -5,13 +5,21 @@ Strata capability. Each example is also rendered into the docs site
 automatically — click through to read the cell sources and any cached
 outputs without cloning the repo.
 
-To run an example locally, copy it under your notebook storage root
-(`STRATA_NOTEBOOK_STORAGE_DIR`, default `/tmp/strata-notebooks`) and
-open it from the Strata home page:
+To run examples locally, point the server's storage root at the
+repo's `examples/` directory and start in personal mode:
 
 ```bash
-cp -R examples/iris_classification /tmp/strata-notebooks/
+STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples \
+STRATA_DEPLOYMENT_MODE=personal \
+  uv run strata-server
 ```
+
+Every example then appears on the Strata home page. No copying
+required — open the notebook, click Run, edit, watch the cascade.
+
+(If you'd rather keep examples separate from your own work, copy
+the directory you want under your existing storage root instead:
+`cp -R examples/iris_classification /tmp/strata-notebooks/`.)
 
 ## Walkthroughs — start here
 

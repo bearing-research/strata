@@ -1,4 +1,5 @@
-# Load the Iris dataset into a pandas DataFrame
+# @name Load iris dataset
+# Load the Iris dataset into a pandas DataFrame.
 import pandas as pd
 from sklearn.datasets import load_iris
 

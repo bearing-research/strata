@@ -1,4 +1,5 @@
-# Pairwise scatter plot colored by species
+# @name Pairwise scatter plot
+# Pairwise scatter plot colored by species.
 import matplotlib
 import seaborn as sns
 
