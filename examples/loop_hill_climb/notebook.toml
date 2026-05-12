@@ -5,6 +5,7 @@ updated_at = 2026-04-19 00:00:00+00:00
 cells = [
     { id = "helpers", file = "helpers.py", language = "python", order = 0 },
     { id = "seed", file = "seed.py", language = "python", order = 1 },
+    { id = "loop-intro", file = "loop_intro.md", language = "markdown", order = 1.5 },
     { id = "evolve", file = "evolve.py", language = "python", order = 2 },
     { id = "summary", file = "summary.py", language = "python", order = 3 },
 ]

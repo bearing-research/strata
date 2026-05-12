@@ -1,15 +1,17 @@
 notebook_id = "news-alpha-trader-001"
 name = "News Alpha Trader"
 created_at = 2026-04-22 00:00:00+00:00
-updated_at = "2026-04-24T05:25:21.094539+00:00"
+updated_at = "2026-05-12T00:00:00+00:00"
 cells = [
     { id = "disclaimer", file = "disclaimer.md", language = "markdown", order = 0 },
     { id = "helpers", file = "helpers.py", language = "python", order = 1 },
     { id = "fetch_news", file = "fetch_news.py", language = "python", order = 2 },
+    { id = "analysis-intro", file = "analysis_intro.md", language = "markdown", order = 2.5 },
     { id = "extract_signals", file = "extract_signals.py", language = "prompt", order = 3 },
     { id = "persist_signals", file = "persist_signals.py", language = "python", order = 4 },
     { id = "fetch_prices", file = "fetch_prices.py", language = "python", order = 5 },
     { id = "risk_check", file = "risk_check.py", language = "python", order = 6 },
+    { id = "execution-intro", file = "execution_intro.md", language = "markdown", order = 6.5 },
     { id = "place_orders", file = "place_orders.py", language = "python", order = 7 },
     { id = "reconcile", file = "reconcile.py", language = "python", order = 8 },
     { id = "costs", file = "costs.py", language = "python", order = 9 },
