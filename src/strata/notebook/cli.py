@@ -472,6 +472,14 @@ def import_main(args: argparse.Namespace) -> int:
         f"  cells: {result.code_cells} code, {result.markdown_cells} markdown"
         f"  ({result.suppressed_outputs} with ; display-suppression)"
     )
+    if result.translated_magics:
+        print(f"  magics translated: {len(result.translated_magics)}")
+    if result.dropped_magics:
+        print(f"  magics dropped: {len(result.dropped_magics)} — see import for details")
+    if result.dropped_shells:
+        print(f"  shell commands dropped: {len(result.dropped_shells)}")
+    if result.captured_deps:
+        print(f"  dependencies captured: {len(result.captured_deps)} → pyproject.toml")
     if result.skipped_cells:
         kinds = ", ".join(sorted(set(result.skipped_cells)))
         print(f"  skipped {len(result.skipped_cells)} cell(s) of unsupported type(s): {kinds}")

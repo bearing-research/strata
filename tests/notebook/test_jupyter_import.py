@@ -1,8 +1,12 @@
 """Tests for ``strata.notebook.jupyter_import``.
 
 PR 1 coverage: parse + convert markdown / code cells, ``;``-suppression
-handling, source-order preservation. Magic translation, shell-command
-extraction, and dep capture get their own test file in PR 2.
+handling, source-order preservation.
+
+PR 2 coverage: line-magic and cell-magic translation per the table,
+``!shell`` handling, dependency capture from sibling
+``requirements.txt`` / ``pyproject.toml`` and from ``pip install``
+lines extracted from cells.
 """
 
 from __future__ import annotations
@@ -238,3 +242,275 @@ def test_strata_import_cli_rejects_missing_file(tmp_path: Path) -> None:
         check=False,
     )
     assert result.returncode == 2
+
+
+# ---------------------------------------------------------------------------
+# Magic translation (PR 2)
+
+
+def test_drops_matplotlib_inline_magic(tmp_path: Path) -> None:
+    """%matplotlib inline is decorative in Strata — figures are
+    captured via the display protocol regardless."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("%matplotlib inline\nimport matplotlib.pyplot as plt\n")],
+    )
+    result = import_notebook(ipynb)
+    assert "%matplotlib" in " ".join(result.translated_magics)
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "%matplotlib" not in src
+    assert "import matplotlib.pyplot as plt" in src
+
+
+def test_drops_load_ext_and_autoreload(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("%load_ext autoreload\n%autoreload 2\nx = 1\n")],
+    )
+    result = import_notebook(ipynb)
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "%load_ext" not in src
+    assert "%autoreload" not in src
+    assert "x = 1" in src
+    assert len(result.translated_magics) >= 2
+
+
+def test_translates_env_magic_to_cell_annotation(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(tmp_path, [_code_cell("%env DEBUG=1\nx = 1\n")])
+    result = import_notebook(ipynb)
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "# @env DEBUG=1" in src
+    assert "%env" not in src
+
+
+def test_strips_line_timeit_keeps_body(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(tmp_path, [_code_cell("%timeit sum(range(100))\n")])
+    result = import_notebook(ipynb)
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "sum(range(100))" in src
+    assert "%timeit" not in src
+
+
+def test_translates_cell_magic_bash_to_subprocess(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("%%bash\necho hello\nls -la\n")],
+    )
+    result = import_notebook(ipynb)
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "subprocess" in src
+    assert "shell=True" in src
+    assert "echo hello" in src
+    assert "%%bash" not in src
+
+
+def test_translates_cell_magic_writefile(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("%%writefile output.txt\nline 1\nline 2\n")],
+    )
+    result = import_notebook(ipynb)
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "write_text" in src
+    assert "output.txt" in src
+    assert "line 1" in src
+
+
+def test_cell_magic_timeit_recurses_on_body(tmp_path: Path) -> None:
+    """%%timeit\\n<body> → just <body>. The body itself goes through
+    the regular line-magic pass so a `%env` inside it would also
+    translate."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("%%timeit -n 1\nx = sum(range(100))\nx\n")],
+    )
+    result = import_notebook(ipynb)
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "%%timeit" not in src
+    assert "x = sum(range(100))" in src
+    # bare `x` still pass-throughs (not display-wrapped)
+    assert src.rstrip().endswith("x")
+
+
+def test_drops_javascript_and_html_cell_magics(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("%%javascript\nalert('hi')\n"),
+            _code_cell("%%html\n<b>bold</b>\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    assert len(result.dropped_magics) == 2
+    nb = parse_notebook(result.notebook_dir)
+    assert "alert" not in nb.cells[0].source
+    assert "<b>bold</b>" not in nb.cells[1].source
+
+
+def test_unsupported_line_magic_dropped_with_comment(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(tmp_path, [_code_cell("%who\nx = 1\n")])
+    result = import_notebook(ipynb)
+    assert "%who" in " ".join(result.dropped_magics)
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "# strata: unsupported magic '%who' dropped" in src
+    assert "%who" not in src.replace("'%who'", "")
+    assert "x = 1" in src
+
+
+# ---------------------------------------------------------------------------
+# Shell commands + pip-install dep capture
+
+
+def test_pip_install_magic_captures_packages(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("%pip install requests pandas==2.0\nimport requests\n")],
+    )
+    result = import_notebook(ipynb)
+    assert "requests" in result.captured_deps
+    assert "pandas==2.0" in result.captured_deps
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "%pip install" not in src
+    assert "import requests" in src
+
+
+def test_pip_install_shell_form_captures_packages(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("!pip install httpx\nimport httpx\n")],
+    )
+    result = import_notebook(ipynb)
+    assert "httpx" in result.captured_deps
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "!pip install" not in src
+    assert "import httpx" in src
+
+
+def test_pip_install_does_not_capture_subcommand_word(tmp_path: Path) -> None:
+    """Regression: ``%pip install httpx`` must capture ``httpx``, NOT
+    the literal subcommand word ``install``. Caught by end-to-end run
+    on a fixture with a single ``%pip install`` line."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell("%pip install httpx\n")])
+    result = import_notebook(ipynb)
+    assert result.captured_deps == ["httpx"]
+    assert "install" not in result.captured_deps
+
+
+def test_pip_list_and_uninstall_are_dropped(tmp_path: Path) -> None:
+    """Only ``%pip install`` captures deps; other subcommands surface
+    as dropped magics rather than getting their args treated as packages."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("%pip list\n%pip uninstall pandas -y\n")],
+    )
+    result = import_notebook(ipynb)
+    assert result.captured_deps == []
+    assert any("list" in m for m in result.dropped_magics)
+    assert any("uninstall" in m for m in result.dropped_magics)
+
+
+def test_pip_install_strips_flags(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("!pip install -U --quiet requests scikit-learn>=1.0\n")],
+    )
+    result = import_notebook(ipynb)
+    assert result.captured_deps == ["requests", "scikit-learn>=1.0"]
+
+
+def test_pip_install_skips_flag_value_pairs(tmp_path: Path) -> None:
+    """``-r req.txt`` consumes its following arg, so the next token
+    is NOT a package name."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("!pip install -r requirements-extra.txt requests\n")],
+    )
+    result = import_notebook(ipynb)
+    # ``requirements-extra.txt`` got consumed by -r, ``requests`` stays
+    assert result.captured_deps == ["requests"]
+
+
+def test_other_shell_commands_dropped_with_comment(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("!ls /data\n!apt-get install foo\nimport sys\n")],
+    )
+    result = import_notebook(ipynb)
+    assert len(result.dropped_shells) == 2
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "# strata: shell command dropped: !ls" in src
+    assert "import sys" in src
+
+
+# ---------------------------------------------------------------------------
+# Sibling-file dep capture
+
+
+def test_captures_deps_from_sibling_requirements_txt(tmp_path: Path) -> None:
+    (tmp_path / "requirements.txt").write_text(
+        "# pinned for repro\nrequests==2.31.0\npandas\n-e ./local\n",
+        encoding="utf-8",
+    )
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
+
+    result = import_notebook(ipynb)
+    assert "requests==2.31.0" in result.captured_deps
+    assert "pandas" in result.captured_deps
+    # -e ./local is editable install, skipped
+    assert "-e ./local" not in result.captured_deps
+
+    # Deps land in the new notebook's pyproject.toml so first `uv sync`
+    # picks them up. We don't run `uv add` ourselves.
+    pyproject = (result.notebook_dir / "pyproject.toml").read_text()
+    assert "requests==2.31.0" in pyproject
+    assert "pandas" in pyproject
+
+
+def test_captures_deps_from_sibling_pyproject_toml(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\nversion = "0"\n'
+        'dependencies = ["scikit-learn", "matplotlib>=3.8"]\n',
+        encoding="utf-8",
+    )
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
+
+    result = import_notebook(ipynb)
+    assert "scikit-learn" in result.captured_deps
+    assert "matplotlib>=3.8" in result.captured_deps
+
+
+def test_deduplicates_deps_across_sources(tmp_path: Path) -> None:
+    (tmp_path / "requirements.txt").write_text("requests\n", encoding="utf-8")
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("!pip install requests pandas\n")],
+    )
+    result = import_notebook(ipynb)
+    assert result.captured_deps.count("requests") == 1
+    assert "pandas" in result.captured_deps
+
+
+def test_suppression_still_works_after_magic_translation(tmp_path: Path) -> None:
+    """A magic above a ``;``-suppressed expression shouldn't break
+    the suppression rewrite."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("%matplotlib inline\nimport pandas as pd\ndf = pd.DataFrame()\ndf;\n")],
+    )
+    result = import_notebook(ipynb)
+    assert result.suppressed_outputs == 1
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    assert "%matplotlib" not in src
+    assert src.rstrip().endswith("pass")
