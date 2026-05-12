@@ -3,6 +3,7 @@
 Subcommands:
     run     Execute a notebook headlessly (see :mod:`strata.notebook.cli`)
     export  Render a notebook to markdown or HTML for sharing
+    import  Convert a Jupyter .ipynb file into a Strata notebook directory
 
 The existing ``strata-server`` script and ``python -m strata`` entry
 points still start the server; they predate this CLI and stay as-is
@@ -14,7 +15,13 @@ from __future__ import annotations
 import argparse
 import sys
 
-from strata.notebook.cli import add_export_arguments, add_run_arguments, export_main
+from strata.notebook.cli import (
+    add_export_arguments,
+    add_import_arguments,
+    add_run_arguments,
+    export_main,
+    import_main,
+)
 from strata.notebook.cli import run_main as _run_main_direct
 
 
@@ -45,6 +52,20 @@ def _build_parser() -> argparse.ArgumentParser:
     add_export_arguments(export_parser)
     export_parser.set_defaults(func=_dispatch_export)
 
+    import_parser = subparsers.add_parser(
+        "import",
+        help="Convert a Jupyter .ipynb file into a Strata notebook directory",
+        description=(
+            "Parse a Jupyter notebook and produce an equivalent Strata "
+            "notebook directory. Cells are converted in source order; "
+            "Jupyter's trailing-';' display-suppression convention is "
+            "preserved. Magics, shell commands, and dependency capture "
+            "are not yet implemented."
+        ),
+    )
+    add_import_arguments(import_parser)
+    import_parser.set_defaults(func=_dispatch_import)
+
     return parser
 
 
@@ -60,6 +81,10 @@ def _dispatch_run(args: argparse.Namespace) -> int:
 
 def _dispatch_export(args: argparse.Namespace) -> int:
     return export_main(args)
+
+
+def _dispatch_import(args: argparse.Namespace) -> int:
+    return import_main(args)
 
 
 def main(argv: list[str] | None = None) -> int:

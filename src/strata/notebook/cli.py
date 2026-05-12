@@ -422,6 +422,64 @@ def add_export_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_import_arguments(parser: argparse.ArgumentParser) -> None:
+    """Attach ``import`` subcommand arguments to an existing parser."""
+    parser.add_argument(
+        "path",
+        help="Path to a Jupyter .ipynb file",
+    )
+    parser.add_argument(
+        "--out",
+        dest="output_path",
+        default=None,
+        help=(
+            "Target notebook directory. Defaults to a sibling directory "
+            "named after the .ipynb file stem."
+        ),
+    )
+
+
+def import_main(args: argparse.Namespace) -> int:
+    """Entry point for ``strata import``.
+
+    Loads a Jupyter ``.ipynb`` file, converts cells, and writes a
+    Strata notebook directory ready to be opened with the server or
+    executed with ``strata run``.
+    """
+    from strata.notebook.jupyter_import import import_notebook
+
+    path = Path(args.path)
+    if not path.is_file():
+        print(f"error: {path} is not a file", file=sys.stderr)
+        return 2
+    if path.suffix != ".ipynb":
+        print(
+            f"warning: {path} does not have .ipynb extension; trying to parse anyway",
+            file=sys.stderr,
+        )
+
+    try:
+        result = import_notebook(path, out_dir=args.output_path)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Imported {path} → {result.notebook_dir}")
+    print(
+        f"  cells: {result.code_cells} code, {result.markdown_cells} markdown"
+        f"  ({result.suppressed_outputs} with ; display-suppression)"
+    )
+    if result.skipped_cells:
+        kinds = ", ".join(sorted(set(result.skipped_cells)))
+        print(f"  skipped {len(result.skipped_cells)} cell(s) of unsupported type(s): {kinds}")
+    for warning in result.warnings:
+        print(f"  warning: {warning}")
+    return 0
+
+
 def export_main(args: argparse.Namespace) -> int:
     """Entry point for ``strata export``.
 
