@@ -163,20 +163,11 @@ Then use **Open Existing** and open:
 /tmp/strata-notebooks/iris_classification
 ```
 
-Other bundled examples:
-
-| Directory                      | What it shows                                           |
-| ------------------------------ | ------------------------------------------------------- |
-| `examples/iris_classification` | Basic ML workflow with sklearn                          |
-| `examples/pandas_basics`       | DataFrame manipulation and plotting                     |
-| `examples/titanic_ml`          | End-to-end classifier                                   |
-| `examples/arxiv_classifier`    | AI-powered paper classification (prompt cells)          |
-| `examples/review_triage`       | Structured-output prompt cells with `@output_schema`    |
-| `examples/loop_hill_climb`     | `@loop` cell with carry state and termination predicate |
-| `examples/news_alpha_trader`   | Secret manager, AI pricing lookup, multi-cell DAG       |
-| `examples/s3_mount`            | `@mount` annotations for S3 / file access               |
-
-See the `examples/` directory in the repo for the full list.
+See the [Examples catalog](../notebook/examples.md) for the full list,
+grouped by which feature each one demonstrates (variant cells, prompt
+cells, SQL cells, loop cells, library cells, mounts, AI integration).
+Every example is also rendered into the docs site so you can read the
+cells before deciding which to copy.
 
 ## Cell Operations
 

@@ -53,12 +53,16 @@ markdown_extensions:
 plugins:
   - search
 
+hooks:
+  - docs_hooks/export_examples.py
+
 nav:
   - Home: index.md
   - Notebook:
     - Quickstart: getting-started/notebook.md
     - Concepts: notebook/concepts.md
     - vs Jupyter, Marimo, Pluto: notebook/comparison.md
+    - Examples: notebook/examples.md
     - Cell Types: notebook/cells.md
     - Cell Annotations: notebook/annotations.md
     - Distributed Workers: notebook/workers.md

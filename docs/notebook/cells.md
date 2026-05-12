@@ -124,7 +124,7 @@ The synthetic module is built from one cell's source only — no transitive comp
 
 One concession: annotations that reference names outside the slice would normally block, but adding `from __future__ import annotations` relaxes this. PEP 563 stringifies annotations and the free-variable check drops them, so cross-cell type hints "just work" with the future import.
 
-Walked through end-to-end in the [`library_cells`](../../examples/library_cells) example notebook.
+Walked through end-to-end in the [`library_cells`](../examples/library_cells.md) example notebook.
 
 ### Mutation warnings
 
@@ -492,7 +492,7 @@ SELECT category, COUNT(*) FROM products GROUP BY category
 
 ### Worked example
 
-The [`sql_orders_report`](../../examples/sql_orders_report) example notebook walks through all of this end-to-end: a SQL `seed` cell, a Python `threshold` cell, two parameterized SQL queries, and a Python report cell — five cells, two languages, with both `fingerprint` and `forever` cache policies side by side.
+The [`sql_orders_report`](../examples/sql_orders_report.md) example notebook walks through all of this end-to-end: a SQL `seed` cell, a Python `threshold` cell, two parameterized SQL queries, and a Python report cell — five cells, two languages, with both `fingerprint` and `forever` cache policies side by side.
 
 ### SQL-cell annotations
 

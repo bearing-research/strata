@@ -1,7 +1,8 @@
 """Top-level ``strata`` command dispatcher.
 
 Subcommands:
-    run    Execute a notebook headlessly (see :mod:`strata.notebook.cli`)
+    run     Execute a notebook headlessly (see :mod:`strata.notebook.cli`)
+    export  Render a notebook to markdown or HTML for sharing
 
 The existing ``strata-server`` script and ``python -m strata`` entry
 points still start the server; they predate this CLI and stay as-is
@@ -13,7 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from strata.notebook.cli import add_run_arguments
+from strata.notebook.cli import add_export_arguments, add_run_arguments, export_main
 from strata.notebook.cli import run_main as _run_main_direct
 
 
@@ -32,6 +33,18 @@ def _build_parser() -> argparse.ArgumentParser:
     add_run_arguments(run_parser)
     run_parser.set_defaults(func=_dispatch_run)
 
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Render a notebook to markdown or HTML",
+        description=(
+            "Render a Strata notebook directory to a single shareable file. "
+            "Source cells, cached display outputs, and console snapshots are "
+            "included; prompt-cell responses are intentionally excluded."
+        ),
+    )
+    add_export_arguments(export_parser)
+    export_parser.set_defaults(func=_dispatch_export)
+
     return parser
 
 
@@ -43,6 +56,10 @@ def _dispatch_run(args: argparse.Namespace) -> int:
     from strata.notebook.cli import _run_async
 
     return asyncio.run(_run_async(args))
+
+
+def _dispatch_export(args: argparse.Namespace) -> int:
+    return export_main(args)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -379,3 +379,63 @@ def run_main(argv: list[str] | None = None) -> int:
     add_run_arguments(parser)
     args = parser.parse_args(argv)
     return asyncio.run(_run_async(args))
+
+
+def add_export_arguments(parser: argparse.ArgumentParser) -> None:
+    """Attach ``export`` subcommand arguments to an existing parser."""
+    parser.add_argument(
+        "path",
+        help="Path to the notebook directory (containing notebook.toml)",
+    )
+    parser.add_argument(
+        "--to",
+        dest="output_format",
+        choices=["markdown", "html"],
+        default="markdown",
+        help="Output format (default: markdown)",
+    )
+    parser.add_argument(
+        "--out",
+        dest="output_path",
+        default=None,
+        help="Output file path (default: stdout)",
+    )
+    parser.add_argument(
+        "--include-inactive-variants",
+        action="store_true",
+        help="Include inactive variants of every variant group in the output",
+    )
+    parser.add_argument(
+        "--no-console",
+        action="store_true",
+        help="Skip the per-cell console (stdout/stderr) snapshots",
+    )
+
+
+def export_main(args: argparse.Namespace) -> int:
+    """Entry point for ``strata export``.
+
+    Loads the notebook directory, renders it via
+    :func:`strata.notebook.export.export_notebook`, and writes the
+    result to stdout (default) or to the ``--out`` path.
+    """
+    from strata.notebook.export import ExportOptions, export_notebook
+
+    path = Path(args.path)
+    if not (path / "notebook.toml").is_file():
+        print(f"error: {path} is not a notebook directory (no notebook.toml)", file=sys.stderr)
+        return 2
+
+    options = ExportOptions(
+        output_format=args.output_format,
+        include_inactive_variants=bool(args.include_inactive_variants),
+        include_console=not bool(args.no_console),
+    )
+    rendered = export_notebook(path, options)
+
+    out_path = args.output_path
+    if out_path:
+        Path(out_path).write_text(rendered, encoding="utf-8")
+    else:
+        sys.stdout.write(rendered)
+    return 0

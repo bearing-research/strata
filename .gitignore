@@ -220,6 +220,10 @@ site/
 # Internal design and planning docs — kept local only.
 docs/internal/
 
+# Auto-generated example renderings produced by the export hook
+# (docs_hooks/export_examples.py). Regenerated on every `mkdocs build`.
+docs/examples/
+
 # Per-notebook runtime state — artifacts, blobs, console output,
 # environment lockfiles, example DuckDB files. Generated whenever a
 # notebook runs; never meant to be shared.
