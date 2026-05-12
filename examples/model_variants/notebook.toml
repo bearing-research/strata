@@ -5,6 +5,7 @@ updated_at = 2026-05-09 00:00:00+00:00
 cells = [
     { id = "load-data", file = "load_data.py", language = "python", order = 0 },
     { id = "train-test", file = "train_test.py", language = "python", order = 1 },
+    { id = "variants-intro", file = "variants_intro.md", language = "markdown", order = 1.5 },
     { id = "train-logreg", file = "train_logreg.py", language = "python", order = 2 },
     { id = "train-rf", file = "train_rf.py", language = "python", order = 2.1 },
     { id = "train-gbm", file = "train_gbm.py", language = "python", order = 2.2 },

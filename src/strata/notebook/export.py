@@ -168,23 +168,27 @@ def _render_cell(
 ) -> list[Block]:
     blocks: list[Block] = []
 
-    # Banner heading uses the @name annotation when present, otherwise
-    # the cell id. The intent is "what is this cell" — a short label.
     from strata.notebook.annotations import parse_annotations
 
     annotations = parse_annotations(cell.source)
+
+    if cell.language == "markdown":
+        # Markdown cells are *content*, not annotated source. Their
+        # body usually opens with a heading already; adding our own
+        # banner above it would compete for the section title (we hit
+        # the same trade-off with the notebook README at the top of
+        # the export). Skip the banner + chips and emit the body
+        # verbatim — the markdown content IS the section divider.
+        blocks.append(MarkdownBlock(cell.source))
+        return blocks
+
+    # Code cells: cell-banner heading + chip metadata above the source.
     label = annotations.name or cell.id
     blocks.append(HeadingBlock(label, level=2))
 
     chips = _cell_chips(cell, annotations, state)
     if chips:
         blocks.append(ChipsBlock(chips))
-
-    if cell.language == "markdown":
-        # Markdown cells are *content*, not annotated source. Render the
-        # body verbatim and skip the source-as-code path.
-        blocks.append(MarkdownBlock(cell.source))
-        return blocks
 
     # Prompt cells: source template only — never the response.
     if cell.language == "prompt":

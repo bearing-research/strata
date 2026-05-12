@@ -292,6 +292,26 @@ def test_export_with_include_inactive_variants_shows_all(tmp_path: Path) -> None
     assert "## model_b" in rendered
 
 
+def test_export_markdown_cell_renders_without_cell_banner(tmp_path: Path) -> None:
+    """Markdown cells already contain a heading; adding our own '##
+    cell-id' banner above them creates duplicate section titles. The
+    markdown body IS the section divider for these cells."""
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "intro", language="markdown")
+    write_cell(
+        nb_dir,
+        "intro",
+        "# Section heading\n\nProse explaining the upcoming code.\n",
+    )
+
+    rendered = export_notebook(nb_dir)
+    assert "# Section heading" in rendered
+    # No banner ahead of the markdown content
+    assert "## intro" not in rendered
+    # No metadata chips before markdown content
+    assert "**kind** markdown" not in rendered
+
+
 def test_export_renders_readme_intro_when_present(tmp_path: Path) -> None:
     nb_dir = _make_notebook(tmp_path)
     (nb_dir / "README.md").write_text(

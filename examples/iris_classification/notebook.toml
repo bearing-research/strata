@@ -6,6 +6,7 @@ cells = [
     { id = "load-data", file = "load_data.py", language = "python", order = 0 },
     { id = "explore-stats", file = "explore_stats.py", language = "python", order = 1 },
     { id = "scatter-plot", file = "scatter_plot.py", language = "python", order = 2 },
+    { id = "train-intro", file = "train_intro.md", language = "markdown", order = 2.5 },
     { id = "train-test", file = "train_test.py", language = "python", order = 3 },
     { id = "train-model", file = "train_model.py", language = "python", order = 4 },
     { id = "evaluate", file = "evaluate.py", language = "python", order = 5 },
