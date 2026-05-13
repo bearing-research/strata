@@ -191,6 +191,30 @@ def test_import_returns_error_for_missing_file(tmp_path: Path) -> None:
         import_notebook(tmp_path / "does-not-exist.ipynb")
 
 
+def test_import_rejects_non_dict_top_level_json(tmp_path: Path) -> None:
+    """Regression: a top-level JSON list / scalar / null used to fall
+    through to ``nb.get("cells")`` and crash with AttributeError. The
+    converter should raise ValueError instead so callers can map to a
+    clean 400."""
+    for bad in ("[]", '"a string"', "null", "42"):
+        bad_path = tmp_path / f"bad-{hash(bad)}.ipynb"
+        bad_path.write_text(bad, encoding="utf-8")
+        with pytest.raises(ValueError, match="expected JSON object"):
+            import_notebook(bad_path)
+
+
+def test_import_stamps_owner_when_provided(tmp_path: Path) -> None:
+    """The CLI doesn't pass owner; the REST endpoint does. Verify the
+    plumbing all the way down to notebook.toml."""
+    import tomllib
+
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
+    result = import_notebook(ipynb, owner="alice@example.com")
+    with (result.notebook_dir / "notebook.toml").open("rb") as f:
+        data = tomllib.load(f)
+    assert data["owner"] == "alice@example.com"
+
+
 def test_import_writes_to_explicit_out_dir_when_provided(tmp_path: Path) -> None:
     ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")], name="source.ipynb")
     target = tmp_path / "my-imports" / "custom-name"

@@ -108,6 +108,8 @@ class ImportResult:
 def import_notebook(
     ipynb_path: Path | str,
     out_dir: Path | str | None = None,
+    *,
+    owner: str | None = None,
 ) -> ImportResult:
     """Convert a Jupyter ``.ipynb`` file into a Strata notebook directory.
 
@@ -116,9 +118,19 @@ def import_notebook(
         out_dir: Target notebook directory. If ``None``, a sibling
             directory named after the ``.ipynb`` stem is created next
             to the source file.
+        owner: Caller identity to stamp into ``notebook.toml``. The CLI
+            doesn't pass this (single-user); the REST endpoint does so
+            multi-user / per-user-scoped deployments don't lose owner
+            attribution on imported notebooks.
 
     Returns:
         An :class:`ImportResult` describing what got converted.
+
+    Raises:
+        FileNotFoundError: if ``ipynb_path`` doesn't exist.
+        ValueError: if the file isn't a valid nbformat object (top-level
+            JSON must be a dict; anything else — a list, scalar, null —
+            isn't a notebook).
     """
     ipynb_path = Path(ipynb_path)
     if not ipynb_path.is_file():
@@ -126,6 +138,14 @@ def import_notebook(
 
     with ipynb_path.open("r", encoding="utf-8") as f:
         nb = json.load(f)
+
+    # nbformat requires the top-level value to be a JSON object. Reject
+    # arrays / scalars here so downstream `.get("cells")` doesn't crash
+    # with AttributeError mid-conversion.
+    if not isinstance(nb, dict):
+        raise ValueError(
+            f"Invalid .ipynb: expected JSON object at top level, got {type(nb).__name__}"
+        )
 
     if out_dir is not None:
         out_dir = Path(out_dir)
@@ -135,7 +155,7 @@ def import_notebook(
         parent = ipynb_path.parent
         name = ipynb_path.stem
 
-    notebook_dir = create_notebook(parent, name, initialize_environment=False)
+    notebook_dir = create_notebook(parent, name, initialize_environment=False, owner=owner)
     result = ImportResult(notebook_dir=notebook_dir)
 
     sibling_deps = _capture_sibling_deps(ipynb_path.parent)

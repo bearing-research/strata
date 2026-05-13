@@ -900,12 +900,42 @@ async def import_jupyter_notebook(
     # through the regular UI.
     source_filename = file.filename or "imported.ipynb"
     raw_name = name or Path(source_filename).stem or "imported"
+
+    # Reject path separators / traversal segments / NUL bytes — the
+    # name flows into a filesystem path, and `target_parent / "../x"`
+    # would otherwise escape the storage root entirely.
+    if "/" in raw_name or "\\" in raw_name or "\0" in raw_name or raw_name in ("..", "."):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid notebook name: must not contain path separators or traversal segments",
+        )
+    if ".." in Path(raw_name).parts:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid notebook name: must not contain '..' segments",
+        )
+
     notebook_dir_name = raw_name.lower().replace(" ", "_")
-    if (target_parent / notebook_dir_name / "notebook.toml").exists():
+    candidate_dir = target_parent / notebook_dir_name
+    # Belt-and-braces: after building the path, verify it still resolves
+    # under target_parent. Catches any escape route the textual checks
+    # above might miss (e.g. platform-specific weirdness).
+    try:
+        candidate_resolved = candidate_dir.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid notebook name: {exc}")
+    target_resolved = target_parent.resolve()
+    if candidate_resolved != target_resolved and target_resolved not in candidate_resolved.parents:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid notebook name: resolves outside the configured storage root",
+        )
+
+    if (candidate_dir / "notebook.toml").exists():
         raise HTTPException(
             status_code=409,
             detail=(
-                f"A notebook already exists at {target_parent / notebook_dir_name}. "
+                f"A notebook already exists at {candidate_dir}. "
                 "Use Open to open it, or import with a different --name."
             ),
         )
@@ -925,7 +955,11 @@ async def import_jupyter_notebook(
 
         with timing.phase("convert"):
             try:
-                result = import_notebook(tmp_path, out_dir=target_parent / raw_name)
+                result = import_notebook(
+                    tmp_path,
+                    out_dir=target_parent / raw_name,
+                    owner=_caller_identity(request),
+                )
             except (ValueError, OSError) as exc:
                 raise HTTPException(status_code=400, detail=f"Import failed: {exc}")
 

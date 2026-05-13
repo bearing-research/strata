@@ -2609,6 +2609,83 @@ def test_import_endpoint_enforces_upload_size_cap(monkeypatch, tmp_path):
     assert "MB cap" in resp.json()["detail"]
 
 
+def test_import_endpoint_rejects_path_traversal_in_name(monkeypatch, tmp_path):
+    """Regression: ``name=../escaped`` must not let the imported notebook
+    land outside the configured storage root."""
+    client = TestClient(create_test_app())
+    storage = _import_storage(monkeypatch, tmp_path / "storage")
+    storage.mkdir(parents=True, exist_ok=True)
+
+    # Path outside the storage root that an attacker would target.
+    escape_target = (storage / ".." / "escaped").resolve()
+    assert storage.resolve() not in escape_target.parents
+    assert not escape_target.exists()  # sanity
+
+    payload = _ipynb_bytes([_code("x = 1\n")])
+    for bad_name in ("../escaped", "..", "foo/bar", "foo\\bar", "foo/../escaped"):
+        resp = client.post(
+            "/v1/notebooks/import",
+            files={"file": ("safe.ipynb", payload, "application/x-ipynb+json")},
+            data={"name": bad_name},
+        )
+        assert resp.status_code == 400, (bad_name, resp.text)
+        assert "Invalid notebook name" in resp.json()["detail"]
+
+    # And the escape target was never written.
+    assert not escape_target.exists()
+
+
+def test_import_endpoint_rejects_structurally_invalid_notebook(monkeypatch, tmp_path):
+    """Regression: a JSON file whose top-level value isn't an object
+    (a list, a scalar, null) used to crash the converter with
+    AttributeError → 500. It should be a clean 400 now."""
+    client = TestClient(create_test_app())
+    _import_storage(monkeypatch, tmp_path)
+
+    for bad_payload in (b"[]", b'"a string"', b"null", b"42"):
+        resp = client.post(
+            "/v1/notebooks/import",
+            files={"file": ("malformed.ipynb", bad_payload, "application/x-ipynb+json")},
+        )
+        assert resp.status_code == 400, (bad_payload, resp.text)
+        assert (
+            "Import failed" in resp.json()["detail"]
+            or "expected JSON object" in resp.json()["detail"]
+        )
+
+
+def test_import_endpoint_stamps_caller_owner(monkeypatch, tmp_path):
+    """When personal-mode per-user scoping is on, imported notebooks
+    should inherit the caller identity the same way `create` does."""
+    import tomllib
+
+    client = TestClient(create_test_app())
+    monkeypatch.setattr(
+        "strata.server._state",
+        SimpleNamespace(
+            config=SimpleNamespace(
+                deployment_mode="personal",
+                transforms_config={},
+                notebook_storage_dir=tmp_path,
+                personal_mode_user_header="X-Notebook-User",
+            )
+        ),
+    )
+
+    payload = _ipynb_bytes([_code("x = 1\n")])
+    resp = client.post(
+        "/v1/notebooks/import",
+        files={"file": ("owned.ipynb", payload, "application/x-ipynb+json")},
+        headers={"X-Notebook-User": "alice@example.com"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    notebook_dir = Path(resp.json()["path"])
+    with (notebook_dir / "notebook.toml").open("rb") as f:
+        data = tomllib.load(f)
+    assert data.get("owner") == "alice@example.com"
+
+
 def test_import_endpoint_uses_custom_name_form_field(monkeypatch, tmp_path):
     """The ``name`` form field overrides the upload's filename stem so
     the user can re-import into a different directory layout."""
