@@ -198,6 +198,39 @@ class TestAnalyzerReferences:
         assert result.defines == []
         assert result.references == []
 
+    def test_rebind_with_self_read_keeps_reference(self):
+        """``df = df.dropna()`` and ``x = x + 1`` style rebinds: the RHS
+        reads the same name being bound on the LHS, so the read is a
+        genuine upstream reference. Without this, the DAG would skip
+        the edge to the cell that produced the original ``df`` and the
+        runtime would crash with NameError.
+
+        Common pattern in Jupyter notebooks (caught by the corpus runner
+        on titanic_classifier.ipynb)."""
+        result = analyze_cell("df = df.dropna()")
+        assert "df" in result.defines
+        assert "df" in result.references
+
+        result = analyze_cell("x = x + 1")
+        assert "x" in result.defines
+        assert "x" in result.references
+
+        # Nested target — ``df.head()`` after the rebind reads the
+        # local df, but the original read still surfaces.
+        result = analyze_cell("df = df.dropna()\ndf.head()\n")
+        assert "df" in result.defines
+        assert "df" in result.references
+
+    def test_pure_define_then_read_not_a_reference(self):
+        """Counterpoint to the rebind-with-self-read case: when a cell
+        defines a name THEN reads it (``x = 5; y = x + 1``), the read
+        is intra-cell — no upstream needed. The earlier read must not
+        accidentally drag the name into references."""
+        result = analyze_cell("x = 5\ny = x + 1\n")
+        assert "x" not in result.references
+        assert "x" in result.defines
+        assert "y" in result.defines
+
 
 class TestAnalyzerPrivateVariables:
     """Test private variable (starting with _) handling."""

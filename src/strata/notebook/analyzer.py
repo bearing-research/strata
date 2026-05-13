@@ -48,6 +48,12 @@ class VariableAnalyzer(ast.NodeVisitor):
         # rebinds (``x = x + 1``) where the reference is intra-cell
         # and should be filtered out.
         self.mutation_defines: set[str] = set()
+        # Names whose value is read on the RHS of an assignment that
+        # also defines them at module scope — ``df = df.dropna()`` style.
+        # The reference is genuine (Python evaluates RHS before binding
+        # LHS, so the upstream producer must exist) and survives the
+        # pure-define filter below. Common pattern in Jupyter notebooks.
+        self.rebind_with_self_read: set[str] = set()
         self._in_nested_scope = False
         self._local_vars: set[str] = set()  # Track local scope variables
         # Set in visit_Module if the cell carries
@@ -69,14 +75,33 @@ class VariableAnalyzer(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         """Handle: x = ... or x, y = ..."""
+        # Names being pure-assigned by this statement, e.g. ``df`` in
+        # ``df = df.dropna()``. We need them before visiting the RHS so
+        # we can record genuine read-before-write references.
+        pure_target_names: set[str] = set()
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                pure_target_names.add(target.id)
+        # Visit the value first to populate references, then collect
+        # targets as defines. Order matters: a name that appears on
+        # both sides (``x = x + 1``) needs to land in both sets.
+        all_underscore = all(self._is_pure_underscore(target) for target in node.targets)
+        if not all_underscore:
+            # Walk the RHS looking for Loads of any target name. Those
+            # are real upstream references and must survive the global
+            # pure-define filter — without this, ``df = df.dropna()``
+            # appears DAG-orphaned and breaks at runtime with NameError.
+            for child in ast.walk(node.value):
+                if (
+                    isinstance(child, ast.Name)
+                    and isinstance(child.ctx, ast.Load)
+                    and child.id in pure_target_names
+                ):
+                    self.rebind_with_self_read.add(child.id)
+            self.visit(node.value)
         # Collect targets (defines)
         for target in node.targets:
             self._add_assign_target(target)
-        # Visit the value (may have references) — but only if not assigning to pure _
-        # If all targets are _, skip visiting the value
-        all_underscore = all(self._is_pure_underscore(target) for target in node.targets)
-        if not all_underscore:
-            self.visit(node.value)
 
     def _is_pure_underscore(self, target: ast.expr) -> bool:
         """Check if a target is a pure _ (not part of unpacking)."""
@@ -586,9 +611,15 @@ def analyze_cell(source: str) -> CellAnalysis:
     }
     # Mutation-defines stay in references (the cell depends on an
     # upstream producer of the pre-mutation object). Pure defines are
-    # filtered from references as before — that handles intra-cell
-    # rebinds like ``x = x + 1``.
-    pure_defined_names = set(defines) - effective_mutation_defines
+    # filtered from references — that handles intra-cell rebinds like
+    # ``x = 5\ny = x + 1`` where ``x`` is locally produced before being
+    # read.
+    #
+    # Exception: ``df = df.dropna()``-style rebinds where the RHS
+    # reads the same name being bound. The reference is genuine (RHS
+    # evaluates before LHS binding) and must survive the filter so the
+    # DAG draws the upstream edge.
+    pure_defined_names = set(defines) - effective_mutation_defines - analyzer.rebind_with_self_read
     combined_refs = set(analyzer.references) | nested_refs
     references = [
         v
