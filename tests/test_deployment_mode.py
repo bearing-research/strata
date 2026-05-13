@@ -1,7 +1,7 @@
 """Tests for deployment mode configuration and personal mode safety.
 
 These tests verify:
-1. deployment_mode defaults to "service"
+1. deployment_mode defaults to "personal" (the common case)
 2. Invalid deployment_mode raises ValueError
 3. Personal mode creates artifact_dir
 4. Personal mode binding to non-loopback is blocked unless explicitly allowed
@@ -19,20 +19,23 @@ from strata.config import StrataConfig
 class TestDeploymentModeConfig:
     """Tests for deployment mode configuration."""
 
-    def test_default_is_service(self, tmp_path):
-        """Default deployment_mode is 'service'."""
-        config = StrataConfig(cache_dir=tmp_path / "cache")
-        assert config.deployment_mode == "service"
-        assert config.writes_enabled is False
+    def test_default_is_personal(self, tmp_path):
+        """Default deployment_mode is 'personal' — the common case.
 
-    def test_personal_mode(self, tmp_path):
-        """Personal mode can be explicitly set."""
-        config = StrataConfig(
-            cache_dir=tmp_path / "cache",
-            deployment_mode="personal",
-        )
+        First-time ``strata-server`` invocations boot single-user on
+        loopback. Service mode is explicit opt-in."""
+        config = StrataConfig(cache_dir=tmp_path / "cache")
         assert config.deployment_mode == "personal"
         assert config.writes_enabled is True
+
+    def test_service_mode(self, tmp_path):
+        """Service mode can be explicitly set."""
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            deployment_mode="service",
+        )
+        assert config.deployment_mode == "service"
+        assert config.writes_enabled is False
 
     def test_invalid_mode_raises(self, tmp_path):
         """Invalid deployment_mode raises ValueError."""
@@ -59,7 +62,7 @@ class TestDeploymentModeConfig:
 
     def test_service_mode_no_artifact_dir(self, tmp_path):
         """Service mode does not create artifact_dir by default."""
-        config = StrataConfig(cache_dir=tmp_path / "cache")
+        config = StrataConfig(cache_dir=tmp_path / "cache", deployment_mode="service")
         assert config.artifact_dir is None
 
 

@@ -287,8 +287,16 @@ class StrataConfig(BaseSettings):
     # Access control list configuration
     acl_config: AclConfig = Field(default_factory=AclConfig)
 
-    # Deployment mode settings
-    deployment_mode: Literal["service", "personal"] = "service"
+    # Deployment mode settings.
+    #
+    # Default is ``personal`` — the common case. A first-time
+    # ``uv run strata-server`` boots into a single-user, loopback-only
+    # configuration that just works. Multi-user and multi-tenant
+    # deployments must opt in explicitly via ``deployment_mode="service"``
+    # plus the matching auth / artifact settings; that flow has its own
+    # coherence checks (see ``validate_mode_coherence``) so production
+    # operators get clear errors if anything's misconfigured.
+    deployment_mode: Literal["service", "personal"] = "personal"
     allow_remote_clients_in_personal: bool = False
     # Optional request header that identifies the calling user when a personal
     # mode deployment is fronted by an authenticating proxy (Cloudflare Access,

@@ -37,18 +37,14 @@ Or in `pyproject.toml`:
 deployment_mode = "personal"
 ```
 
-**Default is `service`** — that's a deliberate fail-closed choice.
-A production deploy that forgot to set the mode hits coherence-
-enforcement errors at startup and refuses to run, rather than
-silently exposing write endpoints with no auth. Every shipped
-demo (`docker-compose.yml`, `fly.toml`, `.devcontainer/start.sh`)
-overrides to personal explicitly because those demos *are* the
-personal-mode shape; the override makes the intent visible at the
-deployment surface.
+**Default is `personal`** — the common case. A first-time
+`uv run strata-server` boots into a single-user, loopback-only
+deployment that just works.
 
-If you see `ValueError` on boot complaining about service-mode
-prerequisites (auth, artifact dir), you almost certainly want
-`STRATA_DEPLOYMENT_MODE=personal` for local dev.
+Service mode is explicit opt-in. The coherence checker fires clear
+errors at startup if you set `deployment_mode=service` without
+matching auth / artifact configuration, so misconfigured production
+deploys fail fast rather than silently exposing write endpoints.
 
 ## Personal mode
 

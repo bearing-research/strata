@@ -16,20 +16,23 @@ For a single developer running on a laptop, use
 also covers small-team sharing (~5–20 trusted users) — see
 [Sharing personal mode with a small group](modes.md#sharing-personal-mode-with-a-small-group).
 
-## Why service mode is the default
+## Switching from the default
 
-`STRATA_DEPLOYMENT_MODE` defaults to `service` in `config.py`. Every
-deployment artifact in this repo (`docker-compose.yml`, `fly.toml`,
-`.devcontainer/start.sh`) *overrides* to personal mode. That is on
-purpose — fail-closed by default. A production deploy that forgets
-to set the mode hits coherence-enforcement errors at startup and
-refuses to run, rather than silently exposing write endpoints with
-no auth.
+`STRATA_DEPLOYMENT_MODE` defaults to `personal`. To run in service
+mode you set the mode explicitly *and* fill in the matching auth /
+artifact configuration:
 
-If you're seeing `ValueError` on boot complaining about
-`auth_mode="none"` or "personal-mode-only setting in service mode",
-you almost certainly want `STRATA_DEPLOYMENT_MODE=personal` for a
-local run.
+```bash
+STRATA_DEPLOYMENT_MODE=service
+STRATA_AUTH_MODE=trusted_proxy
+STRATA_PROXY_TOKEN=<shared-secret>
+STRATA_ARTIFACT_DIR=/path/to/persistent/dir   # or a blob backend
+```
+
+The coherence checker (`validate_mode_coherence` in `config.py`)
+fires clear `ValueError`s on boot if anything's missing — a sloppy
+service-mode deploy refuses to start rather than silently exposing
+write endpoints.
 
 ## The trusted-proxy contract
 
