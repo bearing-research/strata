@@ -390,6 +390,52 @@ async function createNotebook(
   return readJson<NotebookSessionPayload>(resp)
 }
 
+/**
+ * Outcome of importing a Jupyter ``.ipynb`` file via
+ * ``POST /v1/notebooks/import``. Mirrors the ``ImportResult`` field
+ * shapes from ``strata.notebook.jupyter_import`` so the UI can
+ * display the conversion report inline.
+ */
+export interface ImportReport {
+  markdown_cells: number
+  code_cells: number
+  suppressed_outputs: number
+  skipped_cells: string[]
+  translated_magics: string[]
+  dropped_magics: string[]
+  dropped_shells: string[]
+  captured_deps: string[]
+  warnings: string[]
+  report_path: string | null
+  report_text: string
+}
+
+export interface ImportNotebookResponse extends NotebookSessionPayload {
+  import_report: ImportReport
+}
+
+async function importNotebook(
+  file: File,
+  options?: { name?: string; parentPath?: string },
+): Promise<ImportNotebookResponse> {
+  const form = new FormData()
+  form.append('file', file, file.name)
+  if (options?.name) form.append('name', options.name)
+  if (options?.parentPath) form.append('parent_path', options.parentPath)
+  // The server runs ``uv sync`` after the conversion to install the
+  // captured deps, so this can take a while on a cold cache. Match
+  // the openNotebook timeout (120s) which has the same characteristic.
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/import`, {
+    method: 'POST',
+    body: form,
+    timeoutMs: 120_000,
+  })
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to import notebook')
+  }
+  return readJson<ImportNotebookResponse>(resp)
+}
+
 async function renameNotebook(notebookId: string, name: string): Promise<NotebookRenameResponse> {
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${notebookId}/name`, {
     method: 'PUT',
@@ -1260,6 +1306,7 @@ export function useStrata() {
     openNotebook,
     discoverNotebooks,
     createNotebook,
+    importNotebook,
     renameNotebook,
     deleteNotebook,
     deleteNotebookByPath,

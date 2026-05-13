@@ -1,11 +1,16 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useStrata, type DiscoveredNotebook } from '../composables/useStrata'
+import {
+  useStrata,
+  type DiscoveredNotebook,
+  type ImportNotebookResponse,
+} from '../composables/useStrata'
 import { preloadNotebookRoute } from '../router'
 import { useRecentNotebooks } from '../stores/recentNotebooks'
 import { primePrefetchedNotebookSession } from '../utils/notebookSessionPrefetch'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
+import ImportReportModal from '../components/ImportReportModal.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 
 const router = useRouter()
@@ -28,6 +33,18 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const failedRecentPath = ref<string | null>(null)
 const failedRecentName = ref<string | null>(null)
+
+// ---- Jupyter import flow ----
+const importInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const importError = ref<string | null>(null)
+const importResult = ref<ImportNotebookResponse | null>(null)
+// Active when an ``.ipynb`` is being dragged over the page. The
+// dragenter / dragleave events fire on every child element transit,
+// so we count nested transitions and only clear when the counter
+// hits zero, matching the standard "page-wide drop target" pattern.
+const dragDepth = ref(0)
+const isDragHovering = ref(false)
 
 onMounted(async () => {
   try {
@@ -87,6 +104,128 @@ async function createNotebook() {
     loading.value = false
   }
 }
+
+function triggerImportPicker() {
+  importInput.value?.click()
+}
+
+function onImportFileChange(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (file) {
+    void importNotebookFile(file)
+  }
+  // Reset so picking the same file again re-fires the change event.
+  if (input) input.value = ''
+}
+
+async function importNotebookFile(file: File) {
+  if (!file.name.toLowerCase().endsWith('.ipynb')) {
+    importError.value = `Only .ipynb files are supported (got "${file.name}").`
+    return
+  }
+  if (importing.value) {
+    importError.value = 'An import is already in progress.'
+    return
+  }
+  importing.value = true
+  importError.value = null
+  dismissError()
+  void preloadNotebookRoute()
+  try {
+    const data = await strata.importNotebook(file)
+    importResult.value = data
+  } catch (e: any) {
+    importError.value = e?.message || `Failed to import ${file.name}`
+  } finally {
+    importing.value = false
+  }
+}
+
+async function openImportedNotebook() {
+  const data = importResult.value
+  if (!data) return
+  const resolvedPath = data.path || ''
+  primePrefetchedNotebookSession(data)
+  if (resolvedPath) record(data.name, resolvedPath, data.session_id)
+  await router.push({
+    name: 'notebook',
+    params: { sessionId: data.session_id },
+    query: resolvedPath ? { path: resolvedPath } : {},
+  })
+  importResult.value = null
+}
+
+function dismissImportModal() {
+  importResult.value = null
+}
+
+function dismissImportError() {
+  importError.value = null
+}
+
+// ---- Page-wide drag-and-drop ----
+
+function isIpynbDrag(event: DragEvent): boolean {
+  const items = event.dataTransfer?.items
+  if (!items || items.length === 0) return false
+  // ``DataTransfer.items`` only exposes the *kind* during drag (not
+  // the filename), so accept anything that looks like a file drop
+  // and validate the extension on drop. Multi-file drops surface as
+  // multiple items; we reject them on drop too.
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].kind === 'file') return true
+  }
+  return false
+}
+
+function onWindowDragEnter(event: DragEvent) {
+  if (!isIpynbDrag(event)) return
+  event.preventDefault()
+  dragDepth.value += 1
+  isDragHovering.value = true
+}
+
+function onWindowDragOver(event: DragEvent) {
+  if (!isIpynbDrag(event)) return
+  // preventDefault on dragover is what tells the browser this is a
+  // valid drop target; without it the drop event never fires.
+  event.preventDefault()
+}
+
+function onWindowDragLeave(event: DragEvent) {
+  if (!isIpynbDrag(event)) return
+  dragDepth.value = Math.max(0, dragDepth.value - 1)
+  if (dragDepth.value === 0) isDragHovering.value = false
+}
+
+function onWindowDrop(event: DragEvent) {
+  if (!isIpynbDrag(event)) return
+  event.preventDefault()
+  dragDepth.value = 0
+  isDragHovering.value = false
+  const files = event.dataTransfer?.files
+  if (!files || files.length === 0) return
+  if (files.length > 1) {
+    importError.value = `Drop one .ipynb at a time (got ${files.length}).`
+    return
+  }
+  void importNotebookFile(files[0])
+}
+
+onMounted(() => {
+  window.addEventListener('dragenter', onWindowDragEnter)
+  window.addEventListener('dragover', onWindowDragOver)
+  window.addEventListener('dragleave', onWindowDragLeave)
+  window.addEventListener('drop', onWindowDrop)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('dragenter', onWindowDragEnter)
+  window.removeEventListener('dragover', onWindowDragOver)
+  window.removeEventListener('dragleave', onWindowDragLeave)
+  window.removeEventListener('drop', onWindowDrop)
+})
 
 async function loadDiscoveredNotebooks() {
   discoveryLoading.value = true
@@ -241,6 +380,35 @@ function formatTime(ts: number): string {
           <div class="action-icon">📂</div>
           <div class="action-label">Open Existing</div>
         </div>
+        <div
+          class="action-card"
+          data-testid="action-import-notebook"
+          :class="{ 'action-card-disabled': importing }"
+          :aria-disabled="importing || undefined"
+          @click="!importing && triggerImportPicker()"
+          @mouseenter="void preloadNotebookRoute()"
+          @focusin="void preloadNotebookRoute()"
+        >
+          <div class="action-icon">📒</div>
+          <div class="action-label">
+            {{ importing ? 'Importing…' : 'Import from Jupyter' }}
+          </div>
+          <div class="action-hint" v-if="!importing">or drop a .ipynb anywhere</div>
+        </div>
+      </div>
+
+      <input
+        ref="importInput"
+        type="file"
+        accept=".ipynb,application/x-ipynb+json"
+        style="display: none"
+        data-testid="import-file-input"
+        @change="onImportFileChange"
+      />
+
+      <div v-if="importError" class="import-error" role="alert" data-testid="import-error">
+        {{ importError }}
+        <button class="import-error-dismiss" type="button" @click="dismissImportError">×</button>
       </div>
 
       <!-- New notebook form -->
@@ -378,6 +546,30 @@ function formatTime(ts: number): string {
         <span>Loading notebook...</span>
       </div>
     </div>
+
+    <!-- Drag-and-drop overlay for Jupyter import -->
+    <div v-if="isDragHovering" class="drag-overlay" data-testid="drag-overlay" aria-hidden="true">
+      <div class="drag-overlay-card">
+        <div class="drag-overlay-icon">📒</div>
+        <div class="drag-overlay-title">Drop to import</div>
+        <div class="drag-overlay-hint">.ipynb files only, one at a time</div>
+      </div>
+    </div>
+
+    <!-- Import-in-progress overlay -->
+    <div v-if="importing" class="loading-overlay" data-testid="import-loading">
+      <div class="spinner"></div>
+      <span>Converting notebook and syncing environment…</span>
+    </div>
+
+    <!-- Post-import report modal -->
+    <ImportReportModal
+      v-if="importResult"
+      :report="importResult.import_report"
+      :notebook-name="importResult.name"
+      @open="openImportedNotebook"
+      @close="dismissImportModal"
+    />
   </div>
 </template>
 
@@ -497,6 +689,80 @@ function formatTime(ts: number): string {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.action-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.action-card-disabled {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* ---- Jupyter import: drag overlay, error banner ---- */
+
+.drag-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  pointer-events: none;
+  /* Overlay is visual only; window-level drop handler catches the file. */
+}
+
+.drag-overlay-card {
+  background: var(--bg-surface);
+  border: 2px dashed var(--accent, #3b82f6);
+  border-radius: 16px;
+  padding: 2.5rem 3rem;
+  text-align: center;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+}
+
+.drag-overlay-icon {
+  font-size: 56px;
+  margin-bottom: 12px;
+}
+
+.drag-overlay-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.drag-overlay-hint {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.import-error {
+  margin: 12px 0;
+  padding: 0.65rem 0.9rem;
+  background: var(--bg-warning, #fef3c7);
+  border: 1px solid var(--border-warning, #fde68a);
+  color: var(--text-warning, #92400e);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.9rem;
+}
+
+.import-error-dismiss {
+  background: transparent;
+  border: 0;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+  padding: 0 0.25rem;
 }
 
 .form-card {
