@@ -1,8 +1,8 @@
 # Strata
 
-**Notebooks for long-running ML, AI, and data work — cached, distributed, and git-friendly.**
+**Strata is a content-addressed computation graph with an interactive notebook UI.**
 
-Strata is designed for work that runs longer than a single keystroke. Every
+Built for ML, AI, and data work that runs longer than a keystroke. Every
 cell output becomes a content-addressed artifact, so re-runs are cache hits
 when nothing's changed and the DAG cascade re-executes only what did. Prompt
 cells make AI calls first-class participants; `# @worker gpu-fly` dispatches

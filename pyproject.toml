@@ -1,7 +1,7 @@
 [project]
 name = "strata-notebook"
 version = "0.1.0"
-description = "Persistence substrate and notebook runtime for long-horizon computation"
+description = "A content-addressed computation graph with an interactive notebook UI"
 readme = "README.md"
 authors = [
     { name = "Fangchen Li", email = "fangchen.li@outlook.com" }

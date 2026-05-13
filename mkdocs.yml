@@ -1,6 +1,6 @@
 site_name: Strata
 site_url: https://bearing-research.github.io/strata/
-site_description: Notebooks for long-running ML, AI, and data work — cached, distributed, and git-friendly
+site_description: A content-addressed computation graph with an interactive notebook UI
 repo_url: https://github.com/bearing-research/strata
 repo_name: bearing-research/strata
 
