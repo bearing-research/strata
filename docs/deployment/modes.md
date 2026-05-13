@@ -37,7 +37,18 @@ Or in `pyproject.toml`:
 deployment_mode = "personal"
 ```
 
-Default is `service`.
+**Default is `service`** — that's a deliberate fail-closed choice.
+A production deploy that forgot to set the mode hits coherence-
+enforcement errors at startup and refuses to run, rather than
+silently exposing write endpoints with no auth. Every shipped
+demo (`docker-compose.yml`, `fly.toml`, `.devcontainer/start.sh`)
+overrides to personal explicitly because those demos *are* the
+personal-mode shape; the override makes the intent visible at the
+deployment surface.
+
+If you see `ValueError` on boot complaining about service-mode
+prerequisites (auth, artifact dir), you almost certainly want
+`STRATA_DEPLOYMENT_MODE=personal` for local dev.
 
 ## Personal mode
 
@@ -71,29 +82,19 @@ STRATA_DEPLOYMENT_MODE=service \
   uv run strata-server
 ```
 
-Service mode expects an upstream proxy (NGINX, Envoy, Cloud Run ingress)
-that:
+Short version: an upstream proxy authenticates the caller, injects
+identity headers (`X-Strata-Principal`, tenant header,
+`X-Strata-Scopes`, `X-Strata-Proxy-Token`), and is the only ingress
+path. Strata trusts the proxy and refuses to do its own auth.
 
-1. Authenticates the caller (JWT, OIDC, mTLS — whatever you use).
-2. Injects identity headers: `X-Strata-Principal`, `X-Strata-Tenant`,
-   `X-Strata-Scopes`.
-3. Forwards `X-Strata-Proxy-Token` with the value Strata is configured
-   to expect.
+See [Service Mode](service-mode.md) for the full story:
 
-The proxy must be the *only* ingress path — run Strata on a private
-network / security group / NetworkPolicy. See
-[Authentication configuration](../reference/configuration.md#authentication)
-for the full list of identity-header settings.
-
-For multi-tenant hosting, add:
-
-```bash
-STRATA_MULTI_TENANT_ENABLED=true
-STRATA_REQUIRE_TENANT_HEADER=true
-```
-
-Per-tenant QoS isolation, cache keying, and metrics kick in
-automatically.
+- The trusted-proxy header contract.
+- The shipped demo stack (`docker-compose.service.yml` + nginx
+  proxy injecting two demo identities on ports 8865/8866).
+- Production reference architecture.
+- Multi-tenancy, ACLs, server-side transforms.
+- Migration path from personal mode.
 
 ## Sharing personal mode with a small group
 

@@ -82,9 +82,11 @@ nav:
     - Installation: getting-started/installation.md
     - Configuration: reference/configuration.md
     - Deployment Modes: deployment/modes.md
+    - Service Mode: deployment/service-mode.md
     - Docker: deployment/docker.md
     - Fly.io: deployment/fly.md
     - GitHub Codespaces: deployment/codespaces.md
+    - Observability: deployment/observability.md
 
 exclude_docs: |
   internal/

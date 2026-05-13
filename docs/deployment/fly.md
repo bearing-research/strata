@@ -12,12 +12,15 @@ Strata's hosted preview runs on [Fly.io](https://fly.io) at [strata-notebook.fly
 ```bash
 # First time
 fly apps create strata-notebook
-fly volumes create strata_data --region sjc --size 5
 fly deploy
 
 # Subsequent deploys
 fly deploy
 ```
+
+The volume defined in `[[mounts]]` (`strata_data`, 5 GB auto-extending to
+20 GB) is created automatically on first deploy — no separate
+`fly volumes create` step needed.
 
 ## Configuration
 

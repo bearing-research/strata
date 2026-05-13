@@ -6,6 +6,13 @@
 - **Rust toolchain** (for the native Arrow IPC extension)
 - **Node.js 25+** (only if building the frontend from source)
 
+## GitHub Codespaces (zero setup)
+
+Click **"Open in Codespaces"** on the [repo](https://github.com/bearing-research/strata)
+and the server is running by the time the browser tab opens. No local
+toolchain needed. See [Codespaces](../deployment/codespaces.md) for what
+the devcontainer provisions.
+
 ## Docker (Easiest)
 
 No local toolchain required:

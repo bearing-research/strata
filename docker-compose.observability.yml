@@ -36,8 +36,11 @@ services:
       # Structured JSON logging for better observability
       - STRATA_LOG_FORMAT=json
       - STRATA_LOG_LEVEL=INFO
+    # Use stdlib urllib.request (matches every other compose / Dockerfile
+    # healthcheck in the repo). No extra httpx dependency in the
+    # healthcheck path.
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8765/health').raise_for_status()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/health').read()"]
       interval: 10s
       timeout: 5s
       retries: 3
