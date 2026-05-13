@@ -16,12 +16,36 @@ primary_region = "sjc"
   STRATA_PORT = "8765"
   STRATA_DEPLOYMENT_MODE = "personal"
   STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL = "true"
+  # Per-user notebook scoping. When the Fly app is fronted by
+  # Cloudflare Access (or any authenticating proxy), the proxy injects
+  # the authenticated email in ``Cf-Access-Authenticated-User-Email``.
+  # Strata then stamps that identity as the notebook owner on create,
+  # filters ``discover`` to the caller's notebooks, and gates
+  # destructive endpoints. See docs/deployment/modes.md:
+  # "Sharing personal mode with a small group".
+  #
+  # Without a proxy in front, requests have no auth header and
+  # Strata behaves as a single-user instance (all notebooks unowned).
+  # Setting this var is safe in both cases.
+  STRATA_PERSONAL_MODE_USER_HEADER = "Cf-Access-Authenticated-User-Email"
   STRATA_NOTEBOOK_PYTHON_VERSIONS = '["3.12","3.13"]'
   STRATA_CACHE_DIR = "/home/strata/.strata/cache"
   STRATA_METADATA_DB = "/home/strata/.strata/meta.sqlite"
   STRATA_NOTEBOOK_STORAGE_DIR = "/home/strata/.strata/notebooks"
   UV_CACHE_DIR = "/tmp/uv-cache"
   UV_PYTHON_DOWNLOADS = "automatic"
+
+  # OpenTelemetry tracing. The Dockerfile installs the ``otel`` extra
+  # so the SDK is available; STRATA_TRACING_ENABLED defaults to true.
+  # To actually export spans somewhere, set the OTLP endpoint as a Fly
+  # secret (so an embedded token never lands in the committed config):
+  #
+  #     flyctl secrets set OTEL_EXPORTER_OTLP_ENDPOINT=https://your-collector:4317
+  #     flyctl secrets set OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <token>"
+  #
+  # Without an endpoint, the SDK loads but emits to a no-op exporter,
+  # zero observability cost.
+  OTEL_SERVICE_NAME = "strata-fly"
 
 [http_service]
   internal_port = 8765

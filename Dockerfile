@@ -61,6 +61,11 @@ COPY rust ./rust
 # Export the exact runtime dependency set from uv.lock. The final image installs
 # these first, then installs the built wheel with --no-deps to avoid resolving
 # the project's dependencies again at image build time.
+#
+# Extras included in the image:
+#   --extra otel: OpenTelemetry SDK + OTLP exporter. The fly.toml sets
+#     OTEL_* env vars to wire spans to a collector; without the otel
+#     extra installed, those env vars would be silently ignored.
 RUN mkdir -p dist && \
     uv export \
       --frozen \
@@ -69,6 +74,7 @@ RUN mkdir -p dist && \
       --no-editable \
       --no-header \
       --no-annotate \
+      --extra otel \
       --format requirements.txt \
       --output-file dist/runtime-requirements.txt
 

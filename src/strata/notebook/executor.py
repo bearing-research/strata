@@ -26,6 +26,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import tempfile
 import time
 import uuid
@@ -92,6 +93,33 @@ _MODULE_TO_PACKAGE: dict[str, str] = {
     "dotenv": "python-dotenv",
     "gi": "pygobject",
 }
+
+
+def _resolve_worker_token(worker_spec: Any) -> str | None:
+    """Look up the shared-secret token for an HTTP executor worker.
+
+    Two config shapes, in priority order:
+
+    1. ``config.token_env``: name of an env var holding the token. Preferred
+       — keeps the secret out of committed notebook.toml files. Common
+       pattern: ``token_env = "STRATA_GPU_WORKER_TOKEN"``, the operator
+       exports the env var when running the Strata server.
+    2. ``config.token``: literal token string. Convenient for local dev,
+       never commit a real one.
+
+    Returns ``None`` if neither is set (worker is reached without auth,
+    backward-compatible with deployments that don't enforce a token).
+    """
+    config = getattr(worker_spec, "config", None) or {}
+    token_env = str(config.get("token_env") or "").strip()
+    if token_env:
+        value = os.environ.get(token_env, "").strip()
+        if value:
+            return value
+    literal = str(config.get("token") or "").strip()
+    if literal:
+        return literal
+    return None
 
 
 def _detect_missing_module(error: str, stderr: str) -> str | None:
@@ -1083,6 +1111,7 @@ class CellExecutor:
         if not executor_url:
             raise RuntimeError(f"Executor worker '{worker_spec.name}' is missing config.url")
 
+        worker_token = _resolve_worker_token(worker_spec)
         transport = str(worker_spec.config.get("transport", "direct")).strip().lower()
         if transport in {"signed", "manifest", "build"}:
             return await self._dispatch_http_executor_with_manifest(
@@ -1156,6 +1185,8 @@ class CellExecutor:
         headers = {
             EXECUTOR_PROTOCOL_HEADER: EXECUTOR_PROTOCOL_VERSION,
         }
+        if worker_token:
+            headers["Authorization"] = f"Bearer {worker_token}"
         bundle_path = output_dir / "notebook-output-bundle.tar"
         try:
             try:
@@ -1374,8 +1405,10 @@ class CellExecutor:
             ).to_dict()
 
             manifest_execute_url = self._manifest_execute_url(executor_url)
+            worker_token = _resolve_worker_token(worker_spec)
+            headers = {"Authorization": f"Bearer {worker_token}"} if worker_token else None
             async with httpx.AsyncClient(timeout=max(timeout_seconds + 10.0, 30.0)) as client:
-                response = await client.post(manifest_execute_url, json=manifest)
+                response = await client.post(manifest_execute_url, json=manifest, headers=headers)
         except asyncio.CancelledError:
             _mark_failed("Notebook manifest execution cancelled", "CANCELLED")
             raise

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -13,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.background import BackgroundTask
 
@@ -34,12 +36,18 @@ async def _run_harness(
     timeout_seconds: float,
 ) -> dict[str, Any]:
     """Run the notebook harness with one manifest file."""
+    from strata.notebook.process_tree import (
+        subprocess_kwargs_for_new_group,
+        terminate_subprocess_tree,
+    )
+
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         str(harness_path),
         str(manifest_path),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **subprocess_kwargs_for_new_group(),
     )
     try:
         _stdout, stderr = await asyncio.wait_for(
@@ -47,8 +55,7 @@ async def _run_harness(
             timeout=timeout_seconds,
         )
     except TimeoutError:
-        proc.kill()
-        await proc.wait()
+        await terminate_subprocess_tree(proc)
         raise TimeoutError()
 
     result_path = manifest_path.parent / "manifest.json"
@@ -60,9 +67,34 @@ async def _run_harness(
 
 
 def create_notebook_executor_app() -> FastAPI:
-    """Create a standalone notebook executor HTTP app."""
+    """Create a standalone notebook executor HTTP app.
+
+    Optional bearer-token auth via ``STRATA_WORKER_TOKEN`` env var. When
+    set, the ``/v1/*`` execution endpoints require
+    ``Authorization: Bearer <token>``. ``/health`` stays open so platform
+    health probes (Fly, Cloudflare, k8s liveness) don't need the secret.
+    Unset = no auth, backward-compatible with existing deployments.
+    """
     started_at = time.time()
     active_executions = 0
+
+    # ---- Bearer-token gate ----
+    expected_token = os.environ.get("STRATA_WORKER_TOKEN", "").strip() or None
+
+    async def require_worker_token(http_request: Request) -> None:
+        if expected_token is None:
+            return  # Auth disabled
+        header = http_request.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail="Missing or malformed Authorization header (expected Bearer token)",
+            )
+        presented = header[len("Bearer ") :]
+        # Constant-time compare; the public-facing comparison shouldn't
+        # leak token length via timing.
+        if not hmac.compare_digest(presented, expected_token):
+            raise HTTPException(status_code=401, detail="Invalid worker token")
 
     def _input_extension(content_type: str) -> str:
         return {
@@ -268,7 +300,7 @@ def create_notebook_executor_app() -> FastAPI:
             "active_executions": active_executions,
         }
 
-    @app.post("/v1/notebook-execute")
+    @app.post("/v1/notebook-execute", dependencies=[Depends(require_worker_token)])
     async def execute(http_request: Request) -> Response:
         form = await http_request.form()
         metadata_file = form.get("metadata")
@@ -305,7 +337,7 @@ def create_notebook_executor_app() -> FastAPI:
             form=form,
         )
 
-    @app.post("/v1/execute")
+    @app.post("/v1/execute", dependencies=[Depends(require_worker_token)])
     async def execute_protocol_v1(http_request: Request) -> Response:
         """Execute notebook cells using the standard executor v1 metadata envelope."""
         form = await http_request.form()
@@ -371,7 +403,7 @@ def create_notebook_executor_app() -> FastAPI:
             form=form,
         )
 
-    @app.post("/v1/execute-manifest")
+    @app.post("/v1/execute-manifest", dependencies=[Depends(require_worker_token)])
     async def execute_manifest(http_request: Request) -> Response:
         """Execute a notebook build from a signed manifest."""
         try:
