@@ -2,12 +2,14 @@
 
 **Strata is a content-addressed computation graph with an interactive notebook UI.**
 
-Built for ML, AI, and data work that runs longer than a keystroke. Every
-cell output becomes a content-addressed artifact, so re-runs are cache hits
-when nothing's changed and the DAG cascade re-executes only what did. Prompt
-cells make AI calls first-class participants; `# @worker gpu-fly` dispatches
-a cell to a remote GPU; and the whole notebook is plain `.py` files plus a
-manifest — git-diffable, no JSON blobs.
+Every cell output is a versioned artifact keyed by its provenance: source,
+inputs, and environment. Strata reads each cell's AST to build the
+dependency graph automatically, so re-running a notebook is mostly a series
+of cache hits. Prompt cells make AI calls first-class DAG nodes, cached by
+template, inputs, and model config. The `# @worker gpu-fly` annotation
+dispatches a cell to a remote GPU. The whole notebook is plain `.py` files
+plus a manifest, so commits are git-diffable and there are no JSON blobs
+or execution metadata bleeding into the history.
 
 ---
 
@@ -20,7 +22,7 @@ producing artifacts that flow through an auto-built DAG.
 
 - Content-addressed caching (same code + inputs = cache hit)
 - Automatic DAG from variable analysis
-- Git-friendly format — cells are plain `.py` files, outputs and runtime
+- Git-friendly format: cells are plain `.py` files, outputs and runtime
   state live outside the committed tree (no JSON blobs, no diffs on every run)
 - Distributed workers (`@worker gpu-fly` dispatches to remote GPU)
 - Prompt cells with `{{ variable }}` injection into AI calls
@@ -34,7 +36,7 @@ producing artifacts that flow through an auto-built DAG.
 
 ## Strata Core
 
-The notebook is built on Strata Core — a standalone materialization
+The notebook is built on Strata Core, a standalone materialization
 and artifact layer. Core can also be used independently as a Python
 client library and REST API for any workflow that needs provenance-based
 caching, lineage tracking, or Iceberg table scanning.

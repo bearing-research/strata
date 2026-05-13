@@ -6,34 +6,35 @@
 
 **Strata is a content-addressed computation graph with an interactive notebook UI.**
 
-Built for ML, AI, and data work that runs longer than a keystroke. Every
-cell output becomes a content-addressed artifact, so re-runs are cache hits
-when nothing's changed and the DAG cascade re-executes only what did.
-Provenance is automatic — Strata reads each cell's AST, links references
-back to their producers, and invalidates downstream cells when an upstream
-source changes.
+Every cell output is a versioned artifact keyed by its provenance: source,
+inputs, and environment. Strata reads each cell's AST to build the
+dependency graph automatically, so re-running a notebook is mostly a series
+of cache hits. Touch one cell and the cascade re-executes only the cells
+that depend on it. Identical inputs produce the same artifact whether the
+second run comes a minute later or a year later, on the same machine or a
+different one.
 
-Prompt cells make AI calls first-class DAG nodes — cached by template,
+Prompt cells make AI calls first-class DAG nodes, cached by template,
 inputs, and model config. `# @worker gpu-fly` dispatches a cell to a remote
 GPU. `# @mount data s3://bucket/prefix ro` makes an S3 prefix available as a
 local `pathlib.Path` inside the cell. The whole notebook is plain `.py`
-files plus a manifest — git-diffable, no JSON blobs, no execution metadata
-bleeding into commits.
+files plus a manifest, so commits are git-diffable and there are no JSON
+blobs or execution metadata bleeding into the history.
 
 **Docs:** [bearing-research.github.io/strata](https://bearing-research.github.io/strata/)
 
 ## Quick Start
 
-Both paths below run in **personal mode** — single-user, writes enabled, no
+Both paths below run in **personal mode**: single-user, writes enabled, no
 proxy auth. For multi-tenant or hosted deployments, see
 [Deployment Modes](https://bearing-research.github.io/strata/deployment/modes/).
 
 ```bash
-# Docker (recommended) — docker-compose.yml sets personal mode for you
+# Docker (recommended). docker-compose.yml sets personal mode for you.
 docker compose up -d --build
 # Then open http://localhost:8765
 
-# Or from source — set personal mode explicitly
+# Or from source. Set personal mode explicitly.
 uv sync
 cd frontend && npm ci && npm run build && cd ..
 STRATA_DEPLOYMENT_MODE=personal uv run strata-server
@@ -66,22 +67,22 @@ from strata.client import StrataClient
 
 ## Notebook Features
 
-- **Content-addressed caching** — same code + same inputs = instant cache hit, zero recomputation
-- **Automatic dependency tracking** — DAG built from variable analysis, no manual wiring
-- **Cascade execution** — change upstream code, downstream cells auto-invalidate
-- **Distributed workers** — annotate `@worker gpu-fly` and the cell dispatches to a remote GPU
-- **Prompt cells** — LLM-powered cells with `{{ variable }}` template injection
-- **AI assistant** — streaming chat with conversation memory, agent mode for autonomous notebook building
-- **Environment management** — per-notebook Python venvs via uv, isolated from each other
-- **Rich outputs** — DataFrames, matplotlib plots, markdown, images
-- **Cell operations** — reorder, duplicate, fold, keyboard shortcuts
-- **Headless runner** — `strata run ./my-notebook` for CI and scheduled execution
+- **Content-addressed caching.** Same code plus same inputs equals an instant cache hit, zero recomputation.
+- **Automatic dependency tracking.** DAG built from variable analysis, no manual wiring.
+- **Cascade execution.** Change upstream code, downstream cells auto-invalidate.
+- **Distributed workers.** Annotate `@worker gpu-fly` and the cell dispatches to a remote GPU.
+- **Prompt cells.** LLM-powered cells with `{{ variable }}` template injection.
+- **AI assistant.** Streaming chat with conversation memory, agent mode for autonomous notebook building.
+- **Environment management.** Per-notebook Python venvs via uv, isolated from each other.
+- **Rich outputs.** DataFrames, matplotlib plots, markdown, images.
+- **Cell operations.** Reorder, duplicate, fold, keyboard shortcuts.
+- **Headless runner.** `strata run ./my-notebook` for CI and scheduled execution.
 
 ## The Cache Advantage
 
 Every notebook platform re-executes from scratch when you change one cell.
-Strata doesn't. The artifact store deduplicates by provenance hash —
-if the code and inputs haven't changed, the result is served instantly.
+Strata doesn't. The artifact store deduplicates by provenance hash. If
+the code and inputs haven't changed, the result is served instantly.
 
 ```
 First run:     load data (10s) → clean (3s) → train (20s) → evaluate (1s)  = 34s
@@ -89,10 +90,10 @@ Change model:  load data (✓)   → clean (✓)  → train (20s) → evaluate (
 Re-run:        load data (✓)   → clean (✓)  → train (✓)   → evaluate (✓)   = <1s
 ```
 
-This is not a feature bolted on — it's the architecture. Every cell
-execution is a `materialize(inputs, transform) → artifact` operation.
-The cache is correct by construction because it's keyed on content, not
-time.
+This isn't a feature bolted on. It's the architecture. Every cell
+execution is a `materialize(inputs, transform) → artifact` operation,
+and the cache is correct by construction because it's keyed on content,
+not time.
 
 ## Distributed Execution
 
@@ -103,12 +104,12 @@ Each cell can declare which worker it runs on via a single annotation:
 embeddings = model.encode(abstracts, batch_size=256)
 ```
 
-You define workers in `notebook.toml` — each one points at an HTTP
+You define workers in `notebook.toml`. Each one points at an HTTP
 endpoint that implements the Strata executor protocol. A worker can be
 a GPU box on RunPod, a DataFusion cluster on Fly, a beefy EC2 instance,
 or anything else that speaks HTTP. The notebook routes the cell to the
 declared worker at execution time, and the UI shows a live
-"dispatching → my-gpu" badge while it runs.
+"dispatching to my-gpu" badge while it runs.
 
 No deployment code, no infrastructure glue. Bring your own compute,
 one annotation per cell.
@@ -116,7 +117,7 @@ one annotation per cell.
 ## Source Annotations
 
 Every piece of per-cell metadata is a comment directive in the cell's
-source. The source is the single canonical place for cell config —
+source. The source is the single canonical place for cell config:
 annotations always win over any stored defaults.
 
 ```python
@@ -137,7 +138,7 @@ cell header and log structured warnings for headless runs.
 
 Mounts bind a remote URI to a local path inside the cell. Supported
 schemes: `file://`, `s3://`, `gs://`, `az://`. Credentials flow through
-fsspec options — set `anon = true` for public buckets, or drop it to
+fsspec options: set `anon = true` for public buckets, or drop it to
 use the standard credential chain.
 
 ```toml
@@ -155,7 +156,7 @@ it on first read and caches the bytes locally for the session.
 
 | Example                                             | What it shows                                                                       |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [pandas_basics](examples/pandas_basics)             | Linear DataFrame chain — caching, staleness propagation                             |
+| [pandas_basics](examples/pandas_basics)             | Linear DataFrame chain, caching, staleness propagation                              |
 | [iris_classification](examples/iris_classification) | End-to-end ML, DAG branching, mixed output types                                    |
 | [titanic_ml](examples/titanic_ml)                   | Feature engineering + model comparison                                              |
 | [s3_mount](examples/s3_mount)                       | Reading a public S3 bucket via a mount                                              |
