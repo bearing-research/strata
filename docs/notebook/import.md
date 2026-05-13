@@ -209,6 +209,21 @@ The runner does a `uv sync` per fixture and a real `strata run`,
 so it's slow (network) and intended for nightly schedules or
 manual pre-release verification.
 
+### Extended corpus + nightly CI
+
+`tests/notebook/jupyter_corpus/extended.yaml` lists public `.ipynb`
+URLs pinned to specific commit SHAs. The `jupyter-corpus` GitHub
+Actions workflow fetches each one nightly (04:00 UTC) and runs it
+through the same rubric. Failures are report-only — the workflow
+uploads a junit XML artifact, doesn't gate other CI. The cache is
+keyed by the manifest's content hash so once a URL has been
+fetched it's served from disk on subsequent runs.
+
+Anyone can trigger the workflow from the Actions tab via
+`workflow_dispatch`. Adding a new entry: pick a stable repo, pin to
+a commit SHA, run `STRATA_CORPUS_RUN=1 pytest -k <name>` locally to
+verify the entry clears the bar you set, commit the manifest line.
+
 ## Round-trip back to `.ipynb`
 
 Out of scope today. Tracked as a follow-up because preserving the

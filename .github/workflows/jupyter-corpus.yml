@@ -1,0 +1,94 @@
+name: Jupyter Corpus
+
+# Stress-test the Jupyter notebook importer against real-world
+# .ipynb files. Runs the extended corpus (URLs pinned in
+# tests/notebook/jupyter_corpus/extended.yaml) end-to-end through
+# parse → convert → dag → run → artifact. Per-PR CI exercises only
+# the in-repo smoke corpus; this workflow covers the public corpus
+# that requires network access.
+#
+# Schedule: nightly at 04:00 UTC. Also dispatchable manually from
+# the Actions tab so a release manager can refresh the signal
+# before cutting a tag.
+#
+# Failures here are report-only — corpus health is signal, not a
+# gate. A flaky download or a Jupyter notebook upstream-renamed
+# overnight shouldn't block PR merges or releases. Inspect the
+# uploaded junit artifact + the summary in the run log.
+
+on:
+  schedule:
+    # 04:00 UTC ≈ 21:00 PT / 23:00 CT — outside the usual workday
+    # so the runners aren't competing for capacity with normal CI.
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+# This workflow shouldn't gate anything else, but stale runs from
+# yesterday's cron don't add signal — cancel them when a new run
+# fires.
+concurrency:
+  group: jupyter-corpus
+  cancel-in-progress: true
+
+jobs:
+  corpus:
+    name: Extended corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Important: report-only. Don't fail the workflow when an
+    # individual notebook breaks — the junit XML carries the per-
+    # entry detail. A workflow-level failure would just hide which
+    # entries actually broke.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          version: 'latest'
+
+      - name: Build Strata (with notebook + Rust extension)
+        run: uv sync --python 3.13 --all-extras
+
+      - name: Cache extended-corpus downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/strata-jupyter-corpus
+          # Manifest is pinned to commit SHAs, so the URLs are
+          # immutable — the manifest hash is a safe cache key.
+          key: jupyter-corpus-${{ hashFiles('tests/notebook/jupyter_corpus/extended.yaml') }}
+
+      - name: Run the extended corpus
+        env:
+          STRATA_CORPUS_RUN: '1'
+        run: |
+          uv run pytest \
+            tests/notebook/test_jupyter_corpus.py::test_corpus_extended \
+            -v \
+            --junitxml=junit-corpus.xml \
+            || true
+
+      - name: Run the smoke corpus in full mode too
+        env:
+          STRATA_CORPUS_RUN: '1'
+        run: |
+          uv run pytest \
+            tests/notebook/test_jupyter_corpus.py::test_corpus_smoke_full_run \
+            -v \
+            --junitxml=junit-smoke-full.xml \
+            || true
+
+      - name: Upload junit XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jupyter-corpus-junit
+          path: |
+            junit-corpus.xml
+            junit-smoke-full.xml
+          retention-days: 30

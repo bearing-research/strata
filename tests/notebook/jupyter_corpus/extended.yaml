@@ -1,0 +1,54 @@
+# Extended Jupyter corpus.
+#
+# Hand-curated set of .ipynb files we want to keep working across
+# converter changes. Fetched at test time (cached locally), run
+# through the full parse → convert → dag → run → artifact pipeline.
+# Drives the nightly jupyter-corpus GitHub Actions workflow.
+#
+# Each entry pins to a specific commit SHA or release tag in the URL —
+# never to `main` / `master` — so the corpus is reproducible across
+# runs. Refreshing is a deliberate act, not a moving target.
+#
+# Adding a new entry:
+#   1. Pick a notebook from a stable public repo.
+#   2. Resolve a permanent URL pinned to a commit SHA (or a tag like
+#      v2.2.0). Use raw.githubusercontent.com.
+#   3. Run `STRATA_CORPUS_RUN=1 pytest -k <name>` locally to confirm
+#      the entry clears the steps you expect.
+#   4. ``expected: pass``        — must run end-to-end through the
+#                                  five-step rubric.
+#      ``expected: parse_only``  — only parse + convert + dag get
+#                                  scored; run + artifact skipped.
+#                                  Use this when the notebook needs
+#                                  packages Strata can't auto-capture
+#                                  (no ``%pip install`` line + no
+#                                  sibling requirements.txt), needs
+#                                  a GPU / paid API, downloads
+#                                  multi-GB data, etc.
+#
+# The deps-capture limitation: imports inside cells (``import numpy
+# as np``) without a sibling ``%pip install`` line or
+# ``requirements.txt`` are NOT auto-captured today. Source 3 of the
+# dep-capture design was deferred. Notebooks affected by this stay
+# at ``parse_only`` until import-name → pip-name capture lands.
+
+notebooks:
+  # ---- Python Data Science Handbook (Jake VanderPlas) ----
+  # Stable repo, pinned to a verified commit SHA. These notebooks
+  # use bare ``import numpy``, ``import pandas`` etc. without
+  # %pip install lines, so they're parse_only today.
+
+  - name: pdsh-numpy-array-basics
+    url: https://raw.githubusercontent.com/jakevdp/PythonDataScienceHandbook/d66231454ef753818dc9213c9b5942e067266966/notebooks/02.02-The-Basics-Of-NumPy-Arrays.ipynb
+    expected: parse_only
+    reason: "imports numpy without %pip install line; auto-import-capture not yet implemented"
+
+  - name: pdsh-pandas-objects
+    url: https://raw.githubusercontent.com/jakevdp/PythonDataScienceHandbook/d66231454ef753818dc9213c9b5942e067266966/notebooks/03.01-Introducing-Pandas-Objects.ipynb
+    expected: parse_only
+    reason: "imports pandas/numpy without %pip install line; auto-import-capture not yet implemented"
+
+  - name: pdsh-matplotlib-line-plots
+    url: https://raw.githubusercontent.com/jakevdp/PythonDataScienceHandbook/d66231454ef753818dc9213c9b5942e067266966/notebooks/04.01-Simple-Line-Plots.ipynb
+    expected: parse_only
+    reason: "imports matplotlib without %pip install line; auto-import-capture not yet implemented"

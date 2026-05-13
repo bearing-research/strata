@@ -1,10 +1,19 @@
-"""Smoke corpus runner for Jupyter notebook import.
+"""Smoke + extended corpus runner for Jupyter notebook import.
 
-PRs 5–6 of the Jupyter interop work. Each fixture under
-``tests/notebook/jupyter_corpus/smoke/`` is a hand-crafted ``.ipynb``
-that exercises a different facet of the converter — pandas/numpy/
-matplotlib/sklearn idioms, ``%pip install`` capture, ``;``-suppression,
-variable rebinding, etc.
+PRs 5–7 of the Jupyter interop work.
+
+**Smoke** fixtures live under ``tests/notebook/jupyter_corpus/smoke/``
+— hand-crafted ``.ipynb`` files exercising different facets of the
+converter (pandas/numpy/matplotlib/sklearn idioms, ``%pip install``
+capture, ``;``-suppression, variable rebinding, …). Committed
+verbatim so any behavior change in the converter shows up as a diff.
+
+**Extended** corpus lives in
+``tests/notebook/jupyter_corpus/extended.yaml`` — URLs pinned to
+specific commit SHAs of public stable-source repos. Fetched at test
+time (cached under ``~/.cache/strata-jupyter-corpus/``). Run on a
+nightly schedule via the ``jupyter-corpus`` GitHub Actions workflow,
+or on-demand by anyone with ``STRATA_CORPUS_RUN=1`` set locally.
 
 Scoring rubric (per the design doc):
 
@@ -32,10 +41,13 @@ infrastructure and lands separately.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -48,6 +60,9 @@ from strata.notebook.parser import parse_notebook
 
 _SMOKE_DIR = Path(__file__).parent / "jupyter_corpus" / "smoke"
 _SMOKE_NOTEBOOKS = sorted(_SMOKE_DIR.glob("*.ipynb"))
+_EXTENDED_MANIFEST = Path(__file__).parent / "jupyter_corpus" / "extended.yaml"
+_EXTENDED_CACHE = Path.home() / ".cache" / "strata-jupyter-corpus"
+_FETCH_TIMEOUT_S = 30
 
 
 @dataclass
@@ -310,6 +325,116 @@ def test_corpus_exercises_converter_translations(tmp_path: Path) -> None:
             saw_deps = True
     assert saw_translated, "no smoke notebook exercises magic translation"
     assert saw_deps, "no smoke notebook exercises dep capture"
+
+
+# ---------------------------------------------------------------------------
+# Extended corpus — fetched from pinned URLs in extended.yaml
+
+
+@dataclass
+class _ExtendedEntry:
+    """One row from the extended-corpus manifest."""
+
+    name: str
+    url: str
+    expected: str = "pass"  # 'pass' or 'parse_only'
+    reason: str = ""
+
+
+def _load_extended_manifest() -> list[_ExtendedEntry]:
+    """Read ``extended.yaml`` and return its entries.
+
+    Returns an empty list when the file is missing or empty — the
+    test is parametrized over the result, so an empty list just
+    means the parametrized test produces zero items (no failure).
+    """
+    if not _EXTENDED_MANIFEST.is_file():
+        return []
+    import yaml  # PyYAML; transitive dep already present via pytest plugins
+
+    try:
+        data = yaml.safe_load(_EXTENDED_MANIFEST.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return []
+    entries = data.get("notebooks") or []
+    out: list[_ExtendedEntry] = []
+    for item in entries:
+        if not isinstance(item, dict) or "name" not in item or "url" not in item:
+            continue
+        out.append(
+            _ExtendedEntry(
+                name=str(item["name"]),
+                url=str(item["url"]),
+                expected=str(item.get("expected") or "pass"),
+                reason=str(item.get("reason") or ""),
+            )
+        )
+    return out
+
+
+def _fetch_notebook(url: str) -> Path:
+    """Download a notebook to the local cache; return its path.
+
+    Cache key is the URL's SHA-256 digest. The URL is pinned to a
+    specific commit SHA in the manifest, so once fetched the cache
+    entry is immutable — re-running tests doesn't re-download. Raises
+    on network failure; callers map that to a skip (network is
+    flaky, not the converter's problem).
+    """
+    _EXTENDED_CACHE.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    target = _EXTENDED_CACHE / f"{digest}.ipynb"
+    if target.is_file() and target.stat().st_size > 0:
+        return target
+
+    req = urllib.request.Request(url, headers={"User-Agent": "strata-jupyter-corpus/1.0"})
+    with urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT_S) as resp:
+        body = resp.read()
+    target.write_bytes(body)
+    return target
+
+
+_EXTENDED_ENTRIES = _load_extended_manifest()
+
+
+@pytest.mark.skipif(
+    not _EXTENDED_ENTRIES or not _full_mode_enabled(),
+    reason="extended corpus requires STRATA_CORPUS_RUN=1 and a non-empty manifest",
+)
+@pytest.mark.parametrize("entry", _EXTENDED_ENTRIES, ids=lambda e: e.name)
+def test_corpus_extended(entry: _ExtendedEntry, tmp_path: Path) -> None:
+    """Score one extended-corpus entry end-to-end.
+
+    The manifest pins each URL to a commit SHA, so this test is
+    reproducible across runs once the local cache is warm. Network
+    failures during fetch are reported as skips (transient, not a
+    converter problem); everything else is a real signal.
+
+    Intended to be run under the ``jupyter-corpus`` GitHub Actions
+    workflow nightly + on dispatch. Failures here are report-only —
+    the workflow doesn't gate other CI.
+    """
+    try:
+        ipynb_path = _fetch_notebook(entry.url)
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        pytest.skip(f"fetch failed: {type(exc).__name__}: {exc}")
+
+    out_dir = tmp_path / entry.name
+    full = entry.expected == "pass"
+    score = _score(ipynb_path, out_dir=out_dir, full=full)
+
+    if entry.expected == "parse_only":
+        assert score.parse and score.convert and score.dag, (
+            f"{entry.name} (expected parse_only) failed at {score.failed_at}: {score.error}"
+        )
+    else:
+        assert (
+            score.parse
+            and score.convert
+            and score.dag
+            and score.run
+            and (score.artifact is not False)
+        ), f"{entry.name} failed at {score.failed_at}: {score.error}"
 
 
 @pytest.mark.skipif(
