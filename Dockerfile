@@ -120,11 +120,21 @@ VOLUME ["/home/strata/.strata", "/data"]
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Strata configuration defaults (can be overridden)
+# Strata configuration defaults (can be overridden).
+#
+# The container is fundamentally a multi-user shape: ``docker run -p
+# 8765:8765`` only works when the server binds non-loopback. Set the
+# personal-mode "allow remote clients" flag so the default
+# personal-mode deployment doesn't refuse to bind to 0.0.0.0.
+# Service-mode operators override STRATA_DEPLOYMENT_MODE at runtime;
+# this set of defaults gets them to a working container immediately
+# without an extra env var.
 ENV UV_CACHE_DIR=/home/strata/.strata/uv-cache
 ENV UV_PYTHON_DOWNLOADS=never
 ENV STRATA_HOST=0.0.0.0
 ENV STRATA_PORT=8765
+ENV STRATA_DEPLOYMENT_MODE=personal
+ENV STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL=true
 ENV STRATA_CACHE_DIR=/home/strata/.strata/cache
 ENV STRATA_METADATA_DB=/home/strata/.strata/meta.sqlite
 
