@@ -11,7 +11,7 @@ Strata notebook directory, see [Import from Jupyter](import.md) and
 its `strata import` sibling.
 
 It reuses the same `NotebookSession` and `CellExecutor` the UI uses, so the
-execution path is identical — artifact cache hits, cascade ordering, worker
+execution path is identical, artifact cache hits, cascade ordering, worker
 dispatch, and mount resolution all behave the same way.
 
 ## Usage
@@ -60,7 +60,7 @@ end, so downstream steps can grep/parse per-cell status without screen-scraping.
 ## What Gets Run
 
 Every cell in the notebook executes in topological order, exactly as if you
-had clicked **Run All** in the UI. Cached artifacts are reused — the first run
+had clicked **Run All** in the UI. Cached artifacts are reused, the first run
 populates the cache; subsequent runs on unchanged source + inputs return
 instantly.
 
@@ -73,7 +73,7 @@ the expected artifacts.
 - **No server starts.** No ports are bound; no UI is served.
 - **No WebSocket broadcasts.** Progress is written to stdout only.
 - **No interactive prompts.** A cascade that would pop a confirmation in the
-  UI just runs — the CLI treats every cell as "confirmed."
+  UI just runs, the CLI treats every cell as "confirmed."
 - **No AI assistant.** `strata run` only executes declarative cells.
 
 ## Environment & Secrets
@@ -81,7 +81,7 @@ the expected artifacts.
 `strata run` reads the notebook's `[env]` and `[secret_manager]` blocks the
 same way the server does. Secret-manager credentials (e.g.
 `INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET`) must be present in the
-shell that invokes the command — they are never stored in the notebook.
+shell that invokes the command, they are never stored in the notebook.
 
 For notebooks that require env vars set only via the Runtime panel (never
 committed), export them before invoking `strata run`.

@@ -1,6 +1,6 @@
 # Secret Manager Integration
 
-Strata can pull environment variables from an external secret manager so API keys, database URLs, and other sensitive config don't have to be re-entered every time a notebook is reopened. Values fetched from the manager flow into the same `notebook.env` map the Runtime panel uses, so cells read them with plain `os.environ` — no notebook code changes.
+Strata can pull environment variables from an external secret manager so API keys, database URLs, and other sensitive config don't have to be re-entered every time a notebook is reopened. Values fetched from the manager flow into the same `notebook.env` map the Runtime panel uses, so cells read them with plain `os.environ`, no notebook code changes.
 
 ## Supported providers
 
@@ -14,7 +14,7 @@ Adding a new provider is a one-file drop-in behind the `SecretProvider` protocol
 
 ### 1. Authenticate the server
 
-Strata reaches Infisical with credentials it reads from the **process environment** of the running server — not from the notebook UI, never from disk. Two auth paths:
+Strata reaches Infisical with credentials it reads from the **process environment** of the running server, not from the notebook UI, never from disk. Two auth paths:
 
 **Machine Identity / Universal Auth (recommended).** Create a Machine Identity in your Infisical project, grant it read access to the secrets you want Strata to see, and export the resulting client id + secret:
 
@@ -45,7 +45,7 @@ export INFISICAL_CLIENT_SECRET="..."
 uv run uvicorn strata.server:app --host 0.0.0.0 --port 8765
 ```
 
-The credentials only live in the server process — never in `notebook.toml`, `.strata/`, logs, or any commit.
+The credentials only live in the server process, never in `notebook.toml`, `.strata/`, logs, or any commit.
 
 ### 3. Wire up the notebook
 
@@ -85,13 +85,13 @@ Each env row in the Runtime panel shows a green source badge (`INFISICAL`) next 
 
 ## Rotation
 
-Rotate the secret in Infisical, then hit the **Refresh** button. Cells that run after the refresh see the new value immediately (the executor reads the cell's `env` each run). Cells with cached artifacts under the *old* value stay cached — rotating a secret doesn't invalidate history. If you need to re-execute with the new value, edit or force-run the downstream cell.
+Rotate the secret in Infisical, then hit the **Refresh** button. Cells that run after the refresh see the new value immediately (the executor reads the cell's `env` each run). Cells with cached artifacts under the *old* value stay cached, rotating a secret doesn't invalidate history. If you need to re-execute with the new value, edit or force-run the downstream cell.
 
 ## Fetch errors
 
-When a fetch fails — bad credentials, network error, wrong project — the notebook still opens. The error surfaces in the Runtime panel's Secret manager block. Common messages:
+When a fetch fails, bad credentials, network error, wrong project, the notebook still opens. The error surfaces in the Runtime panel's Secret manager block. Common messages:
 
-> No Infisical credentials in the process environment. Set either `INFISICAL_CLIENT_ID` + `INFISICAL_CLIENT_SECRET` (Machine Identity / Universal Auth — recommended) or `INFISICAL_TOKEN` (service token, legacy) in the shell that launched Strata.
+> No Infisical credentials in the process environment. Set either `INFISICAL_CLIENT_ID` + `INFISICAL_CLIENT_SECRET` (Machine Identity / Universal Auth, recommended) or `INFISICAL_TOKEN` (service token, legacy) in the shell that launched Strata.
 
 > Infisical authentication failed: …
 
@@ -101,10 +101,10 @@ Fix the cause (rotate the credential, check `project_id` / `environment` / `path
 
 ## Security notes
 
-- Secret **values** never ship to the frontend in cleartext from the env endpoints — values are only visible in the notebook venv's `os.environ`. The UI shows the key names + source, not the values.
+- Secret **values** never ship to the frontend in cleartext from the env endpoints, values are only visible in the notebook venv's `os.environ`. The UI shows the key names + source, not the values.
 - Secret values are **not written to disk**. `[env]` blocks on disk blank sensitive keys (`KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `CREDENTIAL` name patterns) before persisting; secrets fetched at open time are in-memory only.
 - If a cell **prints** an env var, its value is captured in the cell's console output and persisted in `.strata/console/` alongside stdout/stderr. Don't `print(os.environ)` in production notebooks.
-- Authenticating credentials (`INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` or `INFISICAL_TOKEN`) live in the process environment, set by whoever launches the server. Distribute them the same way you'd distribute any deploy secret (systemd unit, k8s secret, `.envrc` with direnv-allow, etc.) — **not** in a committed file.
+- Authenticating credentials (`INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` or `INFISICAL_TOKEN`) live in the process environment, set by whoever launches the server. Distribute them the same way you'd distribute any deploy secret (systemd unit, k8s secret, `.envrc` with direnv-allow, etc.) **not** in a committed file.
 
 ## Limits
 

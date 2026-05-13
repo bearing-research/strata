@@ -1,7 +1,7 @@
 # vs Jupyter, Marimo, Pluto
 
 Strata is closest in spirit to the new generation of reactive notebooks
-(Marimo, Pluto.jl) — it shares the "your DAG comes from your variable
+(Marimo, Pluto.jl) it shares the "your DAG comes from your variable
 references" idea. Where Strata steps further is in turning every cell output
 into a content-addressed artifact and treating remote compute and AI calls
 as first-class cell behaviors rather than escape hatches.
@@ -13,7 +13,7 @@ as first-class cell behaviors rather than escape hatches.
 | File format | Per-cell `.py` files + `notebook.toml` manifest | Single `.py` per notebook | Single `.jl` per notebook | JSON `.ipynb` |
 | Git-friendly diffs | Per-cell, no embedded outputs or execution counts | Single-file but text | Single-file but text | Outputs + base64 images + execution counts embedded in the same file |
 | Automatic DAG from variable references | Yes | Yes | Yes | No |
-| Persistent cell-output cache | **Automatic**, content-addressed per cell, survives restarts | **Opt-in** via `mo.persistent_cache` / `mo.cache` decorators | None — Pluto guarantees the program state is described by the visible code, no hidden cache between sessions | None |
+| Persistent cell-output cache | **Automatic**, content-addressed per cell, survives restarts | **Opt-in** via `mo.persistent_cache` / `mo.cache` decorators | None, Pluto guarantees the program state is described by the visible code, no hidden cache between sessions | None |
 | Distributed / remote execution | `# @worker gpu-fly` annotation dispatches a single cell to a registered worker | Via external orchestration (e.g. SkyPilot recipe); no per-cell remote annotation | Single-process | Single-process per kernel |
 | First-class AI/LLM cells | Prompt cells participate in the DAG and cache by template + inputs + model config | "AI-native" refers to *editor-level* code authoring; LLM calls happen inside Python cells | No | No |
 | Built-in SQL cells | Yes (named connections, schema discovery, snapshot-aware caching) | Yes (built-in SQL engine) | Community library | Community extensions |
@@ -25,7 +25,7 @@ as first-class cell behaviors rather than escape hatches.
 ## Where Strata is distinctive
 
 **Caching is automatic, not opt-in.** Marimo offers persistent caching
-through the `mo.persistent_cache` context manager — the user explicitly
+through the `mo.persistent_cache` context manager, the user explicitly
 delimits a block of code they want cached. In Strata, every cell's output
 is content-addressed by default: the provenance hash of source + upstream
 artifact hashes + environment lockfile decides cache identity, and a cache
@@ -35,15 +35,15 @@ milliseconds.
 **Remote compute is a one-line annotation.** Marimo can be run on a remote
 host (SkyPilot integration, SSH port-forwarding), but the granularity is
 the whole notebook process. Strata's `# @worker gpu-fly` annotation routes
-a single cell — fitting one classifier on a GPU, fingerprinting one file
-on a high-memory box — without rewriting the rest of the pipeline.
+a single cell, fitting one classifier on a GPU, fingerprinting one file
+on a high-memory box, without rewriting the rest of the pipeline.
 
 **AI calls are first-class DAG nodes.** Marimo's "AI-native" label refers
 to the editor's code-authoring assistance, not to LLM responses
 participating in the dependency graph. Strata's prompt cells render a
 `{{ var }}` template against upstream artifacts, send the result to an
 OpenAI-compatible API, validate against an optional JSON Schema, and store
-the response as a cached artifact — same caching guarantees as a Python
+the response as a cached artifact, same caching guarantees as a Python
 cell. Mixing prompt and Python cells in one DAG is the point.
 
 **Variant cells are unique to Strata.** Three alternative training
@@ -56,7 +56,7 @@ the downstream cells that read them) per variant.
 as one `.py` file per cell, `notebook.toml` as the manifest, and all
 runtime state (display outputs, console snapshots, the artifact store) in
 a gitignored `.strata/` directory. `notebook.toml`'s `updated_at` only
-bumps on structural edits — adding/removing cells, changing workers —
+bumps on structural edits, adding/removing cells, changing workers:
 so re-running a cell never touches the tracked tree. Jupyter `.ipynb`
 files JSON-encode source, outputs (base64 images and all), and execution
 counts in the same blob; Marimo and Pluto avoid the JSON issue with one
@@ -65,7 +65,7 @@ text file per notebook but still keep all cells together.
 ## Where other notebooks are stronger
 
 - **Interactive UI widgets.** Marimo has `mo.ui.slider`, `mo.ui.dropdown`,
-  etc. — reactive widgets the user can drag/click to update a parameter,
+  etc., reactive widgets the user can drag/click to update a parameter,
   which then propagates through the DAG. Strata doesn't have a widget
   layer; you change a value by editing source.
 - **Ecosystem maturity.** Jupyter's ecosystem of extensions, kernels (R,
@@ -74,7 +74,7 @@ text file per notebook but still keep all cells together.
 - **Reactive evaluation at the keystroke level.** Pluto and Marimo
   immediately re-run dependent cells on edit. Strata is reactive about
   *staleness* (the DAG updates, downstream cells flip to stale on every
-  source change) but execution is explicit — you press Run.
+  source change) but execution is explicit, you press Run.
 - **Hosted offerings.** Google Colab, Deepnote, Hex, and Databricks
   Notebooks all bundle a hosted runtime; Strata is self-hosted (see
   the section below on where these fit).
@@ -95,11 +95,11 @@ notebook runtime itself:
 | Databricks Notebooks | Custom UI on IPython kernel | `.ipynb` (default), `.dbc` legacy |
 
 None of them have automatic content-addressed caching, per-cell remote
-dispatch, or first-class AI cells — because the underlying Jupyter
+dispatch, or first-class AI cells, because the underlying Jupyter
 runtime doesn't.
 
 The smaller "we-rejected-Jupyter" cohort (Marimo, Observable, Deepnote,
-Hex) explicitly stepped away from `.ipynb` to redesign the runtime —
+Hex) explicitly stepped away from `.ipynb` to redesign the runtime:
 reactive execution, real-time collaboration, multi-language cells, app
 deployment. That cohort is Strata's natural competitive set; the
 JupyterLab-wrapper hosted offerings are an orthogonal category whose
@@ -109,20 +109,20 @@ moat is compute provisioning, not notebook-engine innovation.
 
 Strata is the right fit when your notebook is:
 
-- **Expensive to recompute** — model training, embeddings, large scans,
+- **Expensive to recompute**: model training, embeddings, large scans,
   long LLM chains. The automatic cache pays for itself the first time you
   reload.
-- **Heterogeneous in compute** — some cells want a GPU, some want a
+- **Heterogeneous in compute**: some cells want a GPU, some want a
   warehouse, some are pure CPU. The `# @worker` annotation routes each
   cell to where it should run.
-- **Iterative and branching** — variant cells let you keep three model
+- **Iterative and branching**: variant cells let you keep three model
   candidates in one notebook without forking.
-- **Version-controlled with others** — plain text, no JSON-in-git pain,
+- **Version-controlled with others**: plain text, no JSON-in-git pain,
   no execution-count churn on every re-run.
-- **AI-heavy** — prompt cells make LLM responses cacheable like any
+- **AI-heavy**: prompt cells make LLM responses cacheable like any
   other artifact, with schema-constrained output and retry-on-validation.
 
 For light interactive exploration where the work is a few seconds per
-cell, you're not really paying for what Strata gives you — Jupyter and
+cell, you're not really paying for what Strata gives you, Jupyter and
 Marimo are fine. The value lands when your work is too expensive to
 re-run on every refresh.

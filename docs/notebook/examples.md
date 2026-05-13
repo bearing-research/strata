@@ -2,7 +2,7 @@
 
 Every notebook under `examples/` in the repo demonstrates a specific
 Strata capability. Each example is also rendered into the docs site
-automatically — click through to read the cell sources and any cached
+automatically, click through to read the cell sources and any cached
 outputs without cloning the repo.
 
 To run examples locally, point the server's storage root at the
@@ -15,19 +15,19 @@ STRATA_DEPLOYMENT_MODE=personal \
 ```
 
 Every example then appears on the Strata home page. No copying
-required — open the notebook, click Run, edit, watch the cascade.
+required, open the notebook, click Run, edit, watch the cascade.
 
 (If you'd rather keep examples separate from your own work, copy
 the directory you want under your existing storage root instead:
 `cp -R examples/iris_classification /tmp/strata-notebooks/`.)
 
-## Walkthroughs — start here
+## Walkthroughs, start here
 
 | Notebook | What you'll see |
 | --- | --- |
-| [`iris_classification`](../examples/iris_classification.md) | End-to-end ML in seven cells — load → split → train → evaluate → plot. The canonical "multi-cell DAG with caching" demo. |
+| [`iris_classification`](../examples/iris_classification.md) | End-to-end ML in seven cells, load → split → train → evaluate → plot. The canonical "multi-cell DAG with caching" demo. |
 | [`pandas_basics`](../examples/pandas_basics.md) | Core DataFrame operations and rich display outputs. |
-| [`titanic_ml`](../examples/titanic_ml.md) | Feature engineering plus comparison of two classifiers — closer to a real ML workflow. |
+| [`titanic_ml`](../examples/titanic_ml.md) | Feature engineering plus comparison of two classifiers, closer to a real ML workflow. |
 
 ## Variant cells
 
@@ -39,7 +39,7 @@ the directory you want under your existing storage root instead:
 
 | Notebook | What you'll see |
 | --- | --- |
-| [`arxiv_classifier`](../examples/arxiv_classifier.md) | AI-powered paper classification — prompt cells + distributed workers in one pipeline. |
+| [`arxiv_classifier`](../examples/arxiv_classifier.md) | AI-powered paper classification, prompt cells + distributed workers in one pipeline. |
 | [`review_triage`](../examples/review_triage.md) | Structured-output prompt cells with `@output_schema` + the validate-and-retry loop. |
 | [`news_alpha_trader`](../examples/news_alpha_trader.md) | Secret manager + AI pricing lookup + multi-cell DAG. |
 
@@ -71,4 +71,4 @@ the directory you want under your existing storage root instead:
 
 | Notebook | What you'll see |
 | --- | --- |
-| [`markdown_showcase`](../examples/markdown_showcase.md) | Every markdown rendering path — headings, lists, tables, code blocks, security guards, dynamic `Markdown(...)` output. |
+| [`markdown_showcase`](../examples/markdown_showcase.md) | Every markdown rendering path, headings, lists, tables, code blocks, security guards, dynamic `Markdown(...)` output. |

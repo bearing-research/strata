@@ -1,6 +1,6 @@
 # REST API Reference
 
-This page documents the **notebook** REST surface, mounted under `/v1/notebooks`. Strata Core also exposes a `POST /v1/materialize` endpoint for direct artifact materialization — see the [Core Quickstart](../getting-started/core.md) for that surface.
+This page documents the **notebook** REST surface, mounted under `/v1/notebooks`. Strata Core also exposes a `POST /v1/materialize` endpoint for direct artifact materialization, see the [Core Quickstart](../getting-started/core.md) for that surface.
 
 !!! note "Session ID vs Notebook ID"
 Route parameters use the **session ID** (a UUID generated when the notebook is opened), not the persistent `notebook_id` from `notebook.toml`. The session ID is returned by the `open` and `create` endpoints.
@@ -197,7 +197,7 @@ GET /v1/notebooks/{session_id}/cells/{cell_id}/iterations?variable=<name>
 
 Lists stored iteration artifacts for a `@loop` cell. The `variable` query
 parameter defaults to the loop's `carry` variable if omitted. Non-loop cells
-and loops with no completed iterations return an empty list — safe to poll
+and loops with no completed iterations return an empty list, safe to poll
 from the inspect panel.
 
 Returns `{ "cell_id", "variable", "iterations": [{ "iteration", "artifact_uri",
@@ -256,7 +256,7 @@ Runs `uv sync` synchronously and invalidates any stale cell runtimes. Returns
 the full environment payload plus `lockfile_changed`, `operation_log`
 (command, duration, stdout/stderr), and the per-cell staleness map.
 
-For long syncs prefer the background `POST /environment/jobs` path — this
+For long syncs prefer the background `POST /environment/jobs` path, this
 endpoint blocks the request until the sync finishes.
 
 ### Get Current Environment Job
@@ -423,7 +423,7 @@ One endpoint, three output formats:
 
 | `fmt`        | Returns                                                                                                  |
 | ------------ | -------------------------------------------------------------------------------------------------------- |
-| `zip` *(default)* | Reproducible bundle — `notebook.toml`, `pyproject.toml`, `uv.lock`, cells, `provenance.json`.        |
+| `zip` *(default)* | Reproducible bundle, `notebook.toml`, `pyproject.toml`, `uv.lock`, cells, `provenance.json`.        |
 | `markdown`   | Single-file rendering for sharing / docs ingestion. Same engine as `strata export`.                      |
 | `html`       | Standalone HTML with embedded CSS + Pygments syntax highlighting.                                        |
 
@@ -546,7 +546,7 @@ PUT /v1/notebooks/{session_id}/secret-manager/config
 ```
 
 Persists the `[secret_manager]` block to `notebook.toml` and immediately
-refetches. An empty payload (all fields null) removes the block —
+refetches. An empty payload (all fields null) removes the block:
 "disconnect from secret manager". Credentials are never part of this payload;
 they must be exported in the server's shell environment.
 
@@ -557,7 +557,7 @@ POST /v1/notebooks/{session_id}/secret-manager/refresh
 ```
 
 Re-fetches secrets from the configured manager and merges them into env.
-Never returns 500 on fetch failure — the error surfaces in
+Never returns 500 on fetch failure, the error surfaces in
 `env_fetch_error` so the UI can display it next to the Refresh button.
 
 ## Core API

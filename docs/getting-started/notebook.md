@@ -28,7 +28,7 @@ Each notebook gets its own Python environment (managed by `uv`), so packages ins
 
 ## 3. Walk Through a Pipeline
 
-We'll load the classic iris dataset, summarize it by species, and plot a scatter. Three cells, one real DAG — enough to exercise caching, cascading, and rich displays in motion.
+We'll load the classic iris dataset, summarize it by species, and plot a scatter. Three cells, one real DAG, enough to exercise caching, cascading, and rich displays in motion.
 
 Open the **Environment** panel in the sidebar and add `scikit-learn`, `pandas`, and `matplotlib`.
 
@@ -98,15 +98,15 @@ The matplotlib figure renders inline as a PNG.
 
 ## 4. Re-run for cache hits
 
-Press ++shift+enter++ on the loader cell again. The 2-second pause is gone — Strata returned the cached `df` instantly and the cell badge reads **⚡ cached**.
+Press ++shift+enter++ on the loader cell again. The 2-second pause is gone, Strata returned the cached `df` instantly and the cell badge reads **⚡ cached**.
 
 Caching is content-addressed: the cache key is a hash of the cell's source, its upstream artifacts, and the environment lockfile. Re-running with the same three is always a cache hit. No `@memoize`, no manual invalidation, and the cached result is byte-identical to what produced it.
 
 ## 5. Edit upstream, watch the cascade
 
-Edit the loader — say, change `time.sleep(2)` to `time.sleep(1)`. Strata re-analyzes the source, computes a new provenance hash, and marks the loader **stale**. The summary and plot cells flip stale too: they referenced `df`, which is no longer the cached value.
+Edit the loader, say, change `time.sleep(2)` to `time.sleep(1)`. Strata re-analyzes the source, computes a new provenance hash, and marks the loader **stale**. The summary and plot cells flip stale too: they referenced `df`, which is no longer the cached value.
 
-Now press ++shift+enter++ on the plot cell. Strata builds a **cascade plan** — loader → summary → plot — and runs them in topological order. Revert the edit and re-run: every cell becomes a cache hit on the way through, no work happens, the cascade short-circuits to milliseconds.
+Now press ++shift+enter++ on the plot cell. Strata builds a **cascade plan**: loader → summary → plot, and runs them in topological order. Revert the edit and re-run: every cell becomes a cache hit on the way through, no work happens, the cascade short-circuits to milliseconds.
 
 ## 6. Other display types
 
@@ -128,7 +128,7 @@ See [Environment Management](../notebook/environment.md) for details.
 
 The top-right **AI Assistant** panel is a conversational sidebar that can read
 your notebook, answer questions, and autonomously edit or run cells. It's
-separate from prompt cells — the assistant lives outside the DAG and doesn't
+separate from prompt cells, the assistant lives outside the DAG and doesn't
 create artifacts.
 
 - **Chat mode** (++enter++): stream a response with notebook context included.
@@ -176,7 +176,7 @@ cells before deciding which to open.
 
 ## What's Next
 
-- [Concepts](../notebook/concepts.md) — how the DAG, caching, and cascade work
-- [Environment](../notebook/environment.md) — package management and Python versions
-- [Keyboard Shortcuts](../notebook/keyboard.md) — all available shortcuts
-- [Docker deployment](../deployment/docker.md) — run in a container
+- [Concepts](../notebook/concepts.md) how the DAG, caching, and cascade work
+- [Environment](../notebook/environment.md) package management and Python versions
+- [Keyboard Shortcuts](../notebook/keyboard.md) all available shortcuts
+- [Docker deployment](../deployment/docker.md) run in a container

@@ -1,7 +1,7 @@
 # Export
 
 `strata export` renders a notebook directory to a single self-contained
-file — markdown or HTML — for sharing or archiving. The exported file
+file, markdown or HTML, for sharing or archiving. The exported file
 embeds cell sources, cached display outputs (DataFrame tables, images,
 JSON, console snapshots), and any structural metadata worth showing,
 with **no runtime dependency** on the recipient's end.
@@ -18,7 +18,7 @@ with **no runtime dependency** on the recipient's end.
   `strata export` against every `examples/*/` at mkdocs build time.
 
 For exports inside the notebook UI itself, click the **Export** button
-in the notebook header — same engine, browser triggers a file download.
+in the notebook header, same engine, browser triggers a file download.
 
 ## Usage
 
@@ -39,7 +39,7 @@ strata export <notebook_dir> [options]
 ### Examples
 
 ```bash
-# Markdown to stdout — pipe anywhere
+# Markdown to stdout, pipe anywhere
 strata export ./my_analysis
 
 # Standalone HTML for sharing
@@ -53,11 +53,11 @@ strata export ./my_analysis --include-inactive-variants
 
 For each cell, the exporter emits in order:
 
-1. **Banner** — the cell's `# @name` (if set) or its ID, plus small
+1. **Banner**: the cell's `# @name` (if set) or its ID, plus small
    chips for `# @worker`, `# @variant`, `# @loop`, `# @mount`.
-2. **Source** — fenced code block in the cell's language. The fence
+2. **Source**: fenced code block in the cell's language. The fence
    length auto-grows to cover embedded triple-backticks safely.
-3. **Cached display outputs** — per content type:
+3. **Cached display outputs**: per content type:
     - **DataFrames / Arrow tables** render as markdown tables (or
       HTML `<table>`), truncated to 20 preview rows.
     - **PNG images** inline as `data:` URLs, loaded lazily from the
@@ -65,16 +65,15 @@ For each cell, the exporter emits in order:
     - **JSON / dict / list** as fenced JSON.
     - **Markdown** rendered as content.
     - **Pickled** values become a placeholder with the type hint
-      from the serializer (e.g. *Pickled output (`<MyThing object>`)
-      — not rendered in export*).
+      from the serializer (e.g. *Pickled output (`<MyThing object>`) not rendered in export*).
     - **Errors** render as text blocks.
-4. **Console output** — `stdout` / `stderr` snapshots if present.
+4. **Console output**: `stdout` / `stderr` snapshots if present.
    ANSI escape sequences are stripped so coloured output stays
    readable in a non-terminal viewer.
 
 ## Cell-kind specifics
 
-### Prompt cells — response excluded by design
+### Prompt cells, response excluded by design
 
 Prompt cells render the **template only**. Cached LLM responses are
 never included in exports, with or without flags. Reasons:
@@ -85,22 +84,22 @@ never included in exports, with or without flags. Reasons:
   would mean responses leak by default.
 
 If you want a response in the export, paste it into a markdown cell
-manually — that signals "yes I want this published."
+manually, that signals "yes I want this published."
 
-### Variant cells — active member by default
+### Variant cells, active member by default
 
 A variant group renders only its **active** variant by default, plus
 a small banner note ("Variant `<name>` of group `<group>`"). Pass
 `--include-inactive-variants` to render all members stacked.
 
-### Loop cells — final iteration only
+### Loop cells, final iteration only
 
 Loop cells render the body and the **final iteration's display
 output**. Per-iteration history is not unrolled (it would bloat the
 export for limited gain). The cell banner notes `max_iter` and
 `carry` so the reader knows it's a loop.
 
-### Markdown cells — content verbatim
+### Markdown cells, content verbatim
 
 Markdown cells render as content, not as fenced source. In HTML
 exports they currently render as preformatted text (no
@@ -118,7 +117,7 @@ format.
 
 The docs site uses a small mkdocs hook
 (`docs_hooks/export_examples.py`) to render every `examples/*/`
-notebook at build time. The hook calls `export_notebook` directly —
+notebook at build time. The hook calls `export_notebook` directly:
 no CLI process is spawned. Generated pages are gitignored and
 regenerated on every build. The hand-written
 [Examples catalog](examples.md) provides the feature-grouped table of

@@ -1,6 +1,6 @@
 # Cell Annotations & Environment
 
-Annotations are metadata directives written in the leading comment block of a cell. They control display names, execution routing, timeouts, environment variables, and filesystem mounts — without separate configuration UI. The cell source is the single source of truth.
+Annotations are metadata directives written in the leading comment block of a cell. They control display names, execution routing, timeouts, environment variables, and filesystem mounts, without separate configuration UI. The cell source is the single source of truth.
 
 ```python
 # @name Train Classifier
@@ -26,7 +26,7 @@ import pandas as pd
 papers = pd.read_parquet("https://...")
 ```
 
-For **Python cells**, any non-empty string is accepted — spaces, parentheses, and special characters are fine.
+For **Python cells**, any non-empty string is accepted, spaces, parentheses, and special characters are fine.
 
 For **prompt cells**, `@name` also sets the output variable name and must be a valid Python identifier:
 
@@ -49,7 +49,7 @@ Route the cell's execution to a named worker instead of the local machine.
 category_stats = ctx.sql("SELECT topic, COUNT(*) FROM papers GROUP BY topic").to_pandas()
 ```
 
-Workers are HTTP endpoints that implement the Strata executor protocol. Register them via the **Workers panel** in the sidebar — the persisted result lands in `notebook.toml` as:
+Workers are HTTP endpoints that implement the Strata executor protocol. Register them via the **Workers panel** in the sidebar, the persisted result lands in `notebook.toml` as:
 
 ```toml
 [[workers]]
@@ -173,14 +173,14 @@ Inline JSON Schema pinning the response shape. When provided, Strata
 dispatches to provider-native structured output (OpenAI's `json_schema` with
 strict mode; Anthropic's native tool-use) so the response comes back as
 validated JSON rather than free-form text. Providers without schema support
-fall back to `json_object` — valid JSON, shape not enforced — and the
+fall back to `json_object`, valid JSON, shape not enforced, and the
 `@validate_retries` loop catches shape violations.
 
 ```
 # @output_schema {"type": "object", "properties": {"themes": {"type": "array", "items": {"type": "string"}}}, "required": ["themes"]}
 ```
 
-Editing the schema invalidates the cell's cache — the schema is part of the
+Editing the schema invalidates the cell's cache, the schema is part of the
 provenance hash.
 
 ### `@validate_retries`
@@ -212,9 +212,9 @@ state = step(state)
 
 Key/value parameters:
 
-- `max_iter=<N>` — hard upper bound on iterations.
-- `carry=<var>` — the variable threaded between iterations.
-- `start_from=<cell>@iter=<k>` — (optional) resume from another loop cell's
+- `max_iter=<N>`, hard upper bound on iterations.
+- `carry=<var>`, the variable threaded between iterations.
+- `start_from=<cell>@iter=<k>`, (optional) resume from another loop cell's
   stored iteration `k`. Useful for forking a converged run to explore a
   variant.
 
@@ -251,16 +251,16 @@ SELECT * FROM orders WHERE amount > :min_amount
 
 Key/value parameters:
 
-- `connection=<name>` — required. Must reference an entry under
+- `connection=<name>`, required. Must reference an entry under
   `[connections.<name>]` in `notebook.toml`. Manage these via the
   **Connections panel** in the sidebar; you don't need to edit the file
   directly.
-- `write=true` — opt the cell into writable execution. Without this flag,
+- `write=true`, opt the cell into writable execution. Without this flag,
   the connection is opened in enforced read-only mode (SQLite `mode=ro` +
   `PRAGMA query_only=ON`; PostgreSQL `SET default_transaction_read_only =
   on`) and any DDL/DML errors before mutating the database. With it, the
   cell can run setup scripts (`CREATE TABLE`, `INSERT`, `DROP`). The flag
-  is per-cell — read cells using the same connection stay read-only.
+  is per-cell, read cells using the same connection stay read-only.
 
 ```sql
 # @sql connection=warehouse write=true
@@ -339,7 +339,7 @@ Both cells declare `# @variant <group> <name>` with the same group
 (`classifier`) and different names (`logreg`, `rf`). At any given time
 exactly one variant is **active**; only the active variant participates
 in the DAG, so downstream cells see one producer for `model`. In the UI
-the group renders as a tab strip — clicking a tab switches the active
+the group renders as a tab strip, clicking a tab switches the active
 variant, and the cell editor shows that variant's source.
 
 ### Switching variants
@@ -353,13 +353,13 @@ active = "rf"
 ```
 
 Switching is a one-line diff. Each variant carries its own provenance
-hash, so re-running a variant you've already trained is a cache hit —
+hash, so re-running a variant you've already trained is a cache hit:
 flip-flopping between two variants is free after each has run once.
 Downstream cells go stale on switch (their input artifact comes from
 a different upstream cell) but become cache hits on the way back.
 
-If `notebook.toml` doesn't pin a selection — or pins a name no cell
-provides — the DAG falls back to the **first variant in source order**.
+If `notebook.toml` doesn't pin a selection, or pins a name no cell
+provides, the DAG falls back to the **first variant in source order**.
 A `variant_active_unknown` diagnostic surfaces in the UI when the
 selection drifts (e.g. you renamed a variant in source without updating
 the toml entry).
@@ -368,12 +368,12 @@ the toml entry).
 
 All variants in a group must produce the same set of top-level
 bindings. The validator compares each variant's `defines` against its
-siblings and flags `variant_contract_mismatch` on any outlier — if
+siblings and flags `variant_contract_mismatch` on any outlier, if
 `logreg` exposes only `model` and `rf` exposes `model + feature_importance`,
 downstream cells that depend on the missing name would break under one
 selection but not the other.
 
-Imports don't count toward the contract — they're scaffolding, not
+Imports don't count toward the contract, they're scaffolding, not
 interface. The variants above each bring in a different sklearn class,
 which is fine; only the *values* the cells produce need to match.
 
@@ -381,7 +381,7 @@ which is fine; only the *values* the cells produce need to match.
 
 A variant group can mix any cell kinds. A Python variant and a prompt
 variant can sit in the same group as long as they both produce the
-contract names — e.g. one variant calls a deterministic regex
+contract names, e.g. one variant calls a deterministic regex
 classifier, another asks an AI model to classify.
 
 ### Adding and removing variants
@@ -390,20 +390,20 @@ The variant tab strip carries a `+` button that clones the active
 variant as a sibling. The new cell starts as a copy of the active
 body with the `# @variant` line rewritten to an auto-generated name
 (`<active>_copy`, then `_copy2`, `_copy3`, …). Rename happens by
-editing the annotation line in source — the standard
+editing the annotation line in source, the standard
 annotation-as-truth pattern, no separate rename UI.
 
 Deleting a variant tab removes only that variant. If you delete the
 active one, the next variant in source order auto-promotes. Deleting
 the last variant in a group removes the cell entirely *and* drops the
-`[[variant_group]]` entry — the group dissolves.
+`[[variant_group]]` entry, the group dissolves.
 
 ### Bootstrapping
 
 The first variant of a new group is created by typing the annotation:
 add `# @variant <new_group> <variant_name>` to any existing cell, save
 it, then use the `+` tab to add siblings. (There's no UI affordance for
-the bootstrap step — source is the only place a group comes into
+the bootstrap step, source is the only place a group comes into
 existence, which keeps `notebook.toml` honest about *which* groups
 exist.)
 
@@ -414,8 +414,8 @@ exist.)
 ### `@after`
 
 Add an ordering-only DAG edge from another cell to this one. Useful when the
-dependency is on a side effect — e.g. a SQL `seed` cell creates the database
-state that subsequent SQL cells query — and no Python variable flows
+dependency is on a side effect, e.g. a SQL `seed` cell creates the database
+state that subsequent SQL cells query, and no Python variable flows
 between them.
 
 ```sql
@@ -430,7 +430,7 @@ references and unknown cell IDs are silently dropped at the DAG layer
 (annotation_validation surfaces them as a diagnostic for the user).
 
 The edge participates in upstream/downstream wiring and the topological
-order, but contributes no variable to `consumed_variables` — so it
+order, but contributes no variable to `consumed_variables`, so it
 doesn't affect per-variable provenance hashes.
 
 ---
@@ -445,8 +445,8 @@ When the same setting is configured at multiple levels, the most specific wins:
 | **Timeout** | `# @timeout N` | `cell.timeout` field | 30 seconds |
 | **Env vars** | `# @env K=V` | `cell.env` overrides | `notebook.env` defaults |
 | **Mounts** | `# @mount ...` | `cell.mounts` overrides | `notebook.mounts` defaults |
-| **SQL connection** | `# @sql connection=X` | — | none — required for SQL cells |
-| **Cache policy** | `# @cache <policy>` | — | `fingerprint` (read), `session` (write) |
+| **SQL connection** | `# @sql connection=X` |, | none, required for SQL cells |
+| **Cache policy** | `# @cache <policy>` |, | `fingerprint` (read), `session` (write) |
 
 Annotations always take priority. This lets you override per-cell behavior without editing `notebook.toml`.
 
@@ -463,7 +463,7 @@ Common use cases:
 - **Feature flags**: `DEBUG=true`, `LOG_LEVEL=info`
 
 !!! note "Sensitive values are not persisted to disk"
-    Environment variables with names containing KEY, SECRET, TOKEN, PASSWORD, or CREDENTIAL have their values blanked from `notebook.toml` when saving. The key names are preserved as a "which vars are configured" reminder *only* when something real is configured alongside them. A notebook whose `[env]` would contain nothing but blanked sensitive slots is persisted without an `[env]` block at all — so typing an API key in the Runtime panel doesn't churn the committed notebook.
+    Environment variables with names containing KEY, SECRET, TOKEN, PASSWORD, or CREDENTIAL have their values blanked from `notebook.toml` when saving. The key names are preserved as a "which vars are configured" reminder *only* when something real is configured alongside them. A notebook whose `[env]` would contain nothing but blanked sensitive slots is persisted without an `[env]` block at all, so typing an API key in the Runtime panel doesn't churn the committed notebook.
 
 Notebook env vars are stored in the `[env]` section of `notebook.toml`:
 

@@ -151,6 +151,27 @@ def test_import_passes_through_non_suppressed_last_expression(tmp_path: Path) ->
     assert nb.cells[0].source.rstrip().endswith("x + 1")
 
 
+def test_import_strips_envelope_whitespace_around_source(tmp_path: Path) -> None:
+    """Regression: some hand-edited .ipynb files store cell source as
+    ``" Image(filename='...')"`` (leading space). That leading space
+    confuses Python's module-level parser; the converter has to strip
+    envelope whitespace before writing the cell so the analyzer can
+    parse it. Caught by pml3-ch02 in the extended corpus."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell(" Image(filename='./img.png', width=600) ")],
+    )
+    result = import_notebook(ipynb)
+    nb = parse_notebook(result.notebook_dir)
+    src = nb.cells[0].source
+    # No leading or trailing whitespace in the envelope.
+    assert not src.startswith(" ")
+    # Body still parses as Python.
+    import ast as _ast
+
+    _ast.parse(src)
+
+
 def test_import_handles_source_as_list_of_lines(tmp_path: Path) -> None:
     """nbformat canonical shape is a list of lines (each ending with \\n
     except possibly the last). Hand-edited notebooks sometimes use a
@@ -421,14 +442,84 @@ def test_drops_javascript_and_html_cell_magics(tmp_path: Path) -> None:
     assert "<b>bold</b>" not in nb.cells[1].source
 
 
-def test_unsupported_line_magic_dropped_with_comment(tmp_path: Path) -> None:
-    ipynb = _make_ipynb(tmp_path, [_code_cell("%who\nx = 1\n")])
+def test_inspection_magics_dropped(tmp_path: Path) -> None:
+    """``%who``, ``%whos``, ``%lsmagic``, ``%history``, ``%alias``,
+    ``%magic`` all live for interactive REPL exploration. None have
+    Strata equivalents; all should drop cleanly with marker comments
+    so the rest of the cell still parses."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("%who\n%whos\n%lsmagic\nx = 1\n"),
+            _code_cell("%history -n 1-5\n%alias my_ls ls\ny = 2\n"),
+        ],
+    )
     result = import_notebook(ipynb)
-    assert "%who" in " ".join(result.dropped_magics)
+    nb = parse_notebook(result.notebook_dir)
+    for cell in nb.cells:
+        # No raw magic survives the conversion.
+        for line in cell.source.splitlines():
+            assert not line.lstrip().startswith("%"), (cell.source, line)
+    # Translated_magics carries the per-magic record (every entry above
+    # is in _LINE_MAGIC_TABLE → _lm_drop, which counts as translated).
+    assert any("who" in m for m in result.translated_magics)
+    assert any("history" in m for m in result.translated_magics)
+
+
+def test_set_env_alias_translated_like_env(tmp_path: Path) -> None:
+    """``%set_env`` is the IPython alias for ``%env``. Both should
+    translate to a ``# @env`` annotation."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell("%set_env DEBUG=1\nx = 1\n")])
+    result = import_notebook(ipynb)
+    nb = parse_notebook(result.notebook_dir)
+    assert "# @env DEBUG=1" in nb.cells[0].source
+
+
+def test_conda_install_captures_packages_like_pip(tmp_path: Path) -> None:
+    """``%conda install pkg`` is treated the same as ``%pip install pkg``,
+    since the user's intent is "I need this package available"."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell("%conda install matplotlib pandas\n")])
+    result = import_notebook(ipynb)
+    deps = set(result.captured_deps)
+    assert "matplotlib" in deps
+    assert "pandas" in deps
+
+
+def test_more_cell_magics_routed_correctly(tmp_path: Path) -> None:
+    """Extended cell-magic coverage: ``%%R``, ``%%cython``, ``%%js``
+    drop; ``%%file`` (alias for %%writefile) translates."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("%%R\nlibrary(ggplot2)\n"),
+            _code_cell("%%cython\ndef fast_fn(int x): return x * 2\n"),
+            _code_cell("%%js\nconsole.log('hi')\n"),
+            _code_cell("%%file out.txt\nhello world\n"),
+            _code_cell("%%sql\nSELECT * FROM users\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    assert any("%%R" in m for m in result.dropped_magics)
+    assert any("%%cython" in m for m in result.dropped_magics)
+    assert any("%%js" in m for m in result.dropped_magics)
+    assert any("%%sql" in m for m in result.dropped_magics)
+    nb = parse_notebook(result.notebook_dir)
+    # %%file → write_text path (same handler as %%writefile)
+    file_cell = nb.cells[3]
+    assert "write_text" in file_cell.source
+    assert "out.txt" in file_cell.source
+
+
+def test_unsupported_line_magic_dropped_with_comment(tmp_path: Path) -> None:
+    """``%pastebin`` is not in the translation table — should drop
+    with a marker comment so the rest of the cell still parses."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell("%pastebin foo\nx = 1\n")])
+    result = import_notebook(ipynb)
+    assert "%pastebin" in " ".join(result.dropped_magics)
     nb = parse_notebook(result.notebook_dir)
     src = nb.cells[0].source
-    assert "# strata: unsupported magic '%who' dropped" in src
-    assert "%who" not in src.replace("'%who'", "")
+    assert "# strata: unsupported magic '%pastebin' dropped" in src
+    assert "%pastebin" not in src.replace("'%pastebin'", "")
     assert "x = 1" in src
 
 
@@ -711,9 +802,9 @@ def test_captures_deps_from_bare_import_statements(tmp_path: Path) -> None:
 
 def test_import_name_to_pip_name_override(tmp_path: Path) -> None:
     """Common Python idioms where the top-level import name differs
-    from the PyPI package name — ``cv2`` → opencv-python, ``sklearn``
-    → scikit-learn, ``PIL`` → Pillow. The mapping is a hand-maintained
-    dict; anything not in it falls through unchanged."""
+    from the PyPI package name (``cv2`` → opencv-python, ``sklearn``
+    → scikit-learn, ``PIL`` → Pillow, etc.). The mapping is a hand-
+    maintained dict; anything not in it falls through unchanged."""
     ipynb = _make_ipynb(
         tmp_path,
         [
@@ -732,6 +823,45 @@ def test_import_name_to_pip_name_override(tmp_path: Path) -> None:
     # Original import names should NOT have leaked through.
     assert "cv2" not in deps
     assert "sklearn" not in deps
+
+
+def test_import_name_pip_overrides_extended(tmp_path: Path) -> None:
+    """Regression test pinning the full override table. New entries
+    added to ``_IMPORT_TO_PIP`` should grow this test rather than
+    living unpinned."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("import skimage\nimport attr\n"),
+            _code_cell("from Crypto.Cipher import AES\n"),
+            _code_cell("import OpenSSL\nimport jwt\n"),
+            _code_cell("import MySQLdb\nimport psycopg2\n"),
+            _code_cell("import git\nfrom dateutil import parser\n"),
+            _code_cell("from dotenv import load_dotenv\n"),
+            _code_cell("import Bio\nimport gym\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    deps = set(result.captured_deps)
+    expected = {
+        "scikit-image",
+        "attrs",
+        "pycryptodome",
+        "pyOpenSSL",
+        "PyJWT",
+        "mysqlclient",
+        "psycopg2-binary",
+        "GitPython",
+        "python-dateutil",
+        "python-dotenv",
+        "biopython",
+        "gymnasium",
+    }
+    missing = expected - deps
+    assert not missing, f"missing pip-name mappings: {missing}"
+    # Original import names must not leak.
+    leaked = {"skimage", "attr", "Crypto", "OpenSSL", "MySQLdb", "Bio", "gym"} & deps
+    assert not leaked, f"raw import names leaked into deps: {leaked}"
 
 
 def test_stdlib_imports_not_captured(tmp_path: Path) -> None:

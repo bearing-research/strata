@@ -49,3 +49,33 @@ notebooks:
     url: https://raw.githubusercontent.com/jakevdp/PythonDataScienceHandbook/d66231454ef753818dc9213c9b5942e067266966/notebooks/04.01-Simple-Line-Plots.ipynb
     expected: parse_only
     reason: "upstream API drift: 'seaborn-whitegrid' matplotlib style was renamed"
+
+  # ---- Aurelien Geron, Hands-on Machine Learning (3rd ed) ----
+  # Stable companion repo, pinned to a verified commit SHA.
+
+  - name: handson-ml3-landscape
+    url: https://raw.githubusercontent.com/ageron/handson-ml3/1fa7649974e575b4634e4b532f605b4a834a4e4a/01_the_machine_learning_landscape.ipynb
+    expected: parse_only
+    reason: "downloads CSVs from sklearn data URL endpoint; treat as no-network for this tier"
+
+  # ---- Sebastian Raschka, Python Machine Learning (3rd ed) ----
+  # Stable companion repo, pinned to a verified commit SHA.
+
+  - name: pml3-ch02-perceptron
+    url: https://raw.githubusercontent.com/rasbt/python-machine-learning-book-3rd-edition/bf62496f44a92a21d23250d5ed13d2d2e617e0e2/ch02/ch02.ipynb
+    expected: parse_only
+    reason: "fetches Iris dataset over HTTPS; treat as no-network for this tier"
+
+  - name: pml3-ch03-classifiers
+    url: https://raw.githubusercontent.com/rasbt/python-machine-learning-book-3rd-edition/bf62496f44a92a21d23250d5ed13d2d2e617e0e2/ch03/ch03.ipynb
+    expected: parse_only
+    reason: "uses sklearn.datasets fetch; treat as no-network for this tier"
+
+  # ---- fast.ai book (deep learning) ----
+  # Stable companion repo, pinned to a verified commit SHA. Pulls
+  # significant model weights at runtime so this tier scores parse_only.
+
+  - name: fastai-fastbook-intro
+    url: https://raw.githubusercontent.com/fastai/fastbook/e8baa81d89f0b7be816e35f1cc813ac02038db54/01_intro.ipynb
+    expected: parse_only
+    reason: "fastai download_url() pulls multi-MB model weights; treat as no-network for this tier"

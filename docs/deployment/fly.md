@@ -19,7 +19,7 @@ fly deploy
 ```
 
 The volume defined in `[[mounts]]` (`strata_data`, 5 GB auto-extending to
-20 GB) is created automatically on first deploy — no separate
+20 GB) is created automatically on first deploy, no separate
 `fly volumes create` step needed.
 
 ## Configuration

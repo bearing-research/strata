@@ -151,7 +151,7 @@ max_output_tokens = 4096
 timeout_seconds = 60.0
 ```
 
-All fields are optional — set only the ones you want to override.
+All fields are optional, set only the ones you want to override.
 
 ## Timeouts
 

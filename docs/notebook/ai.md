@@ -16,18 +16,18 @@ Set an API key in the **Runtime panel** under Environment Variables. The key det
 | `OPENAI_API_KEY`     | OpenAI                          | gpt-5.4              |
 | `GEMINI_API_KEY`     | Google                          | gemini-3-flash       |
 | `MISTRAL_API_KEY`    | Mistral                         | mistral-large-latest |
-| `STRATA_AI_API_KEY`  | Custom (requires `[ai]` config) | —                    |
+| `STRATA_AI_API_KEY`  | Custom (requires `[ai]` config) |, |
 
 **Resolution order** (highest priority wins):
 
-1. `notebook.toml` `[ai]` section — per-notebook advanced overrides (see below)
-2. Runtime panel env vars — set in the UI
-3. Server config (`STRATA_AI_*` env vars) — admin default
+1. `notebook.toml` `[ai]` section, per-notebook advanced overrides (see below)
+2. Runtime panel env vars, set in the UI
+3. Server config (`STRATA_AI_*` env vars) admin default
 
 For standard providers you only need step 2: drop your API key into the Runtime panel and Strata auto-picks the matching default base URL and model. The AI panel's model picker lets you switch models without leaving the UI (it persists the choice to `[ai].model`).
 
 !!! note "Process environment is not consulted"
-A shell-exported `OPENAI_API_KEY` does **not** leak into notebooks. This is intentional — each notebook must explicitly opt in to an AI provider. See the [Annotations](annotations.md) page for how env vars flow.
+A shell-exported `OPENAI_API_KEY` does **not** leak into notebooks. This is intentional, each notebook must explicitly opt in to an AI provider. See the [Annotations](annotations.md) page for how env vars flow.
 
 ### Custom Provider Configuration
 
@@ -41,7 +41,7 @@ model = "llama3"
 
 This is the intended escape hatch for advanced config. Fields the `[ai]` section accepts:
 
-- `api_key` — *use sparingly*, persists in `notebook.toml` even for blanked sensitive keys. Prefer the Runtime panel.
+- `api_key`, *use sparingly*, persists in `notebook.toml` even for blanked sensitive keys. Prefer the Runtime panel.
 - `base_url`
 - `model`
 - `max_context_tokens`
@@ -63,7 +63,7 @@ Any service that implements the OpenAI `/v1/chat/completions` endpoint works, in
 
 ## AI Assistant
 
-The AI assistant is a sidebar panel (toggle with the **AI Assistant** button) that provides conversational access to a model. It operates outside the DAG — it doesn't create artifacts or participate in caching.
+The AI assistant is a sidebar panel (toggle with the **AI Assistant** button) that provides conversational access to a model. It operates outside the DAG, it doesn't create artifacts or participate in caching.
 
 ### Chat Mode (Enter)
 

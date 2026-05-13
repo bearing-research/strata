@@ -9,7 +9,7 @@ boundary.
 
 ## What's shared, what isn't
 
-### Iceberg scan cache — shared by design
+### Iceberg scan cache, shared by design
 
 The original Strata value prop: identical scans hit the same cache.
 The key is content-addressed:
@@ -19,21 +19,21 @@ hash(tenant | table_identity | snapshot_id | file_path | row_group_id | projecti
 ```
 
 If Alice ran a scan an hour ago and Bob runs the same scan now, Bob
-hits Alice's cached result. **This is intentional** — it's the
+hits Alice's cached result. **This is intentional**: it's the
 performance win that makes Strata interesting. In multi-tenant
 service mode, the `tenant` term in the hash isolates one tenant
 from another.
 
-### Notebook artifacts — not actually shared
+### Notebook artifacts, not actually shared
 
 Per-cell variable outputs are stored as
 `nb_{notebook_id}_cell_{cell_id}_var_{name}.arrow`. Two users with
 identical notebook code but different notebooks each produce their
-own artifacts under different `notebook_id`s — they don't dedupe
+own artifacts under different `notebook_id`s, they don't dedupe
 across notebooks. So sharing a Strata instance with a teammate
 does **not** mean your cell outputs cross-pollinate.
 
-### Notebook access — URL-based
+### Notebook access, URL-based
 
 Notebook IDs are full UUIDs (8-char prefix for display, full UUID
 for the actual ID). They're not in any global enumeration and
@@ -43,14 +43,14 @@ But: **once a UUID is known, anyone can open the notebook**.
 | Endpoint | Owner check? | Why |
 |---|---|---|
 | `POST /v1/notebooks/open` | No | Direct URL collaboration ("send Alice the link") |
-| `GET /v1/notebooks/{id}/cells` | No | Same — read-after-open |
+| `GET /v1/notebooks/{id}/cells` | No | Same, read-after-open |
 | `POST /v1/notebooks/{id}/cells/{cell_id}/execute` | No | Collaboration shape |
 | `GET /v1/notebooks/{id}/dag` | No | Same |
 | `WS /v1/notebooks/ws/{id}` | No | Live editing |
-| `GET /v1/notebooks/discover` | **Yes** — filters by owner | Prevents accidental discovery |
-| `DELETE /v1/notebooks/{id}` | **Yes** — 404 to non-owners | Destructive |
-| `POST /v1/notebooks/delete-by-path` | **Yes** — 404 to non-owners | Destructive |
-| `PUT /v1/notebooks/{id}/name` | **Yes** — 404 to non-owners | Rename is destructive to URL-based sharing |
+| `GET /v1/notebooks/discover` | **Yes**: filters by owner | Prevents accidental discovery |
+| `DELETE /v1/notebooks/{id}` | **Yes**: 404 to non-owners | Destructive |
+| `POST /v1/notebooks/delete-by-path` | **Yes**: 404 to non-owners | Destructive |
+| `PUT /v1/notebooks/{id}/name` | **Yes**: 404 to non-owners | Rename is destructive to URL-based sharing |
 
 The pattern: **collaboration is open via URL, destructive operations
 are owner-only**. Suits "I want to share an analysis with my
@@ -62,14 +62,14 @@ that no one else should ever read".
 The `owner` field on `notebook.toml` is set when:
 
 - **Personal-mode-with-proxy** (`STRATA_PERSONAL_MODE_USER_HEADER`
-  set) — `POST /create` and `POST /import` stamp the caller's
+  set) `POST /create` and `POST /import` stamp the caller's
   identity from the configured header (typically
   `Cf-Access-Authenticated-User-Email`, `X-Forwarded-Email`, etc.).
-- **Service mode** — `_caller_identity(request)` resolves from
+- **Service mode**: `_caller_identity(request)` resolves from
   `X-Strata-Principal` and stamps the same way.
 
 When `personal_mode_user_header` is unset and the caller has no
-identity, `owner` stays `None` — all notebooks are unowned and the
+identity, `owner` stays `None`, all notebooks are unowned and the
 single-user pattern applies. This is the default for a developer
 running on localhost.
 
@@ -77,7 +77,7 @@ Unowned notebooks (`owner is None`) remain accessible to any
 caller. Migrating an unowned notebook to ownership requires
 manually editing `notebook.toml`.
 
-## Trust boundaries — pick a shape
+## Trust boundaries, pick a shape
 
 ### Single developer (default)
 
@@ -114,7 +114,7 @@ Notes:
   notebook ACLs within a tenant. If Alice and Bob are on the same
   tenant and Alice's notebook ID leaks to Bob, he can open it.
 - **Cross-tenant isolation is hard.** Tenant A and tenant B can't
-  see each other's cache, artifacts, or notebooks — the tenant
+  see each other's cache, artifacts, or notebooks, the tenant
   dimension is hashed into every key.
 
 ### Per-user isolation (every user truly private)
@@ -144,5 +144,5 @@ is the deliberate choice because:
   the "separate instance" escape hatch.
 
 If you have a concrete use case that needs per-notebook ACLs,
-file an issue describing the workflow — that's the right way to
+file an issue describing the workflow, that's the right way to
 move this off the future-work list.

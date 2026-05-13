@@ -61,6 +61,6 @@ docker run --rm -p 8765:8765 \
 
 The multi-stage Dockerfile:
 
-1. **Frontend builder** (Node 25) — builds the Vue.js UI
-2. **Backend builder** (Python + Rust) — builds the wheel with native extension
-3. **Runtime** — minimal image with the wheel and frontend dist
+1. **Frontend builder** (Node 25) builds the Vue.js UI
+2. **Backend builder** (Python + Rust) builds the wheel with native extension
+3. **Runtime**: minimal image with the wheel and frontend dist

@@ -13,19 +13,19 @@ The `.devcontainer/` configuration provides:
 
 ## Setup flow
 
-1. **`postCreateCommand`** (`setup.sh`) — runs once on container creation:
+1. **`postCreateCommand`** (`setup.sh`) runs once on container creation:
     - Installs `uv`
     - Runs `uv sync` (builds Rust extension)
     - Builds the frontend (`npm ci && npm run build`)
 
-2. **`postStartCommand`** (`start.sh`) — runs on every container start:
+2. **`postStartCommand`** (`start.sh`) runs on every container start:
     - Creates a scratch notebook directory if none exists
     - Starts the Strata server in the background
     - Waits for the health check to pass
 
 ## Port forwarding
 
-Port **8765** is forwarded automatically with `onAutoForward: "openBrowser"` — your browser opens the notebook UI as soon as the server is ready.
+Port **8765** is forwarded automatically with `onAutoForward: "openBrowser"`, so your browser opens the notebook UI as soon as the server is ready.
 
 ## First-time startup
 

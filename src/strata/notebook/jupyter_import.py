@@ -374,13 +374,26 @@ def _source_to_text(source: Any) -> str:
     """nbformat allows ``source`` as either a string or a list of lines.
 
     The list form is the canonical on-disk shape; the string form
-    appears in hand-edited notebooks and in some exporters.
+    appears in hand-edited notebooks and in some exporters. Some
+    hand-edited notebooks contain cells whose source has a leading
+    space (the JSON looks like ``" Image(...)"``) which would fail
+    Python's parser as a module-level indent error. ``dedent`` (in
+    a single-line sense) is safe here: we're just normalizing the
+    cell envelope, not changing intended indentation inside a
+    function body.
     """
     if isinstance(source, list):
-        return "".join(source)
-    if source is None:
-        return ""
-    return str(source)
+        text = "".join(source)
+    elif source is None:
+        text = ""
+    else:
+        text = str(source)
+    # Strip leading newlines / spaces and trailing whitespace that
+    # would confuse module-level parsing. If the first line is
+    # genuinely indented (rare; cell shouldn't start that way), the
+    # caller still surfaces a syntax error later, but the common
+    # case of " Image(...) " is fixed.
+    return text.strip() + "\n" if text.strip() else ""
 
 
 def _new_cell_id(prefix: str) -> str:
@@ -587,20 +600,39 @@ def _lm_run(name: str, args: str, indent: str, conv: _CellConversion) -> list[st
 
 
 _LINE_MAGIC_TABLE = {
+    # Display / rendering setup (no-ops in Strata)
     "matplotlib": _lm_drop,
     "load_ext": _lm_drop,
     "autoreload": _lm_drop,
     "reload_ext": _lm_drop,
+    "config": _lm_drop,
+    "colors": _lm_drop,
+    "rerun": _lm_drop,
+    # Debugger / exception controls
     "capture": _lm_drop,
     "xmode": _lm_drop,
     "pdb": _lm_drop,
     "debug": _lm_drop,
-    "config": _lm_drop,
+    "tb": _lm_drop,
+    # Inspection / "what's defined" magics (no Strata equivalent)
+    "who": _lm_drop,
+    "who_ls": _lm_drop,
+    "whos": _lm_drop,
+    "lsmagic": _lm_drop,
+    "magic": _lm_drop,
+    "history": _lm_drop,
+    "alias": _lm_drop,
+    "alias_magic": _lm_drop,
+    # Timing wrappers, keep the body
     "timeit": _lm_strip,
     "time": _lm_strip,
+    # Package management, captured as deps
     "pip": _lm_pip,
+    "conda": _lm_pip,  # ``%conda install x`` is captured the same as %pip
+    # Environment / runtime
     "env": _lm_env,
     "run": _lm_run,
+    "set_env": _lm_env,  # alias of %env
 }
 
 
@@ -644,17 +676,32 @@ def _cm_writefile(name: str, args: str, body: str) -> _CellConversion:
 
 
 _CELL_MAGIC_TABLE = {
+    # Timing / capture wrappers, recurse on body
     "timeit": _cm_strip,
     "time": _cm_strip,
     "capture": _cm_strip,
+    # Shell-out cell magics, translated to subprocess.run
     "bash": _cm_bash,
     "sh": _cm_bash,
+    "script": _cm_bash,  # ``%%script python`` and friends, best-effort as shell
+    # File-writing magic
     "writefile": _cm_writefile,
+    "file": _cm_writefile,  # alias for %%writefile in older IPython
+    # Renderer cell magics that have no Strata-display equivalent
     "javascript": _cm_drop,
+    "js": _cm_drop,
     "html": _cm_drop,
     "latex": _cm_drop,
     "svg": _cm_drop,
     "markdown": _cm_drop,
+    # Other-language cell magics, dropped with marker
+    "R": _cm_drop,
+    "ruby": _cm_drop,
+    "perl": _cm_drop,
+    "cython": _cm_drop,
+    "fortran": _cm_drop,
+    "sql": _cm_drop,  # %%sql binds to a connection that Strata's SQL cell type
+    # handles natively; the magic form can't auto-convert.
 }
 
 
@@ -802,18 +849,38 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
 
 
 # Top-level import names whose PyPI package name differs. Anything not
-# in this dict is assumed to use ``import_name == pip_name`` — right
+# in this dict is assumed to use ``import_name == pip_name``, right
 # ~95% of the time in practice. Extend by adding a row.
 _IMPORT_TO_PIP: dict[str, str] = {
+    # Data science / ML basics
     "cv2": "opencv-python",
     "sklearn": "scikit-learn",
+    "skimage": "scikit-image",
     "PIL": "Pillow",
+    # Web / scraping / serialization
     "bs4": "beautifulsoup4",
     "yaml": "PyYAML",
     "dotenv": "python-dotenv",
     "dateutil": "python-dateutil",
-    "skimage": "scikit-image",
+    "lxml": "lxml",  # Same name but kept here for documentation
+    # Crypto / security
+    "Crypto": "pycryptodome",
+    "OpenSSL": "pyOpenSSL",
+    "jwt": "PyJWT",
+    # Database drivers
+    "MySQLdb": "mysqlclient",
+    "psycopg2": "psycopg2-binary",
+    "pymongo": "pymongo",
+    # Python utility libs that publish under different names
     "attr": "attrs",
+    "git": "GitPython",
+    "tabulate": "tabulate",
+    # Bioinformatics / specialized
+    "Bio": "biopython",
+    # Common namespace-package collisions
+    "google": "google-api-python-client",  # ``import google.auth`` etc.
+    # Deprecated aliases that users still write
+    "gym": "gymnasium",  # gym is unmaintained; gymnasium is the maintained fork
 }
 
 

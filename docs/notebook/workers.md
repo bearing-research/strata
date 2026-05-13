@@ -1,6 +1,6 @@
 # Distributed Workers
 
-Strata Notebook can dispatch individual cells to remote machines via the **executor protocol**. A worker is any HTTP endpoint that accepts cell source code and inputs, runs them, and returns the outputs. You bring the compute — Strata handles the routing, serialization, and caching.
+Strata Notebook can dispatch individual cells to remote machines via the **executor protocol**. A worker is any HTTP endpoint that accepts cell source code and inputs, runs them, and returns the outputs. You bring the compute, Strata handles the routing, serialization, and caching.
 
 ## How It Works
 
@@ -18,11 +18,11 @@ Strata Notebook can dispatch individual cells to remote machines via the **execu
 2. Strata looks up `my-gpu` in the notebook's `[[workers]]` config
 3. The cell source + serialized input variables are sent as a multipart HTTP POST
 4. The worker runs the cell in a subprocess and returns outputs as a gzipped bundle
-5. Strata stores the outputs as artifacts — cache hits work identically to local cells
+5. Strata stores the outputs as artifacts, cache hits work identically to local cells
 
 ## Registering Workers
 
-Add workers from the **Workers panel** in the sidebar. Give each one a name (used in `@worker` annotations), the executor endpoint URL, and — optionally — a `runtime_id` that pins provenance so cache hits are stable across worker upgrades.
+Add workers from the **Workers panel** in the sidebar. Give each one a name (used in `@worker` annotations), the executor endpoint URL, and, optionally, a `runtime_id` that pins provenance so cache hits are stable across worker upgrades.
 
 The result lands in `notebook.toml` as `[[workers]]` entries:
 
@@ -45,7 +45,7 @@ transport = "http"
 | `config.url` | The HTTP endpoint for the executor protocol |
 | `config.transport` | `"http"` for direct push, `"signed"` for pull-model with signed URLs |
 
-Register as many workers as you need — each cell picks its target independently. An example notebook with two workers ends up looking like:
+Register as many workers as you need, each cell picks its target independently. An example notebook with two workers ends up looking like:
 
 ```toml
 [[workers]]
@@ -80,7 +80,7 @@ This starts a FastAPI server that:
 - Returns outputs as a gzipped bundle
 - Exposes `/health` for monitoring
 
-The worker runs cells using **its own Python environment** — whatever packages are installed in the worker's interpreter are available to cells. This is how you provide GPU libraries (torch, sentence-transformers) or data engines (datafusion) without installing them locally. Install your workload dependencies before launching `strata-worker`.
+The worker runs cells using **its own Python environment**: whatever packages are installed in the worker's interpreter are available to cells. This is how you provide GPU libraries (torch, sentence-transformers) or data engines (datafusion) without installing them locally. Install your workload dependencies before launching `strata-worker`.
 
 ### Deploying to Fly.io (CPU worker)
 
@@ -154,7 +154,7 @@ Annotate any cell with `# @worker <name>`:
 embeddings = model.encode(abstracts, batch_size=256)
 ```
 
-The worker annotation is the **only** change needed — the cell code itself is identical to what you'd write for local execution. If the worker has the right packages installed, it just works.
+The worker annotation is the **only** change needed, the cell code itself is identical to what you'd write for local execution. If the worker has the right packages installed, it just works.
 
 ### Precedence
 
@@ -183,7 +183,7 @@ uv run --with datafusion strata-worker --port 9000
 uv run --with torch --with sentence-transformers strata-worker --port 9001
 ```
 
-Register both in the Workers panel pointing at `http://127.0.0.1:9000/v1/execute` and `http://127.0.0.1:9001/v1/execute` during development. Swap to cloud URLs when deploying — cells using `@worker gpu` move over without any code change.
+Register both in the Workers panel pointing at `http://127.0.0.1:9000/v1/execute` and `http://127.0.0.1:9001/v1/execute` during development. Swap to cloud URLs when deploying, cells using `@worker gpu` move over without any code change.
 
 ## Health Checks
 

@@ -82,3 +82,24 @@ uv run ty check src/
 # Start frontend dev server (hot reload, proxies to backend)
 cd frontend && npm run dev
 ```
+
+### Integration test dependencies
+
+A subset of integration tests needs a real PostgreSQL instance (the
+Iceberg SQL catalog tests). A throwaway Postgres container is shipped
+as `docker-compose.test.yml`:
+
+```bash
+# Start the test Postgres (port 5432)
+docker compose -f docker-compose.test.yml up -d
+
+# Run the integration suite
+uv run pytest tests/test_*_integration.py
+
+# Tear it down
+docker compose -f docker-compose.test.yml down
+```
+
+The compose file is dev-only: it has no health-bound dependency on
+the main `docker-compose.yml`, and the credentials are intentionally
+fixed (`strata`/`strata`) for predictable local connection strings.

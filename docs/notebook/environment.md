@@ -31,7 +31,7 @@ scikit-learn
 matplotlib
 ```
 
-The operation runs asynchronously — you can continue editing cells while it installs.
+The operation runs asynchronously, you can continue editing cells while it installs.
 
 ### Import from requirements.txt
 
@@ -82,7 +82,7 @@ When you install or remove a package:
 4. Re-running any cell recomputes with the new environment
 
 !!! info "Switching back"
-    If you remove a package and then re-add it (returning to the same `uv.lock`), the original provenance hashes match again and cells get **cache hits**. This is free by construction — no special logic needed.
+    If you remove a package and then re-add it (returning to the same `uv.lock`), the original provenance hashes match again and cells get **cache hits**. This is free by construction, no special logic needed.
 
 ## Missing Package Detection
 
