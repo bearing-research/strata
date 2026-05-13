@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import re
+import tempfile
 import time
 import tomllib
 import uuid
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -817,6 +818,165 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# Bounded upload size. Notebooks bigger than this are almost always
+# packed with embedded image outputs; importing them would put real
+# pressure on the server-side temp file. Limit conservatively.
+_MAX_IPYNB_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+@router.post("/import")
+async def import_jupyter_notebook(
+    request: Request,
+    file: UploadFile = File(..., description="The .ipynb file to import."),
+    name: str | None = Form(
+        default=None,
+        description="Target notebook name. Defaults to the uploaded file's stem.",
+    ),
+    parent_path: str | None = Form(
+        default=None,
+        description=(
+            "Where the new notebook directory lands. Must be inside the "
+            "configured storage root. Defaults to the user's storage root."
+        ),
+    ),
+) -> JSONResponse:
+    """Convert an uploaded ``.ipynb`` into a Strata notebook directory.
+
+    Wraps :func:`strata.notebook.jupyter_import.import_notebook` and
+    opens a session on the result so the frontend can navigate to it
+    immediately. The import report (sources, magic translation,
+    captured deps, warnings) is returned inline so the caller doesn't
+    need a second round-trip to fetch it.
+    """
+    from strata.notebook.jupyter_import import import_notebook
+
+    timing = NotebookTimingRecorder()
+
+    # Read the upload, bounded. Reading once into memory is safer than
+    # streaming to disk and re-reading: we need to verify it's parseable
+    # JSON before we touch the storage tree, and the size cap means this
+    # never grows past ~50 MB.
+    with timing.phase("read_upload"):
+        try:
+            payload = await file.read()
+        finally:
+            await file.close()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Empty .ipynb upload")
+    if len(payload) > _MAX_IPYNB_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(f".ipynb upload exceeds the {_MAX_IPYNB_UPLOAD_BYTES // (1024 * 1024)} MB cap"),
+        )
+
+    # Defensive parse before we materialize anything on disk — surfaces
+    # malformed JSON as a clean 400, not a 500 from deep inside the
+    # converter.
+    try:
+        json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid .ipynb JSON: {exc}")
+
+    # Resolve target storage root. parent_path override goes through the
+    # same path-traversal guard as the other endpoints.
+    with timing.phase("validate"):
+        if parent_path:
+            target_parent = _validate_notebook_path(parent_path, "parent path", request)
+        else:
+            user_root = _get_user_storage_root(request)
+            target_parent = user_root or _get_notebook_storage_root()
+            if target_parent is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Notebook storage root is not configured on this server",
+                )
+            target_parent.mkdir(parents=True, exist_ok=True)
+
+    # Pick the notebook name. Use the upload's filename stem unless the
+    # caller overrode it — same slugify rule as `create_notebook` so the
+    # resulting directory layout matches anything the user creates
+    # through the regular UI.
+    source_filename = file.filename or "imported.ipynb"
+    raw_name = name or Path(source_filename).stem or "imported"
+    notebook_dir_name = raw_name.lower().replace(" ", "_")
+    if (target_parent / notebook_dir_name / "notebook.toml").exists():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A notebook already exists at {target_parent / notebook_dir_name}. "
+                "Use Open to open it, or import with a different --name."
+            ),
+        )
+
+    # Persist the upload to a tempdir with the user's original filename
+    # — preserves the filename in the generated import report and in
+    # any path logging the converter does. The tempdir + its contents
+    # are unlinked once the import finishes.
+    upload_basename = Path(source_filename).name or "imported.ipynb"
+    if not upload_basename.endswith(".ipynb"):
+        upload_basename = f"{Path(upload_basename).stem or 'imported'}.ipynb"
+
+    with tempfile.TemporaryDirectory(prefix="strata-import-") as tmp_dir:
+        with timing.phase("write_temp"):
+            tmp_path = Path(tmp_dir) / upload_basename
+            tmp_path.write_bytes(payload)
+
+        with timing.phase("convert"):
+            try:
+                result = import_notebook(tmp_path, out_dir=target_parent / raw_name)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(status_code=400, detail=f"Import failed: {exc}")
+
+    # Open a session on the newly-imported notebook so the frontend can
+    # navigate to it immediately. Mirrors `create_new_notebook`'s flow.
+    with timing.phase("session_open"):
+        session = _session_manager.open_notebook(
+            result.notebook_dir,
+            defer_initial_venv_sync=True,
+            timing=timing,
+        )
+
+    with timing.phase("environment_job_submit"):
+        try:
+            await session.submit_environment_job(action="sync")
+        except Exception as exc:
+            logger.exception(
+                "Failed to start initial environment bootstrap for imported %s",
+                result.notebook_dir,
+            )
+            session.environment_sync_state = "failed"
+            session.environment_sync_error = (
+                f"Failed to start notebook environment initialization: {exc}"
+            )
+            session.environment_sync_notice = None
+
+    with timing.phase("serialize"):
+        data = session.serialize_notebook_state()
+        data["session_id"] = session.id
+        data["path"] = str(session.path)
+        data.update(_serialize_notebook_runtime_config(request))
+        data["import_report"] = {
+            "markdown_cells": result.markdown_cells,
+            "code_cells": result.code_cells,
+            "suppressed_outputs": result.suppressed_outputs,
+            "skipped_cells": result.skipped_cells,
+            "translated_magics": result.translated_magics,
+            "dropped_magics": result.dropped_magics,
+            "dropped_shells": result.dropped_shells,
+            "captured_deps": result.captured_deps,
+            "warnings": result.warnings,
+            "report_path": str(result.report_path) if result.report_path else None,
+            "report_text": result.report_text,
+        }
+
+    return _timed_json_response(
+        data,
+        timing=timing,
+        route_name="notebook_import",
+        log_context=str(result.notebook_dir),
+    )
 
 
 @router.delete("/{notebook_id}")

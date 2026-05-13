@@ -2439,3 +2439,191 @@ def test_export_endpoint_missing_notebook_404():
     client = TestClient(create_test_app())
     resp = client.get("/v1/notebooks/not-a-real-session/export")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/notebooks/import — Jupyter notebook upload + convert
+# ---------------------------------------------------------------------------
+
+
+def _ipynb_bytes(cells: list[dict]) -> bytes:
+    """Serialize a minimal nbformat-4 notebook with the given cells."""
+    nb = {
+        "cells": cells,
+        "metadata": {
+            "kernelspec": {"name": "python3", "display_name": "Python 3"},
+            "language_info": {"name": "python"},
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    return json.dumps(nb).encode("utf-8")
+
+
+def _code(source: str) -> dict:
+    return {
+        "cell_type": "code",
+        "source": source,
+        "outputs": [],
+        "execution_count": None,
+        "metadata": {},
+    }
+
+
+def _md(source: str) -> dict:
+    return {"cell_type": "markdown", "source": source, "metadata": {}}
+
+
+def _import_storage(monkeypatch, tmp_path: Path) -> Path:
+    """Point the routes module at ``tmp_path`` as the storage root."""
+    monkeypatch.setattr(
+        "strata.server._state",
+        SimpleNamespace(
+            config=SimpleNamespace(
+                deployment_mode="personal",
+                transforms_config={},
+                notebook_storage_dir=tmp_path,
+            )
+        ),
+    )
+    return tmp_path
+
+
+def test_import_endpoint_happy_path(monkeypatch, tmp_path):
+    """A clean .ipynb with one markdown + one code cell comes back as
+    an opened session with a session_id, a path inside the storage
+    root, and a populated import_report."""
+    client = TestClient(create_test_app())
+    storage = _import_storage(monkeypatch, tmp_path)
+
+    payload = _ipynb_bytes([_md("# Hi\n"), _code("x = 1\n")])
+    resp = client.post(
+        "/v1/notebooks/import",
+        files={"file": ("demo.ipynb", payload, "application/x-ipynb+json")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "session_id" in data
+    assert data["name"] == "demo"
+    # Notebook materialized inside the configured storage root.
+    assert str(storage) in data["path"]
+
+    report = data["import_report"]
+    assert report["markdown_cells"] == 1
+    assert report["code_cells"] == 1
+    assert report["captured_deps"] == []
+    assert report["report_path"].endswith("import_report.md")
+    assert "Imported from demo.ipynb" in report["report_text"]
+
+
+def test_import_endpoint_reports_magic_translation(monkeypatch, tmp_path):
+    """Magics, !shell, and pip-install lines are surfaced through the
+    import_report fields without re-querying the converter."""
+    client = TestClient(create_test_app())
+    _import_storage(monkeypatch, tmp_path)
+
+    payload = _ipynb_bytes(
+        [
+            _code("%matplotlib inline\n%pip install httpx\nimport httpx\n"),
+            _code("%%javascript\nalert('x')\n"),
+            _code("!ls /data\nx = 1\n"),
+        ]
+    )
+    resp = client.post(
+        "/v1/notebooks/import",
+        files={"file": ("magics.ipynb", payload, "application/x-ipynb+json")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    report = resp.json()["import_report"]
+    assert "httpx" in report["captured_deps"]
+    # Each section's count survives the JSON round-trip.
+    assert len(report["translated_magics"]) >= 2
+    assert any("javascript" in m for m in report["dropped_magics"])
+    assert any("ls" in s for s in report["dropped_shells"])
+
+
+def test_import_endpoint_rejects_empty_upload(monkeypatch, tmp_path):
+    client = TestClient(create_test_app())
+    _import_storage(monkeypatch, tmp_path)
+
+    resp = client.post(
+        "/v1/notebooks/import",
+        files={"file": ("empty.ipynb", b"", "application/x-ipynb+json")},
+    )
+    assert resp.status_code == 400
+    assert "empty" in resp.json()["detail"].lower()
+
+
+def test_import_endpoint_rejects_invalid_json(monkeypatch, tmp_path):
+    client = TestClient(create_test_app())
+    _import_storage(monkeypatch, tmp_path)
+
+    resp = client.post(
+        "/v1/notebooks/import",
+        files={"file": ("bad.ipynb", b"this is not json", "application/x-ipynb+json")},
+    )
+    assert resp.status_code == 400
+    assert "Invalid .ipynb JSON" in resp.json()["detail"]
+
+
+def test_import_endpoint_rejects_collision(monkeypatch, tmp_path):
+    """A second import with the same name into the same storage root
+    should not silently overwrite the existing notebook."""
+    client = TestClient(create_test_app())
+    _import_storage(monkeypatch, tmp_path)
+
+    payload = _ipynb_bytes([_code("x = 1\n")])
+    first = client.post(
+        "/v1/notebooks/import",
+        files={"file": ("dup.ipynb", payload, "application/x-ipynb+json")},
+    )
+    assert first.status_code == 200, first.text
+
+    second = client.post(
+        "/v1/notebooks/import",
+        files={"file": ("dup.ipynb", payload, "application/x-ipynb+json")},
+    )
+    assert second.status_code == 409
+    assert "already exists" in second.json()["detail"]
+
+
+def test_import_endpoint_enforces_upload_size_cap(monkeypatch, tmp_path):
+    """Tiny cap monkeypatched on the route — the upload should be
+    rejected before the converter touches disk."""
+    client = TestClient(create_test_app())
+    _import_storage(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "strata.notebook.routes._MAX_IPYNB_UPLOAD_BYTES",
+        50,  # 50 bytes — too small for any real .ipynb
+    )
+
+    payload = _ipynb_bytes([_code("x = 1\n")])
+    assert len(payload) > 50  # sanity
+    resp = client.post(
+        "/v1/notebooks/import",
+        files={"file": ("huge.ipynb", payload, "application/x-ipynb+json")},
+    )
+    assert resp.status_code == 413
+    assert "MB cap" in resp.json()["detail"]
+
+
+def test_import_endpoint_uses_custom_name_form_field(monkeypatch, tmp_path):
+    """The ``name`` form field overrides the upload's filename stem so
+    the user can re-import into a different directory layout."""
+    client = TestClient(create_test_app())
+    storage = _import_storage(monkeypatch, tmp_path)
+
+    payload = _ipynb_bytes([_code("x = 1\n")])
+    resp = client.post(
+        "/v1/notebooks/import",
+        files={"file": ("uploaded_name.ipynb", payload, "application/x-ipynb+json")},
+        data={"name": "Renamed Notebook"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["name"] == "Renamed Notebook"
+    # Slugified by create_notebook (spaces → underscores, lowercased).
+    assert (storage / "renamed_notebook").is_dir()
