@@ -14,6 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from strata.notebook.process_tree import (
+    kill_subprocess_tree_nowait,
+    subprocess_kwargs_for_new_group,
+    terminate_subprocess_tree,
+)
+
 if TYPE_CHECKING:
     import asyncio.subprocess
 
@@ -97,7 +103,11 @@ class WarmProcessPool:
         try:
             worker_script = Path(__file__).parent / "pool_worker.py"
 
-            # Spawn the pool worker process
+            # Spawn the pool worker as a process-group leader so we can
+            # kill the whole descendant tree on cancel / pool drain.
+            # Without this, anything the worker spawns (DataLoader
+            # multiprocessing children, fork servers, …) leaks when
+            # we kill the worker.
             process = await asyncio.create_subprocess_exec(
                 self.python_executable,
                 str(worker_script),
@@ -106,6 +116,7 @@ class WarmProcessPool:
                 stdin=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.notebook_dir),
+                **subprocess_kwargs_for_new_group(),
             )
 
             # Wait for the 'ready' signal
@@ -122,18 +133,10 @@ class WarmProcessPool:
                     logger.debug(f"Warm process spawned and ready (pid={process.pid})")
                 else:
                     logger.warning("Warm process did not send ready signal, killing")
-                    process.kill()
-                    try:
-                        await asyncio.wait_for(process.wait(), timeout=2.0)
-                    except TimeoutError:
-                        pass
+                    await terminate_subprocess_tree(process)
             except TimeoutError:
                 logger.warning("Warm process startup timed out, killing process")
-                process.kill()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=2.0)
-                except TimeoutError:
-                    pass
+                await terminate_subprocess_tree(process)
 
         except Exception as e:
             logger.error(f"Failed to spawn warm process: {e}")
@@ -158,13 +161,9 @@ class WarmProcessPool:
         Args:
             process: The WarmProcess to kill
         """
-        # Kill the used process
+        # Terminate the used process tree (graceful SIGTERM, then SIGKILL).
         if process.process and process.process.returncode is None:
-            process.process.kill()
-            try:
-                await asyncio.wait_for(process.process.wait(), timeout=2.0)
-            except TimeoutError:
-                logger.warning("Warm process kill timeout")
+            await terminate_subprocess_tree(process.process)
 
         # Spawn a replacement in background (tracked so drain() can cancel it)
         task = asyncio.create_task(self._spawn_warm_process())
@@ -192,11 +191,7 @@ class WarmProcessPool:
             try:
                 proc = self._available.get_nowait()
                 if proc.process and proc.process.returncode is None:
-                    proc.process.kill()
-                    try:
-                        await asyncio.wait_for(proc.process.wait(), timeout=2.0)
-                    except TimeoutError:
-                        pass
+                    await terminate_subprocess_tree(proc.process)
             except asyncio.QueueEmpty:
                 break
 
@@ -222,10 +217,7 @@ class WarmProcessPool:
             except asyncio.QueueEmpty:
                 break
             if proc.process and proc.process.returncode is None:
-                try:
-                    proc.process.kill()
-                except ProcessLookupError:
-                    pass
+                kill_subprocess_tree_nowait(proc.process)
 
 
 class PooledCellExecutor:
@@ -284,12 +276,11 @@ class PooledCellExecutor:
                 warm_proc.process.pid,
             )
             if warm_proc.process.returncode is None:
-                warm_proc.process.kill()
                 try:
-                    await asyncio.shield(warm_proc.process.wait())
+                    await asyncio.shield(terminate_subprocess_tree(warm_proc.process))
                 except Exception:
                     logger.exception(
-                        "Failed waiting for cancelled warm worker pid=%s",
+                        "Failed terminating cancelled warm worker tree pid=%s",
                         warm_proc.process.pid,
                     )
             raise

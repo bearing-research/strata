@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
 import { useCodemirror } from '../composables/useCodemirror'
 import { useNotebook } from '../stores/notebook'
 import type { Cell, CellOutput } from '../types/notebook'
@@ -38,6 +38,7 @@ const {
   addDependencyAction,
   setVariantActive,
   addVariant,
+  cancelCellWebSocket,
 } = useNotebook()
 
 const variantGroup = computed(() => {
@@ -217,6 +218,78 @@ const loopProgressTitle = computed(() => {
       : ''
   return `${status} (iter ${completed}/${progress.maxIter})${duration}`
 })
+
+// ---- Elapsed-time tracking for running cells ----
+//
+// Plain Python cells get no per-step progress signal (only loop cells
+// emit cell_iteration_progress). Without an elapsed counter, a cell
+// that's been training for 20 minutes looks identical to one that
+// started two seconds ago: same status dot, no time. Track the
+// transition into 'running' and tick a per-cell counter while it's
+// in that state.
+const runStartedAtMs = ref<number | null>(null)
+const nowMs = ref(Date.now())
+let tickHandle: number | null = null
+
+function startTicker() {
+  if (tickHandle !== null) return
+  nowMs.value = Date.now()
+  tickHandle = window.setInterval(() => {
+    nowMs.value = Date.now()
+  }, 1000)
+}
+
+function stopTicker() {
+  if (tickHandle !== null) {
+    clearInterval(tickHandle)
+    tickHandle = null
+  }
+}
+
+onUnmounted(stopTicker)
+
+watch(
+  () => props.cell.status,
+  (status, prev) => {
+    if (status === 'running' && prev !== 'running') {
+      // Reload edge case: status was already 'running' when the
+      // component mounted. We don't know the real start time, so this
+      // counts from "first observed running", a lower bound. Better
+      // than no info.
+      runStartedAtMs.value = Date.now()
+      startTicker()
+    } else if (status !== 'running') {
+      runStartedAtMs.value = null
+      stopTicker()
+    }
+  },
+  { immediate: true },
+)
+
+function _formatElapsed(ms: number): string {
+  const secs = Math.max(0, Math.floor(ms / 1000))
+  if (secs < 60) return `${secs}s`
+  const mins = Math.floor(secs / 60)
+  const remSecs = secs % 60
+  if (mins < 60) return `${mins}m ${remSecs}s`
+  const hrs = Math.floor(mins / 60)
+  const remMins = mins % 60
+  return `${hrs}h ${remMins}m`
+}
+
+const runningElapsedLabel = computed(() => {
+  if (props.cell.status !== 'running' || runStartedAtMs.value === null) return ''
+  return _formatElapsed(nowMs.value - runStartedAtMs.value)
+})
+
+const runningElapsedTitle = computed(() => {
+  if (!runningElapsedLabel.value) return ''
+  return `Cell has been running for ${runningElapsedLabel.value}. Click the stop button in the gutter to cancel.`
+})
+
+function cancelThisCell() {
+  cancelCellWebSocket(props.cell.id)
+}
 
 /** v1.1: Causality summary for tooltip */
 const causalityTooltip = computed(() => {
@@ -509,12 +582,21 @@ function outputKey(output: CellOutput, index: number): string {
       <span class="status-dot" :title="cell.status">{{ statusLabel }}</span>
       <div class="cell-actions">
         <button
-          v-if="cell.language !== 'markdown'"
+          v-if="cell.language !== 'markdown' && cell.status !== 'running'"
           title="Run (Shift+Enter)"
           :disabled="environmentMutationActive"
           @click="emit('run', cell.id)"
         >
           &#x25B6;
+        </button>
+        <button
+          v-else-if="cell.language !== 'markdown'"
+          class="cancel-btn"
+          title="Cancel running cell"
+          data-testid="cancel-cell-button"
+          @click="cancelThisCell"
+        >
+          &#x25A0;
         </button>
         <button title="Move up" @click="emit('moveUp', cell.id)">&#x25B2;</button>
         <button title="Move down" @click="emit('moveDown', cell.id)">&#x25BC;</button>
@@ -696,6 +778,15 @@ function outputKey(output: CellOutput, index: number): string {
               aria-hidden="true"
             ></span>
             &#x21BB; {{ loopProgressLabel }}
+          </span>
+          <span
+            v-if="cell.status === 'running' && !loopProgressLabel"
+            class="running-badge"
+            data-testid="running-elapsed"
+            :title="runningElapsedTitle"
+          >
+            <span class="running-spinner" aria-hidden="true"></span>
+            running · {{ runningElapsedLabel }}
           </span>
           <span
             v-if="cell.output?.cacheHit"
@@ -1347,6 +1438,43 @@ function outputKey(output: CellOutput, index: number): string {
     transform: rotate(360deg);
   }
 }
+
+/* Plain Python cells: badge shown while the cell is running. Reuses
+   the loop-progress-badge visual treatment so loop and non-loop
+   running states look the same. The spinner animation is shared with
+   loop-spin via the running-spinner rule below. */
+.running-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--tint-warning);
+  color: var(--accent-warning);
+  border: 1px solid var(--tint-warning);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.running-spinner {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  animation: loop-spin 0.9s linear infinite;
+}
+
+/* Cancel button replaces the run button while a cell is executing.
+   Uses the warning color palette to match the running badge. */
+.cell-actions .cancel-btn {
+  color: var(--accent-warning);
+}
+.cell-actions .cancel-btn:hover {
+  color: var(--accent-warning);
+  background: var(--tint-warning);
+}
+
 .mount-badge {
   background: var(--tint-teal);
   color: var(--accent-teal);

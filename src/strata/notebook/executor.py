@@ -2404,11 +2404,22 @@ class CellExecutor:
             str(manifest_path),
         ]
 
+        # Spawn the harness as the leader of a new process group so
+        # SIGTERM / SIGKILL can target the entire descendant tree on
+        # cancel (PyTorch DataLoader workers, multiprocessing pools,
+        # …). Without this, ``proc.kill()`` only reaches the harness
+        # and leaks every child it spawned.
+        from strata.notebook.process_tree import (
+            subprocess_kwargs_for_new_group,
+            terminate_subprocess_tree,
+        )
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(self.session.path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            **subprocess_kwargs_for_new_group(),
         )
 
         try:
@@ -2418,21 +2429,19 @@ class CellExecutor:
             )
         except asyncio.CancelledError:
             logger.info(
-                "Cell execution cancelled; killing harness subprocess pid=%s",
+                "Cell execution cancelled; terminating harness subprocess tree pid=%s",
                 proc.pid,
             )
-            proc.kill()
             try:
-                await asyncio.shield(proc.wait())
+                await asyncio.shield(terminate_subprocess_tree(proc))
             except Exception:
                 logger.exception(
-                    "Failed to wait for cancelled harness subprocess pid=%s",
+                    "Failed to terminate cancelled harness subprocess tree pid=%s",
                     proc.pid,
                 )
             raise
         except TimeoutError:
-            proc.kill()
-            await proc.wait()
+            await terminate_subprocess_tree(proc)
             raise TimeoutError()
 
         result_path = manifest_path.parent / "manifest.json"
