@@ -28,6 +28,23 @@ class CellAnalysis:
     error: str | None = None
 
 
+def _collect_name_targets(target: ast.expr, out: set[str]) -> None:
+    """Recursively collect Name ids from an assignment target.
+
+    Handles plain ``x``, tuple/list unpacking (``a, b`` or ``[a, b]``),
+    and starred targets (``*rest``). Subscript / attribute targets are
+    ignored — they're mutations, not pure binds, and travel through a
+    separate code path.
+    """
+    if isinstance(target, ast.Name):
+        out.add(target.id)
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for elt in target.elts:
+            _collect_name_targets(elt, out)
+    elif isinstance(target, ast.Starred):
+        _collect_name_targets(target.value, out)
+
+
 class VariableAnalyzer(ast.NodeVisitor):
     """AST visitor that collects defined and referenced variables."""
 
@@ -54,6 +71,11 @@ class VariableAnalyzer(ast.NodeVisitor):
         # LHS, so the upstream producer must exist) and survives the
         # pure-define filter below. Common pattern in Jupyter notebooks.
         self.rebind_with_self_read: set[str] = set()
+        # Names pure-defined earlier in source order in this cell.
+        # Used to distinguish ``x = 0\nx += 1`` (intra-cell rebind, no
+        # upstream needed) from bare ``x += 1`` (genuine upstream read).
+        # Walked incrementally in source order via visit_Module.
+        self._defined_so_far: set[str] = set()
         self._in_nested_scope = False
         self._local_vars: set[str] = set()  # Track local scope variables
         # Set in visit_Module if the cell carries
@@ -76,32 +98,34 @@ class VariableAnalyzer(ast.NodeVisitor):
     def visit_Assign(self, node: ast.Assign) -> None:
         """Handle: x = ... or x, y = ..."""
         # Names being pure-assigned by this statement, e.g. ``df`` in
-        # ``df = df.dropna()``. We need them before visiting the RHS so
-        # we can record genuine read-before-write references.
+        # ``df = df.dropna()`` or ``a, b`` in ``a, b = b, a``. We need
+        # them before visiting the RHS so we can record genuine
+        # read-before-write references — including the tuple/list
+        # unpacking case, which is how Python does a swap.
         pure_target_names: set[str] = set()
         for target in node.targets:
-            if isinstance(target, ast.Name):
-                pure_target_names.add(target.id)
-        # Visit the value first to populate references, then collect
-        # targets as defines. Order matters: a name that appears on
-        # both sides (``x = x + 1``) needs to land in both sets.
+            _collect_name_targets(target, pure_target_names)
         all_underscore = all(self._is_pure_underscore(target) for target in node.targets)
         if not all_underscore:
-            # Walk the RHS looking for Loads of any target name. Those
-            # are real upstream references and must survive the global
-            # pure-define filter — without this, ``df = df.dropna()``
-            # appears DAG-orphaned and breaks at runtime with NameError.
+            # Walk the RHS looking for Loads of any target name being
+            # bound here. A name read on the RHS of its own assignment
+            # is an upstream reference UNLESS the cell already pure-
+            # defined that name earlier in source order (``x = 0; x =
+            # x + 1`` reads the local ``x``, not an upstream one).
             for child in ast.walk(node.value):
                 if (
                     isinstance(child, ast.Name)
                     and isinstance(child.ctx, ast.Load)
                     and child.id in pure_target_names
+                    and child.id not in self._defined_so_far
                 ):
                     self.rebind_with_self_read.add(child.id)
             self.visit(node.value)
-        # Collect targets (defines)
+        # Collect targets (defines), and remember Name-target binds for
+        # subsequent statements in this cell.
         for target in node.targets:
             self._add_assign_target(target)
+            _collect_name_targets(target, self._defined_so_far)
 
     def _is_pure_underscore(self, target: ast.expr) -> bool:
         """Check if a target is a pure _ (not part of unpacking)."""
@@ -110,11 +134,32 @@ class VariableAnalyzer(ast.NodeVisitor):
         return False
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
-        """Handle: x += ... or df["col"] += ..."""
+        """Handle: x += ... or df["col"] += ...
+
+        Augmented assignment is ``x = x + value`` desugared: the LHS is
+        implicitly read before being written. Same class of bug as the
+        pure-rebind case in ``visit_Assign`` — without explicit tracking
+        the DAG misses the upstream edge to whoever produced ``x``
+        first, and the cell hits NameError at runtime.
+
+        For a Name target the implicit read isn't a visible AST node
+        (the target sits in Store context), so we add the name to
+        ``self.references`` and ``rebind_with_self_read`` directly —
+        but only if the cell hasn't already pure-defined that name
+        earlier in source order. Subscript / attribute targets
+        (``df["col"] += 1``) flow through ``_add_assign_target`` →
+        ``mutation_defines`` and stay in references via that path.
+        """
+        if isinstance(node.target, ast.Name):
+            if node.target.id not in self._defined_so_far:
+                self.references.add(node.target.id)
+                self.rebind_with_self_read.add(node.target.id)
         # Augmented assignment defines the target
         self._add_assign_target(node.target)
         # Visit the value
         self.visit(node.value)
+        if isinstance(node.target, ast.Name):
+            self._defined_so_far.add(node.target.id)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         """Handle: x: int = ... or x: int (without value)."""

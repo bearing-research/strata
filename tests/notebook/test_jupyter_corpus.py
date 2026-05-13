@@ -116,9 +116,10 @@ def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScor
     # mirrors what session._analyze_and_build_dag does for python cells,
     # without spinning up a Session (which would drag in the process
     # pool and venv machinery).
+    dag = None
+    analyses: list[CellAnalysisWithId] = []
     try:
         nb_state = parse_notebook(result.notebook_dir)
-        analyses: list[CellAnalysisWithId] = []
         for cell in nb_state.cells:
             if cell.language != "python":
                 continue
@@ -132,7 +133,7 @@ def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScor
                     references=cell_analysis.references,
                 )
             )
-        build_dag(analyses)  # raises on cycles
+        dag = build_dag(analyses)  # raises on cycles
         score.dag = True
     except Exception as exc:
         score.failed_at = "dag"
@@ -215,20 +216,57 @@ def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScor
         return score
     score.run = True
 
-    # artifact — every cell that ran should have produced at least one
-    # artifact. Empty notebook (no python cells) doesn't count as a fail
-    # here; treat the artifact step as vacuously true.
+    # artifact — per the design rubric: "do leaf cells produce
+    # non-empty artifacts?". Leaf cells are the DAG terminals — the
+    # ones nothing else depends on, which is where a missing output
+    # would mean nothing downstream covered for it. For each leaf, an
+    # observable trace must exist: an Arrow artifact whose filename
+    # carries the cell_id, a console snapshot, or a display output in
+    # runtime.json.
     artifact_dir = notebook_dir / ".strata" / "artifacts"
-    cell_results = payload.get("cells") or []
-    if not cell_results:
-        score.artifact = True
-    else:
-        produced = artifact_dir.exists() and any(artifact_dir.rglob("*.arrow"))
-        score.artifact = produced or False
-        if not score.artifact:
-            score.failed_at = "artifact"
-            score.error = f"no artifacts under {artifact_dir} after run"
+    console_dir = notebook_dir / ".strata" / "console"
+    runtime_path = notebook_dir / ".strata" / "runtime.json"
+    runtime_data: dict = {}
+    if runtime_path.is_file():
+        try:
+            runtime_data = json.loads(runtime_path.read_text())
+        except json.JSONDecodeError:
+            runtime_data = {}
+    runtime_cells = runtime_data.get("cells") or {}
 
+    leaf_ids = (
+        [cid for cid, downstream in (dag.cell_downstream or {}).items() if not downstream]
+        if dag is not None
+        else []
+    )
+    # Restrict to python leaves — markdown cells never persist anything.
+    python_cell_ids = {a.id for a in analyses}
+    leaf_python_ids = [cid for cid in leaf_ids if cid in python_cell_ids]
+
+    if not leaf_python_ids:
+        # No python leaves (notebook is markdown-only or every python cell
+        # has downstream consumers — both are fine). Artifact step is
+        # vacuously satisfied.
+        score.artifact = True
+        return score
+
+    missing: list[str] = []
+    for cell_id in leaf_python_ids:
+        has_artifact = any(artifact_dir.rglob(f"*cell_{cell_id}*.arrow"))
+        has_console = (console_dir / f"{cell_id}.json").exists()
+        cell_runtime = runtime_cells.get(cell_id) or {}
+        has_display = bool(cell_runtime.get("display_outputs"))
+        if not (has_artifact or has_console or has_display):
+            missing.append(cell_id)
+
+    if missing:
+        score.failed_at = "artifact"
+        score.error = (
+            f"{len(missing)} leaf cell(s) produced no observable output "
+            f"(no artifact / console / display): {missing}"
+        )
+        return score
+    score.artifact = True
     return score
 
 

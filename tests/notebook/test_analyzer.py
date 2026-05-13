@@ -231,6 +231,40 @@ class TestAnalyzerReferences:
         assert "x" in result.defines
         assert "y" in result.defines
 
+    def test_augassign_bare_target_is_a_reference(self):
+        """``x += 1`` reads ``x`` before writing it. Same class as the
+        Assign rebind — the implicit read needs to surface as an
+        upstream reference, otherwise the DAG drops the edge and the
+        cell hits NameError. The AugAssign target has no visible Name
+        in Load context, so the analyzer has to inject the read."""
+        result = analyze_cell("x += 1")
+        assert "x" in result.defines
+        assert "x" in result.references
+
+    def test_augassign_after_local_define_not_a_reference(self):
+        """``x = 0\\nx += 1`` reads the local ``x`` set on the prior
+        line — no upstream dep. The source-order check has to suppress
+        the augassign's implicit read."""
+        result = analyze_cell("x = 0\nx += 1\n")
+        assert "x" not in result.references
+        assert "x" in result.defines
+
+    def test_tuple_swap_keeps_both_references(self):
+        """``a, b = b, a`` reads both ``a`` and ``b`` on the RHS while
+        binding both on the LHS. Both names are genuine upstream
+        references; the tuple-unpack handler has to collect Name
+        targets nested in Tuple."""
+        result = analyze_cell("a, b = b, a")
+        assert "a" in result.defines and "b" in result.defines
+        assert "a" in result.references and "b" in result.references
+
+    def test_tuple_unpacking_after_local_define_not_references(self):
+        """And the source-order suppression flows through tuple unpacking
+        too — locally bound names don't drag in spurious upstream deps."""
+        result = analyze_cell("a, b = 1, 2\na, b = b, a\n")
+        assert "a" not in result.references
+        assert "b" not in result.references
+
 
 class TestAnalyzerPrivateVariables:
     """Test private variable (starting with _) handling."""
