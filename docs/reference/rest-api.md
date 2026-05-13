@@ -38,6 +38,29 @@ POST /v1/notebooks/open
 
 Returns notebook state with `session_id` and `dag`.
 
+### Import Jupyter Notebook
+
+```
+POST /v1/notebooks/import
+Content-Type: multipart/form-data
+```
+
+Form fields:
+
+| Field         | Type            | Description                                                                  |
+| ------------- | --------------- | ---------------------------------------------------------------------------- |
+| `file`        | file (required) | The `.ipynb` upload. Hard cap of 50 MB.                                      |
+| `name`        | string          | Override the notebook name (defaults to the upload's filename stem).         |
+| `parent_path` | string          | Override the storage location (must lie inside the configured storage root). |
+
+Converts the upload through `strata import` and opens a session on
+the result. Returns the same notebook state shape as `POST
+/v1/notebooks/create` plus an `import_report` field with the
+converter's per-cell findings (translated magics, captured deps,
+warnings, full report markdown). See
+[Import from Jupyter](../notebook/import.md) for the magic
+translation table and limitations.
+
 ### Delete Notebook
 
 ```

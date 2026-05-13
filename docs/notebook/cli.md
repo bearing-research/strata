@@ -6,7 +6,9 @@ that a notebook still works after a dependency bump.
 
 For rendering a notebook to a shareable markdown or HTML file (without
 executing anything), see [Export](export.md) and its `strata export`
-sibling command.
+sibling command. For converting an existing Jupyter `.ipynb` into a
+Strata notebook directory, see [Import from Jupyter](import.md) and
+its `strata import` sibling.
 
 It reuses the same `NotebookSession` and `CellExecutor` the UI uses, so the
 execution path is identical — artifact cache hits, cascade ordering, worker
