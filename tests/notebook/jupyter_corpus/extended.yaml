@@ -19,36 +19,33 @@
 #                                  five-step rubric.
 #      ``expected: parse_only``  — only parse + convert + dag get
 #                                  scored; run + artifact skipped.
-#                                  Use this when the notebook needs
-#                                  packages Strata can't auto-capture
-#                                  (no ``%pip install`` line + no
-#                                  sibling requirements.txt), needs
-#                                  a GPU / paid API, downloads
+#                                  Use this when the notebook itself
+#                                  has aged out against current
+#                                  library versions (API drift in
+#                                  numpy / pandas / matplotlib etc.),
+#                                  needs a GPU / paid API, downloads
 #                                  multi-GB data, etc.
-#
-# The deps-capture limitation: imports inside cells (``import numpy
-# as np``) without a sibling ``%pip install`` line or
-# ``requirements.txt`` are NOT auto-captured today. Source 3 of the
-# dep-capture design was deferred. Notebooks affected by this stay
-# at ``parse_only`` until import-name → pip-name capture lands.
 
 notebooks:
   # ---- Python Data Science Handbook (Jake VanderPlas) ----
-  # Stable repo, pinned to a verified commit SHA. These notebooks
-  # use bare ``import numpy``, ``import pandas`` etc. without
-  # %pip install lines, so they're parse_only today.
+  # Stable repo, pinned to a verified commit SHA. Auto-import-capture
+  # successfully infers the deps (numpy / pandas / matplotlib), but
+  # the notebook code itself predates modern library versions and
+  # exercises behaviors that have since been removed or changed.
+  # Kept at parse_only to track the converter / DAG side without
+  # asserting ecosystem stability we don't control.
 
   - name: pdsh-numpy-array-basics
     url: https://raw.githubusercontent.com/jakevdp/PythonDataScienceHandbook/d66231454ef753818dc9213c9b5942e067266966/notebooks/02.02-The-Basics-Of-NumPy-Arrays.ipynb
     expected: parse_only
-    reason: "imports numpy without %pip install line; auto-import-capture not yet implemented"
+    reason: "upstream API drift: relies on numpy view mutability that's now read-only by default"
 
   - name: pdsh-pandas-objects
     url: https://raw.githubusercontent.com/jakevdp/PythonDataScienceHandbook/d66231454ef753818dc9213c9b5942e067266966/notebooks/03.01-Introducing-Pandas-Objects.ipynb
     expected: parse_only
-    reason: "imports pandas/numpy without %pip install line; auto-import-capture not yet implemented"
+    reason: "upstream API drift: pandas.Index became immutable; old assignment patterns now raise"
 
   - name: pdsh-matplotlib-line-plots
     url: https://raw.githubusercontent.com/jakevdp/PythonDataScienceHandbook/d66231454ef753818dc9213c9b5942e067266966/notebooks/04.01-Simple-Line-Plots.ipynb
     expected: parse_only
-    reason: "imports matplotlib without %pip install line; auto-import-capture not yet implemented"
+    reason: "upstream API drift: 'seaborn-whitegrid' matplotlib style was renamed"

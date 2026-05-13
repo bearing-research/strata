@@ -127,16 +127,29 @@ the converter is conservative:
 
 ### Dependencies
 
-Three sources, priority order:
+Four sources, in priority order — earlier sources shadow later ones,
+so a version-pinned spec from `requirements.txt` wins over a bare
+inferred-from-imports entry:
 
 1. Sibling `requirements.txt` next to the `.ipynb`.
 2. Sibling `pyproject.toml` next to the `.ipynb`.
 3. `%pip install` / `!pip install` lines extracted from cells.
+4. **Bare imports in cell source.** AST-walk each cell, collect
+   top-level import names, filter stdlib (via `sys.stdlib_module_names`)
+   and local sibling modules (anything that resolves to a `*.py` or
+   `*/__init__.py` next to the notebook). Map import names to PyPI
+   names via a small hand-maintained dict for common mismatches:
+   `cv2 → opencv-python`, `sklearn → scikit-learn`, `PIL → Pillow`,
+   `bs4 → beautifulsoup4`, `yaml → PyYAML`, etc. Anything not in the
+   dict is assumed to use the same name on PyPI (right ~95% of the
+   time).
 
-The combined set is filtered to **PEP 508 specifiers only** —
-`pyproject.toml`'s `dependencies` won't accept editable installs
-(`-e .`), bare URLs (`git+https://…`), or local paths. Skipped specs
-land in the import report so you can address them by hand.
+The combined set is deduped with PEP 503-normalized package names
+(so `scikit-learn` and `scikit_learn` collapse to one entry) and
+filtered to **PEP 508 specifiers only** — `pyproject.toml`'s
+`dependencies` won't accept editable installs (`-e .`), bare URLs
+(`git+https://…`), or local paths. Skipped specs land in the import
+report so you can address them by hand.
 
 The deps are written to the new notebook's `pyproject.toml`. First
 `uv sync` (which runs automatically when you open the notebook in

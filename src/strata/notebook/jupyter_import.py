@@ -27,6 +27,7 @@ import ast
 import json
 import re
 import shlex
+import sys
 import tomllib
 import uuid
 from dataclasses import dataclass, field
@@ -157,9 +158,11 @@ def import_notebook(
     result = ImportResult(notebook_dir=notebook_dir)
 
     sibling_deps = _capture_sibling_deps(ipynb_path.parent)
+    local_modules = _local_module_names(ipynb_path.parent)
 
     prev_cell_id: str | None = None
     cell_deps: list[str] = []
+    scanned_imports: set[str] = set()
     for cell in nb.get("cells") or []:
         cell_type = cell.get("cell_type")
         source = _source_to_text(cell.get("source", ""))
@@ -192,19 +195,28 @@ def import_notebook(
             result.dropped_magics.extend(conv.dropped_magics)
             result.dropped_shells.extend(conv.dropped_shells)
             cell_deps.extend(conv.deps)
+            # Scan the *converted* source — magics have been stripped,
+            # so what remains is valid Python the harness will execute.
+            scanned_imports |= _scan_imports(conv.source)
             prev_cell_id = cell_id
         elif cell_type is None:
             result.warnings.append("cell missing 'cell_type' was skipped")
         else:
             result.skipped_cells.append(str(cell_type))
 
+    inferred_deps = _imports_to_deps(scanned_imports, local_modules)
+
     # Merge captured deps into the new notebook's pyproject.toml.
+    # Order matters for the dedup: explicit sources (siblings, %pip
+    # install) come first so their version pins shadow bare scan-
+    # derived names. PEP 503-normalized package-name dedup catches
+    # ``scikit_learn`` vs ``scikit-learn`` collisions.
+    all_deps = _dedupe_by_package([*sibling_deps, *cell_deps, *inferred_deps])
     # Filter pip-only forms (editable installs, bare URLs, paths) that
     # pyproject.toml dependencies can't represent — those would either
     # be rejected by uv at sync time or, worse, slip through and corrupt
     # the TOML (a "; python_version < '3.10'" marker contains literal
     # characters that need proper escaping).
-    all_deps = _dedupe_preserve_order([*sibling_deps, *cell_deps])
     valid_deps = [d for d in all_deps if _is_valid_pep508_dep(d)]
     rejected_deps = [d for d in all_deps if not _is_valid_pep508_dep(d)]
     if valid_deps:
@@ -786,6 +798,115 @@ def _dedupe_preserve_order(items: list[str]) -> list[str]:
             continue
         seen.add(item)
         out.append(item)
+    return out
+
+
+# Top-level import names whose PyPI package name differs. Anything not
+# in this dict is assumed to use ``import_name == pip_name`` — right
+# ~95% of the time in practice. Extend by adding a row.
+_IMPORT_TO_PIP: dict[str, str] = {
+    "cv2": "opencv-python",
+    "sklearn": "scikit-learn",
+    "PIL": "Pillow",
+    "bs4": "beautifulsoup4",
+    "yaml": "PyYAML",
+    "dotenv": "python-dotenv",
+    "dateutil": "python-dateutil",
+    "skimage": "scikit-image",
+    "attr": "attrs",
+}
+
+
+def _scan_imports(source: str) -> set[str]:
+    """Collect top-level module names imported by a cell.
+
+    Walks the AST for ``Import`` and ``ImportFrom`` nodes, takes the
+    first dotted-path component, filters out stdlib names. Returns
+    an empty set on syntax errors — those surface separately when
+    the harness tries to execute the cell.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom):
+            # node.level > 0 is a relative import (``from . import x``),
+            # which can't be a third-party dependency.
+            if node.module and node.level == 0:
+                names.add(node.module.split(".", 1)[0])
+    return names - sys.stdlib_module_names
+
+
+def _local_module_names(parent_dir: Path) -> set[str]:
+    """Names that would resolve to local files / packages, not PyPI.
+
+    Without this, a notebook that does ``import my_helpers`` next to
+    a ``my_helpers.py`` file would end up with a fabricated PyPI dep
+    that fails confusingly on ``uv sync``.
+    """
+    names: set[str] = set()
+    if not parent_dir.is_dir():
+        return names
+    try:
+        entries = list(parent_dir.iterdir())
+    except OSError:
+        return names
+    for entry in entries:
+        if entry.is_file() and entry.suffix == ".py" and entry.stem != "__init__":
+            names.add(entry.stem)
+        elif entry.is_dir() and (entry / "__init__.py").is_file():
+            names.add(entry.name)
+    return names
+
+
+def _imports_to_deps(imports: set[str], local_modules: set[str]) -> list[str]:
+    """Map a set of import names to pip package specifiers.
+
+    Skips anything that names a local module. Returns sorted output
+    for stable, hashable results across runs.
+    """
+    deps: list[str] = []
+    for name in sorted(imports):
+        if name in local_modules:
+            continue
+        deps.append(_IMPORT_TO_PIP.get(name, name))
+    return deps
+
+
+def _normalize_pep503(name: str) -> str:
+    """Canonical comparison key for PEP 508 specifiers.
+
+    Strips version markers / extras / markers, lowercases, replaces
+    ``_``/``.`` with ``-`` (PEP 503 normalization). ``scikit_learn``,
+    ``scikit-learn``, and ``Scikit-Learn`` all map to the same key,
+    so version-pinned siblings shadow bare scan-derived names.
+    """
+    head = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)", name.strip())
+    if not head:
+        return ""
+    return re.sub(r"[._-]+", "-", head.group(1)).lower()
+
+
+def _dedupe_by_package(specs: list[str]) -> list[str]:
+    """Dedupe in order, keying by the PEP 503-normalized package name.
+
+    Ensures ``pandas==2.0.1`` (explicit, earlier) shadows a bare
+    ``pandas`` (inferred from imports, later) — the version pin wins.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    for spec in specs:
+        key = _normalize_pep503(spec)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(spec)
     return out
 
 

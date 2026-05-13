@@ -686,6 +686,142 @@ def test_pyproject_skips_pip_only_specs(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Import-name → pip-name auto-capture (source 3 of dep capture)
+
+
+def test_captures_deps_from_bare_import_statements(tmp_path: Path) -> None:
+    """The dep-capture design's source 3: walk imports and auto-add
+    third-party packages to pyproject.toml. Without this, Kaggle-style
+    notebooks that just ``import pandas`` (no %pip install line, no
+    sibling requirements.txt) would land with an empty pyproject and
+    crash at run time."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("import numpy as np\nimport pandas as pd\n"),
+            _code_cell("from matplotlib import pyplot as plt\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    deps = set(result.captured_deps)
+    assert "numpy" in deps
+    assert "pandas" in deps
+    assert "matplotlib" in deps
+
+
+def test_import_name_to_pip_name_override(tmp_path: Path) -> None:
+    """Common Python idioms where the top-level import name differs
+    from the PyPI package name — ``cv2`` → opencv-python, ``sklearn``
+    → scikit-learn, ``PIL`` → Pillow. The mapping is a hand-maintained
+    dict; anything not in it falls through unchanged."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("import cv2\nfrom PIL import Image\n"),
+            _code_cell("from sklearn.linear_model import LogisticRegression\n"),
+            _code_cell("from bs4 import BeautifulSoup\nimport yaml\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    deps = set(result.captured_deps)
+    assert "opencv-python" in deps
+    assert "Pillow" in deps
+    assert "scikit-learn" in deps
+    assert "beautifulsoup4" in deps
+    assert "PyYAML" in deps
+    # Original import names should NOT have leaked through.
+    assert "cv2" not in deps
+    assert "sklearn" not in deps
+
+
+def test_stdlib_imports_not_captured(tmp_path: Path) -> None:
+    """``import os``, ``import json``, ``import re`` etc. resolve to
+    the standard library — never a PyPI dep. Filtering via
+    sys.stdlib_module_names covers everything."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("import os\nimport json\nimport re\nfrom pathlib import Path\n")],
+    )
+    result = import_notebook(ipynb)
+    deps = set(result.captured_deps)
+    assert "os" not in deps
+    assert "json" not in deps
+    assert "re" not in deps
+    assert "pathlib" not in deps
+
+
+def test_local_module_imports_not_captured(tmp_path: Path) -> None:
+    """``import my_helpers`` next to a ``my_helpers.py`` file should
+    NOT be captured as a fake PyPI dep — that would make ``uv sync``
+    fail later with a confusing 'package not found' error."""
+    (tmp_path / "my_helpers.py").write_text("def helper(): pass\n", encoding="utf-8")
+    (tmp_path / "my_package").mkdir()
+    (tmp_path / "my_package" / "__init__.py").write_text("", encoding="utf-8")
+
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("import my_helpers\nfrom my_package import x\nimport numpy\n")],
+    )
+    result = import_notebook(ipynb)
+    deps = set(result.captured_deps)
+    # numpy survives — it's not a sibling file.
+    assert "numpy" in deps
+    # The two locals are filtered.
+    assert "my_helpers" not in deps
+    assert "my_package" not in deps
+    assert "my-helpers" not in deps
+
+
+def test_explicit_version_pin_shadows_inferred_bare_name(tmp_path: Path) -> None:
+    """If the user pinned ``pandas==2.0.1`` in requirements.txt and a
+    cell does ``import pandas``, only the pinned version should land
+    in pyproject.toml. Source 1+2 (explicit) shadow source 3 (inferred)."""
+    (tmp_path / "requirements.txt").write_text("pandas==2.0.1\n", encoding="utf-8")
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("import pandas as pd\nimport numpy\n")],
+    )
+    result = import_notebook(ipynb)
+    deps = result.captured_deps
+    assert "pandas==2.0.1" in deps
+    assert "pandas" not in deps  # bare version got deduped out
+    # numpy survives — only source 3 supplied it.
+    assert "numpy" in deps
+
+
+def test_pep503_normalization_dedupes_underscore_dash_variants(tmp_path: Path) -> None:
+    """PEP 503 says ``scikit_learn`` and ``scikit-learn`` are the same
+    package. Our dedup has to normalize so an underscore-form in
+    requirements.txt doesn't get duplicated by a dash-form anywhere
+    else (or vice versa)."""
+    (tmp_path / "requirements.txt").write_text("scikit-learn\n", encoding="utf-8")
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("from sklearn.linear_model import LogisticRegression\n")],
+    )
+    result = import_notebook(ipynb)
+    deps = result.captured_deps
+    # Only one canonical entry.
+    assert deps.count("scikit-learn") == 1
+    # The import-mapped name shouldn't have produced a duplicate.
+    assert "sklearn" not in deps
+
+
+def test_relative_imports_not_captured(tmp_path: Path) -> None:
+    """``from . import foo`` is a relative import — never a PyPI dep,
+    even though the AST has an ImportFrom node."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("from . import helpers\nfrom ..pkg import thing\nimport numpy\n")],
+    )
+    result = import_notebook(ipynb)
+    deps = set(result.captured_deps)
+    assert "numpy" in deps
+    assert "helpers" not in deps
+    assert "pkg" not in deps
+
+
+# ---------------------------------------------------------------------------
 # Import report (PR 3)
 
 
