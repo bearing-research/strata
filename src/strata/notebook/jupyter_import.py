@@ -139,13 +139,11 @@ def import_notebook(
     with ipynb_path.open("r", encoding="utf-8") as f:
         nb = json.load(f)
 
-    # nbformat requires the top-level value to be a JSON object. Reject
-    # arrays / scalars here so downstream `.get("cells")` doesn't crash
-    # with AttributeError mid-conversion.
-    if not isinstance(nb, dict):
-        raise ValueError(
-            f"Invalid .ipynb: expected JSON object at top level, got {type(nb).__name__}"
-        )
+    # Validate the nbformat structure up-front so we don't leave a
+    # half-materialized notebook directory on disk when the source is
+    # malformed (and so AttributeError from a mid-loop ``.get("cell_type")``
+    # surfaces as a 400 at the REST layer, not a 500).
+    _validate_nbformat_structure(nb)
 
     if out_dir is not None:
         out_dir = Path(out_dir)
@@ -230,6 +228,38 @@ def import_notebook(
     result.report_text = report_text
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Structural validation
+
+
+def _validate_nbformat_structure(nb: object) -> None:
+    """Reject obvious nbformat violations before we materialize anything.
+
+    Catches:
+      - Top-level value isn't a JSON object (a list, a scalar, null).
+      - ``cells`` is present but isn't a list.
+      - Individual entries inside ``cells`` aren't JSON objects.
+
+    Anything more nuanced (missing nbformat version, unknown cell_type)
+    we accept and convert as best we can — those don't crash the
+    converter, they just produce no-op cells or warnings on the result.
+    The point of this check is just to fail fast on shapes that would
+    raise AttributeError mid-loop.
+    """
+    if not isinstance(nb, dict):
+        raise ValueError(
+            f"Invalid .ipynb: expected JSON object at top level, got {type(nb).__name__}"
+        )
+    cells = nb.get("cells")
+    if cells is not None and not isinstance(cells, list):
+        raise ValueError(f"Invalid .ipynb: 'cells' must be a list, got {type(cells).__name__}")
+    for idx, cell in enumerate(cells or []):
+        if not isinstance(cell, dict):
+            raise ValueError(
+                f"Invalid .ipynb: cells[{idx}] must be a JSON object, got {type(cell).__name__}"
+            )
 
 
 # ---------------------------------------------------------------------------

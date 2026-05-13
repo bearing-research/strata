@@ -11,22 +11,17 @@ Scoring rubric (per the design doc):
     parse:    can we read the .ipynb at all?
     convert:  did jupyter_import produce a valid Strata notebook dir?
     dag:      does the DAG build with no cycles / unbound references?
-    run:      does `strata run` complete with no exceptions?
-    artifact: do leaf cells produce non-empty artifacts?
+    run:      does `strata run` complete with no exceptions? (PR 6+)
+    artifact: do leaf cells produce non-empty artifacts? (PR 6+)
 
-Fast mode (default): parse + convert + dag. Network-free, ~1s per
-notebook, runs on every PR. Catches converter regressions, magic
-table breakage, DAG analysis issues.
-
-Full mode (``STRATA_CORPUS_RUN=1``): also exercises ``strata run``
-through the harness. Slow + network-dependent — opt-in only,
-intended for nightly CI or manual pre-release verification.
+PR 5 covers parse + convert + dag only — network-free, ~80ms total,
+runs on every PR. The full-execution side (run + artifact) lands in
+PR 6 along with the extended corpus, and will be opt-in there.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -123,10 +118,6 @@ def _score(ipynb_path: Path, out_dir: Path) -> CorpusScore:
     return score
 
 
-def _full_mode_enabled() -> bool:
-    return os.environ.get("STRATA_CORPUS_RUN", "0") not in ("", "0", "false", "False")
-
-
 @pytest.mark.skipif(not _SMOKE_NOTEBOOKS, reason="smoke corpus directory is empty")
 @pytest.mark.parametrize("notebook_path", _SMOKE_NOTEBOOKS, ids=lambda p: p.name)
 def test_corpus_smoke(notebook_path: Path, tmp_path: Path) -> None:
@@ -169,14 +160,8 @@ def test_corpus_exercises_converter_translations(tmp_path: Path) -> None:
     assert saw_deps, "no smoke notebook exercises dep capture"
 
 
-@pytest.mark.skipif(not _full_mode_enabled(), reason="full mode requires STRATA_CORPUS_RUN=1")
-@pytest.mark.parametrize("notebook_path", _SMOKE_NOTEBOOKS, ids=lambda p: p.name)
-def test_corpus_smoke_full_run(notebook_path: Path, tmp_path: Path) -> None:
-    """Opt-in: actually execute each smoke notebook through ``strata
-    run``. Needs ``uv sync`` so requires network; intended for nightly
-    CI or pre-release verification. Skipped by default.
-
-    Placeholder for PR 6 — wires in run+artifact scoring once the
-    extended-corpus runner lands.
-    """
-    pytest.skip("full-mode runner lands in PR 6 alongside the extended corpus")
+# PR 6 reintroduces a separate test (and an env knob) that exercises
+# the run + artifact steps of the rubric. Intentionally not stubbed
+# here — a parametrized test that unconditionally skips would just
+# inflate the skip count and mislead anyone setting an env var that
+# doesn't do anything yet.

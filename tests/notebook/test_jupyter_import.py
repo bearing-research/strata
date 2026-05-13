@@ -203,6 +203,39 @@ def test_import_rejects_non_dict_top_level_json(tmp_path: Path) -> None:
             import_notebook(bad_path)
 
 
+def test_import_rejects_non_dict_cell_entries(tmp_path: Path) -> None:
+    """Regression: ``{"cells":[1]}`` used to crash mid-loop with
+    AttributeError on ``cell.get("cell_type")``. Validate the cell
+    list shape before we materialize a directory, so the failure
+    surfaces as a clean ValueError and no orphan notebook dir is
+    left on disk."""
+    bad = tmp_path / "bad_cells.ipynb"
+    bad.write_text(
+        '{"cells":[1, {"cell_type":"code","source":"x=1"}], "metadata":{}, '
+        '"nbformat":4, "nbformat_minor":5}',
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out"
+    with pytest.raises(ValueError, match=r"cells\[0\] must be a JSON object"):
+        import_notebook(bad, out_dir=out_dir)
+    # No partial notebook dir was created — validation must run before
+    # create_notebook.
+    assert not out_dir.exists()
+
+
+def test_import_rejects_non_list_cells_field(tmp_path: Path) -> None:
+    """``cells`` present but not a list (a dict, a scalar, a string)
+    is also caught early with a clean ValueError."""
+    for bad_cells in ('"not a list"', '{"k": "v"}', "42"):
+        bad = tmp_path / f"bad_cells_{hash(bad_cells)}.ipynb"
+        bad.write_text(
+            f'{{"cells":{bad_cells}, "metadata":{{}}, "nbformat":4, "nbformat_minor":5}}',
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="'cells' must be a list"):
+            import_notebook(bad)
+
+
 def test_import_stamps_owner_when_provided(tmp_path: Path) -> None:
     """The CLI doesn't pass owner; the REST endpoint does. Verify the
     plumbing all the way down to notebook.toml."""

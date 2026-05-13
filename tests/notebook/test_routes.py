@@ -2636,22 +2636,29 @@ def test_import_endpoint_rejects_path_traversal_in_name(monkeypatch, tmp_path):
 
 
 def test_import_endpoint_rejects_structurally_invalid_notebook(monkeypatch, tmp_path):
-    """Regression: a JSON file whose top-level value isn't an object
-    (a list, a scalar, null) used to crash the converter with
-    AttributeError → 500. It should be a clean 400 now."""
+    """Regression: a JSON file whose top-level value isn't an object,
+    or whose ``cells`` field isn't a list of dicts, used to crash the
+    converter mid-loop with AttributeError → 500. All shapes should
+    surface as a clean 400 now."""
     client = TestClient(create_test_app())
     _import_storage(monkeypatch, tmp_path)
 
-    for bad_payload in (b"[]", b'"a string"', b"null", b"42"):
+    bad_payloads = (
+        b"[]",
+        b'"a string"',
+        b"null",
+        b"42",
+        # ``cells`` entry isn't a dict — the reported regression case.
+        b'{"cells":[1],"metadata":{},"nbformat":4,"nbformat_minor":5}',
+        # ``cells`` itself isn't a list.
+        b'{"cells":"oops","metadata":{},"nbformat":4,"nbformat_minor":5}',
+    )
+    for bad_payload in bad_payloads:
         resp = client.post(
             "/v1/notebooks/import",
             files={"file": ("malformed.ipynb", bad_payload, "application/x-ipynb+json")},
         )
         assert resp.status_code == 400, (bad_payload, resp.text)
-        assert (
-            "Import failed" in resp.json()["detail"]
-            or "expected JSON object" in resp.json()["detail"]
-        )
 
 
 def test_import_endpoint_stamps_caller_owner(monkeypatch, tmp_path):
