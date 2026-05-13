@@ -6,13 +6,9 @@ primary_region = "sjc"
 [http_service]
   internal_port = 8080
   force_https = true
-  # Keep one machine warm. With min_machines_running = 0 the first
-  # request after idle pays an ~8s cold start, which is too sluggish
-  # for a review session. ``auto_stop_machines = "suspend"`` snapshots
-  # memory when idle so wake-up is fast.
-  auto_stop_machines = "suspend"
+  auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
 
   [[http_service.checks]]
     interval = "30s"

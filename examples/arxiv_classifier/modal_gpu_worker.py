@@ -27,7 +27,7 @@ import modal
 
 # Install Strata itself. Pin to a commit or tag for reproducible builds.
 # PyPI users will just write "strata" here.
-PROJECT_GIT_URL = "strata-notebook[notebook] @ git+https://github.com/bearing-research/strata.git@6805fce"
+PROJECT_GIT_URL = "strata-notebook[notebook] @ git+https://github.com/bearing-research/strata.git@7d29f01"
 
 # Dependencies needed by cells that run on this worker. Keep this list
 # tight — the image rebuilds when it changes.
@@ -42,11 +42,7 @@ WORKLOAD_DEPS: list[str] = [
 
 APP_NAME = "strata-gpu-worker"
 GPU = "A10G"
-# Idle window before Modal stops the container. 60s makes review demos
-# pay a ~10s cold start on every casual click; 1800s (30min) keeps the
-# container warm for a review session at a small extra cost. Drop back
-# to 60 after the review window.
-SCALEDOWN_WINDOW = 1800
+SCALEDOWN_WINDOW = 60  # seconds idle before stopping
 MAX_CONTAINERS = 1  # cell execution is exclusive; don't pipeline
 
 
