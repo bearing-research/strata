@@ -7,6 +7,10 @@ PR 2 coverage: line-magic and cell-magic translation per the table,
 ``!shell`` handling, dependency capture from sibling
 ``requirements.txt`` / ``pyproject.toml`` and from ``pip install``
 lines extracted from cells.
+
+PR 3 coverage: import report written to ``<notebook_dir>/
+import_report.md`` and returned on the :class:`ImportResult` so REST
+can serve it without re-reading from disk.
 """
 
 from __future__ import annotations
@@ -21,6 +25,7 @@ import pytest
 
 from strata.notebook.jupyter_import import (
     _SUPPRESSED_COMMENT,
+    format_import_report,
     import_notebook,
 )
 from strata.notebook.parser import parse_notebook
@@ -350,6 +355,10 @@ def test_drops_javascript_and_html_cell_magics(tmp_path: Path) -> None:
     )
     result = import_notebook(ipynb)
     assert len(result.dropped_magics) == 2
+    # Each entry names the actual magic, not a placeholder union — so
+    # the import report can tell the user which one was where.
+    assert "%%javascript" in result.dropped_magics
+    assert "%%html" in result.dropped_magics
     nb = parse_notebook(result.notebook_dir)
     assert "alert" not in nb.cells[0].source
     assert "<b>bold</b>" not in nb.cells[1].source
@@ -617,6 +626,134 @@ def test_pyproject_skips_pip_only_specs(tmp_path: Path) -> None:
 
     # The user is told what was skipped.
     assert any("pip-only" in w for w in result.warnings)
+
+
+# ---------------------------------------------------------------------------
+# Import report (PR 3)
+
+
+def test_report_is_written_next_to_notebook_toml(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
+    result = import_notebook(ipynb)
+
+    assert result.report_path is not None
+    assert result.report_path == result.notebook_dir / "import_report.md"
+    assert result.report_path.is_file()
+    assert result.report_text  # also exposed on the result
+    on_disk = result.report_path.read_text(encoding="utf-8")
+    assert on_disk == result.report_text
+
+
+def test_report_includes_counts_section(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _md_cell("# Intro\n"),
+            _code_cell("x = 1\n"),
+            _code_cell("y = x\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    text = result.report_text
+    assert "## Counts" in text
+    assert "Markdown cells: 1" in text
+    assert "Code cells: 2" in text
+
+
+def test_report_lists_translated_and_dropped_magics(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("%matplotlib inline\nx = 1\n"),
+            _code_cell("%%javascript\nalert('x')\n"),
+            _code_cell("%who\ny = 2\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    text = result.report_text
+    assert "## Magics translated" in text
+    assert "%matplotlib" in text
+    assert "## Magics dropped" in text
+    # The unsupported %who is one of the dropped ones.
+    assert "%who" in text
+
+
+def test_report_lists_dropped_shells(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("!ls /data\nfiles = !find . -name '*.py'\nx = 1\n")],
+    )
+    result = import_notebook(ipynb)
+    text = result.report_text
+    assert "## Shell commands dropped" in text
+    assert "!ls /data" in text
+    # Assignment-form shell escape also appears.
+    assert "files = !find" in text or "= !find" in text
+
+
+def test_report_lists_captured_deps(tmp_path: Path) -> None:
+    (tmp_path / "requirements.txt").write_text("requests==2.31.0\n", encoding="utf-8")
+    ipynb = _make_ipynb(tmp_path, [_code_cell("!pip install pandas\n")])
+    result = import_notebook(ipynb)
+    text = result.report_text
+    assert "## Dependencies captured" in text
+    assert "requests==2.31.0" in text
+    assert "pandas" in text
+
+
+def test_report_lists_warnings(tmp_path: Path) -> None:
+    """A `git+https://...` spec passes the leading-`-` filter in the
+    requirements parser but gets rejected later by the PEP 508 check,
+    so it produces a user-visible warning in the report."""
+    (tmp_path / "requirements.txt").write_text(
+        "git+https://github.com/psf/requests\nrequests\n",
+        encoding="utf-8",
+    )
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
+    result = import_notebook(ipynb)
+    text = result.report_text
+    assert "## Warnings" in text
+    assert "pip-only" in text
+
+
+def test_report_omits_empty_sections_for_clean_notebook(tmp_path: Path) -> None:
+    """A notebook with no magics / no shell / no deps / no warnings
+    produces a short report — only the counts section."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_md_cell("# Hello\n"), _code_cell("x = 1\n")],
+    )
+    result = import_notebook(ipynb)
+    text = result.report_text
+    assert "## Counts" in text
+    # No optional sections.
+    assert "## Magics translated" not in text
+    assert "## Magics dropped" not in text
+    assert "## Shell commands dropped" not in text
+    assert "## Dependencies captured" not in text
+    assert "## Warnings" not in text
+
+
+def test_format_import_report_is_callable_directly(tmp_path: Path) -> None:
+    """The formatter is exposed so the REST endpoint (PR 4) can call it
+    without re-running the conversion."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")])
+    result = import_notebook(ipynb)
+    rendered = format_import_report(result, ipynb)
+    # Same prose layout — deterministic from the result.
+    assert rendered == result.report_text
+
+
+def test_strata_import_cli_points_to_report(tmp_path: Path) -> None:
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")], name="cli_report.ipynb")
+    result = subprocess.run(
+        [sys.executable, "-m", "strata.cli", "import", str(ipynb)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "import_report.md" in result.stdout
 
 
 def test_suppression_still_works_after_magic_translation(tmp_path: Path) -> None:

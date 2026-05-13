@@ -475,7 +475,7 @@ def import_main(args: argparse.Namespace) -> int:
     if result.translated_magics:
         print(f"  magics translated: {len(result.translated_magics)}")
     if result.dropped_magics:
-        print(f"  magics dropped: {len(result.dropped_magics)} — see import for details")
+        print(f"  magics dropped: {len(result.dropped_magics)} (see report)")
     if result.dropped_shells:
         print(f"  shell commands dropped: {len(result.dropped_shells)}")
     if result.captured_deps:
@@ -483,8 +483,10 @@ def import_main(args: argparse.Namespace) -> int:
     if result.skipped_cells:
         kinds = ", ".join(sorted(set(result.skipped_cells)))
         print(f"  skipped {len(result.skipped_cells)} cell(s) of unsupported type(s): {kinds}")
-    for warning in result.warnings:
-        print(f"  warning: {warning}")
+    if result.warnings:
+        print(f"  warnings: {len(result.warnings)} (see report)")
+    if result.report_path is not None:
+        print(f"  report: {result.report_path}")
     return 0
 
 

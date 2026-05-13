@@ -7,6 +7,9 @@ PR 1 scope: parse + convert markdown / code cells, ``;``-suppression.
 PR 2 adds: line-magic and cell-magic translation, ``!shell`` handling,
 dependency capture from sibling ``requirements.txt`` / ``pyproject.toml``
 and ``pip install`` lines extracted from cells.
+PR 3 adds: a human-readable import report saved as
+``<notebook_dir>/import_report.md`` and returned on the
+:class:`ImportResult` so the REST endpoint can serve it directly.
 
 The conversion is intentionally light. Most Jupyter notebooks that
 run top-to-bottom and don't depend on magics produce a valid Strata
@@ -91,6 +94,11 @@ class ImportResult:
     dropped_shells: list[str] = field(default_factory=list)
     captured_deps: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # Populated by ``import_notebook`` after the conversion finishes.
+    # Path to the rendered report file, and the same content in memory
+    # so the REST endpoint can return it without re-reading from disk.
+    report_path: Path | None = None
+    report_text: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +200,108 @@ def import_notebook(
             f"requires PEP 508 specifiers: {sample}{more}"
         )
 
+    # Write the human-readable report next to notebook.toml. Same
+    # content is returned on the result so callers (REST, CLI) can
+    # serve it without re-reading.
+    report_text = format_import_report(result, ipynb_path)
+    report_path = notebook_dir / "import_report.md"
+    report_path.write_text(report_text, encoding="utf-8")
+    result.report_path = report_path
+    result.report_text = report_text
+
     return result
+
+
+# ---------------------------------------------------------------------------
+# Import report
+
+
+def format_import_report(result: ImportResult, ipynb_path: Path | str) -> str:
+    """Build the human-readable conversion report for one import.
+
+    Same content the CLI surfaces and the REST endpoint will return.
+    Sections only appear when they have content — a clean notebook
+    with no magics produces a short report.
+    """
+    ipynb_path = Path(ipynb_path)
+    lines: list[str] = [
+        f"# Imported from {ipynb_path.name}",
+        "",
+        f"- Source: `{ipynb_path}`",
+        f"- Target: `{result.notebook_dir}`",
+        "",
+        "## Counts",
+        "",
+        f"- Markdown cells: {result.markdown_cells}",
+        f"- Code cells: {result.code_cells}",
+    ]
+    if result.suppressed_outputs:
+        lines.append(
+            f"- Cells with `;`-display-suppression preserved: {result.suppressed_outputs}",
+        )
+    if result.skipped_cells:
+        kinds = ", ".join(f"`{k}`" for k in sorted(set(result.skipped_cells)))
+        lines.append(
+            f"- Skipped cell type(s): {kinds} ({len(result.skipped_cells)} cells)",
+        )
+
+    if result.translated_magics:
+        lines.extend(
+            [
+                "",
+                "## Magics translated",
+                "",
+                "These were rewritten or absorbed into the imported notebook.",
+                "",
+            ]
+        )
+        lines.extend(f"- `{m}`" for m in result.translated_magics)
+
+    if result.dropped_magics:
+        lines.extend(
+            [
+                "",
+                "## Magics dropped",
+                "",
+                "Strata doesn't translate these; the source carries a "
+                "`# strata: ...` marker comment where each one lived. Inspect "
+                "the affected cells if behavior depends on them.",
+                "",
+            ]
+        )
+        lines.extend(f"- `{m}`" for m in result.dropped_magics)
+
+    if result.dropped_shells:
+        lines.extend(
+            [
+                "",
+                "## Shell commands dropped",
+                "",
+                "Auto-running shell from an untrusted notebook is a real "
+                "hazard, so `!cmd` lines (except `!pip install ...`) are "
+                "dropped. Wrap in `subprocess.run(...)` by hand if needed.",
+                "",
+            ]
+        )
+        lines.extend(f"- `{s}`" for s in result.dropped_shells)
+
+    if result.captured_deps:
+        lines.extend(
+            [
+                "",
+                "## Dependencies captured",
+                "",
+                "Added to `pyproject.toml`. First `uv sync` resolves them.",
+                "",
+            ]
+        )
+        lines.extend(f"- `{d}`" for d in result.captured_deps)
+
+    if result.warnings:
+        lines.extend(["", "## Warnings", ""])
+        lines.extend(f"- {w}" for w in result.warnings)
+
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +457,7 @@ def _translate_cell_magic(name: str, args: str, body: str) -> _CellConversion:
             source=f"# strata: unsupported cell magic '%%{name}' dropped\n",
             dropped_magics=[f"%%{name}"],
         )
-    return handler(args, body)
+    return handler(name, args, body)
 
 
 # --- line-magic handlers ---
@@ -436,27 +545,27 @@ _LINE_MAGIC_TABLE = {
 # --- cell-magic handlers ---
 
 
-def _cm_strip(args: str, body: str) -> _CellConversion:
+def _cm_strip(name: str, args: str, body: str) -> _CellConversion:
     """``%%timeit body`` → recurse on the body as plain code."""
     inner = _convert_code_source(body)
-    inner.translated_magics.insert(0, "%%timeit/time")
+    inner.translated_magics.insert(0, f"%%{name}")
     return inner
 
 
-def _cm_drop(args: str, body: str) -> _CellConversion:
+def _cm_drop(name: str, args: str, body: str) -> _CellConversion:
     return _CellConversion(
         source="# strata: cell magic dropped (body not translatable)\n",
-        dropped_magics=["%%javascript|html|latex|svg|markdown"],
+        dropped_magics=[f"%%{name}"],
     )
 
 
-def _cm_bash(args: str, body: str) -> _CellConversion:
+def _cm_bash(name: str, args: str, body: str) -> _CellConversion:
     """``%%bash``/``%%sh`` → wrap the body in ``subprocess.run(..., shell=True)``."""
     wrapped = f"import subprocess as _strata_sp\n_strata_sp.run({body!r}, shell=True, check=True)\n"
-    return _CellConversion(source=wrapped, translated_magics=["%%bash/sh"])
+    return _CellConversion(source=wrapped, translated_magics=[f"%%{name}"])
 
 
-def _cm_writefile(args: str, body: str) -> _CellConversion:
+def _cm_writefile(name: str, args: str, body: str) -> _CellConversion:
     target = args.strip().strip("'\"")
     if not target:
         return _CellConversion(
