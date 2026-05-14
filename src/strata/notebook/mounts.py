@@ -136,7 +136,13 @@ class MountResolver:
         cache_dir: Path | None = None,
         credentials: dict[str, Any] | None = None,
     ):
-        self.cache_dir = cache_dir or Path("/tmp/strata_mounts")  # noqa: S108
+        # Default to a user-scoped dir (matches ~/.strata/artifacts) instead
+        # of the world-writable /tmp/strata_mounts that earlier versions
+        # used — that path was shared across all users on the host and
+        # invited cross-user cache poisoning. Real callers (executor,
+        # remote_executor, tests) always pass an explicit cache_dir; the
+        # default just keeps ad-hoc REPL use from blowing up.
+        self.cache_dir = cache_dir or Path.home() / ".strata" / "mount_cache"
         self.credentials = credentials or {}
         self._fsspec_available: bool | None = None
 
@@ -261,10 +267,19 @@ class MountResolver:
             if snapshot_dir.exists():
                 shutil.rmtree(snapshot_dir)
             local_mirror.mkdir(parents=True, exist_ok=True)
+            mirror_root = local_mirror.resolve()
             try:
                 for remote_name in _list_remote_files(fs, protocol, remote_path):
                     rel = _relative_remote_path(remote_name, protocol, remote_path)
                     local_file = local_mirror / rel
+                    # Path-traversal guard: a remote backend (or
+                    # attacker-controlled bucket) can return a name
+                    # containing ``..`` segments or an absolute path,
+                    # which would escape local_mirror once joined. The
+                    # harness only sees pathlib.Path objects rooted
+                    # under local_mirror, so an escape silently widens
+                    # what the cell can read.
+                    _assert_within(local_file, mirror_root, mount.name, remote_name)
                     local_file.parent.mkdir(parents=True, exist_ok=True)
                     fs.get(f"{protocol}://{remote_name}", str(local_file))
                 complete_marker.write_text("", encoding="utf-8")
@@ -308,6 +323,16 @@ class MountResolver:
             raise RuntimeError(
                 f"Failed to stage RW mount '{mount.name}' from {mount.uri}: {e}"
             ) from e
+
+        # Defence-in-depth path-traversal scan: fsspec's recursive=True
+        # is opaque about the local paths it writes; if the remote
+        # backend returned names with ``..`` segments or symlinks
+        # pointing outside, files could land outside the staging dir
+        # and the harness wouldn't know. Walk after the fact and
+        # reject the mount if anything escaped.
+        staging_root = staging.resolve()
+        for entry in staging.rglob("*"):
+            _assert_within(entry, staging_root, mount.name, str(entry))
 
         return ResolvedMount(
             spec=mount,
@@ -435,8 +460,23 @@ class MountFingerprinter:
             content = "\n".join(sorted(parts))
             return hashlib.sha256(content.encode()).hexdigest()
 
-        except ImportError:
-            return hashlib.sha256(f"remote:{scheme}:{remote_path}".encode()).hexdigest()
+        except ImportError as exc:
+            # fsspec or the backend-specific driver is missing. The
+            # earlier code returned a *deterministic* hash here, which
+            # silently produced cache HITs across environments — one
+            # machine without fsspec would see the same fingerprint
+            # forever even when the remote content changed. Match the
+            # generic Exception branch and return a unique-per-call
+            # hash so the cell is treated as uncacheable rather than
+            # cached on stale content.
+            logger.warning(
+                "fsspec missing while fingerprinting %s://%s (%s); "
+                "treating mount as non-cacheable for this run",
+                scheme,
+                remote_path,
+                exc,
+            )
+            return hashlib.sha256(os.urandom(32)).hexdigest()
         except Exception as e:
             logger.warning(
                 "Failed to fingerprint remote mount %s://%s: %s",
@@ -500,6 +540,33 @@ def _scheme_to_fsspec_protocol(scheme: str) -> str:
         "gs": "gcs",
         "az": "abfs",
     }.get(scheme, scheme)
+
+
+def _assert_within(candidate: Path, root: Path, mount_name: str, remote_name: str) -> None:
+    """Raise if ``candidate`` would resolve outside ``root``.
+
+    ``root`` must already be resolved by the caller (so the comparison
+    handles symlinks consistently). The candidate is resolved with
+    ``strict=False`` because it may not exist yet (we check before
+    creation). A remote backend that returns a name containing ``..``
+    segments, an absolute path, or a symlink pointing outside the
+    mirror gets the mount rejected rather than silently widening what
+    the harness can read.
+    """
+    try:
+        resolved = candidate.resolve(strict=False)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Mount '{mount_name}' failed to resolve local path for "
+            f"remote name {remote_name!r}: {exc}"
+        ) from exc
+    if not resolved.is_relative_to(root):
+        raise RuntimeError(
+            f"Mount '{mount_name}' rejected: remote name {remote_name!r} "
+            f"resolves to {resolved}, which is outside the mount root {root}. "
+            f"This usually means the remote returned a path-traversal name "
+            f"(.. segments, absolute path, or a symlink pointing outside)."
+        )
 
 
 def _list_remote_file_info(

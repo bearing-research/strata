@@ -276,3 +276,79 @@ async def test_remote_rw_mount_replaces_staging_with_current_remote_state(
     second = await resolver.prepare_mounts([mount])
 
     assert not (second["scratch"].local_path / "old.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_remote_ro_mount_rejects_path_traversal_in_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A remote returning '..' in a file name must be rejected, not materialized
+    above the mount root — the harness only sees pathlib.Path objects rooted
+    under local_mirror and a silent escape would widen what the cell can read.
+    """
+    fs = _FakeRemoteFS(
+        {
+            "bucket/prefix/../escape.txt": {
+                "name": "bucket/prefix/../escape.txt",
+                "size": 1,
+                "etag": "etag-x",
+                "mtime": "1",
+                "content": b"x",
+            },
+        }
+    )
+    _install_fake_fsspec(monkeypatch, fs)
+
+    resolver = MountResolver(cache_dir=tmp_path / "cache")
+    mount = MountSpec(name="m", uri="s3://bucket/prefix", mode=MountMode.READ_ONLY)
+
+    with pytest.raises(RuntimeError, match="path-traversal|outside the mount root"):
+        await resolver.prepare_mounts([mount])
+
+
+@pytest.mark.asyncio
+async def test_remote_rw_mount_rejects_path_traversal_via_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fsspec's recursive=True is opaque about local paths; the post-fetch
+    walk must catch symlinks that point outside the staging dir.
+    """
+    sentinel = tmp_path / "secret.txt"
+    sentinel.write_text("not-for-cell", encoding="utf-8")
+
+    class _SymlinkFakeFS(_FakeRemoteFS):
+        def get(self, uri: str, local_path: str, recursive: bool = False) -> None:
+            staging = Path(local_path)
+            staging.mkdir(parents=True, exist_ok=True)
+            (staging / "leak").symlink_to(sentinel)
+
+        def exists(self, uri: str) -> bool:  # noqa: ARG002
+            return True
+
+    _install_fake_fsspec(monkeypatch, _SymlinkFakeFS({}))
+
+    resolver = MountResolver(cache_dir=tmp_path / "cache")
+    mount = MountSpec(name="m", uri="s3://bucket/output", mode=MountMode.READ_WRITE)
+
+    with pytest.raises(RuntimeError, match="path-traversal|outside the mount root"):
+        await resolver.prepare_mounts([mount])
+
+
+def test_remote_fingerprint_without_fsspec_is_non_deterministic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When fsspec is missing, fingerprint_remote_sync used to return a
+    deterministic hash, causing the cell to silently cache-hit across
+    environments with completely different remote content. It must now
+    return a unique-per-call value so the cell is treated as uncacheable.
+    """
+    from strata.notebook.mounts import MountFingerprinter
+
+    monkeypatch.setitem(sys.modules, "fsspec", None)
+
+    fp1 = MountFingerprinter.fingerprint_remote_sync("s3", "bucket/prefix")
+    fp2 = MountFingerprinter.fingerprint_remote_sync("s3", "bucket/prefix")
+
+    assert fp1 != fp2, "fingerprint must be unique per call when fsspec is missing"
