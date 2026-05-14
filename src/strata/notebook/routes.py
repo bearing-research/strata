@@ -1695,8 +1695,6 @@ async def update_cell_source(notebook_id: str, cell_id: str, req: UpdateCellSour
             "dag": _format_dag(session),
             "cells": session.serialize_cells(),
         }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except PermissionError as exc:
@@ -2293,8 +2291,6 @@ async def delete_cell(notebook_id: str, cell_id: str) -> dict:
                 "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
             },
         }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except PermissionError as exc:

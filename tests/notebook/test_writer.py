@@ -109,7 +109,7 @@ def test_write_cell_not_found():
         notebook_dir = create_notebook(tmpdir_path, "Cell Write Test")
 
         # Try to write to non-existent cell
-        with pytest.raises(ValueError, match="Cell .* not found"):
+        with pytest.raises(FileNotFoundError, match="Cell .* not found"):
             write_cell(notebook_dir, "nonexistent", "code")
 
 
@@ -196,7 +196,7 @@ def test_remove_cell_not_found():
         notebook_dir = create_notebook(tmpdir_path, "Remove Cell Test")
 
         # Try to remove non-existent cell
-        with pytest.raises(ValueError, match="Cell .* not found"):
+        with pytest.raises(FileNotFoundError, match="Cell .* not found"):
             remove_cell_from_notebook(notebook_dir, "nonexistent")
 
 

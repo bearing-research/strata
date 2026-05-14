@@ -233,7 +233,9 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str) -> None:
             break
 
     if cell_meta is None:
-        raise ValueError(f"Cell {cell_id} not found in notebook.toml")
+        # FileNotFoundError (not ValueError) so route handlers can map
+        # this to 404 without ambiguity with validation errors.
+        raise FileNotFoundError(f"Cell {cell_id} not found in notebook.toml")
 
     # Write cell file
     cells_dir = notebook_dir / "cells"
@@ -683,7 +685,9 @@ def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
             break
 
     if cell_meta is None:
-        raise ValueError(f"Cell {cell_id} not found")
+        # FileNotFoundError (not ValueError) so route handlers can map
+        # this to 404 without ambiguity with validation errors.
+        raise FileNotFoundError(f"Cell {cell_id} not found")
 
     # Remove cell file
     cells_dir = notebook_dir / "cells"
