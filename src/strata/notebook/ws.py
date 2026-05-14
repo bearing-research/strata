@@ -1055,6 +1055,38 @@ async def _handle_cell_source_update(
         )
         return
 
+    # Reject updates to the cell currently being executed. Without this
+    # guard the executor can hash one source version, write the artifact
+    # under that hash, and then have disk + in-memory source overwritten
+    # by this update before the run completes — leaving compute_staleness
+    # to see a different source on next open and mark the cell stale
+    # forever despite having a fresh artifact. control_lock is held only
+    # during execution *scheduling* (not the run itself), so we read the
+    # running-cell snapshot under it and reject without blocking on long
+    # cells. Frontend retries on the next cell_status: idle/ready/error.
+    async with execution_state["control_lock"]:
+        running = execution_state.get("running_cell")
+        requested = execution_state.get("requested_cell")
+    if cell_id in {running, requested}:
+        await websocket.send_text(
+            _json_encode(
+                {
+                    "type": "error",
+                    "seq": execution_state["sequence"],
+                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
+                    "payload": {
+                        "error": (
+                            f"Cannot update cell {cell_id} while it is executing; "
+                            "retry after cell finishes"
+                        ),
+                        "code": "cell_busy",
+                        "cell_id": cell_id,
+                    },
+                }
+            )
+        )
+        return
+
     execution_state["sequence"] += 1
     seq = execution_state["sequence"]
 
