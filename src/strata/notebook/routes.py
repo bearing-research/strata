@@ -2585,8 +2585,10 @@ async def execute_cell(notebook_id: str, cell_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Cell not found")
 
     try:
-        # Execute the cell
-        cell.status = CellStatus.RUNNING
+        # Execute the cell — go through controlled session setters so
+        # this path agrees with WS direct/cascade/run_all on how
+        # cell.status transitions through running → ready/error.
+        session.mark_cell_running(cell_id)
         executor = CellExecutor(session, session.warm_pool)
         result = await executor.execute_cell(cell_id, cell.source)
         session.record_execution(cell_id, result.duration_ms, result.cache_hit)
@@ -2595,17 +2597,17 @@ async def execute_cell(notebook_id: str, cell_id: str) -> dict:
             session.compute_staleness()
             session.mark_executed_ready(cell_id)
         else:
-            cell.status = CellStatus.ERROR
+            session.mark_cell_error(cell_id)
 
         return result.to_dict()
     except ValueError as exc:
-        cell.status = CellStatus.ERROR
+        session.mark_cell_error(cell_id)
         raise HTTPException(status_code=400, detail=str(exc))
     except FileNotFoundError as exc:
-        cell.status = CellStatus.ERROR
+        session.mark_cell_error(cell_id)
         raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except Exception:
-        cell.status = CellStatus.ERROR
+        session.mark_cell_error(cell_id)
         logger.exception("Cell execution failed")
         raise HTTPException(status_code=500, detail="Execution failed")
 

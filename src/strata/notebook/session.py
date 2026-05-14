@@ -911,6 +911,29 @@ class NotebookSession:
         cell.status = CellStatus.READY
         self.causality_map.pop(cell_id, None)
 
+    def mark_cell_running(self, cell_id: str) -> None:
+        """Mark a cell as currently executing in backend state.
+
+        Single controlled entry point used by every execution-driving
+        path (REST execute, WS direct/cascade/run_all, agent execute).
+        Direct ``cell.status = CellStatus.RUNNING`` mutations elsewhere
+        drift from this canonical setter and race with concurrent
+        execution paths writing different statuses to the same cell.
+        """
+        cell = self.notebook_state.get_cell(cell_id)
+        if cell is not None:
+            cell.status = CellStatus.RUNNING
+
+    def mark_cell_error(self, cell_id: str) -> None:
+        """Mark a cell as errored in backend state.
+
+        Companion to ``mark_cell_running`` / ``mark_executed_ready`` —
+        the controlled way to record an execution failure on the cell.
+        """
+        cell = self.notebook_state.get_cell(cell_id)
+        if cell is not None:
+            cell.status = CellStatus.ERROR
+
     def apply_execution_result_metadata(self, cell_id: str, result: Any) -> None:
         """Persist transient execution metadata onto the session cell state."""
         cell = self.notebook_state.get_cell(cell_id)

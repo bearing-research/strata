@@ -1446,9 +1446,7 @@ async def _execute_cell_directly(
 
     # Mark as running — update backend state AND broadcast
     execution_state["running_cell"] = cell_id
-    run_cell = session.notebook_state.get_cell(cell_id)
-    if run_cell:
-        run_cell.status = CellStatus.RUNNING
+    session.mark_cell_running(cell_id)
     await _broadcast_message(
         notebook_id,
         {
@@ -1484,9 +1482,7 @@ async def _execute_cell_directly(
                 preserve_ready_cell_id=cell_id,
             )
         else:
-            cell = session.notebook_state.get_cell(cell_id)
-            if cell:
-                cell.status = CellStatus.ERROR
+            session.mark_cell_error(cell_id)
             await _broadcast_message(
                 notebook_id,
                 {
@@ -1501,9 +1497,7 @@ async def _execute_cell_directly(
         await _set_cell_idle(session, notebook_id, seq, cell_id)
         raise
     except Exception as e:
-        cell = session.notebook_state.get_cell(cell_id)
-        if cell:
-            cell.status = CellStatus.ERROR
+        session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
             {
@@ -1602,9 +1596,7 @@ async def _execute_cascade(
             )
 
             # Execute cell — update backend state AND broadcast
-            cascade_run_cell = session.notebook_state.get_cell(cell_id)
-            if cascade_run_cell:
-                cascade_run_cell.status = CellStatus.RUNNING
+            session.mark_cell_running(cell_id)
             await _broadcast_message(
                 notebook_id,
                 {
@@ -1660,9 +1652,7 @@ async def _execute_cascade(
                 await _set_cell_idle(session, notebook_id, seq, cell_id)
                 raise
             except Exception as e:
-                cascade_cell = session.notebook_state.get_cell(cell_id)
-                if cascade_cell:
-                    cascade_cell.status = CellStatus.ERROR
+                session.mark_cell_error(cell_id)
                 await _broadcast_message(
                     notebook_id,
                     {
@@ -1730,7 +1720,7 @@ async def _execute_run_all(
                 continue
 
             execution_state["running_cell"] = cell_id
-            cell.status = CellStatus.RUNNING
+            session.mark_cell_running(cell_id)
             await _broadcast_message(
                 notebook_id,
                 {
@@ -1761,7 +1751,7 @@ async def _execute_run_all(
 
                 # Failure: mark + broadcast status. The cell_error
                 # frame was already emitted by the helper above.
-                cell.status = CellStatus.ERROR
+                session.mark_cell_error(cell_id)
                 await _broadcast_message(
                     notebook_id,
                     {
@@ -1777,7 +1767,7 @@ async def _execute_run_all(
                 await _set_cell_idle(session, notebook_id, seq, cell_id)
                 raise
             except Exception as exc:
-                cell.status = CellStatus.ERROR
+                session.mark_cell_error(cell_id)
                 await _broadcast_message(
                     notebook_id,
                     {
@@ -2138,8 +2128,7 @@ async def execute_cell_for_agent(
     )
 
     cell = session.notebook_state.get_cell(cell_id)
-    if cell:
-        cell.status = CellStatus.RUNNING
+    session.mark_cell_running(cell_id)
 
     try:
         executor = _make_executor_with_progress(session, notebook_id)
@@ -2180,8 +2169,7 @@ async def execute_cell_for_agent(
 
         return result
     except Exception:
-        if cell:
-            cell.status = CellStatus.ERROR
+        session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
             {
