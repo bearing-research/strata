@@ -135,22 +135,22 @@ class TestShadowWarning:
     """Tests for DAG shadow detection."""
 
     def test_shadow_warning_on_duplicate_defines(self):
-        from strata.notebook.dag import CellAnalysisWithId, build_dag
+        from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 
         cells = [
             CellAnalysisWithId(id="c1", defines=["result"], references=[]),
             CellAnalysisWithId(id="c2", defines=["result"], references=[]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         assert "c2" in dag.shadow_warnings
         assert any("result" in w for w in dag.shadow_warnings["c2"])
 
     def test_no_warning_without_shadow(self):
-        from strata.notebook.dag import CellAnalysisWithId, build_dag
+        from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 
         cells = [
             CellAnalysisWithId(id="c1", defines=["x"], references=[]),
             CellAnalysisWithId(id="c2", defines=["y"], references=["x"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         assert len(dag.shadow_warnings) == 0

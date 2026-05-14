@@ -5,10 +5,8 @@ import pytest
 from strata.notebook.dag import (
     CellAnalysisWithId,
     DagEdge,
+    NotebookDag,
     VariantNameCollisionError,
-    build_dag,
-    detect_cycles,
-    get_cascade_plan,
 )
 
 
@@ -18,7 +16,7 @@ class TestDagBuildingBasics:
     def test_single_cell_no_deps(self):
         """Single cell with no dependencies."""
         cells = [CellAnalysisWithId(id="a", defines=["x"], references=[])]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         assert len(dag.edges) == 0
         assert dag.cell_upstream == {"a": []}
@@ -33,7 +31,7 @@ class TestDagBuildingBasics:
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
             CellAnalysisWithId(id="c", defines=["z"], references=["y"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         # Check edges
         assert len(dag.edges) == 2
@@ -56,7 +54,7 @@ class TestDagBuildingBasics:
             CellAnalysisWithId(id="c", defines=["z"], references=["x"]),
             CellAnalysisWithId(id="d", defines=["w"], references=["y", "z"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         # Check edges
         assert len(dag.edges) == 4
@@ -93,7 +91,7 @@ class TestDagBuildingBasics:
             CellAnalysisWithId(id="b", defines=["y"], references=[]),
             CellAnalysisWithId(id="c", defines=["z"], references=["x", "y"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         assert dag.roots == {"a", "b"}
         assert dag.leaves == {"c"}
@@ -105,7 +103,7 @@ class TestDagBuildingBasics:
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
             CellAnalysisWithId(id="c", defines=["z"], references=["x"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         assert dag.roots == {"a"}
         assert dag.leaves == {"b", "c"}
@@ -120,7 +118,7 @@ class TestDagMultipleVariables:
             CellAnalysisWithId(id="a", defines=["x", "y"], references=[]),
             CellAnalysisWithId(id="b", defines=["z"], references=["x", "y"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         # Two edges: one for x, one for y
         assert len(dag.edges) == 2
@@ -138,7 +136,7 @@ class TestDagMultipleVariables:
             CellAnalysisWithId(id="b", defines=["df"], references=[]),
             CellAnalysisWithId(id="c", defines=["result"], references=["df"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         # df should flow from b (last define) to c, not from a
         edges_dict = {(e.from_cell_id, e.to_cell_id): e.variable for e in dag.edges}
@@ -161,7 +159,7 @@ class TestDagConsumedVariables:
             CellAnalysisWithId(id="a", defines=["x", "y"], references=[]),
             CellAnalysisWithId(id="b", defines=[], references=["x"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         # x is consumed by b, y is not
         assert dag.consumed_variables["a"] == {"x"}
@@ -172,7 +170,7 @@ class TestDagConsumedVariables:
             CellAnalysisWithId(id="a", defines=["df", "temp"], references=[]),
             CellAnalysisWithId(id="b", defines=[], references=["df"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         # Only df is consumed; temp is not
         assert dag.consumed_variables["a"] == {"df"}
@@ -188,7 +186,7 @@ class TestTopologicalSort:
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
             CellAnalysisWithId(id="c", defines=["z"], references=["y"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         assert dag.topological_order == ["a", "b", "c"]
 
@@ -200,7 +198,7 @@ class TestTopologicalSort:
             CellAnalysisWithId(id="c", defines=["z"], references=["x"]),
             CellAnalysisWithId(id="d", defines=["w"], references=["y", "z"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         order = dag.topological_order
         # a must come first
@@ -217,7 +215,7 @@ class TestTopologicalSort:
             CellAnalysisWithId(id="b", defines=["y"], references=[]),
             CellAnalysisWithId(id="c", defines=["z"], references=["x", "y"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         order = dag.topological_order
         # c must come last
@@ -236,9 +234,9 @@ class TestCycleDetection:
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
             CellAnalysisWithId(id="c", defines=["z"], references=["y"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
-        cycles = detect_cycles(dag, [c.id for c in cells])
+        cycles = dag.detect_cycles([c.id for c in cells])
         assert cycles == []
 
     def test_forward_reference_no_cycle(self):
@@ -254,7 +252,7 @@ class TestCycleDetection:
             CellAnalysisWithId(id="a", defines=["x"], references=["y"]),
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         # b links to a via x; a has no predecessor for its y reference.
         assert dag.cell_upstream["a"] == []
         assert dag.cell_upstream["b"] == ["a"]
@@ -266,12 +264,12 @@ class TestCycleDetection:
         reference-to-own-define as a pure rebind with no external
         producer. (The filter in analyze_cell strips ``x`` from
         references when it's a pure define, so this case rarely
-        reaches build_dag in practice.)
+        reaches NotebookDag.from_cells in practice.)
         """
         cells = [
             CellAnalysisWithId(id="a", defines=["x"], references=["x"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         assert dag.cell_upstream["a"] == []
 
     def test_forward_chain_no_cycle(self):
@@ -285,7 +283,7 @@ class TestCycleDetection:
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
             CellAnalysisWithId(id="c", defines=["z"], references=["y"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         assert dag.cell_upstream["a"] == []
         assert dag.cell_upstream["b"] == ["a"]
         assert dag.cell_upstream["c"] == ["b"]
@@ -301,11 +299,11 @@ class TestCascadePlan:
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
             CellAnalysisWithId(id="c", defines=["z"], references=["y"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         cell_ids = [c.id for c in cells]
 
         # To run c, need a and b
-        plan = get_cascade_plan(dag, "c", cell_ids)
+        plan = dag.cascade_plan("c", cell_ids)
         assert set(plan) == {"a", "b"}
         assert plan == ["a", "b"]  # In execution order
 
@@ -317,11 +315,11 @@ class TestCascadePlan:
             CellAnalysisWithId(id="c", defines=["z"], references=["x"]),
             CellAnalysisWithId(id="d", defines=["w"], references=["y", "z"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         cell_ids = [c.id for c in cells]
 
         # To run d, need a, b, c
-        plan = get_cascade_plan(dag, "d", cell_ids)
+        plan = dag.cascade_plan("d", cell_ids)
         assert set(plan) == {"a", "b", "c"}
 
     def test_cascade_root_cell(self):
@@ -330,10 +328,10 @@ class TestCascadePlan:
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=["x"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         cell_ids = [c.id for c in cells]
 
-        plan = get_cascade_plan(dag, "a", cell_ids)
+        plan = dag.cascade_plan("a", cell_ids)
         assert plan == ["a"]
 
     def test_cascade_no_deps(self):
@@ -342,10 +340,10 @@ class TestCascadePlan:
             CellAnalysisWithId(id="a", defines=["x"], references=[]),
             CellAnalysisWithId(id="b", defines=["y"], references=[]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         cell_ids = [c.id for c in cells]
 
-        plan = get_cascade_plan(dag, "b", cell_ids)
+        plan = dag.cascade_plan("b", cell_ids)
         assert plan == ["b"]
 
 
@@ -376,7 +374,7 @@ class TestRealWorldDAGs:
                 references=["summary"],
             ),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         # Linear chain
         assert dag.topological_order == ["load", "clean", "aggregate", "plot"]
@@ -403,7 +401,7 @@ class TestRealWorldDAGs:
                 references=["model", "X_test", "y_test"],
             ),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         # Diamond-like: load → split → train, and split → evaluate (but train also → evaluate)
         assert dag.roots == {"load"}
@@ -418,7 +416,7 @@ class TestRealWorldDAGs:
             CellAnalysisWithId(id="explore2", defines=[], references=["df"]),
             CellAnalysisWithId(id="explore3", defines=[], references=["df"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         # Fan-out from load to multiple explorations
         assert dag.roots == {"load"}
@@ -437,7 +435,7 @@ class TestRealWorldDAGs:
                 references=["model", "X", "y"],
             ),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         # features is shared by both train and evaluate
         assert dag.cell_downstream["features"] == ["train", "evaluate"]
@@ -458,7 +456,7 @@ class TestAfterEdges:
             CellAnalysisWithId(id="setup", defines=[], references=[]),
             CellAnalysisWithId(id="query", defines=[], references=[], after=["setup"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         assert dag.cell_upstream["query"] == ["setup"]
         assert dag.cell_downstream["setup"] == ["query"]
         assert dag.topological_order == ["setup", "query"]
@@ -469,7 +467,7 @@ class TestAfterEdges:
             CellAnalysisWithId(id="setup", defines=[], references=[]),
             CellAnalysisWithId(id="query", defines=[], references=[], after=["setup"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         assert dag.consumed_variables["setup"] == set()
         assert all(e.variable == "" for e in dag.edges if e.from_cell_id == "setup")
 
@@ -480,7 +478,7 @@ class TestAfterEdges:
         cells = [
             CellAnalysisWithId(id="query", defines=[], references=[], after=["does-not-exist"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         assert dag.cell_upstream["query"] == []
         assert dag.edges == []
 
@@ -488,7 +486,7 @@ class TestAfterEdges:
         cells = [
             CellAnalysisWithId(id="c", defines=[], references=[], after=["c"]),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         assert dag.cell_upstream["c"] == []
 
     def test_after_combines_with_variable_edges(self):
@@ -504,7 +502,7 @@ class TestAfterEdges:
                 after=["setup"],
             ),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
         assert sorted(dag.cell_upstream["query"]) == ["config", "setup"]
 
     def test_after_cycle_still_detected(self):
@@ -514,7 +512,7 @@ class TestAfterEdges:
             CellAnalysisWithId(id="b", defines=[], references=[], after=["a"]),
         ]
         with pytest.raises(ValueError, match="Cycle"):
-            build_dag(cells)
+            NotebookDag.from_cells(cells)
 
 
 class TestVariantGroups:
@@ -540,7 +538,7 @@ class TestVariantGroups:
             ),
             CellAnalysisWithId(id="post", defines=["score"], references=["preds"]),
         ]
-        dag = build_dag(cells, variant_active_selections={"model": "b"})
+        dag = NotebookDag.from_cells(cells, variant_active_selections={"model": "b"})
 
         assert dag.variable_producer["preds"] == "model_b"
         assert dag.cell_upstream["post"] == ["model_b"]
@@ -571,7 +569,7 @@ class TestVariantGroups:
                 variant_name="b",
             ),
         ]
-        dag = build_dag(cells)
+        dag = NotebookDag.from_cells(cells)
 
         assert dag.variable_producer["preds"] == "model_a"
         assert "model_b" in dag.inactive_cells
@@ -594,7 +592,7 @@ class TestVariantGroups:
                 variant_name="b",
             ),
         ]
-        dag = build_dag(cells, variant_active_selections={"model": "ghost"})
+        dag = NotebookDag.from_cells(cells, variant_active_selections={"model": "ghost"})
 
         assert dag.variable_producer["preds"] == "model_a"
 
@@ -618,7 +616,7 @@ class TestVariantGroups:
             ),
             CellAnalysisWithId(id="post", defines=[], references=["preds"]),
         ]
-        dag = build_dag(cells, variant_active_selections={"model": "a"})
+        dag = NotebookDag.from_cells(cells, variant_active_selections={"model": "a"})
 
         assert dag.consumed_variables["model_a"] == {"preds"}
         assert dag.consumed_variables["model_b"] == set()
@@ -644,7 +642,7 @@ class TestVariantGroups:
             ),
         ]
         with pytest.raises(VariantNameCollisionError):
-            build_dag(cells)
+            NotebookDag.from_cells(cells)
 
     def test_variant_groups_resolution_surface(self):
         """Resolved groups expose members in source order with the active flag."""
@@ -664,7 +662,7 @@ class TestVariantGroups:
                 variant_name="b",
             ),
         ]
-        dag = build_dag(cells, variant_active_selections={"model": "b"})
+        dag = NotebookDag.from_cells(cells, variant_active_selections={"model": "b"})
 
         assert len(dag.variant_groups) == 1
         group = dag.variant_groups[0]
@@ -693,8 +691,8 @@ class TestVariantGroups:
             CellAnalysisWithId(id="post", defines=[], references=["preds"]),
         ]
 
-        dag_a = build_dag(cells, variant_active_selections={"model": "a"})
-        dag_b = build_dag(cells, variant_active_selections={"model": "b"})
+        dag_a = NotebookDag.from_cells(cells, variant_active_selections={"model": "a"})
+        dag_b = NotebookDag.from_cells(cells, variant_active_selections={"model": "b"})
 
         assert dag_a.cell_upstream["post"] == ["model_a"]
         assert dag_b.cell_upstream["post"] == ["model_b"]

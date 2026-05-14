@@ -54,7 +54,7 @@ from pathlib import Path
 import pytest
 
 from strata.notebook.analyzer import analyze_cell
-from strata.notebook.dag import CellAnalysisWithId, build_dag
+from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 from strata.notebook.jupyter_import import import_notebook
 from strata.notebook.parser import parse_notebook
 
@@ -148,7 +148,7 @@ def _score(ipynb_path: Path, out_dir: Path, *, full: bool = False) -> CorpusScor
                     references=cell_analysis.references,
                 )
             )
-        dag = build_dag(analyses)  # raises on cycles
+        dag = NotebookDag.from_cells(analyses)  # raises on cycles
         score.dag = True
     except Exception as exc:
         score.failed_at = "dag"

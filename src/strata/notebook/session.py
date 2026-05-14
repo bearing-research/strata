@@ -22,7 +22,7 @@ from strata.notebook.analyzer import analyze_cell
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.causality import CausalityChain, compute_causality_on_staleness
-from strata.notebook.dag import CellAnalysisWithId, NotebookDag, build_dag
+from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 from strata.notebook.dependencies import (
     DependencyChangeResult,
     EnvironmentOperationLog,
@@ -561,7 +561,7 @@ class NotebookSession:
 
         # Build DAG
         try:
-            self.dag = build_dag(
+            self.dag = NotebookDag.from_cells(
                 cell_analyses,
                 variant_active_selections=self.notebook_state.variant_active_selections,
             )

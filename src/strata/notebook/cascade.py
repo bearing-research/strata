@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from strata.notebook.dag import reachable_via
 from strata.notebook.models import CellStatus
 
 if TYPE_CHECKING:
@@ -140,9 +139,9 @@ class CascadePlanner:
         if not self.session.dag:
             return None
 
-        # Shared BFS-upstream helper — same one ``get_cascade_plan`` uses,
+        # Shared BFS-upstream helper — same one ``cascade_plan`` uses,
         # so both call sites agree on what "reachable upstream" means.
-        visited = reachable_via(self.session.dag.cell_upstream, target_cell_id)
+        visited = self.session.dag.upstream_reachable(target_cell_id)
 
         # Order by the DAG's topological sort if available; otherwise the
         # raw set order is fine (visited as a fallback).
