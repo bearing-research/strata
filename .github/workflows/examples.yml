@@ -85,8 +85,14 @@ jobs:
         run: uv sync --python 3.13 --all-extras
 
       - name: Sync the example's per-notebook venv
+        # Each example declares its own ``requires-python`` (==X.Y.*)
+        # in its pyproject.toml. ``uv sync`` reads from that and
+        # auto-installs the matching interpreter if missing — the
+        # workflow shouldn't second-guess the notebook's pinned
+        # version, otherwise bumping one example to a different
+        # minor would require a coordinated workflow edit too.
         working-directory: examples/${{ matrix.example }}
-        run: uv sync --python 3.13
+        run: uv sync
 
       # ``strata run`` with --no-sync because the env was already
       # synced above. Ignoring cache (--force) so cached artifacts
