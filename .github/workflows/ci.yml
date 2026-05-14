@@ -76,21 +76,39 @@ jobs:
           cache-workspaces: rust
 
       - name: Verify Rust toolchain
-        # macOS-latest runners intermittently leave the rustup proxy
-        # half-configured after setup-rust-toolchain finishes: the
-        # install step reports ✓, but cargo invoked from a child
-        # shell (eg. maturin under uv sync) resolves to rustup-init
-        # and errors out with "unexpected argument 'metadata'".
-        # Force-setting the default + dumping versions makes the
-        # proxy dispatch correctly AND fails fast with diagnostics
-        # if something is genuinely broken, instead of bubbling up
-        # as an opaque cargo-metadata failure 30 seconds later.
+        # macOS-latest unit-test jobs intermittently fail maturin's
+        # `cargo metadata` call with rustup-init's usage error. Two
+        # underlying causes:
+        #
+        # 1. The rust-cache action (bundled with setup-rust-toolchain)
+        #    can restore ~/.cargo/bin from a prior run while
+        #    ~/.rustup/toolchains/stable-* is missing. The proxy
+        #    binary exists, the toolchain doesn't, and any subprocess
+        #    invocation that doesn't print version-only output errors
+        #    out. Force-installing stable here is idempotent — it
+        #    just verifies/repairs the toolchain on disk.
+        # 2. uv's PEP 517 build subprocess can scrub a shell-level
+        #    `export CARGO=...`, falling back to PATH lookup that
+        #    finds a broken Homebrew cargo shim before ~/.cargo/bin.
+        #    Writing CARGO/RUSTC/RUSTUP_HOME/CARGO_HOME to
+        #    $GITHUB_ENV makes the runner inject them into every
+        #    subsequent step's environment — including uv's children.
+        #
+        # Both fixes are harmless on Linux/Windows where the failure
+        # modes don't fire.
         shell: bash
         run: |
+          rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
           rustup show active-toolchain
           cargo --version
           rustc --version
+          {
+            echo "CARGO=$HOME/.cargo/bin/cargo"
+            echo "RUSTC=$HOME/.cargo/bin/rustc"
+            echo "RUSTUP_HOME=$HOME/.rustup"
+            echo "CARGO_HOME=$HOME/.cargo"
+          } >> "$GITHUB_ENV"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
@@ -99,20 +117,7 @@ jobs:
 
       - name: Install dependencies and build Rust extension
         shell: bash
-        # uv creates an isolated build env for the PEP 517 backend.
-        # On macOS, that env's PATH can fall through to Homebrew's
-        # /opt/homebrew/bin (containing a cargo shim that defers to
-        # rustup-init when no toolchain is initialized for it),
-        # before ~/.cargo/bin — even when setup-rust-toolchain has
-        # installed a working cargo there. maturin's "cargo metadata"
-        # then errors with "unexpected argument 'metadata'".
-        # Exporting $CARGO/$RUSTC pins the binaries by absolute path
-        # so the PATH-order race can't fire. (Harmless on Linux/
-        # Windows where the race doesn't happen.)
-        run: |
-          export CARGO="$HOME/.cargo/bin/cargo"
-          export RUSTC="$HOME/.cargo/bin/rustc"
-          uv sync --python ${{ matrix.python-version }} --all-extras
+        run: uv sync --python ${{ matrix.python-version }} --all-extras
 
       - name: Run unit tests (non-Windows)
         if: runner.os != 'Windows'
