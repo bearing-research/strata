@@ -4,11 +4,29 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import tarfile
 from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = "notebook-output-bundle@v1"
+
+# Per-member size cap. The bundle format expands a member fully into
+# memory when read (tar.extractfile + .read()), so an unbounded member
+# can OOM the unpacker. Override via STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES
+# when legitimate outputs exceed this default.
+_DEFAULT_MAX_BUNDLE_MEMBER_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+
+
+def _max_bundle_member_bytes() -> int:
+    raw = os.environ.get("STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES")
+    if not raw:
+        return _DEFAULT_MAX_BUNDLE_MEMBER_BYTES
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_BUNDLE_MEMBER_BYTES
+    return parsed if parsed > 0 else _DEFAULT_MAX_BUNDLE_MEMBER_BYTES
 
 
 def _add_bytes(tar: tarfile.TarFile, arcname: str, content: bytes) -> None:
@@ -19,11 +37,16 @@ def _add_bytes(tar: tarfile.TarFile, arcname: str, content: bytes) -> None:
 
 
 def _read_member(tar: tarfile.TarFile, name: str) -> bytes:
-    """Read one tar member fully."""
+    """Read one tar member fully, capped at the per-member byte limit."""
     try:
         member = tar.getmember(name)
     except KeyError as exc:
         raise ValueError(f"Bundle member not found: {name}") from exc
+    cap = _max_bundle_member_bytes()
+    if member.size > cap:
+        raise ValueError(
+            f"Bundle member {name!r} declares {member.size} bytes, exceeds {cap}-byte cap"
+        )
     extracted = tar.extractfile(member)
     if extracted is None:
         raise ValueError(f"Bundle member is not a regular file: {name}")

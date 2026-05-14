@@ -76,3 +76,29 @@ def test_remote_bundle_round_trip_failure(tmp_path):
         assert extracted is not None
         bundle_manifest = json.loads(extracted.read().decode("utf-8"))
     assert bundle_manifest["schema_version"] == SCHEMA_VERSION
+
+
+def test_read_member_rejects_oversized_member(tmp_path, monkeypatch):
+    """A malicious / misconfigured bundle could declare an enormous member
+    size; _read_member must refuse rather than OOM the unpacker.
+    """
+    import io
+    import tarfile
+
+    from strata.notebook.remote_bundle import _read_member
+
+    # Set a tiny cap, then build a tar with a member exceeding it.
+    monkeypatch.setenv("STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES", "16")
+
+    bundle_path = tmp_path / "oversize.tar"
+    payload = b"x" * 64
+    with tarfile.open(bundle_path, "w") as tar:
+        info = tarfile.TarInfo(name="big.bin")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+
+    import pytest
+
+    with tarfile.open(bundle_path, "r") as tar:
+        with pytest.raises(ValueError, match="exceeds .*-byte cap"):
+            _read_member(tar, "big.bin")

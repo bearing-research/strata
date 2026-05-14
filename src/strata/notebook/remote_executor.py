@@ -13,6 +13,7 @@ import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -28,6 +29,53 @@ from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 NOTEBOOK_EXECUTOR_PROTOCOL_VERSION = "notebook-cell-v1"
 NOTEBOOK_EXECUTOR_TRANSFORM_REF = "notebook_cell@v1"
 NOTEBOOK_EXECUTOR_MANIFEST_VERSION = "notebook-build-manifest@v1"
+
+# --- Signed-URL manifest trust-model defenses ---------------------------------
+#
+# The /v1/execute-manifest endpoint accepts a manifest of pre-signed URLs
+# the worker must fetch (inputs) or POST to (upload, finalize). The whole
+# v2 pull model's security story is "those URLs are signed and short-lived",
+# but the worker can't verify the signature itself — it only sees the URL.
+# A compromised or buggy orchestrator could hand the worker URLs that
+# point at internal services (SSRF) or unbounded streams (OOM). The
+# defenses below are cheap and don't depend on the orchestrator behaving
+# correctly.
+
+_ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
+
+# Per-input download cap. Override via STRATA_WORKER_MAX_INPUT_BYTES.
+_DEFAULT_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+
+
+def _max_input_bytes() -> int:
+    raw = os.environ.get("STRATA_WORKER_MAX_INPUT_BYTES")
+    if not raw:
+        return _DEFAULT_MAX_INPUT_BYTES
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return _DEFAULT_MAX_INPUT_BYTES
+    return parsed if parsed > 0 else _DEFAULT_MAX_INPUT_BYTES
+
+
+def _assert_url_scheme_allowed(url: str, field: str) -> None:
+    """Reject URLs with schemes outside the http/https allowlist.
+
+    A compromised orchestrator could set ``url`` to ``file:///etc/passwd``,
+    ``http://169.254.169.254/...`` (cloud metadata), or other non-http
+    schemes that httpx might support via plugins. Rejecting non-http
+    schemes up front rules these out without trusting the orchestrator.
+    """
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme not in _ALLOWED_URL_SCHEMES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Manifest {field} URL uses disallowed scheme {scheme!r}; "
+                f"only {sorted(_ALLOWED_URL_SCHEMES)} are accepted."
+            ),
+        )
 
 
 async def _run_harness(
@@ -454,6 +502,7 @@ def create_notebook_executor_app() -> FastAPI:
             url = str(item.get("url", "")).strip()
             if not artifact_id or not url or not isinstance(version, int):
                 raise HTTPException(status_code=400, detail="Manifest input entry is incomplete")
+            _assert_url_scheme_allowed(url, f"input[{artifact_id}@v={version}]")
             input_url_by_uri[f"strata://artifact/{artifact_id}@v={version}"] = url
 
         output = manifest.get("output", {})
@@ -463,6 +512,8 @@ def create_notebook_executor_app() -> FastAPI:
         finalize_url = str(manifest.get("finalize_url", "")).strip()
         if not upload_url or not finalize_url:
             raise HTTPException(status_code=400, detail="Manifest is missing upload/finalize URLs")
+        _assert_url_scheme_allowed(upload_url, "output.url")
+        _assert_url_scheme_allowed(finalize_url, "finalize_url")
 
         async def _download_input(
             var_name: str,
@@ -481,16 +532,46 @@ def create_notebook_executor_app() -> FastAPI:
                     status_code=400,
                     detail=f"Manifest does not include a signed URL for {input_uri}",
                 )
+            # Stream + cap so a misconfigured-or-malicious download
+            # can't OOM the worker. Content-Length (when present) lets
+            # us reject up front before reading any bytes.
+            max_bytes = _max_input_bytes()
             async with httpx.AsyncClient(timeout=max(timeout_seconds, 30.0)) as client:
-                response = await client.get(download_url)
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=502,
-                    detail=(
-                        f"Failed to download notebook input {input_uri}: {response.status_code}"
-                    ),
-                )
-            return response.content
+                async with client.stream("GET", download_url) as response:
+                    if response.status_code != 200:
+                        raise HTTPException(
+                            status_code=502,
+                            detail=(
+                                f"Failed to download notebook input {input_uri}: "
+                                f"{response.status_code}"
+                            ),
+                        )
+                    declared = response.headers.get("content-length")
+                    if declared is not None:
+                        try:
+                            declared_bytes = int(declared)
+                        except ValueError:
+                            declared_bytes = -1
+                        if declared_bytes > max_bytes:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=(
+                                    f"Notebook input {input_uri} declared "
+                                    f"{declared_bytes} bytes, exceeds {max_bytes}-byte cap"
+                                ),
+                            )
+                    buf = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        buf.extend(chunk)
+                        if len(buf) > max_bytes:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=(
+                                    f"Notebook input {input_uri} exceeds "
+                                    f"{max_bytes}-byte cap during download"
+                                ),
+                            )
+            return bytes(buf)
 
         bundle_result = await _execute_to_bundle(
             source=source,

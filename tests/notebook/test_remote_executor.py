@@ -583,3 +583,67 @@ def test_remote_executor_round_trips_large_input_bundle(
     assert unpacked["success"] is True, unpacked.get("error") or unpacked.get("traceback")
     assert unpacked["variables"]["digest"]["preview"] == expected_digest
     assert unpacked["variables"]["size"]["preview"] == payload_size
+
+
+def test_manifest_rejects_input_url_with_disallowed_scheme(notebook_executor_server):
+    """A compromised orchestrator could put file:// or ftp:// in a manifest;
+    the worker must reject up front before httpx fetches anything.
+    """
+    manifest = {
+        "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
+        "metadata": {
+            "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
+            "params": {"source": "x = 1", "input_specs": {}, "mounts": [], "env": {}},
+        },
+        "inputs": [
+            {
+                "artifact_id": "a",
+                "version": 1,
+                "url": "file:///etc/passwd",
+            }
+        ],
+        "output": {"url": "https://example.invalid/upload"},
+        "finalize_url": "https://example.invalid/finalize",
+    }
+    response = httpx.post(
+        notebook_executor_server["manifest_execute_url"], json=manifest, timeout=10.0
+    )
+    assert response.status_code == 400
+    assert "disallowed scheme" in response.json()["detail"]
+    assert "'file'" in response.json()["detail"]
+
+
+def test_manifest_rejects_upload_url_with_disallowed_scheme(notebook_executor_server):
+    manifest = {
+        "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
+        "metadata": {
+            "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
+            "params": {"source": "x = 1", "input_specs": {}, "mounts": [], "env": {}},
+        },
+        "inputs": [],
+        "output": {"url": "javascript:alert(1)"},
+        "finalize_url": "https://example.invalid/finalize",
+    }
+    response = httpx.post(
+        notebook_executor_server["manifest_execute_url"], json=manifest, timeout=10.0
+    )
+    assert response.status_code == 400
+    assert "output.url" in response.json()["detail"]
+
+
+def test_manifest_rejects_finalize_url_with_disallowed_scheme(notebook_executor_server):
+    manifest = {
+        "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
+        "metadata": {
+            "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
+            "params": {"source": "x = 1", "input_specs": {}, "mounts": [], "env": {}},
+        },
+        "inputs": [],
+        "output": {"url": "https://example.invalid/upload"},
+        "finalize_url": "ftp://example.invalid/finalize",
+    }
+    response = httpx.post(
+        notebook_executor_server["manifest_execute_url"], json=manifest, timeout=10.0
+    )
+    assert response.status_code == 400
+    assert "finalize_url" in response.json()["detail"]
