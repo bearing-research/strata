@@ -71,6 +71,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: rust
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
@@ -112,6 +114,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: rust
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
@@ -142,6 +146,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: rust
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
