@@ -106,9 +106,9 @@ async def _run_harness(
         await terminate_subprocess_tree(proc)
         raise TimeoutError()
 
-    result_path = manifest_path.parent / "result.json"
+    result_path = manifest_path.parent / "harness-result.json"
     if not result_path.exists():
-        raise RuntimeError(f"Harness did not produce result.json: {stderr.decode()}")
+        raise RuntimeError(f"Harness did not produce harness-result.json: {stderr.decode()}")
 
     with open(result_path, encoding="utf-8") as f:
         return json.load(f)

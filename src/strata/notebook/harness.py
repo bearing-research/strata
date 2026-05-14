@@ -347,7 +347,13 @@ def main():
         # the input we wrote" — fragile because adding any field
         # named ``success`` to the input manifest would silently
         # mask real crashes.
-        result_path = Path(manifest.get("output_dir", "/tmp/strata_output")) / "result.json"
+        #
+        # Hyphen in the filename guarantees no collision with the
+        # variable files: variables get the JSON-serialized output
+        # written at ``output_dir / <var_name>.json``, and "harness-
+        # result" can't be a Python identifier (so it can't be a
+        # variable name).
+        result_path = Path(manifest.get("output_dir", "/tmp/strata_output")) / "harness-result.json"
         result_path.parent.mkdir(parents=True, exist_ok=True)
         # orjson handles datetime, Decimal, numpy, UUID natively;
         # OPT_NON_STR_KEYS covers the rare case of non-string dict

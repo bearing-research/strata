@@ -51,7 +51,7 @@ def run_harness(harness_path: Path, manifest: dict) -> dict:
         )
 
         # Read result
-        result_path = tmpdir / "result.json"
+        result_path = tmpdir / "harness-result.json"
         with open(result_path) as f:
             return json.load(f)
 
@@ -465,7 +465,7 @@ class TestHarnessLoopUntil:
                 capture_output=True,
             )
 
-            with open(tmpdir / "result.json") as f:
+            with open(tmpdir / "harness-result.json") as f:
                 result = json.load(f)
 
         assert result["success"] is True

@@ -65,7 +65,7 @@ def test_remote_bundle_round_trip_failure(tmp_path):
     assert unpacked["success"] is False
     assert unpacked["error"] == "boom"
     assert unpacked["traceback"] == "Traceback..."
-    manifest = json.loads((unpacked_dir / "result.json").read_text(encoding="utf-8"))
+    manifest = json.loads((unpacked_dir / "harness-result.json").read_text(encoding="utf-8"))
     assert manifest["success"] is False
 
     # Bundle schema version is the transport contract, not the harness result contract.

@@ -2495,12 +2495,14 @@ class CellExecutor:
             await terminate_subprocess_tree(proc)
             raise TimeoutError()
 
-        # Harness writes output to result.json (separate from the
-        # input manifest.json). File absent → harness crashed before
-        # reaching its finally block (typically a ModuleNotFoundError
-        # at import time) — surface stderr so the user sees what
-        # actually broke instead of an opaque "Unknown error".
-        result_path = manifest_path.parent / "result.json"
+        # Harness writes output to harness-result.json (separate
+        # from the input manifest.json AND from any user variable
+        # files like result.json). File absent → harness crashed
+        # before reaching its finally block (typically a
+        # ModuleNotFoundError at import time) — surface stderr so
+        # the user sees what actually broke instead of an opaque
+        # "Unknown error".
+        result_path = manifest_path.parent / "harness-result.json"
         if not result_path.exists():
             stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
             return {
