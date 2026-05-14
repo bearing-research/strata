@@ -30,6 +30,7 @@ const {
   fetchDependencies,
   fetchEnvironment,
   connected,
+  updatePythonVersionAction,
 } = useNotebook()
 
 const strata = useStrata()
@@ -54,8 +55,7 @@ async function openPythonModal() {
             .filter((v: string) => v.length > 0)
         : []
     } catch (err) {
-      pythonModalError.value =
-        (err as Error).message || 'Failed to load available Python versions'
+      pythonModalError.value = (err as Error).message || 'Failed to load available Python versions'
     }
   }
   pythonModalOpen.value = true
@@ -67,22 +67,21 @@ function closePythonModal() {
 }
 
 async function confirmPythonChange(version: string) {
-  if (!notebook.id) return
   pythonModalBusy.value = true
   pythonModalError.value = null
   try {
-    const result = await strata.updateNotebookPythonVersion(notebook.id, version)
-    if (result.accepted) {
-      // Background job is running. The environment_job_progress WS
-      // stream and subsequent runtime-state refreshes will surface
-      // completion; just close the modal.
-      pythonModalOpen.value = false
-    } else {
-      // 200 no-op (already at requested version). Close silently.
-      pythonModalOpen.value = false
+    // The store action resolves the session id internally (the REST
+    // route uses session_id, not notebook content id) and surfaces
+    // server errors as ``error`` rather than throwing.
+    const result = await updatePythonVersionAction(version)
+    if (result.error) {
+      pythonModalError.value = result.error
+      return
     }
-  } catch (err) {
-    pythonModalError.value = (err as Error).message || 'Failed to update Python version'
+    // 200 no-op + 202 accepted both close the modal — the WS
+    // environment_job_progress channel surfaces live progress, so
+    // the modal doesn't have to stay open.
+    pythonModalOpen.value = false
   } finally {
     pythonModalBusy.value = false
   }

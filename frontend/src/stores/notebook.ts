@@ -2326,6 +2326,23 @@ function isServerWorkerActionLoading(workerName: string): boolean {
   return serverWorkerActionLoading.value[workerName] === true
 }
 
+async function updatePythonVersionAction(
+  newVersion: string,
+): Promise<{ accepted: boolean; error?: string }> {
+  const sid = sessionId()
+  if (!sid) return { accepted: false, error: 'No active session' }
+  const strata = useStrata()
+  try {
+    const data = await strata.updateNotebookPythonVersion(sid, newVersion)
+    // 200 no-op + 202 accepted both surface as no thrown error. The
+    // environment-job WS broadcasts handle live progress updates, so
+    // we don't have to refresh the panel inline here.
+    return { accepted: data.accepted }
+  } catch (err: any) {
+    return { accepted: false, error: err?.message || 'Failed to update Python version' }
+  }
+}
+
 async function addDependencyAction(pkg: string) {
   const sid = sessionId()
   if (!sid) return
@@ -3235,6 +3252,7 @@ export function useNotebook() {
     fetchDependencies,
     fetchEnvironment,
     addDependencyAction,
+    updatePythonVersionAction,
     removeDependencyAction,
     syncEnvironmentAction,
     exportRequirementsAction,
