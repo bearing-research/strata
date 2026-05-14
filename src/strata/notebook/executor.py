@@ -41,7 +41,7 @@ import httpx
 from strata.artifact_store import TransformSpec as ArtifactTransformSpec
 from strata.artifact_store import get_artifact_store
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
-from strata.notebook.annotations import LoopAnnotation, parse_annotations
+from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
 from strata.notebook.models import MountSpec, WorkerBackendType
 from strata.notebook.module_export import build_module_export_plan
@@ -150,6 +150,32 @@ def _artifact_content_type(artifact: Any) -> str:
         return "pickle/object"
     ct = spec.get("params", {}).get("content_type")
     return str(ct) if isinstance(ct, str) and ct else "pickle/object"
+
+
+@dataclass(kw_only=True, frozen=True)
+class _CellProvenance:
+    """Inputs and outputs of the standard cell-provenance computation.
+
+    Every cell-kind path (default, prompt, sql, loop) must produce the
+    *same* provenance hash for a given (source, env, inputs, mounts)
+    tuple — that hash is what ``compute_staleness`` recomputes on cell
+    re-open to decide whether to re-run. The fields here are the
+    ingredients plus the resulting hash, kept together so callers can
+    re-use intermediate values (env_hash for record_successful_execution,
+    annotations for downstream dispatch) without re-deriving them.
+    """
+
+    annotations: CellAnnotations
+    source_hash: str
+    runtime_env: dict[str, str]
+    effective_worker: str
+    runtime_identity: str | None
+    env_hash: str
+    input_hashes: list[str]
+    mount_specs: list[MountSpec]
+    mount_fingerprints: list[str]
+    has_rw_mount: bool
+    provenance_hash: str
 
 
 @dataclass(kw_only=True)
@@ -515,6 +541,78 @@ class CellExecutor:
         return runtime_env
 
     # ------------------------------------------------------------------
+    # Provenance computation (shared by every cell-kind path)
+    # ------------------------------------------------------------------
+
+    async def _compute_cell_provenance(
+        self,
+        cell_id: str,
+        source: str,
+        *,
+        annotations: CellAnnotations | None = None,
+        mount_specs: list[MountSpec] | None = None,
+        mount_fingerprints: list[str] | None = None,
+        has_rw_mount: bool | None = None,
+    ) -> _CellProvenance:
+        """Compute the standard provenance triplet for a cell.
+
+        Every cell-kind path (default, prompt, sql, loop) feeds its
+        artifact-store writes the *same* hash so ``compute_staleness``
+        recognises the cell as ready on re-open. Drifting any of the
+        ingredients (runtime_env, worker identity, mount fingerprints,
+        env-key narrowing) makes the cell appear stale forever.
+
+        Optional precomputed arguments let callers reuse work — the
+        non-loop ``_materialize`` path resolves mounts before the cache
+        check, the loop path resolves them once per iteration, so it
+        passes them in instead of paying the cost again.
+        """
+        if annotations is None:
+            annotations = parse_annotations(source)
+        if mount_specs is None:
+            mount_specs = self._resolve_cell_mount_specs(cell_id, source)
+        if mount_fingerprints is None or has_rw_mount is None:
+            mount_fingerprints, has_rw_mount = await self._fingerprint_mounts(mount_specs)
+
+        source_hash = compute_source_hash(source)
+        runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
+        effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
+        runtime_identity = worker_runtime_identity(self.session.notebook_state, effective_worker)
+        cell_state = next(
+            (c for c in self.session.notebook_state.cells if c.id == cell_id),
+            None,
+        )
+        declared_env_keys = set(annotations.env) | set(
+            getattr(cell_state, "env_overrides", {}) or {}
+        )
+        provenance_env = narrow_env_for_provenance(source, runtime_env, declared_env_keys)
+        env_hash = compute_execution_env_hash(
+            self.session.path,
+            provenance_env,
+            runtime_identity=runtime_identity,
+        )
+        input_hashes = self._collect_input_hashes(cell_id)
+        provenance_hash = compute_provenance_hash(
+            input_hashes + mount_fingerprints,
+            source_hash,
+            env_hash,
+        )
+
+        return _CellProvenance(
+            annotations=annotations,
+            source_hash=source_hash,
+            runtime_env=runtime_env,
+            effective_worker=effective_worker,
+            runtime_identity=runtime_identity,
+            env_hash=env_hash,
+            input_hashes=input_hashes,
+            mount_specs=mount_specs,
+            mount_fingerprints=mount_fingerprints,
+            has_rw_mount=has_rw_mount,
+            provenance_hash=provenance_hash,
+        )
+
+    # ------------------------------------------------------------------
     # Core: the materialize pipeline
     # ------------------------------------------------------------------
 
@@ -583,58 +681,29 @@ class CellExecutor:
             if materialize_upstreams:
                 await self._materialize_upstreams(cell_id)
 
-            # ①½ Resolve mount declarations for this cell.
-            mount_specs = self._resolve_cell_mount_specs(cell_id, source)
-            annotations = parse_annotations(source)
-            mount_fingerprints, has_rw_mount = await self._fingerprint_mounts(
-                mount_specs,
-            )
+            # ① Compute the standard provenance triplet (annotations,
+            # mounts, env_hash, input_hashes, source_hash → provenance_hash).
+            # Every cell-kind path uses the same helper so the hash stays
+            # consistent with ``compute_staleness`` on re-open.
+            prov = await self._compute_cell_provenance(cell_id, source)
+            source_hash = prov.source_hash
+            runtime_env = prov.runtime_env
+            effective_worker = prov.effective_worker
+            env_hash = prov.env_hash
+            input_hashes = prov.input_hashes
+            mount_specs = prov.mount_specs
+            mount_fingerprints = prov.mount_fingerprints
+            provenance_hash = prov.provenance_hash
 
             # RW mounts make the cell non-cacheable (side effects).
-            if has_rw_mount:
+            if prov.has_rw_mount:
                 use_cache = False
 
-            # ② Compute provenance (all upstream artifact_uris are now set).
-            source_hash = compute_source_hash(source)
-            runtime_env = self._resolve_effective_runtime_env(
-                cell_id,
-                annotations.env,
-            )
-            effective_worker = self._resolve_effective_worker(
-                cell_id,
-                annotations.worker,
-            )
             worker_spec = resolve_worker_spec(
                 self.session.notebook_state,
                 effective_worker,
             )
             remote_metadata = self._remote_execution_metadata(worker_spec)
-            runtime_identity = worker_runtime_identity(
-                self.session.notebook_state,
-                effective_worker,
-            )
-            cell_state = next(
-                (c for c in self.session.notebook_state.cells if c.id == cell_id),
-                None,
-            )
-            declared_env_keys = set(annotations.env) | set(
-                getattr(cell_state, "env_overrides", {}) or {}
-            )
-            provenance_env = narrow_env_for_provenance(source, runtime_env, declared_env_keys)
-            env_hash = compute_execution_env_hash(
-                self.session.path,
-                provenance_env,
-                runtime_identity=runtime_identity,
-            )
-            input_hashes = self._collect_input_hashes(cell_id)
-            # Mount fingerprints participate in provenance — a cell reading
-            # from s3://bucket/data invalidates when the data changes.
-            all_hashes = input_hashes + mount_fingerprints
-            provenance_hash = compute_provenance_hash(
-                all_hashes,
-                source_hash,
-                env_hash,
-            )
 
             logger.info(
                 "execute_cell %s: source_hash=%s env_hash=%s "
@@ -1804,31 +1873,8 @@ class CellExecutor:
         # for artifact caching, which is correct for dedup but invisible to
         # compute_staleness. Recording the standard hash lets the
         # "can_preserve_ready" path match.
-        #
-        # Must mirror compute_staleness exactly: same runtime_env, worker
-        # identity, and mount fingerprints, or the hashes diverge.
-        source_hash = compute_source_hash(source)
-        annotations = parse_annotations(source)
-        runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
-        effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
-        runtime_identity = worker_runtime_identity(self.session.notebook_state, effective_worker)
-        cell_state = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
-        declared_env_keys = set(annotations.env) | set(
-            getattr(cell_state, "env_overrides", {}) or {}
-        )
-        provenance_env = narrow_env_for_provenance(source, runtime_env, declared_env_keys)
-        env_hash = compute_execution_env_hash(
-            self.session.path, provenance_env, runtime_identity=runtime_identity
-        )
-        input_hashes = self._collect_input_hashes(cell_id)
-        mount_specs = self._resolve_cell_mount_specs(cell_id, source)
-        mount_fingerprints, _ = await self._fingerprint_mounts(mount_specs)
-        standard_provenance = compute_provenance_hash(
-            input_hashes + mount_fingerprints, source_hash, env_hash
-        )
+        prov = await self._compute_cell_provenance(cell_id, source)
+        standard_provenance = prov.provenance_hash
 
         result_dict = await execute_prompt_cell(
             self.session,
@@ -1901,41 +1947,13 @@ class CellExecutor:
             # ``cell.last_provenance_hash``; the SQL-specific hash the
             # cell_executor folds is invisible to that path. Mirror
             # ``_execute_prompt_cell`` and persist the generic triplet
-            # via ``record_successful_execution_provenance`` — this
-            # writes ``cell.last_*`` and the runtime-state mirror so
-            # the can_preserve_uncached_ready path picks it up across
-            # session reopens.
-            annotations = parse_annotations(source)
-            source_hash = compute_source_hash(source)
-            runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
-            effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
-            runtime_identity = worker_runtime_identity(
-                self.session.notebook_state, effective_worker
-            )
-            cell_state = next(
-                (c for c in self.session.notebook_state.cells if c.id == cell_id),
-                None,
-            )
-            declared_env_keys = set(annotations.env) | set(
-                getattr(cell_state, "env_overrides", {}) or {}
-            )
-            provenance_env = narrow_env_for_provenance(source, runtime_env, declared_env_keys)
-            env_hash = compute_execution_env_hash(
-                self.session.path,
-                provenance_env,
-                runtime_identity=runtime_identity,
-            )
-            input_hashes = self._collect_input_hashes(cell_id)
-            mount_specs = self._resolve_cell_mount_specs(cell_id, source)
-            mount_fingerprints, _ = await self._fingerprint_mounts(mount_specs)
-            standard_provenance = compute_provenance_hash(
-                input_hashes + mount_fingerprints, source_hash, env_hash
-            )
+            # via ``record_successful_execution_provenance``.
+            prov = await self._compute_cell_provenance(cell_id, source)
             self.session.record_successful_execution_provenance(
                 cell_id,
-                standard_provenance,
-                source_hash,
-                env_hash,
+                prov.provenance_hash,
+                prov.source_hash,
+                prov.env_hash,
             )
 
         # Account for the duration the wrapper itself adds (materialize
@@ -2758,22 +2776,17 @@ class CellExecutor:
         # narrow env + input hashes + mount fingerprints + source. If
         # we stored a custom hash here the loop cell would always look
         # stale on subsequent staleness computations.
-        effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
-        runtime_identity = worker_runtime_identity(self.session.notebook_state, effective_worker)
-        cell_state = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
+        # Use the shared provenance helper — annotations and mount_specs
+        # are already resolved above, so pass them in to avoid redoing
+        # parse_annotations + mount discovery.
+        prov = await self._compute_cell_provenance(
+            cell_id,
+            source,
+            annotations=annotations,
+            mount_specs=mount_specs,
         )
-        declared_env_keys = set(annotations.env) | set(
-            getattr(cell_state, "env_overrides", {}) or {}
-        )
-        provenance_env = narrow_env_for_provenance(source, runtime_env, declared_env_keys)
-        env_hash = compute_execution_env_hash(
-            self.session.path, provenance_env, runtime_identity=runtime_identity
-        )
-        input_hashes = self._collect_input_hashes(cell_id)
-        mount_fps, _ = await self._fingerprint_mounts(mount_specs)
-        cell_provenance = compute_provenance_hash(input_hashes + mount_fps, source_hash, env_hash)
+        cell_provenance = prov.provenance_hash
+        env_hash = prov.env_hash
         carry_var_provenance = hashlib.sha256(
             f"{cell_provenance}:{loop.carry}".encode()
         ).hexdigest()
