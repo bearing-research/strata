@@ -42,10 +42,16 @@ def normalize_python_minor(version: str) -> str:
 
 
 def format_requires_python(version: str) -> str:
-    """Return a ``requires-python`` spec that pins one minor line."""
-    minor = normalize_python_minor(version)
-    parsed = Version(minor)
-    return f">={parsed.major}.{parsed.minor},<{parsed.major}.{parsed.minor + 1}"
+    """Return a ``requires-python`` spec that pins one minor line.
+
+    Notebooks run on exactly one Python minor — there's no useful
+    "range" interpretation, so we emit ``==3.12.*`` (wildcard match
+    of any 3.12.x patch) rather than ``>=3.12,<3.13``. Both forms
+    match the same set of versions, but ``==`` expresses the intent
+    directly. ``infer_requested_python_minor`` understands either
+    form for backward compatibility with notebooks created earlier.
+    """
+    return f"=={normalize_python_minor(version)}.*"
 
 
 def infer_requested_python_minor(requires_python: str | None) -> str | None:
@@ -65,8 +71,12 @@ def infer_requested_python_minor(requires_python: str | None) -> str | None:
     for clause in spec:
         if clause.operator not in (">=", "==", "~="):
             continue
+        # ``==3.12.*`` (PEP 440 version-matching wildcard) is the
+        # canonical form Strata writes; ``packaging`` exposes the
+        # version field literally as ``"3.12.*"`` and Version() rejects
+        # it. Strip the trailing wildcard before parsing.
         try:
-            parsed = Version(clause.version)
+            parsed = Version(clause.version.removesuffix(".*"))
         except InvalidVersion:
             continue
         return f"{parsed.major}.{parsed.minor}"
