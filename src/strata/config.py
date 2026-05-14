@@ -16,7 +16,11 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from strata.notebook.python_versions import current_python_minor, normalize_python_minor
+from strata.notebook.python_versions import (
+    current_python_minor,
+    discover_installed_python_minors,
+    normalize_python_minor,
+)
 from strata.types import CacheGranularity
 
 # ---------------------------------------------------------------------------
@@ -307,7 +311,7 @@ class StrataConfig(BaseSettings):
     personal_mode_user_header: str | None = None
     artifact_dir: Path | None = None
     notebook_storage_dir: Path = Field(default_factory=lambda: Path("/tmp/strata-notebooks"))
-    notebook_python_versions: list[str] = Field(default_factory=lambda: [current_python_minor()])
+    notebook_python_versions: list[str] = Field(default_factory=discover_installed_python_minors)
 
     # AI/LLM assistant settings (OpenAI-compatible API)
     ai_base_url: str | None = None

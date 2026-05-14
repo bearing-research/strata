@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 import sys
 import tomllib
+from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
+
+from packaging.specifiers import SpecifierSet
 
 _MINOR_VERSION_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)$")
 _PATCH_VERSION_RE = re.compile(r"^(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)$")
@@ -75,6 +81,68 @@ def read_requested_python_minor(notebook_dir: Path) -> str | None:
         return None
 
     return infer_requested_python_minor(requires_python)
+
+
+def discover_installed_python_minors() -> list[str]:
+    """Return ``major.minor`` versions uv reports as installed locally,
+    filtered to those that satisfy Strata's own ``requires-python``.
+
+    Used as the default for ``StrataConfig.notebook_python_versions``
+    so the notebook creation picker shows every interpreter the user
+    already has on disk, not just whatever Python the server happens
+    to be running. Production deployments that want a fixed runtime
+    set ``notebook_python_versions`` explicitly and that override wins.
+
+    Falls back to ``[current_python_minor()]`` on any failure (uv
+    missing, timeout, malformed output, missing project metadata).
+    """
+    current = current_python_minor()
+    fallback = [current]
+
+    uv = shutil.which("uv")
+    if uv is None:
+        return fallback
+
+    try:
+        completed = subprocess.run(  # noqa: S603 — uv is shutil.which-resolved
+            [uv, "python", "list", "--only-installed", "--output-format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        entries = json.loads(completed.stdout)
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return fallback
+    if not isinstance(entries, list):
+        return fallback
+
+    try:
+        requires = metadata("strata-notebook").get("Requires-Python") or ">=3.12"
+    except PackageNotFoundError:
+        requires = ">=3.12"
+    spec = SpecifierSet(requires)
+
+    minors: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        version = entry.get("version")
+        if not isinstance(version, str) or version.count(".") < 1:
+            continue
+        try:
+            minor = normalize_python_minor(version.rsplit(".", 1)[0])
+        except ValueError:
+            continue
+        if minor in seen or not spec.contains(minor):
+            continue
+        seen.add(minor)
+        minors.append(minor)
+
+    if current not in seen and spec.contains(current):
+        minors.insert(0, current)
+    return minors or fallback
 
 
 def read_venv_runtime_python_version(python_executable: Path) -> str | None:
