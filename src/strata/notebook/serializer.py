@@ -39,12 +39,15 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import pickle
 import sys
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
+
+logger = logging.getLogger(__name__)
 
 
 class ContentType(StrEnum):
@@ -302,7 +305,22 @@ def serialize_value(value: Any, output_dir: Path | str, variable_name: str) -> d
             # the JSON fallback assumes a pandas shape and silently
             # drops non-pandas values.
             if _is_pandas_value(value) and _should_fallback_from_arrow_error(exc):
+                logger.warning(
+                    "Arrow serialization of '%s' (%s) failed (%s); falling back "
+                    "to JSON-tagged-arrow. Direct-Arrow consumers (DuckDB/Polars) "
+                    "won't be able to read this artifact.",
+                    variable_name,
+                    type(value).__name__,
+                    exc,
+                )
                 return _serialize_dataframe_json(value, output_dir, variable_name)
+            logger.warning(
+                "Arrow serialization of '%s' (%s) failed (%s); falling back to "
+                "pickle. Downstream cells expecting tabular shape will break.",
+                variable_name,
+                type(value).__name__,
+                exc,
+            )
             return _serialize_pickle(value, output_dir, variable_name)
     elif content_type == ContentType.IMAGE_PNG:
         return _serialize_image_png(value, output_dir, variable_name)
@@ -828,31 +846,26 @@ def _serialize_cell_instance(value: Any, output_dir: Path, variable_name: str) -
 
 
 def _serialize_pickle(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
+    # Pickle failures used to return a success-shape dict with file=None,
+    # which left the artifact store believing the value had been written
+    # while the next reader hit a missing file. Raise instead — both
+    # harness.py and pool_worker.py wrap serialize_value() in a
+    # try/except that converts the exception into an error-shape entry,
+    # so the failure surfaces at the cell that produced it.
     filename = f"{variable_name}.pickle"
     filepath = output_dir / filename
-    type_name = type(value).__name__
-    try:
-        codec = _resolve_object_codec()
-        payload = codec.dumps(value)
-        envelope = _wrap_codec_payload(codec.name, payload)
-        with open(filepath, "wb") as f:
-            pickle.dump(envelope, f, protocol=5)
-    except Exception as e:
-        return {
-            "content_type": ContentType.PICKLE_OBJECT,
-            "file": None,
-            "bytes": 0,
-            "type": type_name,
-            "preview": f"<{type_name} object>",
-            "error": f"Failed to pickle: {e}",
-        }
+    codec = _resolve_object_codec()
+    payload = codec.dumps(value)
+    envelope = _wrap_codec_payload(codec.name, payload)
+    with open(filepath, "wb") as f:
+        pickle.dump(envelope, f, protocol=5)
     return {
         "content_type": ContentType.PICKLE_OBJECT,
         "file": filename,
         "bytes": filepath.stat().st_size,
         "codec": codec.name,
-        "type": type_name,
-        "preview": f"<{type_name} object>",
+        "type": type(value).__name__,
+        "preview": f"<{type(value).__name__} object>",
     }
 
 
@@ -940,13 +953,28 @@ def _deserialize_arrow(file_path: Path) -> Any:
 
 
 def _table_to_pandas_or_arrow(table: Any) -> Any:
-    """Decode a shape=table Arrow Table back to pandas or pyarrow."""
+    """Decode a shape=table Arrow Table back to pandas or pyarrow.
+
+    When the source metadata says the value originated as pandas but
+    to_pandas() fails, we still return the pa.Table — but log it. Silent
+    type changes break downstream cells that called ``.iloc`` on what
+    they expected to be a DataFrame, and the AttributeError they see
+    gives no clue why the type morphed across the round-trip.
+    """
     meta = table.schema.metadata or {}
     source = meta.get(_META_SOURCE, b"")
 
     try:
         frame = table.to_pandas()
-    except Exception:
+    except Exception as exc:
+        if source in (b"pandas.DataFrame", b"pandas.Series"):
+            logger.warning(
+                "Arrow→pandas conversion failed (%s); returning pa.Table even "
+                "though the value originated as %s. Downstream cells expecting "
+                "pandas methods will fail with AttributeError.",
+                exc,
+                source.decode("utf-8"),
+            )
         return table
 
     if source == b"pandas.Series":
@@ -955,7 +983,12 @@ def _table_to_pandas_or_arrow(table: Any) -> Any:
             name_bytes = meta.get(_META_PD_NAME, b"")
             series.name = name_bytes.decode("utf-8") or None
             return series
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Reconstructing pandas.Series from Arrow failed (%s); "
+                "returning DataFrame instead.",
+                exc,
+            )
             return frame
     return frame
 
