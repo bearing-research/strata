@@ -169,3 +169,104 @@ class TestPerIterationArtifacts:
         assert artifact is not None
         spec = _json.loads(artifact.transform_spec or "{}")
         assert spec.get("params", {}).get("iteration") == "7"
+
+
+class TestListCellArtifacts:
+    """``list_cell_artifacts`` was a NotImplementedError stub; now it works."""
+
+    def test_lists_each_variable_once(self, manager):
+        manager.store_cell_output(
+            cell_id="c1",
+            variable_name="x",
+            blob_data=b"x-bytes",
+            content_type="pickle/object",
+            provenance_hash="prov-x",
+        )
+        manager.store_cell_output(
+            cell_id="c1",
+            variable_name="y",
+            blob_data=b"y-bytes",
+            content_type="pickle/object",
+            provenance_hash="prov-y",
+        )
+
+        listed = manager.list_cell_artifacts("c1")
+        names = {name for name, _ in listed}
+        assert names == {"x", "y"}
+
+    def test_excludes_iteration_artifacts(self, manager):
+        """Loop-iteration ids carry @iter=k; those belong to list_iterations,
+        not the canonical list. Including them here would surface every
+        iteration of every variable in cell-level UIs."""
+        manager.store_cell_output(
+            cell_id="c1",
+            variable_name="state",
+            blob_data=b"canonical",
+            content_type="pickle/object",
+            provenance_hash="prov-canonical",
+        )
+        manager.store_cell_output(
+            cell_id="c1",
+            variable_name="state",
+            blob_data=b"iter-0",
+            content_type="pickle/object",
+            provenance_hash="prov-iter-0",
+            iteration=0,
+        )
+        manager.store_cell_output(
+            cell_id="c1",
+            variable_name="state",
+            blob_data=b"iter-1",
+            content_type="pickle/object",
+            provenance_hash="prov-iter-1",
+            iteration=1,
+        )
+
+        listed = manager.list_cell_artifacts("c1")
+        names = [name for name, _ in listed]
+        assert names == ["state"]
+
+    def test_other_cells_isolated(self, manager):
+        manager.store_cell_output(
+            cell_id="c1",
+            variable_name="x",
+            blob_data=b"c1-x",
+            content_type="pickle/object",
+            provenance_hash="prov-c1-x",
+        )
+        manager.store_cell_output(
+            cell_id="c2",
+            variable_name="y",
+            blob_data=b"c2-y",
+            content_type="pickle/object",
+            provenance_hash="prov-c2-y",
+        )
+
+        c1_listing = {name for name, _ in manager.list_cell_artifacts("c1")}
+        c2_listing = {name for name, _ in manager.list_cell_artifacts("c2")}
+        assert c1_listing == {"x"}
+        assert c2_listing == {"y"}
+
+
+class TestGetArtifactInfo:
+    """get_artifact_info used to return content_type='unknown' always; now
+    it reads the value from transform_spec.params like get_artifact_preview."""
+
+    def test_content_type_round_trips(self, manager):
+        manager.store_cell_output(
+            cell_id="c1",
+            variable_name="x",
+            blob_data=b"json-bytes",
+            content_type="json/object",
+            provenance_hash="prov-x",
+        )
+        artifact_id = manager.cell_artifact_id("c1", "x")
+        latest = manager.artifact_store.get_latest_version(artifact_id)
+        assert latest is not None
+
+        info = manager.get_artifact_info(artifact_id, latest.version)
+        assert info is not None
+        assert info.content_type == "json/object"
+
+    def test_returns_none_when_artifact_missing(self, manager):
+        assert manager.get_artifact_info("nonexistent", 1) is None

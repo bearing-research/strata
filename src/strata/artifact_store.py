@@ -627,6 +627,58 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    def force_finalize_canonical(
+        self,
+        artifact_id: str,
+        version: int,
+        schema_json: str,
+        row_count: int,
+        byte_size: int,
+    ) -> ArtifactVersion | None:
+        """Promote a dedup-failed version to ready under its canonical id.
+
+        ``finalize_artifact`` deduplicates by ``(tenant, provenance_hash)``:
+        if another artifact with the same provenance already exists in
+        ready state, the new version is marked ``failed`` and the
+        existing artifact is returned. That's correct for most callers
+        — they only care that *some* ready artifact with the right
+        provenance is reachable.
+
+        Notebook cells, however, resolve inputs by the canonical
+        artifact id (``nb_{notebook_id}_cell_{cell_id}_var_{name}``).
+        A dedup-failed canonical version leaves downstream cells
+        unable to find the artifact under that id, even though an
+        equivalent artifact exists under a different id. This method
+        flips the canonical version back to ready so it's reachable
+        by id without disturbing the prior ready row.
+
+        The partial unique index on
+        ``(tenant, provenance_hash) WHERE state='ready'`` is satisfied
+        because two rows can share provenance in ready state only via
+        this targeted promotion — ``finalize_artifact`` still refuses
+        normally.
+
+        Returns the canonical ``ArtifactVersion`` after promotion, or
+        ``None`` if it can't be found post-update.
+        """
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """
+                UPDATE artifact_versions
+                SET state = 'ready',
+                    schema_json = ?,
+                    row_count = ?,
+                    byte_size = ?
+                WHERE id = ? AND version = ? AND state = 'failed'
+                """,
+                (schema_json, row_count, byte_size, artifact_id, version),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return self.get_artifact(artifact_id, version)
+
     def finalize_and_set_name(
         self,
         artifact_id: str,

@@ -224,30 +224,19 @@ class NotebookArtifactManager:
 
         # Guard against provenance dedup: finalize_artifact may detect
         # another artifact with the same provenance under a *different*
-        # ID and mark our version as "failed".  In a notebook context,
-        # downstream cells resolve inputs by the canonical artifact ID
-        # (``nb_{notebook_id}_cell_{cell_id}_var_{var_name}``), so we
-        # MUST have a ready version under that exact ID.  If finalize
-        # returned a different ID, force our canonical version to ready.
+        # id and mark our version as "failed". Notebook cells resolve
+        # inputs by canonical id, so we promote the canonical version
+        # back to ready via the store's public force_finalize_canonical
+        # helper. (Previously this reached into the store's private
+        # SQLite connection — keeping the SQL inside ArtifactStore so
+        # schema changes can't drift between the two definitions.)
         if artifact_version.id != artifact_id:
-            conn = self.artifact_store._get_connection()
-            try:
-                conn.execute(
-                    """
-                    UPDATE artifact_versions
-                    SET state = 'ready', schema_json = ?,
-                        row_count = ?, byte_size = ?
-                    WHERE id = ? AND version = ? AND state = 'failed'
-                    """,
-                    (schema_str, row_count or 0, byte_size, artifact_id, version),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-            # Re-read the canonical artifact so we return the right one.
-            canonical = self.artifact_store.get_artifact(
-                artifact_id,
-                version,
+            canonical = self.artifact_store.force_finalize_canonical(
+                artifact_id=artifact_id,
+                version=version,
+                schema_json=schema_str,
+                row_count=row_count or 0,
+                byte_size=byte_size,
             )
             if canonical is not None:
                 artifact_version = canonical
@@ -312,38 +301,44 @@ class NotebookArtifactManager:
         }
 
     def list_cell_artifacts(self, cell_id: str) -> list[tuple[str, ArtifactVersion]]:
-        """List all artifacts for a cell (all variables, all versions).
+        """List canonical artifacts for a cell — one per variable, latest version.
 
-        Args:
-            cell_id: Cell ID
-
-        Returns:
-            List of (variable_name, ArtifactVersion) tuples
-
-        Raises:
-            NotImplementedError: ArtifactStore does not yet support prefix queries.
+        Returns ``(variable_name, ArtifactVersion)`` for each canonical
+        ``nb_{notebook_id}_cell_{cell_id}_var_<name>`` artifact. Loop-
+        iteration suffixed ids (``...@iter=k``) are excluded — use
+        ``list_iterations`` when iteration-level granularity is wanted.
         """
-        raise NotImplementedError("list_cell_artifacts requires ArtifactStore prefix query support")
+        prefix = f"nb_{self.notebook_id}_cell_{cell_id}_var_"
+        artifacts = self.artifact_store.list_latest_by_id_prefix(prefix)
+        results: list[tuple[str, ArtifactVersion]] = []
+        for artifact in artifacts:
+            suffix = artifact.id[len(prefix) :]
+            if "@iter=" in suffix:
+                continue
+            results.append((suffix, artifact))
+        return results
 
     def get_artifact_info(self, artifact_id: str, version: int) -> ArtifactInfo | None:
-        """Get lightweight artifact info for API responses.
-
-        Args:
-            artifact_id: Artifact ID
-            version: Version number
-
-        Returns:
-            ArtifactInfo or None if not found
-        """
+        """Get lightweight artifact info for API responses."""
         artifact = self.artifact_store.get_artifact(artifact_id, version)
         if artifact is None:
             return None
+
+        # Content type lives in transform_spec.params — same source
+        # get_artifact_preview reads from.
+        content_type = "unknown"
+        if artifact.transform_spec:
+            try:
+                spec = json.loads(artifact.transform_spec)
+                content_type = spec.get("params", {}).get("content_type", "unknown")
+            except (ValueError, KeyError):
+                pass
 
         return ArtifactInfo(
             id=artifact.id,
             version=artifact.version,
             provenance_hash=artifact.provenance_hash,
-            content_type="unknown",  # Would need to store in params
+            content_type=content_type,
             rows=artifact.row_count,
             bytes=artifact.byte_size or 0,
             created_at=artifact.created_at or 0.0,
