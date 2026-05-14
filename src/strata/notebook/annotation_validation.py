@@ -8,14 +8,16 @@ execution.
 from __future__ import annotations
 
 import ast
-import re
 
-from strata.notebook.annotations import parse_annotations
+from strata.notebook.annotations import (
+    iter_annotation_block,
+    parse_annotation_directive,
+    parse_annotations,
+)
 from strata.notebook.models import AnnotationDiagnostic, CellState, NotebookState
 
 _BUILTIN_WORKER_NAMES = frozenset({"local"})
 _SUPPORTED_MOUNT_SCHEMES = frozenset({"file", "s3", "gs", "gcs", "az", "azure"})
-_ANNOTATION_RE = re.compile(r"^#\s*@(\w+)\s*(.*?)\s*$")
 
 
 def validate_cell_annotations(
@@ -94,12 +96,11 @@ def validate_cell_annotations(
 
     # --- timeout_not_numeric / env_malformed ---
     # The parser silently swallows these, so we re-scan raw lines.
-    for lineno, line_text in _annotation_lines(cell.source):
-        match = _ANNOTATION_RE.match(line_text.strip())
-        if not match:
+    for lineno, line_text in iter_annotation_block(cell.source):
+        parsed = parse_annotation_directive(line_text)
+        if parsed is None:
             continue
-        key = match.group(1).lower()
-        value = match.group(2).strip()
+        key, value = parsed
 
         if key == "timeout":
             if not value:
@@ -408,11 +409,11 @@ def _validate_sql_cell_annotations(
 
     # Re-scan raw lines to catch malformed @cache values that the
     # permissive parser silently dropped.
-    for lineno, line_text in _annotation_lines(cell.source):
-        match = _ANNOTATION_RE.match(line_text.strip())
-        if not match or match.group(1).lower() != "cache":
+    for lineno, line_text in iter_annotation_block(cell.source):
+        parsed = parse_annotation_directive(line_text)
+        if parsed is None or parsed[0] != "cache":
             continue
-        value = match.group(2).strip()
+        _, value = parsed
         if not value:
             diagnostics.append(
                 AnnotationDiagnostic(
@@ -681,21 +682,10 @@ def _collect_top_level_imports(source: str) -> set[str]:
 
 def _find_annotation_line(source: str, directive: str, needle: str | None = None) -> int | None:
     """Return 1-based line number of the first matching annotation."""
-    for lineno, line_text in _annotation_lines(source):
+    for lineno, line_text in iter_annotation_block(source):
         lowered = line_text.strip().lstrip("#").strip().lower()
         if not lowered.startswith(f"@{directive.lower()}"):
             continue
         if needle is None or needle.lower() in lowered:
             return lineno
     return None
-
-
-def _annotation_lines(source: str):
-    """Yield (1-based lineno, line_text) for the leading comment block."""
-    for i, line in enumerate(source.splitlines(), start=1):
-        stripped = line.strip()
-        if not stripped.startswith("#"):
-            if stripped:
-                break
-            continue
-        yield i, line

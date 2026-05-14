@@ -26,6 +26,7 @@ Annotations do **not** affect the cell's ``defines``/``references`` analysis.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 from strata.notebook.models import MountMode, MountSpec
@@ -106,6 +107,59 @@ class LoopAnnotation:
 _ANNOTATION_RE = re.compile(r"^#\s*@(\w+)\s*(.*?)\s*$")
 
 
+def iter_annotation_block(source: str) -> Iterator[tuple[int, str]]:
+    """Yield ``(1-based lineno, raw_line)`` for the leading comment block.
+
+    The leading comment block is the first contiguous run of blank
+    lines and ``#``-prefixed lines at the top of a cell. Blank lines
+    inside the block are skipped (not yielded). The block ends at the
+    first non-blank non-comment line, which is the start of the cell
+    body.
+
+    Single source of truth for "what counts as the leading comment
+    block" — used by ``parse_annotations`` here, by validation
+    diagnostics in ``annotation_validation``, and by prompt/SQL
+    analysers. Drift between independent implementations of this scan
+    would silently desynchronise parsing from validation.
+    """
+    for lineno, line in enumerate(source.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if not stripped.startswith("#"):
+            break
+        yield lineno, line
+
+
+def parse_annotation_directive(line: str) -> tuple[str, str] | None:
+    """Match one ``# @key value`` line and return ``(key.lower(), value)``.
+
+    Returns ``None`` when the line isn't a directive (a plain comment,
+    or a line outside the leading block). ``value`` is stripped of
+    surrounding whitespace; the caller decides how to interpret it.
+    """
+    match = _ANNOTATION_RE.match(line.strip())
+    if not match:
+        return None
+    return match.group(1).lower(), match.group(2).strip()
+
+
+def strip_leading_annotations(source: str) -> str:
+    """Return source with the leading comment block removed.
+
+    The cell body is everything from the first non-blank non-comment
+    line onwards. Used by SQL and prompt cells, which embed an
+    annotation block at the top followed by a content body.
+    """
+    lines = source.splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        return "\n".join(lines[i:])
+    return ""
+
+
 @dataclass
 class CellAnnotations:
     """Parsed annotations from a cell's leading comment block."""
@@ -152,23 +206,11 @@ def parse_annotations(source: str) -> CellAnnotations:
     """
     result = CellAnnotations()
 
-    for line in source.splitlines():
-        stripped = line.strip()
-
-        # Skip blank lines within the comment block
-        if not stripped:
+    for _lineno, line in iter_annotation_block(source):
+        parsed = parse_annotation_directive(line)
+        if parsed is None:
             continue
-
-        # Stop at the first non-comment line
-        if not stripped.startswith("#"):
-            break
-
-        match = _ANNOTATION_RE.match(stripped)
-        if not match:
-            continue
-
-        key = match.group(1).lower()
-        value = match.group(2).strip()
+        key, value = parsed
 
         if key == "worker":
             result.worker = value or None

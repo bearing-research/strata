@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from strata.notebook.annotations import strip_leading_annotations as _strip_leading_annotations
 from strata.notebook.sql.adapter import QualifiedTable
 from strata.notebook.sql.analyzer import (
     SqlAnalysis,
     _blank_strings_and_comments,
     _extract_placeholder_positions,
     _extract_placeholders,
-    _strip_leading_annotations,
     analyze_sql_cell,
 )
 

@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 
 from sqlglot.errors import SqlglotError as _SqlglotError
 
-from strata.notebook.annotations import CachePolicy, parse_annotations
+from strata.notebook.annotations import CachePolicy, parse_annotations, strip_leading_annotations
 from strata.notebook.sql.adapter import QualifiedTable
 
 # Bind-placeholder pattern. ``(?<![:\w])`` rules out ``::cast`` (Postgres
@@ -83,7 +83,7 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
        ``find_all`` would surface those as if they were base tables).
     """
     annotations = parse_annotations(source)
-    sql_body = _strip_leading_annotations(source).strip()
+    sql_body = strip_leading_annotations(source).strip()
 
     output_name = annotations.name if annotations.name else "result"
     if not output_name.isidentifier():
@@ -119,22 +119,6 @@ def analyze_sql_cell(source: str, *, dialect: str | None = None) -> SqlAnalysis:
         tables=tables,
         parse_error=parse_error,
     )
-
-
-def _strip_leading_annotations(source: str) -> str:
-    """Return the source with the leading comment block removed.
-
-    Mirrors ``annotations.parse_annotations``'s scan: blank lines and
-    ``#``-prefixed lines at the top are part of the annotation block;
-    the first non-comment non-blank line starts the SQL body.
-    """
-    lines = source.splitlines()
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        return "\n".join(lines[i:])
-    return ""
 
 
 def _extract_placeholder_positions(sql: str) -> list[str]:
