@@ -99,7 +99,20 @@ jobs:
 
       - name: Install dependencies and build Rust extension
         shell: bash
-        run: uv sync --python ${{ matrix.python-version }} --all-extras
+        # uv creates an isolated build env for the PEP 517 backend.
+        # On macOS, that env's PATH can fall through to Homebrew's
+        # /opt/homebrew/bin (containing a cargo shim that defers to
+        # rustup-init when no toolchain is initialized for it),
+        # before ~/.cargo/bin — even when setup-rust-toolchain has
+        # installed a working cargo there. maturin's "cargo metadata"
+        # then errors with "unexpected argument 'metadata'".
+        # Exporting $CARGO/$RUSTC pins the binaries by absolute path
+        # so the PATH-order race can't fire. (Harmless on Linux/
+        # Windows where the race doesn't happen.)
+        run: |
+          export CARGO="$HOME/.cargo/bin/cargo"
+          export RUSTC="$HOME/.cargo/bin/rustc"
+          uv sync --python ${{ matrix.python-version }} --all-extras
 
       - name: Run unit tests (non-Windows)
         if: runner.os != 'Windows'
