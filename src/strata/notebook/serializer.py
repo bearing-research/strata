@@ -985,8 +985,7 @@ def _table_to_pandas_or_arrow(table: Any) -> Any:
             return series
         except Exception as exc:
             logger.warning(
-                "Reconstructing pandas.Series from Arrow failed (%s); "
-                "returning DataFrame instead.",
+                "Reconstructing pandas.Series from Arrow failed (%s); returning DataFrame instead.",
                 exc,
             )
             return frame
