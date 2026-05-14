@@ -172,10 +172,7 @@ class ImpactAnalyzer:
                 continue
             visited.add(current)
 
-            cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == current),
-                None,
-            )
+            cell = self.session.notebook_state.get_cell(current)
             if cell is None:
                 continue
 

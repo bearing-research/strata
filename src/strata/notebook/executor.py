@@ -467,10 +467,7 @@ class CellExecutor:
         if annotation_worker:
             return annotation_worker
 
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell and cell.worker:
             return cell.worker
 
@@ -513,10 +510,7 @@ class CellExecutor:
         if annotation_timeout is not None:
             return annotation_timeout
 
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell and cell.timeout is not None:
             return cell.timeout
 
@@ -532,10 +526,7 @@ class CellExecutor:
         annotation_env: dict[str, str],
     ) -> dict[str, str]:
         """Resolve the effective runtime env with annotation precedence."""
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         runtime_env = dict(cell.env) if cell is not None else {}
         runtime_env.update(annotation_env)
         return runtime_env
@@ -578,10 +569,7 @@ class CellExecutor:
         runtime_env = self._resolve_effective_runtime_env(cell_id, annotations.env)
         effective_worker = self._resolve_effective_worker(cell_id, annotations.worker)
         runtime_identity = worker_runtime_identity(self.session.notebook_state, effective_worker)
-        cell_state = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell_state = self.session.notebook_state.get_cell(cell_id)
         declared_env_keys = set(annotations.env) | set(
             getattr(cell_state, "env_overrides", {}) or {}
         )
@@ -628,10 +616,7 @@ class CellExecutor:
     ) -> CellExecutionResult:
         remote_metadata: dict[str, str] = {}
         try:
-            cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == cell_id),
-                None,
-            )
+            cell = self.session.notebook_state.get_cell(cell_id)
             if cell is not None:
                 cell.cache_hit = False
 
@@ -1734,10 +1719,7 @@ class CellExecutor:
 
         Priority: annotation > cell-meta > notebook-level.
         """
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
 
         # Cell-level mounts already include notebook defaults from parser.py.
         cell_mounts_spec = cell.mounts if cell else []
@@ -1885,10 +1867,7 @@ class CellExecutor:
         )
 
         if result_dict.get("success"):
-            cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == cell_id),
-                None,
-            )
+            cell = self.session.notebook_state.get_cell(cell_id)
             if cell is not None:
                 cell.last_provenance_hash = standard_provenance
 
@@ -1932,10 +1911,7 @@ class CellExecutor:
         )
 
         if result_dict.get("success"):
-            cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == cell_id),
-                None,
-            )
+            cell = self.session.notebook_state.get_cell(cell_id)
             if cell is not None:
                 cell.cache_hit = bool(result_dict.get("cache_hit"))
 
@@ -1994,10 +1970,7 @@ class CellExecutor:
         missed the case where an upstream's source changed but its old
         artifact still existed in the store.
         """
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or not cell.upstream_ids:
             return
 
@@ -2009,10 +1982,7 @@ class CellExecutor:
             if upstream_id in executed_upstreams:
                 continue
 
-            upstream_cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == upstream_id),
-                None,
-            )
+            upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
 
@@ -2040,10 +2010,7 @@ class CellExecutor:
         artifact is populated. Uses per-variable ``artifact_uris`` dict
         when available, falling back to the legacy ``artifact_uri`` field.
         """
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or not cell.upstream_ids:
             return []
 
@@ -2051,10 +2018,7 @@ class CellExecutor:
         hashes: list[str] = []
 
         for upstream_id in cell.upstream_ids:
-            upstream_cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == upstream_id),
-                None,
-            )
+            upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
 
@@ -2094,10 +2058,7 @@ class CellExecutor:
         ``_materialize_upstreams`` has already run.  This method simply
         reads blobs and writes them to *output_dir* for the harness.
         """
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
             return {}
 
@@ -2106,10 +2067,7 @@ class CellExecutor:
         input_specs: dict[str, dict[str, str]] = {}
 
         for upstream_id in cell.upstream_ids:
-            upstream_cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == upstream_id),
-                None,
-            )
+            upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
 
@@ -2200,10 +2158,7 @@ class CellExecutor:
 
         Returns True if every consumed variable was stored, False otherwise.
         """
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or self.session.dag is None:
             return True
 
@@ -2866,19 +2821,13 @@ class CellExecutor:
                 raise ValueError(f"Loop seed blob missing for {artifact_id}@v={artifact.version}.")
             return blob, _artifact_content_type(artifact)
 
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
             raise ValueError(f"Loop cell {cell_id!r} not found in notebook state.")
 
         notebook_id = self.session.notebook_state.id
         for upstream_id in cell.upstream_ids:
-            upstream_cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == upstream_id),
-                None,
-            )
+            upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if upstream_cell is None or loop.carry not in upstream_cell.defines:
                 continue
             upstream_artifact_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{loop.carry}"

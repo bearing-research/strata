@@ -642,4 +642,21 @@ class NotebookState(BaseModel):
     created_at: datetime | None = Field(default=None)
     updated_at: datetime | None = Field(default=None)
 
+    def get_cell(self, cell_id: str) -> CellState | None:
+        """Return the cell with the given id, or None if not present.
+
+        Single accessor used everywhere a cell needs to be looked up
+        by id — routes/ws/executor/session/cascade previously inlined
+        the same ``next(c for c in ... if c.id == cell_id)`` generator
+        in 60+ places, which made the basic state-container access
+        pattern invisible and drift-prone. Linear scan is fine: cell
+        lists are typically dozens, not thousands, and this is a hot
+        path only on per-keystroke DAG rebuilds where the lookup is
+        already dwarfed by the analysis cost.
+        """
+        for cell in self.cells:
+            if cell.id == cell_id:
+                return cell
+        return None
+
     model_config = ConfigDict(arbitrary_types_allowed=True)

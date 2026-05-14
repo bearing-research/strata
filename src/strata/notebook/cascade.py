@@ -97,7 +97,7 @@ class CascadePlanner:
             return None
 
         # Find the target cell
-        target_cell = next((c for c in self.session.notebook_state.cells if c.id == cell_id), None)
+        target_cell = self.session.notebook_state.get_cell(cell_id)
         if not target_cell:
             return None
 
@@ -110,10 +110,7 @@ class CascadePlanner:
         # Check staleness of upstream cells
         has_stale_upstream = False
         for upstream_id in upstream_cells:
-            upstream_cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == upstream_id),
-                None,
-            )
+            upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if not upstream_cell:
                 continue
 
@@ -157,10 +154,7 @@ class CascadePlanner:
         # Build steps for each cell
         steps: list[CascadeStep] = []
         for step_cell_id in step_cells:
-            cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == step_cell_id),
-                None,
-            )
+            cell = self.session.notebook_state.get_cell(step_cell_id)
             if not cell:
                 continue
 

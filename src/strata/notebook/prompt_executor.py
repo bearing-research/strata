@@ -423,7 +423,7 @@ def _load_upstream_variables(
 ) -> dict[str, Any]:
     """Load upstream variable values from artifacts."""
     variables: dict[str, Any] = {}
-    cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+    cell = session.notebook_state.get_cell(cell_id)
     if cell is None:
         return variables
 
@@ -431,10 +431,7 @@ def _load_upstream_variables(
     notebook_id = session.notebook_state.id
 
     for upstream_id in cell.upstream_ids:
-        upstream_cell = next(
-            (c for c in session.notebook_state.cells if c.id == upstream_id),
-            None,
-        )
+        upstream_cell = session.notebook_state.get_cell(upstream_id)
         if upstream_cell is None:
             continue
 

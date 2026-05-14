@@ -1648,7 +1648,7 @@ async def update_cell_source(notebook_id: str, cell_id: str, req: UpdateCellSour
         write_cell(session.path, cell_id, req.source)
 
         # Update source in session
-        cell_in_session = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+        cell_in_session = session.notebook_state.get_cell(cell_id)
         if cell_in_session:
             cell_in_session.source = req.source
 
@@ -1662,7 +1662,7 @@ async def update_cell_source(notebook_id: str, cell_id: str, req: UpdateCellSour
         session.compute_staleness()
 
         # Find and return the updated cell with DAG info
-        cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+        cell = session.notebook_state.get_cell(cell_id)
         if not cell:
             raise HTTPException(status_code=404, detail="Cell not found")
 
@@ -2141,7 +2141,7 @@ async def add_cell(notebook_id: str, req: AddCellRequest) -> dict:
         session.reload()
 
         # Find and return the new cell
-        cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+        cell = session.notebook_state.get_cell(cell_id)
         if not cell:
             raise HTTPException(status_code=500, detail="Failed to create cell")
 
@@ -2274,7 +2274,7 @@ async def get_cell_iterations(
     if not session:
         raise HTTPException(status_code=404, detail="Notebook not found")
 
-    cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+    cell = session.notebook_state.get_cell(cell_id)
     if cell is None:
         raise HTTPException(status_code=404, detail="Cell not found")
 
@@ -2478,7 +2478,7 @@ async def execute_cell(notebook_id: str, cell_id: str) -> dict:
         )
 
     # Find the cell
-    cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+    cell = session.notebook_state.get_cell(cell_id)
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
@@ -2808,10 +2808,7 @@ def _prepare_chat_request(session, req: LlmCompleteRequest):
 
     cell_source = None
     if req.cell_id:
-        cell = next(
-            (c for c in session.notebook_state.cells if c.id == req.cell_id),
-            None,
-        )
+        cell = session.notebook_state.get_cell(req.cell_id)
         if cell:
             cell_source = cell.source
 

@@ -114,19 +114,13 @@ class InspectSession:
         into the inspect subprocess namespace.
         """
         # Find the cell
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == self.cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(self.cell_id)
         if cell is None:
             raise ValueError(f"Cell {self.cell_id} not found")
 
         # Get input artifact URIs from upstream cells
         for upstream_id in cell.upstream_ids:
-            upstream_cell = next(
-                (c for c in self.session.notebook_state.cells if c.id == upstream_id),
-                None,
-            )
+            upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if upstream_cell and upstream_cell.artifact_uri:
                 # Extract variable name (we'll use the upstream cell ID as var name)
                 # For now, use a simple naming scheme

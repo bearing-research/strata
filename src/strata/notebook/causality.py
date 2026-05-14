@@ -126,18 +126,12 @@ class CausalityInspector:
             List of CausalityDetail for changed upstream cells
         """
         details: list[CausalityDetail] = []
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
             return details
 
         for upstream_id in cell.upstream_ids:
-            upstream = next(
-                (c for c in self.session.notebook_state.cells if c.id == upstream_id),
-                None,
-            )
+            upstream = self.session.notebook_state.get_cell(upstream_id)
             if upstream is None:
                 continue
 
@@ -180,10 +174,7 @@ class CausalityInspector:
         Returns:
             Stored source hash or None if no artifact exists
         """
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or not cell.artifact_uri:
             return None
 
@@ -232,10 +223,7 @@ class CausalityInspector:
         Returns:
             Value or None
         """
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or not cell.artifact_uri:
             return None
 
@@ -264,10 +252,7 @@ class CausalityInspector:
         Returns:
             Display name (first defined variable, or cell ID)
         """
-        cell = next(
-            (c for c in self.session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.session.notebook_state.get_cell(cell_id)
         if cell and cell.defines:
             return cell.defines[0]
         return cell_id
@@ -294,10 +279,7 @@ def compute_causality_on_staleness(
     causality_map: dict[str, CausalityChain] = {}
 
     for cell_id in session.dag.topological_order:
-        cell = next(
-            (c for c in session.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = session.notebook_state.get_cell(cell_id)
         if cell is None:
             continue
 
@@ -328,10 +310,7 @@ def compute_causality_on_staleness(
         # Compute current provenance — use per-variable artifact_uris
         input_hashes: list[str] = []
         for upstream_id in cell.upstream_ids:
-            upstream = next(
-                (c for c in session.notebook_state.cells if c.id == upstream_id),
-                None,
-            )
+            upstream = session.notebook_state.get_cell(upstream_id)
             if upstream is None:
                 continue
             uris = list(upstream.artifact_uris.values())
@@ -361,10 +340,7 @@ def compute_causality_on_staleness(
         # Cell is stale — figure out why
         # Check upstream cells
         for upstream_id in cell.upstream_ids:
-            upstream = next(
-                (c for c in session.notebook_state.cells if c.id == upstream_id),
-                None,
-            )
+            upstream = session.notebook_state.get_cell(upstream_id)
             if upstream is None:
                 continue
 
@@ -419,10 +395,7 @@ def compute_causality_on_staleness(
                 and cell.upstream_ids
             ):
                 upstream_id = cell.upstream_ids[0]
-                upstream = next(
-                    (c for c in session.notebook_state.cells if c.id == upstream_id),
-                    None,
-                )
+                upstream = session.notebook_state.get_cell(upstream_id)
                 upstream_name = (
                     upstream.defines[0]
                     if upstream is not None and upstream.defines
@@ -477,10 +450,7 @@ def _get_stored_hash(session: NotebookSession, cell_id: str, key: str) -> str | 
     Returns:
         Stored hash string or None if not available
     """
-    cell = next(
-        (c for c in session.notebook_state.cells if c.id == cell_id),
-        None,
-    )
+    cell = session.notebook_state.get_cell(cell_id)
     if cell is None or not cell.artifact_uri:
         return None
 

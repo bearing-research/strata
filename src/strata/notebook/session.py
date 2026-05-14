@@ -375,7 +375,7 @@ class NotebookSession:
             set_variant_active as _set_variant_active,
         )
 
-        cell = next((c for c in self.notebook_state.cells if c.id == cell_id), None)
+        cell = self.notebook_state.get_cell(cell_id)
         if cell is None:
             raise ValueError(f"Cell {cell_id} not found")
 
@@ -435,10 +435,7 @@ class NotebookSession:
         if resolved is None:
             raise ValueError(f"Variant group {group!r} does not exist")
 
-        active_cell = next(
-            (c for c in self.notebook_state.cells if c.id == resolved.active_cell_id),
-            None,
-        )
+        active_cell = self.notebook_state.get_cell(resolved.active_cell_id)
         if active_cell is None:
             # Defensive: resolution gave us an active_cell_id that doesn't
             # match any cell. Shouldn't happen but bail cleanly if it does.
@@ -681,7 +678,7 @@ class NotebookSession:
             cell_id: ID of the cell to re-analyze
         """
         # Find the cell
-        cell = next((c for c in self.notebook_state.cells if c.id == cell_id), None)
+        cell = self.notebook_state.get_cell(cell_id)
         if not cell:
             return
 
@@ -773,7 +770,7 @@ class NotebookSession:
 
         # Walk cells in topological order
         for cell_id in self.dag.topological_order:
-            cell = next((c for c in self.notebook_state.cells if c.id == cell_id), None)
+            cell = self.notebook_state.get_cell(cell_id)
             if cell is None:
                 continue
 
@@ -906,7 +903,7 @@ class NotebookSession:
         immediately after execution, even though a later staleness recompute
         may otherwise classify them as idle.
         """
-        cell = next((c for c in self.notebook_state.cells if c.id == cell_id), None)
+        cell = self.notebook_state.get_cell(cell_id)
         if cell is None:
             return
 
@@ -916,7 +913,7 @@ class NotebookSession:
 
     def apply_execution_result_metadata(self, cell_id: str, result: Any) -> None:
         """Persist transient execution metadata onto the session cell state."""
-        cell = next((c for c in self.notebook_state.cells if c.id == cell_id), None)
+        cell = self.notebook_state.get_cell(cell_id)
         if cell is None:
             return
 
@@ -980,7 +977,7 @@ class NotebookSession:
         """
         from strata.notebook.runtime_state import persist_cell_provenance
 
-        cell = next((c for c in self.notebook_state.cells if c.id == cell_id), None)
+        cell = self.notebook_state.get_cell(cell_id)
         if cell is None:
             return
         cell.last_provenance_hash = provenance_hash
@@ -1444,19 +1441,13 @@ class NotebookSession:
 
     def _collect_input_hashes(self, cell_id: str) -> list[str]:
         """Read provenance hashes from upstream artifacts for staleness checks."""
-        cell = next(
-            (c for c in self.notebook_state.cells if c.id == cell_id),
-            None,
-        )
+        cell = self.notebook_state.get_cell(cell_id)
         if cell is None or not cell.upstream_ids:
             return []
 
         hashes: list[str] = []
         for upstream_id in cell.upstream_ids:
-            upstream_cell = next(
-                (c for c in self.notebook_state.cells if c.id == upstream_id),
-                None,
-            )
+            upstream_cell = self.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
 

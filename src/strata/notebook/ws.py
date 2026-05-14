@@ -178,7 +178,7 @@ async def _set_cell_idle(
     cell_id: str,
 ) -> None:
     """Mark a cell idle in backend state and broadcast the update."""
-    cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+    cell = session.notebook_state.get_cell(cell_id)
     if cell is not None:
         cell.status = CellStatus.IDLE
 
@@ -656,7 +656,7 @@ async def _handle_cell_execute(
         return
 
     # Find cell
-    cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+    cell = session.notebook_state.get_cell(cell_id)
     if not cell:
         await _release_execution_request(execution_state, cell_id)
         await websocket.send_text(
@@ -994,7 +994,7 @@ async def _handle_cell_cancel(
             await _set_cell_idle(session, notebook_id, seq, requested_cell)
         return
 
-    cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+    cell = session.notebook_state.get_cell(cell_id)
     if cell is not None and cell.status in {CellStatus.IDLE, CellStatus.RUNNING}:
         await _set_cell_idle(session, notebook_id, seq, cell_id)
 
@@ -1047,7 +1047,7 @@ async def _handle_cell_source_update(
         write_cell(session.path, cell_id, source)
 
         # Update source in session (must happen before re-analysis)
-        cell_in_session = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+        cell_in_session = session.notebook_state.get_cell(cell_id)
         if cell_in_session:
             cell_in_session.source = source
 
@@ -1392,13 +1392,13 @@ async def _execute_cell_directly(
     seq = execution_state["sequence"]
 
     # Find cell
-    cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+    cell = session.notebook_state.get_cell(cell_id)
     if not cell:
         return
 
     # Mark as running — update backend state AND broadcast
     execution_state["running_cell"] = cell_id
-    run_cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+    run_cell = session.notebook_state.get_cell(cell_id)
     if run_cell:
         run_cell.status = CellStatus.RUNNING
     await _broadcast_message(
@@ -1549,7 +1549,7 @@ async def _execute_cell_directly(
                 preserve_ready_cell_id=cell_id,
             )
         else:
-            cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+            cell = session.notebook_state.get_cell(cell_id)
             if cell:
                 cell.status = CellStatus.ERROR
             await _broadcast_message(
@@ -1566,7 +1566,7 @@ async def _execute_cell_directly(
         await _set_cell_idle(session, notebook_id, seq, cell_id)
         raise
     except Exception as e:
-        cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+        cell = session.notebook_state.get_cell(cell_id)
         if cell:
             cell.status = CellStatus.ERROR
         await _broadcast_message(
@@ -1621,7 +1621,7 @@ async def _execute_cascade(
                 continue
 
             cell_id = step.cell_id
-            cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+            cell = session.notebook_state.get_cell(cell_id)
             if not cell:
                 continue
 
@@ -1634,10 +1634,7 @@ async def _execute_cascade(
                 )
                 # Use "stale" (not "idle") so the client can distinguish a
                 # cascade-abort from a normal staleness notification.
-                cell_to_skip = next(
-                    (c for c in session.notebook_state.cells if c.id == cell_id),
-                    None,
-                )
+                cell_to_skip = session.notebook_state.get_cell(cell_id)
                 if cell_to_skip:
                     cell_to_skip.status = CellStatus.STALE
                 await _broadcast_message(
@@ -1670,10 +1667,7 @@ async def _execute_cascade(
             )
 
             # Execute cell — update backend state AND broadcast
-            cascade_run_cell = next(
-                (c for c in session.notebook_state.cells if c.id == cell_id),
-                None,
-            )
+            cascade_run_cell = session.notebook_state.get_cell(cell_id)
             if cascade_run_cell:
                 cascade_run_cell.status = CellStatus.RUNNING
             await _broadcast_message(
@@ -1811,10 +1805,7 @@ async def _execute_cascade(
 
                 # Mark as ready — update backend state AND broadcast
                 status = CellStatus.READY if result.success else CellStatus.ERROR
-                cascade_cell = next(
-                    (c for c in session.notebook_state.cells if c.id == cell_id),
-                    None,
-                )
+                cascade_cell = session.notebook_state.get_cell(cell_id)
                 if cascade_cell:
                     cascade_cell.status = status
                 await _broadcast_message(
@@ -1844,10 +1835,7 @@ async def _execute_cascade(
                 await _set_cell_idle(session, notebook_id, seq, cell_id)
                 raise
             except Exception as e:
-                cascade_cell = next(
-                    (c for c in session.notebook_state.cells if c.id == cell_id),
-                    None,
-                )
+                cascade_cell = session.notebook_state.get_cell(cell_id)
                 if cascade_cell:
                     cascade_cell.status = CellStatus.ERROR
                 await _broadcast_message(
@@ -2448,7 +2436,7 @@ async def execute_cell_for_agent(
         },
     )
 
-    cell = next((c for c in session.notebook_state.cells if c.id == cell_id), None)
+    cell = session.notebook_state.get_cell(cell_id)
     if cell:
         cell.status = CellStatus.RUNNING
 
@@ -2551,10 +2539,7 @@ def _running_payload(session, cell_id: str, source: str) -> dict[str, Any]:
     except Exception:
         return payload
 
-    cell = next(
-        (c for c in session.notebook_state.cells if c.id == cell_id),
-        None,
-    )
+    cell = session.notebook_state.get_cell(cell_id)
     effective_name = (
         annotations.worker
         or (cell.worker if cell else None)
