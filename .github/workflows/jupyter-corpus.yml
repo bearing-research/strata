@@ -47,6 +47,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          toolchain: stable
           cache-workspaces: rust
 
       - name: Install uv
