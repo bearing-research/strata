@@ -729,6 +729,12 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
         raise HTTPException(status_code=404, detail=str(e))
     except HTTPException:
         raise
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -813,6 +819,12 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
         )
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
@@ -1047,6 +1059,8 @@ async def delete_notebook(notebook_id: str, request: Request) -> dict:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except Exception:
         logger.exception("Failed to delete notebook %s", notebook_path)
         raise HTTPException(status_code=500, detail="Failed to delete notebook")
@@ -1233,6 +1247,8 @@ async def delete_notebook_by_path(req: DeleteNotebookByPathRequest, request: Req
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except Exception:
         logger.exception("Failed to delete notebook by path %s", notebook_path)
         raise HTTPException(status_code=500, detail="Failed to delete notebook")
@@ -1602,6 +1618,12 @@ async def reorder_notebook_cells(notebook_id: str, req: ReorderCellsRequest) -> 
             "notebook_id": session.notebook_state.id,
             "cells": session.serialize_cells(),
         }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1675,6 +1697,12 @@ async def update_cell_source(notebook_id: str, cell_id: str, req: UpdateCellSour
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1697,6 +1725,12 @@ async def update_notebook_mounts_endpoint(
             "mounts": [mount.model_dump() for mount in session.notebook_state.mounts],
             "cells": session.serialize_cells(),
         }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1762,6 +1796,12 @@ async def update_notebook_connections_endpoint(
             ],
             "cells": session.serialize_cells(),
         }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1872,6 +1912,12 @@ async def update_notebook_workers_endpoint(
             ],
             **await _serialize_worker_catalog(session),
         }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1898,6 +1944,12 @@ async def update_notebook_worker_endpoint(
             **await _serialize_worker_catalog(session),
             "cells": session.serialize_cells(),
         }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1920,6 +1972,12 @@ async def update_notebook_timeout_endpoint(
             "timeout": session.notebook_state.timeout,
             "cells": session.serialize_cells(),
         }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1951,6 +2009,12 @@ async def add_variant_endpoint(
         }
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1981,6 +2045,12 @@ async def set_variant_active_endpoint(
             "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
             "cells": session.serialize_cells(),
         }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2019,6 +2089,12 @@ async def update_notebook_env_endpoint(
             resolved.update(cell.env_overrides or {})
             cell.env = resolved
         return _serialize_env_response(session)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2079,6 +2155,12 @@ async def update_notebook_secret_manager_config(
             resolved.update(cell.env_overrides or {})
             cell.env = resolved
         return _serialize_env_response(session)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2105,6 +2187,12 @@ async def refresh_notebook_secret_manager(notebook_id: str) -> dict:
             resolved.update(cell.env_overrides or {})
             cell.env = resolved
         return _serialize_env_response(session)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2146,6 +2234,12 @@ async def add_cell(notebook_id: str, req: AddCellRequest) -> dict:
             raise HTTPException(status_code=500, detail="Failed to create cell")
 
         return session.serialize_cell(cell)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2201,6 +2295,12 @@ async def delete_cell(notebook_id: str, cell_id: str) -> dict:
         }
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2231,6 +2331,12 @@ async def rename_notebook_endpoint(notebook_id: str, req: RenameNotebookRequest)
             "notebook_id": session.notebook_state.id,
             "name": session.notebook_state.name,
         }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
@@ -2496,6 +2602,12 @@ async def execute_cell(notebook_id: str, cell_id: str) -> dict:
             cell.status = CellStatus.ERROR
 
         return result.to_dict()
+    except ValueError as exc:
+        cell.status = CellStatus.ERROR
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError as exc:
+        cell.status = CellStatus.ERROR
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except Exception:
         cell.status = CellStatus.ERROR
         logger.exception("Cell execution failed")
@@ -2524,6 +2636,10 @@ def _render_notebook_export(
             include_inactive_variants=bool(include_inactive_variants),
         )
         body = export_notebook(session.path, options)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except Exception:
         logger.exception("render export failed for notebook %s", session.id)
         raise HTTPException(status_code=500, detail="Export failed")
