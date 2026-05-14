@@ -815,20 +815,16 @@ async function updateNotebookPythonVersion(
   // 200 (no-op when already at requested version) or 202 (job dispatched)
   // both indicate the request was understood. Errors throw via
   // throwApiError so callers see 400/404/409 with the server's detail.
-  const resp = await fetchWithTimeout(
-    `${STRATA_BASE}/v1/notebooks/${notebookId}/python-version`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ python_version: pythonVersion }),
-    },
-  )
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${notebookId}/python-version`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ python_version: pythonVersion }),
+  })
   if (!resp.ok) {
     await throwApiError(resp, 'Failed to update Python version')
   }
   return readJson<{ accepted: boolean; reason?: string }>(resp)
 }
-
 
 async function updateWorkers(
   notebookId: string,

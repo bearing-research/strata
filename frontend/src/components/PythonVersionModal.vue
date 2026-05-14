@@ -43,10 +43,9 @@ function onConfirm() {
     <div class="pyver-card">
       <div class="pyver-title">Change notebook Python version</div>
       <div class="pyver-body">
-        Switching the notebook to a different Python minor rebuilds the
-        virtual environment from scratch and invalidates every cached cell
-        output. Cell sources stay intact and re-run on the new interpreter
-        the next time you execute them.
+        Switching the notebook to a different Python minor rebuilds the virtual environment from
+        scratch and invalidates every cached cell output. Cell sources stay intact and re-run on the
+        new interpreter the next time you execute them.
       </div>
 
       <label class="pyver-label">
@@ -62,11 +61,7 @@ function onConfirm() {
 
       <div class="pyver-actions">
         <button class="pyver-cancel" :disabled="busy" @click="emit('close')">Cancel</button>
-        <button
-          class="pyver-confirm"
-          :disabled="busy || selected === current"
-          @click="onConfirm"
-        >
+        <button class="pyver-confirm" :disabled="busy || selected === current" @click="onConfirm">
           {{ busy ? 'Rebuilding…' : `Change to ${selected}` }}
         </button>
       </div>
