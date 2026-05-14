@@ -1730,7 +1730,9 @@ function outputKey(output: CellOutput, index: number): string {
 }
 
 .editor-container {
-  min-height: 40px;
+  /* CodeMirror auto-sizes to content; a forced min-height left ~18px of
+     dead space below 1-line cells. The cell-gutter padding (8px top +
+     bottom) already guarantees a visible click target on empty cells. */
 }
 
 .cell-output {
