@@ -101,9 +101,9 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
             await proc.wait()
             raise
 
-        result_path = manifest_path.parent / "manifest.json"
+        result_path = manifest_path.parent / "result.json"
         if not result_path.exists():
-            raise RuntimeError(f"Harness did not produce manifest.json: {stderr.decode()}")
+            raise RuntimeError(f"Harness did not produce result.json: {stderr.decode()}")
 
         with open(result_path) as f:
             return json.load(f)

@@ -156,7 +156,11 @@ def unpack_notebook_output_bundle(
             var_meta["file"] = file_name
             result["variables"][var_name] = var_meta
 
-    with open(output_dir / "manifest.json", "w", encoding="utf-8") as f:
+    # Match the local harness contract: write to result.json (not
+    # manifest.json) so downstream code that reads the executor
+    # output from disk finds it under the same name regardless of
+    # whether the cell ran via local harness or remote bundle.
+    with open(output_dir / "result.json", "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2)
 
     return result

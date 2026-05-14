@@ -323,6 +323,10 @@ def main():
             result["loop"] = loop_state
 
     except Exception as e:
+        # sys.exit(1) raises SystemExit, which triggers the finally
+        # block — the parent gets exit=1 plus a result.json with
+        # success=False. The exit code is informational; the parent
+        # only checks for the presence + contents of result.json.
         result = {
             "success": False,
             "error": str(e),
@@ -332,11 +336,18 @@ def main():
             "stderr": stderr_text,
             "mutation_warnings": [],
         }
-        output_dir = Path(manifest.get("output_dir", "/tmp/strata_output"))
         sys.exit(1)
 
     finally:
-        result_path = Path(manifest.get("output_dir", "/tmp/strata_output")) / "manifest.json"
+        # Write the harness output to a *separate* filename so it
+        # can't be confused with the input manifest the parent wrote.
+        # The previous "manifest.json" overlap forced a fragile
+        # ``"success" not in result`` heuristic on the parent side to
+        # tell "harness crashed before finally" from "this is still
+        # the input we wrote" — fragile because adding any field
+        # named ``success`` to the input manifest would silently
+        # mask real crashes.
+        result_path = Path(manifest.get("output_dir", "/tmp/strata_output")) / "result.json"
         result_path.parent.mkdir(parents=True, exist_ok=True)
         # orjson handles datetime, Decimal, numpy, UUID natively;
         # OPT_NON_STR_KEYS covers the rare case of non-string dict

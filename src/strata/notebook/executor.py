@@ -2495,20 +2495,13 @@ class CellExecutor:
             await terminate_subprocess_tree(proc)
             raise TimeoutError()
 
-        result_path = manifest_path.parent / "manifest.json"
+        # Harness writes output to result.json (separate from the
+        # input manifest.json). File absent → harness crashed before
+        # reaching its finally block (typically a ModuleNotFoundError
+        # at import time) — surface stderr so the user sees what
+        # actually broke instead of an opaque "Unknown error".
+        result_path = manifest_path.parent / "result.json"
         if not result_path.exists():
-            raise RuntimeError(f"Harness did not produce manifest.json: {stderr.decode()}")
-
-        with open(result_path) as f:
-            result = json.load(f)
-
-        # The harness writes ``{"success": True/False, ...}``; the input
-        # manifest has neither field. If we read back something without
-        # ``success``, the harness crashed before reaching its finally
-        # block (typically a ModuleNotFoundError on import) and the file
-        # is still the input we wrote. Surface stderr so the user sees
-        # what actually broke instead of "Unknown error".
-        if "success" not in result:
             stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
             return {
                 "success": False,
@@ -2519,7 +2512,8 @@ class CellExecutor:
                 "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
                 "variables": {},
             }
-        return result
+        with open(result_path) as f:
+            return json.load(f)
 
     # ------------------------------------------------------------------
     # Loop cell execution (Phase 1 — local worker, sequential iterations,
