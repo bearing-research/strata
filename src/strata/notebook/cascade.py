@@ -11,6 +11,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from strata.notebook.dag import reachable_via
+from strata.notebook.models import CellStatus
+
 if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession
 
@@ -115,7 +118,7 @@ class CascadePlanner:
                 continue
 
             # Check if upstream is ready (artifact exists and provenance matches)
-            if upstream_cell.status != "ready":
+            if upstream_cell.status != CellStatus.READY:
                 has_stale_upstream = True
                 break
 
@@ -140,25 +143,16 @@ class CascadePlanner:
         if not self.session.dag:
             return None
 
-        # Use BFS backwards from target to find all reachable upstream cells
-        visited = set()
-        queue = [target_cell_id]
-        step_cells = []
+        # Shared BFS-upstream helper — same one ``get_cascade_plan`` uses,
+        # so both call sites agree on what "reachable upstream" means.
+        visited = reachable_via(self.session.dag.cell_upstream, target_cell_id)
 
-        while queue:
-            current = queue.pop(0)
-            if current in visited:
-                continue
-            visited.add(current)
-            step_cells.append(current)
-
-            for upstream_id in self.session.dag.cell_upstream.get(current, []):
-                if upstream_id not in visited:
-                    queue.append(upstream_id)
-
-        # Sort by topological order
+        # Order by the DAG's topological sort if available; otherwise the
+        # raw set order is fine (visited as a fallback).
         if self.session.dag.topological_order:
             step_cells = [cid for cid in self.session.dag.topological_order if cid in visited]
+        else:
+            step_cells = list(visited)
 
         # Build steps for each cell
         steps: list[CascadeStep] = []
@@ -173,13 +167,13 @@ class CascadePlanner:
             # Determine reason
             if step_cell_id == target_cell_id:
                 reason = CascadeReason.TARGET
-            elif cell.status == "stale":
+            elif cell.status == CellStatus.STALE:
                 reason = CascadeReason.STALE
             else:
                 reason = CascadeReason.MISSING
 
             # Check if can skip (already cached/ready)
-            skip = cell.status == "ready"
+            skip = cell.status == CellStatus.READY
 
             step = CascadeStep(
                 cell_id=step_cell_id,

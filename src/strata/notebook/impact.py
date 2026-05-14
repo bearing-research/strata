@@ -10,10 +10,12 @@ This extends the existing cascade prompt with downstream analysis.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from strata.notebook.cascade import CascadePlanner, CascadeStep
+from strata.notebook.models import CellStatus
 
 if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession
@@ -162,10 +164,10 @@ class ImpactAnalyzer:
 
         impacts: list[DownstreamImpact] = []
         visited: set[str] = set()
-        queue = list(self.session.dag.cell_downstream.get(cell_id, []))
+        queue: deque[str] = deque(self.session.dag.cell_downstream.get(cell_id, []))
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             if current in visited:
                 continue
             visited.add(current)
@@ -178,7 +180,7 @@ class ImpactAnalyzer:
                 continue
 
             # Only report cells that are currently ready — they'll become stale
-            if cell.status == "ready":
+            if cell.status == CellStatus.READY:
                 cell_name = cell.defines[0] if cell.defines else cell.id
                 impacts.append(
                     DownstreamImpact(

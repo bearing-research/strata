@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
@@ -312,13 +313,15 @@ def topological_sort(dag: NotebookDag, cell_ids: list[str]) -> list[str]:
     # Build in-degree map
     in_degree = {cell_id: len(dag.cell_upstream[cell_id]) for cell_id in cell_ids}
 
-    # Find all nodes with in-degree 0
-    queue = [cell_id for cell_id in cell_ids if in_degree[cell_id] == 0]
+    # Find all nodes with in-degree 0. deque (not list) so popleft is O(1) —
+    # this path runs on every keystroke-driven DAG rebuild, and list.pop(0)
+    # is O(n) per call, giving O(n²) on the hot interactive path.
+    queue: deque[str] = deque(cell_id for cell_id in cell_ids if in_degree[cell_id] == 0)
     result = []
 
     while queue:
         # Process a node with in-degree 0
-        current = queue.pop(0)
+        current = queue.popleft()
         result.append(current)
 
         # For each downstream cell, reduce in-degree
@@ -375,6 +378,32 @@ def detect_cycles(dag: NotebookDag, cell_ids: list[str]) -> list[list[str]]:
     return cycles
 
 
+def reachable_via(
+    adjacency: Mapping[str, list[str]],
+    start: str,
+) -> set[str]:
+    """BFS from ``start`` over ``adjacency``; return reachable set (incl. start).
+
+    Single shared helper for both upstream and downstream walks across the
+    DAG, cascade planner, and impact previewer — pass ``dag.cell_upstream``
+    for an upstream walk, ``dag.cell_downstream`` for a downstream one.
+    Uses ``deque.popleft`` (O(1)) rather than ``list.pop(0)`` (O(n)) since
+    these walks run on every keystroke-driven DAG rebuild and once per
+    impact-preview request.
+    """
+    visited: set[str] = set()
+    queue: deque[str] = deque([start])
+    while queue:
+        current = queue.popleft()
+        if current in visited:
+            continue
+        visited.add(current)
+        for neighbor in adjacency.get(current, []):
+            if neighbor not in visited:
+                queue.append(neighbor)
+    return visited
+
+
 def get_cascade_plan(dag: NotebookDag, target_cell_id: str, cell_ids: list[str]) -> list[str]:
     """Get all upstream cells needed before executing a target cell.
 
@@ -388,29 +417,8 @@ def get_cascade_plan(dag: NotebookDag, target_cell_id: str, cell_ids: list[str])
         If the target is a root cell, includes the target cell itself.
         Otherwise, includes only upstream cells.
     """
-    # BFS backwards from target to find all reachable upstream cells
-    visited = set()
-    queue = [target_cell_id]
-
-    while queue:
-        current = queue.pop(0)
-        if current in visited:
-            continue
-        visited.add(current)
-
-        for upstream_id in dag.cell_upstream[current]:
-            if upstream_id not in visited:
-                queue.append(upstream_id)
-
-    # If the target cell has no upstream dependencies (is a root), keep it in the plan
-    # Otherwise, remove it (we only want upstream cells)
+    visited = reachable_via(dag.cell_upstream, target_cell_id)
+    # Target stays in the plan only if it's a root (no upstreams to run).
     if dag.cell_upstream[target_cell_id]:
-        # Target has upstream dependencies, remove it
         visited.discard(target_cell_id)
-    else:
-        # Target is a root cell, keep it (it needs to be executed)
-        pass
-
-    # Return visited cells in topological order
-    plan = [cid for cid in cell_ids if cid in visited]
-    return plan
+    return [cid for cid in cell_ids if cid in visited]
