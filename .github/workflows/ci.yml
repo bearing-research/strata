@@ -66,19 +66,36 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.12", "3.13"]
 
-    # Pin the rustup toolchain via env so it applies regardless of CWD.
-    # setup-rust-toolchain's default `override: true` sets only a
-    # *per-directory* override (in $GITHUB_WORKSPACE). When uv spawns
-    # maturin from /Users/runner/work/_temp/setup-uv-cache/builds-v0/...,
-    # the override doesn't apply, no user-wide default is set, and
-    # macOS runners hit the rustup proxy's no-toolchain path (which
-    # prints rustup-init's help and exits 1). RUSTUP_TOOLCHAIN beats
-    # both override and default — rustup honors it everywhere.
     env:
       RUSTUP_TOOLCHAIN: stable
 
     steps:
       - uses: actions/checkout@v6
+
+      # macOS-latest images ship with Homebrew's rust + rustup pre-
+      # installed, configured against /opt/homebrew/etc/.rustup. The
+      # setup-rust-toolchain action skips installing rustup when it
+      # detects an existing one ("Install rustup, if needed" in the
+      # action.yml), and consequently doesn't prepend ~/.cargo/bin to
+      # $GITHUB_PATH. The action then runs `rustup toolchain install
+      # stable` which lands in ~/.rustup — but cargo on PATH is still
+      # Homebrew's, looking at Homebrew's RUSTUP_HOME, which doesn't
+      # have the toolchain. The proxy then prints rustup-init's help
+      # and exits 1 from inside maturin's cargo-metadata call.
+      #
+      # Removing Homebrew's rust+rustup before the action forces the
+      # action onto its curl-install path, which puts cargo at
+      # ~/.cargo/bin, adds it to $GITHUB_PATH, and installs the stable
+      # toolchain to ~/.rustup — all consistent.
+      - name: Remove Homebrew rust on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew list --formula 2>/dev/null | grep -E '^(rust|rustup-init|rustup)$' \
+            | xargs -I {} brew uninstall --force --ignore-dependencies {} \
+            || true
+          rm -rf /opt/homebrew/etc/.rustup
+          which rustup 2>/dev/null || echo "rustup removed"
 
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
