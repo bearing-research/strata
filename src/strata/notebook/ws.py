@@ -16,7 +16,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cascade import CascadePlanner
-from strata.notebook.executor import CellExecutor
+from strata.notebook.executor import CellExecutionResult, CellExecutor
 from strata.notebook.impact import ImpactAnalyzer
 from strata.notebook.inspect_repl import InspectManager
 from strata.notebook.models import CellStaleness, CellStatus, WorkerBackendType
@@ -1467,125 +1467,12 @@ async def _execute_cell_directly(
         else:
             result = await executor.execute_cell(cell_id, cell.source)
 
-        # Send console output
-        if result.stdout:
-            await _broadcast_message(
-                notebook_id,
-                {
-                    "type": "cell_console",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
-                        "cell_id": cell_id,
-                        "stream": "stdout",
-                        "text": result.stdout,
-                    },
-                },
-            )
-
-        if result.stderr:
-            await _broadcast_message(
-                notebook_id,
-                {
-                    "type": "cell_console",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
-                        "cell_id": cell_id,
-                        "stream": "stderr",
-                        "text": result.stderr,
-                    },
-                },
-            )
-
-        # v1.1: Record execution for profiling
+        # Record execution for profiling before broadcasting so the
+        # output payload reflects the just-recorded metadata.
         session.record_execution(cell_id, result.duration_ms, result.cache_hit)
         session.apply_execution_result_metadata(cell_id, result)
 
-        # Send output with v1.1 profiling data
-        if result.success:
-            await _broadcast_message(
-                notebook_id,
-                {
-                    "type": "cell_output",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
-                        "cell_id": cell_id,
-                        "outputs": result.outputs,
-                        **({"displays": result.display_outputs} if result.display_outputs else {}),
-                        **({"display": result.display_output} if result.display_output else {}),
-                        "cache_hit": result.cache_hit,
-                        "duration_ms": int(result.duration_ms),
-                        "artifact_uri": result.artifact_uri,
-                        "stdout": result.stdout,
-                        "stderr": result.stderr,
-                        # v1.1: Profiling data
-                        "execution_method": result.execution_method,
-                        "mutation_warnings": result.mutation_warnings,
-                        **({"remote_worker": result.remote_worker} if result.remote_worker else {}),
-                        **(
-                            {"remote_transport": result.remote_transport}
-                            if result.remote_transport
-                            else {}
-                        ),
-                        **(
-                            {"remote_build_id": result.remote_build_id}
-                            if result.remote_build_id
-                            else {}
-                        ),
-                        **(
-                            {"remote_build_state": result.remote_build_state}
-                            if result.remote_build_state
-                            else {}
-                        ),
-                        **(
-                            {"remote_error_code": result.remote_error_code}
-                            if result.remote_error_code
-                            else {}
-                        ),
-                    },
-                },
-            )
-        else:
-            await _broadcast_message(
-                notebook_id,
-                {
-                    "type": "cell_error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
-                        "cell_id": cell_id,
-                        "error": result.error,
-                        **({"remote_worker": result.remote_worker} if result.remote_worker else {}),
-                        **(
-                            {"remote_transport": result.remote_transport}
-                            if result.remote_transport
-                            else {}
-                        ),
-                        **(
-                            {"remote_build_id": result.remote_build_id}
-                            if result.remote_build_id
-                            else {}
-                        ),
-                        **(
-                            {"remote_build_state": result.remote_build_state}
-                            if result.remote_build_state
-                            else {}
-                        ),
-                        **(
-                            {"remote_error_code": result.remote_error_code}
-                            if result.remote_error_code
-                            else {}
-                        ),
-                        **(
-                            {"suggest_install": result.suggest_install}
-                            if result.suggest_install
-                            else {}
-                        ),
-                    },
-                },
-            )
+        await _broadcast_execution_result(notebook_id, seq, cell_id, result)
 
         if result.success:
             previous_snapshot = _capture_cell_state_snapshot(session)
@@ -1735,121 +1622,11 @@ async def _execute_cascade(
                 session.record_execution(cell_id, result.duration_ms, result.cache_hit)
                 session.apply_execution_result_metadata(cell_id, result)
 
-                # Send console output for cascade cells
-                if result.stdout:
-                    await _broadcast_message(
-                        notebook_id,
-                        {
-                            "type": "cell_console",
-                            "seq": seq,
-                            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                            "payload": {
-                                "cell_id": cell_id,
-                                "stream": "stdout",
-                                "text": result.stdout,
-                            },
-                        },
-                    )
-
-                # Send output with v1.1 profiling data
-                if result.success:
-                    await _broadcast_message(
-                        notebook_id,
-                        {
-                            "type": "cell_output",
-                            "seq": seq,
-                            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                            "payload": {
-                                "cell_id": cell_id,
-                                "outputs": result.outputs,
-                                **(
-                                    {"displays": result.display_outputs}
-                                    if result.display_outputs
-                                    else {}
-                                ),
-                                **(
-                                    {"display": result.display_output}
-                                    if result.display_output
-                                    else {}
-                                ),
-                                "cache_hit": result.cache_hit,
-                                "duration_ms": int(result.duration_ms),
-                                "artifact_uri": result.artifact_uri,
-                                "stdout": result.stdout,
-                                "stderr": result.stderr,
-                                "execution_method": result.execution_method,
-                                "mutation_warnings": result.mutation_warnings,
-                                **(
-                                    {"remote_worker": result.remote_worker}
-                                    if result.remote_worker
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_transport": result.remote_transport}
-                                    if result.remote_transport
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_build_id": result.remote_build_id}
-                                    if result.remote_build_id
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_build_state": result.remote_build_state}
-                                    if result.remote_build_state
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_error_code": result.remote_error_code}
-                                    if result.remote_error_code
-                                    else {}
-                                ),
-                            },
-                        },
-                    )
-                else:
-                    await _broadcast_message(
-                        notebook_id,
-                        {
-                            "type": "cell_error",
-                            "seq": seq,
-                            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                            "payload": {
-                                "cell_id": cell_id,
-                                "error": result.error,
-                                **(
-                                    {"remote_worker": result.remote_worker}
-                                    if result.remote_worker
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_transport": result.remote_transport}
-                                    if result.remote_transport
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_build_id": result.remote_build_id}
-                                    if result.remote_build_id
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_build_state": result.remote_build_state}
-                                    if result.remote_build_state
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_error_code": result.remote_error_code}
-                                    if result.remote_error_code
-                                    else {}
-                                ),
-                                **(
-                                    {"suggest_install": result.suggest_install}
-                                    if result.suggest_install
-                                    else {}
-                                ),
-                            },
-                        },
-                    )
+                # Broadcast stdout/stderr console + output/error in the
+                # same shape as the direct-execute path. Note: cascade
+                # previously skipped the stderr console broadcast — that
+                # drift is fixed by going through the shared helper.
+                await _broadcast_execution_result(notebook_id, seq, cell_id, result)
 
                 # Mark as ready — update backend state AND broadcast
                 status = CellStatus.READY if result.success else CellStatus.ERROR
@@ -1967,95 +1744,11 @@ async def _execute_run_all(
             try:
                 result = await executor.execute_cell(cell_id, cell.source)
 
-                if result.stdout:
-                    await _broadcast_message(
-                        notebook_id,
-                        {
-                            "type": "cell_console",
-                            "seq": seq,
-                            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                            "payload": {
-                                "cell_id": cell_id,
-                                "stream": "stdout",
-                                "text": result.stdout,
-                            },
-                        },
-                    )
-
-                if result.stderr:
-                    await _broadcast_message(
-                        notebook_id,
-                        {
-                            "type": "cell_console",
-                            "seq": seq,
-                            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                            "payload": {
-                                "cell_id": cell_id,
-                                "stream": "stderr",
-                                "text": result.stderr,
-                            },
-                        },
-                    )
-
                 session.record_execution(cell_id, result.duration_ms, result.cache_hit)
                 session.apply_execution_result_metadata(cell_id, result)
+                await _broadcast_execution_result(notebook_id, seq, cell_id, result)
 
                 if result.success:
-                    await _broadcast_message(
-                        notebook_id,
-                        {
-                            "type": "cell_output",
-                            "seq": seq,
-                            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                            "payload": {
-                                "cell_id": cell_id,
-                                "outputs": result.outputs,
-                                **(
-                                    {"displays": result.display_outputs}
-                                    if result.display_outputs
-                                    else {}
-                                ),
-                                **(
-                                    {"display": result.display_output}
-                                    if result.display_output
-                                    else {}
-                                ),
-                                "cache_hit": result.cache_hit,
-                                "duration_ms": int(result.duration_ms),
-                                "artifact_uri": result.artifact_uri,
-                                "stdout": result.stdout,
-                                "stderr": result.stderr,
-                                "execution_method": result.execution_method,
-                                "mutation_warnings": result.mutation_warnings,
-                                **(
-                                    {"remote_worker": result.remote_worker}
-                                    if result.remote_worker
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_transport": result.remote_transport}
-                                    if result.remote_transport
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_build_id": result.remote_build_id}
-                                    if result.remote_build_id
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_build_state": result.remote_build_state}
-                                    if result.remote_build_state
-                                    else {}
-                                ),
-                                **(
-                                    {"remote_error_code": result.remote_error_code}
-                                    if result.remote_error_code
-                                    else {}
-                                ),
-                            },
-                        },
-                    )
-
                     previous_snapshot = _capture_cell_state_snapshot(session)
                     await _refresh_and_broadcast_changed_staleness(
                         session,
@@ -2066,49 +1759,9 @@ async def _execute_run_all(
                     )
                     continue
 
+                # Failure: mark + broadcast status. The cell_error
+                # frame was already emitted by the helper above.
                 cell.status = CellStatus.ERROR
-                await _broadcast_message(
-                    notebook_id,
-                    {
-                        "type": "cell_error",
-                        "seq": seq,
-                        "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                        "payload": {
-                            "cell_id": cell_id,
-                            "error": result.error,
-                            **(
-                                {"remote_worker": result.remote_worker}
-                                if result.remote_worker
-                                else {}
-                            ),
-                            **(
-                                {"remote_transport": result.remote_transport}
-                                if result.remote_transport
-                                else {}
-                            ),
-                            **(
-                                {"remote_build_id": result.remote_build_id}
-                                if result.remote_build_id
-                                else {}
-                            ),
-                            **(
-                                {"remote_build_state": result.remote_build_state}
-                                if result.remote_build_state
-                                else {}
-                            ),
-                            **(
-                                {"remote_error_code": result.remote_error_code}
-                                if result.remote_error_code
-                                else {}
-                            ),
-                            **(
-                                {"suggest_install": result.suggest_install}
-                                if result.suggest_install
-                                else {}
-                            ),
-                        },
-                    },
-                )
                 await _broadcast_message(
                     notebook_id,
                     {
@@ -2606,6 +2259,120 @@ def _running_payload(session, cell_id: str, source: str) -> dict[str, Any]:
     payload["remote_worker"] = worker_spec.name
     payload["remote_transport"] = worker_transport(worker_spec)
     return payload
+
+
+def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict[str, Any]:
+    """Build the payload for ``cell_output`` (success) or ``cell_error`` (failure).
+
+    Single source of truth for the post-execution payload shape —
+    previously inlined four times (``_execute_cell_directly``,
+    ``_execute_cascade``, ``_execute_run_all``, ``execute_cell_for_agent``)
+    with ~30 lines of ``**({"key": value} if value else {})`` spreads.
+    Adding a field to ``CellExecutionResult`` used to require touching
+    every site; now it's one place.
+
+    Remote-* fields (worker / transport / build_id / build_state /
+    error_code) appear on both success and failure responses so the
+    frontend can render the same "ran on X via Y" badge regardless of
+    outcome.
+    """
+    payload: dict[str, Any] = {"cell_id": cell_id}
+    if result.success:
+        payload.update(
+            {
+                "outputs": result.outputs,
+                "cache_hit": result.cache_hit,
+                "duration_ms": int(result.duration_ms),
+                "artifact_uri": result.artifact_uri,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "execution_method": result.execution_method,
+                "mutation_warnings": result.mutation_warnings,
+            }
+        )
+        if result.display_outputs:
+            payload["displays"] = result.display_outputs
+        if result.display_output:
+            payload["display"] = result.display_output
+    else:
+        payload["error"] = result.error
+        if result.suggest_install:
+            payload["suggest_install"] = result.suggest_install
+
+    for field in (
+        "remote_worker",
+        "remote_transport",
+        "remote_build_id",
+        "remote_build_state",
+        "remote_error_code",
+    ):
+        value = getattr(result, field, None)
+        if value:
+            payload[field] = value
+
+    return payload
+
+
+async def _broadcast_execution_result(
+    notebook_id: str,
+    seq: int,
+    cell_id: str,
+    result: CellExecutionResult,
+) -> None:
+    """Broadcast the standard execution-finished message sequence.
+
+    Emits, in order:
+
+    1. ``cell_console`` for stdout (if any)
+    2. ``cell_console`` for stderr (if any)
+    3. ``cell_output`` (success) or ``cell_error`` (failure)
+
+    All four execution-driving handlers (``_execute_cell_directly``,
+    ``_execute_cascade``, ``_execute_run_all``,
+    ``execute_cell_for_agent``) used to inline this block. The cascade
+    path was already drifting — it skipped the stderr broadcast.
+    """
+    ts = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
+
+    if result.stdout:
+        await _broadcast_message(
+            notebook_id,
+            {
+                "type": "cell_console",
+                "seq": seq,
+                "ts": ts,
+                "payload": {
+                    "cell_id": cell_id,
+                    "stream": "stdout",
+                    "text": result.stdout,
+                },
+            },
+        )
+
+    if result.stderr:
+        await _broadcast_message(
+            notebook_id,
+            {
+                "type": "cell_console",
+                "seq": seq,
+                "ts": ts,
+                "payload": {
+                    "cell_id": cell_id,
+                    "stream": "stderr",
+                    "text": result.stderr,
+                },
+            },
+        )
+
+    await _broadcast_message(
+        notebook_id,
+        {
+            "type": "cell_output" if result.success else "cell_error",
+            "seq": seq,
+            "ts": ts,
+            "payload": _execution_result_payload(cell_id, result),
+        },
+    )
 
 
 async def _broadcast_message(notebook_id: str, message: dict[str, Any]) -> None:
