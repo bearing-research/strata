@@ -516,7 +516,7 @@ class CreateNotebookRequest(BaseModel):
 class UpdateCellSourceRequest(BaseModel):
     """Request to update cell source."""
 
-    source: str = Field(..., max_length=1_000_000)  # 1MB limit
+    source: str = Field(..., max_length=1_000_000)  # 1M characters (~1-4 MB UTF-8)
 
 
 class AddCellRequest(BaseModel):

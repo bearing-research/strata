@@ -435,24 +435,40 @@ async def _cleanup_notebook_websocket(
 async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     """WebSocket endpoint for real-time notebook updates.
 
-    Accepts messages:
-    - cell_execute: Run a cell (check if cascade needed)
-    - cell_execute_cascade: Execute cascade plan
-    - cell_execute_force: Run with stale inputs
-    - notebook_run_all: Run all non-empty cells in notebook order
-    - cell_cancel: Cancel execution
-    - cell_source_update: Source code changed
-    - notebook_sync: Request full state
+    Accepts messages (C→S):
+    - cell_execute              Run a cell (check if cascade needed)
+    - cell_execute_cascade      Execute cascade plan
+    - cell_execute_force        Run with stale inputs
+    - notebook_run_all          Run all non-empty cells in notebook order
+    - cell_cancel               Cancel execution
+    - cell_source_update        Source code changed (debounced flush)
+    - notebook_sync             Request full state
+    - impact_preview_request    Compute upstream + downstream impact
+    - profiling_request         Compute per-cell duration summary
+    - inspect_open              Open an inspect REPL on a cell
+    - inspect_eval              Eval an expression in an open REPL
+    - inspect_close             Close the REPL
+    - dependency_add            Add a Python dep via writer
+    - dependency_remove         Remove a Python dep via writer
+    - variant_set_active        Switch active variant in a group
+    - variant_add               Add a new variant cell
+    - agent_cancel              Cancel a running agent task
+    - agent_confirm_response    Reply to an agent's pending confirmation
 
-    Sends messages:
-    - cell_status: Status changed
-    - cell_output: Execution result
-    - cell_console: Incremental stdout/stderr
-    - cell_error: Execution failed
-    - dag_update: DAG changed
-    - cascade_prompt: Cascade needed
-    - cascade_progress: Progress during cascade
-    - notebook_state: Full state (response to sync)
+    Sends messages (S→C):
+    - cell_status               Status changed (idle/running/ready/error/stale)
+    - cell_output               Execution result
+    - cell_console              Incremental stdout/stderr
+    - cell_error                Execution failed
+    - cell_iteration_progress   Loop-cell iteration update
+    - dag_update                DAG changed
+    - cascade_prompt            Cascade needed
+    - cascade_progress          Progress during cascade
+    - notebook_state            Full state (response to sync)
+    - impact_preview            Upstream + downstream impact
+    - inspect_result            Result of an inspect_eval
+    - profiling_summary         Per-cell duration summary
+    - error                     Generic error frame
     """
     # Get or create session
     session_manager = _get_session_manager()

@@ -1063,7 +1063,13 @@ class NotebookSession:
         return data
 
     def _persist_console_output(self, cell_id: str, stdout: str | None, stderr: str | None) -> None:
-        """Persist stdout/stderr to notebook.toml so they survive reopens."""
+        """Persist stdout/stderr to ``.strata/console/{cell_id}.json``.
+
+        Written outside ``notebook.toml`` because console output is
+        runtime state — it changes every execution and would churn
+        the committed config (CLAUDE.md invariant 6: runtime writers
+        never touch notebook.toml).
+        """
         from strata.notebook.writer import update_cell_console_output
 
         update_cell_console_output(self.path, cell_id, stdout or "", stderr or "")
@@ -1071,7 +1077,11 @@ class NotebookSession:
     def persist_display_outputs(
         self, cell_id: str, display_outputs: list[dict[str, Any]] | None
     ) -> None:
-        """Persist display metadata to notebook.toml for reopen/refresh restoration."""
+        """Persist display metadata to ``.strata/runtime.json`` for reopen restoration.
+
+        Display outputs are runtime state, not committed config — same
+        reason as console output, per CLAUDE.md invariant 6.
+        """
         update_cell_display_outputs(self.path, cell_id, display_outputs)
 
     def persist_display_output(self, cell_id: str, display_output: dict[str, Any] | None) -> None:
