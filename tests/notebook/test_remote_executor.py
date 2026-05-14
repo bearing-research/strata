@@ -632,6 +632,10 @@ def test_manifest_rejects_upload_url_with_disallowed_scheme(notebook_executor_se
 
 
 def test_manifest_rejects_finalize_url_with_disallowed_scheme(notebook_executor_server):
+    # example.com is the only sanctioned "real but uninteresting" host
+    # that resolves to a public IP; the validator now requires hosts
+    # to resolve to a non-private address, so example.invalid would
+    # fail at host resolution before reaching the scheme check.
     manifest = {
         "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
         "metadata": {
@@ -639,11 +643,93 @@ def test_manifest_rejects_finalize_url_with_disallowed_scheme(notebook_executor_
             "params": {"source": "x = 1", "input_specs": {}, "mounts": [], "env": {}},
         },
         "inputs": [],
-        "output": {"url": "https://example.invalid/upload"},
-        "finalize_url": "ftp://example.invalid/finalize",
+        "output": {"url": "https://example.com/upload"},
+        "finalize_url": "ftp://example.com/finalize",
     }
     response = httpx.post(
         notebook_executor_server["manifest_execute_url"], json=manifest, timeout=10.0
     )
     assert response.status_code == 400
     assert "finalize_url" in response.json()["detail"]
+
+
+def test_manifest_rejects_url_resolving_to_loopback(notebook_executor_server, monkeypatch):
+    """SSRF guard: a hostname like ``localhost`` resolves to 127.0.0.1 / ::1
+    and would let a compromised orchestrator coerce the worker into
+    fetching internal services on the worker's loopback interface.
+
+    The fixture sets STRATA_WORKER_ALLOW_LOCAL_HOSTS so the build-server
+    tests pass against 127.0.0.1; delete it here to exercise the
+    production SSRF guard.
+    """
+    monkeypatch.delenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", raising=False)
+    manifest = {
+        "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
+        "metadata": {
+            "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
+            "params": {"source": "x = 1", "input_specs": {}, "mounts": [], "env": {}},
+        },
+        "inputs": [
+            {
+                "artifact_id": "a",
+                "version": 1,
+                "url": "http://localhost/secret",
+            }
+        ],
+        "output": {"url": "https://example.com/upload"},
+        "finalize_url": "https://example.com/finalize",
+    }
+    response = httpx.post(
+        notebook_executor_server["manifest_execute_url"], json=manifest, timeout=10.0
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "non-routable" in detail
+    assert "localhost" in detail
+
+
+def test_manifest_rejects_url_with_metadata_ip(notebook_executor_server, monkeypatch):
+    """SSRF guard: 169.254.169.254 is the AWS / Azure / GCP cloud-metadata
+    endpoint and must never be reachable from worker code paths.
+    """
+    monkeypatch.delenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", raising=False)
+    manifest = {
+        "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
+        "metadata": {
+            "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
+            "params": {"source": "x = 1", "input_specs": {}, "mounts": [], "env": {}},
+        },
+        "inputs": [],
+        "output": {"url": "http://169.254.169.254/latest/meta-data/"},
+        "finalize_url": "https://example.com/finalize",
+    }
+    response = httpx.post(
+        notebook_executor_server["manifest_execute_url"], json=manifest, timeout=10.0
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "non-routable" in detail
+
+
+def test_manifest_rejects_url_with_private_ip(notebook_executor_server, monkeypatch):
+    """SSRF guard: RFC1918 private addresses (10/8, 172.16/12, 192.168/16)
+    typically belong to the worker's VPC and host internal services
+    that should not be reachable from manifest URLs.
+    """
+    monkeypatch.delenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", raising=False)
+    manifest = {
+        "schema_version": NOTEBOOK_EXECUTOR_MANIFEST_VERSION,
+        "metadata": {
+            "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
+            "params": {"source": "x = 1", "input_specs": {}, "mounts": [], "env": {}},
+        },
+        "inputs": [],
+        "output": {"url": "http://10.0.0.1/upload"},
+        "finalize_url": "https://example.com/finalize",
+    }
+    response = httpx.post(
+        notebook_executor_server["manifest_execute_url"], json=manifest, timeout=10.0
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "non-routable" in detail

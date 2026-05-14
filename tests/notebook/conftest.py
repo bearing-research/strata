@@ -112,10 +112,17 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
 
 
 @pytest.fixture
-def notebook_executor_server():
-    """Run the notebook HTTP executor in a background thread."""
+def notebook_executor_server(monkeypatch):
+    """Run the notebook HTTP executor in a background thread.
+
+    The build server we point at is on 127.0.0.1, which the production
+    SSRF guard refuses; set STRATA_WORKER_ALLOW_LOCAL_HOSTS so the
+    manifest URLs validate without disabling the scheme allowlist
+    that the SSRF tests still want exercised.
+    """
     from strata.notebook.remote_executor import create_notebook_executor_app
 
+    monkeypatch.setenv("STRATA_WORKER_ALLOW_LOCAL_HOSTS", "1")
     port = find_free_port()
     app = create_notebook_executor_app()
     server_config = uvicorn.Config(

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import ipaddress
 import json
 import os
 import shutil
+import socket
 import sys
 import tempfile
 import time
@@ -58,13 +60,56 @@ def _max_input_bytes() -> int:
     return parsed if parsed > 0 else _DEFAULT_MAX_INPUT_BYTES
 
 
-def _assert_url_scheme_allowed(url: str, field: str) -> None:
-    """Reject URLs with schemes outside the http/https allowlist.
+def _allow_local_hosts() -> bool:
+    """Whether to bypass the host-IP SSRF check.
 
-    A compromised orchestrator could set ``url`` to ``file:///etc/passwd``,
-    ``http://169.254.169.254/...`` (cloud metadata), or other non-http
-    schemes that httpx might support via plugins. Rejecting non-http
-    schemes up front rules these out without trusting the orchestrator.
+    Default off. Tests and local development that need to fetch from
+    127.0.0.1 / 192.168.x.x / docker-bridge addresses set
+    ``STRATA_WORKER_ALLOW_LOCAL_HOSTS=1``. Production worker
+    deployments should leave it unset so the SSRF defense is active.
+    """
+    return os.environ.get("STRATA_WORKER_ALLOW_LOCAL_HOSTS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _assert_url_safe(url: str, field: str) -> None:
+    """Reject manifest URLs that are scheme- or host-unsafe.
+
+    A compromised or buggy orchestrator could hand the worker URLs
+    that point at internal services. Two distinct defenses:
+
+    1. **Scheme allowlist** — only http and https. Blocks file://,
+       data:, javascript:, ftp:// and any other scheme httpx might
+       grow plugin support for.
+    2. **Host resolution + IP-range blocklist** — the resolved IP
+       must not be loopback, link-local (incl. cloud metadata
+       169.254.169.254 / fd00:ec2::254), private, multicast,
+       reserved, or unspecified. Hostnames are resolved via
+       getaddrinfo and every returned address is checked; a
+       hostname that resolves to multiple addresses must have all
+       of them in the public range to pass. This rules out both
+       direct internal-IP URLs and hostname-based variants
+       (e.g. metadata.google.internal). Set
+       ``STRATA_WORKER_ALLOW_LOCAL_HOSTS=1`` to bypass the IP check
+       (tests / local dev with 127.0.0.1 build servers); production
+       deployments leave it unset.
+
+    Allowlist-on-host instead of blocklist-on-host would be more
+    restrictive but breaks real signed-URL usage where S3/GCS
+    buckets resolve to public IPs across many regions. Blocklist
+    on internal ranges is the right tradeoff.
+
+    Caveats:
+    * DNS rebinding race: the IP we resolved here may differ from
+      the IP httpx resolves at fetch time. Honest mitigation
+      requires resolving once and passing the IP to httpx; left as
+      a follow-up because the practical attacker who controls DNS
+      already has stronger primitives.
+    * IPv4-mapped IPv6 (``::ffff:127.0.0.1``) is caught — we
+      ``unmap()`` before checking.
     """
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
@@ -76,6 +121,53 @@ def _assert_url_scheme_allowed(url: str, field: str) -> None:
                 f"only {sorted(_ALLOWED_URL_SCHEMES)} are accepted."
             ),
         )
+
+    if _allow_local_hosts():
+        return
+
+    host = parsed.hostname
+    if not host:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Manifest {field} URL is missing a host: {url!r}",
+        )
+
+    try:
+        addrinfo = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Manifest {field} URL host {host!r} did not resolve: {exc}",
+        ) from exc
+
+    for entry in addrinfo:
+        sockaddr = entry[4]
+        try:
+            ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Manifest {field} URL host {host!r} resolved to non-IP address {sockaddr[0]!r}"
+                ),
+            ) from None
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        if (
+            ip.is_loopback
+            or ip.is_link_local
+            or ip.is_private
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Manifest {field} URL host {host!r} resolves to "
+                    f"non-routable address {ip}; refusing to fetch"
+                ),
+            )
 
 
 async def _run_harness(
@@ -502,7 +594,7 @@ def create_notebook_executor_app() -> FastAPI:
             url = str(item.get("url", "")).strip()
             if not artifact_id or not url or not isinstance(version, int):
                 raise HTTPException(status_code=400, detail="Manifest input entry is incomplete")
-            _assert_url_scheme_allowed(url, f"input[{artifact_id}@v={version}]")
+            _assert_url_safe(url, f"input[{artifact_id}@v={version}]")
             input_url_by_uri[f"strata://artifact/{artifact_id}@v={version}"] = url
 
         output = manifest.get("output", {})
@@ -512,8 +604,8 @@ def create_notebook_executor_app() -> FastAPI:
         finalize_url = str(manifest.get("finalize_url", "")).strip()
         if not upload_url or not finalize_url:
             raise HTTPException(status_code=400, detail="Manifest is missing upload/finalize URLs")
-        _assert_url_scheme_allowed(upload_url, "output.url")
-        _assert_url_scheme_allowed(finalize_url, "finalize_url")
+        _assert_url_safe(upload_url, "output.url")
+        _assert_url_safe(finalize_url, "finalize_url")
 
         async def _download_input(
             var_name: str,
