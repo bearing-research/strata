@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Pool worker script that runs in the notebook subprocess.
 
-This script:
-1. Parses pyproject.toml to find common deps and imports them (warm-up)
-2. Sends a 'ready' signal on stdout
-3. Reads manifest paths from stdin, one per line
-4. Executes each manifest with the harness logic and prints the JSON result
+Single-shot: the worker imports common deps, sends a ``ready`` signal,
+reads exactly one manifest path from stdin, executes it, prints the
+JSON result, and exits. The parent (``WarmProcessPool``) kills the
+worker after every cell to preserve per-cell isolation (sys.path,
+os.environ, and module-state cannot leak between cells), so any
+reuse loop here would be unreachable.
 
-It runs in the notebook's venv and cannot ``import strata``.
+This script runs in the notebook's venv and cannot ``import strata``.
 Serialization is delegated to ``serializer.py`` in the same directory,
 loaded via ``importlib.util``.
 """
@@ -279,32 +280,32 @@ def main() -> None:
 
         print("ready", flush=True)
 
-        while True:
-            line = sys.stdin.readline()
-            if not line:
-                break
-            manifest_path = line.strip()
-            if not manifest_path:
-                continue
-            try:
-                with open(manifest_path, "rb") as f:
-                    manifest = orjson.loads(f.read())
-                result = execute_harness(manifest)
-                print(_dumps_result(result), flush=True)
-            except Exception as e:
-                print(
-                    _dumps_result(
-                        {
-                            "success": False,
-                            "variables": {},
-                            "stdout": "",
-                            "stderr": "",
-                            "error": f"Pool worker error: {e}",
-                            "mutation_warnings": [],
-                        }
-                    ),
-                    flush=True,
-                )
+        line = sys.stdin.readline()
+        if not line:
+            return
+        manifest_path = line.strip()
+        if not manifest_path:
+            return
+
+        try:
+            with open(manifest_path, "rb") as f:
+                manifest = orjson.loads(f.read())
+            result = execute_harness(manifest)
+            print(_dumps_result(result), flush=True)
+        except Exception as e:
+            print(
+                _dumps_result(
+                    {
+                        "success": False,
+                        "variables": {},
+                        "stdout": "",
+                        "stderr": "",
+                        "error": f"Pool worker error: {e}",
+                        "mutation_warnings": [],
+                    }
+                ),
+                flush=True,
+            )
 
     except Exception as e:
         print(f"fatal: {e}", file=sys.stderr, flush=True)

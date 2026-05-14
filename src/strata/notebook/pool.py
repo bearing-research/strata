@@ -38,9 +38,13 @@ class WarmProcess:
 class WarmProcessPool:
     """Pool of pre-spawned Python processes for fast cell execution.
 
-    The pool maintains a configured number of Python processes that are kept warm
-    with common imports already loaded. When a cell needs to execute, we acquire
-    a warm process, send the execution manifest, and wait for results.
+    Each worker is *single-shot*: it runs one manifest and is killed by
+    ``release_and_replace``. A background replacement is spawned so the
+    queue stays primed. The win is parallel warm-up — common imports
+    are loaded ahead of time so cells don't pay the ~1.5s import cost
+    when they execute — not interpreter reuse. Single-shot also
+    preserves Strata's per-cell isolation invariant (no sys.path,
+    os.environ, or module-state leakage between cells).
 
     Attributes:
         notebook_dir: Path to the notebook directory
@@ -149,6 +153,13 @@ class WarmProcessPool:
         Returns:
             WarmProcess if available, None if pool is empty or not started
         """
+        # Check started flag first so callers see a clean None after
+        # drain() — without this, a process that drain() raced past
+        # (background spawn finishing just after drain set _started=False)
+        # could still be handed out and then immediately killed by the
+        # next invalidate cycle.
+        if not self._started:
+            return None
         try:
             warm_proc = self._available.get_nowait()
             return warm_proc
