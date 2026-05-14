@@ -805,6 +805,31 @@ async function listWorkers(notebookId: string, refresh = false): Promise<WorkerC
   return readJson<WorkerCatalogResponse>(resp)
 }
 
+async function updateNotebookPythonVersion(
+  notebookId: string,
+  pythonVersion: string,
+): Promise<{
+  accepted: boolean
+  reason?: string
+}> {
+  // 200 (no-op when already at requested version) or 202 (job dispatched)
+  // both indicate the request was understood. Errors throw via
+  // throwApiError so callers see 400/404/409 with the server's detail.
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/python-version`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ python_version: pythonVersion }),
+    },
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to update Python version')
+  }
+  return readJson<{ accepted: boolean; reason?: string }>(resp)
+}
+
+
 async function updateWorkers(
   notebookId: string,
   workers: BackendWorkerPayload[],
@@ -1323,6 +1348,7 @@ export function useStrata() {
     getConnectionSchema,
     updateNotebookWorker,
     updateNotebookTimeout,
+    updateNotebookPythonVersion,
     updateNotebookEnv,
     refreshNotebookSecretManager,
     updateNotebookSecretManagerConfig,

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
+import { useStrata } from '../composables/useStrata'
+import PythonVersionModal from './PythonVersionModal.vue'
 
 const {
   notebook,
@@ -29,6 +31,62 @@ const {
   fetchEnvironment,
   connected,
 } = useNotebook()
+
+const strata = useStrata()
+
+// Python-version modal state. Versions are fetched lazily when the
+// modal opens so the panel doesn't pay the round-trip cost on every
+// notebook open — the picker is a rarely-used affordance.
+const pythonModalOpen = ref(false)
+const pythonModalBusy = ref(false)
+const pythonModalError = ref<string | null>(null)
+const pythonAvailable = ref<string[]>([])
+
+async function openPythonModal() {
+  pythonModalError.value = null
+  if (pythonAvailable.value.length === 0) {
+    try {
+      const data = await strata.getNotebookRuntimeConfig()
+      const raw = data as { available_python_versions?: unknown }
+      pythonAvailable.value = Array.isArray(raw.available_python_versions)
+        ? raw.available_python_versions
+            .map((v: unknown) => String(v || '').trim())
+            .filter((v: string) => v.length > 0)
+        : []
+    } catch (err) {
+      pythonModalError.value =
+        (err as Error).message || 'Failed to load available Python versions'
+    }
+  }
+  pythonModalOpen.value = true
+}
+
+function closePythonModal() {
+  if (pythonModalBusy.value) return
+  pythonModalOpen.value = false
+}
+
+async function confirmPythonChange(version: string) {
+  if (!notebook.id) return
+  pythonModalBusy.value = true
+  pythonModalError.value = null
+  try {
+    const result = await strata.updateNotebookPythonVersion(notebook.id, version)
+    if (result.accepted) {
+      // Background job is running. The environment_job_progress WS
+      // stream and subsequent runtime-state refreshes will surface
+      // completion; just close the modal.
+      pythonModalOpen.value = false
+    } else {
+      // 200 no-op (already at requested version). Close silently.
+      pythonModalOpen.value = false
+    }
+  } catch (err) {
+    pythonModalError.value = (err as Error).message || 'Failed to update Python version'
+  } finally {
+    pythonModalBusy.value = false
+  }
+}
 
 const newPackage = ref('')
 const showPanel = ref(false)
@@ -366,9 +424,19 @@ function downloadRequirements() {
       <div class="env-stats">
         <div class="env-stat">
           <span class="env-stat-label">Requested Python</span>
-          <span class="env-stat-value">{{
-            notebook.environment.requestedPythonVersion || 'Unknown'
-          }}</span>
+          <button
+            type="button"
+            class="env-stat-value env-stat-button"
+            :disabled="environmentMutationActive"
+            :title="
+              environmentMutationActive
+                ? 'Cannot change Python while another environment update is running'
+                : 'Click to change the notebook\'s Python version'
+            "
+            @click="openPythonModal"
+          >
+            {{ notebook.environment.requestedPythonVersion || 'Unknown' }}
+          </button>
         </div>
         <div class="env-stat">
           <span class="env-stat-label">Runtime Python</span>
@@ -695,6 +763,16 @@ function downloadRequirements() {
         </li>
       </ul>
     </div>
+
+    <PythonVersionModal
+      :open="pythonModalOpen"
+      :available="pythonAvailable"
+      :current="notebook.environment.requestedPythonVersion || ''"
+      :busy="pythonModalBusy"
+      :error-message="pythonModalError"
+      @close="closePythonModal"
+      @confirm="confirmPythonChange"
+    />
   </div>
 </template>
 
@@ -871,6 +949,25 @@ function downloadRequirements() {
   font-size: 12px;
   font-weight: 600;
   word-break: break-all;
+}
+.env-stat-button {
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 1px 6px;
+  margin-left: -6px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.env-stat-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-input);
+}
+.env-stat-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .env-meta {
