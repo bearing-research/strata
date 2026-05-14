@@ -2711,3 +2711,107 @@ def test_import_endpoint_uses_custom_name_form_field(monkeypatch, tmp_path):
     assert data["name"] == "Renamed Notebook"
     # Slugified by create_notebook (spaces → underscores, lowercased).
     assert (storage / "renamed_notebook").is_dir()
+
+
+# ---------------------------------------------------------------------------
+# PUT /v1/notebooks/{id}/python-version
+# ---------------------------------------------------------------------------
+
+
+def _open_for_python_version_tests(client, tmpdir_path):
+    """Helper: create a notebook at 3.13, return (session_id, notebook_dir)."""
+    notebook_dir = create_notebook(
+        tmpdir_path, "PyVer Test", python_version="3.13", initialize_environment=False
+    )
+    resp = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["session_id"], notebook_dir
+
+
+def test_python_version_update_rejects_unknown_version(monkeypatch):
+    """Asking for a Python the deployment doesn't allow returns 400."""
+    client = TestClient(create_test_app())
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setattr(
+            "strata.server._state",
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    deployment_mode="personal",
+                    notebook_storage_dir=Path(tmpdir),
+                    notebook_python_versions=["3.13"],
+                    transforms_config={},
+                )
+            ),
+        )
+        session_id, _ = _open_for_python_version_tests(client, Path(tmpdir))
+
+        resp = client.put(
+            f"/v1/notebooks/{session_id}/python-version",
+            json={"python_version": "3.14"},
+        )
+        assert resp.status_code == 400, resp.text
+        assert "not available" in resp.json()["detail"]
+
+
+def test_python_version_update_no_op_for_current_version(monkeypatch):
+    """Picking the version that's already declared returns 200 without
+    accepting a new job."""
+    client = TestClient(create_test_app())
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setattr(
+            "strata.server._state",
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    deployment_mode="personal",
+                    notebook_storage_dir=Path(tmpdir),
+                    notebook_python_versions=["3.12", "3.13"],
+                    transforms_config={},
+                )
+            ),
+        )
+        session_id, _ = _open_for_python_version_tests(client, Path(tmpdir))
+
+        resp = client.put(
+            f"/v1/notebooks/{session_id}/python-version",
+            json={"python_version": "3.13"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["accepted"] is False
+        assert body["reason"] == "already_at_requested_version"
+
+
+def test_python_version_update_unknown_notebook_returns_404():
+    """Posting to a stale session id returns 404."""
+    client = TestClient(create_test_app())
+    resp = client.put(
+        "/v1/notebooks/nonexistent-session/python-version",
+        json={"python_version": "3.13"},
+    )
+    assert resp.status_code == 404
+
+
+def test_python_version_update_rejects_malformed_version(monkeypatch):
+    """The Pydantic field validator rejects anything that isn't major.minor."""
+    client = TestClient(create_test_app())
+    with tempfile.TemporaryDirectory() as tmpdir:
+        monkeypatch.setattr(
+            "strata.server._state",
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    deployment_mode="personal",
+                    notebook_storage_dir=Path(tmpdir),
+                    notebook_python_versions=["3.13"],
+                    transforms_config={},
+                )
+            ),
+        )
+        session_id, _ = _open_for_python_version_tests(client, Path(tmpdir))
+
+        # ``3.13.5`` has a patch component — must be rejected before reaching
+        # the runtime-config allowlist check.
+        resp = client.put(
+            f"/v1/notebooks/{session_id}/python-version",
+            json={"python_version": "3.13.5"},
+        )
+        assert resp.status_code == 422  # Pydantic validation error

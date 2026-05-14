@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import re
+import shutil
 import subprocess
 import threading
 import time as _time
@@ -1919,9 +1920,10 @@ class NotebookSession:
         package: str | None = None,
         requirements_text: str | None = None,
         environment_yaml_text: str | None = None,
+        python_version: str | None = None,
     ) -> EnvironmentJobSnapshot:
         """Start an asynchronous notebook environment job."""
-        if action not in {"add", "remove", "sync", "import"}:
+        if action not in {"add", "remove", "sync", "import", "change_python"}:
             raise ValueError(f"Unsupported environment job action: {action}")
 
         if action == "import":
@@ -1930,6 +1932,8 @@ class NotebookSession:
                     "Import environment jobs require exactly one of requirements_text "
                     "or environment_yaml_text"
                 )
+        if action == "change_python" and not python_version:
+            raise ValueError("change_python jobs require python_version")
 
         if action == "import":
             action_label = (
@@ -1937,6 +1941,8 @@ class NotebookSession:
                 if requirements_text is not None
                 else "environment.yaml import"
             )
+        elif action == "change_python":
+            action_label = f"change Python to {python_version}"
         else:
             action_label = f"{action} {package}".strip()
         with self._environment_state_lock:
@@ -1949,6 +1955,8 @@ class NotebookSession:
                 command = f"uv remove {package}"
             elif action == "sync" and requested_python:
                 command = f"uv sync --python {requested_python}"
+            elif action == "change_python":
+                command = f"uv sync (python {python_version})"
 
             job = EnvironmentJobSnapshot(
                 id=str(uuid.uuid4()),
@@ -1967,6 +1975,7 @@ class NotebookSession:
                 job,
                 requirements_text=requirements_text,
                 environment_yaml_text=environment_yaml_text,
+                python_version=python_version,
             )
         )
         with self._environment_state_lock:
@@ -1979,6 +1988,7 @@ class NotebookSession:
         *,
         requirements_text: str | None = None,
         environment_yaml_text: str | None = None,
+        python_version: str | None = None,
     ) -> None:
         """Execute a background environment job and publish updates."""
         stale_cell_ids: list[str] = []
@@ -1991,6 +2001,11 @@ class NotebookSession:
                     job,
                     requirements_text=requirements_text,
                     environment_yaml_text=environment_yaml_text,
+                )
+            elif job.action == "change_python":
+                assert python_version is not None
+                stale_cell_ids = await self._run_change_python_environment_job(
+                    job, new_minor=python_version
                 )
             else:
                 assert job.package is not None
@@ -2160,6 +2175,82 @@ class NotebookSession:
             lockfile_changed=result.lockfile_changed,
         )
         return stale_cell_ids, result
+
+    async def _run_change_python_environment_job(
+        self,
+        job: EnvironmentJobSnapshot,
+        *,
+        new_minor: str,
+    ) -> list[str]:
+        """Change ``requires-python`` + rebuild the venv on the new minor.
+
+        Rollback policy on uv sync failure: restore the previous
+        ``requires-python`` and re-sync to the old interpreter. Best-
+        effort — if the rollback sync also fails the notebook is left
+        with the old pyproject and no venv, and we surface the error
+        via the job's operation log.
+        """
+        from strata.notebook.writer import update_requires_python
+
+        old_minor = read_requested_python_minor(self.path)
+        await asyncio.to_thread(update_requires_python, self.path, new_minor)
+
+        # Wipe the existing .venv so uv sync builds against the new
+        # interpreter rather than reporting an "interpreter mismatch"
+        # error and refusing to proceed.
+        venv_dir = self.path / ".venv"
+        if venv_dir.exists():
+            await asyncio.to_thread(shutil.rmtree, venv_dir, ignore_errors=True)
+
+        old_lockfile_hash = compute_lockfile_hash(self.path)
+        lock = _get_notebook_lock(self.path)
+        await asyncio.to_thread(lock.acquire)
+        try:
+            result = await run_uv_command_streaming(
+                self.path,
+                ["sync"],
+                timeout=180,
+                display_name="uv sync",
+                on_update=lambda stream, text, truncated: self._update_environment_job_stream(
+                    job,
+                    stream=stream,
+                    text=text,
+                    truncated=truncated,
+                ),
+            )
+        finally:
+            lock.release()
+
+        self._apply_environment_operation_log(job, result.operation_log)
+        if not result.success:
+            # Rollback: restore previous requires-python and re-sync.
+            if old_minor:
+                try:
+                    await asyncio.to_thread(update_requires_python, self.path, old_minor)
+                    rollback = await run_uv_command_streaming(
+                        self.path,
+                        ["sync"],
+                        timeout=180,
+                        display_name="uv sync (rollback)",
+                        on_update=lambda stream,
+                        text,
+                        truncated: self._update_environment_job_stream(
+                            job,
+                            stream=stream,
+                            text=text,
+                            truncated=truncated,
+                        ),
+                    )
+                    self._apply_environment_operation_log(job, rollback.operation_log)
+                except Exception:
+                    logger.exception("Failed to rollback python-version change for %s", self.path)
+            raise RuntimeError(result.error or f"uv sync failed for Python {new_minor}")
+
+        job.lockfile_changed = compute_lockfile_hash(self.path) != old_lockfile_hash
+        return await self._finalize_environment_job(
+            job,
+            lockfile_changed=True,
+        )
 
     async def _run_sync_environment_job(
         self,

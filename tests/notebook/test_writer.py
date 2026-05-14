@@ -31,6 +31,7 @@ from strata.notebook.writer import (
     update_notebook_timeout,
     update_notebook_worker,
     update_notebook_workers,
+    update_requires_python,
     write_cell,
     write_notebook_toml,
 )
@@ -733,3 +734,69 @@ def test_update_notebook_connections_empty_drops_block():
         assert "connections" not in data
         state = parse_notebook(notebook_dir)
         assert state.connections == []
+
+
+class TestUpdateRequiresPython:
+    """update_requires_python rewrites the pyproject's requires-python line."""
+
+    def test_rewrites_to_new_minor(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nb = create_notebook(
+                Path(tmpdir),
+                "py_update",
+                python_version="3.12",
+                initialize_environment=False,
+            )
+            update_requires_python(nb, "3.13")
+            content = (nb / "pyproject.toml").read_text()
+            assert 'requires-python = "==3.13.*"' in content
+            assert "==3.12" not in content
+
+    def test_returns_previous_spec_for_rollback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nb = create_notebook(
+                Path(tmpdir),
+                "py_rollback",
+                python_version="3.12",
+                initialize_environment=False,
+            )
+            old = update_requires_python(nb, "3.13")
+            # The previous spec is the canonical format the writer produced.
+            assert old == "==3.12.*"
+
+    def test_no_change_when_minor_matches(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nb = create_notebook(
+                Path(tmpdir),
+                "py_noop",
+                python_version="3.12",
+                initialize_environment=False,
+            )
+            mtime_before = (nb / "pyproject.toml").stat().st_mtime_ns
+            old = update_requires_python(nb, "3.12")
+            assert old == "==3.12.*"
+            # File should not be rewritten in the no-op case.
+            assert (nb / "pyproject.toml").stat().st_mtime_ns == mtime_before
+
+    def test_missing_pyproject_raises(self, tmp_path: Path):
+        with pytest.raises(FileNotFoundError):
+            update_requires_python(tmp_path, "3.12")
+
+    def test_legacy_range_spec_is_rewritten_to_canonical(self):
+        """An existing notebook with the legacy range form is rewritten
+        to the canonical ``==X.Y.*`` form on update."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nb = create_notebook(
+                Path(tmpdir),
+                "legacy_range",
+                python_version="3.12",
+                initialize_environment=False,
+            )
+            pyproject = nb / "pyproject.toml"
+            content = pyproject.read_text()
+            pyproject.write_text(
+                content.replace('requires-python = "==3.12.*"', 'requires-python = ">=3.12,<3.13"')
+            )
+            old = update_requires_python(nb, "3.13")
+            assert old == ">=3.12,<3.13"
+            assert 'requires-python = "==3.13.*"' in pyproject.read_text()

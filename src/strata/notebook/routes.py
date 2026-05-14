@@ -30,7 +30,11 @@ from strata.notebook.dependencies import (
 )
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import CellStatus, ConnectionSpec, MountSpec, WorkerSpec
-from strata.notebook.python_versions import current_python_minor, normalize_python_minor
+from strata.notebook.python_versions import (
+    current_python_minor,
+    normalize_python_minor,
+    read_requested_python_minor,
+)
 from strata.notebook.session import SessionManager
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
@@ -1951,6 +1955,87 @@ async def update_notebook_worker_endpoint(
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+class UpdatePythonVersionRequest(BaseModel):
+    """Body for ``PUT /v1/notebooks/{id}/python-version``."""
+
+    python_version: str = Field(..., max_length=16)
+
+    @field_validator("python_version")
+    @classmethod
+    def _validate_python_version_field(cls, value: str) -> str:
+        try:
+            return normalize_python_minor(value)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
+
+@router.put("/{notebook_id}/python-version")
+async def update_notebook_python_version(
+    notebook_id: str,
+    req: UpdatePythonVersionRequest,
+    request: Request,
+) -> JSONResponse:
+    """Change the notebook's requested Python minor.
+
+    Atomically rewrites ``pyproject.toml``'s ``requires-python``,
+    wipes ``.venv/``, and dispatches a background ``uv sync`` job
+    against the new interpreter. Rolls back to the previous version
+    if the new-minor sync fails (eg. a declared dep doesn't support
+    it). Returns 202 immediately with the job started — the
+    frontend follows the existing ``environment_job_progress`` WS
+    stream for live output.
+
+    No-op short circuit: if the requested version equals the
+    current ``requires-python`` minor, returns 200 without touching
+    disk.
+    """
+    session = _session_manager.get_session(notebook_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+
+    runtime_config = _serialize_notebook_runtime_config(request)
+    allowed = runtime_config["available_python_versions"]
+    if req.python_version not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Python {req.python_version} is not available for this deployment "
+                f"(allowed: {', '.join(allowed)})"
+            ),
+        )
+
+    current = read_requested_python_minor(session.path)
+    if current == req.python_version:
+        # 200 no-op: idempotent. Avoids the disk write + uv sync when
+        # the user re-confirms the version they already have.
+        return JSONResponse(
+            status_code=200,
+            content={
+                "accepted": False,
+                "reason": "already_at_requested_version",
+                **_serialize_environment_payload(session),
+                "cells": session.serialize_cells(),
+            },
+        )
+
+    try:
+        await session.submit_environment_job(
+            action="change_python",
+            python_version=req.python_version,
+        )
+    except RuntimeError as exc:
+        _raise_environment_busy(session, str(exc))
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "accepted": True,
+            **_serialize_environment_payload(session),
+            "cells": session.serialize_cells(),
+        },
+    )
 
 
 @router.put("/{notebook_id}/timeout")

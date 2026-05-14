@@ -737,6 +737,47 @@ def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
         tomli_w.dump(toml_data, f)
 
 
+def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
+    """Rewrite ``requires-python`` in a notebook's pyproject.toml.
+
+    Returns the *previous* requires-python value so the caller can
+    roll back (eg. when the subsequent ``uv sync`` fails on the new
+    minor). ``new_minor`` is normalized via
+    ``format_requires_python`` so the on-disk form is always the
+    canonical ``==X.Y.*`` spec.
+
+    The pyproject is rewritten in place — uv.lock and .venv are NOT
+    touched here; the caller orchestrates the rest of the version-
+    change pipeline.
+    """
+    pyproject_path = Path(notebook_dir) / "pyproject.toml"
+    if not pyproject_path.exists():
+        raise FileNotFoundError(f"Notebook pyproject not found: {pyproject_path}")
+
+    text = pyproject_path.read_text(encoding="utf-8")
+    new_spec = format_requires_python(new_minor)
+    new_line = f'requires-python = "{new_spec}"'
+
+    pattern = re.compile(r'^requires-python\s*=\s*"[^"]*"', re.MULTILINE)
+    match = pattern.search(text)
+    if match is None:
+        raise ValueError(f"Notebook pyproject is missing a requires-python line: {pyproject_path}")
+
+    old_line = match.group(0)
+    # Capture the old spec value (between quotes) for the return.
+    old_spec_match = re.search(r'"([^"]*)"', old_line)
+    old_spec = old_spec_match.group(1) if old_spec_match else ""
+
+    if old_line == new_line:
+        # Caller is responsible for the equal-to-current no-op short
+        # circuit; if it gets here anyway, no harm done.
+        return old_spec
+
+    updated = text[: match.start()] + new_line + text[match.end() :]
+    pyproject_path.write_text(updated, encoding="utf-8")
+    return old_spec
+
+
 def rename_notebook(notebook_dir: Path, new_name: str) -> None:
     """Rename the notebook.
 
