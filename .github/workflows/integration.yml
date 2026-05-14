@@ -51,6 +51,14 @@ jobs:
           toolchain: stable
           cache-workspaces: rust
 
+      - name: Verify Rust toolchain
+        shell: bash
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+          cargo --version
+          rustc --version
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:

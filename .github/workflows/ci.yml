@@ -75,6 +75,23 @@ jobs:
           toolchain: stable
           cache-workspaces: rust
 
+      - name: Verify Rust toolchain
+        # macOS-latest runners intermittently leave the rustup proxy
+        # half-configured after setup-rust-toolchain finishes: the
+        # install step reports ✓, but cargo invoked from a child
+        # shell (eg. maturin under uv sync) resolves to rustup-init
+        # and errors out with "unexpected argument 'metadata'".
+        # Force-setting the default + dumping versions makes the
+        # proxy dispatch correctly AND fails fast with diagnostics
+        # if something is genuinely broken, instead of bubbling up
+        # as an opaque cargo-metadata failure 30 seconds later.
+        shell: bash
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+          cargo --version
+          rustc --version
+
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
         with:
@@ -119,6 +136,23 @@ jobs:
           toolchain: stable
           cache-workspaces: rust
 
+      - name: Verify Rust toolchain
+        # macOS-latest runners intermittently leave the rustup proxy
+        # half-configured after setup-rust-toolchain finishes: the
+        # install step reports ✓, but cargo invoked from a child
+        # shell (eg. maturin under uv sync) resolves to rustup-init
+        # and errors out with "unexpected argument 'metadata'".
+        # Force-setting the default + dumping versions makes the
+        # proxy dispatch correctly AND fails fast with diagnostics
+        # if something is genuinely broken, instead of bubbling up
+        # as an opaque cargo-metadata failure 30 seconds later.
+        shell: bash
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+          cargo --version
+          rustc --version
+
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
         with:
@@ -151,6 +185,23 @@ jobs:
         with:
           toolchain: stable
           cache-workspaces: rust
+
+      - name: Verify Rust toolchain
+        # macOS-latest runners intermittently leave the rustup proxy
+        # half-configured after setup-rust-toolchain finishes: the
+        # install step reports ✓, but cargo invoked from a child
+        # shell (eg. maturin under uv sync) resolves to rustup-init
+        # and errors out with "unexpected argument 'metadata'".
+        # Force-setting the default + dumping versions makes the
+        # proxy dispatch correctly AND fails fast with diagnostics
+        # if something is genuinely broken, instead of bubbling up
+        # as an opaque cargo-metadata failure 30 seconds later.
+        shell: bash
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+          cargo --version
+          rustc --version
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
