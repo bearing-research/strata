@@ -2,7 +2,7 @@
 name = "markdown-showcase"
 version = "0.1.0"
 description = "Exercises every markdown rendering path in Strata Notebook"
-requires-python = ">=3.12"
+requires-python = "==3.12.*"
 # pyarrow / orjson / cloudpickle are harness runtime deps — every Strata
 # notebook needs them or cell execution dies on import. pandas is the
 # only one this notebook itself uses.

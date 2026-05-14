@@ -2,7 +2,7 @@
 name = "library-cells"
 version = "0.1.0"
 description = "Walk through cross-cell library code: pure module cells, mixed runtime+library cells, and the limits"
-requires-python = ">=3.12"
+requires-python = "==3.12.*"
 # pyarrow / orjson / cloudpickle are harness runtime deps — every Strata
 # notebook needs them or cell execution dies on import.
 dependencies = [

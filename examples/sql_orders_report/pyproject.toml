@@ -2,7 +2,7 @@
 name = "sql-orders-report"
 version = "0.1.0"
 description = "SQL cells against a local SQLite warehouse, with binds and cache policies"
-requires-python = ">=3.12"
+requires-python = "==3.12.*"
 dependencies = [
     "pyarrow>=18.0.0",
     "orjson>=3.10.0",

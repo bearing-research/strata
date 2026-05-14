@@ -1,0 +1,18 @@
+[project]
+name = "pixel-dynamics-lab"
+version = "0.1.0"
+description = ""
+requires-python = "==3.13.*"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+    "kagglehub",
+    "matplotlib",
+    "numpy",
+    "scikit-learn",
+    "torch",
+    "torchvision",
+]
+
+[tool.uv]

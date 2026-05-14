@@ -55,12 +55,17 @@ def format_requires_python(version: str) -> str:
 
 
 def infer_requested_python_minor(requires_python: str | None) -> str | None:
-    """Extract a Python ``major.minor`` from a ``requires-python`` spec.
+    """Extract a Python ``major.minor`` from a notebook ``requires-python``.
 
-    Returns the minor implied by the first lower-bound specifier
-    (``>=``, ``==``, ``~=``). ``None`` if the spec is empty,
-    unparseable, or has no lower bound we can pin to a single minor
-    (e.g. ``<3.14`` alone).
+    The only supported form is the canonical ``==X.Y.*`` written by
+    ``format_requires_python``. Notebooks are pinned to exactly one
+    minor — there's no useful "range" interpretation — so accepting
+    anything else (``>=X.Y``, ``>=X.Y,<X.(Y+1)``, ``~=X.Y``) would
+    invite the user to scribble a spec the rest of the toolchain
+    can't honor.
+
+    Returns ``None`` when the spec is empty, malformed, or not a
+    single ``==X.Y.*`` clause.
     """
     if not requires_python:
         return None
@@ -68,19 +73,19 @@ def infer_requested_python_minor(requires_python: str | None) -> str | None:
         spec = SpecifierSet(requires_python.strip())
     except InvalidSpecifier:
         return None
-    for clause in spec:
-        if clause.operator not in (">=", "==", "~="):
-            continue
-        # ``==3.12.*`` (PEP 440 version-matching wildcard) is the
-        # canonical form Strata writes; ``packaging`` exposes the
-        # version field literally as ``"3.12.*"`` and Version() rejects
-        # it. Strip the trailing wildcard before parsing.
-        try:
-            parsed = Version(clause.version.removesuffix(".*"))
-        except InvalidVersion:
-            continue
-        return f"{parsed.major}.{parsed.minor}"
-    return None
+    clauses = list(spec)
+    if len(clauses) != 1:
+        return None
+    clause = clauses[0]
+    if clause.operator != "==" or not clause.version.endswith(".*"):
+        return None
+    try:
+        parsed = Version(clause.version.removesuffix(".*"))
+    except InvalidVersion:
+        return None
+    if len(parsed.release) != 2:
+        return None
+    return f"{parsed.major}.{parsed.minor}"
 
 
 def read_requested_python_minor(notebook_dir: Path) -> str | None:
