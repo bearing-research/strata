@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -37,8 +37,59 @@ router = APIRouter(prefix="/v1/notebooks", tags=["notebooks_ws"])
 # Per-notebook WebSocket connections (for broadcast)
 _notebook_connections: dict[str, list[WebSocket]] = {}
 
+
+@dataclass
+class NotebookExecutionState:
+    """Per-notebook WebSocket execution bookkeeping.
+
+    Attributes
+    ----------
+    sequence : int
+        Monotonic outbound message counter for ordering WS broadcasts.
+    running_cell : str or None
+        Cell ID currently executing on the worker.
+    requested_cell : str or None
+        Cell ID the user has asked to run, queued before execution starts.
+    cascade_plan : CascadePlan or None
+        Active cascade plan when a multi-cell cascade is in flight.
+    execution_task : asyncio.Task[None] or None
+        Background task running the cell; cleared once it completes.
+    control_lock : asyncio.Lock
+        Serializes execution-control transitions (start / stop / requeue).
+    """
+
+    sequence: int = 0
+    running_cell: str | None = None
+    requested_cell: str | None = None
+    cascade_plan: CascadePlan | None = None
+    execution_task: asyncio.Task[None] | None = None
+    control_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    def next_sequence(self) -> int:
+        """Increment and return the outbound message sequence number."""
+        self.sequence += 1
+        return self.sequence
+
+    def active_task(self) -> asyncio.Task[None] | None:
+        """Return the live execution task, clearing fields if it's already done."""
+        task = self.execution_task
+        if task is not None and task.done():
+            self.execution_task = None
+            self.requested_cell = None
+            self.running_cell = None
+            return None
+        return task
+
+    def reset_execution(self) -> None:
+        """Clear all fields tracking the in-flight execution and cascade."""
+        self.execution_task = None
+        self.requested_cell = None
+        self.running_cell = None
+        self.cascade_plan = None
+
+
 # Per-notebook execution state
-_notebook_execution_state: dict[str, dict[str, Any]] = {}
+_notebook_execution_state: dict[str, NotebookExecutionState] = {}
 
 # Per-notebook inspect managers
 _notebook_inspect_managers: dict[str, InspectManager] = {}
@@ -77,25 +128,14 @@ def _json_decode(text: str) -> Any:
     return json.loads(text)
 
 
-def _ensure_execution_state(notebook_id: str) -> dict[str, Any]:
+def _ensure_execution_state(notebook_id: str) -> NotebookExecutionState:
     """Get or create per-notebook execution bookkeeping."""
-    if notebook_id not in _notebook_execution_state:
-        _notebook_execution_state[notebook_id] = {
-            "running_cell": None,
-            "requested_cell": None,
-            "sequence": 0,
-            "cascade_plan": None,
-            "execution_task": None,
-            "control_lock": asyncio.Lock(),
-        }
-    return _notebook_execution_state[notebook_id]
+    return _notebook_execution_state.setdefault(notebook_id, NotebookExecutionState())
 
 
 def next_notebook_sequence(notebook_id: str) -> int:
     """Increment and return the next outbound sequence for a notebook."""
-    execution_state = _ensure_execution_state(notebook_id)
-    execution_state["sequence"] += 1
-    return execution_state["sequence"]
+    return _ensure_execution_state(notebook_id).next_sequence()
 
 
 def notebook_has_active_execution(notebook_id: str) -> bool:
@@ -103,11 +143,10 @@ def notebook_has_active_execution(notebook_id: str) -> bool:
     execution_state = _notebook_execution_state.get(notebook_id)
     if execution_state is None:
         return False
-    task = _get_active_execution_task(execution_state)
     return (
-        task is not None
-        or execution_state.get("running_cell") is not None
-        or execution_state.get("requested_cell") is not None
+        execution_state.active_task() is not None
+        or execution_state.running_cell is not None
+        or execution_state.requested_cell is not None
     )
 
 
@@ -119,19 +158,6 @@ async def broadcast_notebook_message(notebook_id: str, message: dict[str, Any]) 
 async def _send_message(websocket: WebSocket, message: dict[str, Any]) -> None:
     """Send one protocol message to a single WebSocket client."""
     await websocket.send_text(_json_encode(message))
-
-
-def _get_active_execution_task(
-    execution_state: dict[str, Any],
-) -> asyncio.Task[None] | None:
-    """Return the live execution task for a notebook, if any."""
-    task = execution_state.get("execution_task")
-    if task is not None and task.done():
-        execution_state["execution_task"] = None
-        execution_state["requested_cell"] = None
-        execution_state["running_cell"] = None
-        task = None
-    return task
 
 
 async def _send_error_message(
@@ -262,7 +288,7 @@ async def _refresh_and_broadcast_changed_staleness(
 
 
 async def _run_execution_task(
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     requested_cell: str,
     notebook_id: str,
     operation: Any,
@@ -284,17 +310,13 @@ async def _run_execution_task(
             requested_cell,
         )
     finally:
-        current_task = asyncio.current_task()
-        if execution_state.get("execution_task") is current_task:
-            execution_state["execution_task"] = None
-            execution_state["requested_cell"] = None
-            execution_state["running_cell"] = None
-            execution_state["cascade_plan"] = None
+        if execution_state.execution_task is asyncio.current_task():
+            execution_state.reset_execution()
 
 
 async def _schedule_execution(
     websocket: WebSocket,
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
     requested_cell: str,
     seq: int,
@@ -304,20 +326,18 @@ async def _schedule_execution(
     busy_cell: str | None = None
     operation: Any | None = None
 
-    async with execution_state["control_lock"]:
-        task = _get_active_execution_task(execution_state)
-        active_request = execution_state.get("running_cell") or execution_state.get(
-            "requested_cell"
-        )
+    async with execution_state.control_lock:
+        task = execution_state.active_task()
+        active_request = execution_state.running_cell or execution_state.requested_cell
         if task is not None:
-            busy_cell = execution_state.get("running_cell") or execution_state.get("requested_cell")
+            busy_cell = execution_state.running_cell or execution_state.requested_cell
         elif active_request not in {None, requested_cell}:
             busy_cell = active_request
         else:
-            execution_state["requested_cell"] = requested_cell
+            execution_state.requested_cell = requested_cell
             try:
                 operation = operation_factory()
-                execution_state["execution_task"] = asyncio.create_task(
+                execution_state.execution_task = asyncio.create_task(
                     _run_execution_task(
                         execution_state,
                         requested_cell,
@@ -327,7 +347,7 @@ async def _schedule_execution(
                     name=f"notebook-exec-{notebook_id}-{requested_cell}",
                 )
             except Exception:
-                execution_state["requested_cell"] = None
+                execution_state.requested_cell = None
                 raise
 
     if busy_cell is not None:
@@ -346,28 +366,28 @@ async def _schedule_execution(
 
 
 async def _reserve_execution_request(
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     requested_cell: str,
 ) -> str | None:
     """Reserve execution for a cell before validation/scheduling."""
-    async with execution_state["control_lock"]:
-        task = _get_active_execution_task(execution_state)
-        busy_cell = execution_state.get("running_cell") or execution_state.get("requested_cell")
+    async with execution_state.control_lock:
+        task = execution_state.active_task()
+        busy_cell = execution_state.running_cell or execution_state.requested_cell
         if task is not None or busy_cell is not None:
             return busy_cell
-        execution_state["requested_cell"] = requested_cell
+        execution_state.requested_cell = requested_cell
         return None
 
 
 async def _release_execution_request(
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     requested_cell: str,
 ) -> None:
     """Release a pre-scheduling execution reservation when execution did not start."""
-    async with execution_state["control_lock"]:
-        task = _get_active_execution_task(execution_state)
-        if task is None and execution_state.get("requested_cell") == requested_cell:
-            execution_state["requested_cell"] = None
+    async with execution_state.control_lock:
+        task = execution_state.active_task()
+        if task is None and execution_state.requested_cell == requested_cell:
+            execution_state.requested_cell = None
 
 
 async def _cleanup_notebook_websocket(
@@ -390,7 +410,7 @@ async def _cleanup_notebook_websocket(
     del _notebook_connections[notebook_id]
     execution_state = _notebook_execution_state.get(notebook_id)
     if execution_state is not None:
-        task = _get_active_execution_task(execution_state)
+        task = execution_state.active_task()
         if task is not None:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
@@ -569,7 +589,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                     _json_encode(
                         {
                             "type": "error",
-                            "seq": execution_state.get("sequence", 0),
+                            "seq": execution_state.sequence,
                             "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                             "payload": {"error": f"Unknown message type: {msg_type}"},
                         }
@@ -596,7 +616,7 @@ async def _handle_cell_execute(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle cell_execute message.
@@ -610,7 +630,7 @@ async def _handle_cell_execute(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": "Missing cell_id"},
                 }
@@ -618,8 +638,8 @@ async def _handle_cell_execute(
         )
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
@@ -687,7 +707,7 @@ async def _handle_cell_execute(
                 for uid in (session.dag.cell_upstream.get(cell_id, []) if session.dag else [])
             },
         )
-        execution_state["cascade_plan"] = plan
+        execution_state.cascade_plan = plan
         await _send_message(
             websocket,
             {
@@ -722,15 +742,15 @@ async def _handle_cell_execute(
 async def _handle_notebook_run_all(
     websocket: WebSocket,
     session: NotebookSession,
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle notebook_run_all message.
 
     Execute all non-empty cells in notebook order, stopping on first failure.
     """
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     # Skip inactive variants — they aren't in the DAG, so their references
     # don't resolve (e.g. `X_train` would NameError because the upstream
@@ -797,7 +817,7 @@ async def _handle_cell_execute_cascade(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle cell_execute_cascade message.
@@ -812,7 +832,7 @@ async def _handle_cell_execute_cascade(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": "Missing cell_id or plan_id"},
                 }
@@ -820,8 +840,8 @@ async def _handle_cell_execute_cascade(
         )
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
@@ -855,7 +875,7 @@ async def _handle_cell_execute_cascade(
         return
 
     # Get the cascade plan
-    plan = execution_state.get("cascade_plan")
+    plan = execution_state.cascade_plan
     if not plan or plan.plan_id != plan_id:
         await _release_execution_request(execution_state, cell_id)
         await websocket.send_text(
@@ -887,7 +907,7 @@ async def _handle_cell_execute_force(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle cell_execute_force message.
@@ -900,7 +920,7 @@ async def _handle_cell_execute_force(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": "Missing cell_id"},
                 }
@@ -908,8 +928,8 @@ async def _handle_cell_execute_force(
         )
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
@@ -961,7 +981,7 @@ async def _handle_cell_cancel(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle cell_cancel message.
@@ -973,13 +993,13 @@ async def _handle_cell_cancel(
     if not cell_id:
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
-    async with execution_state["control_lock"]:
-        running_cell = execution_state.get("running_cell")
-        requested_cell = execution_state.get("requested_cell")
-        task = _get_active_execution_task(execution_state)
+    async with execution_state.control_lock:
+        running_cell = execution_state.running_cell
+        requested_cell = execution_state.requested_cell
+        task = execution_state.active_task()
 
         should_cancel = task is not None and cell_id in {running_cell, requested_cell}
         if should_cancel and task is not None:
@@ -1000,7 +1020,7 @@ async def _handle_cell_source_update(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle cell_source_update message.
@@ -1015,7 +1035,7 @@ async def _handle_cell_source_update(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": "Missing cell_id or source"},
                 }
@@ -1028,7 +1048,7 @@ async def _handle_cell_source_update(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": "Cell source exceeds 1MB limit"},
                 }
@@ -1045,15 +1065,15 @@ async def _handle_cell_source_update(
     # during execution *scheduling* (not the run itself), so we read the
     # running-cell snapshot under it and reject without blocking on long
     # cells. Frontend retries on the next cell_status: idle/ready/error.
-    async with execution_state["control_lock"]:
-        running = execution_state.get("running_cell")
-        requested = execution_state.get("requested_cell")
+    async with execution_state.control_lock:
+        running = execution_state.running_cell
+        requested = execution_state.requested_cell
     if cell_id in {running, requested}:
         await websocket.send_text(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {
                         "error": (
@@ -1068,8 +1088,8 @@ async def _handle_cell_source_update(
         )
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     try:
         # Write to disk
@@ -1161,7 +1181,7 @@ async def _handle_variant_set_active(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Switch the active variant for a group, then broadcast a dag_update.
@@ -1178,7 +1198,7 @@ async def _handle_variant_set_active(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": "Missing group or name"},
                 }
@@ -1186,8 +1206,8 @@ async def _handle_variant_set_active(
         )
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     try:
         session.set_variant_active(group, variant_name)
@@ -1262,7 +1282,7 @@ async def _handle_variant_add(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Add a sibling variant to a group, then broadcast a dag_update.
@@ -1277,7 +1297,7 @@ async def _handle_variant_add(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": "Missing group"},
                 }
@@ -1285,8 +1305,8 @@ async def _handle_variant_add(
         )
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     try:
         session.add_variant(group)
@@ -1411,14 +1431,14 @@ async def _execute_cell_directly(
     websocket: WebSocket,
     session: NotebookSession,
     cell_id: str,
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
     force: bool = False,
 ) -> None:
     """Execute a cell directly (not part of cascade)."""
     del websocket
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     # Find cell
     cell = session.notebook_state.get_cell(cell_id)
@@ -1426,7 +1446,7 @@ async def _execute_cell_directly(
         return
 
     # Mark as running — update backend state AND broadcast
-    execution_state["running_cell"] = cell_id
+    execution_state.running_cell = cell_id
     session.mark_cell_running(cell_id)
     await _broadcast_message(
         notebook_id,
@@ -1498,20 +1518,20 @@ async def _execute_cell_directly(
             },
         )
     finally:
-        execution_state["running_cell"] = None
+        execution_state.running_cell = None
 
 
 async def _execute_cascade(
     websocket: WebSocket,
     session: NotebookSession,
     plan: CascadePlan,
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Execute all cells in a cascade plan."""
     del websocket
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     executor = _make_executor_with_progress(session, notebook_id)
 
@@ -1558,7 +1578,7 @@ async def _execute_cascade(
                 )
                 continue
 
-            execution_state["running_cell"] = cell_id
+            execution_state.running_cell = cell_id
 
             # Send cascade progress
             await _broadcast_message(
@@ -1663,20 +1683,20 @@ async def _execute_cascade(
                 preserve_ready_cell_id=plan.target_cell_id,
             )
     finally:
-        execution_state["running_cell"] = None
+        execution_state.running_cell = None
 
 
 async def _execute_run_all(
     websocket: WebSocket,
     session: NotebookSession,
     cell_ids: list[str],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Execute all requested notebook cells in notebook order."""
     del websocket
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     executor = _make_executor_with_progress(session, notebook_id)
 
@@ -1700,7 +1720,7 @@ async def _execute_run_all(
             if cell is None or not cell.source.strip():
                 continue
 
-            execution_state["running_cell"] = cell_id
+            execution_state.running_cell = cell_id
             session.mark_cell_running(cell_id)
             await _broadcast_message(
                 notebook_id,
@@ -1769,7 +1789,7 @@ async def _execute_run_all(
                 )
                 break
     finally:
-        execution_state["running_cell"] = None
+        execution_state.running_cell = None
 
 
 def _get_inspect_manager(notebook_id: str) -> InspectManager:
@@ -1783,7 +1803,7 @@ async def _handle_inspect_open(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle inspect_open — spawn REPL with cell's inputs loaded."""
@@ -1791,8 +1811,8 @@ async def _handle_inspect_open(
     if not cell_id:
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     mgr = _get_inspect_manager(notebook_id)
     inspect_session, status = await mgr.open_session(cell_id, session)
@@ -1819,7 +1839,7 @@ async def _handle_inspect_eval(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle inspect_eval — evaluate expression in REPL."""
@@ -1828,8 +1848,8 @@ async def _handle_inspect_eval(
     if not cell_id or not expr:
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     mgr = _get_inspect_manager(notebook_id)
     inspect_session = await mgr.get_session(cell_id)
@@ -1875,7 +1895,7 @@ async def _handle_inspect_close(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle inspect_close — shut down REPL."""
@@ -1883,8 +1903,8 @@ async def _handle_inspect_close(
     if not cell_id:
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     mgr = _get_inspect_manager(notebook_id)
     await mgr.close_session(cell_id)
@@ -1910,7 +1930,7 @@ async def _handle_impact_preview_request(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle impact_preview_request — user wants to see impact before running."""
@@ -1918,8 +1938,8 @@ async def _handle_impact_preview_request(
     if not cell_id:
         return
 
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     analyzer = ImpactAnalyzer(session)
     impact = analyzer.preview(cell_id)
@@ -1938,12 +1958,12 @@ async def _handle_impact_preview_request(
 async def _handle_profiling_request(
     websocket: WebSocket,
     session: NotebookSession,
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle profiling_request — return notebook profiling summary."""
-    execution_state["sequence"] += 1
-    seq = execution_state["sequence"]
+    execution_state.sequence += 1
+    seq = execution_state.sequence
 
     summary = session.get_profiling_summary()
 
@@ -1963,7 +1983,7 @@ async def _handle_dependency_add(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle dependency_add — submit an async env job for ``uv add``."""
@@ -1971,12 +1991,12 @@ async def _handle_dependency_add(
 
     package = payload.get("package", "")
     if not package:
-        execution_state["sequence"] += 1
+        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": "Missing 'package' in payload"},
                 }
@@ -1987,12 +2007,12 @@ async def _handle_dependency_add(
     try:
         package = validate_package_name(package)
     except ValueError as e:
-        execution_state["sequence"] += 1
+        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": str(e)},
                 }
@@ -2003,12 +2023,12 @@ async def _handle_dependency_add(
     try:
         await session.submit_environment_job(action="add", package=package)
     except RuntimeError as exc:
-        execution_state["sequence"] += 1
+        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": str(exc), "code": "ENVIRONMENT_BUSY"},
                 }
@@ -2020,7 +2040,7 @@ async def _handle_dependency_remove(
     websocket: WebSocket,
     session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle dependency_remove — submit an async env job for ``uv remove``."""
@@ -2028,12 +2048,12 @@ async def _handle_dependency_remove(
 
     package = payload.get("package", "")
     if not package:
-        execution_state["sequence"] += 1
+        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": "Missing 'package' in payload"},
                 }
@@ -2044,12 +2064,12 @@ async def _handle_dependency_remove(
     try:
         package = validate_package_name(package)
     except ValueError as e:
-        execution_state["sequence"] += 1
+        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": str(e)},
                 }
@@ -2060,12 +2080,12 @@ async def _handle_dependency_remove(
     try:
         await session.submit_environment_job(action="remove", package=package)
     except RuntimeError as exc:
-        execution_state["sequence"] += 1
+        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
                 {
                     "type": "error",
-                    "seq": execution_state["sequence"],
+                    "seq": execution_state.sequence,
                     "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
                     "payload": {"error": str(exc), "code": "ENVIRONMENT_BUSY"},
                 }
@@ -2092,8 +2112,8 @@ async def execute_cell_for_agent(
         executor = _make_executor_with_progress(session, notebook_id)
         return await executor.execute_cell(cell_id, source)
 
-    async with execution_state["control_lock"]:
-        task = _get_active_execution_task(execution_state)
+    async with execution_state.control_lock:
+        task = execution_state.active_task()
         if task is not None:
             raise RuntimeError("Another cell is currently executing. Wait and retry.")
 
@@ -2268,16 +2288,16 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
         if result.suggest_install:
             payload["suggest_install"] = result.suggest_install
 
-    for field in (
+    for field_name in (
         "remote_worker",
         "remote_transport",
         "remote_build_id",
         "remote_build_state",
         "remote_error_code",
     ):
-        value = getattr(result, field, None)
+        value = getattr(result, field_name, None)
         if value:
-            payload[field] = value
+            payload[field_name] = value
 
     return payload
 

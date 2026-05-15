@@ -1819,15 +1819,15 @@ def test_last_websocket_disconnect_cancels_running_execution(
     assert cancelled.wait(timeout=1)
     for _ in range(20):
         state = _notebook_execution_state.get(session.id)
-        if state is None or state.get("execution_task") is None:
+        if state is None or state.execution_task is None:
             break
         time.sleep(0.05)
 
     state = _notebook_execution_state.get(session.id)
     if state is not None:
-        assert state["execution_task"] is None
-        assert state["running_cell"] is None
-        assert state["requested_cell"] is None
+        assert state.execution_task is None
+        assert state.running_cell is None
+        assert state.requested_cell is None
 
 
 def test_malformed_message(client, temp_notebook, app):

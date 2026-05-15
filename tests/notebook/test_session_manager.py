@@ -345,7 +345,7 @@ def test_open_notebook_reuse_existing_session_does_not_reload_while_execution_ac
         execution_state = notebook_ws._ensure_execution_state(session.id)
         blocker = asyncio.Event()
         task = asyncio.create_task(blocker.wait())
-        execution_state["execution_task"] = task
+        execution_state.execution_task = task
 
         def _fail_reload() -> None:
             raise AssertionError("reload should not be called during active execution")
