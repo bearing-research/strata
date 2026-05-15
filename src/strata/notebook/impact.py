@@ -25,11 +25,16 @@ if TYPE_CHECKING:
 class DownstreamImpact:
     """A downstream cell that will be invalidated.
 
-    Attributes:
-        cell_id: ID of the affected cell
-        cell_name: Display name of the affected cell
-        current_status: Cell's current status
-        new_status: Status after target cell runs (always 'stale:upstream')
+    Attributes
+    ----------
+    cell_id : str
+        ID of the affected cell.
+    cell_name : str
+        Display name of the affected cell.
+    current_status : str
+        Cell's current status (a ``CellStatus`` value).
+    new_status : str
+        Status after the target cell runs (always ``"stale:upstream"``).
     """
 
     cell_id: str
@@ -37,49 +42,27 @@ class DownstreamImpact:
     current_status: str
     new_status: str = "stale:upstream"
 
-    def to_dict(self) -> dict:
-        """Convert to JSON-serializable dict."""
-        return {
-            "cell_id": self.cell_id,
-            "cell_name": self.cell_name,
-            "current_status": self.current_status,
-            "new_status": self.new_status,
-        }
-
 
 @dataclass
 class ImpactPreview:
     """Full impact preview for running a cell.
 
-    Attributes:
-        target_cell_id: The cell the user wants to run
-        upstream: Cells that need to run first (from cascade planner)
-        downstream: Cells that will become stale
-        estimated_ms: Total estimated execution time
+    Attributes
+    ----------
+    target_cell_id : str
+        The cell the user wants to run.
+    upstream : list of CascadeStep
+        Cells that need to run first (from the cascade planner).
+    downstream : list of DownstreamImpact
+        Cells that will become stale once the target runs.
+    estimated_ms : int
+        Total estimated execution time across upstream cells.
     """
 
     target_cell_id: str
     upstream: list[CascadeStep] = field(default_factory=list)
     downstream: list[DownstreamImpact] = field(default_factory=list)
     estimated_ms: int = 0
-
-    def to_dict(self) -> dict:
-        """Convert to JSON-serializable dict."""
-        return {
-            "target_cell_id": self.target_cell_id,
-            "upstream": [
-                {
-                    "cell_id": s.cell_id,
-                    "cell_name": s.cell_name,
-                    "reason": s.reason,
-                    "skip": s.skip,
-                    "estimated_ms": s.estimated_ms,
-                }
-                for s in self.upstream
-            ],
-            "downstream": [d.to_dict() for d in self.downstream],
-            "estimated_ms": self.estimated_ms,
-        }
 
     @property
     def has_impact(self) -> bool:

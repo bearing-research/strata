@@ -1931,7 +1931,7 @@ async def _handle_impact_preview_request(
             "type": "impact_preview",
             "seq": seq,
             "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-            "payload": impact.to_dict(),
+            "payload": asdict(impact),
         },
     )
 
