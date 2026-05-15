@@ -43,6 +43,7 @@ from strata.notebook.env import (
 from strata.notebook.models import (
     CellOutput,
     CellStaleness,
+    CellState,
     CellStatus,
     NotebookState,
     VariantGroupState,
@@ -976,75 +977,26 @@ class NotebookSession:
             last_env_hash=env_hash,
         )
 
-    def serialize_cell(self, cell: Any) -> dict[str, Any]:
-        """Serialize a cell with causality and flattened staleness reasons."""
-        data = cell.model_dump()
+    def serialize_cell(self, cell: CellState) -> dict[str, Any]:
+        """Serialize a cell with session-coupled overlays.
+
+        Wraps ``CellState.serialize()`` (cell-only view) with the three
+        overlays that need session state: hydrated display outputs (which
+        read from the artifact store), causality chains, and DAG shadow
+        warnings.
+        """
+        data = cell.serialize()
         if cell.display_outputs:
             data["display_outputs"] = [
                 self._hydrate_display_output(output) for output in cell.display_outputs
             ]
         if cell.display_output is not None:
             data["display_output"] = self._hydrate_display_output(cell.display_output)
-        data["staleness_reasons"] = (
-            [reason.value for reason in cell.staleness.reasons]
-            if cell.staleness and cell.staleness.reasons
-            else []
-        )
-        annotations = parse_annotations(cell.source)
-        loop_payload: dict[str, Any] | None = None
-        if annotations.loop is not None:
-            loop_payload = {
-                "max_iter": annotations.loop.max_iter,
-                "carry": annotations.loop.carry,
-                "until_expr": annotations.loop.until_expr,
-                "start_from_cell": annotations.loop.start_from_cell,
-                "start_from_iter": annotations.loop.start_from_iter,
-            }
-        variant_payload: dict[str, str] | None = None
-        if annotations.variant is not None:
-            variant_payload = {
-                "group": annotations.variant.group,
-                "name": annotations.variant.name,
-            }
-        data["annotations"] = {
-            "name": annotations.name,
-            "worker": annotations.worker,
-            "timeout": annotations.timeout,
-            "env": annotations.env,
-            "mounts": [mount.model_dump() for mount in annotations.mounts],
-            "loop": loop_payload,
-            "variant": variant_payload,
-        }
         causality = self.causality_map.get(cell.id)
         if causality is not None:
             data["causality"] = asdict(causality, dict_factory=skip_none)
-
-        # Shadow warnings from DAG
         if self.dag and cell.id in self.dag.shadow_warnings:
             data["shadow_warnings"] = self.dag.shadow_warnings[cell.id]
-
-        # Module-cell classification — drives the "module" pill in the
-        # UI and the richer tooltip on the module_export_blocked
-        # diagnostic. Only meaningful for Python cells; prompt and
-        # markdown cells have no Python identifiers to export.
-        if cell.language == "python":
-            from strata.notebook.module_export import build_module_export_plan
-
-            export_plan = build_module_export_plan(cell.source)
-            has_code_export = any(
-                symbol.kind in ("function", "async function", "class")
-                for symbol in export_plan.exported_symbols.values()
-            )
-            # "Module cell" = pure source *and* actually exports code.
-            # A lone ``x = 1`` is pure but it's not a module cell in
-            # any useful sense — routing still takes the data path.
-            data["is_module_cell"] = export_plan.is_exportable and has_code_export
-            if data["is_module_cell"]:
-                data["module_exports"] = [
-                    {"name": name, "kind": symbol.kind}
-                    for name, symbol in sorted(export_plan.exported_symbols.items())
-                ]
-
         return data
 
     def persist_display_outputs(

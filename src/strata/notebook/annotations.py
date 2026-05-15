@@ -28,8 +28,42 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from typing import Any, TypedDict
 
 from strata.notebook.models import MountMode, MountSpec
+
+
+class LoopWirePayload(TypedDict):
+    """Wire shape for a parsed ``@loop`` directive."""
+
+    max_iter: int
+    carry: str
+    until_expr: str | None
+    start_from_cell: str | None
+    start_from_iter: int | None
+
+
+class VariantWirePayload(TypedDict):
+    """Wire shape for a parsed ``@variant`` directive."""
+
+    group: str
+    name: str
+
+
+class AnnotationsWirePayload(TypedDict):
+    """Wire shape for the curated annotation view sent to the frontend.
+
+    Subset of ``CellAnnotations`` keys consumed by the UI; ``mounts`` carries
+    ``MountSpec.model_dump()`` dicts (json-ready ``dict[str, Any]`` per entry).
+    """
+
+    name: str | None
+    worker: str | None
+    timeout: float | None
+    env: dict[str, str]
+    mounts: list[dict[str, Any]]
+    loop: LoopWirePayload | None
+    variant: VariantWirePayload | None
 
 
 @dataclass
@@ -193,6 +227,37 @@ class CellAnnotations:
     # file the setup cell created" or any other side-effecting upstream.
     # Multiple ``@after`` lines may stack; each line adds one edge.
     after: list[str] = field(default_factory=list)
+
+    def to_wire_payload(self) -> AnnotationsWirePayload:
+        """Render the curated annotation view for cell serialization.
+
+        Only the UI-visible subset is included; SQL/cache/prompt-cell
+        directives and ``@after`` edges live in their own wire paths.
+        """
+        loop_payload: LoopWirePayload | None = None
+        if self.loop is not None:
+            loop_payload = {
+                "max_iter": self.loop.max_iter,
+                "carry": self.loop.carry,
+                "until_expr": self.loop.until_expr,
+                "start_from_cell": self.loop.start_from_cell,
+                "start_from_iter": self.loop.start_from_iter,
+            }
+        variant_payload: VariantWirePayload | None = None
+        if self.variant is not None:
+            variant_payload = {
+                "group": self.variant.group,
+                "name": self.variant.name,
+            }
+        return {
+            "name": self.name,
+            "worker": self.worker,
+            "timeout": self.timeout,
+            "env": self.env,
+            "mounts": [mount.model_dump() for mount in self.mounts],
+            "loop": loop_payload,
+            "variant": variant_payload,
+        }
 
 
 def parse_annotations(source: str) -> CellAnnotations:

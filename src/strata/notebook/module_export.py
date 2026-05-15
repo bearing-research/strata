@@ -67,6 +67,15 @@ import ast
 import builtins as _python_builtins
 import symtable
 from dataclasses import dataclass, field
+from typing import TypedDict
+
+
+class ModuleExportEntry(TypedDict):
+    """Wire shape for one entry in a cell's ``module_exports`` list."""
+
+    name: str
+    kind: str
+
 
 _BUILTIN_NAMES: frozenset[str] = frozenset(dir(_python_builtins))
 

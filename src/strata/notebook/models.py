@@ -543,6 +543,50 @@ class CellState(BaseModel):
         description="Runtime-only environment hash from the last successful execution",
     )
 
+    def serialize(self) -> dict[str, Any]:
+        """Return the cell-only wire view of this cell.
+
+        Combines ``model_dump()`` with the cell-derived overlays the
+        frontend expects: flattened ``staleness_reasons``, the curated
+        ``annotations`` payload from the source-comment block, and
+        module-export classification for Python cells. Session-coupled
+        overlays (display-output hydration, causality, shadow warnings)
+        are added separately by ``NotebookSession.serialize_cell``.
+        """
+        # Local imports to avoid a cycle: annotations.py and
+        # module_export.py both import from this module.
+        from strata.notebook.annotations import parse_annotations
+        from strata.notebook.module_export import build_module_export_plan
+
+        data = self.model_dump()
+        data["staleness_reasons"] = (
+            [reason.value for reason in self.staleness.reasons]
+            if self.staleness and self.staleness.reasons
+            else []
+        )
+        data["annotations"] = parse_annotations(self.source).to_wire_payload()
+
+        # Module-cell classification — drives the "module" pill in the
+        # UI and the richer tooltip on the module_export_blocked
+        # diagnostic. Only meaningful for Python cells; prompt and
+        # markdown cells have no Python identifiers to export.
+        if self.language == "python":
+            export_plan = build_module_export_plan(self.source)
+            has_code_export = any(
+                symbol.kind in ("function", "async function", "class")
+                for symbol in export_plan.exported_symbols.values()
+            )
+            # "Module cell" = pure source *and* actually exports code.
+            # A lone ``x = 1`` is pure but it's not a module cell in
+            # any useful sense — routing still takes the data path.
+            data["is_module_cell"] = export_plan.is_exportable and has_code_export
+            if data["is_module_cell"]:
+                data["module_exports"] = [
+                    {"name": name, "kind": symbol.kind}
+                    for name, symbol in sorted(export_plan.exported_symbols.items())
+                ]
+        return data
+
 
 class NotebookState(BaseModel):
     """Full notebook state for API responses."""
