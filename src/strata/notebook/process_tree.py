@@ -29,11 +29,12 @@ import logging
 import os
 import signal
 import sys
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def subprocess_kwargs_for_new_group() -> dict[str, object]:
+def subprocess_kwargs_for_new_group() -> dict[str, Any]:
     """Spawn kwargs that put the child into its own process group.
 
     POSIX: ``start_new_session=True`` makes the child a session leader

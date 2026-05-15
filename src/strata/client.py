@@ -58,7 +58,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 
 from strata.config import StrataConfig
-from strata.types import Filter, FilterOp
+from strata.types import Filter, FilterOp, FilterValue
 
 type TransformSpec = Mapping[str, object]
 type JsonArtifactInput = Mapping[str, object]
@@ -1800,31 +1800,31 @@ class AsyncArtifact:
         return response.json()
 
 
-def eq(column: str, value: object) -> Filter:
+def eq(column: str, value: FilterValue) -> Filter:
     """Create an equality filter."""
     return Filter(column=column, op=FilterOp.EQ, value=value)
 
 
-def ne(column: str, value: object) -> Filter:
+def ne(column: str, value: FilterValue) -> Filter:
     """Create a not-equal filter."""
     return Filter(column=column, op=FilterOp.NE, value=value)
 
 
-def lt(column: str, value: object) -> Filter:
+def lt(column: str, value: FilterValue) -> Filter:
     """Create a less-than filter."""
     return Filter(column=column, op=FilterOp.LT, value=value)
 
 
-def le(column: str, value: object) -> Filter:
+def le(column: str, value: FilterValue) -> Filter:
     """Create a less-than-or-equal filter."""
     return Filter(column=column, op=FilterOp.LE, value=value)
 
 
-def gt(column: str, value: object) -> Filter:
+def gt(column: str, value: FilterValue) -> Filter:
     """Create a greater-than filter."""
     return Filter(column=column, op=FilterOp.GT, value=value)
 
 
-def ge(column: str, value: object) -> Filter:
+def ge(column: str, value: FilterValue) -> Filter:
     """Create a greater-than-or-equal filter."""
     return Filter(column=column, op=FilterOp.GE, value=value)

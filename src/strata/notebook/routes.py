@@ -1831,8 +1831,8 @@ async def get_connection_schema(notebook_id: str, name: str) -> dict:
     a confusing 500.
     """
     from strata.notebook.sql.cell_executor import (
-        _resolve_runtime_spec,  # type: ignore[attr-defined]
-        _safely_close,  # type: ignore[attr-defined]
+        _resolve_runtime_spec,
+        _safely_close,
     )
     from strata.notebook.sql.registry import get_adapter
 

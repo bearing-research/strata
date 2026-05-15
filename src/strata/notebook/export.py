@@ -268,7 +268,7 @@ def _sanitize_markdown_body(body: str) -> str:
 
     from html import escape
 
-    block_re, void_re, on_re, link_re = _SANITIZE_RES  # type: ignore[misc]
+    block_re, void_re, on_re, link_re = _SANITIZE_RES
     body = block_re.sub(lambda m: escape(m.group(0)), body)  # type: ignore[union-attr]
     body = void_re.sub(lambda m: escape(m.group(0)), body)  # type: ignore[union-attr]
     body = on_re.sub(lambda m: escape(m.group(0)), body)  # type: ignore[union-attr]

@@ -67,8 +67,8 @@ class DisplayCapture:
         original_figure_show = None
 
         try:
-            import matplotlib.pyplot as plt  # type: ignore[import-not-found]
-            from matplotlib.figure import Figure as figure_cls  # type: ignore[import-not-found]
+            import matplotlib.pyplot as plt
+            from matplotlib.figure import Figure as figure_cls
         except ImportError:
             plt = None  # type: ignore[assignment]
 

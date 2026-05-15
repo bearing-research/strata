@@ -188,7 +188,7 @@ def _sanitize_display_output_for_toml(
     persisted.pop("file", None)
     persisted.pop("markdown_text", None)
     cleaned = {key: value for key, value in persisted.items() if value is not None}
-    return to_serialization_safe(cleaned)  # type: ignore[return-value]
+    return to_serialization_safe(cleaned)
 
 
 def _sanitize_display_outputs_for_toml(
