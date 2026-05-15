@@ -98,15 +98,19 @@ class DisplayCapture:
             self.capture(fig_self)
             return None
 
+        # ``setattr`` deliberately bypasses static attribute typing — the
+        # patched callables intentionally have looser signatures than
+        # ``plt.show`` / ``Figure.show`` (we ignore their kwargs to
+        # capture the figure for display).
         if callable(original_show):
-            plt.show = _patched_show
+            setattr(plt, "show", _patched_show)
         if figure_cls is not None and callable(original_figure_show):
-            figure_cls.show = _patched_figure_show
+            setattr(figure_cls, "show", _patched_figure_show)
 
         try:
             yield
         finally:
             if callable(original_show):
-                plt.show = original_show
+                setattr(plt, "show", original_show)
             if figure_cls is not None and callable(original_figure_show):
-                figure_cls.show = original_figure_show
+                setattr(figure_cls, "show", original_figure_show)

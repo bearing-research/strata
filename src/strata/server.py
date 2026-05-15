@@ -41,6 +41,7 @@ from strata.cache_warmer import CacheWarmer
 from strata.config import StrataConfig
 from strata.gc_tracker import get_gc_stats, get_recent_gc_pauses, install_gc_tracker
 from strata.health import HealthStatus, run_health_checks
+from strata.json_types import JsonValue
 from strata.logging import (
     configure_logging,
     get_logger,
@@ -1435,11 +1436,15 @@ async def auth_middleware(request: Request, call_next):
     try:
         principal = parse_principal(dict(request.headers), config)
         set_principal(principal)
+        # list[str] would be invariant against the structured-logger's
+        # list[JsonValue] kwargs; cast widens the declared element type
+        # without changing runtime behavior.
+        scopes_json: list[JsonValue] = cast(list[JsonValue], list(principal.scopes))
         logger.debug(
             "auth_success",
             principal=principal.id,
             tenant=principal.tenant,
-            scopes=list(principal.scopes),
+            scopes=scopes_json,
         )
     except AuthError as e:
         logger.warning(
@@ -5650,9 +5655,10 @@ async def _handle_identity_materialize(
             detail="scan@v1 transform input must be a table URI, not an artifact",
         )
 
-    # Parse identity params
+    # Parse identity params via model_validate so ty doesn't try to
+    # narrow each dict[str, object] value against the typed fields.
     try:
-        identity_params = IdentityParams(**request.transform.params)
+        identity_params = IdentityParams.model_validate(request.transform.params)
     except Exception as e:
         raise HTTPException(
             status_code=400,

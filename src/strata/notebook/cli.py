@@ -506,14 +506,13 @@ def export_main(args: argparse.Namespace) -> int:
         print(f"error: {path} is not a notebook directory (no notebook.toml)", file=sys.stderr)
         return 2
 
-    option_kwargs: dict[str, object] = {
-        "output_format": ExportFormat(args.output_format),
-        "include_inactive_variants": bool(args.include_inactive_variants),
-        "include_console": not bool(args.no_console),
-    }
+    options = ExportOptions(
+        output_format=ExportFormat(args.output_format),
+        include_inactive_variants=bool(args.include_inactive_variants),
+        include_console=not bool(args.no_console),
+    )
     if args.max_output_bytes is not None:
-        option_kwargs["max_output_bytes"] = int(args.max_output_bytes)
-    options = ExportOptions(**option_kwargs)
+        options.max_output_bytes = int(args.max_output_bytes)
     rendered = export_notebook(path, options)
 
     out_path = args.output_path

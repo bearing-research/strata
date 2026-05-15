@@ -97,8 +97,13 @@ def fetch_to_polars(
         )
         # Fetch the artifact data
         arrow_table = client.fetch(artifact.uri)
-        # Arrow-native; typically zero-copy when types are supported
-        return pl.from_arrow(arrow_table)
+        # Arrow-native; typically zero-copy when types are supported.
+        # ``pl.from_arrow`` on a ``pa.Table`` always yields a DataFrame
+        # (Series only for Array / ChunkedArray inputs); narrow so the
+        # function signature is honored without leaking the union.
+        result = pl.from_arrow(arrow_table)
+        assert isinstance(result, pl.DataFrame)
+        return result
     finally:
         client.close()
 
@@ -211,7 +216,10 @@ class StrataPolarsScanner:
         )
         # Fetch the artifact data
         arrow_table = self.client.fetch(artifact.uri)
-        return pl.from_arrow(arrow_table)
+        # ``pa.Table`` → DataFrame (never Series); narrow to honor the signature.
+        result = pl.from_arrow(arrow_table)
+        assert isinstance(result, pl.DataFrame)
+        return result
 
     # Backwards compatibility alias
     scan = fetch

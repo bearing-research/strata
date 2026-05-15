@@ -39,6 +39,7 @@ from typing import Any
 
 # Import at module level to avoid annotation resolution issues with FastAPI
 from fastapi import Request as FastAPIRequest
+from fastapi import UploadFile
 
 logger = logging.getLogger(__name__)
 
@@ -330,7 +331,7 @@ def create_executor_app(executor: BaseExecutor | None = None):
 
         # Get metadata
         metadata_file = form.get("metadata")
-        if metadata_file is None:
+        if not isinstance(metadata_file, UploadFile):
             raise HTTPException(status_code=400, detail="Missing metadata")
 
         # Parse metadata
@@ -366,7 +367,7 @@ def create_executor_app(executor: BaseExecutor | None = None):
         inputs: list[ExecutorInput] = []
         for name in ["input0", "input1", "input2", "input3", "input4"]:
             upload = form.get(name)
-            if upload is not None:
+            if isinstance(upload, UploadFile):
                 data = await upload.read()
                 if data:
                     inputs.append(ExecutorInput(name=name, data=data))

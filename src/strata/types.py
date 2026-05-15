@@ -237,6 +237,37 @@ def compute_filter_fingerprint(filters: list[Filter] | None) -> str:
     return hashlib.md5(combined.encode()).hexdigest()[:16]
 
 
+def _wrap_filter_value(value: FilterValue):
+    """Wrap a ``FilterValue`` into a pyiceberg ``Literal``.
+
+    ``iceberg_literal`` is generic over a constrained TypeVar — a union
+    input doesn't typecheck because the constraint resolver can't pick
+    a single slot. Dispatching on isinstance narrows ``value`` to one
+    constraint at each call site.
+    """
+    from pyiceberg.expressions.literals import literal as iceberg_literal
+
+    if isinstance(value, str):
+        return iceberg_literal(value)
+    if isinstance(value, bool):
+        return iceberg_literal(value)
+    if isinstance(value, int):
+        return iceberg_literal(value)
+    if isinstance(value, float):
+        return iceberg_literal(value)
+    if isinstance(value, bytes):
+        return iceberg_literal(value)
+    if isinstance(value, uuid.UUID):
+        return iceberg_literal(value)
+    if isinstance(value, Decimal):
+        return iceberg_literal(value)
+    if isinstance(value, datetime):
+        return iceberg_literal(value)
+    if isinstance(value, date):
+        return iceberg_literal(value)
+    return iceberg_literal(value)
+
+
 def filters_to_iceberg_expression(filters: list[Filter] | None):
     """Convert Strata filters to a PyIceberg boolean expression.
 
@@ -262,7 +293,9 @@ def filters_to_iceberg_expression(filters: list[Filter] | None):
         LessThan,
         LessThanOrEqual,
         NotEqualTo,
+        Reference,
     )
+    from pyiceberg.expressions.literals import Literal as IcebergLiteral
 
     exprs = []
     for f in filters:
@@ -270,19 +303,28 @@ def filters_to_iceberg_expression(filters: list[Filter] | None):
         if "." in f.column:
             continue
 
+        # Wrap the column name as an ``UnboundTerm`` (``Reference``) and
+        # narrow the value into a typed pyiceberg ``Literal`` via a
+        # per-branch isinstance dispatch. Pyiceberg accepts raw scalars
+        # at runtime via internal coercion, but its constructors are
+        # typed to require these wrappers — and ``iceberg_literal`` itself
+        # is generic over a *constrained* type variable, so a single
+        # call with a ``FilterValue`` union won't typecheck either.
+        term = Reference(f.column)
+        value: IcebergLiteral = _wrap_filter_value(f.value)
         match f.op:
             case FilterOp.EQ:
-                exprs.append(EqualTo(f.column, f.value))
+                exprs.append(EqualTo(term=term, value=value))
             case FilterOp.NE:
-                exprs.append(NotEqualTo(f.column, f.value))
+                exprs.append(NotEqualTo(term=term, value=value))
             case FilterOp.LT:
-                exprs.append(LessThan(f.column, f.value))
+                exprs.append(LessThan(term=term, value=value))
             case FilterOp.LE:
-                exprs.append(LessThanOrEqual(f.column, f.value))
+                exprs.append(LessThanOrEqual(term=term, value=value))
             case FilterOp.GT:
-                exprs.append(GreaterThan(f.column, f.value))
+                exprs.append(GreaterThan(term=term, value=value))
             case FilterOp.GE:
-                exprs.append(GreaterThanOrEqual(f.column, f.value))
+                exprs.append(GreaterThanOrEqual(term=term, value=value))
 
     if not exprs:
         return None

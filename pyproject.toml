@@ -157,36 +157,8 @@ python-version = "3.12"
 python = ".venv"
 
 [tool.ty.rules]
-# Optional deps (azure, otel, rust ext) use guarded imports
+# Optional deps (Rust ext, ADBC drivers) use guarded imports
 unresolved-import = "warn"
-# Dict literal narrowing false positives
-invalid-assignment = "warn"
-# Generic[P] deliberate use, asyncio.Process.stdin/stdout nullability
-invalid-method-override = "warn"
-
-# Per-file overrides for remaining warnings that need deeper refactoring
-[[tool.ty.overrides]]
-include = ["src/strata/transforms/runner.py"]
-[tool.ty.overrides.rules]
-unknown-argument = "warn"
-missing-argument = "warn"
-
-[[tool.ty.overrides]]
-include = ["src/strata/integration/polars.py"]
-[tool.ty.overrides.rules]
-invalid-return-type = "warn"
-
-[[tool.ty.overrides]]
-include = ["src/strata/logging.py"]
-[tool.ty.overrides.rules]
-unresolved-attribute = "warn"
-invalid-argument-type = "warn"
-no-matching-overload = "warn"
-
-[[tool.ty.overrides]]
-include = ["src/strata/transforms/reference_executor.py"]
-[tool.ty.overrides.rules]
-unresolved-attribute = "warn"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

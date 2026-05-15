@@ -32,7 +32,7 @@ import tomllib
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import tomli_w
 
@@ -265,7 +265,11 @@ def _validate_nbformat_structure(nb: object) -> None:
         raise ValueError(
             f"Invalid .ipynb: expected JSON object at top level, got {type(nb).__name__}"
         )
-    cells = nb.get("cells")
+    # ``cast`` only — ty narrows the isinstance result to dict[Unknown, Unknown]
+    # whose ``.get`` signature resolves to ``(key: Never) -> ...``. The runtime
+    # dict is the standard JSON parse so str-keyed access is safe.
+    nb_dict = cast(dict[str, Any], nb)
+    cells = nb_dict.get("cells")
     if cells is not None and not isinstance(cells, list):
         raise ValueError(f"Invalid .ipynb: 'cells' must be a list, got {type(cells).__name__}")
     for idx, cell in enumerate(cells or []):
