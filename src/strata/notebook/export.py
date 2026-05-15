@@ -24,20 +24,27 @@ Design choices captured in
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
-from typing import Literal
 
-from strata.notebook.models import CellOutput, CellState, NotebookState
+from strata.notebook.models import CellLanguage, CellOutput, CellState, NotebookState
 from strata.notebook.parser import parse_notebook
 
 _DEFAULT_MAX_OUTPUT_BYTES = 1_048_576  # 1 MB per individual rendered output
+
+
+class ExportFormat(StrEnum):
+    """Target format for ``export_notebook``."""
+
+    MARKDOWN = "markdown"
+    HTML = "html"
 
 
 @dataclass
 class ExportOptions:
     """User-facing knobs for an export run."""
 
-    output_format: Literal["markdown", "html"] = "markdown"
+    output_format: ExportFormat = ExportFormat.MARKDOWN
     include_inactive_variants: bool = False
     include_console: bool = True
     # Per-output byte cap. Affects console snapshots, JSON previews,
@@ -84,7 +91,7 @@ def export_notebook(
             continue
         blocks.extend(_render_cell(cell, state, notebook_dir, options))
 
-    if options.output_format == "html":
+    if options.output_format == ExportFormat.HTML:
         return _emit_html(blocks, title=state.name)
     return _emit_markdown(blocks)
 
@@ -172,7 +179,7 @@ def _render_cell(
 
     annotations = parse_annotations(cell.source)
 
-    if cell.language == "markdown":
+    if cell.language == CellLanguage.MARKDOWN:
         # Markdown cells are *content*, not annotated source. Their
         # body usually opens with a heading already; adding our own
         # banner above it would compete for the section title (we hit
@@ -191,7 +198,7 @@ def _render_cell(
         blocks.append(ChipsBlock(chips))
 
     # Prompt cells: source template only — never the response.
-    if cell.language == "prompt":
+    if cell.language == CellLanguage.PROMPT:
         blocks.append(NoteBlock("Prompt cell — response intentionally excluded from export."))
         blocks.append(CodeBlock(language="text", body=cell.source))
         return blocks

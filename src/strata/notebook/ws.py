@@ -21,7 +21,7 @@ from strata.notebook.causality import skip_none
 from strata.notebook.executor import CellExecutionResult, CellExecutor
 from strata.notebook.impact import ImpactAnalyzer
 from strata.notebook.inspect_repl import InspectManager
-from strata.notebook.models import CellStaleness, CellStatus, WorkerBackendType
+from strata.notebook.models import CellLanguage, CellStaleness, CellStatus, WorkerBackendType
 from strata.notebook.session import CellStateSnapshot, SessionManager
 from strata.notebook.workers import resolve_worker_spec, worker_transport
 from strata.notebook.writer import write_cell
@@ -1109,7 +1109,7 @@ async def _handle_cell_source_update(
                 "variant_name": cell.variant_name,
                 "variant_active": cell.variant_active,
             }
-            if cell.language == "python":
+            if cell.language == CellLanguage.PYTHON:
                 plan = build_module_export_plan(cell.source)
                 has_code_export = any(
                     s.kind in ("function", "async function", "class")
@@ -1211,7 +1211,7 @@ async def _handle_variant_set_active(
                 "variant_name": cell.variant_name,
                 "variant_active": cell.variant_active,
             }
-            if cell.language == "python":
+            if cell.language == CellLanguage.PYTHON:
                 plan = build_module_export_plan(cell.source)
                 has_code_export = any(
                     s.kind in ("function", "async function", "class")

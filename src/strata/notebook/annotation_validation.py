@@ -14,7 +14,13 @@ from strata.notebook.annotations import (
     parse_annotation_directive,
     parse_annotations,
 )
-from strata.notebook.models import AnnotationDiagnostic, CellState, NotebookState
+from strata.notebook.models import (
+    AnnotationDiagnostic,
+    CellLanguage,
+    CellState,
+    DiagnosticSeverity,
+    NotebookState,
+)
 
 _BUILTIN_WORKER_NAMES = frozenset({"local"})
 _SUPPORTED_MOUNT_SCHEMES = frozenset({"file", "s3", "gs", "gcs", "az", "azure"})
@@ -31,11 +37,11 @@ def validate_cell_annotations(
     variant_diagnostics = _validate_variant_annotation(
         cell, parse_annotations(cell.source), notebook_state
     )
-    if cell.language == "prompt":
+    if cell.language == CellLanguage.PROMPT:
         return variant_diagnostics + _validate_prompt_cell_annotations(cell)
-    if cell.language == "sql":
+    if cell.language == CellLanguage.SQL:
         return variant_diagnostics + _validate_sql_cell_annotations(cell, notebook_state)
-    if cell.language == "markdown":
+    if cell.language == CellLanguage.MARKDOWN:
         # Markdown cells are pure prose; ``# @worker`` etc. would be a
         # markdown heading, not an annotation. No validation applies.
         return variant_diagnostics
@@ -49,7 +55,7 @@ def validate_cell_annotations(
         if annotations.worker not in known:
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="warn",
+                    severity=DiagnosticSeverity.WARN,
                     code="worker_unknown",
                     message=(
                         f"`@worker {annotations.worker}` is not declared in this notebook. "
@@ -69,7 +75,7 @@ def validate_cell_annotations(
         if not scheme or scheme not in _SUPPORTED_MOUNT_SCHEMES:
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="warn",
+                    severity=DiagnosticSeverity.WARN,
                     code="mount_uri_unsupported",
                     message=(
                         f"`@mount {mount.name}` uses unsupported URI scheme "
@@ -84,7 +90,7 @@ def validate_cell_annotations(
         if mount.name in notebook_mount_names:
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="info",
+                    severity=DiagnosticSeverity.INFO,
                     code="mount_shadows_notebook",
                     message=(
                         f"`@mount {mount.name}` overrides the notebook-level "
@@ -106,7 +112,7 @@ def validate_cell_annotations(
             if not value:
                 diagnostics.append(
                     AnnotationDiagnostic(
-                        severity="warn",
+                        severity=DiagnosticSeverity.WARN,
                         code="timeout_not_numeric",
                         message="`@timeout` requires a numeric value (seconds).",
                         line=lineno,
@@ -118,7 +124,7 @@ def validate_cell_annotations(
                     if t <= 0:
                         diagnostics.append(
                             AnnotationDiagnostic(
-                                severity="warn",
+                                severity=DiagnosticSeverity.WARN,
                                 code="timeout_not_numeric",
                                 message=f"`@timeout {value}` must be a positive number.",
                                 line=lineno,
@@ -127,7 +133,7 @@ def validate_cell_annotations(
                 except ValueError:
                     diagnostics.append(
                         AnnotationDiagnostic(
-                            severity="warn",
+                            severity=DiagnosticSeverity.WARN,
                             code="timeout_not_numeric",
                             message=f"`@timeout {value}` is not a valid number.",
                             line=lineno,
@@ -139,7 +145,7 @@ def validate_cell_annotations(
             if eq_idx <= 0:
                 diagnostics.append(
                     AnnotationDiagnostic(
-                        severity="warn",
+                        severity=DiagnosticSeverity.WARN,
                         code="env_malformed",
                         message=(
                             f"`@env {value}` is malformed. Expected format: `@env KEY=value`."
@@ -204,7 +210,7 @@ def _validate_module_export(
     names = ", ".join(f"`{n}`" for n in blocked)
     return [
         AnnotationDiagnostic(
-            severity="warn",
+            severity=DiagnosticSeverity.WARN,
             code="module_export_blocked",
             message=(
                 f"This cell defines reusable code ({names}) that downstream cells "
@@ -229,7 +235,7 @@ def _validate_prompt_cell_annotations(cell: CellState) -> list[AnnotationDiagnos
     if analysis.output_schema_error:
         diagnostics.append(
             AnnotationDiagnostic(
-                severity="warn",
+                severity=DiagnosticSeverity.WARN,
                 code="prompt_output_schema_invalid",
                 message=analysis.output_schema_error,
                 line=_find_annotation_line(cell.source, "output_schema"),
@@ -269,7 +275,7 @@ def _validate_referenced_connection(
     if registered and conn.driver not in registered:
         diagnostics.append(
             AnnotationDiagnostic(
-                severity="error",
+                severity=DiagnosticSeverity.ERROR,
                 code="connection_driver_unknown",
                 message=(
                     f"Connection {conn.name!r} declares driver "
@@ -291,7 +297,7 @@ def _validate_referenced_connection(
             continue
         diagnostics.append(
             AnnotationDiagnostic(
-                severity="warn",
+                severity=DiagnosticSeverity.WARN,
                 code="connection_auth_literal_secret",
                 message=(
                     f"Connection {conn.name!r} `auth.{key}` contains a "
@@ -325,7 +331,7 @@ def _validate_sql_cell_annotations(
     if sql is None or not sql.connection:
         diagnostics.append(
             AnnotationDiagnostic(
-                severity="error",
+                severity=DiagnosticSeverity.ERROR,
                 code="sql_connection_missing",
                 message=(
                     "SQL cells require `# @sql connection=<name>`. The connection "
@@ -345,7 +351,7 @@ def _validate_sql_cell_annotations(
             mal = malformed_by_name[target]
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="error",
+                    severity=DiagnosticSeverity.ERROR,
                     code="connection_malformed",
                     message=(
                         f"Connection {target!r} is declared but failed to "
@@ -358,7 +364,7 @@ def _validate_sql_cell_annotations(
         else:
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="warn",
+                    severity=DiagnosticSeverity.WARN,
                     code="sql_connection_unknown",
                     message=(
                         f"`@sql connection={target}` is not declared in this "
@@ -390,7 +396,7 @@ def _validate_sql_cell_annotations(
             if sql_analysis.parse_error:
                 diagnostics.append(
                     AnnotationDiagnostic(
-                        severity="warn",
+                        severity=DiagnosticSeverity.WARN,
                         code="sql_parse_error",
                         message=(
                             f"sqlglot couldn't parse this SQL cell: "
@@ -417,7 +423,7 @@ def _validate_sql_cell_annotations(
         if not value:
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="warn",
+                    severity=DiagnosticSeverity.WARN,
                     code="cache_policy_unknown",
                     message=(
                         "`@cache` requires a policy: fingerprint | forever | "
@@ -439,7 +445,7 @@ def _validate_sql_cell_annotations(
                 pass
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="warn",
+                    severity=DiagnosticSeverity.WARN,
                     code="cache_ttl_invalid",
                     message=(f"`@cache ttl={raw}` requires a positive integer (seconds)."),
                     line=lineno,
@@ -448,7 +454,7 @@ def _validate_sql_cell_annotations(
             continue
         diagnostics.append(
             AnnotationDiagnostic(
-                severity="warn",
+                severity=DiagnosticSeverity.WARN,
                 code="cache_policy_unknown",
                 message=(
                     f"`@cache {head}` is not a recognized policy. Use "
@@ -478,7 +484,7 @@ def _validate_loop_annotation(
     if loop.max_iter <= 0:
         diagnostics.append(
             AnnotationDiagnostic(
-                severity="error",
+                severity=DiagnosticSeverity.ERROR,
                 code="loop_missing_max_iter",
                 message=(
                     "`@loop` requires a positive `max_iter=<N>`. "
@@ -491,7 +497,7 @@ def _validate_loop_annotation(
     if not loop.carry:
         diagnostics.append(
             AnnotationDiagnostic(
-                severity="error",
+                severity=DiagnosticSeverity.ERROR,
                 code="loop_missing_carry",
                 message=(
                     "`@loop` requires `carry=<variable>`. "
@@ -503,7 +509,7 @@ def _validate_loop_annotation(
     elif cell.defines and loop.carry not in cell.defines:
         diagnostics.append(
             AnnotationDiagnostic(
-                severity="warn",
+                severity=DiagnosticSeverity.WARN,
                 code="loop_carry_unknown",
                 message=(
                     f"`@loop carry={loop.carry}` does not match any top-level "
@@ -520,7 +526,7 @@ def _validate_loop_annotation(
         except SyntaxError as exc:
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="error",
+                    severity=DiagnosticSeverity.ERROR,
                     code="loop_until_syntax_error",
                     message=(
                         f"`@loop_until` expression is not a valid Python expression: {exc.msg}."
@@ -534,7 +540,7 @@ def _validate_loop_annotation(
         if loop.start_from_cell not in known_cells:
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="error",
+                    severity=DiagnosticSeverity.ERROR,
                     code="loop_start_from_unknown",
                     message=(
                         f"`@loop start_from={loop.start_from_cell}@iter="
@@ -547,7 +553,7 @@ def _validate_loop_annotation(
         elif loop.start_from_cell == cell.id:
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="error",
+                    severity=DiagnosticSeverity.ERROR,
                     code="loop_start_from_unknown",
                     message=(
                         "`@loop start_from` must reference a different cell — "
@@ -584,7 +590,7 @@ def _validate_variant_annotation(
     if variant_line is not None and annotations.variant is None:
         diagnostics.append(
             AnnotationDiagnostic(
-                severity="warn",
+                severity=DiagnosticSeverity.WARN,
                 code="variant_malformed",
                 message=(
                     "`@variant` requires `group` and `name`, both Python "
@@ -627,7 +633,7 @@ def _validate_variant_annotation(
                     diff_parts.append(f"extra {sorted(extra)}")
                 diagnostics.append(
                     AnnotationDiagnostic(
-                        severity="warn",
+                        severity=DiagnosticSeverity.WARN,
                         code="variant_contract_mismatch",
                         message=(
                             f"Variant `{annotations.variant.name}` defines a different "
@@ -649,7 +655,7 @@ def _validate_variant_annotation(
         if selected not in all_members:
             diagnostics.append(
                 AnnotationDiagnostic(
-                    severity="warn",
+                    severity=DiagnosticSeverity.WARN,
                     code="variant_active_unknown",
                     message=(
                         f"notebook.toml selects variant `{selected}` for group "

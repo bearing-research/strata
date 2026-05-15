@@ -44,7 +44,7 @@ from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
 from strata.notebook.immutability import MutationWarning
-from strata.notebook.models import MountSpec, WorkerBackendType
+from strata.notebook.models import CellLanguage, MountSpec, WorkerBackendType
 from strata.notebook.module_export import build_module_export_plan
 from strata.notebook.mounts import (
     MountFingerprinter,
@@ -615,7 +615,7 @@ class CellExecutor:
                 cell.cache_hit = False
 
             # Prompt cells use a dedicated executor (LLM call, no subprocess)
-            if cell is not None and cell.language == "prompt":
+            if cell is not None and cell.language == CellLanguage.PROMPT:
                 return await self._execute_prompt_cell(
                     cell_id,
                     source,
@@ -625,7 +625,7 @@ class CellExecutor:
                 )
 
             # SQL cells use a dedicated executor (ADBC query, no subprocess).
-            if cell is not None and cell.language == "sql":
+            if cell is not None and cell.language == CellLanguage.SQL:
                 return await self._execute_sql_cell(
                     cell_id,
                     source,
@@ -640,7 +640,7 @@ class CellExecutor:
             # cell's preview view, so emitting it again as a display
             # output would just duplicate the same content in the output
             # panel below the editor.
-            if cell is not None and cell.language == "markdown":
+            if cell is not None and cell.language == CellLanguage.MARKDOWN:
                 # ``start_time`` is wall-clock (``time.time()``), so subtract
                 # in the same clock — mixing ``monotonic()`` here produces a
                 # ~1.7e12 ms negative because the two clocks have different

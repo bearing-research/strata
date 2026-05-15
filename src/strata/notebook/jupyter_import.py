@@ -36,6 +36,7 @@ from typing import Any
 
 import tomli_w
 
+from strata.notebook.models import CellLanguage
 from strata.notebook.writer import (
     add_cell_to_notebook,
     create_notebook,
@@ -173,7 +174,7 @@ def import_notebook(
                 notebook_dir,
                 cell_id,
                 after_cell_id=prev_cell_id,
-                language="markdown",
+                language=CellLanguage.MARKDOWN,
             )
             write_cell(notebook_dir, cell_id, _ensure_final_newline(source))
             result.markdown_cells += 1
@@ -185,7 +186,7 @@ def import_notebook(
                 notebook_dir,
                 cell_id,
                 after_cell_id=prev_cell_id,
-                language="python",
+                language=CellLanguage.PYTHON,
             )
             write_cell(notebook_dir, cell_id, conv.source)
             result.code_cells += 1

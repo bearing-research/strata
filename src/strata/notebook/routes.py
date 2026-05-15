@@ -29,7 +29,13 @@ from strata.notebook.dependencies import (
     preview_requirements_text,
 )
 from strata.notebook.executor import CellExecutor
-from strata.notebook.models import CellStatus, ConnectionSpec, MountSpec, WorkerSpec
+from strata.notebook.models import (
+    CellLanguage,
+    CellStatus,
+    ConnectionSpec,
+    MountSpec,
+    WorkerSpec,
+)
 from strata.notebook.python_versions import (
     current_python_minor,
     normalize_python_minor,
@@ -531,7 +537,7 @@ class AddCellRequest(BaseModel):
     """Request to add a new cell."""
 
     after_cell_id: str | None = None
-    language: Literal["python", "prompt", "markdown", "sql"] = "python"
+    language: CellLanguage = CellLanguage.PYTHON
 
 
 class MountConfigRequest(BaseModel):
@@ -2713,11 +2719,11 @@ def _render_notebook_export(
     """
     from fastapi.responses import Response
 
-    from strata.notebook.export import ExportOptions, export_notebook
+    from strata.notebook.export import ExportFormat, ExportOptions, export_notebook
 
     try:
         options = ExportOptions(
-            output_format=fmt,  # type: ignore[arg-type]
+            output_format=ExportFormat(fmt),
             include_inactive_variants=bool(include_inactive_variants),
         )
         body = export_notebook(session.path, options)

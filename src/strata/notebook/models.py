@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -160,6 +160,23 @@ class StalenessReason(StrEnum):
     FORCED = "forced"  # Forced re-run despite cache hit
 
 
+class CellLanguage(StrEnum):
+    """Source language of a notebook cell."""
+
+    PYTHON = "python"
+    PROMPT = "prompt"
+    SQL = "sql"
+    MARKDOWN = "markdown"
+
+
+class DiagnosticSeverity(StrEnum):
+    """Severity of an annotation-validation diagnostic."""
+
+    ERROR = "error"
+    WARN = "warn"
+    INFO = "info"
+
+
 class ContentType(StrEnum):
     """Serialization format for cell outputs."""
 
@@ -174,7 +191,7 @@ class ContentType(StrEnum):
 class AnnotationDiagnostic(BaseModel):
     """A validation finding for a cell's source annotations."""
 
-    severity: Literal["error", "warn", "info"] = Field(..., description="Diagnostic severity")
+    severity: DiagnosticSeverity = Field(..., description="Diagnostic severity")
     code: str = Field(..., description="Stable identifier, e.g. 'worker_unknown'")
     message: str = Field(..., description="Human-readable explanation")
     line: int | None = Field(default=None, description="1-based line in cell source")
@@ -253,7 +270,7 @@ class CellMeta(BaseModel):
 
     id: str = Field(..., description="Unique cell ID (UUID-like)")
     file: str = Field(..., description="Path to cell source file (relative to cells/)")
-    language: str = Field(default="python", description="Programming language")
+    language: CellLanguage = Field(default=CellLanguage.PYTHON, description="Programming language")
     order: float = Field(default=0, description="Display order in notebook")
     worker: str | None = Field(
         default=None,
@@ -388,7 +405,7 @@ class CellState(BaseModel):
 
     id: str = Field(..., description="Cell ID")
     source: str = Field(default="", description="Cell source code")
-    language: str = Field(default="python", description="Programming language")
+    language: CellLanguage = Field(default=CellLanguage.PYTHON, description="Programming language")
     order: float = Field(default=0, description="Display order in notebook")
     status: CellStatus = Field(
         default=CellStatus.IDLE,
@@ -570,7 +587,7 @@ class CellState(BaseModel):
         # UI and the richer tooltip on the module_export_blocked
         # diagnostic. Only meaningful for Python cells; prompt and
         # markdown cells have no Python identifiers to export.
-        if self.language == "python":
+        if self.language == CellLanguage.PYTHON:
             export_plan = build_module_export_plan(self.source)
             has_code_export = any(
                 symbol.kind in ("function", "async function", "class")

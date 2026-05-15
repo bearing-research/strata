@@ -22,6 +22,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from strata.notebook.models import CellLanguage
+
 # ANSI colors for human output. Disabled when stdout isn't a tty so that
 # pipes and CI logs stay clean.
 _USE_COLOR = sys.stdout.isatty()
@@ -239,7 +241,7 @@ async def _run_async(args: argparse.Namespace) -> int:
         # Markdown cells are non-executable prose; surface them as
         # success-with-no-op so ``strata run`` doesn't print a misleading
         # "skipped: unsupported language" line for documentation cells.
-        if cell.language == "markdown":
+        if cell.language == CellLanguage.MARKDOWN:
             entry = {
                 "id": cell_id,
                 "label": f"[markdown] {_cell_label(cell.source)}",
@@ -254,7 +256,7 @@ async def _run_async(args: argparse.Namespace) -> int:
             continue
 
         # Skip languages we can't execute headlessly.
-        if cell.language not in {"python", "prompt", "sql"}:
+        if cell.language not in {CellLanguage.PYTHON, CellLanguage.PROMPT, CellLanguage.SQL}:
             entry = {
                 "id": cell_id,
                 "label": f"[{cell.language}] {_cell_label(cell.source)}",
@@ -497,7 +499,7 @@ def export_main(args: argparse.Namespace) -> int:
     :func:`strata.notebook.export.export_notebook`, and writes the
     result to stdout (default) or to the ``--out`` path.
     """
-    from strata.notebook.export import ExportOptions, export_notebook
+    from strata.notebook.export import ExportFormat, ExportOptions, export_notebook
 
     path = Path(args.path)
     if not (path / "notebook.toml").is_file():
@@ -505,7 +507,7 @@ def export_main(args: argparse.Namespace) -> int:
         return 2
 
     option_kwargs: dict[str, object] = {
-        "output_format": args.output_format,
+        "output_format": ExportFormat(args.output_format),
         "include_inactive_variants": bool(args.include_inactive_variants),
         "include_console": not bool(args.no_console),
     }

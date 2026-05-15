@@ -41,6 +41,7 @@ from strata.notebook.env import (
     narrow_env_for_provenance,
 )
 from strata.notebook.models import (
+    CellLanguage,
     CellOutput,
     CellStaleness,
     CellState,
@@ -450,12 +451,12 @@ class NotebookSession:
 
         cell_analyses = []
         for cell in self.notebook_state.cells:
-            if cell.language == "prompt":
+            if cell.language == CellLanguage.PROMPT:
                 prompt_analysis = analyze_prompt_cell(cell.source)
                 defines = prompt_analysis.defines
                 references = prompt_analysis.references
                 mutation_defines: list[str] = []
-            elif cell.language == "sql":
+            elif cell.language == CellLanguage.SQL:
                 from strata.notebook.sql.analyzer import analyze_sql_cell
 
                 # Resolve the dialect for table extraction lazily —
@@ -469,7 +470,7 @@ class NotebookSession:
                 defines = sql_analysis.defines
                 references = sql_analysis.references
                 mutation_defines = []
-            elif cell.language == "markdown":
+            elif cell.language == CellLanguage.MARKDOWN:
                 # Markdown cells are pure prose — no Python identifiers
                 # to define or reference, so they sit isolated in the
                 # DAG with no edges in or out.
@@ -642,20 +643,20 @@ class NotebookSession:
             return
 
         # Re-analyze just this cell (dispatch by language)
-        if cell.language == "prompt":
+        if cell.language == CellLanguage.PROMPT:
             from strata.notebook.prompt_analyzer import analyze_prompt_cell
 
             prompt_analysis = analyze_prompt_cell(cell.source)
             cell.defines = prompt_analysis.defines
             cell.references = prompt_analysis.references
-        elif cell.language == "sql":
+        elif cell.language == CellLanguage.SQL:
             from strata.notebook.sql.analyzer import analyze_sql_cell
 
             dialect = self._resolve_sql_dialect(cell)
             sql_analysis = analyze_sql_cell(cell.source, dialect=dialect)
             cell.defines = sql_analysis.defines
             cell.references = sql_analysis.references
-        elif cell.language == "markdown":
+        elif cell.language == CellLanguage.MARKDOWN:
             # Markdown is prose — no identifiers in or out of the DAG.
             cell.defines = []
             cell.references = []
@@ -736,7 +737,7 @@ class NotebookSession:
             # Markdown cells are pure prose — they have no inputs, no
             # subprocess, and can never be stale. Mark ready and move on
             # without computing provenance hashes or hitting the cache.
-            if cell.language == "markdown":
+            if cell.language == CellLanguage.MARKDOWN:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 continue
 
@@ -804,7 +805,7 @@ class NotebookSession:
                     can_preserve_uncached_ready = (
                         (
                             cell.is_leaf
-                            or cell.language == "prompt"
+                            or cell.language == CellLanguage.PROMPT
                             # SQL cells store artifacts under a
                             # SQL-specific per-variable hash
                             # (compute_sql_provenance_hash), so the
@@ -813,7 +814,7 @@ class NotebookSession:
                             # generic hash via
                             # ``record_successful_execution_provenance``
                             # so this path keeps the cell READY.
-                            or cell.language == "sql"
+                            or cell.language == CellLanguage.SQL
                         )
                         and cell.status == CellStatus.READY
                         and cell.last_provenance_hash == provenance_hash
