@@ -15,6 +15,7 @@ rendered in past tense after execution instead of present tense before.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from strata.notebook.annotations import parse_annotations
@@ -26,22 +27,56 @@ if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession
 
 
+class CausalityType(StrEnum):
+    """Which provenance component changed."""
+
+    SOURCE_CHANGED = "source_changed"
+    INPUT_CHANGED = "input_changed"
+    ENV_CHANGED = "env_changed"
+
+
+class CausalityReason(StrEnum):
+    """Primary staleness reason for a cell."""
+
+    SELF = "self"
+    UPSTREAM = "upstream"
+    ENV = "env"
+
+
+def skip_none(pairs: list[tuple[str, object]]) -> dict:
+    """``dict_factory`` for ``asdict`` that drops fields whose value is None.
+
+    Used by callers serializing CausalityChain / CausalityDetail to JSON,
+    so optional fields don't appear in the wire payload as ``null``.
+    """
+    return {k: v for k, v in pairs if v is not None}
+
+
 @dataclass
 class CausalityDetail:
     """A single reason contributing to staleness.
 
-    Attributes:
-        type: One of 'source_changed', 'input_changed', 'env_changed'
-        cell_id: For source/input changes, which cell changed
-        cell_name: Human-readable name of the changed cell
-        from_version: Old artifact version string (for input_changed)
-        to_version: New artifact version string (for input_changed)
-        package: Package name (for env_changed)
-        from_package_version: Old package version (for env_changed)
-        to_package_version: New package version (for env_changed)
+    Attributes
+    ----------
+    type : CausalityType
+        Which provenance component changed.
+    cell_id : str or None
+        For source/input changes, which cell changed.
+    cell_name : str or None
+        Human-readable name of the changed cell.
+    from_version : str or None
+        Old artifact version string (for ``input_changed``).
+    to_version : str or None
+        New artifact version string (for ``input_changed``).
+    package : str or None
+        Package name (for ``env_changed``).
+    from_package_version : str or None
+        Old package version (for ``env_changed``).
+    to_package_version : str or None
+        New package version (for ``env_changed``).
     """
 
-    type: str  # 'source_changed' | 'input_changed' | 'env_changed'
+    type: CausalityType
     cell_id: str | None = None
     cell_name: str | None = None
     from_version: str | None = None
@@ -50,44 +85,21 @@ class CausalityDetail:
     from_package_version: str | None = None
     to_package_version: str | None = None
 
-    def to_dict(self) -> dict:
-        """Convert to JSON-serializable dict, omitting None values."""
-        d: dict = {"type": self.type}
-        if self.cell_id is not None:
-            d["cell_id"] = self.cell_id
-        if self.cell_name is not None:
-            d["cell_name"] = self.cell_name
-        if self.from_version is not None:
-            d["from_version"] = self.from_version
-        if self.to_version is not None:
-            d["to_version"] = self.to_version
-        if self.package is not None:
-            d["package"] = self.package
-        if self.from_package_version is not None:
-            d["from_package_version"] = self.from_package_version
-        if self.to_package_version is not None:
-            d["to_package_version"] = self.to_package_version
-        return d
-
 
 @dataclass
 class CausalityChain:
     """Full causality explanation for a stale cell.
 
-    Attributes:
-        reason: Primary staleness reason ('self', 'upstream', 'env')
-        details: List of specific changes that caused staleness
+    Attributes
+    ----------
+    reason : CausalityReason
+        Primary staleness reason.
+    details : list of CausalityDetail
+        Specific changes that caused staleness.
     """
 
-    reason: str  # 'self' | 'upstream' | 'env'
+    reason: CausalityReason
     details: list[CausalityDetail] = field(default_factory=list)
-
-    def to_dict(self) -> dict:
-        """Convert to JSON-serializable dict."""
-        return {
-            "reason": self.reason,
-            "details": [d.to_dict() for d in self.details],
-        }
 
 
 class CausalityInspector:
@@ -101,8 +113,10 @@ class CausalityInspector:
     def __init__(self, session: NotebookSession):
         """Initialize inspector for a session.
 
-        Args:
-            session: NotebookSession instance
+        Parameters
+        ----------
+        session : NotebookSession
+            Session whose cells will be inspected.
         """
         self.session = session
 
@@ -119,11 +133,15 @@ class CausalityInspector:
     def _check_upstream_changes(self, cell_id: str) -> list[CausalityDetail]:
         """Check if upstream cells have changed artifacts.
 
-        Args:
-            cell_id: Cell to check upstream changes for
+        Parameters
+        ----------
+        cell_id : str
+            Cell to check upstream changes for.
 
-        Returns:
-            List of CausalityDetail for changed upstream cells
+        Returns
+        -------
+        list of CausalityDetail
+            One entry per upstream cell whose artifact has changed.
         """
         details: list[CausalityDetail] = []
         cell = self.session.notebook_state.get_cell(cell_id)
@@ -139,7 +157,7 @@ class CausalityInspector:
             if upstream.status in ("stale", "idle", "error"):
                 details.append(
                     CausalityDetail(
-                        type="input_changed",
+                        type=CausalityType.INPUT_CHANGED,
                         cell_id=upstream_id,
                         cell_name=self._cell_display_name(upstream_id),
                     )
@@ -152,7 +170,7 @@ class CausalityInspector:
                 if stored_input_uri and stored_input_uri != upstream.artifact_uri:
                     details.append(
                         CausalityDetail(
-                            type="input_changed",
+                            type=CausalityType.INPUT_CHANGED,
                             cell_id=upstream_id,
                             cell_name=self._cell_display_name(upstream_id),
                             from_version=stored_input_uri,
@@ -165,14 +183,17 @@ class CausalityInspector:
     def _get_stored_source_hash(self, cell_id: str) -> str | None:
         """Get the source hash stored with the last artifact for a cell.
 
-        We compute what the source hash was when the artifact was created
-        by looking at the provenance metadata.
+        Reads the source hash from the artifact's provenance metadata.
 
-        Args:
-            cell_id: Cell ID
+        Parameters
+        ----------
+        cell_id : str
+            Cell ID.
 
-        Returns:
-            Stored source hash or None if no artifact exists
+        Returns
+        -------
+        str or None
+            Stored source hash, or ``None`` if no artifact exists.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or not cell.artifact_uri:
@@ -188,23 +209,32 @@ class CausalityInspector:
     def _get_stored_env_hash(self, cell_id: str) -> str | None:
         """Get the env hash stored with the last artifact for a cell.
 
-        Args:
-            cell_id: Cell ID
+        Parameters
+        ----------
+        cell_id : str
+            Cell ID.
 
-        Returns:
-            Stored env hash or None if no artifact exists
+        Returns
+        -------
+        str or None
+            Stored env hash, or ``None`` if no artifact exists.
         """
         return self._get_artifact_metadata(cell_id, "env_hash")
 
     def _get_stored_input_uri(self, cell_id: str, upstream_id: str) -> str | None:
         """Get the artifact URI of an upstream cell as stored in our artifact.
 
-        Args:
-            cell_id: The cell whose stored input we're checking
-            upstream_id: The upstream cell
+        Parameters
+        ----------
+        cell_id : str
+            The cell whose stored input we're checking.
+        upstream_id : str
+            The upstream cell.
 
-        Returns:
-            Stored artifact URI or None
+        Returns
+        -------
+        str or None
+            Stored artifact URI, or ``None``.
         """
         # This would ideally come from artifact metadata.
         # For v1.1, we use a simpler heuristic: check if provenance matches.
@@ -213,15 +243,20 @@ class CausalityInspector:
     def _get_artifact_metadata(self, cell_id: str, key: str) -> str | None:
         """Get metadata from a cell's stored artifact.
 
-        Reads component hashes (source_hash, env_hash) from the
+        Reads component hashes (``source_hash``, ``env_hash``) from the
         artifact's ``transform_spec.params``.
 
-        Args:
-            cell_id: Cell ID
-            key: Metadata key (e.g. 'source_hash', 'env_hash')
+        Parameters
+        ----------
+        cell_id : str
+            Cell ID.
+        key : str
+            Metadata key (e.g. ``"source_hash"``, ``"env_hash"``).
 
-        Returns:
-            Value or None
+        Returns
+        -------
+        str or None
+            Stored metadata value, or ``None`` if unavailable.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or not cell.artifact_uri:
@@ -246,11 +281,15 @@ class CausalityInspector:
     def _cell_display_name(self, cell_id: str) -> str:
         """Get a human-readable name for a cell.
 
-        Args:
-            cell_id: Cell ID
+        Parameters
+        ----------
+        cell_id : str
+            Cell ID.
 
-        Returns:
-            Display name (first defined variable, or cell ID)
+        Returns
+        -------
+        str
+            First variable the cell defines, or the cell ID as fallback.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell and cell.defines:
@@ -263,15 +302,19 @@ def compute_causality_on_staleness(
 ) -> dict[str, CausalityChain]:
     """Compute causality chains for all cells during staleness detection.
 
-    This is called alongside compute_staleness() to provide causality
+    Called alongside ``compute_staleness()`` to provide causality
     explanations for stale cells. It uses the same topological walk and
     provenance comparison, but extracts component-level diffs.
 
-    Args:
-        session: NotebookSession instance
+    Parameters
+    ----------
+    session : NotebookSession
+        Session whose cells will be inspected.
 
-    Returns:
-        Dict mapping cell_id -> CausalityChain for stale cells
+    Returns
+    -------
+    dict of {str : CausalityChain}
+        Mapping from ``cell_id`` to the causality chain for stale cells.
     """
     if session.dag is None:
         return {}
@@ -349,7 +392,7 @@ def compute_causality_on_staleness(
                 upstream_name = upstream.defines[0] if upstream.defines else upstream_id
                 details.append(
                     CausalityDetail(
-                        type="input_changed",
+                        type=CausalityType.INPUT_CHANGED,
                         cell_id=upstream_id,
                         cell_name=upstream_name,
                     )
@@ -360,7 +403,7 @@ def compute_causality_on_staleness(
                 upstream_name = upstream.defines[0] if upstream.defines else upstream_id
                 details.append(
                     CausalityDetail(
-                        type="input_changed",
+                        type=CausalityType.INPUT_CHANGED,
                         cell_id=upstream_id,
                         cell_name=upstream_name,
                     )
@@ -383,7 +426,7 @@ def compute_causality_on_staleness(
             if env_changed_flag:
                 details.append(
                     CausalityDetail(
-                        type="env_changed",
+                        type=CausalityType.ENV_CHANGED,
                         package="notebook env",
                     )
                 )
@@ -403,7 +446,7 @@ def compute_causality_on_staleness(
                 )
                 details.append(
                     CausalityDetail(
-                        type="input_changed",
+                        type=CausalityType.INPUT_CHANGED,
                         cell_id=upstream_id,
                         cell_name=upstream_name,
                     )
@@ -415,7 +458,7 @@ def compute_causality_on_staleness(
                     cell_name = cell.defines[0] if cell.defines else cell_id
                     details.append(
                         CausalityDetail(
-                            type="source_changed",
+                            type=CausalityType.SOURCE_CHANGED,
                             cell_id=cell_id,
                             cell_name=cell_name,
                         )
@@ -423,16 +466,16 @@ def compute_causality_on_staleness(
 
         # Determine primary reason — env takes precedence when it's the
         # *only* change, since source_changed may be a fallback guess.
-        has_source = any(d.type == "source_changed" for d in details)
-        has_input = any(d.type == "input_changed" for d in details)
-        has_env = any(d.type == "env_changed" for d in details)
+        has_source = any(d.type == CausalityType.SOURCE_CHANGED for d in details)
+        has_input = any(d.type == CausalityType.INPUT_CHANGED for d in details)
+        has_env = any(d.type == CausalityType.ENV_CHANGED for d in details)
 
         if has_env and not has_source and not has_input:
-            reason = "env"
+            reason = CausalityReason.ENV
         elif has_input:
-            reason = "upstream"
+            reason = CausalityReason.UPSTREAM
         else:
-            reason = "self"
+            reason = CausalityReason.SELF
 
         causality_map[cell_id] = CausalityChain(reason=reason, details=details)
 
@@ -442,13 +485,19 @@ def compute_causality_on_staleness(
 def _get_stored_hash(session: NotebookSession, cell_id: str, key: str) -> str | None:
     """Read a component hash from a cell's stored artifact metadata.
 
-    Args:
-        session: NotebookSession
-        cell_id: Cell ID
-        key: 'source_hash' or 'env_hash'
+    Parameters
+    ----------
+    session : NotebookSession
+        Session that owns the cell's artifact store.
+    cell_id : str
+        Cell ID.
+    key : {"source_hash", "env_hash"}
+        Which component hash to read.
 
-    Returns:
-        Stored hash string or None if not available
+    Returns
+    -------
+    str or None
+        Stored hash, or ``None`` if not available.
     """
     cell = session.notebook_state.get_cell(cell_id)
     if cell is None or not cell.artifact_uri:

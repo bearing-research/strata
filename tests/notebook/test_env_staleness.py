@@ -225,7 +225,7 @@ class TestCausalityInspectorWithHashes:
         chain = inspector.inspect("c2")
 
         assert chain is not None
-        assert session.causality_map["c2"].to_dict() == chain.to_dict()
+        assert session.causality_map["c2"] == chain
         assert any(detail.type == "input_changed" for detail in chain.details)
 
 

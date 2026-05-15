@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cascade import CascadePlanner
+from strata.notebook.causality import skip_none
 from strata.notebook.executor import CellExecutionResult, CellExecutor
 from strata.notebook.impact import ImpactAnalyzer
 from strata.notebook.inspect_repl import InspectManager
@@ -210,7 +212,7 @@ async def _broadcast_staleness_updates(
         }
         causality = session.causality_map.get(cell_id)
         if causality:
-            payload["causality"] = causality.to_dict()
+            payload["causality"] = asdict(causality, dict_factory=skip_none)
 
         await _broadcast_message(
             notebook_id,
@@ -237,7 +239,7 @@ def _capture_cell_state_snapshot(
         snapshot[cell.id] = (
             status,
             reasons,
-            causality.to_dict() if causality else None,
+            asdict(causality, dict_factory=skip_none) if causality else None,
         )
     return snapshot
 
@@ -269,7 +271,7 @@ async def _refresh_and_broadcast_changed_staleness(
         current = (
             staleness.status.value,
             tuple(reason.value for reason in staleness.reasons),
-            causality.to_dict() if causality else None,
+            asdict(causality, dict_factory=skip_none) if causality else None,
         )
         if previous_snapshot.get(cell.id) != current:
             changed[cell.id] = staleness

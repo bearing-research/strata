@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from strata.notebook.analyzer import analyze_cell
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
-from strata.notebook.causality import CausalityChain, compute_causality_on_staleness
+from strata.notebook.causality import CausalityChain, compute_causality_on_staleness, skip_none
 from strata.notebook.dag import CellAnalysisWithId, NotebookDag
 from strata.notebook.dependencies import (
     DependencyChangeResult,
@@ -882,7 +882,11 @@ class NotebookSession:
         if result.success:
             cell.console_stdout = result.stdout or ""
             cell.console_stderr = result.stderr or ""
-            self._persist_console_output(cell_id, result.stdout, result.stderr)
+            # Console output lives in .strata/console/, not notebook.toml —
+            # invariant 6: runtime writers never touch notebook.toml.
+            from strata.notebook.writer import update_cell_console_output
+
+            update_cell_console_output(self.path, cell_id, result.stdout or "", result.stderr or "")
         if result.success and result.display_outputs:
             cell.display_outputs = [CellOutput(**output) for output in result.display_outputs]
             cell.display_output = cell.display_outputs[-1]
@@ -993,7 +997,7 @@ class NotebookSession:
         }
         causality = self.causality_map.get(cell.id)
         if causality is not None:
-            data["causality"] = causality.to_dict()
+            data["causality"] = asdict(causality, dict_factory=skip_none)
 
         # Shadow warnings from DAG
         if self.dag and cell.id in self.dag.shadow_warnings:
@@ -1022,18 +1026,6 @@ class NotebookSession:
                 ]
 
         return data
-
-    def _persist_console_output(self, cell_id: str, stdout: str | None, stderr: str | None) -> None:
-        """Persist stdout/stderr to ``.strata/console/{cell_id}.json``.
-
-        Written outside ``notebook.toml`` because console output is
-        runtime state — it changes every execution and would churn
-        the committed config (CLAUDE.md invariant 6: runtime writers
-        never touch notebook.toml).
-        """
-        from strata.notebook.writer import update_cell_console_output
-
-        update_cell_console_output(self.path, cell_id, stdout or "", stderr or "")
 
     def persist_display_outputs(
         self, cell_id: str, display_outputs: list[dict[str, Any]] | None
@@ -1283,10 +1275,6 @@ class NotebookSession:
                     "Failed to persist environment job history for %s", self.path, exc_info=True
                 )
 
-    def _has_active_cell_status(self) -> bool:
-        """Return whether any notebook cell is currently marked running."""
-        return any(cell.status == CellStatus.RUNNING for cell in self.notebook_state.cells)
-
     def has_active_environment_mutation(self) -> bool:
         """Return whether an environment change is currently in progress."""
         with self._environment_state_lock:
@@ -1307,7 +1295,7 @@ class NotebookSession:
 
     def _has_active_execution(self) -> bool:
         """Return whether cell execution is currently active for this notebook."""
-        if self._has_active_cell_status():
+        if any(cell.status == CellStatus.RUNNING for cell in self.notebook_state.cells):
             return True
         try:
             from strata.notebook.ws import notebook_has_active_execution
@@ -2353,7 +2341,7 @@ class NotebookSession:
             }
             causality = self.causality_map.get(cell.id)
             if causality is not None:
-                payload["causality"] = causality.to_dict()
+                payload["causality"] = asdict(causality, dict_factory=skip_none)
 
             await broadcast_notebook_message(
                 self.id,
