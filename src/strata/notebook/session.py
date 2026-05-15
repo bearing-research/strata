@@ -14,7 +14,7 @@ import threading
 import time as _time
 import tomllib
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -148,30 +148,8 @@ class EnvironmentJobSnapshot:
     finished_at: int | None = None
     lockfile_changed: bool = False
     stale_cell_count: int = 0
-    stale_cell_ids: list[str] | None = None
+    stale_cell_ids: list[str] = field(default_factory=list)
     error: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize the job for REST and WebSocket payloads."""
-        return {
-            "id": self.id,
-            "action": self.action,
-            "package": self.package,
-            "command": self.command,
-            "status": self.status,
-            "phase": self.phase,
-            "duration_ms": self.duration_ms,
-            "stdout": self.stdout,
-            "stderr": self.stderr,
-            "stdout_truncated": self.stdout_truncated,
-            "stderr_truncated": self.stderr_truncated,
-            "started_at": self.started_at,
-            "finished_at": self.finished_at,
-            "lockfile_changed": self.lockfile_changed,
-            "stale_cell_count": self.stale_cell_count,
-            "stale_cell_ids": list(self.stale_cell_ids or []),
-            "error": self.error,
-        }
 
     @classmethod
     def from_dict(cls, raw: object) -> EnvironmentJobSnapshot | None:
@@ -210,7 +188,7 @@ class EnvironmentJobSnapshot:
                 str(value) for value in stale_cell_ids if isinstance(value, str) and value
             ]
             if isinstance(stale_cell_ids, list)
-            else None,
+            else [],
             error=str(raw_dict["error"]) if raw_dict.get("error") is not None else None,
         )
 
@@ -1286,15 +1264,15 @@ class NotebookSession:
         """Serialize the current or most recent environment job when present."""
         with self._environment_state_lock:
             if self.environment_job is not None and self.environment_job.status == "running":
-                return self.environment_job.to_dict()
+                return asdict(self.environment_job)
             if self.environment_job_history:
-                return self.environment_job_history[0].to_dict()
+                return asdict(self.environment_job_history[0])
             return None
 
     def serialize_environment_job_history(self) -> list[dict[str, Any]]:
         """Serialize recent finished environment jobs, newest first."""
         with self._environment_state_lock:
-            return [job.to_dict() for job in self.environment_job_history]
+            return [asdict(job) for job in self.environment_job_history]
 
     def _environment_job_history_path(self) -> Path:
         """Return the persisted recent-job history path for this notebook."""
@@ -1331,7 +1309,7 @@ class NotebookSession:
         history_path.write_text(
             json.dumps(
                 [
-                    job.to_dict()
+                    asdict(job)
                     for job in self.environment_job_history[:_ENVIRONMENT_JOB_HISTORY_LIMIT]
                 ],
                 indent=2,
@@ -2026,7 +2004,7 @@ class NotebookSession:
             job.duration_ms = job.finished_at - job.started_at
             self._record_finished_environment_job(job)
             payload: dict[str, Any] = {
-                "environment_job": job.to_dict(),
+                "environment_job": asdict(job),
                 "environment_job_history": self.serialize_environment_job_history(),
                 "cells": self.serialize_cells(),
                 **{
@@ -2086,7 +2064,7 @@ class NotebookSession:
                     "dependency_changed",
                     legacy_payload,
                 )
-                await self._broadcast_environment_staleness_updates(job.stale_cell_ids or [])
+                await self._broadcast_environment_staleness_updates(job.stale_cell_ids)
             with self._environment_state_lock:
                 if self.environment_job is job:
                     self.environment_job = None
@@ -2373,7 +2351,7 @@ class NotebookSession:
         """Broadcast a single environment-job state snapshot over notebook WS."""
         await self._broadcast_environment_job_message(
             event_type,
-            {"environment_job": job.to_dict()},
+            {"environment_job": asdict(job)},
         )
 
     async def _broadcast_environment_job_message(
