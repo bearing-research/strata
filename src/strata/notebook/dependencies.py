@@ -19,6 +19,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import tomli_w
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
 
 logger = logging.getLogger(__name__)
 _MAX_OPERATION_LOG_CHARS = 12_000
@@ -46,11 +50,25 @@ def _get_notebook_lock(notebook_dir: Path) -> threading.Lock:
 
 @dataclass
 class DependencyInfo:
-    """One installed dependency."""
+    """One declared or resolved notebook dependency.
+
+    Attributes
+    ----------
+    name : str
+        PEP 503 canonical project name.
+    version : Version or None
+        Concrete pinned version parsed as PEP 440 (only set for entries
+        read from ``uv.lock``). Render with ``str(...)`` at serialization
+        boundaries.
+    specifier : SpecifierSet or None
+        Declared version constraint (only set for entries read from
+        ``pyproject.toml``). Stored as a parsed ``SpecifierSet`` so semantic
+        equality works; render with ``str(...)`` at serialization boundaries.
+    """
 
     name: str
-    version: str | None = None
-    specifier: str | None = None  # e.g. ">=1.0,<2"
+    version: Version | None = None
+    specifier: SpecifierSet | None = None
 
 
 @dataclass
@@ -357,7 +375,7 @@ def list_dependencies(notebook_dir: Path) -> list[DependencyInfo]:
     results: list[DependencyInfo] = []
     for dep_str in deps_list:
         name, specifier = _split_requirement(dep_str)
-        results.append(DependencyInfo(name=name.strip(), specifier=specifier))
+        results.append(DependencyInfo(name=name, specifier=specifier))
 
     return results
 
@@ -384,18 +402,29 @@ def list_resolved_dependencies(notebook_dir: Path) -> list[DependencyInfo]:
         if not isinstance(package, dict):
             continue
         name = package.get("name")
-        version = package.get("version")
+        version_raw = package.get("version")
         if not isinstance(name, str):
             continue
+        parsed_version: Version | None = None
+        if version_raw is not None:
+            try:
+                parsed_version = Version(str(version_raw))
+            except InvalidVersion:
+                logger.debug(
+                    "Skipping non-PEP 440 version %r for %s in %s",
+                    version_raw,
+                    name,
+                    notebook_dir,
+                )
         resolved.append(
             DependencyInfo(
-                name=name,
-                version=str(version) if version is not None else None,
+                name=canonicalize_name(name),
+                version=parsed_version,
                 specifier=None,
             )
         )
 
-    resolved.sort(key=lambda dep: dep.name.lower())
+    resolved.sort(key=lambda dep: dep.name)
     return resolved
 
 
@@ -790,9 +819,10 @@ def parse_requirements_text(requirements_text: str) -> list[str]:
 
         validated = _validate_requirement_specifier(line)
         requirement_name, _ = _split_requirement(validated)
-        if requirement_name in seen_names:
+        canonical = canonicalize_name(requirement_name)
+        if canonical in seen_names:
             raise ValueError(f"Duplicate requirement: {requirement_name}")
-        seen_names.add(requirement_name)
+        seen_names.add(canonical)
         requirements.append(validated)
 
     return requirements
@@ -831,9 +861,10 @@ def parse_environment_yaml_text(environment_yaml_text: str) -> tuple[list[str], 
     def add_requirement(requirement: str) -> None:
         validated = _validate_requirement_specifier(requirement)
         requirement_name, _ = _split_requirement(validated)
-        if requirement_name in seen_names:
+        canonical = canonicalize_name(requirement_name)
+        if canonical in seen_names:
             raise ValueError(f"Duplicate requirement: {requirement_name}")
-        seen_names.add(requirement_name)
+        seen_names.add(canonical)
         requirements.append(validated)
 
     for entry in dependencies:
@@ -885,30 +916,37 @@ def _dependency_info_from_requirement_strings(
     results: list[DependencyInfo] = []
     for requirement in requirements:
         name, specifier = _split_requirement(requirement)
-        results.append(DependencyInfo(name=name.strip(), specifier=specifier))
+        results.append(DependencyInfo(name=name, specifier=specifier))
     return results
 
 
-def _split_requirement(dep_str: str) -> tuple[str, str | None]:
-    """Split a requirement into package name and version specifier."""
-    name = dep_str
-    specifier = None
-    for op in (">=", "<=", "!=", "==", "~=", ">", "<"):
-        if op in dep_str:
-            idx = dep_str.index(op)
-            name = dep_str[:idx].strip()
-            specifier = dep_str[idx:].strip()
-            break
-    if "[" in name:
-        name = name[: name.index("[")]
-    return name.strip(), specifier
+def _split_requirement(dep_str: str) -> tuple[str, SpecifierSet | None]:
+    """Split a requirement into canonical name and parsed specifier.
+
+    Uses ``packaging.requirements.Requirement`` for PEP 508 parsing and
+    ``packaging.utils.canonicalize_name`` for PEP 503 name normalization.
+    Falls back to returning the raw string as the name (and ``None`` for
+    the specifier) when the entry can't be parsed, so malformed
+    ``pyproject.toml`` entries still surface in the UI rather than crashing.
+    """
+    try:
+        req = Requirement(dep_str)
+    except InvalidRequirement:
+        return dep_str.strip(), None
+    specifier = req.specifier if req.specifier else None
+    return canonicalize_name(req.name), specifier
 
 
 def _diff_dependency_sets(
     current: list[DependencyInfo],
     target: list[DependencyInfo],
 ) -> tuple[list[DependencyInfo], list[DependencyInfo], list[DependencyInfo]]:
-    """Diff dependency sets by package name and specifier."""
+    """Diff dependency sets by canonical name and semantic specifier equality.
+
+    Names are already PEP 503 canonical at construction (``Pandas`` and
+    ``pandas`` collapse); specifiers are ``SpecifierSet`` instances, so
+    ``==`` is structural — ``>=1.0,<2.0`` matches ``<2.0,>=1.0``.
+    """
     current_map = {dep.name: dep for dep in current}
     target_map = {dep.name: dep for dep in target}
 
@@ -930,21 +968,32 @@ def _diff_dependency_sets(
         if name not in target_map:
             removals.append(current_dep)
 
-    additions.sort(key=lambda dep: dep.name.lower())
-    removals.sort(key=lambda dep: dep.name.lower())
-    unchanged.sort(key=lambda dep: dep.name.lower())
+    additions.sort(key=lambda dep: dep.name)
+    removals.sort(key=lambda dep: dep.name)
+    unchanged.sort(key=lambda dep: dep.name)
     return additions, removals, unchanged
 
 
 def _validate_requirement_specifier(requirement: str) -> str:
-    """Validate a supported requirement line."""
+    """Validate a supported requirement line.
+
+    Accepts plain PEP 508 requirements (name, optional extras, optional
+    version specifier); rejects environment markers and URL/direct
+    references, which are out of scope for this notebook surface.
+    """
     normalized = requirement.strip()
     if not normalized:
         raise ValueError("Requirement cannot be empty")
     if len(normalized) > 200:
         raise ValueError("Requirement specifier too long")
-    if any(c in normalized for c in ";&|`$(){}\"'\n\r\t"):
-        raise ValueError("Requirement specifier contains invalid characters")
+    try:
+        req = Requirement(normalized)
+    except InvalidRequirement as exc:
+        raise ValueError(f"Invalid requirement: {exc}") from exc
+    if req.marker is not None:
+        raise ValueError("Environment markers are not supported in notebook requirements")
+    if req.url is not None:
+        raise ValueError("URL / direct-reference requirements are not supported")
     return normalized
 
 

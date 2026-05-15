@@ -415,7 +415,11 @@ def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
 def _serialize_dependency_info_list(dependencies: list) -> list[dict]:
     """Serialize dependency metadata for API responses."""
     return [
-        {"name": dep.name, "version": dep.version, "specifier": dep.specifier}
+        {
+            "name": dep.name,
+            "version": str(dep.version) if dep.version else None,
+            "specifier": str(dep.specifier) if dep.specifier else None,
+        }
         for dep in dependencies
     ]
 

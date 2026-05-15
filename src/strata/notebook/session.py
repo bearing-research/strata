@@ -1963,8 +1963,8 @@ class NotebookSession:
                         "dependencies": [
                             {
                                 "name": dep.name,
-                                "version": dep.version,
-                                "specifier": dep.specifier,
+                                "version": str(dep.version) if dep.version else None,
+                                "specifier": str(dep.specifier) if dep.specifier else None,
                             }
                             for dep in list_dependencies(self.path)
                         ],
@@ -1975,8 +1975,8 @@ class NotebookSession:
                 payload["resolved_dependencies"] = [
                     {
                         "name": dep.name,
-                        "version": dep.version,
-                        "specifier": dep.specifier,
+                        "version": str(dep.version) if dep.version else None,
+                        "specifier": str(dep.specifier) if dep.specifier else None,
                     }
                     for dep in list_resolved_dependencies(self.path)
                 ]

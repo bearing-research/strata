@@ -85,7 +85,7 @@ class TestListDependencies:
         six_dep = next((d for d in deps if d.name == "six"), None)
         assert six_dep is not None
         assert six_dep.specifier is not None
-        assert ">=" in six_dep.specifier
+        assert ">=" in str(six_dep.specifier)
 
     def test_no_pyproject(self, tmp_path: Path):
         """No pyproject.toml → empty list."""
@@ -409,7 +409,7 @@ dependencies:
         assert "pyarrow" in names
         assert "six" in names
         six_dep = next(dep for dep in resolved if dep.name == "six")
-        assert six_dep.version == "1.17.0"
+        assert str(six_dep.version) == "1.17.0"
 
     def test_preview_requirements_text_reports_diff(self, tmp_path: Path):
         """Requirements preview should report additions, removals, and unchanged deps."""
