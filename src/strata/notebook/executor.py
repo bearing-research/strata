@@ -31,7 +31,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlunparse
@@ -43,6 +43,7 @@ from strata.artifact_store import get_artifact_store
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
+from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import MountSpec, WorkerBackendType
 from strata.notebook.module_export import build_module_export_plan
 from strata.notebook.mounts import (
@@ -210,7 +211,7 @@ class CellExecutionResult:
     cache_hit: bool = False
     artifact_uri: str | None = None
     execution_method: str = "cold"  # cold, warm, cached
-    mutation_warnings: list[dict[str, Any]] = field(default_factory=list)
+    mutation_warnings: list[MutationWarning] = field(default_factory=list)
     # Number of retries the prompt-cell validate-and-retry loop
     # consumed. 0 on first-try pass or for non-prompt / non-schema
     # cells. Surfaced so the UI can show "validated after N retries"
@@ -254,36 +255,29 @@ class CellExecutionResult:
         return self
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to JSON-serializable dict."""
-        payload: dict[str, Any] = {
-            "cell_id": self.cell_id,
-            "status": "ready" if self.success else "error",
-            "stdout": self.stdout,
-            "stderr": self.stderr,
-            "outputs": self.outputs,
-            "displays": self.display_outputs,
-            "display": self.display_output,
-            "duration_ms": self.duration_ms,
-            "error": self.error,
-            "cache_hit": self.cache_hit,
-            "artifact_uri": self.artifact_uri,
-            "execution_method": self.execution_method,
-            "mutation_warnings": self.mutation_warnings,
-        }
-        if self.validation_retries:
-            payload["validation_retries"] = self.validation_retries
-        if self.suggest_install:
-            payload["suggest_install"] = self.suggest_install
-        if self.remote_worker:
-            payload["remote_worker"] = self.remote_worker
-        if self.remote_transport:
-            payload["remote_transport"] = self.remote_transport
-        if self.remote_build_id:
-            payload["remote_build_id"] = self.remote_build_id
-        if self.remote_build_state:
-            payload["remote_build_state"] = self.remote_build_state
-        if self.remote_error_code:
-            payload["remote_error_code"] = self.remote_error_code
+        """Convert to the REST ``/agent`` execution-result wire shape.
+
+        The WebSocket execution-finished frame uses a slimmer, different
+        shape — see ``_execution_result_payload`` in ws.py.
+        """
+        payload = asdict(self)
+        # success: bool → status: "ready" | "error" (wire rename + transform)
+        payload["status"] = "ready" if payload.pop("success") else "error"
+        # display_outputs / display_output → displays / display on the wire
+        payload["displays"] = payload.pop("display_outputs")
+        payload["display"] = payload.pop("display_output")
+        # Optional metadata fields are omitted from the wire when falsy.
+        for opt_field in (
+            "validation_retries",
+            "suggest_install",
+            "remote_worker",
+            "remote_transport",
+            "remote_build_id",
+            "remote_build_state",
+            "remote_error_code",
+        ):
+            if not payload[opt_field]:
+                payload.pop(opt_field)
         return payload
 
 
@@ -2555,7 +2549,7 @@ class CellExecutor:
         final_result: dict[str, Any] | None = None
         combined_stdout: list[str] = []
         combined_stderr: list[str] = []
-        all_mutation_warnings: list[dict[str, Any]] = []
+        all_mutation_warnings: list[MutationWarning] = []
 
         for k in range(loop.max_iter):
             with tempfile.TemporaryDirectory(prefix=f"strata_loop_iter_{k}_") as tmpdir:
