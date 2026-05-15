@@ -22,7 +22,7 @@ from strata.notebook.executor import CellExecutionResult, CellExecutor
 from strata.notebook.impact import ImpactAnalyzer
 from strata.notebook.inspect_repl import InspectManager
 from strata.notebook.models import CellStaleness, CellStatus, WorkerBackendType
-from strata.notebook.session import SessionManager
+from strata.notebook.session import CellStateSnapshot, SessionManager
 from strata.notebook.workers import resolve_worker_spec, worker_transport
 from strata.notebook.writer import write_cell
 
@@ -230,30 +230,11 @@ async def _broadcast_staleness_updates(
         )
 
 
-def _capture_cell_state_snapshot(
-    session: NotebookSession,
-) -> dict[str, tuple[str, tuple[str, ...], dict[str, Any] | None]]:
-    """Capture cell status/reasons/causality for diffing after recompute."""
-    snapshot: dict[str, tuple[str, tuple[str, ...], dict[str, Any] | None]] = {}
-    for cell in session.notebook_state.cells:
-        causality = session.causality_map.get(cell.id)
-        status = cell.status.value if isinstance(cell.status, CellStatus) else str(cell.status)
-        reasons = tuple(
-            reason.value for reason in (cell.staleness.reasons if cell.staleness else [])
-        )
-        snapshot[cell.id] = (
-            status,
-            reasons,
-            asdict(causality, dict_factory=skip_none) if causality else None,
-        )
-    return snapshot
-
-
 async def _refresh_and_broadcast_changed_staleness(
     session: NotebookSession,
     notebook_id: str,
     seq: int,
-    previous_snapshot: dict[str, tuple[str, tuple[str, ...], dict[str, Any] | None]],
+    previous_snapshot: dict[str, CellStateSnapshot],
     *,
     preserve_ready_cell_id: str | None = None,
 ) -> dict[str, CellStaleness]:
@@ -273,10 +254,10 @@ async def _refresh_and_broadcast_changed_staleness(
             continue
 
         causality = session.causality_map.get(cell.id)
-        current = (
-            staleness.status.value,
-            tuple(reason.value for reason in staleness.reasons),
-            asdict(causality, dict_factory=skip_none) if causality else None,
+        current = CellStateSnapshot(
+            status=staleness.status.value,
+            reasons=tuple(reason.value for reason in staleness.reasons),
+            causality=asdict(causality, dict_factory=skip_none) if causality else None,
         )
         if previous_snapshot.get(cell.id) != current:
             changed[cell.id] = staleness
@@ -1474,7 +1455,7 @@ async def _execute_cell_directly(
         await _broadcast_execution_result(notebook_id, seq, cell_id, result)
 
         if result.success:
-            previous_snapshot = _capture_cell_state_snapshot(session)
+            previous_snapshot = session.capture_cell_state_snapshot()
             await _refresh_and_broadcast_changed_staleness(
                 session,
                 notebook_id,
@@ -1674,7 +1655,7 @@ async def _execute_cascade(
                 )
                 cascade_failed = True
         if not cascade_failed:
-            previous_snapshot = _capture_cell_state_snapshot(session)
+            previous_snapshot = session.capture_cell_state_snapshot()
             await _refresh_and_broadcast_changed_staleness(
                 session,
                 notebook_id,
@@ -1740,7 +1721,7 @@ async def _execute_run_all(
                 await _broadcast_execution_result(notebook_id, seq, cell_id, result)
 
                 if result.success:
-                    previous_snapshot = _capture_cell_state_snapshot(session)
+                    previous_snapshot = session.capture_cell_state_snapshot()
                     await _refresh_and_broadcast_changed_staleness(
                         session,
                         notebook_id,

@@ -129,6 +129,26 @@ class RequirementsImportOutcome:
     staleness_map: dict[str, CellStaleness]
 
 
+@dataclass(frozen=True)
+class CellStateSnapshot:
+    """Per-cell state slice used to diff before/after a staleness recompute.
+
+    Attributes
+    ----------
+    status : str
+        Cell status value (e.g. ``"ready"``, ``"stale"``, ``"running"``).
+    reasons : tuple of str
+        Staleness reason values in the order they were recorded.
+    causality : dict of {str : Any} or None
+        Wire-format causality chain (``asdict``-serialized with None fields
+        stripped), or ``None`` when the cell has no causality entry.
+    """
+
+    status: str
+    reasons: tuple[str, ...]
+    causality: dict[str, Any] | None
+
+
 @dataclass
 class EnvironmentJobSnapshot:
     """One notebook-scoped background environment operation."""
@@ -1119,6 +1139,30 @@ class NotebookSession:
     def serialize_cells(self) -> list[dict[str, Any]]:
         """Serialize all cells with runtime-derived metadata."""
         return [self.serialize_cell(cell) for cell in self.notebook_state.cells]
+
+    def capture_cell_state_snapshot(self) -> dict[str, CellStateSnapshot]:
+        """Capture cell status/reasons/causality for diffing after a recompute.
+
+        Returns
+        -------
+        dict of {str : CellStateSnapshot}
+            Mapping from cell ID to its current snapshot. Callers recompute
+            staleness, build fresh snapshots, and broadcast only the cells
+            whose snapshot changed.
+        """
+        snapshot: dict[str, CellStateSnapshot] = {}
+        for cell in self.notebook_state.cells:
+            causality = self.causality_map.get(cell.id)
+            status = cell.status.value if isinstance(cell.status, CellStatus) else str(cell.status)
+            reasons = tuple(
+                reason.value for reason in (cell.staleness.reasons if cell.staleness else [])
+            )
+            snapshot[cell.id] = CellStateSnapshot(
+                status=status,
+                reasons=reasons,
+                causality=asdict(causality, dict_factory=skip_none) if causality else None,
+            )
+        return snapshot
 
     def serialize_notebook_state(self) -> dict[str, Any]:
         """Serialize notebook state with enriched cell metadata."""
