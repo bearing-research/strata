@@ -44,27 +44,6 @@ _notebook_execution_state: dict[str, dict[str, Any]] = {}
 _notebook_inspect_managers: dict[str, InspectManager] = {}
 
 
-def _serialize_dag_edges(session: Any) -> list[dict[str, Any]]:
-    """Build the wire-format edge list the frontend expects.
-
-    Frontend's ``applyBackendDag`` keys off ``from_cell_id`` / ``to_cell_id``;
-    every site that broadcasts DAG state uses this helper so a future
-    refactor can't drift the field names again. (Pre-fix, three near-
-    identical loops drifted; the agent-edit path silently emitted ``from``
-    / ``to`` and stranded every edge until the user hard-refreshed.)
-    """
-    if not session.dag:
-        return []
-    return [
-        {
-            "from_cell_id": edge.from_cell_id,
-            "to_cell_id": edge.to_cell_id,
-            "variable": edge.variable,
-        }
-        for edge in session.dag.edges
-    ]
-
-
 def _get_session_manager() -> SessionManager:
     """Get the session manager from routes module."""
     from strata.notebook.routes import get_session_manager
@@ -1109,7 +1088,7 @@ async def _handle_cell_source_update(
         staleness_map = session.compute_staleness()
 
         # Build DAG update message
-        dag_edges = _serialize_dag_edges(session)
+        dag_edges = session.dag.serialize_edges() if session.dag else []
 
         # Include per-cell analysis so the frontend can merge
         # authoritative defines/references without a REST round-trip.
@@ -1214,7 +1193,7 @@ async def _handle_variant_set_active(
         session.set_variant_active(group, variant_name)
         staleness_map = session.compute_staleness()
 
-        dag_edges = _serialize_dag_edges(session)
+        dag_edges = session.dag.serialize_edges() if session.dag else []
         from strata.notebook.module_export import build_module_export_plan
 
         cells_analysis = []
@@ -1321,7 +1300,7 @@ async def _handle_variant_add(
         # are added or removed.
         state_payload = session.serialize_notebook_state()
         state_payload["dag"] = {
-            "edges": _serialize_dag_edges(session),
+            "edges": session.dag.serialize_edges() if session.dag else [],
             "roots": list(session.dag.roots) if session.dag else [],
             "leaves": list(session.dag.leaves) if session.dag else [],
             "topological_order": session.dag.topological_order if session.dag else [],
@@ -1372,7 +1351,7 @@ async def _handle_notebook_sync(
     Return full notebook state (for reconnection).
     """
     # Build DAG
-    dag_edges = _serialize_dag_edges(session)
+    dag_edges = session.dag.serialize_edges() if session.dag else []
 
     state = session.serialize_notebook_state()
     state["dag"] = {
@@ -2190,7 +2169,7 @@ async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
     Used by the agent loop to push intermediate state changes so
     frontends stay in sync during multi-tool operations.
     """
-    dag_edges = _serialize_dag_edges(session)
+    dag_edges = session.dag.serialize_edges() if session.dag else []
 
     state = session.serialize_notebook_state()
     state["dag"] = {

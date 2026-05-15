@@ -117,13 +117,12 @@ def test_serialize_dag_edges_uses_frontend_field_names(temp_notebook):
     agent edit until the user hard-refreshed.
     """
     from strata.notebook.routes import get_session_manager
-    from strata.notebook.ws import _serialize_dag_edges
 
     notebook_dir, _ = temp_notebook
     session_manager = get_session_manager()
     session = session_manager.open_notebook(notebook_dir)
 
-    edges = _serialize_dag_edges(session)
+    edges = session.dag.serialize_edges() if session.dag else []
     assert edges, "fixture defines x->y->z, expected at least one DAG edge"
     for edge in edges:
         assert set(edge) == {"from_cell_id", "to_cell_id", "variable"}, (

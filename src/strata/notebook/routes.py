@@ -2365,15 +2365,13 @@ async def delete_cell(notebook_id: str, cell_id: str) -> dict:
         # re-wire downstream producers; without ``dag`` in the response
         # the DAG view ends up rendering stale edges and the group
         # appears orphaned until the next reload.
-        from strata.notebook.ws import _serialize_dag_edges
-
         return {
             "message": "Cell deleted",
             "cell_id": cell_id,
             "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
             "cells": session.serialize_cells(),
             "dag": {
-                "edges": _serialize_dag_edges(session),
+                "edges": session.dag.serialize_edges() if session.dag else [],
                 "roots": list(session.dag.roots) if session.dag else [],
                 "leaves": list(session.dag.leaves) if session.dag else [],
                 "topological_order": session.dag.topological_order if session.dag else [],

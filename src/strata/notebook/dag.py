@@ -394,6 +394,30 @@ class NotebookDag:
             visited.discard(target_cell_id)
         return [cid for cid in cell_ids if cid in visited]
 
+    def serialize_edges(self) -> list[dict[str, str]]:
+        """Serialize edges in the wire format the frontend expects.
+
+        The frontend's ``applyBackendDag`` keys off ``from_cell_id`` /
+        ``to_cell_id``; every broadcast site must use this so the field
+        names can't drift apart. (Pre-fix, three near-identical loops
+        diverged and the agent-edit path silently emitted ``from`` /
+        ``to``, stranding every edge until the user hard-refreshed.)
+
+        Returns
+        -------
+        list of dict of {str : str}
+            One entry per edge with ``from_cell_id``, ``to_cell_id``,
+            and ``variable`` keys.
+        """
+        return [
+            {
+                "from_cell_id": edge.from_cell_id,
+                "to_cell_id": edge.to_cell_id,
+                "variable": edge.variable,
+            }
+            for edge in self.edges
+        ]
+
 
 def _resolve_variant_groups(
     cells: list[CellAnalysisWithId],
