@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from strata.notebook.causality import (
-    CausalityInspector,
+    _get_stored_hash,
     compute_causality_on_staleness,
 )
 from strata.notebook.dependencies import add_dependency
@@ -164,12 +164,12 @@ class TestCausalityEnvChanged:
             assert len(env_details) == 0
 
 
-class TestCausalityInspectorWithHashes:
-    """CausalityInspector reads stored hashes."""
+class TestStoredHashLookup:
+    """``_get_stored_hash`` reads component hashes from cached artifacts."""
 
     @pytest.mark.asyncio
-    async def test_inspector_reads_env_hash(self, tmp_path):
-        """Inspector can read stored env_hash from artifact."""
+    async def test_reads_env_and_source_hash(self, tmp_path):
+        """Stored env_hash and source_hash round-trip through artifact metadata."""
         nb_dir, cell_id = _create_notebook_with_cell(tmp_path, "x = 1")
         add_cell_to_notebook(nb_dir, "c2", after_cell_id="c1")
         write_cell(nb_dir, "c2", "y = x + 1")
@@ -183,9 +183,8 @@ class TestCausalityInspectorWithHashes:
         result = await executor.execute_cell("c1", "x = 1")
         assert result.success
 
-        inspector = CausalityInspector(session)
-        stored_env = inspector._get_artifact_metadata("c1", "env_hash")
-        stored_src = inspector._get_artifact_metadata("c1", "source_hash")
+        stored_env = _get_stored_hash(session, "c1", "env_hash")
+        stored_src = _get_stored_hash(session, "c1", "source_hash")
 
         assert stored_env == compute_execution_env_hash(
             nb_dir,
@@ -197,8 +196,8 @@ class TestCausalityInspectorWithHashes:
         assert stored_src == compute_source_hash("x = 1")
 
     @pytest.mark.asyncio
-    async def test_inspector_matches_canonical_multi_output_causality(self, tmp_path):
-        """Inspector should use the same causality result as session staleness."""
+    async def test_deleted_upstream_artifact_marks_input_changed(self, tmp_path):
+        """Deleting an upstream artifact surfaces as ``input_changed`` for downstream."""
         nb_dir = create_notebook(tmp_path, "multi_output")
         add_cell_to_notebook(nb_dir, "c1")
         write_cell(nb_dir, "c1", "x = 1\ny = 2")
@@ -221,11 +220,10 @@ class TestCausalityInspectorWithHashes:
             artifact_id, artifact.version
         )
 
-        inspector = CausalityInspector(session)
-        chain = inspector.inspect("c2")
+        session.compute_staleness()
+        chain = session.causality_map.get("c2")
 
         assert chain is not None
-        assert session.causality_map["c2"] == chain
         assert any(detail.type == "input_changed" for detail in chain.details)
 
 
