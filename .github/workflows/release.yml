@@ -55,7 +55,7 @@ jobs:
           npm ci
           npm run build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: frontend-dist
           path: frontend/dist
@@ -72,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: frontend-dist
           path: src/strata/_frontend
@@ -90,7 +90,7 @@ jobs:
           sccache: 'true'
           manylinux: auto
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: dist-linux-${{ matrix.target }}
           path: dist
@@ -107,7 +107,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: frontend-dist
           path: src/strata/_frontend
@@ -118,7 +118,7 @@ jobs:
           args: --release --out dist
           sccache: 'true'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: dist-macos-${{ matrix.target }}
           path: dist
@@ -135,7 +135,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           name: frontend-dist
           path: src/strata/_frontend
@@ -146,7 +146,7 @@ jobs:
           args: --release --out dist
           sccache: 'true'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: dist-windows-${{ matrix.target }}
           path: dist
@@ -163,7 +163,7 @@ jobs:
     permissions:
       id-token: write   # OIDC token for trusted publishing
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           # All dist-* artifacts get merged into a single dist/ dir
           # so the publish action sees every wheel + the sdist.
@@ -193,7 +193,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           path: dist
           pattern: dist-*
