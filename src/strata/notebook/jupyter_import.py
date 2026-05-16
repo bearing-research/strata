@@ -112,6 +112,7 @@ def import_notebook(
     out_dir: Path | str | None = None,
     *,
     owner: str | None = None,
+    check_deps: bool = False,
 ) -> ImportResult:
     """Convert a Jupyter ``.ipynb`` file into a Strata notebook directory.
 
@@ -124,9 +125,18 @@ def import_notebook(
             doesn't pass this (single-user); the REST endpoint does so
             multi-user / per-user-scoped deployments don't lose owner
             attribution on imported notebooks.
+        check_deps: If True, run ``uv lock`` after writing dependencies
+            to verify they resolve. Failures land in ``result.warnings``
+            (the import itself still succeeds; the user can fix the
+            offending pin by hand). Off by default because it requires
+            uv on PATH and is seconds-slow / networked on cold caches.
 
     Returns:
-        An :class:`ImportResult` describing what got converted.
+        An :class:`ImportResult` describing what got converted. The
+        converted notebook is *always* sanity-checked for openability
+        (parse → per-cell analyze → DAG build); any failure lands in
+        ``result.warnings`` rather than raising, so partial conversions
+        stay inspectable.
 
     Raises:
         FileNotFoundError: if ``ipynb_path`` doesn't exist.
@@ -231,6 +241,19 @@ def import_notebook(
             f"requires PEP 508 specifiers: {sample}{more}"
         )
 
+    # Sanity-check the converted notebook by running the parse →
+    # analyze → DAG-build pass that ``NotebookSession`` would on open.
+    # Failures here mean the user will hit an error the moment they
+    # open the notebook in the UI; surfacing them now in the report
+    # turns that into a fail-fast signal at import time.
+    _check_openable(notebook_dir, result)
+
+    # ``--check-deps`` runs ``uv lock`` to verify the captured deps
+    # actually resolve. Opt-in because it's seconds-slow on cold
+    # caches and requires the uv CLI.
+    if check_deps:
+        _check_resolvable(notebook_dir, result)
+
     # Write the human-readable report next to notebook.toml. Same
     # content is returned on the result so callers (REST, CLI) can
     # serve it without re-reading.
@@ -241,6 +264,84 @@ def import_notebook(
     result.report_text = report_text
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Post-import sanity checks
+
+
+def _check_openable(notebook_dir: Path, result: ImportResult) -> None:
+    """Run parse → analyze → DAG-build over the converted notebook.
+
+    Appends a warning to ``result`` for the first failure encountered.
+    Doesn't raise — the notebook is already on disk and a partial
+    success is more useful than a refused import.
+    """
+    # Local imports — these modules import from this one transitively
+    # through the parser test fixtures.
+    from strata.notebook.analyzer import analyze_cell
+    from strata.notebook.dag import CellAnalysisWithId, NotebookDag
+    from strata.notebook.parser import parse_notebook
+
+    try:
+        nb_state = parse_notebook(notebook_dir)
+    except Exception as exc:
+        result.warnings.append(f"converted notebook fails to parse: {type(exc).__name__}: {exc}")
+        return
+
+    analyses: list[CellAnalysisWithId] = []
+    for cell in nb_state.cells:
+        if cell.language != CellLanguage.PYTHON:
+            continue
+        cell_analysis = analyze_cell(cell.source)
+        if cell_analysis.error:
+            result.warnings.append(f"cell {cell.id[:8]} fails to analyze: {cell_analysis.error}")
+            continue
+        analyses.append(
+            CellAnalysisWithId(
+                id=cell.id,
+                defines=cell_analysis.defines,
+                references=cell_analysis.references,
+            )
+        )
+
+    try:
+        NotebookDag.from_cells(analyses)
+    except Exception as exc:
+        result.warnings.append(f"DAG build fails: {type(exc).__name__}: {exc}")
+
+
+def _check_resolvable(notebook_dir: Path, result: ImportResult) -> None:
+    """Run ``uv lock`` to verify the captured dependencies resolve.
+
+    Appends a warning with the stderr tail on failure. ``uv lock``
+    writes ``uv.lock`` as a side effect when successful, which seeds
+    the notebook's first real ``uv sync`` with a cached resolution.
+    """
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            ["uv", "lock"],
+            cwd=str(notebook_dir),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except FileNotFoundError:
+        result.warnings.append("--check-deps skipped: uv not found on PATH")
+        return
+    except subprocess.TimeoutExpired:
+        result.warnings.append("--check-deps timed out after 120s")
+        return
+
+    if completed.returncode != 0:
+        # Trim noisy stderr to one informative chunk; the user can
+        # always run ``uv lock`` themselves in the notebook directory
+        # to see the full failure.
+        detail = completed.stderr.strip() or completed.stdout.strip() or "(no output)"
+        result.warnings.append(f"dependency resolution failed: {detail[:400]}")
 
 
 # ---------------------------------------------------------------------------

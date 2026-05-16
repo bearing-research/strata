@@ -439,6 +439,16 @@ def add_import_arguments(parser: argparse.ArgumentParser) -> None:
             "named after the .ipynb file stem."
         ),
     )
+    parser.add_argument(
+        "--check-deps",
+        dest="check_deps",
+        action="store_true",
+        help=(
+            "Run `uv lock` after import to verify captured dependencies "
+            "resolve. Failures land in the import report. Requires uv on "
+            "PATH; seconds-slow on cold caches."
+        ),
+    )
 
 
 def import_main(args: argparse.Namespace) -> int:
@@ -461,7 +471,11 @@ def import_main(args: argparse.Namespace) -> int:
         )
 
     try:
-        result = import_notebook(path, out_dir=args.output_path)
+        result = import_notebook(
+            path,
+            out_dir=args.output_path,
+            check_deps=bool(getattr(args, "check_deps", False)),
+        )
     except FileNotFoundError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

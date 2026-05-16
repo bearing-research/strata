@@ -1092,3 +1092,61 @@ def test_suppression_still_works_after_magic_translation(tmp_path: Path) -> None
     src = nb.cells[0].source
     assert "%matplotlib" not in src
     assert src.rstrip().endswith("pass")
+
+
+def test_import_openable_check_passes_for_clean_notebook(tmp_path: Path) -> None:
+    """The default openable check (parse → analyze → DAG) leaves a
+    well-formed notebook with no warnings beyond magic / dep noise."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [
+            _code_cell("import pandas as pd\n"),
+            _code_cell("x = 1\n"),
+            _code_cell("y = x + 1\n"),
+        ],
+    )
+    result = import_notebook(ipynb)
+    # No analyze / DAG failures.
+    assert not any(
+        "fails to analyze" in w or "DAG build fails" in w or "fails to parse" in w
+        for w in result.warnings
+    )
+
+
+def test_import_openable_check_flags_cells_that_fail_to_analyze(tmp_path: Path) -> None:
+    """Syntax-broken cells surface as openable-check warnings."""
+    ipynb = _make_ipynb(
+        tmp_path,
+        [_code_cell("def broken(:\n    pass\n")],
+    )
+    result = import_notebook(ipynb)
+    assert any("fails to analyze" in w for w in result.warnings)
+
+
+def test_import_check_deps_skipped_when_uv_missing(tmp_path: Path, monkeypatch) -> None:
+    """``check_deps=True`` records a skip warning if uv isn't on PATH."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell("import pandas as pd\n")])
+    monkeypatch.setenv("PATH", "/nonexistent")
+    result = import_notebook(ipynb, check_deps=True)
+    assert any("uv not found" in w for w in result.warnings)
+
+
+def test_import_check_deps_off_by_default(tmp_path: Path) -> None:
+    """The default path doesn't shell out to uv lock."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell("import pandas as pd\n")])
+    result = import_notebook(ipynb)
+    # No uv-lock-related warning surfaces unless --check-deps was passed.
+    assert not any("dependency resolution" in w for w in result.warnings)
+    assert not any("uv not found" in w for w in result.warnings)
+
+
+def test_strata_import_cli_accepts_check_deps_flag(tmp_path: Path) -> None:
+    """``--check-deps`` is wired through to the importer."""
+    ipynb = _make_ipynb(tmp_path, [_code_cell("x = 1\n")], name="check_deps.ipynb")
+    result = subprocess.run(
+        [sys.executable, "-m", "strata.cli", "import", str(ipynb), "--check-deps"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
