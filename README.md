@@ -41,6 +41,19 @@ STRATA_DEPLOYMENT_MODE=personal uv run strata-server
 # Then open http://localhost:8765
 ```
 
+### Heads up: Strata uses uv for per-notebook environments
+
+You don't need [uv](https://docs.astral.sh/uv/) on your machine to *install*
+Strata (`pip install strata-notebook` is fine). But once you create a notebook
+in the UI, Strata writes a `pyproject.toml` next to it and runs `uv sync` to
+materialize an isolated `.venv/` per notebook — so the notebook subsystem
+expects `uv` on `PATH` at runtime.
+
+Conda and pip-venv users: your existing environments are untouched; each
+notebook is isolated to its own directory. If you want Strata to attach to a
+pre-existing environment instead of managing its own, that's not supported
+today.
+
 ### Install as a dependency
 
 ```bash
@@ -72,6 +85,7 @@ from strata.client import StrataClient
 - **Cascade execution.** Change upstream code, downstream cells auto-invalidate.
 - **Distributed workers.** Annotate `@worker gpu-fly` and the cell dispatches to a remote GPU.
 - **Prompt cells.** LLM-powered cells with `{{ variable }}` template injection.
+- **SQL cells.** First-class SQL cells with `# @sql connection=<name>`, named-bind parameters, and DuckDB / Postgres / SQLite drivers.
 - **AI assistant.** Streaming chat with conversation memory, agent mode for autonomous notebook building.
 - **Environment management.** Per-notebook Python venvs via uv, isolated from each other.
 - **Rich outputs.** DataFrames, matplotlib plots, markdown, images.
@@ -164,6 +178,23 @@ it on first read and caches the bytes locally for the session.
 | [markdown_showcase](examples/markdown_showcase)     | Markdown cells, dynamic `Markdown(...)` outputs, security cases                     |
 | [library_cells](examples/library_cells)             | Cross-cell library code: pure module cells, mixed runtime+library cells, the limits |
 | [news_alpha_trader](examples/news_alpha_trader)     | Multi-stage trading pipeline with prompt cells and structured LLM outputs           |
+
+## Known rough edges
+
+Strata is at 0.1 and a few surfaces are explicitly exploratory. The core
+(materialization, artifact store, DAG, caching, headless run) is stable
+in the alpha sense; these are the bits where the API or coverage is
+still moving:
+
+- **Prompt-cell API.** Streaming, conversation memory, and structured-output
+  validation are not yet finalized — expect breaking changes in 0.x.
+- **SQL cell cloud drivers.** DuckDB / Postgres / SQLite are exercised in
+  CI. MotherDuck, MySQL, BigQuery, and Snowflake adapters exist but lack
+  integration test coverage; pin a Strata version in production until that
+  lands.
+- **Wire / on-disk formats.** `notebook.toml`, `runtime.json`, and the
+  artifact cache layout may change between minor versions during 0.x.
+  Rely on the Python API surface, not the file shapes.
 
 ---
 
