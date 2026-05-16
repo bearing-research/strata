@@ -39,7 +39,7 @@ from typing import Any
 
 # Import at module level to avoid annotation resolution issues with FastAPI
 from fastapi import Request as FastAPIRequest
-from fastapi import UploadFile
+from starlette.datastructures import UploadFile
 
 logger = logging.getLogger(__name__)
 
