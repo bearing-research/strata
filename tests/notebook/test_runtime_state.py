@@ -78,27 +78,6 @@ def test_load_tolerates_corrupt_file(tmp_path: Path):
     assert load_runtime_state(tmp_path) == RuntimeState()
 
 
-def test_load_filters_unknown_keys(tmp_path: Path):
-    """Forward-compat: a newer schema writing an extra field should not
-    crash the loader. Unknown keys are silently dropped."""
-    import json
-
-    path = runtime_state_path(tmp_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": SCHEMA_VERSION,
-                "cells": {"c1": {"last_source_hash": "s", "future_field": "x"}},
-                "environment": {"lockfile_hash": "h", "future_env_field": 42},
-            }
-        )
-    )
-    state = load_runtime_state(tmp_path)
-    assert state.cells["c1"].last_source_hash == "s"
-    assert state.environment.lockfile_hash == "h"
-
-
 def test_migration_moves_artifacts_to_runtime_state(tmp_path: Path):
     toml_data = {
         "notebook_id": "nb",

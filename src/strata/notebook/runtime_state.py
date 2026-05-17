@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -92,24 +92,16 @@ def runtime_state_path(notebook_dir: Path) -> Path:
     return Path(notebook_dir) / ".strata" / _RUNTIME_FILENAME
 
 
-def _coerce_cell(raw: dict[str, Any]) -> CellRuntime:
-    """Build a ``CellRuntime`` from a possibly-extra-keys dict.
-
-    Filtering unknown keys means legacy on-disk payloads (or
-    forward-compat reads from a newer schema) don't blow up the load
-    path with ``TypeError: unexpected keyword``.
-    """
-    valid = {f.name for f in fields(CellRuntime)}
-    return CellRuntime(**{k: v for k, v in raw.items() if k in valid})
-
-
-def _coerce_environment(raw: dict[str, Any]) -> EnvironmentRuntime:
-    valid = {f.name for f in fields(EnvironmentRuntime)}
-    return EnvironmentRuntime(**{k: v for k, v in raw.items() if k in valid})
-
-
 def load_runtime_state(notebook_dir: Path) -> RuntimeState:
-    """Return the runtime-state document, or a fresh empty shell."""
+    """Return the runtime-state document, or a fresh empty shell.
+
+    A missing or unparseable file produces an empty ``RuntimeState`` —
+    runtime data is augmenting state, not authoritative, so a corrupt
+    ``runtime.json`` must not prevent a notebook from opening.
+    Schema-level mismatches (e.g. a hand-edited file with stray fields)
+    raise from the dataclass constructor; the on-disk shape is
+    Strata-written and trusted to match.
+    """
     path = runtime_state_path(notebook_dir)
     if not path.exists():
         return RuntimeState()
@@ -118,14 +110,10 @@ def load_runtime_state(notebook_dir: Path) -> RuntimeState:
             data = json.load(f)
     except (ValueError, OSError):
         return RuntimeState()
-    if not isinstance(data, dict):
-        return RuntimeState()
-    cells_raw = data.get("cells") or {}
-    environment_raw = data.get("environment") or {}
     return RuntimeState(
         schema_version=data.get("schema_version", SCHEMA_VERSION),
-        cells={cid: _coerce_cell(entry) for cid, entry in cells_raw.items()},
-        environment=_coerce_environment(environment_raw),
+        cells={cid: CellRuntime(**entry) for cid, entry in data.get("cells", {}).items()},
+        environment=EnvironmentRuntime(**data.get("environment", {})),
     )
 
 
@@ -212,7 +200,7 @@ def migrate_from_legacy_notebook_toml(
     legacy_environment = toml_data.get("environment")
     if isinstance(legacy_environment, dict) and legacy_environment:
         if state.environment == EnvironmentRuntime():
-            state.environment = _coerce_environment(legacy_environment)
+            state.environment = EnvironmentRuntime(**legacy_environment)
             migrated = True
 
     if migrated:
