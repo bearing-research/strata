@@ -15,7 +15,12 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 
-from strata.client import Artifact, RetryConfig, StrataClient
+from strata.client import (
+    Artifact,
+    RetryConfig,
+    StrataClient,
+    _parse_artifact_uri,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -101,31 +106,27 @@ class TestArtifactProperties:
 class TestParseArtifactUri:
     """``_parse_artifact_uri`` — invalid input raises ValueError."""
 
-    @pytest.fixture
-    def client(self):
-        return _make_client(lambda req: httpx.Response(200))
+    def test_valid_uri(self):
+        assert _parse_artifact_uri("strata://artifact/abc@v=3") == ("abc", 3)
 
-    def test_valid_uri(self, client):
-        assert client._parse_artifact_uri("strata://artifact/abc@v=3") == ("abc", 3)
-
-    def test_uri_with_complex_id(self, client):
+    def test_uri_with_complex_id(self):
         # Artifact IDs can contain underscores, dashes, dots.
-        assert client._parse_artifact_uri("strata://artifact/nb_42_cell_x@v=12") == (
+        assert _parse_artifact_uri("strata://artifact/nb_42_cell_x@v=12") == (
             "nb_42_cell_x",
             12,
         )
 
-    def test_invalid_uri_raises(self, client):
+    def test_invalid_uri_raises(self):
         with pytest.raises(ValueError, match="Invalid artifact URI"):
-            client._parse_artifact_uri("http://example.com/foo")
+            _parse_artifact_uri("http://example.com/foo")
 
-    def test_missing_version_raises(self, client):
+    def test_missing_version_raises(self):
         with pytest.raises(ValueError, match="Invalid artifact URI"):
-            client._parse_artifact_uri("strata://artifact/abc")
+            _parse_artifact_uri("strata://artifact/abc")
 
-    def test_non_numeric_version_raises(self, client):
+    def test_non_numeric_version_raises(self):
         with pytest.raises(ValueError, match="Invalid artifact URI"):
-            client._parse_artifact_uri("strata://artifact/abc@v=x")
+            _parse_artifact_uri("strata://artifact/abc@v=x")
 
 
 # ---------------------------------------------------------------------------

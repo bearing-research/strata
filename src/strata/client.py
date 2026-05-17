@@ -47,7 +47,9 @@ Retry Behavior:
 """
 
 import asyncio
+import json
 import random
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -64,6 +66,82 @@ type TransformSpec = Mapping[str, object]
 type JsonArtifactInput = Mapping[str, object]
 type JsonArtifactData = dict[str, object]
 type PutData = JsonArtifactInput | pa.Table | bytes
+
+
+_ARTIFACT_URI_RE = re.compile(r"^strata://artifact/([^@]+)@v=(\d+)$")
+
+
+def _parse_artifact_uri(uri: str) -> tuple[str, int]:
+    """Parse a canonical artifact URI into ``(artifact_id, version)``."""
+    match = _ARTIFACT_URI_RE.match(uri)
+    if not match:
+        raise ValueError(f"Invalid artifact URI: {uri}")
+    return match.group(1), int(match.group(2))
+
+
+def _table_to_ipc(table: pa.Table) -> bytes:
+    """Serialize an Arrow Table to IPC stream bytes."""
+    sink = pa.BufferOutputStream()
+    with ipc.new_stream(sink, table.schema) as writer:
+        writer.write_table(table)
+    return sink.getvalue().to_pybytes()
+
+
+def _dict_to_ipc(data: JsonArtifactInput) -> bytes:
+    """Convert a dict to Arrow IPC stream bytes.
+
+    If all values are equal-length lists the dict is treated as columnar
+    and converted directly. Otherwise it's stored as a single JSON column.
+    """
+    list_values = [value for value in data.values() if isinstance(value, list)]
+    if data and len(list_values) == len(data):
+        lengths = [len(value) for value in list_values]
+        if len(set(lengths)) == 1:
+            try:
+                table = pa.Table.from_pydict(dict(data))
+                return _table_to_ipc(table)
+            except Exception:
+                pass  # Fall through to JSON storage
+
+    json_str = json.dumps(dict(data))
+    table = pa.Table.from_pydict({"data": [json_str]})
+    return _table_to_ipc(table)
+
+
+def _convert_to_arrow_ipc(data: PutData) -> bytes:
+    """Convert various supported data types to Arrow IPC bytes.
+
+    Supports: ``dict`` (treated columnar or stored as JSON), ``pa.Table``,
+    pandas DataFrame, polars DataFrame, and pre-encoded ``bytes`` (assumed
+    to already be Arrow IPC).
+    """
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, pa.Table):
+        return _table_to_ipc(data)
+    if isinstance(data, dict):
+        return _dict_to_ipc(data)
+
+    try:
+        import pandas as pd
+
+        if isinstance(data, pd.DataFrame):
+            return _table_to_ipc(pa.Table.from_pandas(data))
+    except ImportError:
+        pass
+
+    try:
+        import polars as pl
+
+        if isinstance(data, pl.DataFrame):
+            return _table_to_ipc(data.to_arrow())
+    except ImportError:
+        pass
+
+    raise TypeError(
+        f"Unsupported data type: {type(data).__name__}. "
+        "Expected dict, pa.Table, pd.DataFrame, pl.DataFrame, or bytes."
+    )
 
 
 class MaterializeRequestBody(TypedDict, total=False):
@@ -289,7 +367,7 @@ class StrataClient:
         bypass the normal config-load path.
         """
         client = cls.__new__(cls)
-        client.config = None  # type: ignore[assignment]
+        client.config = None
         client.base_url = base_url
         client.retry_config = retry_config or RetryConfig()
         client._client = httpx.Client(transport=transport, base_url=base_url)
@@ -349,7 +427,7 @@ class StrataClient:
             # Step 2: Fetch downloads the data
             table = client.fetch(artifact.uri)
         """
-        artifact_id, version = self._parse_artifact_uri(artifact_uri)
+        artifact_id, version = _parse_artifact_uri(artifact_uri)
         return self._fetch_artifact_data_with_wait(artifact_id, version, timeout)
 
     def _fetch_artifact_data_with_wait(
@@ -489,15 +567,6 @@ class StrataClient:
             timeout=timeout,
         )
 
-    def _parse_artifact_uri(self, uri: str) -> tuple[str, int]:
-        """Parse artifact URI into (artifact_id, version)."""
-        import re
-
-        match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", uri)
-        if not match:
-            raise ValueError(f"Invalid artifact URI: {uri}")
-        return match.group(1), int(match.group(2))
-
     def _materialize_server(
         self,
         inputs: list[str],
@@ -536,7 +605,7 @@ class StrataClient:
 
         # Parse artifact_uri to get artifact_id and version
         artifact_uri = data["artifact_uri"]
-        artifact_id, version = self._parse_artifact_uri(artifact_uri)
+        artifact_id, version = _parse_artifact_uri(artifact_uri)
         hit = data.get("hit", False)
         state = data.get("state", "ready")
         stream_id = data.get("stream_id")
@@ -678,7 +747,7 @@ class StrataClient:
             httpx.HTTPStatusError: If name not found (404)
         """
         resolved = self.resolve_name(name)
-        artifact_id, version = self._parse_artifact_uri(resolved["artifact_uri"])
+        artifact_id, version = _parse_artifact_uri(resolved["artifact_uri"])
         return Artifact(
             _client=self,
             artifact_id=artifact_id,
@@ -777,7 +846,7 @@ class StrataClient:
             )
         """
         # Convert data to Arrow IPC bytes
-        arrow_bytes = self._convert_to_arrow_ipc(data)
+        arrow_bytes = _convert_to_arrow_ipc(data)
 
         # Map 'ref' to 'executor' for server compatibility
         server_transform = dict(transform)
@@ -805,7 +874,7 @@ class StrataClient:
 
         # Parse artifact URI
         artifact_uri = result["artifact_uri"]
-        artifact_id, version = self._parse_artifact_uri(artifact_uri)
+        artifact_id, version = _parse_artifact_uri(artifact_uri)
 
         return Artifact(
             _client=self,
@@ -815,87 +884,6 @@ class StrataClient:
             execution="cache" if result.get("hit") else "local",
             name=name,
         )
-
-    def _convert_to_arrow_ipc(self, data: PutData) -> bytes:
-        """Convert various data types to Arrow IPC bytes.
-
-        Args:
-            data: Data to convert (dict, Arrow Table, DataFrame, or bytes)
-
-        Returns:
-            Arrow IPC stream bytes
-
-        Raises:
-            TypeError: If data type is not supported
-        """
-        # Already bytes - assume Arrow IPC
-        if isinstance(data, bytes):
-            return data
-
-        # Arrow Table
-        if isinstance(data, pa.Table):
-            return self._table_to_ipc(data)
-
-        # Dict/JSON
-        if isinstance(data, dict):
-            return self._dict_to_ipc(data)
-
-        # Try Pandas DataFrame
-        try:
-            import pandas as pd
-
-            if isinstance(data, pd.DataFrame):
-                table = pa.Table.from_pandas(data)
-                return self._table_to_ipc(table)
-        except ImportError:
-            pass
-
-        # Try Polars DataFrame
-        try:
-            import polars as pl
-
-            if isinstance(data, pl.DataFrame):
-                table = data.to_arrow()
-                return self._table_to_ipc(table)
-        except ImportError:
-            pass
-
-        raise TypeError(
-            f"Unsupported data type: {type(data).__name__}. "
-            "Expected dict, pa.Table, pd.DataFrame, pl.DataFrame, or bytes."
-        )
-
-    def _table_to_ipc(self, table: pa.Table) -> bytes:
-        """Convert Arrow Table to IPC stream bytes."""
-        sink = pa.BufferOutputStream()
-        with ipc.new_stream(sink, table.schema) as writer:
-            writer.write_table(table)
-        return sink.getvalue().to_pybytes()
-
-    def _dict_to_ipc(self, data: JsonArtifactInput) -> bytes:
-        """Convert dict to Arrow IPC stream bytes.
-
-        If all values are lists of the same length, treats as columnar data.
-        Otherwise, stores as a single JSON column.
-        """
-        import json
-
-        # Check if columnar (all values are lists of same length)
-        list_values = [value for value in data.values() if isinstance(value, list)]
-        if data and len(list_values) == len(data):
-            lengths = [len(value) for value in list_values]
-            if len(set(lengths)) == 1:
-                # Columnar data - convert directly
-                try:
-                    table = pa.Table.from_pydict(dict(data))
-                    return self._table_to_ipc(table)
-                except Exception:
-                    pass  # Fall through to JSON storage
-
-        # Non-columnar or conversion failed - store as single JSON column
-        json_str = json.dumps(dict(data))
-        table = pa.Table.from_pydict({"data": [json_str]})
-        return self._table_to_ipc(table)
 
     def put_json(
         self,
@@ -1242,7 +1230,7 @@ class AsyncStrataClient:
             # Step 2: Fetch downloads the data
             table = await client.fetch(artifact.uri)
         """
-        artifact_id, version = self._parse_artifact_uri(artifact_uri)
+        artifact_id, version = _parse_artifact_uri(artifact_uri)
         return await self._fetch_artifact_data_with_wait(artifact_id, version, timeout)
 
     async def _fetch_artifact_data_with_wait(
@@ -1374,7 +1362,7 @@ class AsyncStrataClient:
         data = response.json()
 
         artifact_uri = data["artifact_uri"]
-        artifact_id, version = self._parse_artifact_uri(artifact_uri)
+        artifact_id, version = _parse_artifact_uri(artifact_uri)
         hit = data.get("hit", False)
         state = data.get("state", "ready")
         stream_id = data.get("stream_id")
@@ -1487,15 +1475,6 @@ class AsyncStrataClient:
         response.raise_for_status()
         return response.json()
 
-    def _parse_artifact_uri(self, uri: str) -> tuple[str, int]:
-        """Parse artifact URI into (artifact_id, version)."""
-        import re
-
-        match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", uri)
-        if not match:
-            raise ValueError(f"Invalid artifact URI: {uri}")
-        return match.group(1), int(match.group(2))
-
     async def get_artifact(self, artifact_id: str, version: int) -> "AsyncArtifact":
         """Get an existing artifact by ID and version."""
         response = await self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}")
@@ -1508,7 +1487,7 @@ class AsyncStrataClient:
         response.raise_for_status()
         resolved = response.json()
 
-        artifact_id, version = self._parse_artifact_uri(resolved["artifact_uri"])
+        artifact_id, version = _parse_artifact_uri(resolved["artifact_uri"])
         return AsyncArtifact(
             _client=self,
             artifact_id=artifact_id,
@@ -1566,7 +1545,7 @@ class AsyncStrataClient:
             )
         """
         # Convert data to Arrow IPC bytes
-        arrow_bytes = self._convert_to_arrow_ipc(data)
+        arrow_bytes = _convert_to_arrow_ipc(data)
 
         # Map 'ref' to 'executor' for server compatibility
         server_transform = dict(transform)
@@ -1594,7 +1573,7 @@ class AsyncStrataClient:
 
         # Parse artifact URI
         artifact_uri = result["artifact_uri"]
-        artifact_id, version = self._parse_artifact_uri(artifact_uri)
+        artifact_id, version = _parse_artifact_uri(artifact_uri)
 
         return AsyncArtifact(
             _client=self,
@@ -1604,87 +1583,6 @@ class AsyncStrataClient:
             execution="cache" if result.get("hit") else "local",
             name=name,
         )
-
-    def _convert_to_arrow_ipc(self, data: PutData) -> bytes:
-        """Convert various data types to Arrow IPC bytes.
-
-        Args:
-            data: Data to convert (dict, Arrow Table, DataFrame, or bytes)
-
-        Returns:
-            Arrow IPC stream bytes
-
-        Raises:
-            TypeError: If data type is not supported
-        """
-        # Already bytes - assume Arrow IPC
-        if isinstance(data, bytes):
-            return data
-
-        # Arrow Table
-        if isinstance(data, pa.Table):
-            return self._table_to_ipc(data)
-
-        # Dict/JSON
-        if isinstance(data, dict):
-            return self._dict_to_ipc(data)
-
-        # Try Pandas DataFrame
-        try:
-            import pandas as pd
-
-            if isinstance(data, pd.DataFrame):
-                table = pa.Table.from_pandas(data)
-                return self._table_to_ipc(table)
-        except ImportError:
-            pass
-
-        # Try Polars DataFrame
-        try:
-            import polars as pl
-
-            if isinstance(data, pl.DataFrame):
-                table = data.to_arrow()
-                return self._table_to_ipc(table)
-        except ImportError:
-            pass
-
-        raise TypeError(
-            f"Unsupported data type: {type(data).__name__}. "
-            "Expected dict, pa.Table, pd.DataFrame, pl.DataFrame, or bytes."
-        )
-
-    def _table_to_ipc(self, table: pa.Table) -> bytes:
-        """Convert Arrow Table to IPC stream bytes."""
-        sink = pa.BufferOutputStream()
-        with ipc.new_stream(sink, table.schema) as writer:
-            writer.write_table(table)
-        return sink.getvalue().to_pybytes()
-
-    def _dict_to_ipc(self, data: JsonArtifactInput) -> bytes:
-        """Convert dict to Arrow IPC stream bytes.
-
-        If all values are lists of the same length, treats as columnar data.
-        Otherwise, stores as a single JSON column.
-        """
-        import json
-
-        # Check if columnar (all values are lists of same length)
-        list_values = [value for value in data.values() if isinstance(value, list)]
-        if data and len(list_values) == len(data):
-            lengths = [len(value) for value in list_values]
-            if len(set(lengths)) == 1:
-                # Columnar data - convert directly
-                try:
-                    table = pa.Table.from_pydict(dict(data))
-                    return self._table_to_ipc(table)
-                except Exception:
-                    pass  # Fall through to JSON storage
-
-        # Non-columnar or conversion failed - store as single JSON column
-        json_str = json.dumps(dict(data))
-        table = pa.Table.from_pydict({"data": [json_str]})
-        return self._table_to_ipc(table)
 
     async def put_json(
         self,
