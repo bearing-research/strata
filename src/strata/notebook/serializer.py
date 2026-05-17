@@ -43,9 +43,10 @@ import logging
 import os
 import pickle
 import sys
+from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, NamedTuple, NotRequired, Protocol, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,34 @@ class ContentType(StrEnum):
     MODULE_IMPORT = "module/import"
     MODULE_CELL = "module/cell"
     MODULE_CELL_INSTANCE = "module/cell-instance"
+
+
+class SerializedPayload(TypedDict):
+    """Metadata dict returned by ``serialize_value`` and every ``_serialize_*`` helper.
+
+    Four keys are always present (``content_type``, ``file``, ``bytes``,
+    ``preview``); the rest are content-type-specific extras. Keeping
+    them all in one ``TypedDict`` instead of per-handler subclasses
+    matches the actual on-wire shape and keeps typo protection at
+    every literal-dict construction site.
+    """
+
+    content_type: ContentType
+    file: str
+    bytes: int
+    preview: Any
+    # arrow/ipc table shape
+    rows: NotRequired[int]
+    columns: NotRequired[list[Any]]
+    # text/markdown
+    markdown_text: NotRequired[str]
+    # image/png
+    inline_data_url: NotRequired[str]
+    width: NotRequired[int | None]
+    height: NotRequired[int | None]
+    # pickle/object & module/cell-instance
+    codec: NotRequired[str]
+    type: NotRequired[str]
 
 
 OBJECT_CODEC_ENV_VAR = "STRATA_NOTEBOOK_OBJECT_CODEC"
@@ -292,7 +321,33 @@ def _is_display_variable_name(variable_name: str | None) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def serialize_value(value: Any, output_dir: Path | str, variable_name: str) -> dict[str, Any]:
+_SerializeFn = Callable[[Any, Path, str], SerializedPayload]
+_DeserializeFn = Callable[[Path], Any]
+
+
+class _Handler(NamedTuple):
+    """Bidirectional codec for one content type.
+
+    ``serialize`` is ``None`` for content types that arrive on disk by
+    other means (``module/cell`` is written by the module-export
+    machinery, not by ``serialize_value``). ``deserialize`` is ``None``
+    for display-only types (``image/png``) that the notebook UI
+    consumes directly without round-tripping through Python.
+
+    NamedTuple rather than ``@dataclass(frozen=True)`` because this
+    module is loaded via ``importlib.util.spec_from_file_location`` in
+    harness / pool_worker / inspect_repl subprocesses — that loader
+    doesn't register the module in ``sys.modules`` before class
+    creation runs, and ``dataclass`` crashes when it tries to look up
+    annotations via ``sys.modules[cls.__module__]``. NamedTuple has
+    no such introspection.
+    """
+
+    serialize: _SerializeFn | None
+    deserialize: _DeserializeFn | None
+
+
+def serialize_value(value: Any, output_dir: Path | str, variable_name: str) -> SerializedPayload:
     """Serialize *value* to *output_dir* and return a metadata dict.
 
     The metadata dict always contains:
@@ -306,47 +361,47 @@ def serialize_value(value: Any, output_dir: Path | str, variable_name: str) -> d
     output_dir.mkdir(parents=True, exist_ok=True)
 
     content_type = detect_content_type(value, variable_name)
+    handler = _HANDLERS.get(content_type)
+    if handler is None or handler.serialize is None:
+        # detect_content_type only returns content types with a
+        # registered serializer, so this is a defensive guard against
+        # registry drift, not a path users can reach in practice.
+        return _serialize_pickle(value, output_dir, variable_name)
+    return handler.serialize(value, output_dir, variable_name)
 
-    if content_type == ContentType.ARROW_IPC:
-        try:
-            return _serialize_arrow(value, output_dir, variable_name)
-        except Exception as exc:
-            # Pandas-specific Arrow failures (Series shape mismatch,
-            # mixed dtypes pa.Table.from_pandas can't coerce) use the
-            # JSON table fallback so downstream code still sees a
-            # table-shaped artifact. Non-pandas failures (complex
-            # ndarray, structured dtype, unencodable scalar) pickle —
-            # the JSON fallback assumes a pandas shape and silently
-            # drops non-pandas values.
-            if _is_pandas_value(value) and _should_fallback_from_arrow_error(exc):
-                logger.warning(
-                    "Arrow serialization of '%s' (%s) failed (%s); falling back "
-                    "to JSON-tagged-arrow. Direct-Arrow consumers (DuckDB/Polars) "
-                    "won't be able to read this artifact.",
-                    variable_name,
-                    type(value).__name__,
-                    exc,
-                )
-                return _serialize_dataframe_json(value, output_dir, variable_name)
+
+def _serialize_arrow_with_fallback(
+    value: Any, output_dir: Path, variable_name: str
+) -> SerializedPayload:
+    """Try the unified Arrow path; fall back to JSON-tagged-arrow or pickle on failure.
+
+    Pandas-specific Arrow failures (Series shape mismatch, mixed dtypes
+    pa.Table.from_pandas can't coerce) use the JSON table fallback so
+    downstream code still sees a table-shaped artifact. Non-pandas
+    failures (complex ndarray, structured dtype, unencodable scalar)
+    pickle — the JSON fallback assumes a pandas shape and silently
+    drops non-pandas values.
+    """
+    try:
+        return _serialize_arrow(value, output_dir, variable_name)
+    except Exception as exc:
+        if _is_pandas_value(value) and _should_fallback_from_arrow_error(exc):
             logger.warning(
-                "Arrow serialization of '%s' (%s) failed (%s); falling back to "
-                "pickle. Downstream cells expecting tabular shape will break.",
+                "Arrow serialization of '%s' (%s) failed (%s); falling back "
+                "to JSON-tagged-arrow. Direct-Arrow consumers (DuckDB/Polars) "
+                "won't be able to read this artifact.",
                 variable_name,
                 type(value).__name__,
                 exc,
             )
-            return _serialize_pickle(value, output_dir, variable_name)
-    elif content_type == ContentType.IMAGE_PNG:
-        return _serialize_image_png(value, output_dir, variable_name)
-    elif content_type == ContentType.TEXT_MARKDOWN:
-        return _serialize_markdown(value, output_dir, variable_name)
-    elif content_type == ContentType.JSON_OBJECT:
-        return _serialize_json(value, output_dir, variable_name)
-    elif content_type == ContentType.MODULE_IMPORT:
-        return _serialize_module(value, output_dir, variable_name)
-    elif content_type == ContentType.MODULE_CELL_INSTANCE:
-        return _serialize_cell_instance(value, output_dir, variable_name)
-    else:
+            return _serialize_dataframe_json(value, output_dir, variable_name)
+        logger.warning(
+            "Arrow serialization of '%s' (%s) failed (%s); falling back to "
+            "pickle. Downstream cells expecting tabular shape will break.",
+            variable_name,
+            type(value).__name__,
+            exc,
+        )
         return _serialize_pickle(value, output_dir, variable_name)
 
 
@@ -376,7 +431,7 @@ _SCALAR_TYPE_UUID = b"uuid"
 _SCALAR_TYPE_COMPLEX = b"complex"
 
 
-def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
+def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     """Unified writer for the arrow/ipc codec.
 
     Dispatches to one of three shape encoders (table / tensor / scalar)
@@ -714,7 +769,7 @@ def _coerce_markdown_text(value: Any) -> str:
     raise ValueError("_repr_markdown_() must return str or UTF-8 bytes")
 
 
-def _serialize_markdown(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
+def _serialize_markdown(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     markdown_text = _coerce_markdown_text(value)
     filename = f"{variable_name}.md"
     filepath = output_dir / filename
@@ -728,7 +783,7 @@ def _serialize_markdown(value: Any, output_dir: Path, variable_name: str) -> dic
     }
 
 
-def _serialize_image_png(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
+def _serialize_image_png(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     for handler in _PNG_HANDLERS:
         result = handler(value)
         if result is not None:
@@ -825,7 +880,9 @@ def _png_size_from_bytes(png_bytes: bytes) -> tuple[int | None, int | None]:
         return None, None
 
 
-def _serialize_dataframe_json(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
+def _serialize_dataframe_json(
+    value: Any, output_dir: Path, variable_name: str
+) -> SerializedPayload:
     """JSON fallback for DataFrames when Arrow serialization fails.
 
     The fallback still uses ``arrow/ipc`` metadata and a ``.arrow`` artifact
@@ -883,7 +940,7 @@ def _serialize_dataframe_json(value: Any, output_dir: Path, variable_name: str) 
     }
 
 
-def _serialize_json(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
+def _serialize_json(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     filename = f"{variable_name}.json"
     filepath = output_dir / filename
     with open(filepath, "w", encoding="utf-8") as f:
@@ -896,7 +953,7 @@ def _serialize_json(value: Any, output_dir: Path, variable_name: str) -> dict[st
     }
 
 
-def _serialize_module(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
+def _serialize_module(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     module_name = getattr(value, "__name__", variable_name)
     filename = f"{variable_name}.module.json"
     filepath = output_dir / filename
@@ -910,7 +967,7 @@ def _serialize_module(value: Any, output_dir: Path, variable_name: str) -> dict[
     }
 
 
-def _serialize_cell_instance(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
+def _serialize_cell_instance(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     module = sys.modules.get(type(value).__module__)
     module_source = getattr(module, _CELL_MODULE_SOURCE_ATTR, None)
     if not isinstance(module_source, str) or not module_source:
@@ -945,7 +1002,7 @@ def _serialize_cell_instance(value: Any, output_dir: Path, variable_name: str) -
     }
 
 
-def _serialize_pickle(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
+def _serialize_pickle(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     # Pickle failures used to return a success-shape dict with file=None,
     # which left the artifact store believing the value had been written
     # while the next reader hit a missing file. Raise instead — both
@@ -993,26 +1050,12 @@ def deserialize_value(
     *output_dir* is accepted for API compatibility but not required —
     *file_path* is always treated as an absolute (or relative-to-cwd) path.
     Accepts either a ContentType enum value or the raw string form; since
-    ContentType is a StrEnum, either compares equal to the literal
-    ``"arrow/ipc"`` etc.
+    ContentType is a StrEnum, ``_HANDLERS`` lookups work for both.
     """
-    file_path = Path(file_path)
-    if content_type == ContentType.ARROW_IPC:
-        return _deserialize_arrow(file_path)
-    elif content_type == ContentType.TEXT_MARKDOWN:
-        return _deserialize_markdown(file_path)
-    elif content_type == ContentType.JSON_OBJECT:
-        return _deserialize_json(file_path)
-    elif content_type == ContentType.PICKLE_OBJECT:
-        return _deserialize_pickle(file_path)
-    elif content_type == ContentType.MODULE_IMPORT:
-        return _deserialize_module(file_path)
-    elif content_type == ContentType.MODULE_CELL:
-        return _deserialize_cell_module(file_path)
-    elif content_type == ContentType.MODULE_CELL_INSTANCE:
-        return _deserialize_cell_instance(file_path)
-    else:
+    handler = _HANDLERS.get(content_type)
+    if handler is None or handler.deserialize is None:
         raise ValueError(f"Unknown content type: {content_type!r}")
+    return handler.deserialize(Path(file_path))
 
 
 def _deserialize_arrow(file_path: Path) -> Any:
@@ -1360,3 +1403,25 @@ def _iter_slot_names(cls: type[Any]) -> list[str]:
                 slot_names.append(slot_name)
 
     return slot_names
+
+
+# ---------------------------------------------------------------------------
+# Handler registry — the canonical map from ContentType to (serialize,
+# deserialize). Lives at module bottom so every handler function is
+# defined before being referenced. Keyed by ``str`` so both the
+# ``ContentType`` enum and raw string content-types (the form callers
+# from outside this module typically pass) resolve to the same entry.
+# ---------------------------------------------------------------------------
+
+_HANDLERS: dict[str, _Handler] = {
+    ContentType.ARROW_IPC: _Handler(_serialize_arrow_with_fallback, _deserialize_arrow),
+    ContentType.JSON_OBJECT: _Handler(_serialize_json, _deserialize_json),
+    ContentType.PICKLE_OBJECT: _Handler(_serialize_pickle, _deserialize_pickle),
+    ContentType.IMAGE_PNG: _Handler(_serialize_image_png, None),
+    ContentType.TEXT_MARKDOWN: _Handler(_serialize_markdown, _deserialize_markdown),
+    ContentType.MODULE_IMPORT: _Handler(_serialize_module, _deserialize_module),
+    ContentType.MODULE_CELL: _Handler(None, _deserialize_cell_module),
+    ContentType.MODULE_CELL_INSTANCE: _Handler(
+        _serialize_cell_instance, _deserialize_cell_instance
+    ),
+}
