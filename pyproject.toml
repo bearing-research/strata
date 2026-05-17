@@ -90,6 +90,7 @@ sql-duckdb = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-cov>=7.0.0",
     "ruff>=0.8.0",
     "moto[s3]>=5.0.0",
     "boto3>=1.35.0",
@@ -168,3 +169,43 @@ markers = [
     "integration: marks tests as integration tests requiring external services",
     "warm_pool: marks tests that require live warm worker startup",
 ]
+
+# Coverage is opt-in: pass ``--cov`` (or ``--cov=strata --cov-report=html``)
+# to enable it. Default test runs stay fast for tight inner-loop iteration.
+# Configuration below applies whenever coverage is collected.
+[tool.coverage.run]
+source_pkgs = ["strata"]
+branch = true
+# Coverage data files get a per-process suffix so we can later combine
+# them via ``coverage combine`` once subprocess coverage is wired in
+# (Phase 4 — see project memory). Harmless when subprocess coverage is
+# disabled; ``coverage combine`` is a no-op on a single data file.
+parallel = false
+omit = [
+    # Rust extension: imported, never executed from Python.
+    "*/strata/_strata_core/*",
+    # Re-export shims that exist purely to keep imports stable.
+    "*/strata/__init__.py",
+]
+
+[tool.coverage.report]
+# ``exclude_also`` keeps coverage.py's built-in defaults
+# (``pragma: no cover``, ``def __repr__``, ``raise NotImplementedError``, …)
+# instead of overwriting them.
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "if typing\\.TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    # Optional-import branches use the same shape repo-wide; ty already
+    # flags these as guarded so coverage shouldn't penalize the
+    # never-installed leg.
+    "except ImportError:",
+    "except ModuleNotFoundError:",
+]
+show_missing = true
+skip_covered = false
+precision = 1
+
+[tool.coverage.html]
+directory = "htmlcov"
