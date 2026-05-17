@@ -206,6 +206,26 @@ Loop cells (`@loop max_iter=N carry=var`): one harness subprocess per iteration,
 `carry` threaded between iterations, `…@iter=k` artifacts per step, final state
 becomes the cell's canonical artifact. WebSocket emits `cell_iteration_progress`.
 
+### Materialize: Core SDK vs notebook
+
+The word "materialize" names *two* distinct pipelines in this codebase. They
+deliberately do not share the entry point — only the artifact-store substrate.
+
+| Axis              | Core SDK `client.materialize`          | Notebook `CellExecutor._materialize_cell` |
+| ----------------- | -------------------------------------- | ----------------------------------------- |
+| Entry point       | HTTP `POST /v1/materialize`            | In-process method call                    |
+| Unit of work      | One *transform* (e.g. `scan@v1`)       | One *cell* (ad-hoc Python source)         |
+| Provenance key    | `(table_identity, snapshot, columns, filters)` for scan; `transform_spec.to_json() + sorted_inputs` for others | `(sorted_inputs, source_hash, env_hash, mount_fingerprints)` |
+| Inputs            | List of table / artifact URIs          | Upstream cell variables (resolved via DAG) |
+| Outputs           | Single artifact (Arrow IPC stream)     | Multi-output fan-out — one artifact per consumed variable via `derive_subkey` |
+| Execution         | Server dispatches to registered HTTP executors (v1-push / v2-pull) or built-in scan planner | Local subprocess harness in notebook venv, or HTTP executor |
+| Shared substrate  | `artifact_store.find_by_provenance` / `put` / `set_name`; `notebook.provenance.derive_subkey` (used by both for sub-artifact keys) |
+
+Trying to force one through the other warps either core's transform contract
+(to encode source + env + multi-output) or imposes HTTP latency on every
+keystroke-sensitive cell run. The split is intentional; the sharing happens
+one level down at the artifact store.
+
 ### Serialization
 
 Content type is selected by value type and stored in

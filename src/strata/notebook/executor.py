@@ -1,7 +1,7 @@
-"""Cell executor — the ``materialize`` primitive for notebook cells.
+"""Cell executor — materialize a notebook cell.
 
-Each ``execute_cell`` call is a ``materialize(inputs, transform) → artifact``
-operation:
+Each ``execute_cell`` call materializes one cell: ensure upstream inputs
+exist, compute provenance, cache-check, execute on miss, persist outputs.
 
 1. **Materialize upstream inputs** — for every upstream variable this cell
    needs, look in the artifact store.  Cache hit → done.  Cache miss →
@@ -18,6 +18,25 @@ The cascade planner (``cascade.py``) is a *UI-level* optimisation that
 previews which cells will run.  The executor itself is self-contained: you
 can call ``execute_cell`` on *any* cell and it will recursively materialise
 the full upstream DAG.
+
+Relationship to Strata Core's ``materialize`` SDK
+-------------------------------------------------
+
+Strata Core exposes a separate ``materialize(inputs, transform) → artifact``
+primitive (``client.materialize`` / ``POST /v1/materialize``) for materializing
+*transforms* — server-registered executors like ``scan@v1`` keyed by
+``(table_identity, snapshot_id, columns, filters)``.
+
+This module is a parallel pipeline for materializing *cells* — ad-hoc Python
+source executed in a subprocess harness, keyed by ``(source_hash, env_hash,
+mount_fingerprints, input_hashes)``, with multi-output fan-out (one artifact
+per consumed variable via ``derive_subkey``).
+
+The two pipelines deliberately do not share the materialize entry point —
+the SDK shape (HTTP, single-output, registered transforms) does not fit
+the notebook shape (in-process, multi-output, source-as-transform). They
+share the substrate: ``artifact_store.find_by_provenance`` / ``put`` and the
+``derive_subkey`` helper in ``notebook.provenance``.
 """
 
 from __future__ import annotations
@@ -301,11 +320,14 @@ class RemoteExecutionError(RuntimeError):
 
 
 class CellExecutor:
-    """Executes notebook cells — the ``materialize`` primitive.
+    """Materialize notebook cells (cache-or-build per cell).
 
     Each ``execute_cell`` call ensures all upstream artifacts exist
     (recursively materialising them on cache miss), then checks the
     cache for this cell, and finally executes + stores on a miss.
+
+    This is the notebook-side parallel to Strata Core's transform
+    ``materialize`` SDK — see the module docstring for the seam.
 
     Attributes:
         session: NotebookSession for the notebook
@@ -339,8 +361,10 @@ class CellExecutor:
     ) -> CellExecutionResult:
         """Materialise a cell: ensure inputs → cache check → execute → store.
 
-        This is the single entry-point that implements
-        ``materialize(inputs, transform) → artifact``.
+        Single public entry point for cell materialization. See the module
+        docstring for how this relates to Strata Core's transform
+        ``materialize`` SDK (they are deliberately separate pipelines that
+        share the artifact-store substrate).
         """
         return await self._execute_cell(
             cell_id,
@@ -445,7 +469,7 @@ class CellExecutor:
         self._materializing.add(cell_id)
 
         try:
-            return await self._materialize(
+            return await self._materialize_cell(
                 cell_id,
                 source,
                 timeout_seconds,
@@ -552,7 +576,7 @@ class CellExecutor:
         env-key narrowing) makes the cell appear stale forever.
 
         Optional precomputed arguments let callers reuse work — the
-        non-loop ``_materialize`` path resolves mounts before the cache
+        non-loop ``_materialize_cell`` path resolves mounts before the cache
         check, the loop path resolves them once per iteration, so it
         passes them in instead of paying the cost again.
         """
@@ -599,10 +623,10 @@ class CellExecutor:
         )
 
     # ------------------------------------------------------------------
-    # Core: the materialize pipeline
+    # The cell materialization pipeline
     # ------------------------------------------------------------------
 
-    async def _materialize(
+    async def _materialize_cell(
         self,
         cell_id: str,
         source: str,
