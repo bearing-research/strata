@@ -79,6 +79,20 @@ _CODEC_ENVELOPE_TAG = "strata.notebook.object_codec.v1"
 _CELL_INSTANCE_STATE_TAG = "strata.notebook.cell_instance_state.v1"
 _ARROW_JSON_FALLBACK_TAG = "strata.notebook.arrow_json_fallback.v1"
 
+# Wire-stable envelope keys. These are byte-level constants that
+# already-cached artifacts depend on — changing any value invalidates
+# every prior pickle/JSON-fallback/instance-state artifact on disk.
+_TAG_OBJECT_CODEC = "__strata_object_codec__"
+_TAG_ARROW_JSON_FALLBACK = "__strata_arrow_json_fallback__"
+_TAG_CELL_INSTANCE_STATE = "__strata_cell_instance_state__"
+
+# Module-level attributes that mark a synthetic cell-exported module
+# and its exported classes. Looked up via getattr/setattr on the
+# module dict and the class itself.
+_CELL_MODULE_SOURCE_ATTR = "__strata_cell_module_source__"
+_CELL_MODULE_FLAG_ATTR = "__strata_cell_module__"
+_CELL_EXPORTED_CLASS_ATTR = "__strata_cell_exported_class__"
+
 
 class ObjectCodec(Protocol):
     """Pluggable object serializer backend for notebook runtime values."""
@@ -147,7 +161,7 @@ def _resolve_object_codec(codec_name: str | None = None) -> ObjectCodec:
 
 def _wrap_codec_payload(codec_name: str, payload: bytes) -> dict[str, Any]:
     return {
-        "__strata_object_codec__": _CODEC_ENVELOPE_TAG,
+        _TAG_OBJECT_CODEC: _CODEC_ENVELOPE_TAG,
         "codec": codec_name,
         "payload": payload,
     }
@@ -156,7 +170,7 @@ def _wrap_codec_payload(codec_name: str, payload: bytes) -> dict[str, Any]:
 def _unwrap_codec_payload(obj: Any) -> tuple[str, bytes] | None:
     if not isinstance(obj, dict):
         return None
-    if obj.get("__strata_object_codec__") != _CODEC_ENVELOPE_TAG:
+    if obj.get(_TAG_OBJECT_CODEC) != _CODEC_ENVELOPE_TAG:
         return None
     codec_name = obj.get("codec")
     payload = obj.get("payload")
@@ -338,13 +352,28 @@ def serialize_value(value: Any, output_dir: Path | str, variable_name: str) -> d
 
 # Schema-metadata keys for the unified arrow/ipc format. The shape key
 # tells the reader which reconstruction path to take; the rest are
-# shape-specific.
-_META_SHAPE = b"strata.arrow.shape"  # b"table" | b"tensor" | b"scalar"
-_META_SOURCE = b"strata.arrow.source"  # b"pandas.DataFrame" | b"pandas.Series"
+# shape-specific. Both keys and values are wire-stable — changing any
+# byte invalidates already-cached arrow/ipc artifacts.
+_META_SHAPE = b"strata.arrow.shape"
+_META_SOURCE = b"strata.arrow.source"
 _META_PD_NAME = b"strata.arrow.pandas.name"  # Series name
 _META_TENSOR_SHAPE = b"strata.arrow.tensor.shape"  # JSON-encoded list[int]
 _META_TENSOR_DTYPE = b"strata.arrow.tensor.dtype"  # e.g. b"int32", b"float64"
-_META_SCALAR_TYPE = b"strata.arrow.scalar.type"  # b"uuid" | b"complex" | ...
+_META_SCALAR_TYPE = b"strata.arrow.scalar.type"
+
+# Values of _META_SHAPE.
+_SHAPE_TABLE = b"table"
+_SHAPE_TENSOR = b"tensor"
+_SHAPE_SCALAR = b"scalar"
+
+# Values of _META_SOURCE — only set for pandas-origin tables.
+_SOURCE_PANDAS_DATAFRAME = b"pandas.DataFrame"
+_SOURCE_PANDAS_SERIES = b"pandas.Series"
+
+# Values of _META_SCALAR_TYPE — set only for non-native typed scalars
+# that need round-trip help beyond what pyarrow's native types give us.
+_SCALAR_TYPE_UUID = b"uuid"
+_SCALAR_TYPE_COMPLEX = b"complex"
 
 
 def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
@@ -368,9 +397,9 @@ def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> dict[s
         writer.close()
 
     meta = table.schema.metadata or {}
-    shape = meta.get(_META_SHAPE, b"table")
+    shape = meta.get(_META_SHAPE, _SHAPE_TABLE)
 
-    if shape == b"tensor":
+    if shape == _SHAPE_TENSOR:
         tensor_shape = json.loads(meta.get(_META_TENSOR_SHAPE, b"[]").decode("utf-8"))
         tensor_dtype = meta.get(_META_TENSOR_DTYPE, b"").decode("utf-8")
         preview = f"ndarray shape={tuple(tensor_shape)} dtype={tensor_dtype}"
@@ -381,7 +410,7 @@ def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> dict[s
             "preview": preview,
         }
 
-    if shape == b"scalar":
+    if shape == _SHAPE_SCALAR:
         scalar_value = _extract_scalar_from_table(table)
         return {
             "content_type": ContentType.ARROW_IPC,
@@ -405,77 +434,120 @@ def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> dict[s
 
 
 def _to_arrow_table(value: Any) -> Any:
-    """Dispatch *value* to an Arrow Table with shape metadata stamped."""
+    """Dispatch *value* to an Arrow Table with shape metadata stamped.
+
+    Tries each shape-specific converter in order; the first that
+    accepts the value (returns non-None) wins. Each converter owns its
+    own lazy import so pandas-free notebooks keep working.
+    """
+    for converter in _ARROW_CONVERTERS:
+        table = converter(value)
+        if table is not None:
+            return table
+    raise ValueError(f"Cannot convert {type(value).__name__} to Arrow")
+
+
+def _arrow_from_pyarrow(value: Any) -> Any | None:
+    import pyarrow as pa
+
+    if isinstance(value, pa.RecordBatch):
+        return _stamp_shape(pa.Table.from_batches([value]), _SHAPE_TABLE)
+    if isinstance(value, pa.Table):
+        return _stamp_shape(value, _SHAPE_TABLE)
+    return None
+
+
+def _arrow_from_pandas(value: Any) -> Any | None:
+    try:
+        import pandas as pd
+    except ImportError:
+        return None
+    import pyarrow as pa
+
+    if isinstance(value, pd.DataFrame):
+        table = pa.Table.from_pandas(value)
+        return _stamp_metadata(
+            table, {_META_SHAPE: _SHAPE_TABLE, _META_SOURCE: _SOURCE_PANDAS_DATAFRAME}
+        )
+    if isinstance(value, pd.Series):
+        # pa.Table.from_pandas expects a DataFrame — calling it with a
+        # Series historically raised AttributeError. Promote to a
+        # single-column frame and stash the original name so the
+        # deserializer can round-trip back to Series.
+        frame = value.to_frame()
+        table = pa.Table.from_pandas(frame)
+        return _stamp_metadata(
+            table,
+            {
+                _META_SHAPE: _SHAPE_TABLE,
+                _META_SOURCE: _SOURCE_PANDAS_SERIES,
+                _META_PD_NAME: str(value.name or "").encode("utf-8"),
+            },
+        )
+    return None
+
+
+def _arrow_from_numpy(value: Any) -> Any | None:
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+
+    if isinstance(value, np.ndarray):
+        return _ndarray_to_table(value)
+    if isinstance(value, np.generic):
+        # numpy scalar — lose the numpy flavor on round-trip, treat as
+        # the equivalent Python primitive. Users who depend on
+        # type(x) is np.int64 are vanishingly rare.
+        return _python_scalar_to_table(value.item())
+    return None
+
+
+def _arrow_from_typed_scalar(value: Any) -> Any | None:
+    """Wrap a typed Python primitive in a 1-row scalar Table.
+
+    UUID and complex need a custom Arrow representation (binary(16) and
+    a struct of floats) plus a scalar-type tag so the reader can
+    reconstruct the original Python type. datetime / Decimal / bytes
+    round-trip through pyarrow natively, so they just need the scalar
+    shape tag and no type discriminator.
+    """
     import datetime as _dt
     from decimal import Decimal
     from uuid import UUID
 
     import pyarrow as pa
 
-    if isinstance(value, pa.RecordBatch):
-        return _stamp_shape(pa.Table.from_batches([value]), b"table")
-
-    if isinstance(value, pa.Table):
-        return _stamp_shape(value, b"table")
-
-    try:
-        import pandas as pd
-
-        if isinstance(value, pd.DataFrame):
-            table = pa.Table.from_pandas(value)
-            return _stamp_metadata(
-                table, {_META_SHAPE: b"table", _META_SOURCE: b"pandas.DataFrame"}
-            )
-
-        if isinstance(value, pd.Series):
-            # pa.Table.from_pandas expects a DataFrame — calling it with a
-            # Series historically raised AttributeError. Promote to a
-            # single-column frame and stash the original name so the
-            # deserializer can round-trip back to Series.
-            frame = value.to_frame()
-            table = pa.Table.from_pandas(frame)
-            return _stamp_metadata(
-                table,
-                {
-                    _META_SHAPE: b"table",
-                    _META_SOURCE: b"pandas.Series",
-                    _META_PD_NAME: str(value.name or "").encode("utf-8"),
-                },
-            )
-    except ImportError:
-        pass
-
-    try:
-        import numpy as np
-
-        if isinstance(value, np.ndarray):
-            return _ndarray_to_table(value)
-
-        if isinstance(value, np.generic):
-            # numpy scalar — lose the numpy flavor on round-trip, treat as
-            # the equivalent Python primitive. Users who depend on
-            # type(x) is np.int64 are vanishingly rare.
-            return _python_scalar_to_table(value.item())
-    except ImportError:
-        pass
-
-    # Typed Python primitives
     if isinstance(value, UUID):
         pa_arr = pa.array([value.bytes], type=pa.binary(16))
         table = pa.table({"value": pa_arr})
-        return _stamp_metadata(table, {_META_SHAPE: b"scalar", _META_SCALAR_TYPE: b"uuid"})
+        return _stamp_metadata(
+            table, {_META_SHAPE: _SHAPE_SCALAR, _META_SCALAR_TYPE: _SCALAR_TYPE_UUID}
+        )
 
     if isinstance(value, complex):
         struct_type = pa.struct([("real", pa.float64()), ("imag", pa.float64())])
         pa_arr = pa.array([{"real": value.real, "imag": value.imag}], type=struct_type)
         table = pa.table({"value": pa_arr})
-        return _stamp_metadata(table, {_META_SHAPE: b"scalar", _META_SCALAR_TYPE: b"complex"})
+        return _stamp_metadata(
+            table, {_META_SHAPE: _SHAPE_SCALAR, _META_SCALAR_TYPE: _SCALAR_TYPE_COMPLEX}
+        )
 
     _dt_types = (_dt.datetime, _dt.date, _dt.time, _dt.timedelta)
     if isinstance(value, _dt_types) or isinstance(value, (Decimal, bytes, bytearray)):
         return _python_scalar_to_table(value)
+    return None
 
-    raise ValueError(f"Cannot convert {type(value).__name__} to Arrow")
+
+# Order matters: pyarrow first (cheapest no-op), then pandas / numpy
+# (their isinstance checks need lazy imports), then typed Python
+# primitives.
+_ARROW_CONVERTERS = (
+    _arrow_from_pyarrow,
+    _arrow_from_pandas,
+    _arrow_from_numpy,
+    _arrow_from_typed_scalar,
+)
 
 
 def _python_scalar_to_table(value: Any) -> Any:
@@ -484,7 +556,7 @@ def _python_scalar_to_table(value: Any) -> Any:
 
     pa_arr = pa.array([value])
     table = pa.table({"value": pa_arr})
-    return _stamp_metadata(table, {_META_SHAPE: b"scalar"})
+    return _stamp_metadata(table, {_META_SHAPE: _SHAPE_SCALAR})
 
 
 def _ndarray_to_table(arr: Any) -> Any:
@@ -499,7 +571,7 @@ def _ndarray_to_table(arr: Any) -> Any:
     return _stamp_metadata(
         table,
         {
-            _META_SHAPE: b"tensor",
+            _META_SHAPE: _SHAPE_TENSOR,
             _META_TENSOR_SHAPE: json.dumps(list(contiguous.shape)).encode("utf-8"),
             _META_TENSOR_DTYPE: str(contiguous.dtype).encode("utf-8"),
         },
@@ -523,11 +595,11 @@ def _extract_scalar_from_table(table: Any) -> Any:
     col = table.column(0)
     raw = col[0].as_py()
 
-    if scalar_type == b"uuid":
+    if scalar_type == _SCALAR_TYPE_UUID:
         from uuid import UUID
 
         return UUID(bytes=raw)
-    if scalar_type == b"complex":
+    if scalar_type == _SCALAR_TYPE_COMPLEX:
         return complex(raw["real"], raw["imag"])
     return raw
 
@@ -657,57 +729,16 @@ def _serialize_markdown(value: Any, output_dir: Path, variable_name: str) -> dic
 
 
 def _serialize_image_png(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
-    png_bytes: bytes | None = None
-    width: int | None = None
-    height: int | None = None
-
-    repr_png = getattr(value, "_repr_png_", None)
-    if callable(repr_png):
-        raw = repr_png()
-        if isinstance(raw, str):
-            png_bytes = raw.encode("latin1")
-        elif isinstance(raw, (bytes, bytearray, memoryview)):
-            png_bytes = bytes(raw)
-        elif raw is not None:
-            raise ValueError("_repr_png_() must return bytes-like data")
-
-    if png_bytes is None:
-        try:
-            from matplotlib.figure import Figure
-
-            if isinstance(value, Figure):
-                buffer = io.BytesIO()
-                value.savefig(buffer, format="png")
-                png_bytes = buffer.getvalue()
-                width = int(round(value.get_figwidth() * value.dpi))
-                height = int(round(value.get_figheight() * value.dpi))
-        except ImportError:
-            pass
-
-    if png_bytes is None:
-        try:
-            from PIL import Image as _PILImage
-
-            if isinstance(value, _PILImage.Image):
-                buffer = io.BytesIO()
-                value.save(buffer, format="PNG")
-                png_bytes = buffer.getvalue()
-                width, height = value.size
-        except ImportError:
-            pass
-
-    if png_bytes is None:
+    for handler in _PNG_HANDLERS:
+        result = handler(value)
+        if result is not None:
+            png_bytes, width, height = result
+            break
+    else:
         raise ValueError(f"Cannot serialize {type(value)} as image/png")
 
     if width is None or height is None:
-        try:
-            from PIL import Image as _PILImage
-
-            with _PILImage.open(io.BytesIO(png_bytes)) as image:
-                width, height = image.size
-        except Exception:
-            width = None
-            height = None
+        width, height = _png_size_from_bytes(png_bytes)
 
     filename = f"{variable_name}.png"
     filepath = output_dir / filename
@@ -725,6 +756,75 @@ def _serialize_image_png(value: Any, output_dir: Path, variable_name: str) -> di
     }
 
 
+# Each handler returns ``(png_bytes, width|None, height|None)`` on a
+# match or ``None`` to defer to the next handler. Order is by cost +
+# specificity: caller-provided ``_repr_png_`` first, then matplotlib
+# (heaviest typical case), then PIL.
+_PngHandlerResult = tuple[bytes, int | None, int | None]
+
+
+def _png_via_repr_png(value: Any) -> _PngHandlerResult | None:
+    repr_png = getattr(value, "_repr_png_", None)
+    if not callable(repr_png):
+        return None
+    raw = repr_png()
+    if isinstance(raw, str):
+        return raw.encode("latin1"), None, None
+    if isinstance(raw, (bytes, bytearray, memoryview)):
+        return bytes(raw), None, None
+    if raw is None:
+        return None
+    raise ValueError("_repr_png_() must return bytes-like data")
+
+
+def _png_via_matplotlib(value: Any) -> _PngHandlerResult | None:
+    try:
+        from matplotlib.figure import Figure
+    except ImportError:
+        return None
+    if not isinstance(value, Figure):
+        return None
+    buffer = io.BytesIO()
+    value.savefig(buffer, format="png")
+    width = int(round(value.get_figwidth() * value.dpi))
+    height = int(round(value.get_figheight() * value.dpi))
+    return buffer.getvalue(), width, height
+
+
+def _png_via_pil(value: Any) -> _PngHandlerResult | None:
+    try:
+        from PIL import Image as _PILImage
+    except ImportError:
+        return None
+    if not isinstance(value, _PILImage.Image):
+        return None
+    buffer = io.BytesIO()
+    value.save(buffer, format="PNG")
+    width, height = value.size
+    return buffer.getvalue(), width, height
+
+
+_PNG_HANDLERS = (_png_via_repr_png, _png_via_matplotlib, _png_via_pil)
+
+
+def _png_size_from_bytes(png_bytes: bytes) -> tuple[int | None, int | None]:
+    """Probe PIL for size when the source handler couldn't supply one.
+
+    Returns ``(None, None)`` if PIL isn't installed or fails to read
+    the bytes; the caller stamps the dimensions as ``None`` in that
+    case so downstream renderers fall back to intrinsic sizing.
+    """
+    try:
+        from PIL import Image as _PILImage
+    except ImportError:
+        return None, None
+    try:
+        with _PILImage.open(io.BytesIO(png_bytes)) as image:
+            return image.size
+    except Exception:
+        return None, None
+
+
 def _serialize_dataframe_json(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
     """JSON fallback for DataFrames when Arrow serialization fails.
 
@@ -734,7 +834,7 @@ def _serialize_dataframe_json(value: Any, output_dir: Path, variable_name: str) 
     ``_deserialize_arrow`` understands even when ``pyarrow`` is unavailable.
     """
     payload: dict[str, Any] = {
-        "__strata_arrow_json_fallback__": True,
+        _TAG_ARROW_JSON_FALLBACK: True,
         "format": _ARROW_JSON_FALLBACK_TAG,
         "kind": "dataframe",
         "columns": [],
@@ -812,7 +912,7 @@ def _serialize_module(value: Any, output_dir: Path, variable_name: str) -> dict[
 
 def _serialize_cell_instance(value: Any, output_dir: Path, variable_name: str) -> dict[str, Any]:
     module = sys.modules.get(type(value).__module__)
-    module_source = getattr(module, "__strata_cell_module_source__", None)
+    module_source = getattr(module, _CELL_MODULE_SOURCE_ATTR, None)
     if not isinstance(module_source, str) or not module_source:
         raise ValueError(
             f"Cannot serialize notebook-exported instance '{variable_name}' "
@@ -940,15 +1040,15 @@ def _deserialize_arrow(file_path: Path) -> Any:
     table = table.combine_chunks()
 
     meta = table.schema.metadata or {}
-    shape = meta.get(_META_SHAPE, b"table")
+    shape = meta.get(_META_SHAPE, _SHAPE_TABLE)
 
-    if shape == b"tensor":
+    if shape == _SHAPE_TENSOR:
         return _tensor_from_table(table)
 
-    if shape == b"scalar":
+    if shape == _SHAPE_SCALAR:
         return _extract_scalar_from_table(table)
 
-    # Default / b"table" shape — pandas DataFrame or pa.Table.
+    # Default / table shape — pandas DataFrame or pa.Table.
     return _table_to_pandas_or_arrow(table)
 
 
@@ -967,7 +1067,7 @@ def _table_to_pandas_or_arrow(table: Any) -> Any:
     try:
         frame = table.to_pandas()
     except Exception as exc:
-        if source in (b"pandas.DataFrame", b"pandas.Series"):
+        if source in (_SOURCE_PANDAS_DATAFRAME, _SOURCE_PANDAS_SERIES):
             logger.warning(
                 "Arrow→pandas conversion failed (%s); returning pa.Table even "
                 "though the value originated as %s. Downstream cells expecting "
@@ -977,7 +1077,7 @@ def _table_to_pandas_or_arrow(table: Any) -> Any:
             )
         return table
 
-    if source == b"pandas.Series":
+    if source == _SOURCE_PANDAS_SERIES:
         try:
             series = frame.iloc[:, 0]
             name_bytes = meta.get(_META_PD_NAME, b"")
@@ -1015,7 +1115,7 @@ def _read_arrow_json_fallback(file_path: Path) -> dict[str, Any] | None:
 
     if not isinstance(payload, dict):
         return None
-    if payload.get("__strata_arrow_json_fallback__") is not True:
+    if payload.get(_TAG_ARROW_JSON_FALLBACK) is not True:
         return None
     if payload.get("format") != _ARROW_JSON_FALLBACK_TAG:
         return None
@@ -1091,12 +1191,12 @@ def _ensure_cell_module(
         module.__file__ = str(file_path)
         sys.modules[module_name] = module
         exec(compile(module_source, module_name, "exec"), module.__dict__)  # noqa: S102
-    module.__dict__["__strata_cell_module_source__"] = module_source
-    module.__dict__["__strata_cell_module__"] = True
+    module.__dict__[_CELL_MODULE_SOURCE_ATTR] = module_source
+    module.__dict__[_CELL_MODULE_FLAG_ATTR] = True
     for value in module.__dict__.values():
         if isinstance(value, type) and getattr(value, "__module__", None) == module_name:
             try:
-                setattr(value, "__strata_cell_exported_class__", True)
+                setattr(value, _CELL_EXPORTED_CLASS_ATTR, True)
             except (AttributeError, TypeError):
                 continue
     return module
@@ -1181,9 +1281,9 @@ def _is_cell_module_instance(value: Any) -> bool:
         return False
 
     module = sys.modules.get(type(value).__module__)
-    module_source = getattr(module, "__strata_cell_module_source__", None)
+    module_source = getattr(module, _CELL_MODULE_SOURCE_ATTR, None)
     return bool(
-        getattr(type(value), "__strata_cell_exported_class__", False)
+        getattr(type(value), _CELL_EXPORTED_CLASS_ATTR, False)
         and isinstance(module_source, str)
         and module_source
     )
@@ -1210,7 +1310,7 @@ def _extract_default_cell_instance_state(value: Any) -> Any:
         return None
 
     return {
-        "__strata_cell_instance_state__": _CELL_INSTANCE_STATE_TAG,
+        _TAG_CELL_INSTANCE_STATE: _CELL_INSTANCE_STATE_TAG,
         "dict": dict_state,
         "slots": slot_state,
     }
@@ -1218,8 +1318,7 @@ def _extract_default_cell_instance_state(value: Any) -> Any:
 
 def _is_default_cell_instance_state(state: Any) -> bool:
     return (
-        isinstance(state, dict)
-        and state.get("__strata_cell_instance_state__") == _CELL_INSTANCE_STATE_TAG
+        isinstance(state, dict) and state.get(_TAG_CELL_INSTANCE_STATE) == _CELL_INSTANCE_STATE_TAG
     )
 
 
