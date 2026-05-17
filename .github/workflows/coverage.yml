@@ -1,0 +1,68 @@
+name: Coverage
+
+# Daily coverage baseline, uploaded to Codecov. Kept out of the per-push
+# CI critical path because coverage tracing adds 3-4x overhead on the
+# subprocess-heavy notebook test suite — running it on every commit is
+# wasteful and the signal (per-module % drift) doesn't change quickly.
+#
+# Manual ``workflow_dispatch`` covers the "I just merged a big refactor
+# and want to recheck coverage" case.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # daily at 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  coverage:
+    name: Collect coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache-workspaces: rust
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          version: "latest"
+
+      - name: Install dependencies and build Rust extension
+        run: uv sync --python 3.13 --all-extras
+
+      # Test scope matches the non-Windows unit-tests job in ci.yml —
+      # E2E/lineage/S3 are excluded the same way. ``continue-on-error``
+      # lets us still upload a baseline when a single test flakes under
+      # the coverage tracer (sporadic timing-sensitive failures are known
+      # on subprocess-heavy notebook tests).
+      - name: Run tests with coverage
+        continue-on-error: true
+        run: |
+          uv run pytest tests/ \
+            --ignore=tests/test_e2e_artifacts.py \
+            --ignore=tests/test_lineage.py \
+            --ignore=tests/test_s3_integration.py \
+            --cov \
+            --cov-report=xml \
+            --cov-report=term \
+            -q --no-header
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+          flags: notebook
+          # Public repo + OIDC: no token required.
