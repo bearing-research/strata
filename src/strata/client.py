@@ -270,6 +270,31 @@ class StrataClient:
         self.retry_config = retry_config or RetryConfig()
         self._client = httpx.Client(base_url=self.base_url, timeout=300.0)
 
+    @classmethod
+    def from_transport(
+        cls,
+        transport: httpx.BaseTransport,
+        *,
+        base_url: str = "http://test",
+        retry_config: RetryConfig | None = None,
+    ) -> "StrataClient":
+        """Build a client backed by a custom ``httpx`` transport.
+
+        Intended for tests that want to inject ``httpx.MockTransport``
+        without firing ``StrataConfig.load()`` (which reads pyproject /
+        env vars). The returned client is fully constructed; close it
+        via ``client.close()`` or use it as a context manager.
+
+        ``config`` is left as ``None`` since transport-injected clients
+        bypass the normal config-load path.
+        """
+        client = cls.__new__(cls)
+        client.config = None  # type: ignore[assignment]
+        client.base_url = base_url
+        client.retry_config = retry_config or RetryConfig()
+        client._client = httpx.Client(transport=transport, base_url=base_url)
+        return client
+
     def __enter__(self) -> "StrataClient":
         return self
 
@@ -485,7 +510,12 @@ class StrataClient:
         timeout: float,
     ) -> Artifact:
         """Request server-side execution via unified /v1/materialize endpoint."""
-        # Map 'ref' to 'executor' for server compatibility
+        # Public API documents transform={"ref": ..., "params": ...}; the
+        # server only accepts ``executor``. This shim renames so callers can
+        # use either spelling. Deleting it would silently break every
+        # ``ref``-style call site (examples/10_artifacts.py plus the
+        # integration test suite); add an explicit deprecation cycle if it
+        # ever needs to go away.
         server_transform = dict(transform)
         if "ref" in server_transform:
             server_transform["executor"] = server_transform.pop("ref")
