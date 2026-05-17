@@ -11,7 +11,9 @@ import pytest
 
 from strata.notebook.runtime_state import (
     SCHEMA_VERSION,
-    get_cell_entry,
+    CellRuntime,
+    EnvironmentRuntime,
+    RuntimeState,
     load_runtime_state,
     migrate_from_legacy_notebook_toml,
     runtime_state_path,
@@ -21,52 +23,80 @@ from strata.notebook.runtime_state import (
 
 def test_load_returns_empty_shell_when_file_missing(tmp_path: Path):
     state = load_runtime_state(tmp_path)
-    assert state == {"schema_version": SCHEMA_VERSION, "cells": {}, "environment": {}}
+    assert state == RuntimeState()
+    assert state.schema_version == SCHEMA_VERSION
+    assert state.cells == {}
+    assert state.environment == EnvironmentRuntime()
 
 
 def test_save_and_load_roundtrip(tmp_path: Path):
-    state = {
-        "schema_version": SCHEMA_VERSION,
-        "cells": {"c1": {"display_outputs": [{"content_type": "json/object"}]}},
-        "environment": {},
-    }
+    state = RuntimeState(
+        cells={"c1": CellRuntime(display_outputs=[{"content_type": "json/object"}])},
+    )
     save_runtime_state(tmp_path, state)
 
-    path = runtime_state_path(tmp_path)
-    assert path.exists()
+    assert runtime_state_path(tmp_path).exists()
     reloaded = load_runtime_state(tmp_path)
     assert reloaded == state
 
 
 def test_save_strips_empty_cell_entries(tmp_path: Path):
-    state = {
-        "schema_version": SCHEMA_VERSION,
-        "cells": {"c1": {"display_outputs": [{}]}, "empty": {}},
-        "environment": {},
-    }
+    state = RuntimeState(
+        cells={
+            "c1": CellRuntime(display_outputs=[{"content_type": "json/object"}]),
+            "empty": CellRuntime(),
+        },
+    )
     save_runtime_state(tmp_path, state)
 
     reloaded = load_runtime_state(tmp_path)
-    assert "c1" in reloaded["cells"]
-    assert "empty" not in reloaded["cells"]
+    assert "c1" in reloaded.cells
+    assert "empty" not in reloaded.cells
 
 
-def test_get_cell_entry_creates_on_demand(tmp_path: Path):
+def test_get_or_create_cell_creates_on_demand(tmp_path: Path):
     state = load_runtime_state(tmp_path)
-    entry = get_cell_entry(state, "c1")
-    entry["display_outputs"] = []
+    entry = state.get_or_create_cell("c1")
+    entry.last_source_hash = "src"
     save_runtime_state(tmp_path, state)
 
     reloaded = load_runtime_state(tmp_path)
-    assert reloaded["cells"]["c1"] == {"display_outputs": []}
+    assert reloaded.cells["c1"].last_source_hash == "src"
+
+
+def test_prune_cell_removes_entry(tmp_path: Path):
+    state = RuntimeState(cells={"c1": CellRuntime(last_source_hash="src")})
+    state.prune_cell("c1")
+    state.prune_cell("nonexistent")  # no-op, no error
+    assert state.cells == {}
 
 
 def test_load_tolerates_corrupt_file(tmp_path: Path):
     path = runtime_state_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("not valid json {")
+    assert load_runtime_state(tmp_path) == RuntimeState()
+
+
+def test_load_filters_unknown_keys(tmp_path: Path):
+    """Forward-compat: a newer schema writing an extra field should not
+    crash the loader. Unknown keys are silently dropped."""
+    import json
+
+    path = runtime_state_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "cells": {"c1": {"last_source_hash": "s", "future_field": "x"}},
+                "environment": {"lockfile_hash": "h", "future_env_field": 42},
+            }
+        )
+    )
     state = load_runtime_state(tmp_path)
-    assert state == {"schema_version": SCHEMA_VERSION, "cells": {}, "environment": {}}
+    assert state.cells["c1"].last_source_hash == "s"
+    assert state.environment.lockfile_hash == "h"
 
 
 def test_migration_moves_artifacts_to_runtime_state(tmp_path: Path):
@@ -88,15 +118,15 @@ def test_migration_moves_artifacts_to_runtime_state(tmp_path: Path):
     assert migrated is True
 
     state = load_runtime_state(tmp_path)
-    assert state["cells"]["c1"]["display_outputs"][0]["artifact_uri"] == "strata://..."
-    assert state["cells"]["c1"]["display"] == {"content_type": "json/object"}
-    assert "c2" not in state["cells"]  # empty entries pruned on save
+    assert state.cells["c1"].display_outputs[0]["artifact_uri"] == "strata://..."
+    assert state.cells["c1"].display == {"content_type": "json/object"}
+    assert "c2" not in state.cells  # empty entries pruned on save
 
 
 def test_migration_is_noop_when_runtime_state_already_populated(tmp_path: Path):
     state = load_runtime_state(tmp_path)
-    entry = get_cell_entry(state, "c1")
-    entry["display_outputs"] = [{"content_type": "pickle/object"}]
+    entry = state.get_or_create_cell("c1")
+    entry.display_outputs = [{"content_type": "pickle/object"}]
     save_runtime_state(tmp_path, state)
 
     toml_data = {
@@ -110,7 +140,7 @@ def test_migration_is_noop_when_runtime_state_already_populated(tmp_path: Path):
     assert migrated is False
     reloaded = load_runtime_state(tmp_path)
     # Existing entry wins — migration must not overwrite fresh state.
-    assert reloaded["cells"]["c1"]["display_outputs"][0]["content_type"] == "pickle/object"
+    assert reloaded.cells["c1"].display_outputs[0]["content_type"] == "pickle/object"
 
 
 def test_migration_without_legacy_artifacts_returns_false(tmp_path: Path):
@@ -173,7 +203,7 @@ def test_parse_notebook_migrates_and_rewrites_toml_on_first_open(
     assert cell.display_outputs[0].artifact_uri == "strata://artifact/legacy@v=1"
 
     runtime = load_runtime_state(notebook_with_legacy_toml)
-    assert runtime["cells"]["c1"]["display_outputs"][0]["artifact_uri"] == (
+    assert runtime.cells["c1"].display_outputs[0]["artifact_uri"] == (
         "strata://artifact/legacy@v=1"
     )
 
@@ -204,10 +234,8 @@ def test_update_cell_display_outputs_writes_to_runtime_json(tmp_path: Path):
     )
 
     runtime = load_runtime_state(notebook_dir)
-    assert runtime["cells"]["c1"]["display_outputs"] == [
-        {"content_type": "json/object", "bytes": 10}
-    ]
-    assert runtime["cells"]["c1"]["display"] == {"content_type": "json/object", "bytes": 10}
+    assert runtime.cells["c1"].display_outputs == [{"content_type": "json/object", "bytes": 10}]
+    assert runtime.cells["c1"].display == {"content_type": "json/object", "bytes": 10}
 
     # notebook.toml must NOT gain an artifacts section.
     with open(notebook_dir / "notebook.toml", "rb") as f:
@@ -225,13 +253,12 @@ def test_persist_cell_provenance_sets_and_clears_fields(tmp_path: Path):
         last_source_hash="src",
         last_env_hash="env",
     )
-    state = load_runtime_state(tmp_path)
-    entry = state["cells"]["c1"]
-    assert entry["last_provenance_hash"] == "prov"
-    assert entry["last_source_hash"] == "src"
-    assert entry["last_env_hash"] == "env"
+    entry = load_runtime_state(tmp_path).cells["c1"]
+    assert entry.last_provenance_hash == "prov"
+    assert entry.last_source_hash == "src"
+    assert entry.last_env_hash == "env"
 
-    # Clearing one field pops it and leaves the rest intact.
+    # Clearing one field nulls it and leaves the rest intact.
     persist_cell_provenance(
         tmp_path,
         "c1",
@@ -239,10 +266,10 @@ def test_persist_cell_provenance_sets_and_clears_fields(tmp_path: Path):
         last_source_hash="src2",
         last_env_hash="env2",
     )
-    entry = load_runtime_state(tmp_path)["cells"]["c1"]
-    assert "last_provenance_hash" not in entry
-    assert entry["last_source_hash"] == "src2"
-    assert entry["last_env_hash"] == "env2"
+    entry = load_runtime_state(tmp_path).cells["c1"]
+    assert entry.last_provenance_hash is None
+    assert entry.last_source_hash == "src2"
+    assert entry.last_env_hash == "env2"
 
 
 def test_parse_notebook_hydrates_provenance_hashes(tmp_path: Path):
@@ -291,7 +318,7 @@ def test_update_cell_display_outputs_clears_entry(tmp_path: Path):
     update_cell_display_outputs(notebook_dir, "c1", None)
 
     runtime = load_runtime_state(notebook_dir)
-    assert "c1" not in runtime["cells"]
+    assert "c1" not in runtime.cells
 
 
 def test_runtime_state_writes_do_not_bump_notebook_toml_updated_at(tmp_path: Path):

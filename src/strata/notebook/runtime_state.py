@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -24,41 +25,116 @@ SCHEMA_VERSION = 1
 _RUNTIME_FILENAME = "runtime.json"
 
 
+@dataclass
+class CellRuntime:
+    """Per-cell runtime state — execution provenance and display outputs."""
+
+    last_provenance_hash: str | None = None
+    last_source_hash: str | None = None
+    last_env_hash: str | None = None
+    display_outputs: list[dict[str, Any]] = field(default_factory=list)
+    display: dict[str, Any] | None = None
+
+    def is_empty(self) -> bool:
+        """Whether this entry carries no useful state.
+
+        Empty entries are stripped on save so the file stays tidy.
+        """
+        return not (
+            self.last_provenance_hash
+            or self.last_source_hash
+            or self.last_env_hash
+            or self.display_outputs
+            or self.display
+        )
+
+
+@dataclass
+class EnvironmentRuntime:
+    """Snapshot of the notebook's runtime environment after a ``uv sync``.
+
+    All fields default to empty / zero so missing keys on the disk read
+    side and partial migrations resolve to a well-formed dataclass
+    without manual ``setdefault`` calls.
+    """
+
+    requested_python_version: str = ""
+    runtime_python_version: str = ""
+    lockfile_hash: str = ""
+    python_version: str = ""
+    package_count: int = 0
+    declared_package_count: int = 0
+    resolved_package_count: int = 0
+    has_lockfile: bool = False
+    last_synced_at: int = 0
+
+
+@dataclass
+class RuntimeState:
+    """Root of ``.strata/runtime.json`` — keyed cells + environment snapshot."""
+
+    schema_version: int = SCHEMA_VERSION
+    cells: dict[str, CellRuntime] = field(default_factory=dict)
+    environment: EnvironmentRuntime = field(default_factory=EnvironmentRuntime)
+
+    def get_or_create_cell(self, cell_id: str) -> CellRuntime:
+        """Return the per-cell entry, creating it on demand."""
+        if cell_id not in self.cells:
+            self.cells[cell_id] = CellRuntime()
+        return self.cells[cell_id]
+
+    def prune_cell(self, cell_id: str) -> None:
+        """Remove a per-cell entry — callers do this when the cell is deleted."""
+        self.cells.pop(cell_id, None)
+
+
 def runtime_state_path(notebook_dir: Path) -> Path:
     return Path(notebook_dir) / ".strata" / _RUNTIME_FILENAME
 
 
-def load_runtime_state(notebook_dir: Path) -> dict[str, Any]:
+def _coerce_cell(raw: dict[str, Any]) -> CellRuntime:
+    """Build a ``CellRuntime`` from a possibly-extra-keys dict.
+
+    Filtering unknown keys means legacy on-disk payloads (or
+    forward-compat reads from a newer schema) don't blow up the load
+    path with ``TypeError: unexpected keyword``.
+    """
+    valid = {f.name for f in fields(CellRuntime)}
+    return CellRuntime(**{k: v for k, v in raw.items() if k in valid})
+
+
+def _coerce_environment(raw: dict[str, Any]) -> EnvironmentRuntime:
+    valid = {f.name for f in fields(EnvironmentRuntime)}
+    return EnvironmentRuntime(**{k: v for k, v in raw.items() if k in valid})
+
+
+def load_runtime_state(notebook_dir: Path) -> RuntimeState:
     """Return the runtime-state document, or a fresh empty shell."""
     path = runtime_state_path(notebook_dir)
     if not path.exists():
-        return _empty_state()
+        return RuntimeState()
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (ValueError, OSError):
-        return _empty_state()
+        return RuntimeState()
     if not isinstance(data, dict):
-        return _empty_state()
-    data.setdefault("schema_version", SCHEMA_VERSION)
-    data.setdefault("cells", {})
-    data.setdefault("environment", {})
-    if not isinstance(data["cells"], dict):
-        data["cells"] = {}
-    if not isinstance(data["environment"], dict):
-        data["environment"] = {}
-    return data
+        return RuntimeState()
+    cells_raw = data.get("cells") or {}
+    environment_raw = data.get("environment") or {}
+    return RuntimeState(
+        schema_version=data.get("schema_version", SCHEMA_VERSION),
+        cells={cid: _coerce_cell(entry) for cid, entry in cells_raw.items()},
+        environment=_coerce_environment(environment_raw),
+    )
 
 
-def save_runtime_state(notebook_dir: Path, state: dict[str, Any]) -> None:
+def save_runtime_state(notebook_dir: Path, state: RuntimeState) -> None:
     """Atomically persist the runtime-state document."""
     path = runtime_state_path(notebook_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Strip any completely empty cell records so the file stays tidy.
-    cells = state.get("cells", {})
-    if isinstance(cells, dict):
-        state["cells"] = {cid: entry for cid, entry in cells.items() if entry}
-    state["schema_version"] = SCHEMA_VERSION
+    state.cells = {cid: entry for cid, entry in state.cells.items() if not entry.is_empty()}
+    state.schema_version = SCHEMA_VERSION
 
     fd, tmp_name = tempfile.mkstemp(
         prefix=path.name + ".",
@@ -66,33 +142,8 @@ def save_runtime_state(notebook_dir: Path, state: dict[str, Any]) -> None:
         dir=path.parent,
     )
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, sort_keys=True)
+        json.dump(asdict(state), f, indent=2, sort_keys=True)
     os.replace(tmp_name, path)
-
-
-def _empty_state() -> dict[str, Any]:
-    return {"schema_version": SCHEMA_VERSION, "cells": {}, "environment": {}}
-
-
-def get_cell_entry(state: dict[str, Any], cell_id: str) -> dict[str, Any]:
-    """Return the mutable per-cell entry, creating it on demand."""
-    cells = state.setdefault("cells", {})
-    entry = cells.get(cell_id)
-    if not isinstance(entry, dict):
-        entry = {}
-        cells[cell_id] = entry
-    return entry
-
-
-def prune_cell_entry(state: dict[str, Any], cell_id: str) -> None:
-    """Remove the per-cell entry entirely — callers do this when the
-    cell is deleted so runtime state follows the structural config."""
-    cells = state.get("cells")
-    if isinstance(cells, dict):
-        cells.pop(cell_id, None)
-
-
-_PROVENANCE_FIELDS = ("last_provenance_hash", "last_source_hash", "last_env_hash")
 
 
 def persist_cell_provenance(
@@ -112,16 +163,10 @@ def persist_cell_provenance(
     reopens without polluting the committed ``notebook.toml``.
     """
     state = load_runtime_state(notebook_dir)
-    entry = get_cell_entry(state, cell_id)
-    for key, value in zip(
-        _PROVENANCE_FIELDS,
-        (last_provenance_hash, last_source_hash, last_env_hash),
-        strict=True,
-    ):
-        if value:
-            entry[key] = value
-        else:
-            entry.pop(key, None)
+    entry = state.get_or_create_cell(cell_id)
+    entry.last_provenance_hash = last_provenance_hash or None
+    entry.last_source_hash = last_source_hash or None
+    entry.last_env_hash = last_env_hash or None
     save_runtime_state(notebook_dir, state)
 
 
@@ -152,23 +197,22 @@ def migrate_from_legacy_notebook_toml(
         for cell_id, cell_artifacts in legacy_artifacts.items():
             if not isinstance(cell_artifacts, dict):
                 continue
-            entry = get_cell_entry(state, cell_id)
+            entry = state.get_or_create_cell(cell_id)
             raw_outputs = cell_artifacts.get("display_outputs")
-            if isinstance(raw_outputs, list) and "display_outputs" not in entry:
+            if isinstance(raw_outputs, list) and not entry.display_outputs:
                 cleaned = [dict(output) for output in raw_outputs if isinstance(output, dict)]
                 if cleaned:
-                    entry["display_outputs"] = cleaned
+                    entry.display_outputs = cleaned
                     migrated = True
             raw_display = cell_artifacts.get("display")
-            if isinstance(raw_display, dict) and raw_display and "display" not in entry:
-                entry["display"] = dict(raw_display)
+            if isinstance(raw_display, dict) and raw_display and entry.display is None:
+                entry.display = dict(raw_display)
                 migrated = True
 
     legacy_environment = toml_data.get("environment")
     if isinstance(legacy_environment, dict) and legacy_environment:
-        existing_env = state.get("environment")
-        if not isinstance(existing_env, dict) or not existing_env:
-            state["environment"] = dict(legacy_environment)
+        if state.environment == EnvironmentRuntime():
+            state.environment = _coerce_environment(legacy_environment)
             migrated = True
 
     if migrated:

@@ -146,7 +146,7 @@ def parse_notebook(directory: Path) -> NotebookState:
     toml_data.pop("environment", None)
 
     runtime_state = load_runtime_state(directory)
-    runtime_cells = runtime_state.get("cells", {})
+    runtime_cells = runtime_state.cells
 
     # Parse into NotebookToml
     # Get created_at and updated_at, defaulting to now if not present
@@ -207,24 +207,13 @@ def parse_notebook(directory: Path) -> NotebookState:
         )
         resolved_env = dict(notebook_toml.env)
         resolved_env.update(cell_meta.env)
-        display_outputs: list[CellOutput] = []
-        runtime_cell = runtime_cells.get(cell_meta.id, {})
-        if isinstance(runtime_cell, dict):
-            raw_displays = runtime_cell.get("display_outputs")
-            if isinstance(raw_displays, list):
-                for raw_display in raw_displays:
-                    if not isinstance(raw_display, dict):
-                        continue
-                    try:
-                        display_outputs.append(CellOutput(**raw_display))
-                    except Exception:
-                        continue
-            raw_display = runtime_cell.get("display")
-            if not display_outputs and isinstance(raw_display, dict):
-                try:
-                    display_outputs = [CellOutput(**raw_display)]
-                except Exception:
-                    display_outputs = []
+        runtime_cell = runtime_cells.get(cell_meta.id)
+        if runtime_cell is not None:
+            display_outputs = [CellOutput(**d) for d in runtime_cell.display_outputs]
+            if not display_outputs and runtime_cell.display:
+                display_outputs = [CellOutput(**runtime_cell.display)]
+        else:
+            display_outputs = []
 
         # Restore console output from .strata/console/
         from strata.notebook.writer import load_cell_console_output
@@ -236,9 +225,6 @@ def parse_notebook(directory: Path) -> NotebookState:
         # hashes, so hydrating them at open lets a reopened notebook
         # correctly classify cells as READY / STALE without a
         # re-execution.
-        def _str_or_none(value: object) -> str | None:
-            return value if isinstance(value, str) and value else None
-
         cell_states.append(
             CellState(
                 id=cell_meta.id,
@@ -257,9 +243,9 @@ def parse_notebook(directory: Path) -> NotebookState:
                 display_output=display_outputs[-1] if display_outputs else None,
                 console_stdout=console_stdout,
                 console_stderr=console_stderr,
-                last_provenance_hash=_str_or_none(runtime_cell.get("last_provenance_hash")),
-                last_source_hash=_str_or_none(runtime_cell.get("last_source_hash")),
-                last_env_hash=_str_or_none(runtime_cell.get("last_env_hash")),
+                last_provenance_hash=runtime_cell.last_provenance_hash if runtime_cell else None,
+                last_source_hash=runtime_cell.last_source_hash if runtime_cell else None,
+                last_env_hash=runtime_cell.last_env_hash if runtime_cell else None,
             )
         )
 

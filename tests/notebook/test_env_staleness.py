@@ -237,18 +237,17 @@ class TestEnvironmentMetadata:
         from strata.notebook.runtime_state import load_runtime_state
 
         nb_dir = create_notebook(tmp_path, "env_meta")
-        env = load_runtime_state(nb_dir).get("environment", {})
+        env = load_runtime_state(nb_dir).environment
 
-        assert "lockfile_hash" in env
-        assert "python_version" in env
-        assert env["python_version"].startswith(f"{sys.version_info.major}.")
+        assert env.lockfile_hash
+        assert env.python_version.startswith(f"{sys.version_info.major}.")
 
     def test_environment_updated_after_dep_change(self, tmp_path):
         """update_environment_metadata refreshes lockfile_hash in runtime.json."""
         from strata.notebook.runtime_state import load_runtime_state
 
         nb_dir = create_notebook(tmp_path, "env_update")
-        old_hash = load_runtime_state(nb_dir)["environment"]["lockfile_hash"]
+        old_hash = load_runtime_state(nb_dir).environment.lockfile_hash
 
         # Add a dependency
         result = add_dependency(nb_dir, "six")
@@ -257,7 +256,7 @@ class TestEnvironmentMetadata:
         # Update metadata
         update_environment_metadata(nb_dir)
 
-        new_hash = load_runtime_state(nb_dir)["environment"]["lockfile_hash"]
+        new_hash = load_runtime_state(nb_dir).environment.lockfile_hash
         assert old_hash != new_hash
 
     def test_environment_missing_no_crash(self, tmp_path):

@@ -74,8 +74,8 @@ def test_update_environment_metadata_reads_pyvenv_cfg_without_subprocess(
 
         from strata.notebook.runtime_state import load_runtime_state
 
-        environment = load_runtime_state(notebook_dir).get("environment", {})
-        assert environment.get("runtime_python_version") == "3.13.3"
+        environment = load_runtime_state(notebook_dir).environment
+        assert environment.runtime_python_version == "3.13.3"
 
 
 def test_write_cell():

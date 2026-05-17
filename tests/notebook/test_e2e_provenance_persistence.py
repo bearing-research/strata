@@ -28,10 +28,13 @@ pytestmark = pytest.mark.integration
 
 
 def _provenance(nb_dir: Path, cell_id: str) -> dict[str, str]:
-    entry = load_runtime_state(nb_dir).get("cells", {}).get(cell_id, {})
+    entry = load_runtime_state(nb_dir).cells.get(cell_id)
+    if entry is None:
+        return {k: "" for k in ("last_provenance_hash", "last_source_hash", "last_env_hash")}
     return {
-        key: entry.get(key, "")
-        for key in ("last_provenance_hash", "last_source_hash", "last_env_hash")
+        "last_provenance_hash": entry.last_provenance_hash or "",
+        "last_source_hash": entry.last_source_hash or "",
+        "last_env_hash": entry.last_env_hash or "",
     }
 
 

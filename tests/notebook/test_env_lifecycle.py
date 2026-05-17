@@ -523,15 +523,12 @@ class TestEnvironmentMetadata:
         nb_dir = create_notebook(tmp_path, "env_metadata")
         update_environment_metadata(nb_dir)
 
-        environment = load_runtime_state(nb_dir).get("environment", {})
-        assert "lockfile_hash" in environment
-        assert "python_version" in environment
-        assert "requested_python_version" in environment
-        assert "runtime_python_version" in environment
-        assert "declared_package_count" in environment
-        assert "resolved_package_count" in environment
-        assert "has_lockfile" in environment
-        assert "last_synced_at" in environment
+        environment = load_runtime_state(nb_dir).environment
+        # has_lockfile / *_package_count are populated even when zero; the
+        # truthy-leaning fields (timestamps, hashes) guard against the
+        # writer forgetting to compute a field.
+        assert environment.last_synced_at > 0
+        assert environment.lockfile_hash
 
         with open(nb_dir / "notebook.toml", "rb") as f:
             data = tomllib.load(f)

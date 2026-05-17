@@ -61,6 +61,7 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
     read_venv_runtime_python_version,
 )
+from strata.notebook.runtime_state import EnvironmentRuntime
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
     build_worker_catalog,
@@ -1161,7 +1162,7 @@ class NotebookSession:
 
         return result.stdout.strip()
 
-    def _read_persisted_environment_metadata(self) -> dict[str, Any]:
+    def _read_persisted_environment_metadata(self) -> EnvironmentRuntime:
         """Best-effort read of the persisted environment metadata.
 
         Lives in ``.strata/runtime.json`` under ``environment`` — the
@@ -1170,9 +1171,7 @@ class NotebookSession:
         """
         from strata.notebook.runtime_state import load_runtime_state
 
-        state = load_runtime_state(self.path)
-        environment = state.get("environment", {})
-        return environment if isinstance(environment, dict) else {}
+        return load_runtime_state(self.path).environment
 
     def _resolved_package_count(self) -> int:
         """Count resolved packages from ``uv.lock`` when present."""
@@ -1660,28 +1659,17 @@ class NotebookSession:
         self.venv_python = venv_python
         self.environment_interpreter_source = "venv"
         persisted = self._read_persisted_environment_metadata()
-        persisted_runtime_python = persisted.get("runtime_python_version") or persisted.get(
-            "python_version"
+        persisted_runtime_python = (
+            persisted.runtime_python_version or persisted.python_version
+        ).strip()
+        self.environment_python_version = persisted_runtime_python or self._probe_python_version(
+            venv_python
         )
-        if isinstance(persisted_runtime_python, str) and persisted_runtime_python.strip():
-            self.environment_python_version = persisted_runtime_python.strip()
-        else:
-            self.environment_python_version = self._probe_python_version(venv_python)
         self.environment_sync_state = "ready"
         self.environment_sync_error = None
         self.environment_sync_notice = None
-        persisted_last_synced_at = persisted.get("last_synced_at")
-        self.environment_last_synced_at = (
-            persisted_last_synced_at
-            if isinstance(persisted_last_synced_at, int)
-            else int(_time.time() * 1000)
-        )
-        persisted_last_sync_duration_ms = persisted.get("last_sync_duration_ms")
-        self.environment_last_sync_duration_ms = (
-            persisted_last_sync_duration_ms
-            if isinstance(persisted_last_sync_duration_ms, int)
-            else int((_time.perf_counter() - started) * 1000)
-        )
+        self.environment_last_synced_at = persisted.last_synced_at or int(_time.time() * 1000)
+        self.environment_last_sync_duration_ms = int((_time.perf_counter() - started) * 1000)
 
     def _should_start_warm_pool(self) -> bool:
         """Return whether the notebook has a stable enough runtime for warm workers."""

@@ -515,7 +515,11 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
     """
     from strata.notebook.dependencies import list_dependencies
     from strata.notebook.env import compute_lockfile_hash
-    from strata.notebook.runtime_state import load_runtime_state, save_runtime_state
+    from strata.notebook.runtime_state import (
+        EnvironmentRuntime,
+        load_runtime_state,
+        save_runtime_state,
+    )
 
     if not (notebook_dir / "notebook.toml").exists():
         return
@@ -563,17 +567,17 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
 
     declared_package_count = len(list_dependencies(notebook_dir))
     state = load_runtime_state(notebook_dir)
-    state["environment"] = {
-        "requested_python_version": requested_python_version,
-        "runtime_python_version": runtime_python_version,
-        "lockfile_hash": compute_lockfile_hash(notebook_dir),
-        "python_version": runtime_python_version,
-        "package_count": declared_package_count,
-        "declared_package_count": declared_package_count,
-        "resolved_package_count": resolved_package_count,
-        "has_lockfile": lock_path.exists(),
-        "last_synced_at": int(time.time() * 1000),
-    }
+    state.environment = EnvironmentRuntime(
+        requested_python_version=requested_python_version,
+        runtime_python_version=runtime_python_version,
+        lockfile_hash=compute_lockfile_hash(notebook_dir),
+        python_version=runtime_python_version,
+        package_count=declared_package_count,
+        declared_package_count=declared_package_count,
+        resolved_package_count=resolved_package_count,
+        has_lockfile=lock_path.exists(),
+        last_synced_at=int(time.time() * 1000),
+    )
     save_runtime_state(notebook_dir, state)
 
 
@@ -985,23 +989,19 @@ def update_cell_display_outputs(
     there. The same file also holds per-cell provenance hashes and
     the last ``uv sync`` timestamp; see ``runtime_state.py``.
     """
-    from strata.notebook.runtime_state import (
-        get_cell_entry,
-        load_runtime_state,
-        save_runtime_state,
-    )
+    from strata.notebook.runtime_state import load_runtime_state, save_runtime_state
 
     notebook_dir = Path(notebook_dir)
     state = load_runtime_state(notebook_dir)
-    entry = get_cell_entry(state, cell_id)
+    entry = state.get_or_create_cell(cell_id)
 
     persisted_displays = _sanitize_display_outputs_for_toml(display_outputs)
     if persisted_displays:
-        entry["display_outputs"] = persisted_displays
-        entry["display"] = persisted_displays[-1]
+        entry.display_outputs = persisted_displays
+        entry.display = persisted_displays[-1]
     else:
-        entry.pop("display_outputs", None)
-        entry.pop("display", None)
+        entry.display_outputs = []
+        entry.display = None
 
     save_runtime_state(notebook_dir, state)
 
