@@ -52,7 +52,11 @@ from strata.notebook.models import (
 )
 from strata.notebook.mounts import MountFingerprinter, resolve_cell_mounts
 from strata.notebook.parser import parse_notebook
-from strata.notebook.provenance import compute_provenance_hash, compute_source_hash
+from strata.notebook.provenance import (
+    compute_provenance_hash,
+    compute_source_hash,
+    derive_subkey,
+)
 from strata.notebook.python_versions import (
     read_requested_python_minor,
     read_venv_runtime_python_version,
@@ -1363,7 +1367,7 @@ class NotebookSession:
         consumed_vars = self.dag.consumed_variables.get(cell_id, set()) if self.dag else set()
         if consumed_vars:
             first_var = sorted(consumed_vars)[0]
-            lookup_hash = hashlib.sha256(f"{provenance_hash}:{first_var}".encode()).hexdigest()
+            lookup_hash = derive_subkey(provenance_hash, first_var)
         else:
             lookup_hash = provenance_hash
 
@@ -1378,7 +1382,7 @@ class NotebookSession:
         cached_outputs: dict[str, tuple[str, int]] = {}
         for var_name in sorted(consumed_vars):
             canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
-            expected_hash = hashlib.sha256(f"{provenance_hash}:{var_name}".encode()).hexdigest()
+            expected_hash = derive_subkey(provenance_hash, var_name)
             canonical = self.artifact_manager.artifact_store.get_latest_version(
                 canonical_id,
             )

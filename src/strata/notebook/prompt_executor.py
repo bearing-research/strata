@@ -19,6 +19,7 @@ from strata.notebook.llm import (
     render_prompt_template,
 )
 from strata.notebook.prompt_analyzer import analyze_prompt_cell
+from strata.notebook.provenance import derive_subkey
 
 if TYPE_CHECKING:
     from strata.notebook.session import NotebookSession
@@ -169,7 +170,7 @@ async def execute_prompt_cell(
     artifact_mgr = session.get_artifact_manager()
     notebook_id = session.notebook_state.id
     canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{output_name}"
-    var_provenance = hashlib.sha256(f"{provenance_hash}:{output_name}".encode()).hexdigest()
+    var_provenance = derive_subkey(provenance_hash, output_name)
 
     if use_cache:
         cached = artifact_mgr.find_cached(var_provenance)

@@ -57,6 +57,29 @@ def compute_source_hash(source: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def derive_subkey(parent_hash: str, *labels: str) -> str:
+    """Derive a sub-hash from a parent provenance hash plus one or more labels.
+
+    Returns ``sha256("parent_hash:label1:label2:...")``. Used to namespace
+    per-variable, per-display, and per-iteration provenance off a cell's
+    main provenance hash, so two cells that share a provenance hash still
+    produce distinct artifact keys for their distinct outputs.
+
+    The byte format (colon-joined, no separator after the last component)
+    is wire-stable — changing it would invalidate every existing cached
+    artifact keyed off a derived hash.
+
+    Args:
+        parent_hash: The originating provenance hash (or any seed value).
+        *labels: One or more discriminating labels appended after the parent.
+
+    Returns:
+        SHA-256 hex digest of ``parent_hash:label1:label2:...``.
+    """
+    pieces = [parent_hash, *labels]
+    return hashlib.sha256(":".join(pieces).encode()).hexdigest()
+
+
 def compute_provenance_hash(
     input_hashes: list[str],
     source_hash: str,

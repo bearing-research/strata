@@ -25,7 +25,6 @@ the cell's output panel without special handling.
 
 from __future__ import annotations
 
-import hashlib
 import io
 import json
 import logging
@@ -33,6 +32,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from strata.notebook.annotations import parse_annotations
+from strata.notebook.provenance import derive_subkey
 from strata.notebook.sql.analyzer import analyze_sql_cell, rewrite_named_to_positional
 from strata.notebook.sql.bind import BindError, resolve_bind_params
 from strata.notebook.sql.provenance import (
@@ -169,7 +169,7 @@ async def execute_sql_cell(
         schema_fingerprint=schema_fp,
     )
     output_name = analysis.name
-    var_provenance = hashlib.sha256(f"{provenance_hash}:{output_name}".encode()).hexdigest()
+    var_provenance = derive_subkey(provenance_hash, output_name)
 
     # ---- cache check -----------------------------------------------
     artifact_mgr = session.get_artifact_manager()
@@ -361,7 +361,7 @@ async def _execute_write_cell(
         schema_fingerprint=None,
     )
     output_name = analysis.name
-    var_provenance = hashlib.sha256(f"{provenance_hash}:{output_name}".encode()).hexdigest()
+    var_provenance = derive_subkey(provenance_hash, output_name)
 
     artifact_mgr = session.get_artifact_manager()
     notebook_id = session.notebook_state.id

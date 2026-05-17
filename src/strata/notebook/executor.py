@@ -52,7 +52,11 @@ from strata.notebook.mounts import (
     ResolvedMount,
     resolve_cell_mounts,
 )
-from strata.notebook.provenance import compute_provenance_hash, compute_source_hash
+from strata.notebook.provenance import (
+    compute_provenance_hash,
+    compute_source_hash,
+    derive_subkey,
+)
 from strata.notebook.remote_bundle import (
     pack_notebook_output_bundle,
     read_notebook_output_bundle_manifest_path,
@@ -722,7 +726,7 @@ class CellExecutor:
             if use_cache:
                 if consumed_vars:
                     first_var = sorted(consumed_vars)[0]
-                    var_prov = hashlib.sha256(f"{provenance_hash}:{first_var}".encode()).hexdigest()
+                    var_prov = derive_subkey(provenance_hash, first_var)
                     cached_artifact = artifact_mgr.find_cached(var_prov)
                 else:
                     cached_artifact = artifact_mgr.find_cached(provenance_hash)
@@ -737,7 +741,7 @@ class CellExecutor:
             if use_cache and cached_artifact is not None and consumed_vars:
                 for var_name in consumed_vars:
                     canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
-                    var_prov = hashlib.sha256(f"{provenance_hash}:{var_name}".encode()).hexdigest()
+                    var_prov = derive_subkey(provenance_hash, var_name)
                     canonical_art = artifact_mgr.artifact_store.get_latest_version(
                         canonical_id,
                     )
@@ -1178,9 +1182,11 @@ class CellExecutor:
             "build_id": f"notebook-{uuid.uuid4().hex[:12]}",
             "tenant": None,
             "principal": None,
-            "provenance_hash": hashlib.sha256(
-                f"{source}:{sorted(input_specs)}".encode()
-            ).hexdigest(),
+            # ``sorted(input_specs)`` round-trips through ``str(list)`` —
+            # the legacy inline form used an f-string which called
+            # ``__str__`` on the list. Preserve the same byte format so
+            # any cached transport hashes keyed off this value stay valid.
+            "provenance_hash": derive_subkey(source, str(sorted(input_specs))),
             "transform": {
                 "ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
                 "code_hash": compute_source_hash(source),
@@ -2203,9 +2209,7 @@ class CellExecutor:
                         }
                         content_type = content_type_map.get(ext, "pickle/object")
 
-                        var_provenance = hashlib.sha256(
-                            f"{provenance_hash}:{var_name}".encode()
-                        ).hexdigest()
+                        var_provenance = derive_subkey(provenance_hash, var_name)
 
                         artifact_version = artifact_mgr.store_cell_output(
                             cell_id=cell_id,
@@ -2286,9 +2290,7 @@ class CellExecutor:
 
             blob_data = output_file.read_bytes()
             row_count = display_output.get("rows")
-            display_provenance = hashlib.sha256(
-                f"{provenance_hash}:__display__{index}".encode()
-            ).hexdigest()
+            display_provenance = derive_subkey(provenance_hash, f"__display__{index}")
             artifact_version = artifact_mgr.store_cell_output(
                 cell_id=cell_id,
                 variable_name=f"__display__{index}",
@@ -2365,9 +2367,7 @@ class CellExecutor:
                 "symbol_name": var_name,
                 "kind": symbol.kind,
                 "source": export_plan.module_source,
-                "provenance_hash": hashlib.sha256(
-                    f"{provenance_hash}:{var_name}".encode()
-                ).hexdigest(),
+                "provenance_hash": derive_subkey(provenance_hash, var_name),
             }
             output_file = output_dir / f"{var_name}.cell_module.json"
             with open(output_file, "w", encoding="utf-8") as f:
@@ -2664,9 +2664,7 @@ class CellExecutor:
                 # Per-iteration provenance: chains through the previous iter's
                 # carry bytes so re-runs with identical chains are detectable.
                 prev_carry_hash = hashlib.sha256(carry_blob).hexdigest()
-                iter_provenance = hashlib.sha256(
-                    f"{source_hash}:{prev_carry_hash}:iter={k}".encode()
-                ).hexdigest()
+                iter_provenance = derive_subkey(source_hash, prev_carry_hash, f"iter={k}")
 
                 artifact = artifact_mgr.store_cell_output(
                     cell_id=cell_id,
@@ -2732,9 +2730,7 @@ class CellExecutor:
         )
         cell_provenance = prov.provenance_hash
         env_hash = prov.env_hash
-        carry_var_provenance = hashlib.sha256(
-            f"{cell_provenance}:{loop.carry}".encode()
-        ).hexdigest()
+        carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
 
         canonical_artifact = artifact_mgr.store_cell_output(
             cell_id=cell_id,

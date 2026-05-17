@@ -1,8 +1,11 @@
 """Tests for provenance hashing."""
 
+import hashlib
+
 from strata.notebook.provenance import (
     compute_provenance_hash,
     compute_source_hash,
+    derive_subkey,
 )
 
 
@@ -118,3 +121,49 @@ def test_provenance_hash_empty_inputs():
     hash2 = compute_provenance_hash([], source_hash, env_hash)
 
     assert hash1 == hash2
+
+
+# ---------------------------------------------------------------------------
+# derive_subkey
+
+
+def test_derive_subkey_matches_legacy_inline_form():
+    """Wire stability: derive_subkey must produce byte-identical output to
+    the inline ``hashlib.sha256(f"{parent}:{label}".encode()).hexdigest()``
+    pattern callers used before the extraction. Changing the byte format
+    would invalidate every cached artifact keyed off a derived hash."""
+    parent = "a" * 64
+    expected = hashlib.sha256(f"{parent}:varname".encode()).hexdigest()
+    assert derive_subkey(parent, "varname") == expected
+
+
+def test_derive_subkey_multi_label_matches_legacy_inline_form():
+    """Multi-label variant: same byte-identity invariant for the loop
+    iter-provenance shape ``f"{parent1}:{parent2}:iter={k}"``."""
+    expected = hashlib.sha256(b"p1:p2:iter=3").hexdigest()
+    assert derive_subkey("p1", "p2", "iter=3") == expected
+
+
+def test_derive_subkey_stable():
+    """Repeat calls with identical args return identical hashes."""
+    assert derive_subkey("parent", "x") == derive_subkey("parent", "x")
+
+
+def test_derive_subkey_label_distinguishes_outputs():
+    """Different labels produce different hashes (the whole point — two
+    output variables of the same cell get distinct artifact keys)."""
+    parent = "common"
+    assert derive_subkey(parent, "x") != derive_subkey(parent, "y")
+
+
+def test_derive_subkey_parent_distinguishes_cells():
+    """Different parents produce different hashes (two cells with the
+    same output name still get distinct artifact keys)."""
+    assert derive_subkey("cell_a", "result") != derive_subkey("cell_b", "result")
+
+
+def test_derive_subkey_zero_labels_is_just_parent_hash():
+    """No labels degenerates to hashing the parent alone — useful as the
+    identity element when a caller iterates over an optional label list."""
+    parent = "abc"
+    assert derive_subkey(parent) == hashlib.sha256(parent.encode()).hexdigest()
