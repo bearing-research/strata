@@ -1,7 +1,13 @@
 """Runtime helpers for notebook display-side effects.
 
-This module is intentionally dependency-light so it can be imported both by the
-server package and by notebook subprocess helpers via direct file loading.
+This module is intentionally dependency-light so it can be imported both by
+the server package *and* by notebook subprocess helpers via direct file
+loading (``harness.py`` and ``pool_worker.py`` use
+``importlib.util.spec_from_file_location`` to load this file without setting
+up ``strata.notebook.display`` as a package). That load path imposes one
+invariant: **no relative imports in this module**. Absolute imports (stdlib,
+third-party) are fine; ``from .other import X`` would break the subprocess
+loaders silently.
 """
 
 from __future__ import annotations

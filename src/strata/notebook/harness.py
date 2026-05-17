@@ -41,7 +41,7 @@ def _load_local_module(filename: str, module_name: str):
 
 _ser = _load_local_module("serializer.py", "_nb_serializer")
 _immut = _load_local_module("immutability.py", "_nb_immutability")
-_display = _load_local_module("display_runtime.py", "_nb_display_runtime")
+_display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 
 
 # ---------------------------------------------------------------------------
