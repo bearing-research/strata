@@ -65,4 +65,8 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: false
           flags: notebook
-          # Public repo + OIDC: no token required.
+          # ``main`` is a protected branch, which Codecov treats as
+          # needing an explicit token (tokenless upload errors with
+          # "Token required because branch is protected"). Stored as
+          # a repo secret on the user's side.
+          token: ${{ secrets.CODECOV_TOKEN }}
