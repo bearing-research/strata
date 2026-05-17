@@ -13,10 +13,10 @@ import tomllib
 import uuid
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -41,7 +41,7 @@ from strata.notebook.python_versions import (
     normalize_python_minor,
     read_requested_python_minor,
 )
-from strata.notebook.session import SessionManager
+from strata.notebook.session import NotebookSession, SessionManager
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
     build_worker_catalog_with_health,
@@ -63,9 +63,6 @@ from strata.notebook.writer import (
     write_cell,
 )
 
-if TYPE_CHECKING:
-    from strata.notebook.session import NotebookSession
-
 logger = logging.getLogger(__name__)
 
 # Global session manager (shared with WebSocket handler)
@@ -77,6 +74,23 @@ router = APIRouter(prefix="/v1/notebooks", tags=["notebooks"])
 def get_session_manager() -> SessionManager:
     """Export session manager for WebSocket handler."""
     return _session_manager
+
+
+def get_notebook_session(notebook_id: str) -> NotebookSession:
+    """FastAPI dependency: resolve ``notebook_id`` to an open session.
+
+    Raises ``HTTPException(404)`` when the notebook is not known to the
+    session manager. Used as ``session: SessionDep`` on every route
+    that targets a specific notebook so individual handlers don't
+    re-implement the lookup-and-404 dance.
+    """
+    session = _session_manager.get_session(notebook_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    return session
+
+
+SessionDep = Annotated[NotebookSession, Depends(get_notebook_session)]
 
 
 def _require_personal_mode_session_api() -> None:
@@ -1040,13 +1054,9 @@ async def import_jupyter_notebook(
 
 
 @router.delete("/{notebook_id}")
-async def delete_notebook(notebook_id: str, request: Request) -> dict:
+async def delete_notebook(notebook_id: str, session: SessionDep, request: Request) -> dict:
     """Delete a notebook directory and all notebook-owned runtime state."""
     _require_personal_mode_notebook_delete()
-
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     _require_owner(session.notebook_state.owner, _caller_identity(request))
 
@@ -1271,11 +1281,8 @@ async def delete_notebook_by_path(req: DeleteNotebookByPathRequest, request: Req
 
 
 @router.get("/{notebook_id}/environment")
-async def get_environment_status(notebook_id: str) -> dict:
+async def get_environment_status(notebook_id: str, session: SessionDep) -> dict:
     """Get the live notebook environment status."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     return _serialize_environment_payload(session)
 
@@ -1287,11 +1294,8 @@ async def get_notebook_runtime_config(request: Request) -> dict:
 
 
 @router.post("/{notebook_id}/environment/sync")
-async def sync_environment(notebook_id: str) -> dict:
+async def sync_environment(notebook_id: str, session: SessionDep) -> dict:
     """Re-sync the notebook environment and invalidate stale runtimes."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         session._begin_synchronous_environment_mutation("environment sync")
@@ -1322,11 +1326,8 @@ async def sync_environment(notebook_id: str) -> dict:
 
 
 @router.get("/{notebook_id}/environment/jobs/current")
-async def get_current_environment_job(notebook_id: str) -> dict:
+async def get_current_environment_job(notebook_id: str, session: SessionDep) -> dict:
     """Return the currently active background environment job, if any."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     return {
         **_serialize_environment_payload(session),
         "cells": session.serialize_cells(),
@@ -1334,11 +1335,10 @@ async def get_current_environment_job(notebook_id: str) -> dict:
 
 
 @router.post("/{notebook_id}/environment/jobs")
-async def submit_environment_job(notebook_id: str, req: EnvironmentJobRequest) -> JSONResponse:
+async def submit_environment_job(
+    notebook_id: str, session: SessionDep, req: EnvironmentJobRequest
+) -> JSONResponse:
     """Submit a background notebook environment job."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     if req.action in {"add", "remove"} and not req.package:
         raise HTTPException(
@@ -1393,11 +1393,10 @@ async def submit_environment_job(notebook_id: str, req: EnvironmentJobRequest) -
 
 
 @router.get("/{notebook_id}/environment/requirements.txt")
-async def export_environment_requirements(notebook_id: str) -> PlainTextResponse:
+async def export_environment_requirements(
+    notebook_id: str, session: SessionDep
+) -> PlainTextResponse:
     """Export direct notebook dependencies as ``requirements.txt`` text."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     filename = f"{_safe_filename(session.notebook_state.name)}-requirements.txt"
     return PlainTextResponse(
@@ -1407,11 +1406,10 @@ async def export_environment_requirements(notebook_id: str) -> PlainTextResponse
 
 
 @router.post("/{notebook_id}/environment/requirements.txt")
-async def import_environment_requirements(notebook_id: str, req: ImportRequirementsRequest) -> dict:
+async def import_environment_requirements(
+    notebook_id: str, session: SessionDep, req: ImportRequirementsRequest
+) -> dict:
     """Replace direct notebook dependencies from ``requirements.txt`` text."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         session._begin_synchronous_environment_mutation("requirements import")
@@ -1449,12 +1447,9 @@ async def import_environment_requirements(notebook_id: str, req: ImportRequireme
 
 @router.post("/{notebook_id}/environment/requirements.txt/preview")
 async def preview_environment_requirements(
-    notebook_id: str, req: PreviewRequirementsRequest
+    notebook_id: str, session: SessionDep, req: PreviewRequirementsRequest
 ) -> dict:
     """Preview replacing direct notebook dependencies from ``requirements.txt`` text."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         result = preview_requirements_text(session.path, req.requirements)
@@ -1468,11 +1463,10 @@ async def preview_environment_requirements(
 
 
 @router.post("/{notebook_id}/environment/environment.yaml")
-async def import_environment_yaml(notebook_id: str, req: ImportEnvironmentYamlRequest) -> dict:
+async def import_environment_yaml(
+    notebook_id: str, session: SessionDep, req: ImportEnvironmentYamlRequest
+) -> dict:
     """Best-effort import of Conda-style ``environment.yaml`` text."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         session._begin_synchronous_environment_mutation("environment.yaml import")
@@ -1510,11 +1504,10 @@ async def import_environment_yaml(notebook_id: str, req: ImportEnvironmentYamlRe
 
 
 @router.post("/{notebook_id}/environment/environment.yaml/preview")
-async def preview_environment_yaml(notebook_id: str, req: PreviewEnvironmentYamlRequest) -> dict:
+async def preview_environment_yaml(
+    notebook_id: str, session: SessionDep, req: PreviewEnvironmentYamlRequest
+) -> dict:
     """Preview best-effort import of Conda-style ``environment.yaml`` text."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         result = preview_environment_yaml_text(session.path, req.environment_yaml)
@@ -1619,11 +1612,10 @@ async def get_session(session_id: str, request: Request) -> JSONResponse:
 
 
 @router.put("/{notebook_id}/cells/reorder")
-async def reorder_notebook_cells(notebook_id: str, req: ReorderCellsRequest) -> dict:
+async def reorder_notebook_cells(
+    notebook_id: str, session: SessionDep, req: ReorderCellsRequest
+) -> dict:
     """Reorder cells in the notebook."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         reorder_cells(session.path, req.cell_ids)
@@ -1644,7 +1636,7 @@ async def reorder_notebook_cells(notebook_id: str, req: ReorderCellsRequest) -> 
 
 
 @router.get("/{notebook_id}/cells")
-async def list_cells(notebook_id: str) -> dict:
+async def list_cells(notebook_id: str, session: SessionDep) -> dict:
     """List cells in a notebook.
 
     Args:
@@ -1653,9 +1645,6 @@ async def list_cells(notebook_id: str) -> dict:
     Returns:
         List of cells with source
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     return {
         "notebook_id": session.notebook_state.id,
@@ -1664,7 +1653,9 @@ async def list_cells(notebook_id: str) -> dict:
 
 
 @router.put("/{notebook_id}/cells/{cell_id}")
-async def update_cell_source(notebook_id: str, cell_id: str, req: UpdateCellSourceRequest) -> dict:
+async def update_cell_source(
+    notebook_id: str, session: SessionDep, cell_id: str, req: UpdateCellSourceRequest
+) -> dict:
     """Update cell source code.
 
     Args:
@@ -1675,9 +1666,6 @@ async def update_cell_source(notebook_id: str, cell_id: str, req: UpdateCellSour
     Returns:
         Updated cell state and DAG
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         # Write to disk
@@ -1723,12 +1711,10 @@ async def update_cell_source(notebook_id: str, cell_id: str, req: UpdateCellSour
 @router.put("/{notebook_id}/mounts")
 async def update_notebook_mounts_endpoint(
     notebook_id: str,
+    session: SessionDep,
     req: MountConfigRequest,
 ) -> dict:
     """Replace notebook-level mount defaults."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         update_notebook_mounts(session.path, req.mounts)
@@ -1749,15 +1735,12 @@ async def update_notebook_mounts_endpoint(
 
 
 @router.get("/{notebook_id}/connections")
-async def list_notebook_connections(notebook_id: str) -> dict:
+async def list_notebook_connections(notebook_id: str, session: SessionDep) -> dict:
     """List the notebook's declared connections.
 
     Returns the same shape used by ``serialize_notebook_state`` so the
     UI can stay in sync with what the parser already exposes.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     return {
         "connections": [conn.model_dump() for conn in session.notebook_state.connections],
     }
@@ -1766,6 +1749,7 @@ async def list_notebook_connections(notebook_id: str) -> dict:
 @router.put("/{notebook_id}/connections")
 async def update_notebook_connections_endpoint(
     notebook_id: str,
+    session: SessionDep,
     req: ConnectionConfigRequest,
 ) -> dict:
     """Replace the notebook's ``[connections.<name>]`` blocks.
@@ -1776,9 +1760,6 @@ async def update_notebook_connections_endpoint(
     UI immediately sees blanked secrets and can prompt the user to
     move them to ``${VAR}`` indirections.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     seen: set[str] = set()
     for conn in req.connections:
@@ -1820,7 +1801,7 @@ async def update_notebook_connections_endpoint(
 
 
 @router.get("/{notebook_id}/connections/{name}/schema")
-async def get_connection_schema(notebook_id: str, name: str) -> dict:
+async def get_connection_schema(notebook_id: str, session: SessionDep, name: str) -> dict:
     """Enumerate tables (and columns) on a connection.
 
     Powers the schema-discovery sidebar so users can see what's
@@ -1835,10 +1816,6 @@ async def get_connection_schema(notebook_id: str, name: str) -> dict:
         _safely_close,
     )
     from strata.notebook.sql.registry import get_adapter
-
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     spec = next(
         (c for c in session.notebook_state.connections if c.name == name),
@@ -1891,11 +1868,10 @@ async def get_connection_schema(notebook_id: str, name: str) -> dict:
 
 
 @router.get("/{notebook_id}/workers")
-async def list_notebook_workers(notebook_id: str, refresh: bool = False) -> dict:
+async def list_notebook_workers(
+    notebook_id: str, session: SessionDep, refresh: bool = False
+) -> dict:
     """List the worker catalog visible to a notebook."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     return await _serialize_worker_catalog(session, force_refresh=refresh)
 
@@ -1903,12 +1879,10 @@ async def list_notebook_workers(notebook_id: str, refresh: bool = False) -> dict
 @router.put("/{notebook_id}/workers")
 async def update_notebook_workers_endpoint(
     notebook_id: str,
+    session: SessionDep,
     req: WorkersConfigRequest,
 ) -> dict:
     """Replace notebook-scoped worker definitions."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     if not notebook_worker_definitions_editable(session.notebook_state):
         raise HTTPException(
             status_code=403,
@@ -1938,12 +1912,10 @@ async def update_notebook_workers_endpoint(
 @router.put("/{notebook_id}/worker")
 async def update_notebook_worker_endpoint(
     notebook_id: str,
+    session: SessionDep,
     req: WorkerConfigRequest,
 ) -> dict:
     """Replace the notebook-level default worker."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     policy_error = validate_worker_assignment(session.notebook_state, req.worker)
     if policy_error is not None:
         raise HTTPException(status_code=403, detail=policy_error)
@@ -1984,6 +1956,7 @@ class UpdatePythonVersionRequest(BaseModel):
 @router.put("/{notebook_id}/python-version")
 async def update_notebook_python_version(
     notebook_id: str,
+    session: SessionDep,
     req: UpdatePythonVersionRequest,
     request: Request,
 ) -> JSONResponse:
@@ -2001,9 +1974,6 @@ async def update_notebook_python_version(
     current ``requires-python`` minor, returns 200 without touching
     disk.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     runtime_config = _serialize_notebook_runtime_config(request)
     allowed = runtime_config["available_python_versions"]
@@ -2051,12 +2021,10 @@ async def update_notebook_python_version(
 @router.put("/{notebook_id}/timeout")
 async def update_notebook_timeout_endpoint(
     notebook_id: str,
+    session: SessionDep,
     req: TimeoutConfigRequest,
 ) -> dict:
     """Replace the notebook-level default timeout."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         update_notebook_timeout(session.path, req.timeout)
@@ -2079,6 +2047,7 @@ async def update_notebook_timeout_endpoint(
 @router.post("/{notebook_id}/variant-groups/{group_id}/variants")
 async def add_variant_endpoint(
     notebook_id: str,
+    session: SessionDep,
     group_id: str,
 ) -> dict:
     """Add a sibling variant to an existing group.
@@ -2088,9 +2057,6 @@ async def add_variant_endpoint(
     active on creation so the user can immediately edit it; renaming
     happens by editing the annotation line in source.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         new_name, new_cell_id = session.add_variant(group_id)
@@ -2116,6 +2082,7 @@ async def add_variant_endpoint(
 @router.put("/{notebook_id}/variant-groups/{group_id}")
 async def set_variant_active_endpoint(
     notebook_id: str,
+    session: SessionDep,
     group_id: str,
     req: VariantActiveRequest,
 ) -> dict:
@@ -2128,9 +2095,6 @@ async def set_variant_active_endpoint(
     a ``variant_active_unknown`` diagnostic and the DAG falls back to
     the first variant in source order.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         session.set_variant_active(group_id, req.active)
@@ -2152,12 +2116,10 @@ async def set_variant_active_endpoint(
 @router.put("/{notebook_id}/env")
 async def update_notebook_env_endpoint(
     notebook_id: str,
+    session: SessionDep,
     req: EnvConfigRequest,
 ) -> dict:
     """Replace the notebook-level default env vars."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         update_notebook_env(session.path, req.env)
@@ -2223,6 +2185,7 @@ class SecretManagerConfigRequest(BaseModel):
 @router.put("/{notebook_id}/secret-manager/config")
 async def update_notebook_secret_manager_config(
     notebook_id: str,
+    session: SessionDep,
     req: SecretManagerConfigRequest,
 ) -> dict:
     """Persist the [secret_manager] block to notebook.toml and refetch.
@@ -2233,9 +2196,6 @@ async def update_notebook_secret_manager_config(
     """
     from strata.notebook.writer import update_notebook_secret_manager
 
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     try:
         config = req.model_dump(exclude_none=True)
         update_notebook_secret_manager(session.path, config)
@@ -2260,7 +2220,7 @@ async def update_notebook_secret_manager_config(
 
 
 @router.post("/{notebook_id}/secret-manager/refresh")
-async def refresh_notebook_secret_manager(notebook_id: str) -> dict:
+async def refresh_notebook_secret_manager(notebook_id: str, session: SessionDep) -> dict:
     """Re-fetch secrets from the configured manager and merge into env.
 
     Returns the same shape as the env endpoint so the frontend can
@@ -2268,9 +2228,6 @@ async def refresh_notebook_secret_manager(notebook_id: str) -> dict:
     error message comes back in ``env_fetch_error`` so the UI can
     display it next to the Refresh button.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     try:
         session.refresh_secrets()
         # Propagate the refreshed env back to each cell's resolved view
@@ -2292,7 +2249,7 @@ async def refresh_notebook_secret_manager(notebook_id: str) -> dict:
 
 
 @router.post("/{notebook_id}/cells")
-async def add_cell(notebook_id: str, req: AddCellRequest) -> dict:
+async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -> dict:
     """Add a new cell to the notebook.
 
     Args:
@@ -2302,9 +2259,6 @@ async def add_cell(notebook_id: str, req: AddCellRequest) -> dict:
     Returns:
         New cell state
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         # Generate cell ID
@@ -2339,7 +2293,7 @@ async def add_cell(notebook_id: str, req: AddCellRequest) -> dict:
 
 
 @router.delete("/{notebook_id}/cells/{cell_id}")
-async def delete_cell(notebook_id: str, cell_id: str) -> dict:
+async def delete_cell(notebook_id: str, session: SessionDep, cell_id: str) -> dict:
     """Delete a cell from the notebook.
 
     Args:
@@ -2349,9 +2303,6 @@ async def delete_cell(notebook_id: str, cell_id: str) -> dict:
     Returns:
         Success message
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         # Check if cell exists before deleting
@@ -2396,7 +2347,9 @@ async def delete_cell(notebook_id: str, cell_id: str) -> dict:
 
 
 @router.put("/{notebook_id}/name")
-async def rename_notebook_endpoint(notebook_id: str, req: RenameNotebookRequest) -> dict:
+async def rename_notebook_endpoint(
+    notebook_id: str, session: SessionDep, req: RenameNotebookRequest
+) -> dict:
     """Rename the notebook.
 
     Args:
@@ -2406,9 +2359,6 @@ async def rename_notebook_endpoint(notebook_id: str, req: RenameNotebookRequest)
     Returns:
         Updated notebook state
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         rename_notebook(session.path, req.name)
@@ -2434,7 +2384,7 @@ async def rename_notebook_endpoint(notebook_id: str, req: RenameNotebookRequest)
 
 
 @router.get("/{notebook_id}/dag")
-async def get_notebook_dag(notebook_id: str) -> dict:
+async def get_notebook_dag(notebook_id: str, session: SessionDep) -> dict:
     """Get the DAG for a notebook.
 
     Args:
@@ -2443,9 +2393,6 @@ async def get_notebook_dag(notebook_id: str) -> dict:
     Returns:
         DAG edges, topological order, leaves, roots, and per-cell metadata
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     return _format_dag(session)
 
@@ -2453,6 +2400,7 @@ async def get_notebook_dag(notebook_id: str) -> dict:
 @router.get("/{notebook_id}/cells/{cell_id}/iterations")
 async def get_cell_iterations(
     notebook_id: str,
+    session: SessionDep,
     cell_id: str,
     variable: str | None = None,
 ) -> dict:
@@ -2464,10 +2412,6 @@ async def get_cell_iterations(
     endpoint is a safe poll target for the inspect panel.
     """
     from strata.notebook.annotations import parse_annotations
-
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     cell = session.notebook_state.get_cell(cell_id)
     if cell is None:
@@ -2511,29 +2455,25 @@ async def get_cell_iterations(
 
 
 @router.get("/{notebook_id}/dependencies")
-async def get_dependencies(notebook_id: str) -> dict:
+async def get_dependencies(notebook_id: str, session: SessionDep) -> dict:
     """List current dependencies for a notebook.
 
     Returns:
         List of dependencies from pyproject.toml
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     return _serialize_environment_payload(session)
 
 
 @router.post("/{notebook_id}/dependencies")
-async def add_notebook_dependency(notebook_id: str, req: AddDependencyRequest) -> dict:
+async def add_notebook_dependency(
+    notebook_id: str, session: SessionDep, req: AddDependencyRequest
+) -> dict:
     """Add a dependency to the notebook.
 
     Runs ``uv add``, updates pyproject.toml + uv.lock, syncs venv.
     If the lockfile changes, the session's venv_python is re-synced.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         session._begin_synchronous_environment_mutation(f"add {req.package}")
@@ -2567,14 +2507,13 @@ async def add_notebook_dependency(notebook_id: str, req: AddDependencyRequest) -
 
 
 @router.delete("/{notebook_id}/dependencies/{package_name}")
-async def remove_notebook_dependency(notebook_id: str, package_name: str) -> dict:
+async def remove_notebook_dependency(
+    notebook_id: str, session: SessionDep, package_name: str
+) -> dict:
     """Remove a dependency from the notebook.
 
     Runs ``uv remove``, updates pyproject.toml + uv.lock, syncs venv.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     try:
         package_name = validate_package_name(package_name)
@@ -2647,7 +2586,7 @@ def _format_dag(session) -> dict:
 
 
 @router.post("/{notebook_id}/cells/{cell_id}/execute")
-async def execute_cell(notebook_id: str, cell_id: str) -> dict:
+async def execute_cell(notebook_id: str, session: SessionDep, cell_id: str) -> dict:
     """Execute a cell and return results.
 
     Args:
@@ -2657,9 +2596,6 @@ async def execute_cell(notebook_id: str, cell_id: str) -> dict:
     Returns:
         Execution result with outputs and stdout/stderr
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     environment_block_reason = session.environment_execution_block_message()
     if environment_block_reason:
@@ -2750,6 +2686,7 @@ def _render_notebook_export(
 @router.get("/{notebook_id}/export")
 async def export_notebook(
     notebook_id: str,
+    session: SessionDep,
     fmt: str = "zip",
     include_inactive_variants: bool = False,
 ):
@@ -2778,10 +2715,6 @@ async def export_notebook(
             status_code=400,
             detail="fmt must be one of 'zip', 'markdown', 'html'",
         )
-
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     if fmt in {"markdown", "html"}:
         return _render_notebook_export(
@@ -2904,11 +2837,8 @@ def _get_llm_config(session):
 
 
 @router.get("/{notebook_id}/ai/status")
-async def llm_status(notebook_id: str) -> dict:
+async def llm_status(notebook_id: str, session: SessionDep) -> dict:
     """Check if the LLM assistant is configured and available."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     from strata.notebook.llm import infer_provider_name
 
@@ -2924,15 +2854,12 @@ async def llm_status(notebook_id: str) -> dict:
 
 
 @router.get("/{notebook_id}/ai/models")
-async def llm_models(notebook_id: str) -> dict:
+async def llm_models(notebook_id: str, session: SessionDep) -> dict:
     """Fetch available models from the configured LLM provider.
 
     Queries the provider's ``/models`` endpoint (OpenAI-compatible) and
     returns a list of model IDs sorted alphabetically.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     config = _get_llm_config(session)
     if config is None:
@@ -2972,14 +2899,11 @@ class UpdateAiModelRequest(BaseModel):
 
 
 @router.put("/{notebook_id}/ai/model")
-async def update_ai_model(notebook_id: str, req: UpdateAiModelRequest) -> dict:
+async def update_ai_model(notebook_id: str, session: SessionDep, req: UpdateAiModelRequest) -> dict:
     """Set the notebook's default LLM model.
 
     Writes to the ``[ai]`` section of notebook.toml.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     from strata.notebook.writer import update_notebook_ai_model
 
@@ -3030,11 +2954,8 @@ def _prepare_chat_request(session, req: LlmCompleteRequest):
 
 
 @router.post("/{notebook_id}/ai/complete")
-async def llm_complete(notebook_id: str, req: LlmCompleteRequest) -> dict:
+async def llm_complete(notebook_id: str, session: SessionDep, req: LlmCompleteRequest) -> dict:
     """Run a (blocking) LLM chat completion. Prefer ``/ai/stream`` for UI."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     from strata.notebook.llm import chat_completion
 
@@ -3064,7 +2985,7 @@ async def llm_complete(notebook_id: str, req: LlmCompleteRequest) -> dict:
 
 
 @router.post("/{notebook_id}/ai/stream")
-async def llm_stream(notebook_id: str, req: LlmCompleteRequest):
+async def llm_stream(notebook_id: str, session: SessionDep, req: LlmCompleteRequest):
     """Stream an LLM chat completion as Server-Sent Events.
 
     Event types:
@@ -3075,10 +2996,6 @@ async def llm_stream(notebook_id: str, req: LlmCompleteRequest):
     from fastapi.responses import StreamingResponse
 
     from strata.notebook.llm import chat_completion_stream
-
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     config, messages = _prepare_chat_request(session, req)
 
@@ -3163,7 +3080,7 @@ def _short_payload_detail(payload: dict[str, Any]) -> str:
 
 
 @router.post("/{notebook_id}/ai/agent")
-async def run_agent(notebook_id: str, req: AgentRequest) -> dict:
+async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) -> dict:
     """Run an LLM agent loop with tool use, streaming, and approvals.
 
     Progress is streamed via WebSocket: ``agent_progress`` for log
@@ -3172,9 +3089,6 @@ async def run_agent(notebook_id: str, req: AgentRequest) -> dict:
     tool. Completion arrives as ``agent_done``. Only one agent runs per
     notebook at a time.
     """
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
 
     from strata.notebook.llm import run_agent_loop
 
@@ -3332,11 +3246,8 @@ def cancel_agent(notebook_id: str) -> bool:
 
 
 @router.post("/{notebook_id}/ai/agent/reset")
-async def reset_agent(notebook_id: str) -> dict:
+async def reset_agent(notebook_id: str, session: SessionDep) -> dict:
     """Clear the persistent conversation history for a notebook."""
-    session = _session_manager.get_session(notebook_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     from strata.notebook.llm import reset_history
 
     reset_history(notebook_id)
