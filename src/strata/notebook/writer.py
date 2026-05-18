@@ -327,6 +327,7 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         ),
         **({"ai": toml.ai} if toml.ai else {}),
         **({"secret_manager": toml.secret_manager} if toml.secret_manager else {}),
+        **({"strata": toml.strata} if toml.strata else {}),
         # Runtime state that used to live in this file — ``artifacts``
         # (display outputs), ``environment`` (sync timestamps, package
         # counts), ``cache`` — now lives in ``.strata/runtime.json``.

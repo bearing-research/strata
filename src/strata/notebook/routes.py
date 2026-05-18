@@ -93,6 +93,28 @@ def get_notebook_session(notebook_id: str) -> NotebookSession:
 SessionDep = Annotated[NotebookSession, Depends(get_notebook_session)]
 
 
+def _require_mutable_backend(session: NotebookSession) -> None:
+    """Raise ``409 Conflict`` if the session's backend is read-only.
+
+    Called at the top of every endpoint that mutates the environment
+    (``add``/``remove``/``sync``/``set_python_version``/requirements
+    or environment.yaml import). The frontend short-circuits these
+    before the user clicks based on the ``supports_mutations`` flag
+    in the env-status payload; the route check is defense in depth
+    for direct API callers and stale UI state.
+    """
+    if not session.backend.supports_mutations:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This notebook is using the {session.backend.name!r} backend, "
+                "which doesn't support environment mutations. Use your own "
+                "tooling to install/remove packages, or set [strata] "
+                'backend = "uv" in notebook.toml to let Strata take over.'
+            ),
+        )
+
+
 def _require_personal_mode_session_api() -> None:
     """Restrict session discovery/reconnect APIs to personal mode.
 
@@ -1296,6 +1318,7 @@ async def get_notebook_runtime_config(request: Request) -> dict:
 @router.post("/{notebook_id}/environment/sync")
 async def sync_environment(notebook_id: str, session: SessionDep) -> dict:
     """Re-sync the notebook environment and invalidate stale runtimes."""
+    _require_mutable_backend(session)
 
     try:
         session._begin_synchronous_environment_mutation("environment sync")
@@ -1339,6 +1362,7 @@ async def submit_environment_job(
     notebook_id: str, session: SessionDep, req: EnvironmentJobRequest
 ) -> JSONResponse:
     """Submit a background notebook environment job."""
+    _require_mutable_backend(session)
 
     if req.action in {"add", "remove"} and not req.package:
         raise HTTPException(
@@ -1410,6 +1434,7 @@ async def import_environment_requirements(
     notebook_id: str, session: SessionDep, req: ImportRequirementsRequest
 ) -> dict:
     """Replace direct notebook dependencies from ``requirements.txt`` text."""
+    _require_mutable_backend(session)
 
     try:
         session._begin_synchronous_environment_mutation("requirements import")
@@ -1467,6 +1492,7 @@ async def import_environment_yaml(
     notebook_id: str, session: SessionDep, req: ImportEnvironmentYamlRequest
 ) -> dict:
     """Best-effort import of Conda-style ``environment.yaml`` text."""
+    _require_mutable_backend(session)
 
     try:
         session._begin_synchronous_environment_mutation("environment.yaml import")
@@ -1974,6 +2000,7 @@ async def update_notebook_python_version(
     current ``requires-python`` minor, returns 200 without touching
     disk.
     """
+    _require_mutable_backend(session)
 
     runtime_config = _serialize_notebook_runtime_config(request)
     allowed = runtime_config["available_python_versions"]
@@ -2474,6 +2501,7 @@ async def add_notebook_dependency(
     Runs ``uv add``, updates pyproject.toml + uv.lock, syncs venv.
     If the lockfile changes, the session's venv_python is re-synced.
     """
+    _require_mutable_backend(session)
 
     try:
         session._begin_synchronous_environment_mutation(f"add {req.package}")
@@ -2514,6 +2542,7 @@ async def remove_notebook_dependency(
 
     Runs ``uv remove``, updates pyproject.toml + uv.lock, syncs venv.
     """
+    _require_mutable_backend(session)
 
     try:
         package_name = validate_package_name(package_name)

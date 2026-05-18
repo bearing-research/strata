@@ -1214,6 +1214,13 @@ class NotebookSession:
             "has_lockfile": (self.path / "uv.lock").exists(),
             "venv_python": str(self.venv_python) if self.venv_python else None,
             "interpreter_source": self.environment_interpreter_source,
+            # Backend identity + capability flag — drives the frontend's
+            # "Powered by uv" / "Attached venv" badge and the
+            # disabled-button state on the mutation controls. Frontend
+            # also short-circuits ``supports_mutations is False`` before
+            # the user reaches a 409 from the route layer.
+            "backend": self.backend.name,
+            "supports_mutations": self.backend.supports_mutations,
         }
 
     def serialize_environment_job_state(self) -> dict[str, Any] | None:
@@ -1835,8 +1842,20 @@ class NotebookSession:
         python_version: str | None = None,
     ) -> EnvironmentJobSnapshot:
         """Start an asynchronous notebook environment job."""
+        from strata.notebook.env_backend import BackendDoesNotSupportMutations
+
         if action not in {"add", "remove", "sync", "import", "change_python"}:
             raise ValueError(f"Unsupported environment job action: {action}")
+        # Every env-job action mutates. Refuse up front on read-only
+        # backends so callers don't have to coordinate the check at
+        # every entry point (REST routes, WS handlers, internal
+        # callers). The route layer maps this to a 409 response.
+        if not self.backend.supports_mutations:
+            raise BackendDoesNotSupportMutations(
+                f"Environment job {action!r} is not supported on the "
+                f"{self.backend.name!r} backend (notebook is using an "
+                f"externally-managed venv)."
+            )
 
         if action == "import":
             if (requirements_text is None) == (environment_yaml_text is None):

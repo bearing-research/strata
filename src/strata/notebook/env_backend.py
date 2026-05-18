@@ -13,8 +13,14 @@ Two implementations:
 Backend resolution lives at ``get_backend(notebook_dir)``. Order of
 precedence:
 
-1. ``notebook.toml [environment] backend = "uv" | "attached"`` override.
+1. ``notebook.toml [strata] backend = "uv" | "attached"`` override.
 2. Detection from on-disk evidence (see ``detect_backend``).
+
+The override lives under ``[strata]`` rather than ``[environment]``
+because the parser strips ``[environment]`` aggressively (the block
+historically held legacy runtime metadata that has since migrated
+to ``.strata/runtime.json``). ``[strata]`` is a fresh namespace for
+Strata-specific notebook-level configuration.
 
 The protocol separates "I attach to this venv" from "I manage this
 venv" so the next backend doesn't have to fake mutating operations it
@@ -270,7 +276,7 @@ class AttachedBackend:
             f"AttachedBackend cannot {op}: this notebook is attached to a venv "
             "Strata does not manage. Use your own tooling (pip / poetry / etc.) "
             "to mutate the environment, or set "
-            '``[environment] backend = "uv"`` in notebook.toml to let Strata '
+            '``[strata]\nbackend = "uv"`` in notebook.toml to let Strata '
             "take it over."
         )
 
@@ -332,7 +338,7 @@ BackendName = Literal["uv", "attached"]
 
 
 def _read_backend_override(notebook_dir: Path) -> BackendName | None:
-    """Return the ``notebook.toml [environment] backend`` override or None.
+    """Return the ``notebook.toml [strata] backend`` override or None.
 
     The override always wins over detection so a user can force
     Strata to manage an existing venv (set to "uv") or hand off
@@ -349,15 +355,15 @@ def _read_backend_override(notebook_dir: Path) -> BackendName | None:
             data = tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
         return None
-    env_section = data.get("environment")
-    if not isinstance(env_section, dict):
+    strata_section = data.get("strata")
+    if not isinstance(strata_section, dict):
         return None
-    backend = env_section.get("backend")
+    backend = strata_section.get("backend")
     if backend in ("uv", "attached"):
         return backend
     if backend is not None:
         logger.warning(
-            "Unknown [environment] backend %r in %s; falling back to detection",
+            "Unknown [strata] backend %r in %s; falling back to detection",
             backend,
             notebook_toml,
         )
