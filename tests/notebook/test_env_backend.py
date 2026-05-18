@@ -236,3 +236,58 @@ def test_uv_backend_metadata(tmp_path: Path):
     assert backend.python_executable() == tmp_path / ".venv" / "bin" / "python"
     assert backend.supports_mutations is True
     assert backend.name == "uv"
+
+
+# ---------------------------------------------------------------------------
+# Regression: NotebookSession.reload() must re-resolve the backend
+#
+# Before this was added, ``self.backend`` got set once in ``__init__`` and
+# stayed cached. When a user flipped ``[strata] backend = "attached"`` to
+# ``"uv"`` in notebook.toml and the session was reused (via
+# ``SessionManager.open_notebook(reuse_existing=True)`` → ``reload()``),
+# the reused session kept rejecting mutations with 409 -- the new 409
+# message told users to set ``backend = "uv"`` but doing so had no effect.
+
+
+def test_reload_picks_up_backend_override_flip(tmp_path: Path):
+    """Switching ``[strata] backend`` from attached to uv on disk must
+    take effect after ``reload()`` without requiring session
+    destruction."""
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import create_notebook
+
+    notebook_dir = create_notebook(tmp_path, "BackendFlip", initialize_environment=False)
+    notebook_toml = notebook_dir / "notebook.toml"
+    notebook_toml.write_text(notebook_toml.read_text() + '\n[strata]\nbackend = "attached"\n')
+
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    assert session.backend.name == "attached"
+    assert session.backend.supports_mutations is False
+
+    # Flip the override and reload.
+    contents = notebook_toml.read_text().replace('backend = "attached"', 'backend = "uv"')
+    notebook_toml.write_text(contents)
+    session.reload()
+
+    assert session.backend.name == "uv"
+    assert session.backend.supports_mutations is True
+
+
+def test_reload_picks_up_attached_when_override_added(tmp_path: Path):
+    """The opposite direction: a session that started as uv-managed
+    must switch to attached when the user adds an override on disk."""
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import create_notebook
+
+    notebook_dir = create_notebook(tmp_path, "BackendFlipBack", initialize_environment=False)
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    assert session.backend.name == "uv"
+
+    notebook_toml = notebook_dir / "notebook.toml"
+    notebook_toml.write_text(notebook_toml.read_text() + '\n[strata]\nbackend = "attached"\n')
+    session.reload()
+
+    assert session.backend.name == "attached"
+    assert session.backend.supports_mutations is False

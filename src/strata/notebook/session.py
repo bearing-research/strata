@@ -432,12 +432,22 @@ class NotebookSession:
 
     def reload(self) -> None:
         """Reload notebook state from disk."""
+        from strata.notebook.env_backend import get_backend
+
         previous_cells = {cell.id: cell.model_copy(deep=True) for cell in self.notebook_state.cells}
         previous_runtime_identities = {
             cell.id: self._effective_worker_runtime_identity(cell)
             for cell in self.notebook_state.cells
         }
         self.notebook_state = parse_notebook(self.path)
+        # Re-resolve the env backend in case ``[strata] backend`` in
+        # notebook.toml changed (or detection inputs like ``uv.lock``
+        # appeared/disappeared) since the session was first opened.
+        # Without this, a reused session keeps its initially-cached
+        # AttachedBackend even after the user flips the override to
+        # ``"uv"``, and ``_require_mutable_backend`` keeps rejecting
+        # mutations until the session is destroyed.
+        self.backend = get_backend(self.path)
         # Re-analyze all cells and rebuild DAG
         self._analyze_and_build_dag()
         self._run_annotation_validation()
