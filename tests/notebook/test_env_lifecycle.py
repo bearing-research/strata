@@ -347,7 +347,7 @@ class TestDependencyChangeRefresh:
         from types import SimpleNamespace
 
         monkeypatch.setattr(
-            "strata.notebook.session.run_uv_command_streaming",
+            "strata.notebook.dependencies.run_uv_command_streaming",
             fake_run_uv_command_streaming,
         )
 

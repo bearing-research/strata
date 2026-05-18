@@ -30,7 +30,7 @@ def no_uv_sync(monkeypatch):
         return SimpleNamespace(success=True, error=None, operation_log=None)
 
     monkeypatch.setattr(
-        "strata.notebook.session.run_uv_command_streaming",
+        "strata.notebook.dependencies.run_uv_command_streaming",
         _fake_run_uv_command_streaming,
     )
 

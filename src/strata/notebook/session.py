@@ -33,7 +33,6 @@ from strata.notebook.dependencies import (
     import_requirements_text,
     import_requirements_text_streaming,
     list_dependencies,
-    run_uv_command_streaming,
 )
 from strata.notebook.env import (
     compute_execution_env_hash,
@@ -198,11 +197,17 @@ class NotebookSession:
             notebook_state: NotebookState from parser
             path: Path to notebook directory
         """
+        from strata.notebook.env_backend import EnvironmentBackend, get_backend
+
         self.id: str = str(uuid.uuid4())
         self.notebook_state = notebook_state
         self.path = Path(path)
         self.venv_python: Path | None = None
         self.dag: NotebookDag | None = None
+        # Environment backend — Phase 1 always resolves to UvBackend.
+        # Phase 2 will use detection + notebook.toml override to pick
+        # between UvBackend and AttachedBackend.
+        self.backend: EnvironmentBackend = get_backend(self.path)
 
         # M4: Initialize artifact manager
         from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -2011,23 +2016,26 @@ class NotebookSession:
         """Run ``uv add`` / ``uv remove`` as a background job."""
         timeout = 120
         display_name = f"uv {action}"
-        args = [action, package]
         old_lockfile_hash = compute_lockfile_hash(self.path)
         lock = _get_notebook_lock(self.path)
         await asyncio.to_thread(lock.acquire)
         try:
-            result = await run_uv_command_streaming(
-                self.path,
-                args,
-                timeout=timeout,
-                display_name=display_name,
-                on_update=lambda stream, text, truncated: self._update_environment_job_stream(
-                    job,
-                    stream=stream,
-                    text=text,
-                    truncated=truncated,
-                ),
+            on_update = lambda stream, text, truncated: self._update_environment_job_stream(  # noqa: E731
+                job,
+                stream=stream,
+                text=text,
+                truncated=truncated,
             )
+            if action == "add":
+                result = await self.backend.add_streaming(
+                    package, timeout=timeout, on_update=on_update
+                )
+            elif action == "remove":
+                result = await self.backend.remove_streaming(
+                    package, timeout=timeout, on_update=on_update
+                )
+            else:
+                raise RuntimeError(f"Unsupported dependency action: {action!r}")
         finally:
             lock.release()
 
@@ -2113,17 +2121,16 @@ class NotebookSession:
         lock = _get_notebook_lock(self.path)
         await asyncio.to_thread(lock.acquire)
         try:
-            result = await run_uv_command_streaming(
-                self.path,
-                ["sync"],
+            on_update = lambda stream, text, truncated: self._update_environment_job_stream(  # noqa: E731
+                job,
+                stream=stream,
+                text=text,
+                truncated=truncated,
+            )
+            result = await self.backend.sync_streaming(
+                python_version=None,
                 timeout=180,
-                display_name="uv sync",
-                on_update=lambda stream, text, truncated: self._update_environment_job_stream(
-                    job,
-                    stream=stream,
-                    text=text,
-                    truncated=truncated,
-                ),
+                on_update=on_update,
             )
         finally:
             lock.release()
@@ -2134,19 +2141,10 @@ class NotebookSession:
             if old_minor:
                 try:
                     await asyncio.to_thread(update_requires_python, self.path, old_minor)
-                    rollback = await run_uv_command_streaming(
-                        self.path,
-                        ["sync"],
+                    rollback = await self.backend.sync_streaming(
+                        python_version=None,
                         timeout=180,
-                        display_name="uv sync (rollback)",
-                        on_update=lambda stream,
-                        text,
-                        truncated: self._update_environment_job_stream(
-                            job,
-                            stream=stream,
-                            text=text,
-                            truncated=truncated,
-                        ),
+                        on_update=on_update,
                     )
                     self._apply_environment_operation_log(job, rollback.operation_log)
                 except Exception:
@@ -2166,14 +2164,9 @@ class NotebookSession:
         """Run ``uv sync`` as a background job."""
         old_lockfile_hash = compute_lockfile_hash(self.path)
         requested_python = read_requested_python_minor(self.path)
-        args = ["sync"]
-        if requested_python:
-            args.extend(["--python", requested_python])
-        result = await run_uv_command_streaming(
-            self.path,
-            args,
+        result = await self.backend.sync_streaming(
+            python_version=requested_python,
             timeout=60,
-            display_name="uv sync",
             on_update=lambda stream, text, truncated: self._update_environment_job_stream(
                 job,
                 stream=stream,
