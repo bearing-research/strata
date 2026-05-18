@@ -709,7 +709,7 @@ async def _handle_cell_execute(
 async def _handle_notebook_run_all(
     websocket: WebSocket,
     session: NotebookSession,
-    payload: dict[str, Any],  # noqa: ARG001 — uniform handler signature
+    payload: dict[str, Any],
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
@@ -717,6 +717,7 @@ async def _handle_notebook_run_all(
 
     Execute all non-empty cells in notebook order, stopping on first failure.
     """
+    del payload
     seq = execution_state.next_sequence()
 
     # Skip inactive variants — they aren't in the DAG, so their references
@@ -971,26 +972,28 @@ async def _handle_cell_cancel(
 
 
 async def _handle_agent_cancel(
-    websocket: WebSocket,  # noqa: ARG001 — uniform handler signature
-    session: NotebookSession,  # noqa: ARG001 — uniform handler signature
-    payload: dict[str, Any],  # noqa: ARG001 — uniform handler signature
-    execution_state: NotebookExecutionState,  # noqa: ARG001 — uniform handler signature
+    websocket: WebSocket,
+    session: NotebookSession,
+    payload: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle agent_cancel message — abort the active agent run for this notebook."""
+    del websocket, session, payload, execution_state
     from strata.notebook.routes import cancel_agent
 
     cancel_agent(notebook_id)
 
 
 async def _handle_agent_confirm_response(
-    websocket: WebSocket,  # noqa: ARG001 — uniform handler signature
-    session: NotebookSession,  # noqa: ARG001 — uniform handler signature
+    websocket: WebSocket,
+    session: NotebookSession,
     payload: dict[str, Any],
-    execution_state: NotebookExecutionState,  # noqa: ARG001 — uniform handler signature
-    notebook_id: str,  # noqa: ARG001 — uniform handler signature
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
 ) -> None:
     """Handle agent_confirm_response message — relay an approval decision to the LLM gate."""
+    del websocket, session, execution_state, notebook_id
     from strata.notebook.llm import resolve_approval
 
     request_id = payload.get("request_id")
@@ -1302,14 +1305,15 @@ async def _handle_variant_add(
 async def _handle_notebook_sync(
     websocket: WebSocket,
     session: NotebookSession,
-    payload: dict[str, Any],  # noqa: ARG001 — uniform handler signature
-    execution_state: NotebookExecutionState,  # noqa: ARG001 — uniform handler signature
+    payload: dict[str, Any],
+    execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle notebook_sync message.
 
     Return full notebook state (for reconnection).
     """
+    del payload, execution_state
     # Build DAG
     dag_edges = session.dag.serialize_edges() if session.dag else []
 
@@ -1828,11 +1832,12 @@ async def _handle_impact_preview_request(
 async def _handle_profiling_request(
     websocket: WebSocket,
     session: NotebookSession,
-    payload: dict[str, Any],  # noqa: ARG001 — uniform handler signature
+    payload: dict[str, Any],
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
     """Handle profiling_request — return notebook profiling summary."""
+    del payload
     seq = execution_state.next_sequence()
 
     summary = session.get_profiling_summary()
@@ -2214,7 +2219,9 @@ async def _broadcast_message(notebook_id: str, message: dict[str, Any]) -> None:
 # Maps every client-to-server message type to its handler. All handlers
 # follow the uniform signature
 # ``(websocket, session, payload, execution_state, notebook_id)`` -- handlers
-# that don't need a particular argument mark it with ``# noqa: ARG001``.
+# that don't need a particular argument drop it with ``del <name>`` at the
+# top of the body (matching the pre-existing ``del websocket`` pattern used
+# in ``_execute_cell_directly`` and ``_handle_cell_cancel``).
 # Defined at module bottom so every handler exists at registry-build time;
 # the dispatch in ``notebook_websocket`` looks the value up at request time.
 
