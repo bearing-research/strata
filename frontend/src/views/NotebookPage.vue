@@ -12,6 +12,7 @@ import { useStrata } from '../composables/useStrata'
 import { clearNotebookPerfMarks, markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 
 const DagView = defineAsyncComponent(() => import('../components/DagView.vue'))
+const NotesPanel = defineAsyncComponent(() => import('../components/NotesPanel.vue'))
 const EnvironmentPanel = defineAsyncComponent(() => import('../components/EnvironmentPanel.vue'))
 const MountsPanel = defineAsyncComponent(() => import('../components/MountsPanel.vue'))
 const ConnectionsPanel = defineAsyncComponent(() => import('../components/ConnectionsPanel.vue'))
@@ -644,6 +645,7 @@ function goHome() {
           <div class="dag-drawer-graph">
             <DagView />
           </div>
+          <NotesPanel />
           <div class="dag-drawer-profiling">
             <ProfilingPanel />
           </div>

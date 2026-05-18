@@ -48,10 +48,17 @@ function widthForLabel(label: string): number {
 
 // Layout using dagre
 const layout = computed(() => {
-  // Inactive variants aren't part of the executable graph — they have
-  // no edges and would render as orphan nodes. Hide them; the active
-  // variant gets a stacked-card visual indicating siblings exist.
-  const cells = orderedCells.value.filter((c) => c.variantActive !== false)
+  // Hide cells that don't belong on the executable graph:
+  //   - Inactive variants — represented via the stacked-card visual on
+  //     the active variant; rendering them too would just stack
+  //     orphan boxes next to the canonical node.
+  //   - Markdown cells — they have no defines/references by construction
+  //     so they'd dagre-layout as disconnected floaters competing with
+  //     real compute nodes; they render in the Notes panel beside the
+  //     DAG instead.
+  const cells = orderedCells.value.filter(
+    (c) => c.variantActive !== false && c.language !== 'markdown',
+  )
   if (cells.length === 0) return { nodes: [] as NodeLayout[], edges: [] as EdgeLayout[] }
 
   const variantGroupSizes = new Map<string, number>()
