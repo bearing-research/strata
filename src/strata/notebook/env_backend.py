@@ -435,3 +435,52 @@ def get_backend(notebook_dir: Path) -> EnvironmentBackend:
     if chosen == "attached":
         return AttachedBackend(notebook_dir)
     return UvBackend(notebook_dir)
+
+
+def get_backend_override(notebook_dir: Path) -> BackendName | None:
+    """Public accessor for the ``notebook.toml [strata] backend`` value.
+
+    Returns the explicit override when one is set, ``None`` otherwise
+    (i.e. detection is in effect). Used by the env-status payload so
+    the UI can distinguish "user picked uv" from "auto-detection
+    landed on uv".
+    """
+    return _read_backend_override(notebook_dir)
+
+
+def write_backend_override(notebook_dir: Path, backend: BackendName | None) -> None:
+    """Set or clear the ``[strata] backend`` override in notebook.toml.
+
+    ``None`` removes the override entirely (and removes the
+    ``[strata]`` section if it becomes empty), restoring auto-detection.
+    ``"uv"`` / ``"attached"`` write the corresponding string.
+
+    Operates on the raw TOML dict rather than the ``NotebookToml``
+    model: parsing through the model would reset ``updated_at``,
+    re-stringify cell ids, and generally re-emit the entire file,
+    which would churn version control even though only one key
+    changed. The round-trip via ``tomllib`` + ``tomli_w`` is shallow
+    and keeps siblings (cells, workers, ai, secret_manager) intact.
+    """
+    import tomli_w
+
+    path = notebook_dir / "notebook.toml"
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+
+    strata_section = data.get("strata")
+    if not isinstance(strata_section, dict):
+        strata_section = {}
+
+    if backend is None:
+        strata_section.pop("backend", None)
+    else:
+        strata_section["backend"] = backend
+
+    if strata_section:
+        data["strata"] = strata_section
+    else:
+        data.pop("strata", None)
+
+    with open(path, "wb") as f:
+        tomli_w.dump(data, f)

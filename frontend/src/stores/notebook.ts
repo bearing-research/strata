@@ -87,6 +87,7 @@ const notebook = reactive<Notebook>({
     // both from the server payload on first sync.
     backend: 'uv',
     supportsMutations: true,
+    backendOverride: null,
   },
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -373,6 +374,12 @@ function parseBackendEnvironment(raw: any): NotebookEnvironment {
     backend: raw?.backend === 'attached' || raw?.backend === 'uv' ? raw.backend : 'uv',
     supportsMutations:
       raw?.supports_mutations === false || raw?.supportsMutations === false ? false : true,
+    backendOverride:
+      raw?.backend_override === 'uv' || raw?.backend_override === 'attached'
+        ? raw.backend_override
+        : raw?.backendOverride === 'uv' || raw?.backendOverride === 'attached'
+          ? raw.backendOverride
+          : null,
   }
 }
 
@@ -2340,6 +2347,21 @@ function isServerWorkerActionLoading(workerName: string): boolean {
   return serverWorkerActionLoading.value[workerName] === true
 }
 
+async function updateEnvironmentBackendAction(
+  backend: 'uv' | 'attached' | 'auto',
+): Promise<{ error?: string }> {
+  const sid = sessionId()
+  if (!sid) return { error: 'No active session' }
+  const strata = useStrata()
+  try {
+    const data = await strata.updateEnvironmentBackend(sid, backend)
+    syncNotebookEnvironmentFromBackend((data as { environment: unknown }).environment)
+    return {}
+  } catch (err: any) {
+    return { error: err?.message || 'Failed to update environment backend' }
+  }
+}
+
 async function updatePythonVersionAction(
   newVersion: string,
 ): Promise<{ accepted: boolean; error?: string }> {
@@ -3267,6 +3289,7 @@ export function useNotebook() {
     fetchEnvironment,
     addDependencyAction,
     updatePythonVersionAction,
+    updateEnvironmentBackendAction,
     removeDependencyAction,
     syncEnvironmentAction,
     exportRequirementsAction,

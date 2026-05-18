@@ -2918,6 +2918,82 @@ def test_environment_yaml_import_rejected_on_attached_backend():
         assert response.status_code == 409
 
 
+def test_environment_status_exposes_backend_override():
+    """The env-status payload must include ``backend_override`` so the
+    UI dropdown can highlight the user's explicit selection (rather
+    than just the resolved backend, which can't distinguish "user
+    picked uv" from "auto-detected uv")."""
+    client = TestClient(create_test_app())
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        session_id = _open_attached_notebook(client, Path(tmpdir))
+        env = client.get(f"/v1/notebooks/{session_id}/environment").json()["environment"]
+        assert env["backend"] == "attached"
+        assert env["backend_override"] == "attached"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "No override")
+        response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+        session_id = response.json()["session_id"]
+        env = client.get(f"/v1/notebooks/{session_id}/environment").json()["environment"]
+        assert env["backend"] == "uv"
+        assert env["backend_override"] is None
+
+
+def test_update_environment_backend_to_attached():
+    """PUT /environment/backend with attached flips the override and
+    reloads; subsequent GET shows the new backend + override."""
+    client = TestClient(create_test_app())
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Flip Test")
+        response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+        session_id = response.json()["session_id"]
+
+        response = client.put(
+            f"/v1/notebooks/{session_id}/environment/backend",
+            json={"backend": "attached"},
+        )
+        assert response.status_code == 200, response.text
+        env = response.json()["environment"]
+        assert env["backend"] == "attached"
+        assert env["backend_override"] == "attached"
+        assert env["supports_mutations"] is False
+
+
+def test_update_environment_backend_to_auto_clears_override():
+    """auto removes the override and lets detection drive."""
+    client = TestClient(create_test_app())
+    with tempfile.TemporaryDirectory() as tmpdir:
+        session_id = _open_attached_notebook(client, Path(tmpdir))
+        env = client.get(f"/v1/notebooks/{session_id}/environment").json()["environment"]
+        assert env["backend_override"] == "attached"
+
+        response = client.put(
+            f"/v1/notebooks/{session_id}/environment/backend",
+            json={"backend": "auto"},
+        )
+        assert response.status_code == 200, response.text
+        env = response.json()["environment"]
+        # No venv in tmpdir + no uv.lock → detection lands on uv.
+        assert env["backend"] == "uv"
+        assert env["backend_override"] is None
+        assert env["supports_mutations"] is True
+
+
+def test_update_environment_backend_rejects_invalid_value():
+    """Pydantic Literal validation rejects non-uv/attached/auto values."""
+    client = TestClient(create_test_app())
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Invalid Test")
+        response = client.post("/v1/notebooks/open", json={"path": str(notebook_dir)})
+        session_id = response.json()["session_id"]
+        response = client.put(
+            f"/v1/notebooks/{session_id}/environment/backend",
+            json={"backend": "conda"},
+        )
+        assert response.status_code == 422
+
+
 def test_python_version_update_rejected_on_attached_backend(monkeypatch):
     """Changing requires-python re-syncs the venv — that's a mutation,
     refuse it on AttachedBackend."""

@@ -1206,6 +1206,8 @@ class NotebookSession:
 
     def serialize_environment_state(self) -> dict[str, Any]:
         """Serialize the live notebook environment state for the UI."""
+        from strata.notebook.env_backend import get_backend_override
+
         dependencies = list_dependencies(self.path)
         requested_python_version = read_requested_python_minor(self.path) or ""
         return {
@@ -1231,6 +1233,11 @@ class NotebookSession:
             # the user reaches a 409 from the route layer.
             "backend": self.backend.name,
             "supports_mutations": self.backend.supports_mutations,
+            # The explicit user override (or null when detection is in
+            # effect) lets the UI's backend dropdown highlight which
+            # option the user picked, distinct from which backend the
+            # detection landed on.
+            "backend_override": get_backend_override(self.path),
         }
 
     def serialize_environment_job_state(self) -> dict[str, Any] | None:

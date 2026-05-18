@@ -826,6 +826,28 @@ async function updateNotebookPythonVersion(
   return readJson<{ accepted: boolean; reason?: string }>(resp)
 }
 
+async function updateEnvironmentBackend(
+  notebookId: string,
+  backend: 'uv' | 'attached' | 'auto',
+): Promise<{ environment: unknown }> {
+  // Set or clear the [strata] backend override in notebook.toml.
+  // "auto" removes the override entirely; "uv"/"attached" force the
+  // corresponding backend. Server reloads the session in-process so
+  // the badge + button-disabled state both flip on the next GET.
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/environment/backend`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backend }),
+    },
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to update environment backend')
+  }
+  return readJson<{ environment: unknown }>(resp)
+}
+
 async function updateWorkers(
   notebookId: string,
   workers: BackendWorkerPayload[],
@@ -1345,6 +1367,7 @@ export function useStrata() {
     updateNotebookWorker,
     updateNotebookTimeout,
     updateNotebookPythonVersion,
+    updateEnvironmentBackend,
     updateNotebookEnv,
     refreshNotebookSecretManager,
     updateNotebookSecretManagerConfig,
