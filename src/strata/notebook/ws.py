@@ -11,6 +11,7 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -103,6 +104,85 @@ def _get_session_manager() -> SessionManager:
 
 
 # ============================================================================
+# Protocol message types
+# ============================================================================
+
+
+class MessageType(StrEnum):
+    """Notebook WebSocket protocol message types.
+
+    StrEnum so the dispatch keys and emit-site type fields stay in sync;
+    a typo at any send site becomes an import-time error instead of a
+    silent protocol drift the frontend would have to discover at
+    runtime. StrEnum values remain plain ``str``, so existing tests and
+    JSON serialization continue to interop.
+    """
+
+    # Client → Server
+    CELL_EXECUTE = "cell_execute"
+    CELL_EXECUTE_CASCADE = "cell_execute_cascade"
+    CELL_EXECUTE_FORCE = "cell_execute_force"
+    CELL_CANCEL = "cell_cancel"
+    NOTEBOOK_RUN_ALL = "notebook_run_all"
+    CELL_SOURCE_UPDATE = "cell_source_update"
+    NOTEBOOK_SYNC = "notebook_sync"
+    IMPACT_PREVIEW_REQUEST = "impact_preview_request"
+    PROFILING_REQUEST = "profiling_request"
+    INSPECT_OPEN = "inspect_open"
+    INSPECT_EVAL = "inspect_eval"
+    INSPECT_CLOSE = "inspect_close"
+    DEPENDENCY_ADD = "dependency_add"
+    DEPENDENCY_REMOVE = "dependency_remove"
+    VARIANT_SET_ACTIVE = "variant_set_active"
+    VARIANT_ADD = "variant_add"
+    AGENT_CANCEL = "agent_cancel"
+    AGENT_CONFIRM_RESPONSE = "agent_confirm_response"
+
+    # Server → Client
+    ERROR = "error"
+    CELL_STATUS = "cell_status"
+    CELL_OUTPUT = "cell_output"
+    CELL_CONSOLE = "cell_console"
+    CELL_ERROR = "cell_error"
+    CELL_ITERATION_PROGRESS = "cell_iteration_progress"
+    DAG_UPDATE = "dag_update"
+    NOTEBOOK_STATE = "notebook_state"
+    CASCADE_PROMPT = "cascade_prompt"
+    CASCADE_PROGRESS = "cascade_progress"
+    IMPACT_PREVIEW = "impact_preview"
+    INSPECT_RESULT = "inspect_result"
+    PROFILING_SUMMARY = "profiling_summary"
+
+
+def _utc_timestamp() -> str:
+    """Return an ISO-8601 ``...Z`` timestamp for the current UTC moment."""
+    return datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
+
+
+def _make_message(
+    msg_type: MessageType | str,
+    seq: int,
+    payload: Any,
+    *,
+    ts: str | None = None,
+) -> dict[str, Any]:
+    """Build a notebook WebSocket protocol message envelope.
+
+    Centralizes the ``{type, seq, ts, payload}`` shape every send site
+    used to build inline. ``ts`` defaults to "now"; callers that need
+    multiple messages to share a single timestamp (e.g. the stdout /
+    stderr / output trio emitted from one execution result) pass an
+    explicit value.
+    """
+    return {
+        "type": msg_type,
+        "seq": seq,
+        "ts": ts if ts is not None else _utc_timestamp(),
+        "payload": payload,
+    }
+
+
+# ============================================================================
 # Message Serialization
 # ============================================================================
 
@@ -166,16 +246,7 @@ async def _send_error_message(
     error: str,
 ) -> None:
     """Send a protocol error to one WebSocket client."""
-    await websocket.send_text(
-        _json_encode(
-            {
-                "type": "error",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {"error": error},
-            }
-        )
-    )
+    await websocket.send_text(_json_encode(_make_message(MessageType.ERROR, seq, {"error": error})))
 
 
 async def _set_cell_idle(
@@ -191,12 +262,7 @@ async def _set_cell_idle(
 
     await _broadcast_message(
         notebook_id,
-        {
-            "type": "cell_status",
-            "seq": seq,
-            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-            "payload": {"cell_id": cell_id, "status": "idle"},
-        },
+        _make_message(MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": "idle"}),
     )
 
 
@@ -221,12 +287,7 @@ async def _broadcast_staleness_updates(
 
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "cell_status",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": payload,
-            },
+            _make_message(MessageType.CELL_STATUS, seq, payload),
         )
 
 
@@ -568,12 +629,11 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                 # Unknown message type
                 await websocket.send_text(
                     _json_encode(
-                        {
-                            "type": "error",
-                            "seq": execution_state.sequence,
-                            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                            "payload": {"error": f"Unknown message type: {msg_type}"},
-                        }
+                        _make_message(
+                            MessageType.ERROR,
+                            execution_state.sequence,
+                            {"error": f"Unknown message type: {msg_type}"},
+                        )
                     )
                 )
 
@@ -609,18 +669,14 @@ async def _handle_cell_execute(
     if not cell_id:
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": "Missing cell_id"},
-                }
+                _make_message(
+                    MessageType.ERROR, execution_state.sequence, {"error": "Missing cell_id"}
+                )
             )
         )
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
@@ -640,15 +696,14 @@ async def _handle_cell_execute(
         await _release_execution_request(execution_state, cell_id)
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
+                _make_message(
+                    MessageType.ERROR,
+                    seq,
+                    {
                         "error": environment_block_reason,
                         "code": "ENVIRONMENT_BUSY",
                     },
-                }
+                )
             )
         )
         return
@@ -659,12 +714,7 @@ async def _handle_cell_execute(
         await _release_execution_request(execution_state, cell_id)
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": f"Cell {cell_id} not found"},
-                }
+                _make_message(MessageType.ERROR, seq, {"error": f"Cell {cell_id} not found"})
             )
         )
         return
@@ -691,17 +741,16 @@ async def _handle_cell_execute(
         execution_state.cascade_plan = plan
         await _send_message(
             websocket,
-            {
-                "type": "cascade_prompt",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {
+            _make_message(
+                MessageType.CASCADE_PROMPT,
+                seq,
+                {
                     "cell_id": cell_id,
                     "plan_id": plan.plan_id,
                     "cells_to_run": [s.cell_id for s in plan.steps],
                     "estimated_duration_ms": plan.estimated_duration_ms,
                 },
-            },
+            ),
         )
         await _release_execution_request(execution_state, cell_id)
     else:
@@ -730,8 +779,7 @@ async def _handle_notebook_run_all(
 
     Execute all non-empty cells in notebook order, stopping on first failure.
     """
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     # Skip inactive variants — they aren't in the DAG, so their references
     # don't resolve (e.g. `X_train` would NameError because the upstream
@@ -763,15 +811,14 @@ async def _handle_notebook_run_all(
         await _release_execution_request(execution_state, requested_cell)
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
+                _make_message(
+                    MessageType.ERROR,
+                    seq,
+                    {
                         "error": environment_block_reason,
                         "code": "ENVIRONMENT_BUSY",
                     },
-                }
+                )
             )
         )
         return
@@ -811,18 +858,16 @@ async def _handle_cell_execute_cascade(
     if not cell_id or not plan_id:
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": "Missing cell_id or plan_id"},
-                }
+                _make_message(
+                    MessageType.ERROR,
+                    execution_state.sequence,
+                    {"error": "Missing cell_id or plan_id"},
+                )
             )
         )
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
@@ -842,15 +887,14 @@ async def _handle_cell_execute_cascade(
         await _release_execution_request(execution_state, cell_id)
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
+                _make_message(
+                    MessageType.ERROR,
+                    seq,
+                    {
                         "error": environment_block_reason,
                         "code": "ENVIRONMENT_BUSY",
                     },
-                }
+                )
             )
         )
         return
@@ -861,12 +905,9 @@ async def _handle_cell_execute_cascade(
         await _release_execution_request(execution_state, cell_id)
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": "Cascade plan not found or expired"},
-                }
+                _make_message(
+                    MessageType.ERROR, seq, {"error": "Cascade plan not found or expired"}
+                )
             )
         )
         return
@@ -899,18 +940,14 @@ async def _handle_cell_execute_force(
     if not cell_id:
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": "Missing cell_id"},
-                }
+                _make_message(
+                    MessageType.ERROR, execution_state.sequence, {"error": "Missing cell_id"}
+                )
             )
         )
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     busy_cell = await _reserve_execution_request(execution_state, cell_id)
     if busy_cell is not None:
@@ -930,15 +967,14 @@ async def _handle_cell_execute_force(
         await _release_execution_request(execution_state, cell_id)
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
+                _make_message(
+                    MessageType.ERROR,
+                    seq,
+                    {
                         "error": environment_block_reason,
                         "code": "ENVIRONMENT_BUSY",
                     },
-                }
+                )
             )
         )
         return
@@ -974,8 +1010,7 @@ async def _handle_cell_cancel(
     if not cell_id:
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     async with execution_state.control_lock:
         running_cell = execution_state.running_cell
@@ -1014,12 +1049,11 @@ async def _handle_cell_source_update(
     if not cell_id or source is None:
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": "Missing cell_id or source"},
-                }
+                _make_message(
+                    MessageType.ERROR,
+                    execution_state.sequence,
+                    {"error": "Missing cell_id or source"},
+                )
             )
         )
         return
@@ -1027,12 +1061,11 @@ async def _handle_cell_source_update(
     if len(source) > 1_000_000:
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": "Cell source exceeds 1MB limit"},
-                }
+                _make_message(
+                    MessageType.ERROR,
+                    execution_state.sequence,
+                    {"error": "Cell source exceeds 1MB limit"},
+                )
             )
         )
         return
@@ -1052,11 +1085,10 @@ async def _handle_cell_source_update(
     if cell_id in {running, requested}:
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
+                _make_message(
+                    MessageType.ERROR,
+                    execution_state.sequence,
+                    {
                         "error": (
                             f"Cannot update cell {cell_id} while it is executing; "
                             "retry after cell finishes"
@@ -1064,13 +1096,12 @@ async def _handle_cell_source_update(
                         "code": "cell_busy",
                         "cell_id": cell_id,
                     },
-                }
+                )
             )
         )
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     try:
         # Write to disk
@@ -1126,11 +1157,10 @@ async def _handle_cell_source_update(
         # Send DAG update
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "dag_update",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {
+            _make_message(
+                MessageType.DAG_UPDATE,
+                seq,
+                {
                     "edges": dag_edges,
                     "roots": list(session.dag.roots) if session.dag else [],
                     "leaves": list(session.dag.leaves) if session.dag else [],
@@ -1140,21 +1170,14 @@ async def _handle_cell_source_update(
                         vg.model_dump() for vg in session.notebook_state.variant_groups
                     ],
                 },
-            },
+            ),
         )
 
         await _broadcast_staleness_updates(session, notebook_id, seq, staleness_map)
 
     except Exception as e:
         await websocket.send_text(
-            _json_encode(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": str(e)},
-                }
-            )
+            _json_encode(_make_message(MessageType.ERROR, seq, {"error": str(e)}))
         )
 
 
@@ -1177,18 +1200,14 @@ async def _handle_variant_set_active(
     if not isinstance(group, str) or not isinstance(variant_name, str):
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": "Missing group or name"},
-                }
+                _make_message(
+                    MessageType.ERROR, execution_state.sequence, {"error": "Missing group or name"}
+                )
             )
         )
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     try:
         session.set_variant_active(group, variant_name)
@@ -1227,11 +1246,10 @@ async def _handle_variant_set_active(
 
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "dag_update",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {
+            _make_message(
+                MessageType.DAG_UPDATE,
+                seq,
+                {
                     "edges": dag_edges,
                     "roots": list(session.dag.roots) if session.dag else [],
                     "leaves": list(session.dag.leaves) if session.dag else [],
@@ -1241,21 +1259,14 @@ async def _handle_variant_set_active(
                         vg.model_dump() for vg in session.notebook_state.variant_groups
                     ],
                 },
-            },
+            ),
         )
 
         await _broadcast_staleness_updates(session, notebook_id, seq, staleness_map)
 
     except Exception as e:
         await websocket.send_text(
-            _json_encode(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": str(e)},
-                }
-            )
+            _json_encode(_make_message(MessageType.ERROR, seq, {"error": str(e)}))
         )
 
 
@@ -1276,18 +1287,14 @@ async def _handle_variant_add(
     if not isinstance(group, str):
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": "Missing group"},
-                }
+                _make_message(
+                    MessageType.ERROR, execution_state.sequence, {"error": "Missing group"}
+                )
             )
         )
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     try:
         session.add_variant(group)
@@ -1310,37 +1317,18 @@ async def _handle_variant_add(
 
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "notebook_state",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": state_payload,
-            },
+            _make_message(MessageType.NOTEBOOK_STATE, seq, state_payload),
         )
 
         await _broadcast_staleness_updates(session, notebook_id, seq, staleness_map)
 
     except ValueError as e:
         await websocket.send_text(
-            _json_encode(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": str(e)},
-                }
-            )
+            _json_encode(_make_message(MessageType.ERROR, seq, {"error": str(e)}))
         )
     except Exception as e:
         await websocket.send_text(
-            _json_encode(
-                {
-                    "type": "error",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": str(e)},
-                }
-            )
+            _json_encode(_make_message(MessageType.ERROR, seq, {"error": str(e)}))
         )
 
 
@@ -1362,16 +1350,7 @@ async def _handle_notebook_sync(
         "topological_order": (session.dag.topological_order if session.dag else []),
     }
 
-    await websocket.send_text(
-        _json_encode(
-            {
-                "type": "notebook_state",
-                "seq": 0,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": state,
-            }
-        )
-    )
+    await websocket.send_text(_json_encode(_make_message(MessageType.NOTEBOOK_STATE, 0, state)))
 
 
 # ============================================================================
@@ -1396,12 +1375,7 @@ def _make_executor_with_progress(
         seq = next_notebook_sequence(notebook_id)
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "cell_iteration_progress",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": progress,
-            },
+            _make_message(MessageType.CELL_ITERATION_PROGRESS, seq, progress),
         )
 
     executor.on_iteration_complete = _broadcast_iteration_progress
@@ -1418,8 +1392,7 @@ async def _execute_cell_directly(
 ) -> None:
     """Execute a cell directly (not part of cascade)."""
     del websocket
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     # Find cell
     cell = session.notebook_state.get_cell(cell_id)
@@ -1431,12 +1404,9 @@ async def _execute_cell_directly(
     session.mark_cell_running(cell_id)
     await _broadcast_message(
         notebook_id,
-        {
-            "type": "cell_status",
-            "seq": seq,
-            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-            "payload": _running_payload(session, cell_id, cell.source),
-        },
+        _make_message(
+            MessageType.CELL_STATUS, seq, _running_payload(session, cell_id, cell.source)
+        ),
     )
 
     # Execute
@@ -1467,12 +1437,9 @@ async def _execute_cell_directly(
             session.mark_cell_error(cell_id)
             await _broadcast_message(
                 notebook_id,
-                {
-                    "type": "cell_status",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"cell_id": cell_id, "status": CellStatus.ERROR},
-                },
+                _make_message(
+                    MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": CellStatus.ERROR}
+                ),
             )
 
     except asyncio.CancelledError:
@@ -1482,21 +1449,11 @@ async def _execute_cell_directly(
         session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "cell_error",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {"cell_id": cell_id, "error": str(e)},
-            },
+            _make_message(MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(e)}),
         )
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "cell_status",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {"cell_id": cell_id, "status": "error"},
-            },
+            _make_message(MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": "error"}),
         )
     finally:
         execution_state.running_cell = None
@@ -1511,8 +1468,7 @@ async def _execute_cascade(
 ) -> None:
     """Execute all cells in a cascade plan."""
     del websocket
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     executor = _make_executor_with_progress(session, notebook_id)
 
@@ -1550,12 +1506,9 @@ async def _execute_cascade(
                     cell_to_skip.status = CellStatus.STALE
                 await _broadcast_message(
                     notebook_id,
-                    {
-                        "type": "cell_status",
-                        "seq": seq,
-                        "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                        "payload": {"cell_id": cell_id, "status": "stale"},
-                    },
+                    _make_message(
+                        MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": "stale"}
+                    ),
                 )
                 continue
 
@@ -1564,29 +1517,25 @@ async def _execute_cascade(
             # Send cascade progress
             await _broadcast_message(
                 notebook_id,
-                {
-                    "type": "cascade_progress",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
+                _make_message(
+                    MessageType.CASCADE_PROGRESS,
+                    seq,
+                    {
                         "plan_id": plan.plan_id,
                         "current_cell_id": cell_id,
                         "completed": i,
                         "total": len([s for s in plan.steps if not s.skip]),
                     },
-                },
+                ),
             )
 
             # Execute cell — update backend state AND broadcast
             session.mark_cell_running(cell_id)
             await _broadcast_message(
                 notebook_id,
-                {
-                    "type": "cell_status",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": _running_payload(session, cell_id, cell.source),
-                },
+                _make_message(
+                    MessageType.CELL_STATUS, seq, _running_payload(session, cell_id, cell.source)
+                ),
             )
 
             try:
@@ -1609,12 +1558,9 @@ async def _execute_cascade(
                     cascade_cell.status = status
                 await _broadcast_message(
                     notebook_id,
-                    {
-                        "type": "cell_status",
-                        "seq": seq,
-                        "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                        "payload": {"cell_id": cell_id, "status": status},
-                    },
+                    _make_message(
+                        MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": status}
+                    ),
                 )
 
                 logger.info(
@@ -1637,21 +1583,15 @@ async def _execute_cascade(
                 session.mark_cell_error(cell_id)
                 await _broadcast_message(
                     notebook_id,
-                    {
-                        "type": "cell_error",
-                        "seq": seq,
-                        "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                        "payload": {"cell_id": cell_id, "error": str(e)},
-                    },
+                    _make_message(
+                        MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(e)}
+                    ),
                 )
                 await _broadcast_message(
                     notebook_id,
-                    {
-                        "type": "cell_status",
-                        "seq": seq,
-                        "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                        "payload": {"cell_id": cell_id, "status": "error"},
-                    },
+                    _make_message(
+                        MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": "error"}
+                    ),
                 )
                 cascade_failed = True
         if not cascade_failed:
@@ -1676,8 +1616,7 @@ async def _execute_run_all(
 ) -> None:
     """Execute all requested notebook cells in notebook order."""
     del websocket
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     executor = _make_executor_with_progress(session, notebook_id)
 
@@ -1705,12 +1644,9 @@ async def _execute_run_all(
             session.mark_cell_running(cell_id)
             await _broadcast_message(
                 notebook_id,
-                {
-                    "type": "cell_status",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": _running_payload(session, cell_id, cell.source),
-                },
+                _make_message(
+                    MessageType.CELL_STATUS, seq, _running_payload(session, cell_id, cell.source)
+                ),
             )
 
             try:
@@ -1736,12 +1672,11 @@ async def _execute_run_all(
                 session.mark_cell_error(cell_id)
                 await _broadcast_message(
                     notebook_id,
-                    {
-                        "type": "cell_status",
-                        "seq": seq,
-                        "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                        "payload": {"cell_id": cell_id, "status": CellStatus.ERROR},
-                    },
+                    _make_message(
+                        MessageType.CELL_STATUS,
+                        seq,
+                        {"cell_id": cell_id, "status": CellStatus.ERROR},
+                    ),
                 )
                 break
 
@@ -1752,21 +1687,17 @@ async def _execute_run_all(
                 session.mark_cell_error(cell_id)
                 await _broadcast_message(
                     notebook_id,
-                    {
-                        "type": "cell_error",
-                        "seq": seq,
-                        "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                        "payload": {"cell_id": cell_id, "error": str(exc)},
-                    },
+                    _make_message(
+                        MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(exc)}
+                    ),
                 )
                 await _broadcast_message(
                     notebook_id,
-                    {
-                        "type": "cell_status",
-                        "seq": seq,
-                        "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                        "payload": {"cell_id": cell_id, "status": CellStatus.ERROR},
-                    },
+                    _make_message(
+                        MessageType.CELL_STATUS,
+                        seq,
+                        {"cell_id": cell_id, "status": CellStatus.ERROR},
+                    ),
                 )
                 break
     finally:
@@ -1792,26 +1723,24 @@ async def _handle_inspect_open(
     if not cell_id:
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     mgr = _get_inspect_manager(notebook_id)
     inspect_session, status = await mgr.open_session(cell_id, session)
 
     await websocket.send_text(
         _json_encode(
-            {
-                "type": "inspect_result",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {
+            _make_message(
+                MessageType.INSPECT_RESULT,
+                seq,
+                {
                     "cell_id": cell_id,
                     "action": "open",
                     "ok": inspect_session.ready,
                     "result": status,
                     "type": "str",
                 },
-            }
+            )
         )
     )
 
@@ -1829,8 +1758,7 @@ async def _handle_inspect_eval(
     if not cell_id or not expr:
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     mgr = _get_inspect_manager(notebook_id)
     inspect_session = await mgr.get_session(cell_id)
@@ -1838,17 +1766,16 @@ async def _handle_inspect_eval(
     if inspect_session is None:
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "inspect_result",
-                    "seq": seq,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
+                _make_message(
+                    MessageType.INSPECT_RESULT,
+                    seq,
+                    {
                         "cell_id": cell_id,
                         "action": "eval",
                         "ok": False,
                         "error": "No inspect session open for this cell",
                     },
-                }
+                )
             )
         )
         return
@@ -1857,17 +1784,16 @@ async def _handle_inspect_eval(
 
     await websocket.send_text(
         _json_encode(
-            {
-                "type": "inspect_result",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {
+            _make_message(
+                MessageType.INSPECT_RESULT,
+                seq,
+                {
                     "cell_id": cell_id,
                     "action": "eval",
                     "expr": expr,
                     **result,
                 },
-            }
+            )
         )
     )
 
@@ -1884,25 +1810,23 @@ async def _handle_inspect_close(
     if not cell_id:
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     mgr = _get_inspect_manager(notebook_id)
     await mgr.close_session(cell_id)
 
     await websocket.send_text(
         _json_encode(
-            {
-                "type": "inspect_result",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {
+            _make_message(
+                MessageType.INSPECT_RESULT,
+                seq,
+                {
                     "cell_id": cell_id,
                     "action": "close",
                     "ok": True,
                     "result": "closed",
                 },
-            }
+            )
         )
     )
 
@@ -1919,20 +1843,14 @@ async def _handle_impact_preview_request(
     if not cell_id:
         return
 
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     analyzer = ImpactAnalyzer(session)
     impact = analyzer.preview(cell_id)
 
     await _send_message(
         websocket,
-        {
-            "type": "impact_preview",
-            "seq": seq,
-            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-            "payload": asdict(impact),
-        },
+        _make_message(MessageType.IMPACT_PREVIEW, seq, asdict(impact)),
     )
 
 
@@ -1943,20 +1861,12 @@ async def _handle_profiling_request(
     notebook_id: str,
 ) -> None:
     """Handle profiling_request — return notebook profiling summary."""
-    execution_state.sequence += 1
-    seq = execution_state.sequence
+    seq = execution_state.next_sequence()
 
     summary = session.get_profiling_summary()
 
     await websocket.send_text(
-        _json_encode(
-            {
-                "type": "profiling_summary",
-                "seq": seq,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": summary,
-            }
-        )
+        _json_encode(_make_message(MessageType.PROFILING_SUMMARY, seq, summary))
     )
 
 
@@ -1972,15 +1882,13 @@ async def _handle_dependency_add(
 
     package = payload.get("package", "")
     if not package:
-        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": "Missing 'package' in payload"},
-                }
+                _make_message(
+                    MessageType.ERROR,
+                    execution_state.next_sequence(),
+                    {"error": "Missing 'package' in payload"},
+                )
             )
         )
         return
@@ -1988,15 +1896,9 @@ async def _handle_dependency_add(
     try:
         package = validate_package_name(package)
     except ValueError as e:
-        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": str(e)},
-                }
+                _make_message(MessageType.ERROR, execution_state.next_sequence(), {"error": str(e)})
             )
         )
         return
@@ -2004,15 +1906,13 @@ async def _handle_dependency_add(
     try:
         await session.submit_environment_job(action="add", package=package)
     except RuntimeError as exc:
-        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": str(exc), "code": "ENVIRONMENT_BUSY"},
-                }
+                _make_message(
+                    MessageType.ERROR,
+                    execution_state.next_sequence(),
+                    {"error": str(exc), "code": "ENVIRONMENT_BUSY"},
+                )
             )
         )
 
@@ -2029,15 +1929,13 @@ async def _handle_dependency_remove(
 
     package = payload.get("package", "")
     if not package:
-        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": "Missing 'package' in payload"},
-                }
+                _make_message(
+                    MessageType.ERROR,
+                    execution_state.next_sequence(),
+                    {"error": "Missing 'package' in payload"},
+                )
             )
         )
         return
@@ -2045,15 +1943,9 @@ async def _handle_dependency_remove(
     try:
         package = validate_package_name(package)
     except ValueError as e:
-        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": str(e)},
-                }
+                _make_message(MessageType.ERROR, execution_state.next_sequence(), {"error": str(e)})
             )
         )
         return
@@ -2061,15 +1953,13 @@ async def _handle_dependency_remove(
     try:
         await session.submit_environment_job(action="remove", package=package)
     except RuntimeError as exc:
-        execution_state.sequence += 1
         await websocket.send_text(
             _json_encode(
-                {
-                    "type": "error",
-                    "seq": execution_state.sequence,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {"error": str(exc), "code": "ENVIRONMENT_BUSY"},
-                }
+                _make_message(
+                    MessageType.ERROR,
+                    execution_state.next_sequence(),
+                    {"error": str(exc), "code": "ENVIRONMENT_BUSY"},
+                )
             )
         )
 
@@ -2101,12 +1991,7 @@ async def execute_cell_for_agent(
     # Broadcast running status
     await _broadcast_message(
         notebook_id,
-        {
-            "type": "cell_status",
-            "seq": 0,
-            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-            "payload": _running_payload(session, cell_id, source),
-        },
+        _make_message(MessageType.CELL_STATUS, 0, _running_payload(session, cell_id, source)),
     )
 
     cell = session.notebook_state.get_cell(cell_id)
@@ -2125,28 +2010,22 @@ async def execute_cell_for_agent(
         if result.success and result.outputs:
             await _broadcast_message(
                 notebook_id,
-                {
-                    "type": "cell_output",
-                    "seq": 0,
-                    "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                    "payload": {
+                _make_message(
+                    MessageType.CELL_OUTPUT,
+                    0,
+                    {
                         "cell_id": cell_id,
                         "outputs": result.outputs,
                         "cache_hit": result.cache_hit,
                         "duration_ms": int(result.duration_ms),
                         "execution_method": result.execution_method,
                     },
-                },
+                ),
             )
 
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "cell_status",
-                "seq": 0,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {"cell_id": cell_id, "status": status},
-            },
+            _make_message(MessageType.CELL_STATUS, 0, {"cell_id": cell_id, "status": status}),
         )
 
         return result
@@ -2154,12 +2033,7 @@ async def execute_cell_for_agent(
         session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "cell_status",
-                "seq": 0,
-                "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-                "payload": {"cell_id": cell_id, "status": "error"},
-            },
+            _make_message(MessageType.CELL_STATUS, 0, {"cell_id": cell_id, "status": "error"}),
         )
         raise
 
@@ -2182,12 +2056,7 @@ async def broadcast_notebook_sync(notebook_id: str, session: Any) -> None:
 
     await _broadcast_message(
         notebook_id,
-        {
-            "type": "notebook_state",
-            "seq": 0,
-            "ts": datetime.now(tz=UTC).isoformat().replace("+00:00", "Z"),
-            "payload": state,
-        },
+        _make_message(MessageType.NOTEBOOK_STATE, 0, state),
     )
 
 
@@ -2307,41 +2176,41 @@ async def _broadcast_execution_result(
     if result.stdout:
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "cell_console",
-                "seq": seq,
-                "ts": ts,
-                "payload": {
+            _make_message(
+                MessageType.CELL_CONSOLE,
+                seq,
+                {
                     "cell_id": cell_id,
                     "stream": "stdout",
                     "text": result.stdout,
                 },
-            },
+                ts=ts,
+            ),
         )
 
     if result.stderr:
         await _broadcast_message(
             notebook_id,
-            {
-                "type": "cell_console",
-                "seq": seq,
-                "ts": ts,
-                "payload": {
+            _make_message(
+                MessageType.CELL_CONSOLE,
+                seq,
+                {
                     "cell_id": cell_id,
                     "stream": "stderr",
                     "text": result.stderr,
                 },
-            },
+                ts=ts,
+            ),
         )
 
     await _broadcast_message(
         notebook_id,
-        {
-            "type": "cell_output" if result.success else "cell_error",
-            "seq": seq,
-            "ts": ts,
-            "payload": _execution_result_payload(cell_id, result),
-        },
+        _make_message(
+            "cell_output" if result.success else "cell_error",
+            seq,
+            _execution_result_payload(cell_id, result),
+            ts=ts,
+        ),
     )
 
 
