@@ -23,8 +23,9 @@ have to fake mutating operations it can't honestly support.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Awaitable, Callable, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from strata.notebook.dependencies import _UvCommandResult
@@ -155,9 +156,7 @@ class UvBackend:
         args = ["sync"]
         if python_version:
             args += ["--python", python_version]
-        return _run_uv_command(
-            self.notebook_dir, args, timeout=timeout, display_name="uv sync"
-        )
+        return _run_uv_command(self.notebook_dir, args, timeout=timeout, display_name="uv sync")
 
     def add(self, package: str, *, timeout: int) -> _UvCommandResult:
         from strata.notebook.dependencies import _run_uv_command
