@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -559,74 +560,8 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
             msg_type = msg.get("type")
             payload = msg.get("payload", {})
 
-            # Handle each message type
-            if msg_type == "cell_execute":
-                await _handle_cell_execute(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "notebook_run_all":
-                await _handle_notebook_run_all(websocket, session, execution_state, notebook_id)
-            elif msg_type == "cell_execute_cascade":
-                await _handle_cell_execute_cascade(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "cell_execute_force":
-                await _handle_cell_execute_force(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "cell_cancel":
-                await _handle_cell_cancel(websocket, session, payload, execution_state, notebook_id)
-            elif msg_type == "agent_cancel":
-                from strata.notebook.routes import cancel_agent
-
-                cancel_agent(notebook_id)
-            elif msg_type == "agent_confirm_response":
-                from strata.notebook.llm import resolve_approval
-
-                request_id = payload.get("request_id")
-                approved = bool(payload.get("approved", False))
-                if isinstance(request_id, str):
-                    resolve_approval(request_id, approved)
-            elif msg_type == "cell_source_update":
-                await _handle_cell_source_update(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "notebook_sync":
-                await _handle_notebook_sync(websocket, session, notebook_id)
-            elif msg_type == "impact_preview_request":
-                await _handle_impact_preview_request(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "profiling_request":
-                await _handle_profiling_request(websocket, session, execution_state, notebook_id)
-            elif msg_type == "inspect_open":
-                await _handle_inspect_open(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "inspect_eval":
-                await _handle_inspect_eval(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "inspect_close":
-                await _handle_inspect_close(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "dependency_add":
-                await _handle_dependency_add(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "dependency_remove":
-                await _handle_dependency_remove(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "variant_set_active":
-                await _handle_variant_set_active(
-                    websocket, session, payload, execution_state, notebook_id
-                )
-            elif msg_type == "variant_add":
-                await _handle_variant_add(websocket, session, payload, execution_state, notebook_id)
-            else:
-                # Unknown message type
+            handler = _C2S_HANDLERS.get(msg_type) if isinstance(msg_type, str) else None
+            if handler is None:
                 await websocket.send_text(
                     _json_encode(
                         _make_message(
@@ -636,6 +571,8 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                         )
                     )
                 )
+                continue
+            await handler(websocket, session, payload, execution_state, notebook_id)
 
     except WebSocketDisconnect:
         await _cleanup_notebook_websocket(notebook_id, websocket)
@@ -772,6 +709,7 @@ async def _handle_cell_execute(
 async def _handle_notebook_run_all(
     websocket: WebSocket,
     session: NotebookSession,
+    payload: dict[str, Any],  # noqa: ARG001 — uniform handler signature
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
@@ -1030,6 +968,35 @@ async def _handle_cell_cancel(
     cell = session.notebook_state.get_cell(cell_id)
     if cell is not None and cell.status in {CellStatus.IDLE, CellStatus.RUNNING}:
         await _set_cell_idle(session, notebook_id, seq, cell_id)
+
+
+async def _handle_agent_cancel(
+    websocket: WebSocket,  # noqa: ARG001 — uniform handler signature
+    session: NotebookSession,  # noqa: ARG001 — uniform handler signature
+    payload: dict[str, Any],  # noqa: ARG001 — uniform handler signature
+    execution_state: NotebookExecutionState,  # noqa: ARG001 — uniform handler signature
+    notebook_id: str,
+) -> None:
+    """Handle agent_cancel message — abort the active agent run for this notebook."""
+    from strata.notebook.routes import cancel_agent
+
+    cancel_agent(notebook_id)
+
+
+async def _handle_agent_confirm_response(
+    websocket: WebSocket,  # noqa: ARG001 — uniform handler signature
+    session: NotebookSession,  # noqa: ARG001 — uniform handler signature
+    payload: dict[str, Any],
+    execution_state: NotebookExecutionState,  # noqa: ARG001 — uniform handler signature
+    notebook_id: str,  # noqa: ARG001 — uniform handler signature
+) -> None:
+    """Handle agent_confirm_response message — relay an approval decision to the LLM gate."""
+    from strata.notebook.llm import resolve_approval
+
+    request_id = payload.get("request_id")
+    approved = bool(payload.get("approved", False))
+    if isinstance(request_id, str):
+        resolve_approval(request_id, approved)
 
 
 async def _handle_cell_source_update(
@@ -1333,7 +1300,11 @@ async def _handle_variant_add(
 
 
 async def _handle_notebook_sync(
-    websocket: WebSocket, session: NotebookSession, notebook_id: str
+    websocket: WebSocket,
+    session: NotebookSession,
+    payload: dict[str, Any],  # noqa: ARG001 — uniform handler signature
+    execution_state: NotebookExecutionState,  # noqa: ARG001 — uniform handler signature
+    notebook_id: str,
 ) -> None:
     """Handle notebook_sync message.
 
@@ -1857,6 +1828,7 @@ async def _handle_impact_preview_request(
 async def _handle_profiling_request(
     websocket: WebSocket,
     session: NotebookSession,
+    payload: dict[str, Any],  # noqa: ARG001 — uniform handler signature
     execution_state: NotebookExecutionState,
     notebook_id: str,
 ) -> None:
@@ -2206,7 +2178,7 @@ async def _broadcast_execution_result(
     await _broadcast_message(
         notebook_id,
         _make_message(
-            "cell_output" if result.success else "cell_error",
+            MessageType.CELL_OUTPUT if result.success else MessageType.CELL_ERROR,
             seq,
             _execution_result_payload(cell_id, result),
             ts=ts,
@@ -2233,3 +2205,41 @@ async def _broadcast_message(notebook_id: str, message: dict[str, Any]) -> None:
     for ws in disconnected:
         if ws in connections:
             connections.remove(ws)
+
+
+# ============================================================================
+# C→S dispatch registry
+# ============================================================================
+#
+# Maps every client-to-server message type to its handler. All handlers
+# follow the uniform signature
+# ``(websocket, session, payload, execution_state, notebook_id)`` -- handlers
+# that don't need a particular argument mark it with ``# noqa: ARG001``.
+# Defined at module bottom so every handler exists at registry-build time;
+# the dispatch in ``notebook_websocket`` looks the value up at request time.
+
+_C2SHandler = Callable[
+    [WebSocket, "NotebookSession", dict[str, Any], NotebookExecutionState, str],
+    Awaitable[None],
+]
+
+_C2S_HANDLERS: dict[str, _C2SHandler] = {
+    MessageType.CELL_EXECUTE: _handle_cell_execute,
+    MessageType.CELL_EXECUTE_CASCADE: _handle_cell_execute_cascade,
+    MessageType.CELL_EXECUTE_FORCE: _handle_cell_execute_force,
+    MessageType.CELL_CANCEL: _handle_cell_cancel,
+    MessageType.NOTEBOOK_RUN_ALL: _handle_notebook_run_all,
+    MessageType.CELL_SOURCE_UPDATE: _handle_cell_source_update,
+    MessageType.NOTEBOOK_SYNC: _handle_notebook_sync,
+    MessageType.IMPACT_PREVIEW_REQUEST: _handle_impact_preview_request,
+    MessageType.PROFILING_REQUEST: _handle_profiling_request,
+    MessageType.INSPECT_OPEN: _handle_inspect_open,
+    MessageType.INSPECT_EVAL: _handle_inspect_eval,
+    MessageType.INSPECT_CLOSE: _handle_inspect_close,
+    MessageType.DEPENDENCY_ADD: _handle_dependency_add,
+    MessageType.DEPENDENCY_REMOVE: _handle_dependency_remove,
+    MessageType.VARIANT_SET_ACTIVE: _handle_variant_set_active,
+    MessageType.VARIANT_ADD: _handle_variant_add,
+    MessageType.AGENT_CANCEL: _handle_agent_cancel,
+    MessageType.AGENT_CONFIRM_RESPONSE: _handle_agent_confirm_response,
+}
