@@ -82,11 +82,6 @@ const notebook = reactive<Notebook>({
     hasLockfile: false,
     venvPython: null,
     interpreterSource: 'unknown',
-    // Default to ``uv`` / mutable so a still-loading store doesn't
-    // briefly disable buttons. parseBackendEnvironment overwrites
-    // both from the server payload on first sync.
-    backend: 'uv',
-    supportsMutations: true,
   },
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -364,15 +359,6 @@ function parseBackendEnvironment(raw: any): NotebookEnvironment {
         : raw?.interpreter_source === 'path' || raw?.interpreterSource === 'path'
           ? 'path'
           : 'unknown',
-    // Backend identity + capability flag. Server emits both as
-    // ``backend`` / ``supports_mutations`` (snake_case); accept the
-    // camelCase aliases too for symmetry with the other fields.
-    // Unknown backend strings fall back to the "Strata-managed by
-    // uv, full mutation surface" defaults so a forward-compat server
-    // doesn't disable the UI for old clients.
-    backend: raw?.backend === 'attached' || raw?.backend === 'uv' ? raw.backend : 'uv',
-    supportsMutations:
-      raw?.supports_mutations === false || raw?.supportsMutations === false ? false : true,
   }
 }
 

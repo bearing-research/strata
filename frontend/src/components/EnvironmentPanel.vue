@@ -145,45 +145,6 @@ const interpreterSourceLabel = computed(() => {
   }
 })
 
-// Backend badge + read-only mutation gating. ``supportsMutations`` is
-// false on AttachedBackend (Strata is attached to an externally-managed
-// venv); the UI hides this in plain sight via the badge and disables
-// every env-mutation button so users don't reach a 409 from the server.
-const backendBadgeLabel = computed(() =>
-  notebook.environment.backend === 'attached' ? 'Attached venv' : 'Powered by uv',
-)
-
-const backendBadgeClass = computed(
-  () => `env-backend-badge backend-${notebook.environment.backend}`,
-)
-
-const attachedTooltip =
-  'This notebook is attached to a venv Strata does not manage. ' +
-  'Install/remove packages with your own tooling (pip / poetry / etc.), or ' +
-  'set [strata] backend = "uv" in notebook.toml to let Strata take over.'
-
-const mutationsBlocked = computed(() => !notebook.environment.supportsMutations)
-
-/** Combined disabled signal for every env-mutation button. */
-const envMutationDisabled = computed(
-  () =>
-    !connected.value ||
-    environmentMutationActive.value ||
-    dependencyLoading.value ||
-    environmentLoading.value ||
-    mutationsBlocked.value,
-)
-
-/** Title attribute that explains *why* the button is disabled. The
- * attached-venv reason wins over generic "another op is running" so
- * users see the actionable instruction. */
-const envMutationDisabledTitle = computed(() => {
-  if (mutationsBlocked.value) return attachedTooltip
-  if (environmentMutationActive.value) return 'Another environment update is in progress'
-  if (!connected.value) return 'Reconnecting to the notebook server…'
-  return ''
-})
-
 const filteredDeclaredDependencies = computed(() => {
   const query = packageFilter.value.trim().toLowerCase()
   if (!query) return dependencies.value
@@ -413,17 +374,8 @@ function downloadRequirements() {
           <div class="env-status">
             <span class="status-dot" :class="syncStateClass"></span>
             <span>{{ syncStateLabel }}</span>
-            <span :class="backendBadgeClass" :title="mutationsBlocked ? attachedTooltip : ''">{{
-              backendBadgeLabel
-            }}</span>
           </div>
-          <div v-if="mutationsBlocked" class="env-status-help">
-            Strata is attached to a venv you manage yourself. Install / remove packages with your
-            own tooling (pip / poetry / etc.), or set
-            <code>[strata]<br />backend = "uv"</code> in <code>notebook.toml</code> to let Strata
-            take over.
-          </div>
-          <div v-else class="env-status-help">
+          <div class="env-status-help">
             Rebuilds the notebook <code>.venv</code> from <code>pyproject.toml</code> and
             <code>uv.lock</code>, refreshes runtime metadata, and resets warm execution state.
           </div>
@@ -431,32 +383,36 @@ function downloadRequirements() {
         <div class="env-actions">
           <button
             class="btn-sync"
-            :disabled="envMutationDisabled"
-            :title="envMutationDisabledTitle"
+            :disabled="
+              !connected || environmentMutationActive || dependencyLoading || environmentLoading
+            "
             @click="syncEnvironmentAction"
           >
             {{ syncButtonLabel }}
           </button>
           <button
             class="btn-secondary"
-            :disabled="envMutationDisabled"
-            :title="envMutationDisabledTitle"
+            :disabled="
+              !connected || environmentMutationActive || dependencyLoading || environmentLoading
+            "
             @click="openRequirementsExport"
           >
             Export
           </button>
           <button
             class="btn-secondary"
-            :disabled="envMutationDisabled"
-            :title="envMutationDisabledTitle"
+            :disabled="
+              !connected || environmentMutationActive || dependencyLoading || environmentLoading
+            "
             @click="openRequirementsImport"
           >
             Import requirements
           </button>
           <button
             class="btn-secondary"
-            :disabled="envMutationDisabled"
-            :title="envMutationDisabledTitle"
+            :disabled="
+              !connected || environmentMutationActive || dependencyLoading || environmentLoading
+            "
             @click="openEnvironmentYamlImport"
           >
             Import env.yaml
@@ -470,13 +426,11 @@ function downloadRequirements() {
           <button
             type="button"
             class="env-stat-value env-stat-button"
-            :disabled="environmentMutationActive || mutationsBlocked"
+            :disabled="environmentMutationActive"
             :title="
-              mutationsBlocked
-                ? attachedTooltip
-                : environmentMutationActive
-                  ? 'Cannot change Python while another environment update is running'
-                  : 'Click to change the notebook\'s Python version'
+              environmentMutationActive
+                ? 'Cannot change Python while another environment update is running'
+                : 'Click to change the notebook\'s Python version'
             "
             @click="openPythonModal"
           >
@@ -695,8 +649,13 @@ function downloadRequirements() {
           <button
             v-if="requirementsMode !== 'requirements-export'"
             class="btn-secondary"
-            :disabled="envMutationDisabled || !requirementsText.trim()"
-            :title="envMutationDisabledTitle"
+            :disabled="
+              !connected ||
+              environmentMutationActive ||
+              dependencyLoading ||
+              environmentLoading ||
+              !requirementsText.trim()
+            "
             @click="previewImport"
           >
             {{ environmentLoading ? 'Previewing…' : 'Preview Import' }}
@@ -704,8 +663,14 @@ function downloadRequirements() {
           <button
             v-if="requirementsMode !== 'requirements-export'"
             class="btn-sync"
-            :disabled="envMutationDisabled || !requirementsText.trim() || !hasFreshImportPreview"
-            :title="envMutationDisabledTitle"
+            :disabled="
+              !connected ||
+              environmentMutationActive ||
+              dependencyLoading ||
+              environmentLoading ||
+              !requirementsText.trim() ||
+              !hasFreshImportPreview
+            "
             @click="applyRequirementsImport"
           >
             {{ environmentLoading ? 'Importing…' : 'Apply Import' }}
@@ -742,20 +707,22 @@ function downloadRequirements() {
         <input
           v-model="newPackage"
           type="text"
-          :placeholder="
-            mutationsBlocked
-              ? 'Attached venv — manage packages with your own tooling'
-              : 'Add package (e.g. pandas)'
-          "
+          placeholder="Add package (e.g. pandas)"
           class="dep-input"
-          :disabled="envMutationDisabled"
-          :title="envMutationDisabledTitle"
+          :disabled="
+            !connected || environmentMutationActive || dependencyLoading || environmentLoading
+          "
           @keydown.enter="addPackage"
         />
         <button
           class="btn-add"
-          :disabled="envMutationDisabled || !newPackage.trim()"
-          :title="envMutationDisabledTitle"
+          :disabled="
+            !connected ||
+            environmentMutationActive ||
+            dependencyLoading ||
+            environmentLoading ||
+            !newPackage.trim()
+          "
           @click="addPackage"
         >
           {{ environmentMutationActive ? '…' : dependencyLoading ? '…' : '+' }}
@@ -786,13 +753,8 @@ function downloadRequirements() {
           <button
             v-if="packageView === 'declared'"
             class="btn-remove"
-            :title="mutationsBlocked ? attachedTooltip : 'Remove'"
-            :disabled="
-              environmentMutationActive ||
-              dependencyLoading ||
-              environmentLoading ||
-              mutationsBlocked
-            "
+            title="Remove"
+            :disabled="environmentMutationActive || dependencyLoading || environmentLoading"
             @click="removePackage(dep.name)"
           >
             Remove
@@ -879,26 +841,6 @@ function downloadRequirements() {
   color: var(--text-primary);
   font-size: 12px;
   font-weight: 600;
-}
-
-.env-backend-badge {
-  margin-left: 8px;
-  padding: 1px 8px;
-  border-radius: 10px;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  text-transform: none;
-  white-space: nowrap;
-}
-.env-backend-badge.backend-uv {
-  background: var(--tint-primary, var(--bg-subtle));
-  color: var(--accent-primary, var(--text-secondary));
-}
-.env-backend-badge.backend-attached {
-  background: var(--tint-warning, var(--bg-subtle));
-  color: var(--accent-warning, var(--text-secondary));
-  cursor: help;
 }
 
 .env-status-help {

@@ -401,8 +401,6 @@ export interface DependencyInfo {
   specifier: string
 }
 
-export type EnvironmentBackend = 'uv' | 'attached'
-
 export interface NotebookEnvironment {
   pythonVersion: string
   requestedPythonVersion: string
@@ -419,19 +417,6 @@ export interface NotebookEnvironment {
   hasLockfile: boolean
   venvPython: string | null
   interpreterSource: 'unknown' | 'venv' | 'path'
-  /** Which env backend the notebook is using.
-   *
-   * - ``uv``: Strata owns the venv via ``uv add``/``remove``/``sync``.
-   * - ``attached``: Strata attaches to an existing venv the user manages
-   *   themselves (pip / poetry / virtualenv / etc.). Mutations are
-   *   disabled; the UI surfaces a tooltip pointing at the user's own
-   *   tooling and the ``[strata] backend = "uv"`` override. */
-  backend: EnvironmentBackend
-  /** Whether ``add``/``remove``/``sync``/``set_python_version`` are
-   * usable. False on attached backends. Drives the disabled state on
-   * every env-mutation button so users don't reach a 409 from a stale
-   * UI. */
-  supportsMutations: boolean
 }
 
 export interface NotebookRuntimeConfig {
