@@ -138,7 +138,7 @@ SQL cells reference these by name via `# @sql connection=<name>`.
 | Key | Type | Description |
 | --- | --- | --- |
 | `<name>` | section header | Connection name — referenced by `# @sql connection=<name>`. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
-| `driver` | string (required) | `postgresql`, `sqlite`, `mysql`, `snowflake`, `motherduck`, `bigquery`. |
+| `driver` | string (required) | One of the shipped adapters: `duckdb`, `sqlite`, `postgresql`, `snowflake`, `bigquery`. MotherDuck and MySQL are planned but not yet implemented. |
 | `auth` | table | `${VAR}` indirections only. Resolved from the process environment at execute time; never hashed into provenance. |
 | `options` | table | Driver-specific runtime tunables that don't change which objects the connection sees (`application_name`, `connect_timeout`, etc.). |
 | (driver-specific top-level keys) | varies | `uri`, `host`, `account`, `database`, `role`, `path`, ... — interpreted by the driver adapter. |

@@ -9,12 +9,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ## Unreleased
 
-## 0.1.0 — 2026-05-08
+## Planned for 0.1.0
 
-First public release of Strata Notebook. The package is published on PyPI as
-`strata-notebook`; the Python module is imported as `strata`. Wheels ship for
-Linux (x86_64, aarch64), macOS (x86_64, arm64), and Windows (x86_64) and are
-abi3-compatible from Python 3.12 onward.
+First public release of Strata Notebook — in flight, **not yet
+published**. The package will be published on PyPI as `strata-notebook`
+once the release ships; the Python module is imported as `strata`.
+Wheels will ship for Linux (x86_64, aarch64), macOS (x86_64, arm64),
+and Windows (x86_64) and will be abi3-compatible from Python 3.12 onward.
+Until then, install from a git checkout (`uv sync` in a cloned repo).
 
 ### Added
 

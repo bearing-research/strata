@@ -58,8 +58,9 @@ Runtime (Docker or `uv run strata-server`):
   uv-managed. uv fetches a matching Python for you, so you don't
   need Python pre-installed.
 
-Source build (only if you're building from this repo, not using
-Docker or `uv add strata-notebook`):
+Source build (this is currently the only install path —
+`strata-notebook` isn't on PyPI yet; PyPI wheels are planned for
+0.1.0 and will let you skip the Rust step):
 
 - **[Rust toolchain](https://rustup.rs/)** (rustup) — for `maturin`
   to compile the native extension. Once installed, `cargo` and
@@ -84,7 +85,7 @@ a clear message beats a confusing subprocess error later.
 - **Cascade execution.** Change upstream code, downstream cells auto-invalidate.
 - **Distributed workers.** Annotate `@worker gpu-fly` and the cell dispatches to a remote GPU.
 - **Prompt cells.** LLM-powered cells with `{{ variable }}` template injection.
-- **SQL cells.** First-class SQL cells with `# @sql connection=<name>`, named-bind parameters, and DuckDB / Postgres / SQLite drivers.
+- **SQL cells.** First-class SQL cells with `# @sql connection=<name>`, named-bind parameters, and DuckDB / SQLite / PostgreSQL / Snowflake / BigQuery drivers.
 - **AI assistant.** Streaming chat with conversation memory, agent mode for autonomous notebook building.
 - **Environment management.** Per-notebook Python venvs via uv, isolated from each other.
 - **Rich outputs.** DataFrames, matplotlib plots, markdown, images.
@@ -187,10 +188,10 @@ still moving:
 
 - **Prompt-cell API.** Streaming, conversation memory, and structured-output
   validation are not yet finalized — expect breaking changes in 0.x.
-- **SQL cell cloud drivers.** DuckDB / Postgres / SQLite are exercised in
-  CI. MotherDuck, MySQL, BigQuery, and Snowflake adapters exist but lack
-  integration test coverage; pin a Strata version in production until that
-  lands.
+- **SQL cell cloud drivers.** DuckDB / SQLite / PostgreSQL are exercised
+  in CI. BigQuery and Snowflake adapters ship but lack integration test
+  coverage; pin a Strata version in production until that lands.
+  MotherDuck and MySQL are planned but not yet implemented.
 - **Wire / on-disk formats.** `notebook.toml`, `runtime.json`, and the
   artifact cache layout may change between minor versions during 0.x.
   Rely on the Python API surface, not the file shapes.
@@ -208,7 +209,11 @@ has two steps: start the server, then call it from your code.
 
 ```bash
 # 1. Install + start the server (in a uv-managed env).
-uv add "strata-notebook[notebook]"
+# Until 0.1.0 ships to PyPI, install from a git checkout — needs
+# the Rust toolchain (see Requirements above).
+git clone https://github.com/bearing-research/strata.git
+cd strata
+uv sync --all-extras
 uv run strata-server
 
 # 2. From another process, point the client at it:
