@@ -4,6 +4,23 @@ Strata is configured via environment variables (prefixed with `STRATA_`) or a `[
 
 **Precedence**: defaults < pyproject.toml < environment variables < programmatic overrides
 
+The `[tool.strata]` block accepts every env var listed below with the
+`STRATA_` prefix dropped and the name lowercased (e.g. `STRATA_HOST` →
+`host`, `STRATA_CACHE_DIR` → `cache_dir`, `STRATA_S3_REGION` →
+`s3_region`). Values are typed by `StrataConfig` in `src/strata/config.py`;
+strings, numbers, booleans, and TOML arrays all work as expected.
+
+```toml
+# pyproject.toml
+[tool.strata]
+host = "0.0.0.0"
+port = 8765
+deployment_mode = "service"
+cache_dir = "/var/cache/strata"
+multi_tenant_enabled = true
+ai_model = "claude-sonnet-4-6"
+```
+
 ## Server
 
 | Variable                                  | Default     | Description                                  |
@@ -98,10 +115,21 @@ Strata is configured via environment variables (prefixed with `STRATA_`) or a `[
 
 ## Notebook
 
-| Variable                          | Default                     | Description                                                    |
-| --------------------------------- | --------------------------- | -------------------------------------------------------------- |
-| `STRATA_NOTEBOOK_STORAGE_DIR`     | `/tmp/strata-notebooks`     | Default notebook storage directory                             |
-| `STRATA_NOTEBOOK_PYTHON_VERSIONS` | current server Python minor | Available Python versions (JSON array or comma-separated list) |
+| Variable                            | Default                     | Description                                                    |
+| ----------------------------------- | --------------------------- | -------------------------------------------------------------- |
+| `STRATA_NOTEBOOK_STORAGE_DIR`       | `/tmp/strata-notebooks`     | Default notebook storage directory                             |
+| `STRATA_NOTEBOOK_PYTHON_VERSIONS`   | current server Python minor | Available Python versions (JSON array or comma-separated list) |
+| `STRATA_PERSONAL_MODE_USER_HEADER`  | `None`                      | Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and `discover`/`delete` scope to it. Intended for proxy-fronted personal deployments. |
+
+## Worker
+
+These are read by `strata-worker`, not the main server. They have no effect on a `strata-server` process.
+
+| Variable                          | Default              | Description                                                                                  |
+| --------------------------------- | -------------------- | -------------------------------------------------------------------------------------------- |
+| `STRATA_WORKER_TOKEN`             | `None`               | Optional bearer token. When set, the worker's `/v1/*` execution endpoints require `Authorization: Bearer <token>`. `/health` stays open. See [Workers § Authentication](../notebook/workers.md#authentication). |
+| `STRATA_WORKER_MAX_INPUT_BYTES`   | `268435456` (256 MB) | Per-input download cap for the pull-model (`/v1/execute-manifest`). Reject inputs larger than this with 413. |
+| `STRATA_WORKER_ALLOW_LOCAL_HOSTS` | `false`              | Bypass the SSRF defense that rejects manifest URLs resolving to private / loopback IPs. Only set for tests or local dev with 127.0.0.1 build servers; production deployments leave it unset. |
 
 ## Rate Limiting
 
@@ -127,7 +155,7 @@ Strata is configured via environment variables (prefixed with `STRATA_`) or a `[
 | Variable                       | Default  | Description                                                  |
 | ------------------------------ | -------- | ------------------------------------------------------------ |
 | `STRATA_AI_BASE_URL`           | `None`   | OpenAI-compatible API base URL                               |
-| `STRATA_AI_MODEL`              | `None`   | Model identifier (e.g. `claude-sonnet-4-20250514`, `gpt-4o`) |
+| `STRATA_AI_MODEL`              | `None`   | Model identifier (e.g. `claude-sonnet-4-6`, `gpt-5.4`)       |
 | `STRATA_AI_API_KEY`            | `None`   | API key (generic, works with any provider)                   |
 | `STRATA_AI_MAX_CONTEXT_TOKENS` | `100000` | Max context tokens sent to the model                         |
 | `STRATA_AI_MAX_OUTPUT_TOKENS`  | `4096`   | Max output tokens requested                                  |
