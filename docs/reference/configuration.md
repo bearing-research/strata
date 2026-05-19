@@ -117,7 +117,7 @@ ai_model = "claude-sonnet-4-6"
 
 | Variable                            | Default                     | Description                                                    |
 | ----------------------------------- | --------------------------- | -------------------------------------------------------------- |
-| `STRATA_NOTEBOOK_STORAGE_DIR`       | `/tmp/strata-notebooks`     | Default notebook storage directory                             |
+| `STRATA_NOTEBOOK_STORAGE_DIR`       | `~/.strata/notebooks`       | Default notebook storage directory. (Pre-2026-05 default was `/tmp/strata-notebooks`; see [Operations & Lifecycle](../deployment/lifecycle.md#notebook-storage-location) for the migration note.) |
 | `STRATA_NOTEBOOK_PYTHON_VERSIONS`   | current server Python minor | Available Python versions (JSON array or comma-separated list) |
 | `STRATA_PERSONAL_MODE_USER_HEADER`  | `None`                      | Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and `discover`/`delete` scope to it. Intended for proxy-fronted personal deployments. |
 

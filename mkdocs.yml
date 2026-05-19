@@ -88,6 +88,7 @@ nav:
     - Configuration: reference/configuration.md
     - Deployment Modes: deployment/modes.md
     - Service Mode: deployment/service-mode.md
+    - Operations & Lifecycle: deployment/lifecycle.md
     - Privacy & Sharing: deployment/privacy.md
     - Docker: deployment/docker.md
     - Fly.io: deployment/fly.md

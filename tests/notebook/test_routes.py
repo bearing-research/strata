@@ -112,7 +112,7 @@ def test_open_notebook():
         assert data["name"] == "Test Notebook"
         assert "session_id" in data
         assert "id" in data
-        assert data["default_parent_path"] == "/tmp/strata-notebooks"
+        assert data["default_parent_path"] == str(Path.home() / ".strata" / "notebooks")
         assert "environment" in data
         assert "python_version" in data["environment"]
         assert "requested_python_version" in data["environment"]
@@ -353,7 +353,7 @@ def test_create_notebook_endpoint():
         data = response.json()
         assert data["name"] == "New Notebook"
         assert "session_id" in data
-        assert data["default_parent_path"] == "/tmp/strata-notebooks"
+        assert data["default_parent_path"] == str(Path.home() / ".strata" / "notebooks")
         assert data["available_python_versions"]
         assert data["default_python_version"] == data["available_python_versions"][0]
         assert "python_selection_fixed" in data

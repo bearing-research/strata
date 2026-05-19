@@ -310,7 +310,9 @@ class StrataConfig(BaseSettings):
     # for a developer running on localhost.
     personal_mode_user_header: str | None = None
     artifact_dir: Path | None = None
-    notebook_storage_dir: Path = Field(default_factory=lambda: Path("/tmp/strata-notebooks"))
+    notebook_storage_dir: Path = Field(
+        default_factory=lambda: Path.home() / ".strata" / "notebooks"
+    )
     notebook_python_versions: list[str] = Field(default_factory=discover_installed_python_minors)
 
     # AI/LLM assistant settings (OpenAI-compatible API)

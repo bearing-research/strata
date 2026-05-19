@@ -400,7 +400,7 @@ def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
     "Create notebook" flow lands the new notebook under the right user.
     """
     deployment_mode = "service"
-    default_parent_path = Path("/tmp/strata-notebooks")
+    default_parent_path = Path.home() / ".strata" / "notebooks"
     available_python_versions = [current_python_minor()]
 
     try:
