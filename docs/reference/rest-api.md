@@ -1,9 +1,90 @@
 # REST API Reference
 
-This page documents the **notebook** REST surface, mounted under `/v1/notebooks`. Strata Core also exposes a `POST /v1/materialize` endpoint for direct artifact materialization, see the [Core Quickstart](../getting-started/core.md) for that surface.
+This page documents the **notebook** REST surface, mounted under `/v1/notebooks`. Strata Core also exposes a `POST /v1/materialize` endpoint for direct artifact materialization; see the [Library Quickstart](../getting-started/core.md) for that surface.
+
+The remote-worker contract — `/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/health` — is documented separately on the [Executor Protocol](executor-protocol.md) page. Those endpoints live on a different process (`strata-worker`), not the main server.
 
 !!! note "Session ID vs Notebook ID"
 Route parameters use the **session ID** (a UUID generated when the notebook is opened), not the persistent `notebook_id` from `notebook.toml`. The session ID is returned by the `open` and `create` endpoints.
+
+## Conventions
+
+### Canonical machine-readable spec
+
+The server exposes a live OpenAPI document at runtime:
+
+| Path | What it serves |
+| --- | --- |
+| `GET /openapi.json` | Full OpenAPI 3.1 schema — request and response models for every endpoint, generated from the FastAPI route definitions. |
+| `GET /docs` | Swagger UI for interactive try-it-out. |
+| `GET /redoc` | ReDoc browser for the same schema. |
+
+When this page and the live spec disagree, the live spec wins — it's generated from the source of truth. This page exists for orientation and walks through the high-traffic flows.
+
+### Authentication
+
+Authentication depends on `deployment_mode`:
+
+| Mode | Default auth | Required headers |
+| --- | --- | --- |
+| `personal` | None (single user) | None |
+| `personal` + `STRATA_PERSONAL_MODE_USER_HEADER` | Caller identity from the named header (set by an authenticating proxy) | The header you configured (e.g. `X-Authenticated-User`) |
+| `service` + `auth_mode="trusted_proxy"` | Proxy-injected identity | `X-Strata-Principal`, `X-Strata-Scopes`, `X-Strata-Proxy-Token`; `X-Tenant-ID` if multi-tenant |
+
+In service mode, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret. Specific scopes are required on top of that:
+
+| Endpoint | Required scope |
+| --- | --- |
+| `POST /v1/cache/clear` | `admin:cache` |
+| (other endpoints) | No scope beyond authenticated principal |
+
+Personal mode with no header configured is effectively trust-on-first-call — anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](../deployment/modes.md); see [Fly.io deployment](../deployment/fly.md#trust-model) for the load-bearing details.
+
+### Error shape
+
+All `4xx` and `5xx` responses use FastAPI's standard JSON shape:
+
+```json
+{"detail": "<human-readable error message>"}
+```
+
+Validation errors (`422`) come from Pydantic and contain structured field info:
+
+```json
+{
+  "detail": [
+    {
+      "loc": ["body", "python_version"],
+      "msg": "String should have at most 16 characters",
+      "type": "string_too_long"
+    }
+  ]
+}
+```
+
+### Status codes you'll see
+
+| Status | Common cause |
+| --- | --- |
+| `200` | Success |
+| `204` | Success, no body (e.g. `DELETE` operations) |
+| `400` | Malformed request (invalid path, bad enum value, ACL block) |
+| `401` | Service mode auth header missing or proxy-token mismatch |
+| `403` | Authenticated, but missing the required scope (e.g. `admin:cache`) — returned as `404` if `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
+| `404` | Notebook session not found, or hidden 403 (see above) |
+| `409` | Conflict — concurrent environment job, conflicting cell edit, or attempt to use a destructive endpoint outside personal mode |
+| `413` | Request body or scan response exceeded the configured byte cap |
+| `422` | Pydantic validation error on the request body |
+| `429` | Rate limit exceeded — global, per-client, or per-tenant |
+| `500` | Server bug — captured to logs with the request ID |
+
+### Request IDs
+
+Every request gets an `X-Request-ID` response header (and the same value is echoed if the client sent one in). Log lines and traces include this ID — copy it when filing bugs.
+
+### Tenancy
+
+In multi-tenant deployments, the `X-Tenant-ID` header (1–64 alphanumeric, `_`, `-`) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into cache keys, artifact paths, and QoS limiter pools. ACL evaluation is **deny-first**: explicit denies cannot be overridden by allows. See [Service Mode](../deployment/service-mode.md) for the full contract.
 
 ## Notebook Lifecycle
 

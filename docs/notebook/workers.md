@@ -22,6 +22,8 @@ Strata Notebook can dispatch individual cells to remote machines via the **execu
 
 Cells run in **the worker's Python environment**, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into the worker image before launching it. Unlike Strata's own server, the worker process does **not** require a uv-managed env — it can be pip-installed into a plain Docker image.
 
+For the wire-level contract — request envelopes, response bundle format, error codes, the pull-model with signed URLs — see the [Executor Protocol](../reference/executor-protocol.md) reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use `strata-worker`.
+
 ## Quick start: run a worker locally
 
 Start by getting a worker running on your own machine. This verifies your install before you spend time on a cloud deploy, and the same `# @worker name` annotation works against both local and cloud workers.

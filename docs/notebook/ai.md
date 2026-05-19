@@ -100,3 +100,38 @@ The agent runs as a background task with a 10-iteration limit. Progress events a
 - "Fix the error in cell c3 and run it again"
 
 The agent works best for additive tasks (creating new cells, installing packages). For complex refactoring, use Chat mode to discuss the approach first.
+
+### Safety surface
+
+Before granting the assistant write access, understand what it can and can't do.
+
+**Approval-gated tools.** `delete_cell` and `add_package` always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after **120 s** and is treated as a decline so a closed tab doesn't leave the loop hanging. Approval can be skipped with the **Auto-approve** toggle in the AI panel footer — that suppresses the gate for the remainder of the session.
+
+**Non-gated mutating tools.** `create_cell`, `edit_cell`, and `run_cell` execute without prompting. `edit_cell` overwrites the cell source; `run_cell` executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to `cells/*.py`, so git is the practical undo for `edit_cell` and `delete_cell`. Side effects of `run_cell` — files written, packages mutated, API calls made — are not reversible.)
+
+**Loop bounds.**
+
+| Bound | Default | Source |
+| --- | --- | --- |
+| Iterations (tool-use rounds) | **10** | `max_iterations` in `run_agent_loop` |
+| Approval timeout | **120 s** | `make_approval_callback` |
+| Conversation memory | **12 turns** (6 user/assistant pairs) | `HISTORY_MAX_TURNS` |
+| Per-call output tokens | `STRATA_AI_MAX_OUTPUT_TOKENS` (default 4096) | LLM config |
+| Per-call context tokens | `STRATA_AI_MAX_CONTEXT_TOKENS` (default 100000) | LLM config |
+
+There is **no aggregate token budget** across iterations — a 10-iteration run can consume up to 10× the per-call limits. If you're using a metered provider, expect costs roughly proportional to (notebook context size + conversation history + tool-call traces) × iterations.
+
+**What's NOT bounded.**
+
+- **Package allowlist.** `add_package` accepts any pip-compatible package spec. Approval-gated, so the user sees the spec before install, but there's no server-side allowlist or signature check. `pandas>=2.0` and `evil-package@git+https://...` both pass the same gate.
+- **Mount / credential access.** `run_cell` executes in the notebook's normal execution context. It sees the notebook's mounts, env vars (including any unblanked secrets in the runtime panel), and any artifacts already in the store. Don't grant agent access to a notebook with production credentials unless you also trust the assistant's prompts.
+- **Network access from cells.** No sandboxing. A cell created and run by the agent can make outbound HTTP calls, read/write to mounted buckets, hit external APIs — same as a cell you wrote by hand.
+- **Filesystem reads outside the notebook directory.** Same as a hand-written cell — Python `open()` works wherever the strata-server process has permission. Inside a Docker / Fly deployment this is usually limited to the container, but a local-dev `uv run strata-server` has full user-account access.
+
+**Conversation memory is per-notebook.** History is keyed on the notebook session and persists in memory while the server is running. Restarting `strata-server` clears it; explicitly clicking **Clear** in the panel also clears it.
+
+**Recommended posture.**
+
+- For routine work, leave Auto-approve off so destructive actions surface a confirm.
+- Don't put production database credentials in a notebook the agent has access to; use a separate notebook (or a service-mode deployment with proxy auth).
+- After an agent run, review the diff in `cells/*.py` before pushing — the agent can rewrite cells without ceremony.

@@ -8,6 +8,12 @@ The notebook UI communicates with the backend via a WebSocket connection for rea
 ws://localhost:8765/v1/notebooks/ws/{session_id}
 ```
 
+The `{session_id}` is the one returned by `POST /v1/notebooks/open` or `/create`. A session is single-process: opening the same notebook from a second tab returns a different session ID and runs an isolated execution context.
+
+In service mode (proxy auth), the same headers required for REST endpoints — `X-Strata-Principal`, `X-Strata-Proxy-Token`, and `X-Tenant-ID` if multi-tenant — must be present on the WebSocket upgrade. A missing or invalid token closes the connection with `1008 Policy Violation`.
+
+## Envelope
+
 All messages are JSON with this shape:
 
 ```json
@@ -18,6 +24,8 @@ All messages are JSON with this shape:
   "payload": { ... }
 }
 ```
+
+`seq` and `ts` are present on server → client messages; the server doesn't require them on client → server. See [Sequence numbers](#sequence-numbers) below.
 
 ## Client → Server Messages
 
@@ -121,3 +129,35 @@ All messages are JSON with this shape:
 | Type    | Payload              | Description    |
 | ------- | -------------------- | -------------- |
 | `error` | `{ "error": "..." }` | Protocol error |
+
+## Sequence numbers
+
+Every server → client message carries a `seq` from a single counter scoped to the **notebook session** (not the WebSocket connection). The counter increments on every outbound message; it persists across reconnects to the same session and only resets when the session itself is closed (via `DELETE /v1/notebooks/{session_id}` or a server restart).
+
+What the client uses `seq` for:
+
+- **Ordering.** Messages arrive in `seq` order under normal conditions. If your client coalesces state updates, key dedupe on `seq` rather than `type`.
+- **Gap detection across reconnects.** After reconnecting, the first message you receive may have a `seq` far higher than the last one you saw — events emitted while you were disconnected are not buffered. Treat any gap (or any reconnect) as a reason to send `notebook_sync` and replace local state.
+- **One-way ack.** The client doesn't echo `seq` back; the server tracks no per-connection ack state.
+
+## Reconnection semantics
+
+Disconnects happen — proxy timeouts, network drops, server restarts, tab sleep. The recovery protocol:
+
+1. **Client reconnects** to `ws://.../v1/notebooks/ws/{session_id}` with the same session ID. The session itself is in-memory on the server and survives reconnects; it's cleaned up only when closed explicitly via `DELETE /v1/notebooks/{session_id}` or when the server restarts.
+2. **Server accepts the reconnect** and resumes emitting messages from the session's existing `seq` counter (continuing, not resetting).
+3. **Client sends `notebook_sync`** as its first message after reconnecting. The server responds with `notebook_state` containing the full current state (cells, DAG, cell statuses, latest display outputs).
+4. **Client replaces local state** with the synced payload and resumes listening.
+
+There is **no replay** of missed messages — events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_iteration_progress` for a `@loop` cell, `cascade_progress`) are not.
+
+## Close codes
+
+| Code | Meaning |
+| --- | --- |
+| `1000` | Normal closure (client or server initiated) |
+| `1008` | Policy violation — session not found, ownership mismatch in per-user personal mode, or service-mode auth failure on the upgrade |
+
+If the session has been closed server-side (notebook deleted, server restart), the WebSocket upgrade is refused with `1008`. The client should call `POST /v1/notebooks/open` to start a new session.
+
+The server does not send protocol-level pings; the WebSocket library's default frame keepalive is what holds idle connections open. If your client sees no traffic for an extended period and you can't tell whether the connection is live, the safest probe is to send `notebook_sync` and watch for the response.

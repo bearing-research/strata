@@ -81,6 +81,7 @@ nav:
   - API Reference:
     - REST API: reference/rest-api.md
     - WebSocket Protocol: reference/websocket.md
+    - Executor Protocol: reference/executor-protocol.md
     - notebook.toml Schema: reference/notebook-toml.md
   - Deployment:
     - Installation: getting-started/installation.md
