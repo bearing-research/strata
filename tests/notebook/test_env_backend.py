@@ -118,17 +118,17 @@ def test_detect_uv_for_empty_directory(tmp_path: Path):
 
 
 def test_override_uv(tmp_path: Path):
-    (tmp_path / "notebook.toml").write_text('[strata]\nbackend = "uv"\n')
+    (tmp_path / "notebook.toml").write_text('[environment]\nbackend = "uv"\n')
     assert _read_backend_override(tmp_path) == "uv"
 
 
 def test_override_attached(tmp_path: Path):
-    (tmp_path / "notebook.toml").write_text('[strata]\nbackend = "attached"\n')
+    (tmp_path / "notebook.toml").write_text('[environment]\nbackend = "attached"\n')
     assert _read_backend_override(tmp_path) == "attached"
 
 
 def test_override_missing_when_unset(tmp_path: Path):
-    (tmp_path / "notebook.toml").write_text("[strata]\n")
+    (tmp_path / "notebook.toml").write_text("[environment]\n")
     assert _read_backend_override(tmp_path) is None
 
 
@@ -140,24 +140,14 @@ def test_override_unknown_value_ignored(tmp_path: Path):
     """Garbage values fall back to detection rather than crashing.
     A typo in notebook.toml should not prevent the user from opening
     their work — they'd never recover without command-line access."""
-    (tmp_path / "notebook.toml").write_text('[strata]\nbackend = "conda"\n')
+    (tmp_path / "notebook.toml").write_text('[environment]\nbackend = "conda"\n')
     assert _read_backend_override(tmp_path) is None
 
 
 def test_override_malformed_toml_ignored(tmp_path: Path):
     """Same reasoning as the unknown-value case: corrupt notebook.toml
     falls back to detection."""
-    (tmp_path / "notebook.toml").write_text("[strata\nbackend =")
-    assert _read_backend_override(tmp_path) is None
-
-
-def test_override_legacy_environment_section_ignored(tmp_path: Path):
-    """The override lives under [strata] specifically -- a user who
-    writes it under [environment] (the historical Strata section that
-    held legacy runtime metadata) gets detection, not the override.
-    The parser strips [environment] aggressively, so honoring it here
-    would be a half-supported path that disappears on the next save."""
-    (tmp_path / "notebook.toml").write_text('[environment]\nbackend = "attached"\n')
+    (tmp_path / "notebook.toml").write_text("[environment\nbackend =")
     assert _read_backend_override(tmp_path) is None
 
 
@@ -179,7 +169,7 @@ def test_get_backend_override_uv_takes_over_stdlib_venv(tmp_path: Path):
     detection so the user can promote a hand-managed venv into a
     uv-managed one."""
     _write_pyvenv(tmp_path, _STDLIB_PYVENV)
-    (tmp_path / "notebook.toml").write_text('[strata]\nbackend = "uv"\n')
+    (tmp_path / "notebook.toml").write_text('[environment]\nbackend = "uv"\n')
     assert isinstance(get_backend(tmp_path), UvBackend)
 
 
@@ -189,7 +179,7 @@ def test_get_backend_override_attached_hands_off_uv_venv(tmp_path: Path):
     own tooling."""
     _write_pyvenv(tmp_path, _UV_PYVENV)
     (tmp_path / "uv.lock").write_text("")
-    (tmp_path / "notebook.toml").write_text('[strata]\nbackend = "attached"\n')
+    (tmp_path / "notebook.toml").write_text('[environment]\nbackend = "attached"\n')
     assert isinstance(get_backend(tmp_path), AttachedBackend)
 
 

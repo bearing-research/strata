@@ -362,15 +362,6 @@ class NotebookToml(BaseModel):
             "environment."
         ),
     )
-    strata: dict[str, Any] = Field(
-        default_factory=dict,
-        description=(
-            "Strata-specific notebook config under [strata]. Currently "
-            'holds the optional ``backend = "uv" | "attached"`` env-backend '
-            "override; future Strata-specific config that doesn't belong "
-            "to an existing namespace lands here too."
-        ),
-    )
     # Preserved in TOML round-trip but not used at runtime
     artifacts: dict = Field(default_factory=dict)
     environment: dict = Field(default_factory=dict)

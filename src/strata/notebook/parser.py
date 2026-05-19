@@ -177,7 +177,6 @@ def parse_notebook(directory: Path) -> NotebookState:
         variant_groups=_parsed_variant_groups,
         ai=toml_data.get("ai", {}),
         secret_manager=toml_data.get("secret_manager", {}),
-        strata=toml_data.get("strata", {}),
         artifacts=toml_data.get("artifacts", {}),
         environment=toml_data.get("environment", {}),
         cache=toml_data.get("cache", {}),
