@@ -5,7 +5,7 @@ Strata Core is the programmatic materialization and artifact layer. Use this whe
 ## The primitive
 
 ```
-materialize(inputs, transform) → artifact
+materialize(inputs, transform, environment) → artifact
 ```
 
 This gives you:

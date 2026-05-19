@@ -94,7 +94,7 @@ Re-run:        load data (✓)   → clean (✓)  → train (✓)   → evaluate
 ```
 
 This isn't a feature bolted on. It's the architecture. Every cell
-execution is a `materialize(inputs, transform) → artifact` operation,
+execution is a `materialize(inputs, transform, environment) → artifact` operation,
 and the cache is correct by construction because it's keyed on content,
 not time.
 

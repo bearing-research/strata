@@ -2,7 +2,7 @@
 
 ## Architecture
 
-Strata Notebook is a content-addressed compute graph over Python. Every cell output is an artifact, and every cell execution is a `materialize(inputs, transform) → artifact` operation.
+Strata Notebook is a content-addressed compute graph over Python. Every cell output is an artifact, and every cell execution is a `materialize(inputs, transform, environment) → artifact` operation.
 
 ```
 ┌─────────────────────────────────────────────┐

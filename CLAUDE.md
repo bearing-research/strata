@@ -8,7 +8,7 @@ Strata is a **materialization and persistence layer** for long-running, iterativ
 expensive computations. It exposes a single primitive:
 
 ```
-materialize(inputs, transform) → artifact
+materialize(inputs, transform, environment) → artifact
 ```
 
 Results are immutable + versioned, identical computations are deduplicated via a
@@ -154,7 +154,7 @@ wires up a `SqlCatalog` + sample table. The canonical fixture table is
 
 Strata Notebook is a content-addressed compute graph over Python with an
 interactive UX. Every cell output is a Strata artifact; every cell execution
-is `materialize(inputs, transform) → artifact`. The notebook is an
+is `materialize(inputs, transform, environment) → artifact`. The notebook is an
 **orchestration layer** over Strata (cascade planning, staleness tracking);
 the cell harness is the **executor**.
 
