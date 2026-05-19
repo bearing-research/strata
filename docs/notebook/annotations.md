@@ -101,6 +101,20 @@ model = torch.nn.Linear(384, 10).cuda()
 
 Format: `# @env KEY=value`. Multiple `@env` lines are supported. The variable is available in `os.environ` during cell execution.
 
+!!! warning "Don't put secrets in `# @env`"
+    `# @env` values live in **committed cell source** (`cells/*.py`).
+    The sensitive-key blanking that the notebook.toml `[env]` writer
+    applies (KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL values blanked
+    before commit) does **not** apply to `# @env` — the literal value
+    you type goes straight to git.
+
+    For API keys and other secrets, use the notebook's `[env]` block
+    in `notebook.toml` (blanked automatically) or the Runtime panel
+    in the UI (kept in the server process only). See
+    [notebook.toml `[env]`](../reference/notebook-toml.md#env-notebook-environment-variables).
+    `# @env` is for non-sensitive overrides like `CUDA_VISIBLE_DEVICES`
+    or `OMP_NUM_THREADS`.
+
 ---
 
 ## @mount
@@ -165,7 +179,10 @@ Force the response format.
 # @output json
 ```
 
-Currently supports `json`. Auto-applied when `@output_schema` is set.
+Accepts `json` (the response is parsed/coerced as JSON) or `text`
+(free-form text — the default). Auto-set to `json` when
+`@output_schema` is present, so the schema and `# @output json` don't
+need to appear together.
 
 ### `@output_schema`
 
