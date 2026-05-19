@@ -189,11 +189,12 @@ still moving:
 
 ## Library usage
 
-The notebook is built on a content-addressed materialization layer
-that can also be driven directly from Python via the `StrataClient`
-HTTP client. The client talks to a running Strata server, so this
-workflow has two steps: start the server, then call it from your
-code.
+Strata's HTTP API exposes the materialization layer directly,
+driveable from Python via `StrataClient`. Useful for direct table
+scans, custom transforms, and headless workflows; the notebook
+executor is a separate pipeline that writes to the same artifact
+store. The client talks to a running Strata server, so this workflow
+has two steps: start the server, then call it from your code.
 
 ```bash
 # 1. Install + start the server (in a uv-managed env).

@@ -34,17 +34,20 @@ producing artifacts that flow through an auto-built DAG.
 
 ---
 
-## Strata Core
+## Use Strata as a library
 
-The notebook is built on Strata Core, a standalone materialization
-and artifact layer. Core can also be used independently as a Python
-client library and REST API for any workflow that needs provenance-based
-caching, lineage tracking, or Iceberg table scanning.
+Strata's HTTP API exposes the materialization layer directly,
+driveable from Python via `StrataClient`. Useful for direct table
+scans, custom transforms, and headless workflows; the notebook
+executor is a separate pipeline that writes to the same artifact
+store. The client talks to a running Strata server, so this workflow
+has two steps: start the server, then call it from your code.
 
 ```python
+# Prereq: `uv run strata-server` running in another terminal.
 from strata import StrataClient
 
-client = StrataClient()
+client = StrataClient(base_url="http://localhost:8765")
 artifact = client.materialize(
     inputs=["file:///warehouse#db.events"],
     transform={"executor": "scan@v1", "params": {}},
@@ -52,7 +55,7 @@ artifact = client.materialize(
 table = client.fetch(artifact.uri)
 ```
 
-[:octicons-arrow-right-24: Core API Quickstart](getting-started/core.md){ .md-button }
+[:octicons-arrow-right-24: Library Quickstart](getting-started/core.md){ .md-button }
 
 ---
 

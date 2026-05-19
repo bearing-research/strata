@@ -47,7 +47,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v8.1.0
       - name: Install Strata
-        run: uv pip install --system strata-notebook
+        # Strata refuses to start outside a uv-managed env, so install
+        # as a uv tool (creates a uv-marked venv at ~/.local/share/uv/
+        # tools/strata-notebook and adds the CLI to PATH).
+        run: uv tool install strata-notebook
       - name: Run notebook
         run: strata run ./notebooks/daily_report --format json
         env:
