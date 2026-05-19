@@ -2,9 +2,22 @@
 
 ## Prerequisites
 
-- **Python 3.12+**
-- **Rust toolchain** (for the native Arrow IPC extension)
-- **Node.js 25+** (only if building the frontend from source)
+- **[uv](https://docs.astral.sh/uv/) ≥ 0.8** — install via the
+  [uv installer](https://docs.astral.sh/uv/getting-started/installation/)
+  (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux;
+  PowerShell installer on Windows). uv fetches a compatible Python
+  automatically, so you don't need Python 3.12+ pre-installed. Strata
+  refuses to start outside a uv-managed env.
+- **[Rust toolchain](https://rustup.rs/)** (`rustup`) — only for
+  source builds (not Docker or `uv add`). Needed by `maturin` to
+  compile the native Arrow IPC extension; `cargo` and `rustc` must
+  be on `PATH` when you run `uv sync`.
+- **[Node.js 25+](https://nodejs.org/)** — only if building the
+  frontend from source.
+
+Windows: source builds work via WSL2 (smoother) or native Windows
+(uv + rustup + Node have Windows installers). Day-to-day dev is on
+macOS/Linux; WSL2 is the better-trodden path.
 
 ## GitHub Codespaces (zero setup)
 
@@ -67,6 +80,24 @@ curl http://localhost:8765/health
 # {"status":"ok"}
 ```
 
+## Commands reference
+
+The PyPI package is `strata-notebook`; the installed Python module
+and CLI binary are both named `strata`.
+
+| Command | What it does |
+| --- | --- |
+| `uv run strata-server` | Start the HTTP server (notebook UI + REST API). Same as `uv run python -m strata`. |
+| `uv run strata run <notebook-dir>` | Headless notebook execution for CI / scheduled runs. See [Headless Runner](../notebook/cli.md). |
+| `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML. See [Export](../notebook/export.md). |
+| `uv run strata import <ipynb-file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory. See [Import from Jupyter](../notebook/import.md). |
+| `uv run strata-worker --port 9000` | Start a remote worker for `# @worker` cells. See [Distributed Workers](../notebook/workers.md). |
+
+The `uv run` prefix ensures the command resolves to the binary
+inside the uv-managed venv. If you've activated the venv
+(`source .venv/bin/activate`), you can drop the prefix and call
+`strata-server` / `strata` / `strata-worker` directly.
+
 ## Development Commands
 
 ```bash
@@ -74,7 +105,7 @@ curl http://localhost:8765/health
 uv run pytest
 
 # Format and lint
-pre-commit run --all-files
+uv run pre-commit run --all-files
 
 # Type check
 uv run ty check src/

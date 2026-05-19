@@ -37,7 +37,7 @@ docker compose up -d --build
 # Or from source — requires uv (see Requirements below).
 uv sync
 cd frontend && npm ci && npm run build && cd ..
-STRATA_DEPLOYMENT_MODE=personal uv run strata-server
+uv run strata-server
 # Then open http://localhost:8765
 ```
 
@@ -45,22 +45,32 @@ STRATA_DEPLOYMENT_MODE=personal uv run strata-server
 
 Runtime (Docker or `uv run strata-server`):
 
-- [uv](https://docs.astral.sh/uv/) ≥ 0.8 — Strata refuses to start
-  outside a uv-managed environment. The startup check looks for the
-  `uv = <version>` marker that uv writes to `pyvenv.cfg`; `uv run` and
-  `uvx` produce envs with this marker, hand-rolled `python -m venv`
+- **[uv](https://docs.astral.sh/uv/) ≥ 0.8** — install via the
+  [uv installer](https://docs.astral.sh/uv/getting-started/installation/)
+  (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux;
+  PowerShell installer on Windows). Strata refuses to start outside
+  a uv-managed environment: the startup check looks for the
+  `uv = <version>` marker that uv writes to `pyvenv.cfg`; `uv run`
+  and `uvx` produce envs with this marker, hand-rolled `python -m venv`
   venvs do not. Conda and pip-venv users need to install uv and
   re-launch Strata from a uv-managed env — existing data and other
   environments are untouched, but Strata's own runtime has to be
-  uv-managed.
+  uv-managed. uv fetches a matching Python for you, so you don't
+  need Python pre-installed.
 
 Source build (only if you're building from this repo, not using
 Docker or `uv add strata-notebook`):
 
-- A Rust toolchain (rustup), for `maturin` to compile the native
-  extension.
-- Node 25+ / npm, for the frontend `npm ci && npm run build` step.
+- **[Rust toolchain](https://rustup.rs/)** (rustup) — for `maturin`
+  to compile the native extension. Once installed, `cargo` and
+  `rustc` need to be on `PATH` so `uv sync` can invoke them.
+- **[Node 25+ / npm](https://nodejs.org/)** — for the frontend
+  `npm ci && npm run build` step.
 - Python 3.12+ is handled automatically by `uv sync`.
+
+Windows: source builds work via WSL2 (smoother) or native Windows
+(uv + rustup + Node have Windows installers). Day-to-day dev is on
+macOS/Linux, so WSL2 is the better-trodden path.
 
 Why uv at runtime: the notebook subsystem shells out to `uv` to
 manage per-notebook `.venv/` directories, and the project's dev
