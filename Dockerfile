@@ -93,14 +93,24 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM ${UV_IMAGE} AS runtime
 ENV UV_LINK_MODE=copy
 
+# Install into a uv-managed venv. Strata refuses to start outside one
+# (see src/strata/_uv_runtime.py); ``--system`` would leave the
+# container's Python without the ``uv = <version>`` marker that the
+# startup guard reads from pyvenv.cfg. ``uv venv`` writes that marker;
+# subsequent ``uv pip install`` calls without ``--system`` target the
+# active venv via $VIRTUAL_ENV.
+ENV VIRTUAL_ENV=/opt/strata-venv
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
 # Copy and install the pinned runtime dependency set first, then the wheel.
 # This keeps image installs aligned with uv.lock and avoids re-resolving the
 # wheel's dependencies during the final install step.
 COPY --from=builder /build/dist/runtime-requirements.txt /tmp/
 COPY --from=builder /build/dist/*.whl /tmp/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -r /tmp/runtime-requirements.txt && \
-    uv pip install --system --no-deps /tmp/*.whl && \
+    uv venv $VIRTUAL_ENV && \
+    uv pip install -r /tmp/runtime-requirements.txt && \
+    uv pip install --no-deps /tmp/*.whl && \
     rm /tmp/*.whl /tmp/runtime-requirements.txt
 
 # Copy the built frontend
