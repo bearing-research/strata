@@ -31,13 +31,19 @@ local, S3, GCS, Azure.
 ## Build & Development
 
 ```bash
-uv sync                                   # install + build Rust ext
+uv sync --all-extras                      # install + build Rust ext (matches CI)
 uv run pytest                             # all tests
 uv run pytest tests/test_smoke.py -v      # one file
-pre-commit run --all-files                # format + lint
+uv run pre-commit run --all-files         # format + lint
 uv run ty check src/                      # type check (Astral)
 uv run python -m strata                   # start server
 ```
+
+`--all-extras` is what CI runs (`.github/workflows/ci.yml`). Plain
+`uv sync` works for users who only want to run the server, but the
+test suite's harness fixtures point the per-notebook venv at the
+dev interpreter, so the dev env needs the `[notebook]` extra
+(orjson, pyarrow, cloudpickle, …) for cell-execution tests to pass.
 
 ## Architecture
 

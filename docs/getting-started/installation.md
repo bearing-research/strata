@@ -101,6 +101,12 @@ inside the uv-managed venv. If you've activated the venv
 ## Development Commands
 
 ```bash
+# Sync with all optional extras — matches CI. Required for the test
+# suite because the harness fixtures point the per-notebook venv at
+# the dev interpreter, so the dev env needs the [notebook] extra
+# (orjson, pyarrow, cloudpickle) for cell-execution tests.
+uv sync --all-extras
+
 # Run all tests
 uv run pytest
 
