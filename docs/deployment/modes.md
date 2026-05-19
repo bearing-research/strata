@@ -1,28 +1,48 @@
 # Deployment Modes
 
-Strata runs in one of two deployment modes. The mode decides whether the
-server accepts writes, who it trusts, and how strict it is about network
-binding.
+Strata's `deployment_mode` is binary — `personal` or `service` — but
+`personal` supports two flavors depending on whether
+`STRATA_PERSONAL_MODE_USER_HEADER` is set. In practice you're choosing
+between three shapes.
 
-## Summary
+## Decision matrix
 
-| | Personal | Service |
-|---|---|---|
-| **Audience** | Single developer on a laptop | Multi-user hosted deployment |
-| **Writes** | Enabled (`writes_enabled=True`) | Disabled at the surface; server transforms only |
-| **Auth** | None (`auth_mode="none"`) | Trusted proxy injects identity headers |
-| **Multi-tenancy** | Disabled | Optional (`multi_tenant_enabled=True`) |
-| **Default artifact dir** | `~/.strata/artifacts` | Must be set explicitly (or use S3/GCS/Azure) |
-| **Network binding** | Loopback only by default | Unrestricted |
+| | **Personal** | **Personal + auth proxy** | **Service** |
+| --- | --- | --- | --- |
+| **Best for** | One developer, laptop, single notebook open | 5–20 trusted users behind Cloudflare Access / Pomerium / etc. | Multi-tenant team or customer-facing |
+| **Writes** | Enabled | Enabled (per-user filter on discover/delete) | Server-side transforms only |
+| **Auth** | None | Identity from `STRATA_PERSONAL_MODE_USER_HEADER` (proxy injects) | `X-Strata-Principal` + `X-Strata-Proxy-Token` from a trusted proxy |
+| **Identity scoping** | No scoping (single user) | Per-user filter on `discover` / `delete`; shared artifact store | Per-tenant cache keys, storage dirs, QoS pools |
+| **Multi-tenancy** | n/a | n/a | Optional (`multi_tenant_enabled=true`) |
+| **ACLs** | Not evaluated | Not evaluated | Deny-first (`acl_config`) |
+| **Default artifact dir** | `~/.strata/artifacts` | `~/.strata/artifacts` | Must be set explicitly (or blob backend) |
+| **Network binding** | Loopback only | Non-loopback with `allow_remote_clients_in_personal=true` | Unrestricted |
+| **Used by Strata's hosted preview** | – | ✓ (Fly.io + Cloudflare Access) | – |
+| **Use in production for sharing?** | ❌ Anyone on the network can write | ⚠️ Only behind a real auth proxy, small trusted group | ✓ |
 
-## Choosing a mode
+The rows that drive the choice are typically **Writes** (does anyone
+who reaches the URL get to mutate?), **Auth** (who decides who's
+allowed?), and **Identity scoping** (what's isolated and what's
+shared?). The flags that follow are the consequences.
 
-- **Personal**: running the notebook on your own machine. Fast to start,
-  nothing to configure, writes land in your home directory. This is the
-  default for Docker Compose and the "from source" instructions.
-- **Service**: hosting Strata for a team, behind an ingress proxy that
-  authenticates users. Writes must go through server-side transforms so
-  the platform controls what gets materialized and by whom.
+## Choosing a shape
+
+- **Personal**: running the notebook on your own machine. Fast to
+  start, nothing to configure, writes land in your home directory.
+  This is the default for Docker Compose and the "from source"
+  instructions.
+- **Personal + auth proxy**: small team sharing one Strata instance
+  with the proxy handling auth. Cheap to operate, no per-user
+  isolation (artifact store is shared), but each user gets their
+  own list in "Open existing." See [Sharing personal mode with a
+  small group](#sharing-personal-mode-with-a-small-group) below.
+  This is what Strata's own hosted preview at
+  [strata-notebook.fly.dev](https://strata-notebook.fly.dev) runs.
+  See [Fly.io deployment](fly.md) for the deployment recipe.
+- **Service**: hosting Strata for users you can't fully trust, or
+  with sensitive data, or with multi-tenant isolation requirements.
+  Writes go through server-side transforms so the platform controls
+  what gets materialized and by whom. See [Service Mode](service-mode.md).
 
 ## Setting the mode
 

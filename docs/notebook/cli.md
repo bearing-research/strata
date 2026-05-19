@@ -20,14 +20,26 @@ dispatch, and mount resolution all behave the same way.
 strata run <notebook_dir> [options]
 ```
 
+`<notebook_dir>` must be a path to a directory containing `notebook.toml`
+(plus `cells/`, `pyproject.toml`, `uv.lock`). It's the same on-disk layout the
+UI works with; you can pass any notebook directory from `STRATA_NOTEBOOK_STORAGE_DIR`
+or anywhere else on the filesystem. `strata run` is **local-only** — it does
+not talk to a running `strata-server` or a service-mode deployment. Each
+invocation opens its own `NotebookSession`, runs the cells, and exits.
+
 ### Options
 
 | Flag          | Description                                                      |
 | ------------- | ---------------------------------------------------------------- |
 | `--force`     | Ignore the artifact cache and re-execute every cell from scratch |
 | `--no-sync`   | Skip `uv sync`; require `.venv/` to already exist                |
-| `--format`    | `human` (default) or `json`                                      |
+| `--format`    | `human` (default) or `json` — both write to stdout               |
 | `--quiet`     | Suppress per-cell status lines (human format only)               |
+
+`--format json` writes one JSON object per cell as it finishes, followed by a
+final summary record, all to **stdout**. Errors and pre-flight diagnostics go
+to stderr regardless of format. Pipe stdout to `jq` for filtering, or capture
+to a file (`strata run ... --format json > run.jsonl`) for later parsing.
 
 ### Exit Codes
 
@@ -36,6 +48,10 @@ strata run <notebook_dir> [options]
 | `0`  | All cells succeeded                                            |
 | `1`  | One or more cells failed                                       |
 | `2`  | Invocation error (bad path, env sync failure, malformed TOML)  |
+
+CI scripts can branch on the exit code; the structured output stays parseable
+even when some cells failed (each failure produces a JSON object with
+`status: "error"` and the traceback).
 
 ## Example: GitHub Actions
 

@@ -171,10 +171,17 @@ Attach a filesystem mount to the cell. Mounts provide read or read-write access 
 ```python
 # @mount raw_data s3://my-bucket/dataset ro
 # @mount scratch file:///tmp/work rw
-df = pd.read_parquet("/mnt/raw_data/events.parquet")
+df = pd.read_parquet(raw_data / "events.parquet")
+scratch / "summary.txt"  # → Path("/tmp/strata/mounts/.../summary.txt")
 ```
 
-Format: `# @mount <name> <uri> [ro|rw]`. Defaults to `ro` (read-only) if the mode is omitted. The mount name must be a valid Python identifier.
+**The mount name becomes a `pathlib.Path` variable in the cell's namespace.** No
+`/mnt/<name>` directory convention — the variable directly references the
+resolved local path (the cached mirror for remote URIs, the URI's local
+filesystem path for `file://` URIs). Use standard `Path` operations: `/` for
+joining, `.read_text()`, `.iterdir()`, etc.
+
+Format: `# @mount <name> <uri> [ro|rw]`. Defaults to `ro` (read-only) if the mode is omitted. The mount name must be a valid Python identifier (it's an injected variable).
 
 ---
 

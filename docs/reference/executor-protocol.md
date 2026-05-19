@@ -106,7 +106,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | `transform.ref` | string (required) | Must be `"notebook_cell@v1"` for the notebook executor. |
 | `transform.params.source` | string (required) | The cell Python source to execute. |
 | `transform.params.timeout_seconds` | float | Execution timeout (default 30). |
-| `transform.params.mounts` | array of MountSpec | Filesystem mounts injected as `Path` variables (see [notebook.toml schema](notebook-toml.md#mounts)). |
+| `transform.params.mounts` | array of MountSpec | Filesystem mounts injected as `Path` variables (see [notebook.toml schema](notebook-toml.md#mounts-filesystem-mounts)). |
 | `transform.params.env` | object | Env vars set in the cell subprocess. |
 | `inputs` | array of `{name, format}` | Each entry references a multipart field with the same `name`. `format` is the content type — `arrow/ipc`, `pickle/object`, `json/object`, `module/import`, `module/cell`, `module/cell-instance`. |
 

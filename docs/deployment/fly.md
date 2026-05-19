@@ -2,7 +2,9 @@
 
 Strata's hosted preview runs on [Fly.io](https://fly.io) at [strata-notebook.fly.dev](https://strata-notebook.fly.dev). This page describes how to replicate that setup for your own single-tenant deployment.
 
-!!! warning "Trust model — read before deploying to a public URL"
+## Trust model
+
+!!! warning "Read before deploying to a public URL"
     The `fly.toml` in this repo deploys Strata in **personal mode** with
     `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL = "true"`. Personal mode
     has no authentication and enables write endpoints (create / delete
