@@ -17,10 +17,7 @@ def _write_pyvenv(prefix: Path, body: str) -> None:
 def test_is_uv_managed_runtime_true_with_marker(tmp_path, monkeypatch):
     _write_pyvenv(
         tmp_path,
-        "home = /opt/python/bin\n"
-        "implementation = CPython\n"
-        "uv = 0.8.13\n"
-        "version_info = 3.13.3\n",
+        "home = /opt/python/bin\nimplementation = CPython\nuv = 0.8.13\nversion_info = 3.13.3\n",
     )
     monkeypatch.setattr("sys.prefix", str(tmp_path))
 
@@ -30,9 +27,7 @@ def test_is_uv_managed_runtime_true_with_marker(tmp_path, monkeypatch):
 def test_is_uv_managed_runtime_false_without_marker(tmp_path, monkeypatch):
     _write_pyvenv(
         tmp_path,
-        "home = /opt/python/bin\n"
-        "implementation = CPython\n"
-        "version_info = 3.13.3\n",
+        "home = /opt/python/bin\nimplementation = CPython\nversion_info = 3.13.3\n",
     )
     monkeypatch.setattr("sys.prefix", str(tmp_path))
 
