@@ -42,7 +42,7 @@ export INFISICAL_HOST="https://your-self-hosted.infisical.com"
 ```bash
 export INFISICAL_CLIENT_ID="..."
 export INFISICAL_CLIENT_SECRET="..."
-uv run uvicorn strata.server:app --host 0.0.0.0 --port 8765
+uv run strata-server
 ```
 
 The credentials only live in the server process, never in `notebook.toml`, `.strata/`, logs, or any commit.

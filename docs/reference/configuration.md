@@ -10,7 +10,7 @@ Strata is configured via environment variables (prefixed with `STRATA_`) or a `[
 | ----------------------------------------- | ----------- | -------------------------------------------- |
 | `STRATA_HOST`                             | `127.0.0.1` | Server bind address                          |
 | `STRATA_PORT`                             | `8765`      | Server port                                  |
-| `STRATA_DEPLOYMENT_MODE`                  | `service`   | `personal` or `service`                      |
+| `STRATA_DEPLOYMENT_MODE`                  | `personal`  | `personal` or `service`                      |
 | `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL` | `false`     | Allow non-localhost clients in personal mode |
 
 ## Cache

@@ -1,5 +1,14 @@
 # Docker Deployment
 
+## Prerequisites
+
+- Docker Engine ≥ 24 with Compose v2 (`docker compose`, not the
+  legacy `docker-compose` script). [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+  bundles both; on Linux install Docker Engine + the
+  [Compose plugin](https://docs.docker.com/compose/install/linux/).
+- ~1.5 GB of disk for the first build; subsequent rebuilds reuse the
+  layer cache.
+
 ## Quick Start
 
 ```bash
