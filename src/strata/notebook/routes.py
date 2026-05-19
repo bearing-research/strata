@@ -1315,44 +1315,6 @@ async def get_notebook_runtime_config(request: Request) -> dict:
     return _serialize_notebook_runtime_config(request)
 
 
-class UpdateEnvironmentBackendRequest(BaseModel):
-    """Body for ``PUT /v1/notebooks/{id}/environment/backend``."""
-
-    backend: Literal["uv", "attached", "auto"]
-
-
-@router.put("/{notebook_id}/environment/backend")
-async def update_environment_backend(
-    notebook_id: str,
-    session: SessionDep,
-    req: UpdateEnvironmentBackendRequest,
-) -> dict:
-    """Set or clear the ``[strata] backend`` override in ``notebook.toml``.
-
-    ``"uv"`` / ``"attached"`` write the corresponding value; ``"auto"``
-    removes the override and restores detection. The endpoint is not
-    gated by ``_require_mutable_backend`` -- the whole point is to
-    let an attached-mode user promote to uv-managed -- but it does
-    refuse while an env mutation is mid-flight to avoid racing with
-    a sync that's already touching the same notebook.toml's lockfile.
-    """
-    from strata.notebook.env_backend import write_backend_override
-
-    if session.has_active_environment_mutation():
-        _raise_environment_busy(
-            session,
-            "Backend selection is blocked while an environment update is in progress.",
-        )
-
-    override = None if req.backend == "auto" else req.backend
-    write_backend_override(session.path, override)
-    # ``reload()`` re-parses notebook.toml AND re-resolves
-    # ``session.backend`` so the new selection takes effect in-process
-    # without requiring session destruction.
-    session.reload()
-    return _serialize_environment_payload(session)
-
-
 @router.post("/{notebook_id}/environment/sync")
 async def sync_environment(notebook_id: str, session: SessionDep) -> dict:
     """Re-sync the notebook environment and invalidate stale runtimes."""

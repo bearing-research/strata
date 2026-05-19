@@ -432,12 +432,6 @@ export interface NotebookEnvironment {
    * every env-mutation button so users don't reach a 409 from a stale
    * UI. */
   supportsMutations: boolean
-  /** The user's explicit ``[strata] backend = "..."`` choice in
-   * notebook.toml, or null when detection is in effect. Lets the
-   * backend dropdown highlight the *selected* option, distinct from
-   * the *resolved* ``backend`` (which can't tell "user picked uv"
-   * from "auto-detected uv"). */
-  backendOverride: EnvironmentBackend | null
 }
 
 export interface NotebookRuntimeConfig {

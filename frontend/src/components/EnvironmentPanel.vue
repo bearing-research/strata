@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import { useStrata } from '../composables/useStrata'
 import PythonVersionModal from './PythonVersionModal.vue'
@@ -21,7 +21,6 @@ const {
   addDependencyAction,
   removeDependencyAction,
   syncEnvironmentAction,
-  updateEnvironmentBackendAction,
   exportRequirementsAction,
   previewRequirementsImportAction,
   importRequirementsAction,
@@ -157,48 +156,6 @@ const backendBadgeLabel = computed(() =>
 const backendBadgeClass = computed(
   () => `env-backend-badge backend-${notebook.environment.backend}`,
 )
-
-const backendMenuOpen = ref(false)
-const backendMenuBusy = ref(false)
-const backendMenuError = ref<string | null>(null)
-
-/** The dropdown's "selected" indicator follows the override, not the
- * resolved backend, so the user sees what they picked even if
- * detection would have landed on the same value. */
-const backendMenuSelection = computed<'uv' | 'attached' | 'auto'>(
-  () => notebook.environment.backendOverride ?? 'auto',
-)
-
-function toggleBackendMenu() {
-  if (backendMenuBusy.value) return
-  backendMenuOpen.value = !backendMenuOpen.value
-  if (backendMenuOpen.value) backendMenuError.value = null
-}
-
-async function pickBackend(backend: 'uv' | 'attached' | 'auto') {
-  if (backend === backendMenuSelection.value) {
-    backendMenuOpen.value = false
-    return
-  }
-  backendMenuBusy.value = true
-  backendMenuError.value = null
-  const result = await updateEnvironmentBackendAction(backend)
-  backendMenuBusy.value = false
-  if (result.error) {
-    backendMenuError.value = result.error
-    return
-  }
-  backendMenuOpen.value = false
-}
-
-// Close the dropdown when the user clicks anywhere else. Click handlers
-// on the button + menu items use ``@click.stop`` so this listener only
-// fires for clicks outside the menu.
-function handleDocumentClick() {
-  if (backendMenuOpen.value) backendMenuOpen.value = false
-}
-onMounted(() => document.addEventListener('click', handleDocumentClick))
-onUnmounted(() => document.removeEventListener('click', handleDocumentClick))
 
 const attachedTooltip =
   'This notebook is attached to a venv Strata does not manage. ' +
@@ -456,64 +413,15 @@ function downloadRequirements() {
           <div class="env-status">
             <span class="status-dot" :class="syncStateClass"></span>
             <span>{{ syncStateLabel }}</span>
-            <div class="env-backend-wrapper">
-              <button
-                type="button"
-                :class="[backendBadgeClass, 'env-backend-button']"
-                :disabled="backendMenuBusy"
-                :title="backendMenuBusy ? 'Switching backend…' : 'Click to change the env backend'"
-                @click.stop="toggleBackendMenu"
-              >
-                {{ backendBadgeLabel }}<span class="env-backend-caret">▾</span>
-              </button>
-              <div v-if="backendMenuOpen" class="env-backend-menu" @click.stop>
-                <button
-                  type="button"
-                  class="env-backend-menu-item"
-                  :class="{ selected: backendMenuSelection === 'uv' }"
-                  :disabled="backendMenuBusy"
-                  @click="pickBackend('uv')"
-                >
-                  <span class="env-backend-menu-label">Powered by uv</span>
-                  <span class="env-backend-menu-help">
-                    Strata manages the venv with uv add / remove / sync.
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  class="env-backend-menu-item"
-                  :class="{ selected: backendMenuSelection === 'attached' }"
-                  :disabled="backendMenuBusy"
-                  @click="pickBackend('attached')"
-                >
-                  <span class="env-backend-menu-label">Attached venv</span>
-                  <span class="env-backend-menu-help">
-                    Strata uses the existing venv read-only; manage packages with your own tooling.
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  class="env-backend-menu-item"
-                  :class="{ selected: backendMenuSelection === 'auto' }"
-                  :disabled="backendMenuBusy"
-                  @click="pickBackend('auto')"
-                >
-                  <span class="env-backend-menu-label">Auto-detect</span>
-                  <span class="env-backend-menu-help">
-                    Clears the override; backend is chosen from uv.lock / pyvenv.cfg.
-                  </span>
-                </button>
-                <div v-if="backendMenuError" class="env-backend-menu-error">
-                  {{ backendMenuError }}
-                </div>
-              </div>
-            </div>
+            <span :class="backendBadgeClass" :title="mutationsBlocked ? attachedTooltip : ''">{{
+              backendBadgeLabel
+            }}</span>
           </div>
           <div v-if="mutationsBlocked" class="env-status-help">
             Strata is attached to a venv you manage yourself. Install / remove packages with your
-            own tooling (pip / poetry / etc.), or click the
-            <strong>Attached venv ▾</strong> badge above and pick <strong>Powered by uv</strong>
-            to let Strata take over.
+            own tooling (pip / poetry / etc.), or set
+            <code>[strata]<br />backend = "uv"</code> in <code>notebook.toml</code> to let Strata
+            take over.
           </div>
           <div v-else class="env-status-help">
             Rebuilds the notebook <code>.venv</code> from <code>pyproject.toml</code> and
@@ -990,90 +898,7 @@ function downloadRequirements() {
 .env-backend-badge.backend-attached {
   background: var(--tint-warning, var(--bg-subtle));
   color: var(--accent-warning, var(--text-secondary));
-}
-
-.env-backend-wrapper {
-  position: relative;
-  display: inline-block;
-}
-
-.env-backend-button {
-  border: none;
-  font: inherit;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.env-backend-button:hover:not(:disabled) {
-  filter: brightness(0.95);
-}
-.env-backend-button:disabled {
-  opacity: 0.6;
-  cursor: progress;
-}
-
-.env-backend-caret {
-  font-size: 8px;
-  opacity: 0.7;
-}
-
-.env-backend-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 20;
-  min-width: 260px;
-  background: var(--bg);
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.env-backend-menu-item {
-  text-align: left;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  padding: 8px 10px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  color: inherit;
-  font: inherit;
-}
-.env-backend-menu-item:hover:not(:disabled) {
-  background: var(--bg-subtle);
-}
-.env-backend-menu-item:disabled {
-  opacity: 0.6;
-  cursor: progress;
-}
-.env-backend-menu-item.selected {
-  background: var(--tint-primary, var(--bg-subtle));
-}
-.env-backend-menu-label {
-  font-weight: 500;
-  font-size: 12px;
-  color: var(--text-primary);
-}
-.env-backend-menu-help {
-  font-size: 11px;
-  color: var(--text-secondary);
-  font-weight: normal;
-}
-.env-backend-menu-error {
-  margin: 4px 6px 2px 6px;
-  padding: 4px 8px;
-  font-size: 11px;
-  border-radius: 4px;
-  background: var(--tint-danger, var(--bg-subtle));
-  color: var(--accent-danger, var(--text-primary));
+  cursor: help;
 }
 
 .env-status-help {
