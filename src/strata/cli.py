@@ -88,6 +88,10 @@ def _dispatch_import(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from strata._uv_runtime import assert_uv_managed_runtime
+
+    assert_uv_managed_runtime()
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 

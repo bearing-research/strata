@@ -6250,6 +6250,10 @@ def main():
     """Run the server."""
     import uvicorn
 
+    from strata._uv_runtime import assert_uv_managed_runtime
+
+    assert_uv_managed_runtime()
+
     config = StrataConfig.load()
     uvicorn.run(
         "strata.server:app",
