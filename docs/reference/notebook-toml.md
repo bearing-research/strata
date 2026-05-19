@@ -188,7 +188,7 @@ timeout = 600                 # cell-level override
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `id` | string (required) | 8-character backend-generated cell ID. Never edit by hand. |
+| `id` | string (required) | Stable cell identifier. Backend generates an 8-character UUID prefix when cells are created via UI / REST; hand-edits can use any unique string (e.g. `seed`, `top-orders`). This is what `@after` and `@loop start_from=` resolve against — **not** `@name`. See [Cell IDs](../notebook/annotations.md#cell-ids). |
 | `file` | string (required) | Path to the cell source under `cells/`. |
 | `language` | `"python"` \| `"prompt"` \| `"sql"` \| `"markdown"` | Default `"python"`. |
 | `order` | float | Display order. Float so cells can be inserted between existing ones without renumbering. Default `0`. |

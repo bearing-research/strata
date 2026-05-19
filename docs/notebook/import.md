@@ -5,6 +5,58 @@ notebook directory. The result is a normal Strata notebook, same
 DAG analysis, same artifact store, same execution model, that you
 can open in the UI, run headlessly, edit, or export.
 
+## What survives, what doesn't
+
+Read this before you decide to import a particular notebook.
+
+**What survives:**
+
+- **Code and markdown cells**, in source order, including variable
+  rebinding patterns like `df = df.dropna()` (Strata's DAG handles
+  read-before-write correctly).
+- **`;`-suppression** of the trailing display (Strata's harness
+  auto-displays bare expressions; the converter detects `df;` and
+  appends a `pass` so the display is skipped).
+- **`%pip install`, `!pip install`, `%conda install`** — packages
+  captured into the new notebook's `pyproject.toml`.
+- **`%env`, `%set_env`** — translated to `# @env KEY=VAL` cell
+  annotations.
+- **`%run script.py`** — translated to `exec(Path(...).read_text())`.
+- **`%%bash`, `%%sh`, `%%script`** — bodies wrapped in
+  `subprocess.run(..., shell=True)`.
+- **`%%writefile`** — translated to `Path(...).write_text(...)`.
+- **`%timeit`, `%time` (line form)** — the magic prefix is dropped;
+  the body keeps running.
+
+**What you lose:**
+
+- **All cell outputs.** Imported cells start blank; first run
+  produces fresh outputs from the resolved environment. This is
+  intentional — the whole point of content-addressed caching is to
+  produce outputs from a known source + env, not to trust whatever
+  was last serialized into the `.ipynb`.
+- **Widgets** (`ipywidgets`, `tqdm.notebook`, custom display).
+  Strata's display protocol covers DataFrames, plots, markdown,
+  images — but interactive JS widgets don't survive.
+- **`%matplotlib inline` / `notebook`.** Dropped. Strata captures
+  figures via the display protocol automatically.
+- **Raw cells.** Skipped entirely (counted in the import report).
+- **`!shell` commands** other than `pip install`. Dropped with a
+  marker comment; assignment-form (`var = !cmd`) drops the command
+  and stubs `var = []` so downstream code still parses. Restore
+  manually with `subprocess.run(...)` if the escape was load-bearing.
+- **Non-Python `%%` cell magics** (`%%R`, `%%ruby`, `%%javascript`,
+  `%%html`, `%%latex`, `%%svg`, `%%markdown`). Dropped.
+- **`%%sql`.** Dropped — convert by hand to a Strata
+  [SQL cell](cells.md#sql-cells) if you want it back.
+- **REPL-inspection magics** (`%who`, `%whos`, `%lsmagic`, `%history`,
+  `%alias`, etc.). Dropped; no Strata equivalent.
+
+Everything that's "dropped" is reported in the import report
+(`<notebook_dir>/import_report.md`) with the exact line number and
+the marker comment placed in the cell source — there's no silent
+data loss.
+
 ## When to use it
 
 - **You arrived from Jupyter** and want to try Strata on a notebook

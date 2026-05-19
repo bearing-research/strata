@@ -38,6 +38,53 @@ Identify 3 research themes.
 
 If no `@name` is set, the DAG view falls back to showing the cell's defined variable names, then the cell ID.
 
+!!! warning "`@name` is a display label, not a referenceable ID"
+    `@name` sets what shows in the DAG view. It is **not** what
+    `@after` or `@loop start_from=` references. Those resolve against
+    the cell's `id` in `notebook.toml`, which is a separate field —
+    see [Cell IDs](#cell-ids) below.
+
+---
+
+## Cell IDs
+
+Every cell has an `id` in `notebook.toml`. That ID is what `@after`
+and `@loop start_from=` reference across cells. The defaults:
+
+- **Created via the UI or REST**: the backend generates an 8-character
+  UUID prefix like `a1b2c3d4`. This is what you'll see in fresh
+  notebooks.
+- **Hand-written notebook.toml**: any string is accepted, as long as
+  it's unique within the notebook. Friendly IDs like `seed`,
+  `threshold`, or `top-orders` are common in example notebooks where
+  the author wants `@after seed` to read like prose.
+
+`notebook.toml` example:
+
+```toml
+cells = [
+    { id = "seed",      file = "seed_database.py", language = "sql",    order = 0 },
+    { id = "threshold", file = "threshold.py",     language = "python", order = 1 },
+    { id = "top-orders", file = "top_orders.py",   language = "sql",    order = 2 },
+]
+```
+
+…then in `cells/top_orders.py`:
+
+```sql
+# @sql connection=warehouse
+# @after seed
+SELECT category, COUNT(*) FROM products GROUP BY category
+```
+
+The `@after seed` resolves to the cell with `id = "seed"`. If you'd
+rather not hand-edit, opening the notebook in the UI also lets you
+rename cell IDs via the cell's metadata panel.
+
+`@name` and `id` are independent: a cell can have `id = "seed"` and
+`@name "Seed database"` simultaneously. The DAG view shows the
+`@name`; `@after` and `@loop start_from=` use the `id`.
+
 ---
 
 ## @worker
@@ -231,9 +278,10 @@ Key/value parameters:
 
 - `max_iter=<N>`, hard upper bound on iterations.
 - `carry=<var>`, the variable threaded between iterations.
-- `start_from=<cell>@iter=<k>`, (optional) resume from another loop cell's
+- `start_from=<cell-id>@iter=<k>`, (optional) resume from another loop cell's
   stored iteration `k`. Useful for forking a converged run to explore a
-  variant.
+  variant. `<cell-id>` is the upstream loop cell's `id` in
+  `notebook.toml` (not its `@name`) — see [Cell IDs](#cell-ids).
 
 ### `@loop_until`
 
@@ -445,6 +493,10 @@ Multiple `@after` lines stack; each cell ID adds one edge. Whitespace-
 separated IDs on a single line work too: `# @after seed migrate`. Self-
 references and unknown cell IDs are silently dropped at the DAG layer
 (annotation_validation surfaces them as a diagnostic for the user).
+
+`<cell-id>` is the `id` field in `notebook.toml`, **not** the cell's
+`@name`. See [Cell IDs](#cell-ids) for how to set friendly IDs like
+`seed` or `migrate`.
 
 The edge participates in upstream/downstream wiring and the topological
 order, but contributes no variable to `consumed_variables`, so it
