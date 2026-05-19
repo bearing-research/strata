@@ -46,7 +46,7 @@ proxy that:
    | Header | Value | Required |
    |---|---|---|
    | `X-Strata-Principal` | Stable user identifier (email, sub claim, etc.) | Yes |
-   | `X-Strata-Tenant` | Tenant the user belongs to, when multi-tenant is on | When `multi_tenant_enabled=true` |
+   | `X-Tenant-ID` | Tenant the user belongs to, when multi-tenant is on | When `multi_tenant_enabled=true` |
    | `X-Strata-Scopes` | Space-separated capability set (e.g. `notebook:read notebook:write admin:cache`) | For scope-gated endpoints |
    | `X-Tenant-ID` | Tenant header, same role as `X-Strata-Tenant`, alternate name (configurable via `tenant_header`) | Either, depending on which header you configured |
    | `X-Strata-Proxy-Token` | Shared secret matching `STRATA_PROXY_TOKEN` | Yes, proves the request came from the proxy, not a direct connection |

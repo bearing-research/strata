@@ -266,6 +266,28 @@ df = pd.DataFrame(triage["items"])
 print(df["priority"].value_counts())
 ```
 
+!!! note "Long schemas don't have an escape hatch yet"
+    `# @output_schema` is parsed as a single JSON value from a single
+    annotation line (`prompt_analyzer.py:143-154`). For real-world
+    schemas this gets long fast and the resulting cell source isn't
+    pretty.
+
+    Two pragmatic workarounds while a multi-line / file-reference
+    syntax is on the backlog:
+
+    - **Generate the schema in an upstream Python cell** and write
+      the schema-driven prompt cell by hand. The Python cell's
+      `json.dumps(...)` keeps the schema readable in source; the
+      prompt cell pastes the result inline.
+    - **Keep the schema in a `schemas/`-style sibling file** inside
+      the notebook directory, and have a setup cell load + cache it
+      as a string. Downstream prompt cells can use a shorter inline
+      schema for caching while documenting the rich version
+      elsewhere.
+
+    Track the multi-line annotation feature in the issue tracker if
+    this is blocking you.
+
 ```text title="Output"
 priority
 high      4
@@ -504,6 +526,44 @@ The [`sql_orders_report`](../examples/sql_orders_report.md) example notebook wal
 | `# @after <cell-id>`                    | Add an ordering-only DAG edge to an upstream cell     |
 
 See [Cell Annotations][a] for the full reference.
+
+---
+
+## Markdown Cells
+
+Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG — they don't produce artifacts, don't participate in cascade execution, and don't have an `id` / variable that downstream cells can reference. They survive saves and exports verbatim.
+
+```markdown
+## Stage 1: Load + Clean
+
+The next two cells pull last quarter's events and drop rows with
+missing timestamps. The clean DataFrame `events_clean` is what
+everything downstream reads.
+```
+
+Create a markdown cell via the **+ Add cell** menu (pick "Markdown") or by setting `language = "markdown"` on a cell entry in `notebook.toml`. The cell source lives in `cells/<id>.md` rather than `.py`.
+
+See [Markdown showcase](../examples/markdown_showcase.md) for what the supported renderers handle (headings, lists, tables, code fences, fenced HTML attributes) and what's stripped by the security guard.
+
+---
+
+## Artifact URIs
+
+Cells expose their outputs as artifacts under a stable URI scheme:
+
+```
+strata://artifact/<artifact_id>@v=<version>
+```
+
+For loop cells, each iteration gets a suffix:
+
+```
+strata://artifact/<artifact_id>@v=<version>@iter=<k>
+```
+
+The `<artifact_id>` is content-addressed (derived from the provenance hash); same code + same inputs + same env = same artifact ID across machines and runs. The `@v=N` version increments only when the same name pointer is re-bound to a new content hash — see [Library usage](../getting-started/core.md) for how named artifacts work in the Core SDK.
+
+Notebook cell outputs follow the pattern `nb_<notebook_id>_cell_<cell_id>_var_<variable>@v=N` for the variable-level artifacts a cell produces. You don't usually need to construct these by hand; the inspect panel surfaces them and `# @loop start_from=<cell-id>@iter=k` references them by cell ID + iteration index, not the full URI.
 
 ---
 

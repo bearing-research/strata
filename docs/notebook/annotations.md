@@ -123,7 +123,8 @@ If no `@worker` is set, the cell runs locally in the notebook's Python environme
 
 ## @timeout
 
-Override the execution timeout for a single cell, in seconds. The default is 30 seconds.
+Override the execution timeout for a single cell, in seconds. The default
+is 30 seconds; the value must satisfy `0 < t ≤ 86400` (one day max).
 
 ```python
 # @timeout 300
@@ -132,6 +133,20 @@ embeddings = model.encode(abstracts, batch_size=256)
 ```
 
 Useful for cells that download data, train models, or call slow external APIs. The timeout applies to the full execution including any remote worker round-trip.
+
+!!! warning "Prompt-cell timeout vs AI API timeout"
+    Prompt cells have two timeouts that can collide silently. The
+    cell-level `# @timeout` (default **30 s**) wraps the whole cell;
+    the AI API call inside has its own timeout from
+    `STRATA_AI_TIMEOUT_SECONDS` / `[ai] timeout_seconds` in
+    `notebook.toml` (default **60 s**).
+
+    With defaults, the cell-level wrap fires first and you get a
+    cell timeout while the API call would have succeeded eventually.
+    Set `# @timeout` on prompt cells to at least
+    `STRATA_AI_TIMEOUT_SECONDS + a few seconds of slack` (e.g.
+    `# @timeout 90`), or lower `STRATA_AI_TIMEOUT_SECONDS` to match
+    the cell budget.
 
 ---
 

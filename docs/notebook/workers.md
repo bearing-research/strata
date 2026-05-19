@@ -122,7 +122,7 @@ my-strata-worker/
 └── .dockerignore
 ```
 
-**`Dockerfile`** — installs `strata-notebook` and your workload deps. Rust is needed because there's no PyPI release yet, so the install builds the native extension from git source.
+**`Dockerfile`** — installs `strata-notebook` and your workload deps. Rust is needed because there's no PyPI release yet, so the install builds the native extension from git source. Once we publish PyPI wheels (tracked for 0.1.0), this Dockerfile drops the Rust toolchain and the builder stage entirely — `pip install strata-notebook` will fetch a pre-built wheel.
 
 ```dockerfile
 FROM python:3.12-slim AS builder

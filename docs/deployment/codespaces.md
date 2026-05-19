@@ -30,3 +30,10 @@ Port **8765** is forwarded automatically with `onAutoForward: "openBrowser"`, so
 ## First-time startup
 
 The initial `postCreateCommand` takes 3-5 minutes (Rust compilation). Subsequent starts are fast since the build is cached in the Codespace volume.
+
+!!! info "Will simplify once PyPI wheels ship"
+    The Rust toolchain install is only required because
+    `strata-notebook` isn't on PyPI yet. Once we publish pre-built
+    wheels (tracked for 0.1.0), the devcontainer can drop the Rust
+    step and rely on `uv add strata-notebook` pulling a wheel
+    directly. Initial setup will drop to well under a minute.
