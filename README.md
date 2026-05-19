@@ -34,49 +34,26 @@ proxy auth. For multi-tenant or hosted deployments, see
 docker compose up -d --build
 # Then open http://localhost:8765
 
-# Or from source. Set personal mode explicitly.
+# Or from source — requires uv (see Requirements below).
 uv sync
 cd frontend && npm ci && npm run build && cd ..
 STRATA_DEPLOYMENT_MODE=personal uv run strata-server
 # Then open http://localhost:8765
 ```
 
-### Heads up: Strata uses uv for per-notebook environments
+### Requirements
 
-You don't need [uv](https://docs.astral.sh/uv/) on your machine to *install*
-Strata (`pip install strata-notebook` is fine). But once you create a notebook
-in the UI, Strata writes a `pyproject.toml` next to it and runs `uv sync` to
-materialize an isolated `.venv/` per notebook — so the notebook subsystem
-expects `uv` on `PATH` at runtime.
+Strata requires a [uv-managed](https://docs.astral.sh/uv/) Python
+environment and refuses to start outside one. The startup check looks
+for the `uv = <version>` marker that uv writes to `pyvenv.cfg` when it
+creates a venv — `uv run` and `uvx` both produce envs with this marker;
+hand-rolled `python -m venv` venvs do not.
 
-Conda and pip-venv users: your existing environments are untouched; each
-notebook is isolated to its own directory. If you want Strata to attach to a
-pre-existing environment instead of managing its own, that's not supported
-today.
-
-### Install as a dependency
-
-```bash
-# Strata core (materialization, artifact store, Iceberg scanning):
-pip install strata-notebook
-
-# Add the notebook display + serialization stack
-# (DataFrame/Series/ndarray, cloudpickle, matplotlib):
-pip install "strata-notebook[notebook]"
-
-# Or with uv:
-uv add "strata-notebook[notebook]"
-
-# Install from Git (e.g., to track main between releases):
-pip install "strata-notebook @ git+https://github.com/bearing-research/strata.git"
-pip install "strata-notebook @ git+https://github.com/bearing-research/strata.git@<sha>"
-```
-
-The Python module is still imported as `strata`:
-
-```python
-from strata.client import StrataClient
-```
+Why: the notebook subsystem shells out to `uv` to manage per-notebook
+`.venv/` directories. Conda and pip-venv users need to install uv and
+re-launch Strata from a uv-managed env. Existing data and other
+environments are untouched, but Strata's own runtime has to be
+uv-managed.
 
 ## Notebook Features
 
@@ -198,11 +175,15 @@ still moving:
 
 ---
 
-## Strata Core
+## Library usage
 
-The notebook is built on **Strata Core**, a standalone materialization
-and artifact layer that can be used independently as a Python library
-and REST API:
+The notebook is built on a content-addressed materialization layer
+that can also be used as a standalone Python library. Install it
+into a uv-managed env and use `StrataClient`:
+
+```bash
+uv add "strata-notebook[notebook]"
+```
 
 ```python
 from strata import StrataClient
@@ -215,12 +196,13 @@ artifact = client.materialize(
 table = client.fetch(artifact.uri)  # Arrow table, cached by provenance
 ```
 
-Core provides: provenance-based deduplication, immutable versioned
-artifacts, lineage tracking, Iceberg table scanning with row-group
-caching, pluggable blob storage (local/S3/GCS/Azure), multi-tenancy,
-trusted proxy auth, and an executor protocol for external compute.
+The library provides: provenance-based deduplication, immutable
+versioned artifacts, lineage tracking, Iceberg table scanning with
+row-group caching, pluggable blob storage (local/S3/GCS/Azure),
+multi-tenancy, trusted-proxy auth, and an executor protocol for
+external compute.
 
-**[Core documentation →](https://bearing-research.github.io/strata/getting-started/core/)**
+**[Library docs →](https://bearing-research.github.io/strata/getting-started/core/)**
 
 ---
 
