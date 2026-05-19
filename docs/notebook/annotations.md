@@ -210,7 +210,7 @@ configure the AI call.
 Override the notebook-level AI model for this cell only.
 
 ```
-# @model claude-sonnet-4-20250514
+# @model claude-sonnet-4-6
 Summarize {{ df }} in one paragraph.
 ```
 

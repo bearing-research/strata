@@ -128,6 +128,56 @@ There is **no aggregate token budget** across iterations — a 10-iteration run 
 - **Network access from cells.** No sandboxing. A cell created and run by the agent can make outbound HTTP calls, read/write to mounted buckets, hit external APIs — same as a cell you wrote by hand.
 - **Filesystem reads outside the notebook directory.** Same as a hand-written cell — Python `open()` works wherever the strata-server process has permission. Inside a Docker / Fly deployment this is usually limited to the container, but a local-dev `uv run strata-server` has full user-account access.
 
+### Package install scoping
+
+`add_package` calls `uv add <package>` against the **per-notebook**
+`pyproject.toml` (`dependencies.py:688`). The package gets resolved
+into the notebook's local `.venv/`, the local `uv.lock` is updated,
+and `pyproject.toml` records the new entry on disk. Three
+consequences:
+
+- **Scope is the notebook, not the host.** Other notebooks aren't
+  affected; strata-server's own venv isn't affected; system Python
+  isn't touched.
+- **The change is persistent.** Once installed, the package stays
+  in the notebook's `pyproject.toml` until removed; closing and
+  reopening the notebook doesn't un-do it. Inspect the diff before
+  committing to git.
+- **Concurrent installs serialize.** `dependencies.py` holds a
+  per-notebook lock around `uv add` / `uv remove`, so two agent
+  iterations can't race on the same lockfile.
+
+`add_package` cannot escape the notebook venv. It cannot install
+into the system Python and cannot reach across to another notebook.
+
+### Concurrent edit with an open editor
+
+If the user has a cell open in the editor while the agent calls
+`edit_cell` or `delete_cell`:
+
+- The agent writes the new source to `cells/<id>.py` and calls
+  `session.reload()`, then broadcasts a fresh `notebook_state` over
+  WebSocket via `broadcast_notebook_sync` (`agent.py:450`).
+- Every connected frontend tab — including the user's — replaces its
+  cached state with the broadcast. The editor view re-renders with
+  the agent's new source.
+- **The user's unflushed keystrokes are lost.** Source edits are
+  buffered locally in the frontend and flush via debounced
+  `cell_source_update` after 2 s idle / on blur / before run. If
+  the agent's broadcast arrives while a buffer is pending, the
+  buffer is overwritten by the broadcast on the next render. There
+  is no merge-conflict prompt.
+- For `delete_cell`, the cell disappears from the user's view
+  entirely; the editor focus moves to the next cell.
+- For `run_cell`, the user's tab sees the cell transition through
+  `running → ready` via `cell_status` broadcasts; the cell didn't
+  start from a button the user clicked, which can be confusing.
+
+In practice the user is reading the agent's progress in the AI
+panel and notices the cell changes there too, but if you're prone
+to typing into a buffer while the agent works, save first
+(Ctrl+S in the editor, or Shift+Enter to run).
+
 **Conversation memory is per-notebook.** History is keyed on the notebook session and persists in memory while the server is running. Restarting `strata-server` clears it; explicitly clicking **Clear** in the panel also clears it.
 
 **Recommended posture.**

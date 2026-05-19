@@ -223,7 +223,7 @@ Example using several at once:
 
 ```
 # @name classification
-# @model gpt-4o
+# @model gpt-5.4
 # @temperature 0.0
 # @max_tokens 1000
 # @system You are a data scientist. Return only valid JSON.
