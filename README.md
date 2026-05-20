@@ -1,9 +1,14 @@
 # Strata
 
+[![PyPI](https://img.shields.io/pypi/v/strata-notebook.svg)](https://pypi.org/project/strata-notebook/)
+[![Python versions](https://img.shields.io/pypi/pyversions/strata-notebook.svg)](https://pypi.org/project/strata-notebook/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/bearing-research/strata/blob/main/LICENSE)
 [![CI](https://github.com/bearing-research/strata/actions/workflows/ci.yml/badge.svg)](https://github.com/bearing-research/strata/actions/workflows/ci.yml)
 [![Pre-commit](https://github.com/bearing-research/strata/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/bearing-research/strata/actions/workflows/pre-commit.yml)
 [![Docker](https://github.com/bearing-research/strata/actions/workflows/docker.yml/badge.svg)](https://github.com/bearing-research/strata/actions/workflows/docker.yml)
+[![Docs](https://github.com/bearing-research/strata/actions/workflows/docs.yml/badge.svg)](https://github.com/bearing-research/strata/actions/workflows/docs.yml)
 [![codecov](https://codecov.io/gh/bearing-research/strata/branch/main/graph/badge.svg?token=GBAX34U2PO)](https://codecov.io/gh/bearing-research/strata)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/bearing-research/strata/badge)](https://securityscorecards.dev/viewer/?uri=github.com/bearing-research/strata)
 
 **Strata is a content-addressed computation graph with an interactive notebook UI.**
 
