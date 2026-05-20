@@ -7,6 +7,20 @@ release framing rather than exhaustive commit history.
 
 ## Unreleased
 
+## 0.1.0a1 — 2026-05-19
+
+Second release-validation dry-run. `0.1.0a0` uploaded all 5 platform
+wheels to TestPyPI successfully but the sdist was rejected with
+HTTP 400 ("License-File LICENSE does not exist in distribution
+file") — maturin's sdist is built via `cargo package` rooted at
+`rust/` and didn't pick up `LICENSE` and `README.md` from the repo
+root. Added both to `[tool.maturin] include` with `format = ["sdist"]`
+so they land in the archive matching the PEP 639 metadata.
+
+The pipeline never published to PyPI on `0.1.0a0` because the
+TestPyPI failure short-circuited the run. `0.1.0a1` is the retry
+with the fix; no other changes from `0.1.0a0`.
+
 ## 0.1.0a0 — 2026-05-19
 
 Release-validation dry-run. The first tagged release in the project's

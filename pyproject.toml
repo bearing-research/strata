@@ -1,6 +1,6 @@
 [project]
 name = "strata-notebook"
-version = "0.1.0a0"
+version = "0.1.0a1"
 description = "A content-addressed computation graph with an interactive notebook UI"
 readme = "README.md"
 authors = [
@@ -145,6 +145,13 @@ features = ["pyo3/extension-module"]
 # src/strata/_frontend/ before building.
 include = [
     { path = "src/strata/_frontend/**/*", format = ["sdist", "wheel"] },
+    # Maturin's sdist is built via ``cargo package`` rooted at
+    # ``rust/`` and doesn't pick up files from the repo root by
+    # default. Without these, the sdist's PEP 639 ``License-File:
+    # LICENSE`` metadata points at a file the archive doesn't
+    # contain, and PyPI rejects the upload with HTTP 400.
+    { path = "LICENSE", format = ["sdist"] },
+    { path = "README.md", format = ["sdist"] },
 ]
 
 [tool.ruff]
