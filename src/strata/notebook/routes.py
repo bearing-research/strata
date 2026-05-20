@@ -1220,6 +1220,45 @@ async def discover_notebooks(request: Request) -> dict:
     return {"root": str(root), "notebooks": notebooks}
 
 
+class ValidateRecentsRequest(BaseModel):
+    """Request body for the recents-validation endpoint.
+
+    The frontend keeps the "recent notebooks" list in browser
+    localStorage, which survives notebook deletion. Calling this on
+    home-page load lets the client drop stale entries pointing at
+    directories that no longer exist on disk.
+    """
+
+    paths: list[str] = Field(
+        default_factory=list,
+        description="Filesystem paths the client believes are notebooks",
+        max_length=100,
+    )
+
+
+@router.post("/recents/validate")
+async def validate_recent_notebooks(req: ValidateRecentsRequest) -> dict:
+    """Return the subset of supplied paths that still contain a notebook.
+
+    Pure existence check — does ``<path>/notebook.toml`` exist as a
+    regular file? Ownership / scope / storage-root membership are
+    deliberately out of scope here: the localStorage recents list is
+    already per-user-per-browser, and any actual open / delete the
+    client follows up with runs its own ACL pass at that boundary.
+    """
+    valid: list[str] = []
+    for raw_path in req.paths:
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            continue
+        try:
+            if (Path(raw_path) / "notebook.toml").is_file():
+                valid.append(raw_path)
+        except OSError:
+            # Permission errors, broken symlinks, etc. — treat as invalid.
+            continue
+    return {"valid": valid}
+
+
 class DeleteNotebookByPathRequest(BaseModel):
     """Request for path-based notebook deletion (no session required)."""
 

@@ -688,6 +688,32 @@ def test_delete_by_path_rejects_missing_notebook():
         assert bogus.exists()
 
 
+def test_validate_recent_notebooks_filters_to_real_notebook_dirs():
+    """Only paths whose `notebook.toml` is present on disk survive validation."""
+    client = TestClient(create_test_app())
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        real = create_notebook(Path(tmpdir), "Real Notebook")
+        missing = Path(tmpdir) / "deleted-notebook"  # never created
+        bare_dir = Path(tmpdir) / "no-toml-here"
+        bare_dir.mkdir()
+
+        response = client.post(
+            "/v1/notebooks/recents/validate",
+            json={"paths": [str(real), str(missing), str(bare_dir), "", "   "]},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"valid": [str(real)]}
+
+
+def test_validate_recent_notebooks_handles_empty_list():
+    client = TestClient(create_test_app())
+    response = client.post("/v1/notebooks/recents/validate", json={"paths": []})
+    assert response.status_code == 200
+    assert response.json() == {"valid": []}
+
+
 def test_delete_by_path_rejects_service_mode(deployment_mode_state):
     """Path-based delete should also be disabled in service mode."""
     client = TestClient(create_test_app())

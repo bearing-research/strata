@@ -15,7 +15,7 @@ import ThemeToggle from '../components/ThemeToggle.vue'
 
 const router = useRouter()
 const strata = useStrata()
-const { entries: recentNotebooks, record, remove } = useRecentNotebooks()
+const { entries: recentNotebooks, record, remove, clear } = useRecentNotebooks()
 
 const FALLBACK_NOTEBOOK_PARENT_PATH = '/tmp/strata-notebooks'
 const newName = ref('Untitled Notebook')
@@ -46,6 +46,39 @@ const importResult = ref<ImportNotebookResponse | null>(null)
 const dragDepth = ref(0)
 const isDragHovering = ref(false)
 
+async function pruneStaleRecents() {
+  // Recent notebooks live in browser localStorage and persist across
+  // notebook deletion + server restarts. Ask the server which paths
+  // still resolve to a notebook directory and drop the rest, so a
+  // stale entry doesn't pop a confusing "session not found" toast
+  // when the user clicks it.
+  if (recentNotebooks.value.length === 0) return
+  try {
+    const paths = recentNotebooks.value.map((entry) => entry.path)
+    const { valid } = await strata.validateRecentNotebooks(paths)
+    const validSet = new Set(valid)
+    for (const entry of [...recentNotebooks.value]) {
+      if (!validSet.has(entry.path)) remove(entry.path)
+    }
+  } catch (e) {
+    // Network errors / offline / 4xx — leave the list alone. The
+    // worst case is a stale entry, same as before this fix.
+    console.warn('Failed to prune stale recent notebooks', e)
+  }
+}
+
+async function confirmClearRecents() {
+  if (recentNotebooks.value.length === 0) return
+  if (
+    !window.confirm(
+      'Clear the recent notebooks list? This only removes the local list; the notebook directories on disk are untouched.',
+    )
+  ) {
+    return
+  }
+  clear()
+}
+
 onMounted(async () => {
   try {
     const data = await strata.getNotebookRuntimeConfig()
@@ -71,6 +104,9 @@ onMounted(async () => {
   } catch (e) {
     console.warn('Failed to load notebook config, using fallback parent path', e)
   }
+  // Run after config load — pruning is best-effort, so a slow path
+  // check shouldn't gate the rest of the home page.
+  await pruneStaleRecents()
 })
 
 async function createNotebook() {
@@ -510,7 +546,18 @@ function formatTime(ts: number): string {
 
       <!-- Recent notebooks -->
       <div v-if="recentNotebooks.length > 0" class="recent-section">
-        <h3 class="section-title">Recent Notebooks</h3>
+        <div class="recent-header">
+          <h3 class="section-title">Recent Notebooks</h3>
+          <button
+            type="button"
+            class="recent-clear"
+            data-testid="recent-clear"
+            title="Clear the local recent-notebooks list. Doesn't touch the notebooks on disk."
+            @click="confirmClearRecents"
+          >
+            Clear
+          </button>
+        </div>
         <div class="recent-list">
           <div
             v-for="entry in recentNotebooks"
@@ -899,6 +946,32 @@ function formatTime(ts: number): string {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 12px;
+}
+
+.recent-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.recent-header .section-title {
+  margin-bottom: 0;
+}
+
+.recent-clear {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.recent-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .recent-list {

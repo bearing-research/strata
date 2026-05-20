@@ -478,6 +478,18 @@ async function discoverNotebooks(): Promise<DiscoverNotebooksResponse> {
   return readJson<DiscoverNotebooksResponse>(resp)
 }
 
+async function validateRecentNotebooks(paths: string[]): Promise<{ valid: string[] }> {
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/recents/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  })
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to validate recent notebooks')
+  }
+  return readJson<{ valid: string[] }>(resp)
+}
+
 async function deleteNotebookByPath(path: string): Promise<{ deleted: boolean; path: string }> {
   const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/delete-by-path`, {
     method: 'POST',
@@ -1331,6 +1343,7 @@ export function useStrata() {
     renameNotebook,
     deleteNotebook,
     deleteNotebookByPath,
+    validateRecentNotebooks,
     getNotebookRuntimeConfig,
     updateCellSource,
     addCell,
