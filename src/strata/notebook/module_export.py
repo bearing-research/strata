@@ -34,20 +34,23 @@ cells. Concretely:
   Move the helper into the same cell as its caller, or duplicate it.
   (Tested: ``test_def_referencing_cross_cell_helper_blocks_export``.)
 
-* Type annotations *do* participate in the free-variable check on
-  Python ≤ 3.13 by default — ``def f(x: SomeType): ...`` blocks
-  export when ``SomeType`` isn't bound in the slice. Adding
+* Type annotations participate in the free-variable check by
+  default — ``def f(x: SomeType): ...`` blocks export when
+  ``SomeType`` isn't bound in the slice. Adding
   ``from __future__ import annotations`` to the cell relaxes this:
-  PEP 563 stringifies annotations and ``symtable`` correctly drops
-  them from the reference set.
+  PEP 563 stringifies annotations and they're never evaluated.
 
-  On Python 3.14+ this check is naturally relaxed for every cell:
-  PEP 749 makes annotations lazily evaluated by default, so
-  ``symtable`` no longer reports annotation references as free
-  variables and no future-import is needed. ``transform.__annotations__``
-  access can still NameError lazily if downstream code reaches for
-  it; the export check covers module-load safety, not annotation
-  access. (Tested:
+  This check runs as an explicit AST walk over annotation
+  expressions rather than relying on ``symtable``'s free-variable
+  report, which would otherwise produce different verdicts across
+  Python versions: pre-3.14 symtable reports annotation refs as
+  free vars (annotations evaluated at def-time); on 3.14+ PEP 749
+  makes annotations lazily-evaluated by default and symtable
+  stops reporting them. The dedicated AST walk keeps the safety
+  check identical across versions — if your annotation references
+  a name the slice doesn't bind, you get blocked even on 3.14
+  where Python would only crash lazily when the annotation is
+  later accessed. (Tested:
   ``test_annotation_reference_blocks_without_future_import`` and
   ``test_future_annotations_relaxes_annotation_check``.)
 
@@ -258,6 +261,26 @@ def build_module_export_plan(source: str) -> ModuleExportPlan:
             if sym.is_referenced() and not sym.is_local() and name not in _BUILTIN_NAMES:
                 module_load_unresolved.add(name)
 
+        # Annotation references: walk the AST explicitly instead of
+        # trusting symtable's free-variable report. symtable's verdict
+        # on annotations diverges across Python versions — pre-3.14 it
+        # reports annotation refs as free vars; on 3.14+ (PEP 749 lazy
+        # annotations) it does not. The explicit walk keeps the safety
+        # check version-independent: an annotation that references an
+        # unbound name blocks the slice regardless of whether Python
+        # itself would crash at def-time or later at annotation access.
+        # ``from __future__ import annotations`` (PEP 563) skips this
+        # — the source intent is "annotations are strings, never
+        # evaluated" — so unresolved refs in that case are safe.
+        if not _has_future_annotations(tree):
+            annotation_refs = _collect_annotation_names(keep_nodes)
+            annotation_unresolved = {
+                name
+                for name in annotation_refs
+                if name not in module_locals and name not in _BUILTIN_NAMES
+            }
+            module_load_unresolved |= annotation_unresolved
+
         if module_load_unresolved:
             unsupported_reasons.append(
                 "top-level expressions reference names not defined or imported in "
@@ -453,6 +476,77 @@ def _kept_bindings(keep_nodes: list[ast.stmt]) -> set[str]:
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             bindings.update(_target_names_for_assignment(node))
     return bindings
+
+
+def _has_future_annotations(tree: ast.Module) -> bool:
+    """True if the module source has ``from __future__ import annotations``.
+
+    PEP 563 only takes effect when the future import appears before any
+    other statement except module docstrings and other future imports.
+    We mirror that ordering rule conservatively — stop walking at the
+    first non-``__future__`` statement.
+    """
+    for node in tree.body:
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+            # Module docstring — allowed before __future__ imports.
+            continue
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+            for alias in node.names:
+                if alias.name == "annotations":
+                    return True
+            continue
+        # Any other statement terminates the future-import block.
+        break
+    return False
+
+
+def _collect_annotation_names(nodes: list[ast.stmt]) -> set[str]:
+    """Names referenced inside type-annotation expressions in *nodes*.
+
+    Walks function argument annotations, return annotations, and
+    variable annotations across the kept slice (recursing into nested
+    defs/classes — their annotations also evaluate at outer-def-time
+    on pre-3.14 Python, and PEP 749's lazy-eval doesn't make a stale
+    reference any less buggy).
+
+    Returns the bare ``Name.id`` set without attempting to attribute
+    each reference back to its annotation site — the safety check
+    treats any unresolved annotation as a module-load failure, and a
+    module-load failure poisons every symbol the slice would have
+    exported. Caller filters against module locals and builtins.
+    """
+    names: set[str] = set()
+
+    def _visit_annotation(annotation: ast.expr | None) -> None:
+        if annotation is None:
+            return
+        for sub in ast.walk(annotation):
+            if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
+                names.add(sub.id)
+
+    def _walk(stmt: ast.AST) -> None:
+        # ast.walk yields every descendant in the subtree, but for
+        # functions and classes we need access to the annotation slots
+        # specifically — ast.walk would not distinguish an annotation
+        # expression from a body expression. Iterate the relevant
+        # slots by hand.
+        for sub in ast.walk(stmt):
+            if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                args = sub.args
+                for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs):
+                    _visit_annotation(arg.annotation)
+                if args.vararg is not None:
+                    _visit_annotation(args.vararg.annotation)
+                if args.kwarg is not None:
+                    _visit_annotation(args.kwarg.annotation)
+                _visit_annotation(sub.returns)
+            elif isinstance(sub, ast.AnnAssign):
+                _visit_annotation(sub.annotation)
+
+    for node in nodes:
+        _walk(node)
+
+    return names
 
 
 def _module_bindings_in(node: ast.stmt) -> set[str]:
