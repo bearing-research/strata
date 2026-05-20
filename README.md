@@ -30,20 +30,21 @@ proxy auth. For multi-tenant or hosted deployments, see
 [Deployment Modes](https://bearing-research.github.io/strata/deployment/modes/).
 
 ```bash
-# Docker (recommended). docker-compose.yml sets personal mode for you.
+# Docker. docker-compose.yml sets personal mode for you.
 docker compose up -d --build
 # Then open http://localhost:8765
 
-# Or via PyPI install — requires uv. Drops the wheel into a uv-managed
-# tool env at ~/.local/share/uv/tools/strata-notebook with the CLI on PATH.
+# Or via PyPI install (recommended) — requires uv. Drops the wheel into
+# a uv-managed tool env at ~/.local/share/uv/tools/strata-notebook with
+# the CLI on PATH.
 uv tool install strata-notebook
 strata-server
 # Then open http://localhost:8765
-#
-# For the full inventory of installed commands
-# (strata-server, strata, strata-worker, python -m strata),
-# see docs/getting-started/installation.md#commands-reference.
 ```
+
+For the full inventory of installed commands (`strata-server`, `strata`,
+`strata-worker`, `python -m strata`), see the
+[Commands reference](https://bearing-research.github.io/strata/getting-started/installation/#commands-reference).
 
 Source builds — `git clone + uv sync` — work too and are documented in
 [Installation](https://bearing-research.github.io/strata/getting-started/installation/);
@@ -175,14 +176,14 @@ it on first read and caches the bytes locally for the session.
 
 | Example                                             | What it shows                                                                       |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [pandas_basics](examples/pandas_basics)             | Linear DataFrame chain, caching, staleness propagation                              |
-| [iris_classification](examples/iris_classification) | End-to-end ML, DAG branching, mixed output types                                    |
-| [titanic_ml](examples/titanic_ml)                   | Feature engineering + model comparison                                              |
-| [s3_mount](examples/s3_mount)                       | Reading a public S3 bucket via a mount                                              |
-| [arxiv_classifier](examples/arxiv_classifier)       | Distributed execution via `@worker` + Modal GPU + Fly cluster                       |
-| [markdown_showcase](examples/markdown_showcase)     | Markdown cells, dynamic `Markdown(...)` outputs, security cases                     |
-| [library_cells](examples/library_cells)             | Cross-cell library code: pure module cells, mixed runtime+library cells, the limits |
-| [news_alpha_trader](examples/news_alpha_trader)     | Multi-stage trading pipeline with prompt cells and structured LLM outputs           |
+| [pandas_basics](https://bearing-research.github.io/strata/examples/pandas_basics/)             | Linear DataFrame chain, caching, staleness propagation                              |
+| [iris_classification](https://bearing-research.github.io/strata/examples/iris_classification/) | End-to-end ML, DAG branching, mixed output types                                    |
+| [titanic_ml](https://bearing-research.github.io/strata/examples/titanic_ml/)                   | Feature engineering + model comparison                                              |
+| [s3_mount](https://bearing-research.github.io/strata/examples/s3_mount/)                       | Reading a public S3 bucket via a mount                                              |
+| [arxiv_classifier](https://bearing-research.github.io/strata/examples/arxiv_classifier/)       | Distributed execution via `@worker` + Modal GPU + Fly cluster                       |
+| [markdown_showcase](https://bearing-research.github.io/strata/examples/markdown_showcase/)     | Markdown cells, dynamic `Markdown(...)` outputs, security cases                     |
+| [library_cells](https://bearing-research.github.io/strata/examples/library_cells/)             | Cross-cell library code: pure module cells, mixed runtime+library cells, the limits |
+| [news_alpha_trader](https://bearing-research.github.io/strata/examples/news_alpha_trader/)     | Multi-stage trading pipeline with prompt cells and structured LLM outputs           |
 
 ## Known rough edges
 
