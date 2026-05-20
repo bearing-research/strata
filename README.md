@@ -77,7 +77,7 @@ not using PyPI or Docker):
 
 - **[Rust toolchain](https://rustup.rs/)** (rustup) — for `maturin`
   to compile the native extension. PyPI wheels skip this step.
-- **[Node 25+ / npm](https://nodejs.org/)** — for the frontend
+- **[Node 24+ / npm](https://nodejs.org/)** — for the frontend
   `npm ci && npm run build` step. PyPI wheels bundle the prebuilt SPA.
 - Python 3.12+ is handled automatically by `uv sync`.
 
