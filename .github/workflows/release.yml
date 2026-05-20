@@ -37,7 +37,12 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: '22'
+  NODE_VERSION: '24'
+  # GitHub plans to default JS actions to Node 24 on 2026-06-02 and
+  # remove Node 20 on 2026-09-16. Opting in early silences the
+  # per-step deprecation warnings and surfaces any incompatibility
+  # now rather than at the cutover.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   # --- pre-flight ----------------------------------------------------
@@ -143,7 +148,7 @@ jobs:
           npm ci
           npm run build
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: frontend-dist
           path: frontend/dist
@@ -188,7 +193,7 @@ jobs:
           sccache: 'true'
           manylinux: auto
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: dist-linux-${{ matrix.target }}
           path: dist
@@ -226,7 +231,7 @@ jobs:
           args: --release --out dist
           sccache: 'true'
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: dist-macos-${{ matrix.target }}
           path: dist
@@ -264,7 +269,7 @@ jobs:
           args: --release --out dist
           sccache: 'true'
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: dist-windows-${{ matrix.target }}
           path: dist
