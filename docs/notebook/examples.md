@@ -11,7 +11,7 @@ repo's `examples/` directory and start in personal mode:
 ```bash
 STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples \
 STRATA_DEPLOYMENT_MODE=personal \
-  uv run strata-server
+  uv run strata-notebook
 ```
 
 Every example then appears on the Strata home page. No copying

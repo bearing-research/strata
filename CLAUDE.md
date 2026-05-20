@@ -39,7 +39,7 @@ uv run ty check src/                      # type check (Astral)
 uv run python -m strata                   # start server
 ```
 
-Full inventory of installed binaries (`strata-server`, `strata`,
+Full inventory of installed binaries (`strata-notebook`, `strata`,
 `strata-worker`, `python -m strata`, package vs CLI name) lives at
 `docs/getting-started/installation.md#commands-reference` — the
 canonical list other pages should link to instead of re-introducing

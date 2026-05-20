@@ -22,7 +22,7 @@ class TestDeploymentModeConfig:
     def test_default_is_personal(self, tmp_path):
         """Default deployment_mode is 'personal' — the common case.
 
-        First-time ``strata-server`` invocations boot single-user on
+        First-time ``strata-notebook`` invocations boot single-user on
         loopback. Service mode is explicit opt-in."""
         config = StrataConfig(cache_dir=tmp_path / "cache")
         assert config.deployment_mode == "personal"

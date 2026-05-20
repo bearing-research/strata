@@ -125,7 +125,7 @@ def run_benchmark(server_url: str, table_uri: str) -> dict:
             print(f"Connected to Strata server at {server_url}")
         except httpx.ConnectError:
             print(f"ERROR: Cannot connect to Strata server at {server_url}")
-            print("Start the server with: strata-server")
+            print("Start the server with: strata-notebook")
             sys.exit(1)
 
         # Clear cache for fair comparison

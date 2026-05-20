@@ -294,7 +294,7 @@ class StrataConfig(BaseSettings):
     # Deployment mode settings.
     #
     # Default is ``personal`` — the common case. A first-time
-    # ``uv run strata-server`` boots into a single-user, loopback-only
+    # ``uv run strata-notebook`` boots into a single-user, loopback-only
     # configuration that just works. Multi-user and multi-tenant
     # deployments must opt in explicitly via ``deployment_mode="service"``
     # plus the matching auth / artifact settings; that flow has its own

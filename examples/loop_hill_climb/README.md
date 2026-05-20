@@ -39,7 +39,7 @@ converge to different basins.
 ## Running
 
 ```bash
-uv run strata-server --host 127.0.0.1 --port 8765
+uv run strata-notebook --host 127.0.0.1 --port 8765
 ```
 
 Open the notebook from the Strata home page, then run the three cells

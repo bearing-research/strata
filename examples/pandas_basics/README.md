@@ -29,7 +29,7 @@ cell N-1, so edits stay fast and the DAG stays honest.
 From the project root:
 
 ```bash
-uv run strata-server --host 127.0.0.1 --port 8765
+uv run strata-notebook --host 127.0.0.1 --port 8765
 ```
 
 Then open `examples/pandas_basics` from the Strata home page.

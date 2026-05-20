@@ -42,7 +42,7 @@ Two local HTTP executors stand in for the cloud workers during development.
 ./examples/arxiv_classifier/run_local_workers.sh
 
 # Terminal 2 — start Strata
-uv run strata-server
+uv run strata-notebook
 
 # Terminal 3 — open the notebook in the UI
 # http://localhost:8765

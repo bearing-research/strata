@@ -150,7 +150,7 @@ Run the server normally:
 ```bash
 uv run python -m strata
 # or
-uv run strata-server
+uv run strata-notebook
 ```
 
 ## What service mode changes

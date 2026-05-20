@@ -24,7 +24,7 @@ strata run <notebook_dir> [options]
 (plus `cells/`, `pyproject.toml`, `uv.lock`). It's the same on-disk layout the
 UI works with; you can pass any notebook directory from `STRATA_NOTEBOOK_STORAGE_DIR`
 or anywhere else on the filesystem. `strata run` is **local-only** — it does
-not talk to a running `strata-server` or a service-mode deployment. Each
+not talk to a running `strata-notebook` or a service-mode deployment. Each
 invocation opens its own `NotebookSession`, runs the cells, and exits.
 
 ### Options

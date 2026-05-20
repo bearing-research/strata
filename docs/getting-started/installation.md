@@ -62,7 +62,7 @@ The server auto-detects `frontend/dist/` and serves it.
 ### 3. Start the server
 
 ```bash
-uv run strata-server
+uv run strata-notebook
 ```
 
 Or equivalently:
@@ -87,7 +87,7 @@ and CLI binary are both named `strata`.
 
 | Command | What it does |
 | --- | --- |
-| `uv run strata-server` | Start the HTTP server (notebook UI + REST API). Same as `uv run python -m strata`. |
+| `uv run strata-notebook` | Start the HTTP server (notebook UI + REST API). Same as `uv run python -m strata`. |
 | `uv run strata run <notebook-dir>` | Headless notebook execution for CI / scheduled runs. See [Headless Runner](../notebook/cli.md). |
 | `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML. See [Export](../notebook/export.md). |
 | `uv run strata import <ipynb-file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory. See [Import from Jupyter](../notebook/import.md). |
@@ -96,7 +96,7 @@ and CLI binary are both named `strata`.
 The `uv run` prefix ensures the command resolves to the binary
 inside the uv-managed venv. If you've activated the venv
 (`source .venv/bin/activate`), you can drop the prefix and call
-`strata-server` / `strata` / `strata-worker` directly.
+`strata-notebook` / `strata` / `strata-worker` directly.
 
 ## Development Commands
 

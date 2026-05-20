@@ -20,7 +20,7 @@ Reading from an Iceberg table is itself a `materialize` call with the built-in `
 ## 1. Start the server
 
 ```bash
-uv run strata-server
+uv run strata-notebook
 ```
 
 ## 2. Run the demo

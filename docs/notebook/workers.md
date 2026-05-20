@@ -122,7 +122,7 @@ my-strata-worker/
 └── .dockerignore
 ```
 
-**`Dockerfile`** — installs `strata-notebook` and your workload deps from a uv-managed venv. Unlike `strata-server`, the worker entry (`strata-worker`) is not gated by Strata's runtime guard, so a plain `pip install` would also work — but the uv-python base image keeps tooling consistent across server + worker and drops a few hundred MB of build stage versus a source install.
+**`Dockerfile`** — installs `strata-notebook` and your workload deps from a uv-managed venv. Unlike `strata-notebook`, the worker entry (`strata-worker`) is not gated by Strata's runtime guard, so a plain `pip install` would also work — but the uv-python base image keeps tooling consistent across server + worker and drops a few hundred MB of build stage versus a source install.
 
 ```dockerfile
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
@@ -219,7 +219,7 @@ import modal
 
 # Modal's pip_install pulls wheels from PyPI. strata-notebook ships
 # pre-built abi3-py312 wheels so no Rust toolchain is needed, and the
-# worker entry isn't gated by the runtime guard (only strata-server is)
+# worker entry isn't gated by the runtime guard (only strata-notebook is)
 # so Modal's standard image stack works without going through uv.
 gpu_image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -342,11 +342,11 @@ def gpu_executor():
 
 …then create the Modal secret once: `modal secret create strata-worker-token STRATA_WORKER_TOKEN=<paste-token-here>`.
 
-**3. Tell the notebook server about the token.** Export it as an environment variable wherever you run `strata-server`:
+**3. Tell the notebook server about the token.** Export it as an environment variable wherever you run `strata-notebook`:
 
 ```bash
 export STRATA_FLY_WORKER_TOKEN=<paste-token-here>
-uv run strata-server
+uv run strata-notebook
 ```
 
 …and reference that env var in `notebook.toml`:
@@ -416,10 +416,10 @@ The `/health` endpoint is **not** gated by `STRATA_WORKER_TOKEN` — platform he
 ## Troubleshooting
 
 **`401 Unauthorized` when running a cell.**
-`STRATA_WORKER_TOKEN` is set on the worker but the notebook isn't sending it. Confirm `token_env` (or `token`) in `notebook.toml` matches an env var that's actually exported in the strata-server's shell. Restart `strata-server` after exporting; it reads env at startup.
+`STRATA_WORKER_TOKEN` is set on the worker but the notebook isn't sending it. Confirm `token_env` (or `token`) in `notebook.toml` matches an env var that's actually exported in the strata-notebook's shell. Restart `strata-notebook` after exporting; it reads env at startup.
 
 **`Connection refused` or `Could not resolve host`.**
-`config.url` doesn't match where the worker is actually listening. From the strata-server host, run `curl <config.url base>/health` — it should respond. For Fly, `fly status` shows the public hostname; for Modal, `modal app list` shows deployed URLs.
+`config.url` doesn't match where the worker is actually listening. From the strata-notebook host, run `curl <config.url base>/health` — it should respond. For Fly, `fly status` shows the public hostname; for Modal, `modal app list` shows deployed URLs.
 
 **Worker `/health` works but cells fail with `ModuleNotFoundError: <package>`.**
 The worker image is missing the dependency the cell needs. Add it to the Dockerfile's `pip install` (Fly) or the `.pip_install(...)` chain (Modal) and redeploy. The worker uses **its own** Python env; nothing from the notebook server's env transfers.

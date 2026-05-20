@@ -66,7 +66,7 @@ path = "/notebook-secrets"
 base_url = "https://app.infisical.com"
 ```
 
-Routing-only config for an external secret manager (Infisical, Doppler, AWS SM, etc.). The authentication token for the manager itself lives in the strata-server's process environment, **not** here. See [Secret Manager](../notebook/secrets.md).
+Routing-only config for an external secret manager (Infisical, Doppler, AWS SM, etc.). The authentication token for the manager itself lives in the strata-notebook's process environment, **not** here. See [Secret Manager](../notebook/secrets.md).
 
 Allowed keys: `provider`, `project_id`, `environment`, `path`, `base_url`. Unknown keys are dropped on save.
 

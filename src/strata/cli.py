@@ -5,7 +5,7 @@ Subcommands:
     export  Render a notebook to markdown or HTML for sharing
     import  Convert a Jupyter .ipynb file into a Strata notebook directory
 
-The existing ``strata-server`` script and ``python -m strata`` entry
+The existing ``strata-notebook`` script and ``python -m strata`` entry
 points still start the server; they predate this CLI and stay as-is
 for back-compat.
 """

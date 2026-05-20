@@ -31,7 +31,7 @@ cache hits) on top of it.
     sessions):
 
     ```bash
-    uv run strata-server
+    uv run strata-notebook
     ```
 
     Personal mode is the default now; no env vars needed for a
@@ -259,7 +259,7 @@ browse them in the UI, stop the running server first (Ctrl+C), then
 point the storage root at `examples/`:
 
 ```bash
-STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples uv run strata-server
+STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples uv run strata-notebook
 ```
 
 (For Docker, edit `docker-compose.yml` to mount `./examples:/data/notebooks`

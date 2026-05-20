@@ -12,7 +12,7 @@ SERVER_URL="http://127.0.0.1:8765/health"
 if ! curl -fsS "$SERVER_URL" >/dev/null 2>&1; then
     nohup env \
         STRATA_DEPLOYMENT_MODE=personal \
-        strata-server \
+        strata-notebook \
         >"$SERVER_LOG" 2>&1 &
 fi
 

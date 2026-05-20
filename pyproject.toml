@@ -116,7 +116,7 @@ docs = [
 
 [project.scripts]
 strata = "strata.cli:main"
-strata-server = "strata.server:main"
+strata-notebook = "strata.server:main"
 strata-worker = "strata.notebook.remote_executor:main"
 
 [project.urls]

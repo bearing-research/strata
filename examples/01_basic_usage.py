@@ -5,7 +5,7 @@ Example 1: Basic Strata Usage
 This example shows the simplest way to use Strata to query an Iceberg table.
 
 Prerequisites:
-    1. Start the Strata server: strata-server
+    1. Start the Strata server: strata-notebook
     2. Have an Iceberg table accessible via file:// URI
 
 What you'll learn:

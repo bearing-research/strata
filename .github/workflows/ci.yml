@@ -243,7 +243,7 @@ jobs:
 
       - name: Start Strata notebook server
         run: |
-          STRATA_DEPLOYMENT_MODE=personal STRATA_PORT=8770 STRATA_NOTEBOOK_STORAGE_DIR=/tmp uv run strata-server > /tmp/strata-ci.log 2>&1 &
+          STRATA_DEPLOYMENT_MODE=personal STRATA_PORT=8770 STRATA_NOTEBOOK_STORAGE_DIR=/tmp uv run strata-notebook > /tmp/strata-ci.log 2>&1 &
           echo $! > /tmp/strata-ci.pid
 
       - name: Wait for notebook server health

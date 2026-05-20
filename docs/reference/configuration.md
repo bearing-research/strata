@@ -123,7 +123,7 @@ ai_model = "claude-sonnet-4-6"
 
 ## Worker
 
-These are read by `strata-worker`, not the main server. They have no effect on a `strata-server` process.
+These are read by `strata-worker`, not the main server. They have no effect on a `strata-notebook` process.
 
 | Variable                          | Default              | Description                                                                                  |
 | --------------------------------- | -------------------- | -------------------------------------------------------------------------------------------- |

@@ -84,7 +84,9 @@ Strata refuses to start outside a uv-managed Python environment;
 `uv tool install strata-notebook` is the canonical install path,
 with `uv add strata-notebook` for project-style installs. `pip
 install` into a hand-rolled `python -m venv` is rejected by the
-startup guard.
+startup guard. The notebook app boots via `strata-notebook` (or
+`python -m strata`); `strata-worker` boots a remote worker; and
+`strata run | export | import` covers headless notebook tooling.
 
 ### Added
 
@@ -156,7 +158,7 @@ startup guard.
 - `pip install strata-notebook` / `uv add strata-notebook` (the bare
   `strata` name on PyPI was held by an unrelated config framework)
 - wheel ships the frontend SPA bundled at `strata/_frontend/`, so
-  `strata-server` works out of the box without a separate frontend build
+  `strata-notebook` works out of the box without a separate frontend build
 - abi3-py312 wheel format — one wheel per platform covers Python 3.12+
 - tag-driven release workflow with TestPyPI auto-publish and
   PyPI publish gated by a protected GitHub Environment

@@ -20,7 +20,7 @@ try:
     client.health()  # Test connection
 except httpx.ConnectError:
     print("ERROR: Cannot connect to Strata server")
-    print("Make sure the server is running: strata-server")
+    print("Make sure the server is running: strata-notebook")
     exit(1)
 
 # Example 2: Handle invalid table URI

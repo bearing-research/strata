@@ -126,7 +126,7 @@ There is **no aggregate token budget** across iterations — a 10-iteration run 
 - **Package allowlist.** `add_package` accepts any pip-compatible package spec. Approval-gated, so the user sees the spec before install, but there's no server-side allowlist or signature check. `pandas>=2.0` and `evil-package@git+https://...` both pass the same gate.
 - **Mount / credential access.** `run_cell` executes in the notebook's normal execution context. It sees the notebook's mounts, env vars (including any unblanked secrets in the runtime panel), and any artifacts already in the store. Don't grant agent access to a notebook with production credentials unless you also trust the assistant's prompts.
 - **Network access from cells.** No sandboxing. A cell created and run by the agent can make outbound HTTP calls, read/write to mounted buckets, hit external APIs — same as a cell you wrote by hand.
-- **Filesystem reads outside the notebook directory.** Same as a hand-written cell — Python `open()` works wherever the strata-server process has permission. Inside a Docker / Fly deployment this is usually limited to the container, but a local-dev `uv run strata-server` has full user-account access.
+- **Filesystem reads outside the notebook directory.** Same as a hand-written cell — Python `open()` works wherever the strata-notebook process has permission. Inside a Docker / Fly deployment this is usually limited to the container, but a local-dev `uv run strata-notebook` has full user-account access.
 
 ### Package install scoping
 
@@ -137,7 +137,7 @@ and `pyproject.toml` records the new entry on disk. Three
 consequences:
 
 - **Scope is the notebook, not the host.** Other notebooks aren't
-  affected; strata-server's own venv isn't affected; system Python
+  affected; strata-notebook's own venv isn't affected; system Python
   isn't touched.
 - **The change is persistent.** Once installed, the package stays
   in the notebook's `pyproject.toml` until removed; closing and
@@ -178,7 +178,7 @@ panel and notices the cell changes there too, but if you're prone
 to typing into a buffer while the agent works, save first
 (Ctrl+S in the editor, or Shift+Enter to run).
 
-**Conversation memory is per-notebook.** History is keyed on the notebook session and persists in memory while the server is running. Restarting `strata-server` clears it; explicitly clicking **Clear** in the panel also clears it.
+**Conversation memory is per-notebook.** History is keyed on the notebook session and persists in memory while the server is running. Restarting `strata-notebook` clears it; explicitly clicking **Clear** in the panel also clears it.
 
 **Recommended posture.**
 

@@ -58,7 +58,7 @@ deployment_mode = "personal"
 ```
 
 **Default is `personal`**: the common case. A first-time
-`uv run strata-server` boots into a single-user, loopback-only
+`uv run strata-notebook` boots into a single-user, loopback-only
 deployment that just works.
 
 Service mode is explicit opt-in. The coherence checker fires clear
@@ -69,7 +69,7 @@ deploys fail fast rather than silently exposing write endpoints.
 ## Personal mode
 
 ```bash
-STRATA_DEPLOYMENT_MODE=personal uv run strata-server
+STRATA_DEPLOYMENT_MODE=personal uv run strata-notebook
 ```
 
 The server binds to `127.0.0.1` by default and refuses non-loopback
@@ -79,7 +79,7 @@ addresses unless you opt in:
 STRATA_DEPLOYMENT_MODE=personal \
   STRATA_HOST=0.0.0.0 \
   STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL=true \
-  uv run strata-server
+  uv run strata-notebook
 ```
 
 Opt in only if you have separate protection (firewall, VPN, private
@@ -95,7 +95,7 @@ personal-mode-only.
 STRATA_DEPLOYMENT_MODE=service \
   STRATA_AUTH_MODE=trusted_proxy \
   STRATA_PROXY_TOKEN=<shared-secret> \
-  uv run strata-server
+  uv run strata-notebook
 ```
 
 Short version: an upstream proxy authenticates the caller, injects

@@ -93,7 +93,7 @@ def main():
     print("\nTable URI for Strata:")
     print(f"  {table_uri}")
     print("\nNext steps:")
-    print("  1. Start the server: strata-server")
+    print("  1. Start the server: strata-notebook")
     print("  2. Run the demo:     python examples/hello_world.py")
 
 

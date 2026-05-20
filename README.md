@@ -44,11 +44,11 @@ docker compose up -d --build
 # a uv-managed tool env at ~/.local/share/uv/tools/strata-notebook with
 # the CLI on PATH.
 uv tool install strata-notebook
-strata-server
+strata-notebook
 # Then open http://localhost:8765
 ```
 
-For the full inventory of installed commands (`strata-server`, `strata`,
+For the full inventory of installed commands (`strata-notebook`, `strata`,
 `strata-worker`, `python -m strata`), see the
 [Commands reference](https://bearing-research.github.io/strata/getting-started/installation/#commands-reference).
 
@@ -222,7 +222,7 @@ has two steps: start the server, then call it from your code.
 ```bash
 # 1. Install + start the server (in a uv-managed env).
 uv tool install strata-notebook
-strata-server
+strata-notebook
 
 # 2. From another process, point the client at it:
 ```

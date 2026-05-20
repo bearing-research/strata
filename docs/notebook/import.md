@@ -96,7 +96,7 @@ strata import my_analysis.ipynb
 strata import ~/Downloads/kaggle_titanic.ipynb --out ~/work/titanic
 
 # Then open or run normally
-strata-server --notebook-storage-dir ~/work     # UI
+strata-notebook --notebook-storage-dir ~/work     # UI
 strata run ~/work/titanic                       # headless
 ```
 

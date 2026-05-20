@@ -36,7 +36,7 @@ re-runs against it; switch back and the previous result is a cache hit.
 From the project root:
 
 ```bash
-uv run strata-server --host 127.0.0.1 --port 8765
+uv run strata-notebook --host 127.0.0.1 --port 8765
 ```
 
 Open `examples/model_variants` from the Strata home page. The
