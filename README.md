@@ -40,9 +40,10 @@ proxy auth. For multi-tenant or hosted deployments, see
 docker compose up -d --build
 # Then open http://localhost:8765
 
-# Or via PyPI install (recommended) — requires uv. Drops the wheel into
-# a uv-managed tool env at ~/.local/share/uv/tools/strata-notebook with
-# the CLI on PATH.
+# Or install via uv (recommended). Fetches the wheel from PyPI into a
+# uv-managed tool env at ~/.local/share/uv/tools/strata-notebook with
+# the CLI on PATH. Plain `pip install` is not supported — Strata refuses
+# to start outside a uv-managed env (see Requirements below).
 uv tool install strata-notebook
 strata-notebook
 # Then open http://localhost:8765
@@ -81,9 +82,9 @@ not using PyPI or Docker):
   `npm ci && npm run build` step. PyPI wheels bundle the prebuilt SPA.
 - Python 3.12+ is handled automatically by `uv sync`.
 
-Windows: PyPI install works directly. Source builds work via WSL2
-(smoother) or native Windows (uv + rustup + Node have Windows
-installers).
+Windows: `uv tool install strata-notebook` works directly. Source builds
+work via WSL2 (smoother) or native Windows (uv + rustup + Node have
+Windows installers).
 
 Why uv at runtime: the notebook subsystem shells out to `uv` to
 manage per-notebook `.venv/` directories, and the project's dev
