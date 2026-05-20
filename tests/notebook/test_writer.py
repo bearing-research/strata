@@ -736,6 +736,22 @@ def test_update_notebook_connections_empty_drops_block():
         assert state.connections == []
 
 
+def test_update_notebook_connections_empty_on_empty_is_noop():
+    """Empty save on a notebook that never had a [connections] block
+    must not rewrite the file — otherwise ``updated_at`` churns and
+    array-of-tables get re-serialized as inline arrays on every UI save."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "ConnNoopEmpty")
+        notebook_toml = notebook_dir / "notebook.toml"
+        before_mtime = notebook_toml.stat().st_mtime_ns
+        before_text = notebook_toml.read_text(encoding="utf-8")
+
+        update_notebook_connections(notebook_dir, [])
+
+        assert notebook_toml.stat().st_mtime_ns == before_mtime
+        assert notebook_toml.read_text(encoding="utf-8") == before_text
+
+
 class TestUpdateRequiresPython:
     """update_requires_python rewrites the pyproject's requires-python line."""
 

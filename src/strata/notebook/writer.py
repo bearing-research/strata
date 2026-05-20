@@ -887,12 +887,18 @@ def update_notebook_connections(
 
     def mutate(toml_data: dict[str, Any]) -> bool:
         existing = toml_data.get("connections")
+        if not new_connections:
+            # Treat "no [connections] block" and "empty dict" as the same
+            # state so an empty save on a notebook that never had
+            # connections doesn't rewrite the file (and re-serialize
+            # array-of-tables to inline, churning updated_at).
+            if not existing:
+                return False
+            toml_data.pop("connections", None)
+            return True
         if existing == new_connections:
             return False
-        if new_connections:
-            toml_data["connections"] = new_connections
-        else:
-            toml_data.pop("connections", None)
+        toml_data["connections"] = new_connections
         return True
 
     _apply_notebook_toml_update(notebook_dir, mutate)
