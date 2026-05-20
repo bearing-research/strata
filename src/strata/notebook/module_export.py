@@ -34,12 +34,20 @@ cells. Concretely:
   Move the helper into the same cell as its caller, or duplicate it.
   (Tested: ``test_def_referencing_cross_cell_helper_blocks_export``.)
 
-* Type annotations *do* participate in the free-variable check by
-  default — ``def f(x: SomeType): ...`` blocks export when
-  ``SomeType`` isn't bound in the slice. Adding
+* Type annotations *do* participate in the free-variable check on
+  Python ≤ 3.13 by default — ``def f(x: SomeType): ...`` blocks
+  export when ``SomeType`` isn't bound in the slice. Adding
   ``from __future__ import annotations`` to the cell relaxes this:
   PEP 563 stringifies annotations and ``symtable`` correctly drops
-  them from the reference set. (Tested:
+  them from the reference set.
+
+  On Python 3.14+ this check is naturally relaxed for every cell:
+  PEP 749 makes annotations lazily evaluated by default, so
+  ``symtable`` no longer reports annotation references as free
+  variables and no future-import is needed. ``transform.__annotations__``
+  access can still NameError lazily if downstream code reaches for
+  it; the export check covers module-load safety, not annotation
+  access. (Tested:
   ``test_annotation_reference_blocks_without_future_import`` and
   ``test_future_annotations_relaxes_annotation_check``.)
 

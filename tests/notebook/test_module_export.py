@@ -10,6 +10,8 @@ library code can export the library code cleanly; pure module cells
 keep behaving exactly as before.
 """
 
+import sys
+
 from strata.notebook.module_export import build_module_export_plan
 
 # ---------------------------------------------------------------------------
@@ -423,10 +425,11 @@ def use_helper(x):
 
 
 def test_annotation_reference_blocks_without_future_import() -> None:
-    """Without ``from __future__ import annotations``, type
-    annotations are evaluated at function-definition time. A type
-    name not bound in the slice would NameError on module load, so we
-    block.
+    """Type annotations referencing unbound names block the slice on
+    Python ≤ 3.13 (annotations evaluated at def-time would NameError
+    on module load), but pass through on Python 3.14+ where PEP 749
+    makes annotations lazy by default. The runtime semantics differ
+    by Python version, and so does this safety check.
     """
     plan = build_module_export_plan(
         """
@@ -434,8 +437,21 @@ def transform(x: Df) -> Df:
     return x
 """.strip()
     )
-    assert plan.is_exportable is False
-    assert "Df" in plan.format_error()
+    if sys.version_info >= (3, 14):
+        # PEP 749 — annotations are stored as a deferred ``__annotate__``
+        # function and never evaluated at def-time, so the reference to
+        # the unbound ``Df`` is harmless on module load. ``symtable``
+        # correctly reports no free-variable concern; the slice exports
+        # cleanly. Downstream code that accesses
+        # ``transform.__annotations__`` would still raise NameError
+        # lazily; that's a separate concern from module-export safety.
+        assert plan.is_exportable is True
+        assert "transform" in plan.exported_symbols
+    else:
+        # Pre-3.14: annotations evaluated immediately, NameError on
+        # module load if ``Df`` isn't bound, so we block.
+        assert plan.is_exportable is False
+        assert "Df" in plan.format_error()
 
 
 def test_future_annotations_relaxes_annotation_check() -> None:

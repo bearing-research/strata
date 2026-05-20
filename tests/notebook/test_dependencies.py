@@ -300,7 +300,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.13
-  - pyarrow=18.0.0
+  - pyarrow=22.0.0
   - six=1.17.0
   - pip
   - pip:
@@ -308,7 +308,7 @@ dependencies:
 """
         )
 
-        assert requirements == ["pyarrow==18.0.0", "six==1.17.0", "requests==2.32.3"]
+        assert requirements == ["pyarrow==22.0.0", "six==1.17.0", "requests==2.32.3"]
         assert any("channels" in warning for warning in warnings)
         assert any("python version pin" in warning for warning in warnings)
 
@@ -322,7 +322,7 @@ dependencies:
             """
 name: demo
 dependencies:
-  - pyarrow=18.0.0
+  - pyarrow=22.0.0
   - six=1.17.0
   - pip:
       - urllib3==2.5.0
@@ -387,7 +387,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.13
-  - pyarrow=18.0.0
+  - pyarrow=22.0.0
   - six=1.17.0
 """,
         )
@@ -443,7 +443,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.13
-  - pyarrow=18.0.0
+  - pyarrow=22.0.0
   - six=1.17.0
 """,
         )
@@ -633,7 +633,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.13
-  - pyarrow=18.0.0
+  - pyarrow=22.0.0
   - six=1.17.0
   - pip:
       - requests==2.32.3
@@ -703,7 +703,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.13
-  - pyarrow=18.0.0
+  - pyarrow=22.0.0
   - six=1.17.0
 """
                 },
