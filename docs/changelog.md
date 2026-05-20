@@ -75,18 +75,18 @@ The first stable release is still planned as 0.1.0. See the section
 below for the feature inventory; this dry-run aims to validate that
 the inventory ships correctly.
 
-## Planned for 0.1.0
+## 0.1.0 — 2026-05-20
 
-First public release of Strata Notebook — in flight, **not yet
-published**. The package will be published on PyPI as `strata-notebook`
-once the release ships; the Python module is imported as `strata`.
-Wheels will ship for Linux (x86_64, aarch64), macOS (x86_64, arm64),
-and Windows (x86_64) and will be abi3-compatible from Python 3.12 onward.
+First public release of Strata Notebook. The package is published on
+PyPI as `strata-notebook`; the Python module is imported as `strata`.
+Wheels ship for Linux (x86_64, aarch64), macOS (x86_64, arm64), and
+Windows (x86_64) and are abi3-compatible from Python 3.12 onward.
 
 Strata refuses to start outside a uv-managed Python environment;
-`uv tool install strata-notebook` will be the canonical install path
-once 0.1.0 ships. Until then, install from a git checkout
-(`uv sync` in a cloned repo).
+`uv tool install strata-notebook` is the canonical install path,
+with `uv add strata-notebook` for project-style installs. `pip
+install` into a hand-rolled `python -m venv` is rejected by the
+startup guard.
 
 ### Added
 
