@@ -30,6 +30,9 @@ concurrency:
   group: jupyter-corpus
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   corpus:
     name: Extended corpus

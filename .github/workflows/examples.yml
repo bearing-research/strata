@@ -37,6 +37,9 @@ on:
       - 'uv.lock'
       - '.github/workflows/examples.yml'
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 

@@ -1,0 +1,76 @@
+version: 2
+
+# Weekly cadence on Monday mornings. Grouped updates so we get one
+# PR per ecosystem per week instead of N PRs per minor bump.
+
+updates:
+  # Pin GitHub Actions to SHAs and let Dependabot bump them. This is
+  # what closes the bulk of Scorecard's PinnedDependenciesID alerts —
+  # combined with the SHA-pinning sweep in the workflows themselves.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+      include: scope
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 5
+    groups:
+      python-runtime:
+        dependency-type: production
+        update-types: [minor, patch]
+      python-dev:
+        dependency-type: development
+        update-types: [minor, patch]
+    commit-message:
+      prefix: deps
+      include: scope
+
+  - package-ecosystem: cargo
+    directory: /rust
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 3
+    groups:
+      rust:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
+      include: scope
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 5
+    groups:
+      npm-runtime:
+        dependency-type: production
+        update-types: [minor, patch]
+      npm-dev:
+        dependency-type: development
+        update-types: [minor, patch]
+    commit-message:
+      prefix: deps
+      include: scope

@@ -18,6 +18,9 @@ on:
       - 'LICENSE'
       - '.github/workflows/docs.yml'
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   STRATA_CATALOG_URI: postgresql://strata:strata@localhost:5432/iceberg_catalog
