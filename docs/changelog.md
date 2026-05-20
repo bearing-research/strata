@@ -7,80 +7,12 @@ release framing rather than exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
-## Unreleased
-
-## 0.1.0a2 — 2026-05-20
-
-Third release-validation dry-run. Four changes from `0.1.0a1`:
-
-- **Wheel smoke-test job** added to the release workflow. After the
-  five wheel matrix jobs finish, a new `wheel-test` job downloads the
-  Linux x86_64 wheel, installs it into a fresh uv-managed venv, and
-  exercises import + console scripts (`strata`, `strata-worker`) +
-  server boot + `/health` + the served SPA at `/`. The TestPyPI
-  publish job now depends on `wheel-test`, so a packaging bug fails
-  the CI run before the artifact reaches the index. Catches the
-  class of bug we hit on `0.1.0a0` (missing `packaging` dep would
-  have been caught locally instead of in the smoke test we ran
-  after the publish failed).
-- **`GET /` assertion in the smoke test.** `server.py::_mount_frontend()`
-  silently skips mounting the SPA when `src/strata/_frontend/index.html`
-  is absent, so a wheel without the bundle would still pass `/health`.
-  The smoke now also fetches `/` and asserts the response is the SPA
-  index (grep for `<!doctype html`).
-- **`abi3-py312` forward-compat matrix** on `wheel-test`. Same wheel
-  is installed and smoke-tested against Python 3.12, 3.13, and 3.14
-  via a job-level matrix. The release contract is "one wheel per
-  platform covers 3.12+"; this validates it against every minor uv
-  knows about.
-- **`workflow_dispatch` recovery now checks out the tagged ref.**
-  Previously the manual-rerun path checked out whatever branch the
-  user dispatched from — if `main` had moved since the tag, the
-  rebuilt wheels would have the tagged version label but `main`'s
-  source. Now every checkout uses
-  `${{ inputs.version }}` → `v${inputs.version}` for dispatch,
-  falling back to `github.ref` for the tag-push path.
-
-This alpha will **approve the PyPI gate** (unlike `a0` / `a1` which
-rejected it) to validate the PyPI trusted-publisher config + the
-GitHub Release creation job before claiming the stable `0.1.0` slot.
-
-## 0.1.0a1 — 2026-05-19
-
-Second release-validation dry-run. `0.1.0a0` uploaded all 5 platform
-wheels to TestPyPI successfully but the sdist was rejected with
-HTTP 400 ("License-File LICENSE does not exist in distribution
-file") — maturin's sdist is built via `cargo package` rooted at
-`rust/` and didn't pick up `LICENSE` and `README.md` from the repo
-root. Added both to `[tool.maturin] include` with `format = ["sdist"]`
-so they land in the archive matching the PEP 639 metadata.
-
-The pipeline never published to PyPI on `0.1.0a0` because the
-TestPyPI failure short-circuited the run. `0.1.0a1` is the retry
-with the fix; no other changes from `0.1.0a0`.
-
-## 0.1.0a0 — 2026-05-19
-
-Release-validation dry-run. The first tagged release in the project's
-history; exercises the full publish pipeline (multi-platform wheel
-matrix, TestPyPI auto-publish, manually-gated PyPI publish) before
-the stable 0.1.0 cut. The wheel content is identical to what 0.1.0
-will ship; only the version label differs. Anyone installing
-`strata-notebook==0.1.0a0` from PyPI will get a working install with
-the feature surface planned for 0.1.0 (described below); the alpha
-label exists so the version slot can be discarded if the dry-run
-surfaces any release-pipeline bugs.
-
-The first stable release is still planned as 0.1.0. See the section
-below for the feature inventory; this dry-run aims to validate that
-the inventory ships correctly.
-
 ## 0.1.0 — 2026-05-20
 
-First public release of Strata Notebook. The package is published on
+First stable release of Strata Notebook. The package is published on
 PyPI as `strata-notebook`; the Python module is imported as `strata`.
 Wheels ship for Linux (x86_64, aarch64), macOS (x86_64, arm64), and
-Windows (x86_64) and are abi3-compatible from Python 3.12 onward.
+Windows (x86_64) and are abi3-compatible from Python 3.12 through 3.14.
 
 Strata refuses to start outside a uv-managed Python environment;
 `uv tool install strata-notebook` is the canonical install path,
@@ -145,6 +77,9 @@ startup guard. The notebook app boots via `strata-notebook` (or
   free-variable check drops them)
 - module-level globals written from inside a function are detected
 - comprehension elements walk with loop targets locally scoped
+- Python 3.14 / PEP 749 deferred-annotation behavior: annotation references
+  go through an explicit AST walk so the cross-cell check is consistent
+  across `symtable`'s version-dependent free-variable reporting
 - `library_cells` example notebook walking through cross-cell library code
 
 #### Deployment
@@ -164,6 +99,11 @@ startup guard. The notebook app boots via `strata-notebook` (or
 - abi3-py312 wheel format — one wheel per platform covers Python 3.12+
 - tag-driven release workflow with TestPyPI auto-publish and
   PyPI publish gated by a protected GitHub Environment
+- post-build wheel smoke test (`wheel-test` job) installs the Linux
+  x86_64 wheel into a fresh uv venv, exercises console scripts and
+  `/health`, asserts the bundled SPA is served at `/`, and runs the
+  matrix against Python 3.12 / 3.13 / 3.14 — packaging bugs fail
+  the run before the artifact reaches the index
 
 ### Changed
 
@@ -192,6 +132,13 @@ startup guard. The notebook app boots via `strata-notebook` (or
 - local service-mode browser routing and notebook creation flow
 - relative connection paths now resolve against the notebook directory,
   not the server CWD
+- recent-notebook list is server-validated on home-page load so deleted
+  notebooks no longer land the user on a "session not found" toast; a
+  Clear button next to the section title wipes the local list without
+  touching on-disk notebooks
+- `update_notebook_connections` is now idempotent when no `[connections]`
+  block exists and the request is empty — saves with no change no longer
+  churn `updated_at` or rewrite the on-disk TOML shape (invariant 6)
 - timing-based perf assertion in `test_concurrent_scans_dont_block_each_other`
   replaced with a structural correctness check (no more CI flakes from
   runner load)
@@ -206,3 +153,69 @@ startup guard. The notebook app boots via `strata-notebook` (or
   principals when configured (`write_credentials_path`, `write_role`),
   with `read_only` kwarg on `canonicalize_connection_id` so changing the
   write principal does not invalidate read-cell caches
+
+## 0.1.0a2 — 2026-05-20
+
+Third release-validation dry-run. Four changes from `0.1.0a1`:
+
+- **Wheel smoke-test job** added to the release workflow. After the
+  five wheel matrix jobs finish, a new `wheel-test` job downloads the
+  Linux x86_64 wheel, installs it into a fresh uv-managed venv, and
+  exercises import + console scripts (`strata`, `strata-worker`) +
+  server boot + `/health` + the served SPA at `/`. The TestPyPI
+  publish job now depends on `wheel-test`, so a packaging bug fails
+  the CI run before the artifact reaches the index. Catches the
+  class of bug we hit on `0.1.0a0` (missing `packaging` dep would
+  have been caught locally instead of in the smoke test we ran
+  after the publish failed).
+- **`GET /` assertion in the smoke test.** `server.py::_mount_frontend()`
+  silently skips mounting the SPA when `src/strata/_frontend/index.html`
+  is absent, so a wheel without the bundle would still pass `/health`.
+  The smoke now also fetches `/` and asserts the response is the SPA
+  index (grep for `<!doctype html`).
+- **`abi3-py312` forward-compat matrix** on `wheel-test`. Same wheel
+  is installed and smoke-tested against Python 3.12, 3.13, and 3.14
+  via a job-level matrix. The release contract is "one wheel per
+  platform covers 3.12+"; this validates it against every minor uv
+  knows about.
+- **`workflow_dispatch` recovery now checks out the tagged ref.**
+  Previously the manual-rerun path checked out whatever branch the
+  user dispatched from — if `main` had moved since the tag, the
+  rebuilt wheels would have the tagged version label but `main`'s
+  source. Now every checkout uses
+  `${{ inputs.version }}` → `v${inputs.version}` for dispatch,
+  falling back to `github.ref` for the tag-push path.
+
+This alpha will **approve the PyPI gate** (unlike `a0` / `a1` which
+rejected it) to validate the PyPI trusted-publisher config + the
+GitHub Release creation job before claiming the stable `0.1.0` slot.
+
+## 0.1.0a1 — 2026-05-19
+
+Second release-validation dry-run. `0.1.0a0` uploaded all 5 platform
+wheels to TestPyPI successfully but the sdist was rejected with
+HTTP 400 ("License-File LICENSE does not exist in distribution
+file") — maturin's sdist is built via `cargo package` rooted at
+`rust/` and didn't pick up `LICENSE` and `README.md` from the repo
+root. Added both to `[tool.maturin] include` with `format = ["sdist"]`
+so they land in the archive matching the PEP 639 metadata.
+
+The pipeline never published to PyPI on `0.1.0a0` because the
+TestPyPI failure short-circuited the run. `0.1.0a1` is the retry
+with the fix; no other changes from `0.1.0a0`.
+
+## 0.1.0a0 — 2026-05-19
+
+Release-validation dry-run. The first tagged release in the project's
+history; exercises the full publish pipeline (multi-platform wheel
+matrix, TestPyPI auto-publish, manually-gated PyPI publish) before
+the stable 0.1.0 cut. The wheel content is identical to what 0.1.0
+will ship; only the version label differs. Anyone installing
+`strata-notebook==0.1.0a0` from PyPI will get a working install with
+the feature surface planned for 0.1.0 (described above); the alpha
+label exists so the version slot can be discarded if the dry-run
+surfaces any release-pipeline bugs.
+
+The first stable release is still planned as 0.1.0. See the section
+above for the feature inventory; this dry-run aims to validate that
+the inventory ships correctly.
