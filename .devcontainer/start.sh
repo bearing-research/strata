@@ -3,16 +3,16 @@ set -euo pipefail
 
 export PATH="$HOME/.local/bin:$PATH"
 
-NOTEBOOK_PARENT_DIR="/tmp/strata-notebooks"
 SERVER_LOG="/tmp/strata-devcontainer.log"
 SERVER_URL="http://127.0.0.1:8765/health"
 
-mkdir -p "$NOTEBOOK_PARENT_DIR"
-
+# Boot the server if it isn't already responding. The default storage
+# dir is ``~/.strata/notebooks`` (per strata.config), which Strata
+# creates on demand — no mkdir needed here.
 if ! curl -fsS "$SERVER_URL" >/dev/null 2>&1; then
     nohup env \
         STRATA_DEPLOYMENT_MODE=personal \
-        uv run python -m strata \
+        strata-server \
         >"$SERVER_LOG" 2>&1 &
 fi
 

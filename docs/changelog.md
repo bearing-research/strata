@@ -82,7 +82,11 @@ published**. The package will be published on PyPI as `strata-notebook`
 once the release ships; the Python module is imported as `strata`.
 Wheels will ship for Linux (x86_64, aarch64), macOS (x86_64, arm64),
 and Windows (x86_64) and will be abi3-compatible from Python 3.12 onward.
-Until then, install from a git checkout (`uv sync` in a cloned repo).
+
+Strata refuses to start outside a uv-managed Python environment;
+`uv tool install strata-notebook` will be the canonical install path
+once 0.1.0 ships. Until then, install from a git checkout
+(`uv sync` in a cloned repo).
 
 ### Added
 

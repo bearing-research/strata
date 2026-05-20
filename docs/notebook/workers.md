@@ -122,30 +122,24 @@ my-strata-worker/
 └── .dockerignore
 ```
 
-**`Dockerfile`** — installs `strata-notebook` and your workload deps. Rust is needed because there's no PyPI release yet, so the install builds the native extension from git source. Once we publish PyPI wheels (tracked for 0.1.0), this Dockerfile drops the Rust toolchain and the builder stage entirely — `pip install strata-notebook` will fetch a pre-built wheel.
+**`Dockerfile`** — installs `strata-notebook` and your workload deps from a uv-managed venv. Unlike `strata-server`, the worker entry (`strata-worker`) is not gated by Strata's runtime guard, so a plain `pip install` would also work — but the uv-python base image keeps tooling consistent across server + worker and drops a few hundred MB of build stage versus a source install.
 
 ```dockerfile
-FROM python:3.12-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl build-essential git ca-certificates && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal && \
-    rm -rf /var/lib/apt/lists/*
+ENV VIRTUAL_ENV=/opt/strata-venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
-ENV PATH="/root/.cargo/bin:$PATH"
-
-# Install strata-notebook + your workload dependencies. Pin to a
-# git SHA in production so workers can't drift relative to the
-# notebook server's expected protocol version.
-RUN pip install --no-cache-dir \
-    "strata-notebook @ git+https://github.com/bearing-research/strata.git@main" \
-    "datafusion>=42" \
-    "pandas>=2" \
-    "pyarrow>=18"
-
-FROM python:3.12-slim
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+# Install strata-notebook + your workload deps into a uv-managed
+# venv. Pin to an exact strata-notebook version in production so
+# workers can't drift relative to the notebook server's expected
+# protocol version.
+RUN uv venv $VIRTUAL_ENV && \
+    uv pip install \
+      strata-notebook \
+      "datafusion>=42" \
+      "pandas>=2" \
+      "pyarrow>=18"
 
 EXPOSE 8080
 CMD ["strata-worker", "--host", "0.0.0.0", "--port", "8080"]
@@ -186,7 +180,7 @@ fly launch --no-deploy   # first time only — creates the app, accepts fly.toml
 fly deploy
 ```
 
-The first build takes ~3 minutes (Rust compile). Subsequent deploys reuse the builder cache and finish in ~30 seconds.
+The first build takes ~30 seconds (wheel download + layer assembly). Subsequent deploys reuse the layer cache and finish in seconds.
 
 **3. Verify the deployed worker:**
 
@@ -223,24 +217,20 @@ modal token new   # one-time browser auth
 ```python
 import modal
 
+# Modal's pip_install pulls wheels from PyPI. strata-notebook ships
+# pre-built abi3-py312 wheels so no Rust toolchain is needed, and the
+# worker entry isn't gated by the runtime guard (only strata-server is)
+# so Modal's standard image stack works without going through uv.
 gpu_image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("curl", "build-essential", "git", "ca-certificates")
-    .run_commands(
-        # Rust is needed only because strata-notebook isn't on PyPI
-        # yet; the wheel install would skip this once it's published.
-        "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal",
-    )
-    .env({"PATH": "/root/.cargo/bin:/usr/local/bin:/usr/bin:/bin"})
     .pip_install(
-        "fastapi>=0.115", "uvicorn>=0.30", "httpx>=0.27",
-        "python-multipart>=0.0.9",
         "pyarrow>=18.0.0", "pandas>=2.0.0", "numpy>=1.26.0",
         # Your workload dependencies:
         "torch>=2.3",
         "sentence-transformers>=3.0",
-        # Pin to a git SHA in production.
-        "strata-notebook @ git+https://github.com/bearing-research/strata.git@main",
+        # Pin to an exact version in production so the worker
+        # protocol can't drift relative to the notebook server.
+        "strata-notebook",
     )
 )
 
@@ -260,7 +250,7 @@ def gpu_executor():
 modal deploy worker.py
 ```
 
-Modal prints the deployed URL after the build finishes — something like `https://your-username--my-gpu-worker-gpu-executor.modal.run`. The first build with Rust + torch + sentence-transformers takes ~10 minutes; redeploys with no changes hit the layer cache and finish in seconds.
+Modal prints the deployed URL after the build finishes — something like `https://your-username--my-gpu-worker-gpu-executor.modal.run`. The first build with torch + sentence-transformers takes ~5 minutes; redeploys with no changes hit the layer cache and finish in seconds.
 
 **3. Verify:**
 
@@ -440,11 +430,11 @@ Cold start. Modal scales the function to zero after `scaledown_window` seconds i
 **`413 Payload Too Large` from the worker.**
 A cell input is larger than the worker's max-input limit. Default is 256 MB; override with `STRATA_WORKER_MAX_INPUT_BYTES=<bytes>` on the worker. Better: shrink the input by selecting columns / filtering rows in an upstream cell.
 
-**Fly build fails with `error: linker 'cc' not found` or similar Rust build errors.**
-The base image is missing `build-essential`. The Dockerfile above includes it; if you've trimmed the Dockerfile, restore `apt-get install -y build-essential` in the builder stage.
+**Fly build fails with `error: failed to fetch wheel` from a workload dep.**
+Some Python deps (torch, sentence-transformers) don't ship abi3 wheels and fall back to building from source. If your worker needs one, add `build-essential` (plus the dep-specific toolchain) to the Dockerfile via `RUN apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*` before the `uv pip install` step.
 
 **Modal redeploy hangs at "Building image".**
-You changed `.pip_install(...)` — Modal is rebuilding the image layer. With Rust + torch this takes ~10 minutes the first time on a new image hash. Subsequent deploys with no dep changes hit the layer cache and finish in seconds.
+You changed `.pip_install(...)` — Modal is rebuilding the image layer. With torch + sentence-transformers this takes ~5 minutes the first time on a new image hash. Subsequent deploys with no dep changes hit the layer cache and finish in seconds.
 
 ## Live status
 

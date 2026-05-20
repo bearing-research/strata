@@ -31,9 +31,13 @@ Port **8765** is forwarded automatically with `onAutoForward: "openBrowser"`, so
 
 The initial `postCreateCommand` takes 3-5 minutes (Rust compilation). Subsequent starts are fast since the build is cached in the Codespace volume.
 
-!!! info "Will simplify once PyPI wheels ship"
-    The Rust toolchain install is only required because
-    `strata-notebook` isn't on PyPI yet. Once we publish pre-built
-    wheels (tracked for 0.1.0), the devcontainer can drop the Rust
-    step and rely on `uv add strata-notebook` pulling a wheel
-    directly. Initial setup will drop to well under a minute.
+PyPI wheels now ship, so the Codespace setup is `uv tool install
+strata-notebook` and finishes in under a minute. If you're using a
+Codespace to **contribute to Strata** (not just try it), install the
+Rust toolchain and clone the repo manually:
+
+```bash
+curl --proto '=https' -sSf https://sh.rustup.rs | sh -s -- -y
+git clone https://github.com/bearing-research/strata.git
+cd strata && uv sync --all-extras
+```

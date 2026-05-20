@@ -34,10 +34,10 @@ proxy auth. For multi-tenant or hosted deployments, see
 docker compose up -d --build
 # Then open http://localhost:8765
 
-# Or from source — requires uv (see Requirements below).
-uv sync
-cd frontend && npm ci && npm run build && cd ..
-uv run strata-server
+# Or via PyPI install — requires uv. Drops the wheel into a uv-managed
+# tool env at ~/.local/share/uv/tools/strata-notebook with the CLI on PATH.
+uv tool install strata-notebook
+strata-server
 # Then open http://localhost:8765
 #
 # For the full inventory of installed commands
@@ -45,37 +45,38 @@ uv run strata-server
 # see docs/getting-started/installation.md#commands-reference.
 ```
 
-### Requirements
+Source builds — `git clone + uv sync` — work too and are documented in
+[Installation](https://bearing-research.github.io/strata/getting-started/installation/);
+needed only if you're modifying Strata itself.
 
-Runtime (Docker or `uv run strata-server`):
+### Requirements
 
 - **[uv](https://docs.astral.sh/uv/) ≥ 0.8** — install via the
   [uv installer](https://docs.astral.sh/uv/getting-started/installation/)
   (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux;
   PowerShell installer on Windows). Strata refuses to start outside
   a uv-managed environment: the startup check looks for the
-  `uv = <version>` marker that uv writes to `pyvenv.cfg`; `uv run`
-  and `uvx` produce envs with this marker, hand-rolled `python -m venv`
-  venvs do not. Conda and pip-venv users need to install uv and
-  re-launch Strata from a uv-managed env — existing data and other
-  environments are untouched, but Strata's own runtime has to be
-  uv-managed. uv fetches a matching Python for you, so you don't
-  need Python pre-installed.
+  `uv = <version>` marker that uv writes to `pyvenv.cfg`. `uv tool
+  install`, `uv add`, and `uv run` all produce envs with this
+  marker; plain `pip install` into a hand-rolled `python -m venv`
+  does not, and Strata will refuse to start there. Conda and
+  pip-venv users need to install uv and re-launch from a uv-managed
+  env — existing data and other environments are untouched. uv
+  fetches a matching Python for you, so you don't need Python
+  pre-installed.
 
-Source build (this is currently the only install path —
-`strata-notebook` isn't on PyPI yet; PyPI wheels are planned for
-0.1.0 and will let you skip the Rust step):
+Source build (only if you're building Strata itself from a git clone,
+not using PyPI or Docker):
 
 - **[Rust toolchain](https://rustup.rs/)** (rustup) — for `maturin`
-  to compile the native extension. Once installed, `cargo` and
-  `rustc` need to be on `PATH` so `uv sync` can invoke them.
+  to compile the native extension. PyPI wheels skip this step.
 - **[Node 25+ / npm](https://nodejs.org/)** — for the frontend
-  `npm ci && npm run build` step.
+  `npm ci && npm run build` step. PyPI wheels bundle the prebuilt SPA.
 - Python 3.12+ is handled automatically by `uv sync`.
 
-Windows: source builds work via WSL2 (smoother) or native Windows
-(uv + rustup + Node have Windows installers). Day-to-day dev is on
-macOS/Linux, so WSL2 is the better-trodden path.
+Windows: PyPI install works directly. Source builds work via WSL2
+(smoother) or native Windows (uv + rustup + Node have Windows
+installers).
 
 Why uv at runtime: the notebook subsystem shells out to `uv` to
 manage per-notebook `.venv/` directories, and the project's dev
@@ -213,12 +214,8 @@ has two steps: start the server, then call it from your code.
 
 ```bash
 # 1. Install + start the server (in a uv-managed env).
-# Until 0.1.0 ships to PyPI, install from a git checkout — needs
-# the Rust toolchain (see Requirements above).
-git clone https://github.com/bearing-research/strata.git
-cd strata
-uv sync --all-extras
-uv run strata-server
+uv tool install strata-notebook
+strata-server
 
 # 2. From another process, point the client at it:
 ```

@@ -62,19 +62,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v8.1.0
-      - name: Install Rust (needed until 0.1.0 ships PyPI wheels)
-        uses: dtolnay/rust-toolchain@stable
-      - name: Clone Strata
-        run: git clone --depth 1 https://github.com/bearing-research/strata.git
-      - name: Build Strata venv
-        # uv sync builds the native extension and creates the
-        # uv-managed venv that the runtime guard requires.
-        run: uv sync --all-extras
-        working-directory: strata
+      - name: Install Strata
+        # uv tool install creates a uv-managed env at
+        # ~/.local/share/uv/tools/strata-notebook with the strata
+        # CLI on PATH — satisfies the runtime guard.
+        run: uv tool install strata-notebook
       - name: Run notebook
-        # `uv run` resolves into the strata venv created above.
-        run: uv run strata run ../notebooks/daily_report --format json
-        working-directory: strata
+        run: strata run ./notebooks/daily_report --format json
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
