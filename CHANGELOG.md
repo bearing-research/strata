@@ -7,6 +7,42 @@ release framing rather than exhaustive commit history.
 
 ## Unreleased
 
+## 0.1.0a2 — 2026-05-20
+
+Third release-validation dry-run. Four changes from `0.1.0a1`:
+
+- **Wheel smoke-test job** added to the release workflow. After the
+  five wheel matrix jobs finish, a new `wheel-test` job downloads the
+  Linux x86_64 wheel, installs it into a fresh uv-managed venv, and
+  exercises import + console scripts (`strata`, `strata-worker`) +
+  server boot + `/health` + the served SPA at `/`. The TestPyPI
+  publish job now depends on `wheel-test`, so a packaging bug fails
+  the CI run before the artifact reaches the index. Catches the
+  class of bug we hit on `0.1.0a0` (missing `packaging` dep would
+  have been caught locally instead of in the smoke test we ran
+  after the publish failed).
+- **`GET /` assertion in the smoke test.** `server.py::_mount_frontend()`
+  silently skips mounting the SPA when `src/strata/_frontend/index.html`
+  is absent, so a wheel without the bundle would still pass `/health`.
+  The smoke now also fetches `/` and asserts the response is the SPA
+  index (grep for `<!doctype html`).
+- **`abi3-py312` forward-compat matrix** on `wheel-test`. Same wheel
+  is installed and smoke-tested against Python 3.12, 3.13, and 3.14
+  via a job-level matrix. The release contract is "one wheel per
+  platform covers 3.12+"; this validates it against every minor uv
+  knows about.
+- **`workflow_dispatch` recovery now checks out the tagged ref.**
+  Previously the manual-rerun path checked out whatever branch the
+  user dispatched from — if `main` had moved since the tag, the
+  rebuilt wheels would have the tagged version label but `main`'s
+  source. Now every checkout uses
+  `${{ inputs.version }}` → `v${inputs.version}` for dispatch,
+  falling back to `github.ref` for the tag-push path.
+
+This alpha will **approve the PyPI gate** (unlike `a0` / `a1` which
+rejected it) to validate the PyPI trusted-publisher config + the
+GitHub Release creation job before claiming the stable `0.1.0` slot.
+
 ## 0.1.0a1 — 2026-05-19
 
 Second release-validation dry-run. `0.1.0a0` uploaded all 5 platform
