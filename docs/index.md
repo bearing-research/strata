@@ -70,5 +70,7 @@ See [Installation](getting-started/installation.md) for full details.
 
 ## Status
 
-Strata is currently in **alpha**. Both surfaces (Notebook and Core) are
-functional but the API may change before 1.0.
+Strata is at **0.1.0** — the first stable release. Both surfaces
+(Notebook and Core) are functional and shipped from PyPI. The API
+may still change between 0.x minors before 1.0; pin to a minor if
+you need stability.

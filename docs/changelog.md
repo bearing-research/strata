@@ -2,8 +2,8 @@
 
 All notable changes to Strata will be documented in this file.
 
-The project is still in alpha. Entries here focus on user-visible changes and
-release framing rather than exhaustive commit history.
+The project is at 0.1.0 — its first stable release. Entries here focus on
+user-visible changes and release framing rather than exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
