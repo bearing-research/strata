@@ -644,12 +644,14 @@ class TestEndToEnd:
         assert response.status_code == 200
 
         result = response.json()
+        # Surface the planner / fetcher error first so a CI failure
+        # shows the actual exception text instead of just "0 == 1".
+        assert result["errors"] == [], result
         assert result["tables_warmed"] == 1
         assert result["row_groups_cached"] > 0  # Should have cached some
         assert result["row_groups_skipped"] == 0  # Cache was cleared
         assert result["bytes_written"] > 0
         assert result["elapsed_ms"] > 0
-        assert result["errors"] == []
 
         # Warm again - should skip cached row groups
         response = requests.post(
