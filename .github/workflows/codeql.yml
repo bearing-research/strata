@@ -1,0 +1,59 @@
+name: CodeQL
+
+# Advanced CodeQL setup, replacing the default code-scanning setup.
+# Required so we can use ``.github/codeql/codeql-config.yml`` to
+# exclude examples/ from analysis — prompt and SQL cell files there
+# use the .py extension by project convention but aren't valid
+# Python, which the default setup reports as parse-error warnings
+# every run.
+#
+# Before this workflow lands, **disable the default CodeQL setup**
+# in repo Settings → Code security → Code scanning. Otherwise both
+# setups run concurrently and the default one keeps emitting the
+# parse errors.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly on Mondays at 06:00 UTC. Keeps the query suites running
+    # against unchanged code so newly-published query updates surface
+    # findings on existing source without needing a push.
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+env:
+  # GitHub plans to default JS actions to Node 24 on 2026-06-02 and
+  # remove Node 20 on 2026-09-16. Opting in early silences the
+  # per-step deprecation warnings and matches the other workflows.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
