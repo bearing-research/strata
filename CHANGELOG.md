@@ -7,6 +7,22 @@ release framing rather than exhaustive commit history.
 
 ## Unreleased
 
+## 0.1.0a0 — 2026-05-19
+
+Release-validation dry-run. The first tagged release in the project's
+history; exercises the full publish pipeline (multi-platform wheel
+matrix, TestPyPI auto-publish, manually-gated PyPI publish) before
+the stable 0.1.0 cut. The wheel content is identical to what 0.1.0
+will ship; only the version label differs. Anyone installing
+`strata-notebook==0.1.0a0` from PyPI will get a working install with
+the feature surface planned for 0.1.0 (described below); the alpha
+label exists so the version slot can be discarded if the dry-run
+surfaces any release-pipeline bugs.
+
+The first stable release is still planned as 0.1.0. See the section
+below for the feature inventory; this dry-run aims to validate that
+the inventory ships correctly.
+
 ## Planned for 0.1.0
 
 First public release of Strata Notebook — in flight, **not yet
