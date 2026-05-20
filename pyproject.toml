@@ -32,6 +32,7 @@ dependencies = [
     "tomli_w>=1.0.0", # For writing TOML files
     "jsonschema>=4.0.0",
     "infisicalsdk>=1.0.16",
+    "packaging>=24.0",
 ]
 
 [project.optional-dependencies]
