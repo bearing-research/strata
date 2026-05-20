@@ -31,12 +31,24 @@ Authentication depends on `deployment_mode`:
 | `personal` + `STRATA_PERSONAL_MODE_USER_HEADER` | Caller identity from the named header (set by an authenticating proxy) | The header you configured (e.g. `X-Authenticated-User`) |
 | `service` + `auth_mode="trusted_proxy"` | Proxy-injected identity | `X-Strata-Principal`, `X-Strata-Scopes`, `X-Strata-Proxy-Token`; `X-Tenant-ID` if multi-tenant |
 
-In service mode, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret. Specific scopes are required on top of that:
+In service mode, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret. Two further restrictions narrow what each endpoint accepts:
+
+**Personal-mode-only endpoints.** These return `400 Bad Request` outside personal mode (write surface that service-mode deployments route through the artifact build pipeline instead):
+
+| Endpoint | Why personal-mode-only |
+| --- | --- |
+| `DELETE /v1/notebooks/{session_id}` | Filesystem delete of a notebook directory |
+| `POST /v1/notebooks/delete-by-path` | Same, addressed by path |
+| `GET /v1/notebooks/discover` | Walks the storage root for any notebook |
+| Notebook session lifecycle (`/open`, `/create`, session reconnect) | Long-lived sessions land on one server process; service-mode multi-tenant deploys use the artifact API instead |
+
+**Scope-gated endpoints.** These require a scope token in `X-Strata-Scopes` beyond authenticated principal:
 
 | Endpoint | Required scope |
 | --- | --- |
 | `POST /v1/cache/clear` | `admin:cache` |
-| (other endpoints) | No scope beyond authenticated principal |
+
+All other endpoints documented below need only `X-Strata-Principal` + `X-Strata-Proxy-Token` in service mode, and no auth in personal mode. Endpoints below carry a `Personal mode only` callout where applicable; otherwise treat them as available in both modes.
 
 Personal mode with no header configured is effectively trust-on-first-call — anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](../deployment/modes.md); see [Fly.io deployment](../deployment/fly.md#trust-model) for the load-bearing details.
 

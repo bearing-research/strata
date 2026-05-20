@@ -61,7 +61,7 @@ store. The client talks to a running Strata server.
     ```bash
     uv sync
     cd frontend && npm ci && npm run build && cd ..
-    STRATA_DEPLOYMENT_MODE=personal uv run strata-server
+    uv run strata-server
     ```
 
     Then open [http://localhost:8765](http://localhost:8765).

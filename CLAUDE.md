@@ -39,6 +39,12 @@ uv run ty check src/                      # type check (Astral)
 uv run python -m strata                   # start server
 ```
 
+Full inventory of installed binaries (`strata-server`, `strata`,
+`strata-worker`, `python -m strata`, package vs CLI name) lives at
+`docs/getting-started/installation.md#commands-reference` — the
+canonical list other pages should link to instead of re-introducing
+each command from scratch.
+
 `--all-extras` is what CI runs (`.github/workflows/ci.yml`). Plain
 `uv sync` works for users who only want to run the server, but the
 test suite's harness fixtures point the per-notebook venv at the

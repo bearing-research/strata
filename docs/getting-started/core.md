@@ -41,6 +41,14 @@ Same inputs, same transform, three different cache states, and the third is stil
 
 ## 3. Materialize a result
 
+Table URIs use the form `<scheme>://<warehouse-path>#<namespace>.<table>`:
+
+- `<scheme>` is the storage scheme — `file://` for a local Iceberg warehouse, `s3://` / `gs://` / `az://` for cloud blob storage.
+- `<warehouse-path>` is the path to the warehouse root (the directory containing Iceberg metadata).
+- The fragment after `#` names the Iceberg table inside the warehouse, as `<namespace>.<table>`.
+
+For the demo above, the warehouse lives at `/warehouse` and contains the `events` table in the `db` namespace, so the URI is `file:///warehouse#db.events`.
+
 ```python
 from strata.client import StrataClient
 

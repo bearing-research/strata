@@ -39,6 +39,10 @@ uv sync
 cd frontend && npm ci && npm run build && cd ..
 uv run strata-server
 # Then open http://localhost:8765
+#
+# For the full inventory of installed commands
+# (strata-server, strata, strata-worker, python -m strata),
+# see docs/getting-started/installation.md#commands-reference.
 ```
 
 ### Requirements

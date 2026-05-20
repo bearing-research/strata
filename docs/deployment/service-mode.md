@@ -29,10 +29,7 @@ STRATA_PROXY_TOKEN=<shared-secret>
 STRATA_ARTIFACT_DIR=/path/to/persistent/dir   # or a blob backend
 ```
 
-The coherence checker ([`validate_mode_coherence`](https://github.com/bearing-research/strata/blob/main/src/strata/config.py))
-fires clear `ValueError`s on boot if anything's missing, a sloppy
-service-mode deploy refuses to start rather than silently exposing
-write endpoints.
+A [startup coherence check](https://github.com/bearing-research/strata/blob/main/src/strata/config.py) fires clear `ValueError`s on boot if anything's missing, a sloppy service-mode deploy refuses to start rather than silently exposing write endpoints.
 
 ## The trusted-proxy contract
 
@@ -192,11 +189,7 @@ alphanumeric / `_` / `-` characters and hashed into:
 - **Metric labels**: Prometheus output carries a `tenant` label so
   you can dashboard per-tenant usage.
 
-A tenant registry tracks active tenants (LRU-bounded). The
-implementation lives across
-[`tenant.py`](https://github.com/bearing-research/strata/blob/main/src/strata/tenant.py),
-[`tenant_registry.py`](https://github.com/bearing-research/strata/blob/main/src/strata/tenant_registry.py),
-and [`tenant_acl.py`](https://github.com/bearing-research/strata/blob/main/src/strata/tenant_acl.py).
+A tenant registry tracks active tenants (LRU-bounded). [Implementation details are in the source tree](https://github.com/bearing-research/strata/tree/main/src/strata) if you need to extend the tenant-scoping behavior.
 
 ## ACLs
 
@@ -218,10 +211,7 @@ scope = "notebook:write"
 default = "deny"
 ```
 
-Evaluation: deny rules → allow rules → default. The wildcard /
-principal / scope matching rules live in
-[`auth.py`](https://github.com/bearing-research/strata/blob/main/src/strata/auth.py)
-and [`tenant_acl.py`](https://github.com/bearing-research/strata/blob/main/src/strata/tenant_acl.py).
+Evaluation: deny rules → allow rules → default. [Wildcard, principal, and scope matching semantics are documented in source](https://github.com/bearing-research/strata/tree/main/src/strata) for anyone extending the ACL engine.
 
 ## Migrating from personal mode
 
