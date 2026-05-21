@@ -7,6 +7,15 @@ updates:
   # Pin GitHub Actions to SHAs and let Dependabot bump them. This is
   # what closes the bulk of Scorecard's PinnedDependenciesID alerts —
   # combined with the SHA-pinning sweep in the workflows themselves.
+  #
+  # Group only minor + patch bumps; major bumps come as individual PRs
+  # we review case-by-case. We learned this the hard way with the
+  # PR #7 megabump that touched release.yml in ways CI couldn't
+  # exercise (the wheel-publish pipeline only runs on v* tags).
+  #
+  # release.yml's artifact + gh-release actions are ignored entirely
+  # for majors — those need manual smoke-testing against the publish
+  # pipeline before we accept the bump.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -18,6 +27,20 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # Major bumps on release.yml-critical actions. Tests don't
+      # exercise release.yml, so a green CI doesn't mean the
+      # wheel-publish pipeline still works. Bump these manually
+      # with a tag-driven dry-run when needed.
+      - dependency-name: "actions/upload-artifact"
+        update-types: [version-update:semver-major]
+      - dependency-name: "actions/download-artifact"
+        update-types: [version-update:semver-major]
+      - dependency-name: "softprops/action-gh-release"
+        update-types: [version-update:semver-major]
+      - dependency-name: "github/codeql-action"
+        update-types: [version-update:semver-major]
     commit-message:
       prefix: ci
       include: scope
