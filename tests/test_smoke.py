@@ -627,28 +627,49 @@ class TestEndToEnd:
 
     def test_cache_warm_endpoint(self, server_with_client):
         """Test the /v1/cache/warm endpoint."""
+        import time as _time
+
         import requests
 
         config = server_with_client["config"]
         table_uri = server_with_client["warehouse"]["table_uri"]
+        warm_url = f"http://127.0.0.1:{config.port}/v1/cache/warm"
+        warm_payload = {
+            "tables": [table_uri],
+            "columns": ["id", "value"],  # Subset of columns
+            "max_row_groups": 2,  # Limit for testing
+            "concurrent": 2,
+        }
 
         # Clear cache first
         response = requests.post(f"http://127.0.0.1:{config.port}/v1/cache/clear")
         assert response.status_code == 200
 
-        # Warm the cache for our table
-        response = requests.post(
-            f"http://127.0.0.1:{config.port}/v1/cache/warm",
-            json={
-                "tables": [table_uri],
-                "columns": ["id", "value"],  # Subset of columns
-                "max_row_groups": 2,  # Limit for testing
-                "concurrent": 2,
-            },
-        )
-        assert response.status_code == 200
+        # Warm the cache for our table. On Linux + Python 3.14 + tmpfs
+        # the first warm against a freshly-written catalog.db
+        # intermittently hits SQLITE_IOERR ("disk I/O error") inside
+        # pyiceberg's catalog read — the server's SqlCatalog opens a
+        # connection on the same path the fixture just wrote, and the
+        # combo of tmpfs and 3.14's GC ordering occasionally trips
+        # ADBC's cursor finalizer ("Underflow in closing this
+        # AdbcStatement") before the read completes. The endpoint is
+        # already idempotent (cache warm safely retries on its own
+        # internally and again on the next call); the second warm
+        # below verifies that behaviour. Retry once on that specific
+        # symptom so this test absorbs the known environmental flake
+        # without retrying past real bugs.
+        for attempt in range(2):
+            response = requests.post(warm_url, json=warm_payload)
+            assert response.status_code == 200
+            result = response.json()
+            if not result["errors"]:
+                break
+            io_flake = any("disk I/O error" in err for err in result["errors"])
+            if attempt == 0 and io_flake:
+                _time.sleep(0.5)
+                continue
+            break
 
-        result = response.json()
         # Surface the planner / fetcher error first so a CI failure
         # shows the actual exception text instead of just "0 == 1".
         assert result["errors"] == [], result
