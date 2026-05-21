@@ -74,15 +74,20 @@ def temp_warehouse(tmp_path):
     # Append data to table
     table.append(data)
 
-    try:
-        yield {
-            "warehouse_path": warehouse_path,
-            "table_uri": f"file://{warehouse_path}#test_db.events",
-            "catalog": catalog,
-            "table": table,
-        }
-    finally:
-        catalog.engine.dispose()
+    # Dispose the SQLAlchemy engine now (not at teardown). The server
+    # under test opens its own SqlCatalog against the same catalog.db,
+    # and on Linux + Python 3.14 + tmpfs the dual-connection pattern
+    # intermittently surfaces SQLITE_IOERR during the server's planner
+    # read (see test_cache_warm_endpoint flakes 2026-05-20). Tests
+    # never use catalog/table from the yielded dict after this point.
+    catalog.engine.dispose()
+
+    yield {
+        "warehouse_path": warehouse_path,
+        "table_uri": f"file://{warehouse_path}#test_db.events",
+        "catalog": catalog,
+        "table": table,
+    }
 
 
 @pytest.fixture
