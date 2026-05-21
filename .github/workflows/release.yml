@@ -148,7 +148,7 @@ jobs:
           npm ci
           npm run build
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: frontend-dist
           path: frontend/dist
@@ -193,7 +193,7 @@ jobs:
           sccache: 'true'
           manylinux: auto
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: dist-linux-${{ matrix.target }}
           path: dist
@@ -231,7 +231,7 @@ jobs:
           args: --release --out dist
           sccache: 'true'
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: dist-macos-${{ matrix.target }}
           path: dist
@@ -269,7 +269,7 @@ jobs:
           args: --release --out dist
           sccache: 'true'
 
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: dist-windows-${{ matrix.target }}
           path: dist
