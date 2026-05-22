@@ -2197,6 +2197,9 @@ async function executeNotebookRunAllWebSocket() {
       return
     }
   }
+  // Flush every dirty cell first — otherwise run-all hits the backend with
+  // the stale debounced copy of any cell the user just edited.
+  flushDirtyCells()
   wsInstance.executeNotebookRunAll()
 }
 
@@ -2206,17 +2209,87 @@ function executeCascadeWebSocket(cellId: CellId, planId: string) {
   }
 }
 
-function executeForceWebSocket(cellId: CellId) {
+async function executeForceWebSocket(cellId: CellId) {
   if (environmentMutationActive.value) {
     environmentError.value =
       environmentOperation.value?.error ||
       'Environment update in progress. Running cells is disabled until it finishes.'
     return
   }
-  if (wsInstance && wsInstance.connected()) {
-    setCellStatus(cellId, 'running')
-    wsInstance.executeForce(cellId)
+  if (!wsInstance) {
+    console.warn('[notebook] No WebSocket instance, cannot force cell:', cellId)
+    return
   }
+  if (!wsInstance.connected()) {
+    try {
+      await wsInstance.waitForConnection(5000)
+    } catch {
+      console.warn('[notebook] WebSocket not connected, cannot force cell:', cellId)
+      return
+    }
+  }
+  // "Run this only" runs the target with whatever upstream artifacts are
+  // already on disk, so flushing the target's source is enough — we
+  // explicitly do not want to flush upstreams here.
+  flushCellSource(cellId)
+  setCellStatus(cellId, 'running')
+  wsInstance.executeForce(cellId)
+}
+
+async function executeRerunWebSocket(cellId: CellId) {
+  if (environmentMutationActive.value) {
+    environmentError.value =
+      environmentOperation.value?.error ||
+      'Environment update in progress. Running cells is disabled until it finishes.'
+    return
+  }
+  if (!wsInstance) {
+    console.warn('[notebook] No WebSocket instance, cannot rerun cell:', cellId)
+    return
+  }
+  if (!wsInstance.connected()) {
+    try {
+      await wsInstance.waitForConnection(5000)
+    } catch {
+      console.warn('[notebook] WebSocket not connected, cannot rerun cell:', cellId)
+      return
+    }
+  }
+  // Flush every dirty cell — the backend's cascade planner needs current
+  // source for *all* upstreams to make the right cascade decision, not just
+  // the target. A dirty upstream would otherwise look ready and get skipped.
+  flushDirtyCells()
+  const cell = cellMap.value.get(cellId)
+  if (cell?.loopProgress) {
+    cell.loopProgress = undefined
+  }
+  setCellStatus(cellId, 'running')
+  wsInstance.executeRerun(cellId)
+}
+
+async function executeNotebookRerunAllWebSocket() {
+  if (environmentMutationActive.value) {
+    environmentError.value =
+      environmentOperation.value?.error ||
+      'Environment update in progress. Running cells is disabled until it finishes.'
+    return
+  }
+  if (!wsInstance) {
+    console.warn('[notebook] No WebSocket instance, cannot rerun all cells')
+    return
+  }
+  if (!wsInstance.connected()) {
+    try {
+      await wsInstance.waitForConnection(5000)
+    } catch {
+      console.warn('[notebook] WebSocket not connected, cannot rerun all cells')
+      return
+    }
+  }
+  // Flush every dirty cell first — otherwise rerun-all hits the backend with
+  // the stale debounced copy of any cell the user just edited.
+  flushDirtyCells()
+  wsInstance.executeNotebookRerunAll()
 }
 
 function cancelCellWebSocket(cellId: CellId) {
@@ -3196,6 +3269,8 @@ export function useNotebook() {
     executeNotebookRunAllWebSocket,
     executeCascadeWebSocket,
     executeForceWebSocket,
+    executeRerunWebSocket,
+    executeNotebookRerunAllWebSocket,
     cancelCellWebSocket,
     updateSourceWebSocket,
     setVariantActive,

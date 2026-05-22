@@ -53,6 +53,7 @@ export function useCodemirror(
     language?: CellLanguage
     onUpdate?: (doc: string) => void
     onRun?: () => void
+    onRerun?: () => void
   } = {},
 ) {
   const view = ref<EditorView | null>(null)
@@ -79,6 +80,13 @@ export function useCodemirror(
         key: 'Shift-Enter',
         run: () => {
           opts.onRun?.()
+          return true
+        },
+      },
+      {
+        key: 'Mod-Shift-Enter',
+        run: () => {
+          opts.onRerun?.()
           return true
         },
       },

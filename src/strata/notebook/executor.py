@@ -391,6 +391,23 @@ class CellExecutor:
             use_cache=False,
         )
 
+    async def execute_cell_rerun(
+        self, cell_id: str, source: str, timeout_seconds: float = 30
+    ) -> CellExecutionResult:
+        """Force re-execution of a cell while still materializing upstreams.
+
+        Upstreams are resolved through the normal cache (stale upstreams are
+        re-materialized from the artifact store on cache hit); only the target
+        cell's cache is bypassed so a real execution happens.
+        """
+        return await self._execute_cell(
+            cell_id,
+            source,
+            timeout_seconds,
+            materialize_upstreams=True,
+            use_cache=False,
+        )
+
     async def _execute_cell(
         self,
         cell_id: str,

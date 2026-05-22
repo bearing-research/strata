@@ -49,6 +49,8 @@ const {
   duplicateCell,
   executeCellWebSocket,
   executeNotebookRunAllWebSocket,
+  executeRerunWebSocket,
+  executeNotebookRerunAllWebSocket,
   cleanupWebSocket,
   ensureWorkersLoaded,
 } = useNotebook()
@@ -443,8 +445,19 @@ async function runCell(cellId: string) {
   executeCellWebSocket(cellId)
 }
 
+async function rerunCell(cellId: string) {
+  if (environmentMutationActive.value) return
+  const cell = orderedCells.value.find((c) => c.id === cellId)
+  if (!cell || !cell.source.trim()) return
+  executeRerunWebSocket(cellId)
+}
+
 async function runAll() {
   await executeNotebookRunAllWebSocket()
+}
+
+async function rerunAll() {
+  await executeNotebookRerunAllWebSocket()
 }
 
 function exportNotebook(format: 'markdown' | 'html') {
@@ -503,6 +516,15 @@ function goHome() {
           @click="runAll"
         >
           ▶ Run All
+        </button>
+        <button
+          class="btn"
+          data-testid="notebook-rerun-all"
+          title="Force re-execute every cell, bypassing cache"
+          :disabled="!connected || environmentMutationActive"
+          @click="rerunAll"
+        >
+          ↻ Rerun All
         </button>
         <AddCellMenu
           variant="header"
@@ -587,6 +609,7 @@ function goHome() {
             :key="cell.id"
             :cell="cell"
             @run="runCell"
+            @rerun="rerunCell"
             @delete="removeCell"
             @add-below="addCell"
             @duplicate="duplicateCell"

@@ -17,6 +17,7 @@ const InspectPanel = defineAsyncComponent(() => import('./InspectPanel.vue'))
 const props = defineProps<{ cell: Cell }>()
 const emit = defineEmits<{
   run: [cellId: string]
+  rerun: [cellId: string]
   delete: [cellId: string]
   addBelow: [cellId: string]
   duplicate: [cellId: string]
@@ -26,6 +27,7 @@ const emit = defineEmits<{
 
 const {
   notebook,
+  connected,
   environmentMutationActive,
   environmentLastAction,
   environmentOperation,
@@ -98,6 +100,7 @@ const { view, setDoc } = useCodemirror(editorEl, {
   language: props.cell.language,
   onUpdate: (doc) => updateSource(props.cell.id, doc),
   onRun: () => emit('run', props.cell.id),
+  onRerun: () => emit('rerun', props.cell.id),
 })
 
 watch(
@@ -584,10 +587,19 @@ function outputKey(output: CellOutput, index: number): string {
         <button
           v-if="cell.language !== 'markdown' && cell.status !== 'running'"
           title="Run (Shift+Enter)"
-          :disabled="environmentMutationActive"
+          :disabled="!connected || environmentMutationActive"
           @click="emit('run', cell.id)"
         >
           &#x25B6;
+        </button>
+        <button
+          v-if="cell.language !== 'markdown' && cell.status !== 'running'"
+          title="Rerun — force re-execute, bypass cache (Cmd+Shift+Enter)"
+          data-testid="cell-rerun-button"
+          :disabled="!connected || environmentMutationActive"
+          @click="emit('rerun', cell.id)"
+        >
+          &#x21BB;
         </button>
         <button
           v-else-if="cell.language !== 'markdown'"
