@@ -16,6 +16,37 @@ from strata.config import StrataConfig
 from tests.conftest import find_free_port, wait_for_server
 
 
+def _check_notebook_extra() -> None:
+    """Fail fast when the dev env is missing the [notebook] extra.
+
+    The harness fixtures here point the per-notebook venv at the dev
+    interpreter, so any cell-execution test imports `orjson` / `cloudpickle`
+    from this venv. Plain `uv sync` skips those — running tests then fails
+    deep inside a harness subprocess with a cryptic
+    "Harness did not produce harness-result.json" error that doesn't point
+    at the real fix. Surface it at collection time instead.
+    """
+    missing: list[str] = []
+    try:
+        import orjson  # noqa: F401
+    except ImportError:
+        missing.append("orjson")
+    try:
+        import cloudpickle  # noqa: F401
+    except ImportError:
+        missing.append("cloudpickle")
+    if missing:
+        pytest.exit(
+            f"Notebook test prereqs missing: {', '.join(missing)}. "
+            "Run `uv sync --all-extras` (matches CI). "
+            'See CLAUDE.md "Build & Development" for the rationale.',
+            returncode=2,
+        )
+
+
+_check_notebook_extra()
+
+
 def _fake_uv_sync(
     notebook_dir: Path,
     *,
