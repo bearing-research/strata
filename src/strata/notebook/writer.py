@@ -11,10 +11,12 @@ import tomllib
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import tomli_w
+from packaging.requirements import Requirement
 
 from strata.notebook.models import (
     CellMeta,
@@ -341,6 +343,45 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         tomli_w.dump(toml_data, f)
 
 
+# Packages the notebook harness/pool_worker/serializer import directly
+# inside the per-notebook venv. Specifiers come from strata-notebook's
+# own metadata (Requires-Dist) so bounds never drift from what the
+# subprocess code actually uses. pyarrow is in core deps; orjson and
+# cloudpickle are in the [notebook] extra — Requirement.parse handles
+# both shapes.
+_NOTEBOOK_RUNTIME_PACKAGES: tuple[str, ...] = ("pyarrow", "orjson", "cloudpickle")
+
+
+def _notebook_runtime_specifiers() -> list[str]:
+    """Return PEP 508 specifiers for the notebook venv runtime deps,
+    sourced from this distribution's installed metadata.
+    """
+    try:
+        reqs = metadata("strata-notebook").get_all("Requires-Dist") or []
+    except PackageNotFoundError as exc:
+        raise RuntimeError(
+            "strata-notebook distribution metadata not found — install via "
+            "`uv sync` so importlib.metadata can supply notebook venv "
+            "dependency specifiers"
+        ) from exc
+
+    found: dict[str, str] = {}
+    for raw in reqs:
+        req = Requirement(raw)
+        if req.name in _NOTEBOOK_RUNTIME_PACKAGES and req.name not in found:
+            found[req.name] = f"{req.name}{req.specifier}"
+
+    missing = [name for name in _NOTEBOOK_RUNTIME_PACKAGES if name not in found]
+    if missing:
+        raise RuntimeError(
+            f"strata-notebook metadata missing required notebook runtime "
+            f"deps {missing} — they must stay in pyproject.toml (core deps "
+            f"or [project.optional-dependencies].notebook) for the venv "
+            f"template to find them"
+        )
+    return [found[name] for name in _NOTEBOOK_RUNTIME_PACKAGES]
+
+
 def create_notebook(
     parent_dir: Path,
     name: str,
@@ -444,22 +485,19 @@ def create_notebook(
     # importable inside the notebook venv. They're cheap wheels on all
     # supported platforms; baking them into the template avoids
     # silent fallbacks to slower stdlib json / stdlib pickle.
-    pyproject_content = f'''[project]
-name = "{name.lower().replace(" ", "-")}"
-version = "0.1.0"
-description = ""
-requires-python = "{format_requires_python(requested_python_version)}"
-dependencies = [
-    "pyarrow>=18.0.0",
-    "orjson>=3.10.0",
-    "cloudpickle>=3.0.0",
-]
+    pyproject_data: dict[str, Any] = {
+        "project": {
+            "name": name.lower().replace(" ", "-"),
+            "version": "0.1.0",
+            "description": "",
+            "requires-python": format_requires_python(requested_python_version),
+            "dependencies": _notebook_runtime_specifiers(),
+        },
+        "tool": {"uv": {}},
+    }
 
-[tool.uv]
-'''
-
-    with open(notebook_dir / "pyproject.toml", "w", encoding="utf-8") as f:
-        f.write(pyproject_content)
+    with open(notebook_dir / "pyproject.toml", "wb") as f:
+        tomli_w.dump(pyproject_data, f)
 
     if initialize_environment:
         # Run uv sync to create venv + uv.lock (best-effort)
