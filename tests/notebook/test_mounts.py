@@ -213,6 +213,98 @@ async def test_remote_ro_mount_retries_after_partial_materialization_failure(
     assert (resolved["raw_data"].local_path / "nested" / "b.txt").read_bytes() == b"b"
 
 
+def test_resolver_credentials_default_to_empty_dict(tmp_path: Path) -> None:
+    """A resolver built with no credentials carries an empty dict."""
+    resolver = MountResolver(cache_dir=tmp_path / "cache")
+    assert resolver.credentials == {}
+
+
+@pytest.mark.asyncio
+async def test_resolver_credentials_reach_fsspec_filesystem(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-scheme credentials are spread into ``fsspec.filesystem`` kwargs."""
+    fs = _FakeRemoteFS(
+        {
+            "bucket/prefix/a.txt": {
+                "name": "bucket/prefix/a.txt",
+                "size": 1,
+                "etag": "etag-a",
+                "mtime": "1",
+                "content": b"a",
+            },
+        }
+    )
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    def filesystem(protocol: str, **kwargs: object) -> _FakeRemoteFS:
+        captured.append((protocol, kwargs))
+        return fs
+
+    monkeypatch.setitem(sys.modules, "fsspec", types.SimpleNamespace(filesystem=filesystem))
+
+    resolver = MountResolver(
+        cache_dir=tmp_path / "cache",
+        credentials={"s3": {"endpoint_url": "http://minio:9000", "anon": True}},
+    )
+    await resolver.prepare_mounts(
+        [MountSpec(name="raw", uri="s3://bucket/prefix", mode=MountMode.READ_ONLY)]
+    )
+
+    assert captured, "fsspec.filesystem was never called"
+    protocol, kwargs = captured[0]
+    assert protocol == "s3"
+    assert kwargs == {"endpoint_url": "http://minio:9000", "anon": True}
+
+
+@pytest.mark.asyncio
+async def test_mount_options_override_credentials_on_collision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-mount ``options`` win over per-scheme credentials on key collision."""
+    fs = _FakeRemoteFS(
+        {
+            "bucket/prefix/a.txt": {
+                "name": "bucket/prefix/a.txt",
+                "size": 1,
+                "etag": "etag-a",
+                "mtime": "1",
+                "content": b"a",
+            },
+        }
+    )
+    captured: list[dict[str, object]] = []
+
+    def filesystem(protocol: str, **kwargs: object) -> _FakeRemoteFS:
+        del protocol
+        captured.append(kwargs)
+        return fs
+
+    monkeypatch.setitem(sys.modules, "fsspec", types.SimpleNamespace(filesystem=filesystem))
+
+    resolver = MountResolver(
+        cache_dir=tmp_path / "cache",
+        credentials={"s3": {"endpoint_url": "http://default:9000", "key": "scheme-key"}},
+    )
+    await resolver.prepare_mounts(
+        [
+            MountSpec(
+                name="raw",
+                uri="s3://bucket/prefix",
+                mode=MountMode.READ_ONLY,
+                options={"endpoint_url": "http://mount-specific:9000"},
+            )
+        ]
+    )
+
+    assert captured[0] == {
+        "endpoint_url": "http://mount-specific:9000",  # mount.options wins
+        "key": "scheme-key",  # credentials passes through where no override
+    }
+
+
 @pytest.mark.asyncio
 async def test_sync_back_raises_on_remote_failure(
     tmp_path: Path,

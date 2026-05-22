@@ -66,9 +66,11 @@ from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import CellLanguage, MountSpec, WorkerBackendType
 from strata.notebook.module_export import build_module_export_plan
 from strata.notebook.mounts import (
+    MountCredentials,
     MountFingerprinter,
     MountResolver,
     ResolvedMount,
+    parse_mount_uri,
     resolve_cell_mounts,
 )
 from strata.notebook.provenance import (
@@ -335,7 +337,12 @@ class CellExecutor:
         pool: Optional WarmProcessPool for fast execution (M6)
     """
 
-    def __init__(self, session: NotebookSession, pool: WarmProcessPool | None = None):
+    def __init__(
+        self,
+        session: NotebookSession,
+        pool: WarmProcessPool | None = None,
+        mount_credentials: MountCredentials | None = None,
+    ):
         self.session = session
         self.harness_path = Path(__file__).parent / "harness.py"
         self.pool = pool
@@ -346,6 +353,7 @@ class CellExecutor:
         self._materializing: set[str] = set()
         self._mount_resolver = MountResolver(
             cache_dir=session.path / ".strata" / "mount_cache",
+            credentials=mount_credentials,
         )
         # Optional callback fired after every loop iteration completes. Set
         # by the WS handler so the frontend can update its progress badge
@@ -1785,8 +1793,13 @@ class CellExecutor:
         """Compute mount fingerprints without preparing local materializations."""
         mount_fingerprints: list[str] = []
         has_rw_mount = False
+        credentials = self._mount_resolver.credentials
         for mount in sorted(mount_specs, key=lambda item: item.name):
-            fingerprint = await MountFingerprinter.fingerprint_mount(mount)
+            scheme, _ = parse_mount_uri(mount.uri)
+            storage_options = {**credentials.get(scheme, {}), **mount.options} or None
+            fingerprint = await MountFingerprinter.fingerprint_mount(
+                mount, storage_options=storage_options
+            )
             if fingerprint is None:
                 has_rw_mount = True
             else:
