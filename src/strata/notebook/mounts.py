@@ -119,6 +119,16 @@ def _is_remote(scheme: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+type MountCredentials = dict[str, dict[str, Any]]
+"""Per-scheme fsspec storage options for ``MountResolver``.
+
+Maps URI scheme (``s3``, ``gs``, ``az``) to a dict of options spread
+into ``fsspec.filesystem(protocol, **opts)``. See fsspec backend docs
+for valid keys (s3fs, gcsfs, adlfs). Per-mount ``options`` from
+``[[mounts]]`` win on key collision.
+"""
+
+
 class MountResolver:
     """Resolves mount URIs to local paths for cell execution.
 
@@ -128,13 +138,14 @@ class MountResolver:
 
     Args:
         cache_dir: Base directory for caching remote mounts.
-        credentials: Optional cloud credentials (passed to fsspec).
+        credentials: Per-scheme fsspec storage options — see
+            ``MountCredentials``.
     """
 
     def __init__(
         self,
         cache_dir: Path | None = None,
-        credentials: dict[str, Any] | None = None,
+        credentials: MountCredentials | None = None,
     ):
         # Default to a user-scoped dir (matches ~/.strata/artifacts) instead
         # of the world-writable /tmp/strata_mounts that earlier versions
@@ -255,7 +266,9 @@ class MountResolver:
 
         protocol = _scheme_to_fsspec_protocol(scheme)
         storage_options = {**self.credentials.get(scheme, {}), **mount.options}
-        fingerprint = await MountFingerprinter.fingerprint_mount(mount)
+        fingerprint = await MountFingerprinter.fingerprint_mount(
+            mount, storage_options=storage_options
+        )
         assert fingerprint is not None
 
         fs = fsspec.filesystem(protocol, **storage_options)
@@ -501,11 +514,21 @@ class MountFingerprinter:
         )
 
     @staticmethod
-    def fingerprint_mount_sync(mount: MountSpec) -> str | None:
+    def fingerprint_mount_sync(
+        mount: MountSpec,
+        storage_options: dict[str, Any] | None = None,
+    ) -> str | None:
         """Compute fingerprint for any mount spec.
 
         Returns ``None`` for read-write mounts — the caller must treat
         the cell as non-cacheable (skip cache check entirely).
+
+        ``storage_options`` is the *merged* fsspec storage_options
+        (scheme credentials + ``mount.options``) — callers with access
+        to ``MountResolver.credentials`` should pass it so the remote
+        listing call hits the same endpoint as the actual data fetch.
+        When ``None``, falls back to ``mount.options`` for backward
+        compatibility with bare callers (e.g. session staleness check).
         Pinned mounts return a hash of the pin value.
         """
         if mount.mode == MountMode.READ_WRITE:
@@ -518,14 +541,18 @@ class MountFingerprinter:
         if scheme == "file":
             return MountFingerprinter.fingerprint_local_sync(Path(path))
         else:
+            effective = storage_options if storage_options is not None else (mount.options or None)
             return MountFingerprinter.fingerprint_remote_sync(
-                scheme, path, storage_options=mount.options or None
+                scheme, path, storage_options=effective
             )
 
     @staticmethod
-    async def fingerprint_mount(mount: MountSpec) -> str | None:
+    async def fingerprint_mount(
+        mount: MountSpec,
+        storage_options: dict[str, Any] | None = None,
+    ) -> str | None:
         """Async wrapper for mount fingerprinting."""
-        return MountFingerprinter.fingerprint_mount_sync(mount)
+        return MountFingerprinter.fingerprint_mount_sync(mount, storage_options)
 
 
 # ---------------------------------------------------------------------------

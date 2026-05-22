@@ -2076,3 +2076,21 @@ class TestLoopCellExecution:
         )
         assert not result.success
         assert "seed" in (result.error or "").lower()
+
+
+class TestMountCredentialsPassthrough:
+    """The mount-credentials kwarg threads through to ``MountResolver``."""
+
+    def test_default_is_empty(self, sample_notebook):
+        """Construction without the kwarg yields an empty credentials map."""
+        executor = CellExecutor(sample_notebook)
+        assert executor._mount_resolver.credentials == {}
+
+    def test_kwarg_reaches_resolver(self, sample_notebook):
+        """The kwarg lands on the resolver verbatim."""
+        creds = {
+            "s3": {"endpoint_url": "http://minio:9000", "anon": True},
+            "az": {"connection_string": "DefaultEndpointsProtocol=http;..."},
+        }
+        executor = CellExecutor(sample_notebook, mount_credentials=creds)
+        assert executor._mount_resolver.credentials == creds
