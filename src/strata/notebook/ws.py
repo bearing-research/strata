@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from functools import cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -125,8 +125,10 @@ class MessageType(StrEnum):
     CELL_EXECUTE = "cell_execute"
     CELL_EXECUTE_CASCADE = "cell_execute_cascade"
     CELL_EXECUTE_FORCE = "cell_execute_force"
+    CELL_EXECUTE_RERUN = "cell_execute_rerun"
     CELL_CANCEL = "cell_cancel"
     NOTEBOOK_RUN_ALL = "notebook_run_all"
+    NOTEBOOK_RERUN_ALL = "notebook_rerun_all"
     CELL_SOURCE_UPDATE = "cell_source_update"
     NOTEBOOK_SYNC = "notebook_sync"
     IMPACT_PREVIEW_REQUEST = "impact_preview_request"
@@ -485,7 +487,9 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     - cell_execute              Run a cell (check if cascade needed)
     - cell_execute_cascade      Execute cascade plan
     - cell_execute_force        Run with stale inputs
+    - cell_execute_rerun        Force re-execute target cell (cache upstreams)
     - notebook_run_all          Run all non-empty cells in notebook order
+    - notebook_rerun_all        Force re-execute every cell (cache off)
     - cell_cancel               Cancel execution
     - cell_source_update        Source code changed (debounced flush)
     - notebook_sync             Request full state
@@ -787,6 +791,77 @@ async def _handle_notebook_run_all(
         await _release_execution_request(execution_state, requested_cell)
 
 
+async def _handle_notebook_rerun_all(
+    websocket: WebSocket,
+    session: NotebookSession,
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+) -> None:
+    """Handle notebook_rerun_all message.
+
+    Like ``notebook_run_all`` but every cell bypasses its own cache so the
+    entire notebook is re-executed end-to-end.
+    """
+    seq = execution_state.next_sequence()
+
+    runnable_cells = [
+        cell.id
+        for cell in session.notebook_state.cells
+        if cell.source.strip() and cell.variant_active
+    ]
+    if not runnable_cells:
+        return
+
+    requested_cell = runnable_cells[0]
+    busy_cell = await _reserve_execution_request(execution_state, requested_cell)
+    if busy_cell is not None:
+        await _send_error_message(
+            websocket,
+            seq,
+            (
+                f"Notebook is already executing cell {busy_cell}"
+                if busy_cell
+                else "Notebook is already executing another cell"
+            ),
+        )
+        return
+
+    environment_block_reason = session.environment_execution_block_message()
+    if environment_block_reason:
+        await _release_execution_request(execution_state, requested_cell)
+        await websocket.send_text(
+            _json_encode(
+                _make_message(
+                    MessageType.ERROR,
+                    seq,
+                    {
+                        "error": environment_block_reason,
+                        "code": "ENVIRONMENT_BUSY",
+                    },
+                )
+            )
+        )
+        return
+
+    scheduled = await _schedule_execution(
+        websocket,
+        execution_state,
+        notebook_id,
+        requested_cell,
+        seq,
+        lambda: _execute_run_all(
+            websocket,
+            session,
+            runnable_cells,
+            execution_state,
+            notebook_id,
+            force=True,
+        ),
+    )
+    if not scheduled:
+        await _release_execution_request(execution_state, requested_cell)
+
+
 async def _handle_cell_execute_cascade(
     websocket: WebSocket,
     session: NotebookSession,
@@ -933,9 +1008,101 @@ async def _handle_cell_execute_force(
         cell_id,
         seq,
         lambda: _execute_cell_directly(
-            websocket, session, cell_id, execution_state, notebook_id, force=True
+            websocket, session, cell_id, execution_state, notebook_id, mode="force"
         ),
     )
+    if not scheduled:
+        await _release_execution_request(execution_state, cell_id)
+
+
+async def _handle_cell_execute_rerun(
+    websocket: WebSocket,
+    session: NotebookSession,
+    payload: dict[str, Any],
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+) -> None:
+    """Handle cell_execute_rerun message.
+
+    Force re-execute the target cell, bypassing its cache but still
+    materializing upstreams through the normal cache path.
+    """
+    cell_id = payload.get("cell_id")
+    if not cell_id:
+        await websocket.send_text(
+            _json_encode(
+                _make_message(
+                    MessageType.ERROR, execution_state.sequence, {"error": "Missing cell_id"}
+                )
+            )
+        )
+        return
+
+    seq = execution_state.next_sequence()
+
+    busy_cell = await _reserve_execution_request(execution_state, cell_id)
+    if busy_cell is not None:
+        await _send_error_message(
+            websocket,
+            seq,
+            (
+                f"Notebook is already executing cell {busy_cell}"
+                if busy_cell
+                else "Notebook is already executing another cell"
+            ),
+        )
+        return
+
+    environment_block_reason = session.environment_execution_block_message()
+    if environment_block_reason:
+        await _release_execution_request(execution_state, cell_id)
+        await websocket.send_text(
+            _json_encode(
+                _make_message(
+                    MessageType.ERROR,
+                    seq,
+                    {
+                        "error": environment_block_reason,
+                        "code": "ENVIRONMENT_BUSY",
+                    },
+                )
+            )
+        )
+        return
+
+    # If any upstream is stale/missing, run them through cascade so the
+    # client sees per-cell status and output frames for every step.
+    # The target itself still runs cache-off via target_force.
+    planner = CascadePlanner(session)
+    plan = planner.plan(cell_id)
+
+    if plan is not None:
+        scheduled = await _schedule_execution(
+            websocket,
+            execution_state,
+            notebook_id,
+            cell_id,
+            seq,
+            lambda: _execute_cascade(
+                websocket,
+                session,
+                plan,
+                execution_state,
+                notebook_id,
+                target_force=True,
+            ),
+        )
+    else:
+        scheduled = await _schedule_execution(
+            websocket,
+            execution_state,
+            notebook_id,
+            cell_id,
+            seq,
+            lambda: _execute_cell_directly(
+                websocket, session, cell_id, execution_state, notebook_id, mode="rerun"
+            ),
+        )
     if not scheduled:
         await _release_execution_request(execution_state, cell_id)
 
@@ -1351,9 +1518,17 @@ async def _execute_cell_directly(
     cell_id: str,
     execution_state: NotebookExecutionState,
     notebook_id: str,
-    force: bool = False,
+    mode: Literal["normal", "force", "rerun"] = "normal",
 ) -> None:
-    """Execute a cell directly (not part of cascade)."""
+    """Execute a cell directly (not part of cascade).
+
+    ``mode`` selects the executor entry point:
+
+    - ``normal`` — cache-on, materialize upstreams (default).
+    - ``force``  — cache-off, *do not* materialize upstreams ("Run this only").
+    - ``rerun``  — cache-off, but still materialize upstreams (force the
+      target cell only against the current valid upstream graph).
+    """
     del websocket
     seq = execution_state.next_sequence()
 
@@ -1375,8 +1550,10 @@ async def _execute_cell_directly(
     # Execute
     executor = _make_executor_with_progress(session, notebook_id)
     try:
-        if force:
+        if mode == "force":
             result = await executor.execute_cell_force(cell_id, cell.source)
+        elif mode == "rerun":
+            result = await executor.execute_cell_rerun(cell_id, cell.source)
         else:
             result = await executor.execute_cell(cell_id, cell.source)
 
@@ -1428,8 +1605,14 @@ async def _execute_cascade(
     plan: CascadePlan,
     execution_state: NotebookExecutionState,
     notebook_id: str,
+    target_force: bool = False,
 ) -> None:
-    """Execute all cells in a cascade plan."""
+    """Execute all cells in a cascade plan.
+
+    When ``target_force`` is true, the final step (the user-requested target
+    cell) runs ``execute_cell_rerun`` so its own cache is bypassed; upstream
+    steps still go through normal cached execution.
+    """
     del websocket
     seq = execution_state.next_sequence()
 
@@ -1446,8 +1629,8 @@ async def _execute_cascade(
 
     try:
         for i, step in enumerate(plan.steps):
-            if step.skip:
-                # Skip cached cells
+            # Under target_force the cached-ready target must still rerun.
+            if step.skip and not (target_force and step.cell_id == plan.target_cell_id):
                 continue
 
             cell_id = step.cell_id
@@ -1502,7 +1685,10 @@ async def _execute_cascade(
             )
 
             try:
-                result = await executor.execute_cell(cell_id, cell.source)
+                if target_force and cell_id == plan.target_cell_id:
+                    result = await executor.execute_cell_rerun(cell_id, cell.source)
+                else:
+                    result = await executor.execute_cell(cell_id, cell.source)
 
                 # v1.1: Record execution for profiling
                 session.record_execution(cell_id, result.duration_ms, result.cache_hit)
@@ -1576,17 +1762,24 @@ async def _execute_run_all(
     cell_ids: list[str],
     execution_state: NotebookExecutionState,
     notebook_id: str,
+    force: bool = False,
 ) -> None:
-    """Execute all requested notebook cells in notebook order."""
+    """Execute all requested notebook cells in notebook order.
+
+    When ``force`` is true, every cell bypasses its own cache (each cell still
+    materializes its upstreams from the artifact store as normal — the
+    sequential walk already produces fresh upstream artifacts for later cells).
+    """
     del websocket
     seq = execution_state.next_sequence()
 
     executor = _make_executor_with_progress(session, notebook_id)
 
     logger.info(
-        "Run all for notebook %s: executing %d cells: %s",
+        "Run all for notebook %s: executing %d cells (force=%s): %s",
         notebook_id,
         len(cell_ids),
+        force,
         cell_ids,
     )
 
@@ -1613,7 +1806,10 @@ async def _execute_run_all(
             )
 
             try:
-                result = await executor.execute_cell(cell_id, cell.source)
+                if force:
+                    result = await executor.execute_cell_rerun(cell_id, cell.source)
+                else:
+                    result = await executor.execute_cell(cell_id, cell.source)
 
                 session.record_execution(cell_id, result.duration_ms, result.cache_hit)
                 session.apply_execution_result_metadata(cell_id, result)
@@ -2228,8 +2424,10 @@ _C2S_HANDLERS: dict[str, _C2SHandler] = {
     MessageType.CELL_EXECUTE: _handle_cell_execute,
     MessageType.CELL_EXECUTE_CASCADE: _handle_cell_execute_cascade,
     MessageType.CELL_EXECUTE_FORCE: _handle_cell_execute_force,
+    MessageType.CELL_EXECUTE_RERUN: _handle_cell_execute_rerun,
     MessageType.CELL_CANCEL: _handle_cell_cancel,
     MessageType.NOTEBOOK_RUN_ALL: _handle_notebook_run_all,
+    MessageType.NOTEBOOK_RERUN_ALL: _handle_notebook_rerun_all,
     MessageType.CELL_SOURCE_UPDATE: _handle_cell_source_update,
     MessageType.NOTEBOOK_SYNC: _handle_notebook_sync,
     MessageType.IMPACT_PREVIEW_REQUEST: _handle_impact_preview_request,

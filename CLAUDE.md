@@ -218,6 +218,20 @@ Loop cells (`@loop max_iter=N carry=var`): one harness subprocess per iteration,
 `carry` threaded between iterations, `…@iter=k` artifacts per step, final state
 becomes the cell's canonical artifact. WebSocket emits `cell_iteration_progress`.
 
+There are three single-cell "run" modes (`executor.py::execute_cell{,_force,_rerun}`):
+
+| Mode    | Target cache | Materialize upstreams | UI                                 |
+| ------- | ------------ | --------------------- | ---------------------------------- |
+| normal  | on           | on (cascade if stale) | `▶` button, Shift+Enter            |
+| force   | off          | **off** (stale ok)    | "Run this only" — no surfaced UI   |
+| rerun   | off          | on (cascade if stale) | `↻` button, Cmd+Shift+Enter        |
+
+`notebook_run_all` runs every cell in `execute_cell` (normal) mode;
+`notebook_rerun_all` runs every cell in `execute_cell_rerun` mode.
+When rerun on a single cell finds stale upstreams, it dispatches through
+`_execute_cascade(target_force=True)` so per-step status/output frames still
+broadcast — silent in-executor upstream rebuilds would skip those frames.
+
 ### Materialize: Core SDK vs notebook
 
 The word "materialize" names *two* distinct pipelines in this codebase. They
@@ -305,8 +319,9 @@ REST `/v1/notebooks`: `POST /create`, `POST /open`, `GET /{id}/cells`,
 
 WebSocket `/v1/notebooks/ws/{notebook_id}`:
 - C→S: `cell_execute`, `cell_execute_cascade`, `cell_execute_force`,
-  `cell_source_update`, `notebook_sync`, `notebook_run_all`,
-  `impact_preview_request`, `inspect_open|eval|close`
+  `cell_execute_rerun`, `cell_source_update`, `notebook_sync`,
+  `notebook_run_all`, `notebook_rerun_all`, `impact_preview_request`,
+  `inspect_open|eval|close`
 - S→C: `cell_status`, `cell_output`, `cell_error`, `cell_console`,
   `cell_iteration_progress`, `cascade_prompt`, `cascade_progress`,
   `dag_update`, `impact_preview`, `notebook_state`

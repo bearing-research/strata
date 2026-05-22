@@ -183,3 +183,95 @@ class TestForceExecution:
                 state = ws.sync()
                 c1 = next(c for c in state["payload"]["cells"] if c["id"] == "c1")
                 assert c1["status"] != "ready"
+
+
+class TestRerunExecution:
+    """cell_execute_rerun: cache off for target, but upstreams still materialize."""
+
+    def test_rerun_materializes_upstreams_and_skips_target_cache(self, setup):
+        """Rerunning c2 in a chain c1 → c2 must run c1 first (cache miss for c2)."""
+        client, tmp = setup
+        nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
+
+        with open_notebook_session(client, nb.path) as (sid, session):
+            with ws_connect(client, sid) as ws:
+                # Warm cache: run c2 the normal way (cascade brings c1 in).
+                execute_cell_and_wait(ws, "c2")
+                ws.clear()
+
+                # Rerun c2: target cache must be bypassed, but upstream c1's
+                # artifact resolves from the cache so c2 actually executes.
+                ws.execute_rerun("c2")
+                final = ws.receive_until("cell_output", cell_id="c2")
+                assert final["payload"]["outputs"]["y"]["preview"] == 2
+
+                # cache_hit must be False on the rerun's output frame.
+                assert final["payload"].get("cache_hit") is False
+
+    def test_rerun_picks_up_edited_upstream_after_flush(self, setup):
+        """Editing an upstream then rerunning a downstream must re-execute the
+        upstream too — the cascade planner sees the dirty upstream as stale
+        once the source update has been flushed."""
+        client, tmp = setup
+        nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
+
+        with open_notebook_session(client, nb.path) as (sid, session):
+            with ws_connect(client, sid) as ws:
+                execute_cell_and_wait(ws, "c2")
+                ws.clear()
+
+                # Simulate the flush that the frontend does before rerun:
+                # push the new c1 source to the backend before the rerun
+                # message lands.
+                ws.update_source("c1", "x = 42")
+                # Drain any dag_update / cell_status frames the source
+                # update triggers so receive_until below sees only the
+                # rerun frames.
+                ws.clear()
+
+                ws.execute_rerun("c2")
+                c1_out = ws.receive_until("cell_output", cell_id="c1")
+                assert c1_out["payload"]["outputs"]["x"]["preview"] == 42
+
+                c2_out = ws.receive_until("cell_output", cell_id="c2")
+                assert c2_out["payload"]["outputs"]["y"]["preview"] == 43
+
+    def test_rerun_with_stale_upstream_broadcasts_upstream(self, setup):
+        """Rerun on a cell whose upstream is stale must run the upstream
+        through cascade so the client gets a cell_output for it."""
+        client, tmp = setup
+        nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
+
+        with open_notebook_session(client, nb.path) as (sid, session):
+            with ws_connect(client, sid) as ws:
+                # c1 is idle (never run) so it's stale for c2.
+                ws.execute_rerun("c2")
+
+                c1_out = ws.receive_until("cell_output", cell_id="c1")
+                assert c1_out["payload"]["outputs"]["x"]["preview"] == 1
+
+                c2_out = ws.receive_until("cell_output", cell_id="c2")
+                assert c2_out["payload"]["outputs"]["y"]["preview"] == 2
+                assert c2_out["payload"].get("cache_hit") is False
+
+    def test_rerun_all_forces_every_cell(self, setup):
+        """notebook_rerun_all bypasses cache for every non-empty cell."""
+        client, tmp = setup
+        nb = NotebookBuilder(tmp).add_cell("c1", "x = 1").add_cell("c2", "y = x + 1", after="c1")
+
+        with open_notebook_session(client, nb.path) as (sid, session):
+            with ws_connect(client, sid) as ws:
+                # Warm cache.
+                execute_cell_and_wait(ws, "c2")
+                ws.clear()
+
+                ws.rerun_all()
+                # Wait for both cells to land their final cell_output.
+                ws.receive_until("cell_output", cell_id="c1")
+                ws.receive_until("cell_output", cell_id="c2")
+
+                outputs_by_cell = {
+                    m["payload"]["cell_id"]: m for m in ws.messages_of_type("cell_output")
+                }
+                assert outputs_by_cell["c1"]["payload"].get("cache_hit") is False
+                assert outputs_by_cell["c2"]["payload"].get("cache_hit") is False

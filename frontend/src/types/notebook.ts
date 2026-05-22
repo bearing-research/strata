@@ -580,9 +580,11 @@ export type WsClientMessageType =
   | 'cell_execute' // Run a cell (with cascade option)
   | 'cell_execute_cascade' // User confirmed cascade — execute the plan
   | 'cell_execute_force' // "Run this only" — execute with stale inputs
+  | 'cell_execute_rerun' // Force re-execute target cell, refresh upstreams from cache
   | 'cell_cancel' // Cancel a running cell
   | 'cell_source_update' // Cell source changed (debounced)
   | 'notebook_run_all' // Run all cells (or just stale ones)
+  | 'notebook_rerun_all' // Force re-execute every cell (cache off)
   | 'notebook_sync' // Reconnection — request full state
   | 'inspect_open' // Open inspect REPL for a cell
   | 'inspect_eval' // Evaluate expression in inspect REPL

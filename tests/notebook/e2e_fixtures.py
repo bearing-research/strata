@@ -124,6 +124,10 @@ class WebSocketTestHelper:
         """Send cell_execute_force message."""
         self.send("cell_execute_force", {"cell_id": cell_id})
 
+    def execute_rerun(self, cell_id: str) -> None:
+        """Send cell_execute_rerun message."""
+        self.send("cell_execute_rerun", {"cell_id": cell_id})
+
     def update_source(self, cell_id: str, source: str) -> None:
         """Send cell_source_update message."""
         self.send("cell_source_update", {"cell_id": cell_id, "source": source})
@@ -136,6 +140,10 @@ class WebSocketTestHelper:
     def run_all(self) -> None:
         """Send notebook_run_all message."""
         self.send("notebook_run_all")
+
+    def rerun_all(self) -> None:
+        """Send notebook_rerun_all message."""
+        self.send("notebook_rerun_all")
 
 
 # ============================================================================

@@ -4,6 +4,7 @@ const emit = defineEmits<{ close: [] }>()
 
 const shortcuts = [
   { keys: 'Shift + Enter', description: 'Run cell' },
+  { keys: 'Mod + Shift + Enter', description: 'Rerun cell (bypass cache)' },
   { keys: '?', description: 'Show keyboard shortcuts' },
   { keys: 'Esc', description: 'Close modal' },
   { keys: 'Ctrl + Z', description: 'Undo (in editor)' },

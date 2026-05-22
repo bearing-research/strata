@@ -253,6 +253,21 @@ export function useWebSocket(notebookId: string) {
   }
 
   /**
+   * Force re-execute a cell, bypassing its cache but still materializing
+   * upstreams normally (stale upstreams refresh from the artifact store).
+   */
+  function executeRerun(cellId: string): void {
+    send('cell_execute_rerun', { cell_id: cellId })
+  }
+
+  /**
+   * Force re-execute every cell in the notebook with cache off.
+   */
+  function executeNotebookRerunAll(): void {
+    send('notebook_rerun_all', {})
+  }
+
+  /**
    * Cancel a running cell.
    */
   function cancelCell(cellId: string): void {
@@ -387,6 +402,8 @@ export function useWebSocket(notebookId: string) {
     executeNotebookRunAll,
     executeCascade,
     executeForce,
+    executeRerun,
+    executeNotebookRerunAll,
     cancelCell,
     updateCellSource,
     debounceSourceUpdate,
