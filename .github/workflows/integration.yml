@@ -77,3 +77,9 @@ jobs:
 
       - name: Run integration tests
         run: uv run python scripts/integration_test.py --start-server
+
+      - name: Run emulator-backed mount integration tests
+        run: |
+          uv run pytest \
+            tests/notebook/test_e2e_mounts_s3.py \
+            -v --tb=short -p no:cacheprovider
