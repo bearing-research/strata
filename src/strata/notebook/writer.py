@@ -37,17 +37,19 @@ if TYPE_CHECKING:
 
 
 def _serialize_mounts(mounts: list[MountSpec]) -> list[dict[str, Any]]:
-    """Convert mount specs into TOML-friendly dicts."""
-    return [
-        {
-            "name": mount.name,
-            "uri": mount.uri,
-            "mode": mount.mode.value,
-            **({"pin": mount.pin} if mount.pin is not None else {}),
-            **({"options": dict(mount.options)} if mount.options else {}),
-        }
-        for mount in mounts
-    ]
+    """Convert mount specs into TOML-friendly dicts.
+
+    Omits empty ``options`` so notebooks without backend options stay
+    free of ``options = {}`` noise (parser defaults missing ``options``
+    to ``{}``, so round-trips).
+    """
+    result: list[dict[str, Any]] = []
+    for mount in mounts:
+        data = mount.model_dump(mode="json", exclude_none=True)
+        if not data.get("options"):
+            data.pop("options", None)
+        result.append(data)
+    return result
 
 
 _SENSITIVE_KEY_PATTERNS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL")
