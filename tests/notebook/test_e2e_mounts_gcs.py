@@ -82,7 +82,7 @@ def fake_gcs_container():
     redirects against the host:port that the test process sees rather
     than the in-container ``0.0.0.0:4443`` (which gcsfs cannot reach).
     """
-    container = DockerContainer("fsouza/fake-gcs-server:1.49.4")
+    container = DockerContainer("fsouza/fake-gcs-server:latest")
     container.with_command(
         f"-scheme http -port {_FAKE_GCS_PORT} -public-host localhost:{_FAKE_GCS_PORT}"
     )
