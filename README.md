@@ -29,6 +29,21 @@ blobs or execution metadata bleeding into the history.
 
 **Docs:** [bearing-research.github.io/strata](https://bearing-research.github.io/strata/)
 
+## Highlights
+
+- **content-addressed:** every cell output is keyed by source + inputs + environment — identical work hits the cache forever
+- **reactive:** edit a cell, the cascade re-runs only the downstream cells that depend on it
+- **dag-from-ast:** Strata reads each cell's AST to wire upstream/downstream — no decorators, no manual edges
+- **git-friendly:** notebooks are plain `.py` files plus a TOML manifest — readable diffs, no JSON blobs
+- **prompt cells:** LLM calls are first-class DAG nodes, cached by template + inputs + model config
+- **SQL cells:** named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery
+- **distributed:** `# @worker gpu-fly` dispatches a single cell to a remote box — bring your own compute
+- **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3 / GCS / Azure prefix a local `pathlib.Path`
+- **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
+- **headless:** `strata run ./my-notebook` for CI and scheduled execution — same DAG, same cache
+- **also a library:** the materialization layer is exposed via HTTP + a `StrataClient`, usable from any Python process
+- **production-ready:** Iceberg-aware scans, trusted-proxy auth, multi-tenancy, S3 / GCS / Azure / local blob backends
+
 ## Quick Start
 
 Both paths below run in **personal mode**: single-user, writes enabled, no
@@ -90,20 +105,6 @@ Why uv at runtime: the notebook subsystem shells out to `uv` to
 manage per-notebook `.venv/` directories, and the project's dev
 workflow assumes uv as the install path. Failing fast at startup with
 a clear message beats a confusing subprocess error later.
-
-## Notebook Features
-
-- **Content-addressed caching.** Same code plus same inputs equals an instant cache hit, zero recomputation.
-- **Automatic dependency tracking.** DAG built from variable analysis, no manual wiring.
-- **Cascade execution.** Change upstream code, downstream cells auto-invalidate.
-- **Distributed workers.** Annotate `@worker gpu-fly` and the cell dispatches to a remote GPU.
-- **Prompt cells.** LLM-powered cells with `{{ variable }}` template injection.
-- **SQL cells.** First-class SQL cells with `# @sql connection=<name>`, named-bind parameters, and DuckDB / SQLite / PostgreSQL / Snowflake / BigQuery drivers.
-- **AI assistant.** Streaming chat with conversation memory, agent mode for autonomous notebook building.
-- **Environment management.** Per-notebook Python venvs via uv, isolated from each other.
-- **Rich outputs.** DataFrames, matplotlib plots, markdown, images.
-- **Cell operations.** Reorder, duplicate, fold, keyboard shortcuts.
-- **Headless runner.** `strata run ./my-notebook` for CI and scheduled execution.
 
 ## The Cache Advantage
 

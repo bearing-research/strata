@@ -18,17 +18,18 @@ or execution metadata bleeding into the history.
 The interactive notebook surface: Python, prompt, SQL, and loop cells, each
 producing artifacts that flow through an auto-built DAG.
 
-**Key features:**
+**Highlights:**
 
-- Content-addressed caching (same code + inputs = cache hit)
-- Automatic DAG from variable analysis
-- Git-friendly format: cells are plain `.py` files, outputs and runtime
-  state live outside the committed tree (no JSON blobs, no diffs on every run)
-- Distributed workers (`@worker gpu-fly` dispatches to remote GPU)
-- Prompt cells with `{{ variable }}` injection into AI calls
-- AI assistant with streaming chat and agent mode
-- Per-notebook Python environments via uv
-- Headless runner (`strata run`) for CI
+- **content-addressed:** every cell output is keyed by source + inputs + environment — identical work hits the cache forever
+- **reactive:** edit a cell, the cascade re-runs only the downstream cells that depend on it
+- **dag-from-ast:** Strata reads each cell's AST to wire upstream/downstream — no decorators, no manual edges
+- **git-friendly:** notebooks are plain `.py` files plus a TOML manifest — readable diffs, no JSON blobs
+- **prompt cells:** LLM calls are first-class DAG nodes, cached by template + inputs + model config
+- **SQL cells:** named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery
+- **distributed:** `# @worker gpu-fly` dispatches a single cell to a remote box — bring your own compute
+- **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3 / GCS / Azure prefix a local `pathlib.Path`
+- **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
+- **headless:** `strata run ./my-notebook` for CI and scheduled execution — same DAG, same cache
 
 [:octicons-arrow-right-24: Notebook Quickstart](getting-started/notebook.md){ .md-button .md-button--primary }
 
