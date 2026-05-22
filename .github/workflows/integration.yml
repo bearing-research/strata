@@ -82,4 +82,5 @@ jobs:
         run: |
           uv run pytest \
             tests/notebook/test_e2e_mounts_s3.py \
+            tests/notebook/test_e2e_mounts_azure.py \
             -v --tb=short -p no:cacheprovider
