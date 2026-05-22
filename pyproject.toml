@@ -104,6 +104,7 @@ dev = [
     "datafusion>=50.1.0",
     "ty>=0.0.24",
     "s3fs>=2026.3.0",
+    "adlfs>=2026.0.0",
     "sqlglot>=25.0.0",
     "adbc-driver-manager>=1.0.0",
     "adbc-driver-postgresql>=1.0.0",
