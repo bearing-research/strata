@@ -68,20 +68,15 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 def azurite_container():
     """Module-scoped Azurite container exposing the Blob endpoint.
 
-    ``--skipApiVersionCheck`` lets Azurite serve requests from an
-    ``azure-storage-blob`` SDK that's newer than the emulator's
-    recognized API list. Without it, recent SDKs (2025-11-05+) fail
-    every upload/list against Azurite 3.34.0 with ``InvalidHeaderValue``.
-    The other flags mirror the upstream Dockerfile CMD so all three
-    service ports stay reachable (the testcontainers wait check polls
-    the first exposed port).
+    ``:latest`` is intentional — the installed ``azure-storage-blob``
+    SDK ships a recent API version (``2025-11-05+``) that older Azurite
+    builds reject with ``InvalidHeaderValue``. Microsoft's error
+    response for that mismatch literally says "upgrade Azurite to
+    latest version and retry," so we track latest. The tradeoff
+    (occasional CI breakage if Microsoft ships a regression) is
+    smaller than the SDK/emulator drift problem with a fixed pin.
     """
-    container = AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:3.34.0")
-    container.with_command(
-        "--blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 "
-        "--skipApiVersionCheck"
-    )
-    with container as az:
+    with AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest") as az:
         yield az
 
 
