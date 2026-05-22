@@ -34,12 +34,15 @@ blobs or execution metadata bleeding into the history.
 - **content-addressed:** every cell output is keyed by source + inputs + environment — identical work hits the cache forever
 - **reactive:** edit a cell, the cascade re-runs only the downstream cells that depend on it
 - **dag-from-ast:** Strata reads each cell's AST to wire upstream/downstream — no decorators, no manual edges
+- **dag-view:** the dependency graph renders alongside the cells — double-click any node to jump to its source
 - **git-friendly:** notebooks are plain `.py` files plus a TOML manifest — readable diffs, no JSON blobs
-- **prompt cells:** LLM calls are first-class DAG nodes, cached by template + inputs + model config
+- **prompt cells:** LLM calls are first-class DAG nodes, `{{ variable }}` interpolation from upstream cells, cached by template + inputs + model config
 - **SQL cells:** named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery
+- **loop cells:** `# @loop max_iter=N carry=state` iterates a cell with explicit carry between steps — each iteration is its own artifact
 - **distributed:** `# @worker gpu-fly` dispatches a single cell to a remote box — bring your own compute
 - **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3 / GCS / Azure prefix a local `pathlib.Path`
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
+- **auto-install:** missing import in a cell? one click adds the package via uv and re-runs
 - **headless:** `strata run ./my-notebook` for CI and scheduled execution — same DAG, same cache
 - **also a library:** the materialization layer is exposed via HTTP + a `StrataClient`, usable from any Python process
 - **production-ready:** Iceberg-aware scans, trusted-proxy auth, multi-tenancy, S3 / GCS / Azure / local blob backends
