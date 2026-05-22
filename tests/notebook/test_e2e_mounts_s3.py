@@ -23,7 +23,9 @@ import io
 import textwrap
 from pathlib import Path
 
+import docker
 import pytest
+from testcontainers.minio import MinioContainer
 
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import MountMode, MountSpec
@@ -37,25 +39,21 @@ from strata.notebook.writer import (
     write_cell,
 )
 
-try:
-    from testcontainers.minio import MinioContainer
-except ImportError:
-    pytest.skip("testcontainers[minio] not installed", allow_module_level=True)
 
-
-def _docker_available() -> bool:
+def _docker_daemon_reachable() -> bool:
+    """Skip when the daemon is unreachable — the docker package itself is a
+    transitive dev dep, but the daemon may not be running on a contributor's
+    laptop. CI always has Docker, so this only triggers locally.
+    """
     try:
-        import docker
-
-        client = docker.from_env()
-        client.ping()
+        docker.from_env().ping()
         return True
     except Exception:
         return False
 
 
-if not _docker_available():
-    pytest.skip("Docker is not available", allow_module_level=True)
+if not _docker_daemon_reachable():
+    pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]

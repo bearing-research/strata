@@ -19,39 +19,34 @@ Mark with @pytest.mark.slow if you want to skip in quick test runs.
 import random
 import time
 
+import docker
 import pyarrow as pa
 import pytest
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.schema import Schema
 from pyiceberg.types import DoubleType, IntegerType, LongType, NestedField, StringType
+from testcontainers.minio import MinioContainer
 
 from strata.config import StrataConfig
 from strata.fetcher import PyArrowFetcher
 from strata.planner import ReadPlanner
 from strata.types import Filter, FilterOp
 
-# Skip all tests if testcontainers is not installed
-try:
-    from testcontainers.minio import MinioContainer
-except ImportError:
-    pytest.skip("testcontainers[minio] not installed", allow_module_level=True)
 
-
-# Check if Docker is available
-def _docker_available() -> bool:
-    """Check if Docker daemon is accessible."""
+def _docker_daemon_reachable() -> bool:
+    """Skip when the daemon is unreachable. ``docker`` itself is a transitive
+    dev dep via testcontainers, but the daemon may not be running on a
+    contributor's laptop. CI always has Docker; this only triggers locally.
+    """
     try:
-        import docker
-
-        client = docker.from_env()
-        client.ping()
+        docker.from_env().ping()
         return True
     except Exception:
         return False
 
 
-if not _docker_available():
-    pytest.skip("Docker is not available", allow_module_level=True)
+if not _docker_daemon_reachable():
+    pytest.skip("Docker daemon is not running", allow_module_level=True)
 
 # Mark all tests in this module as integration tests
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
