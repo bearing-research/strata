@@ -284,3 +284,49 @@ async def test_batch_cached_displays_round_trip(tmp_path: Path):
     assert c1_second.display_outputs, (
         f"cache-hit c1 should restore display_outputs; got {c1_second.display_outputs!r}"
     )
+    # Regression for #34 review finding #1: cached displays must keep
+    # the rich metadata (markdown_text / preview / image inline data),
+    # not just {content_type, file, artifact_uri}.
+    cached = c1_second.display_outputs[0]
+    assert cached.get("markdown_text") == "first hello", (
+        f"cached display lost markdown_text; got {cached!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_display_only_cell_is_cacheable(tmp_path: Path):
+    """A cell that produces displays but no consumed variables should
+    cache-hit on re-run. Regression for #34 review finding #2 — the
+    cache_check was returning miss for empty consumed_vars even when
+    display artifacts existed.
+    """
+    session = _make_session_with_cells(
+        tmp_path,
+        # c2 makes c1's `x` a consumed var (so the batch has something
+        # consumed_vars-wise on c1). c2 itself is the display-only cell
+        # we're verifying caches.
+        [
+            ("c1", "x = 1\n"),
+            ("c2", "display(Markdown(f'value: {x}'))\n"),
+        ],
+    )
+    specs = _populate_consumed_vars(
+        [
+            _cell_spec("c1", "x = 1\n"),
+            _cell_spec("c2", "display(Markdown(f'value: {x}'))\n"),
+        ],
+        session,
+    )
+
+    executor = CellExecutor(session)
+    first = await executor.execute_batch(specs)
+    assert first.completed
+    c2_first = next(r for r in first.cell_results if r.cell_id == "c2")
+    assert c2_first.display_outputs, "c2 should produce display output"
+
+    second = await executor.execute_batch(specs)
+    assert second.completed
+    c2_second = next(r for r in second.cell_results if r.cell_id == "c2")
+    assert c2_second.status == "cache_hit", (
+        f"display-only cell should cache-hit on re-run; got {c2_second.status}"
+    )

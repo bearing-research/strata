@@ -370,6 +370,37 @@ class TestRunAllBatching:
                 assert c1["payload"].get("execution_method") == "batch"
                 assert c1["payload"]["outputs"]["value"]["preview"] == "batched"
 
+    def test_run_all_mount_failure_emits_per_cell_error_not_batch_abort(self, setup):
+        """A failed mount on one cell becomes a per-cell error broadcast;
+        the rest of the batch still runs. Regression for #34 review
+        finding #3 — mount-prep exceptions had been propagating out of
+        _run_partition_batch and killing the whole run before any cell
+        emitted any frame.
+        """
+        client, tmp = setup
+        nb = (
+            NotebookBuilder(tmp)
+            # c1 mounts a path that does not exist → MountResolver raises.
+            .add_cell(
+                "c_bad",
+                "# @mount data file:///definitely/does/not/exist/strata ro\nv = 1\n",
+            )
+            .add_cell("c_good", "y = 2", after="c_bad")
+        )
+        with open_notebook_session(client, nb.path) as (sid, _session):
+            with ws_connect(client, sid) as ws:
+                ws.run_all()
+                # Each cell hits a terminal frame.
+                ws.receive_until("cell_error", cell_id="c_bad")
+                ws.receive_until("cell_output", cell_id="c_good")
+
+                errors = {m["payload"]["cell_id"] for m in ws.messages_of_type("cell_error")}
+                outputs = {m["payload"]["cell_id"] for m in ws.messages_of_type("cell_output")}
+                assert "c_bad" in errors, f"c_bad should be in cell_error: {errors}"
+                assert "c_good" in outputs, (
+                    f"c_good must still run after c_bad's mount failure; got outputs={outputs}"
+                )
+
     def test_rerun_all_continues_after_failure_without_re_running_failed_upstream(
         self, setup, monkeypatch
     ):

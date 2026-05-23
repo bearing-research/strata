@@ -70,7 +70,13 @@ from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
 from strata.notebook.immutability import MutationWarning
-from strata.notebook.models import CellLanguage, MountMode, MountSpec, WorkerBackendType
+from strata.notebook.models import (
+    CellLanguage,
+    CellOutput,
+    MountMode,
+    MountSpec,
+    WorkerBackendType,
+)
 from strata.notebook.module_export import build_module_export_plan
 from strata.notebook.mounts import (
     MountCredentials,
@@ -3431,10 +3437,39 @@ class CellExecutor:
             else set()
         )
 
-        # A cell with no consumed vars has nothing meaningful to cache
-        # (PR-b3 handles display-only cache hits). Treat as miss so the
-        # cell executes for its side effects.
-        if not consumed_vars:
+        # Resolve cached displays through the same hydration path single-cell
+        # uses (executor.py L857 + session._resolve_cached_display_outputs).
+        # The helper returns rich CellOutput models (with markdown_text /
+        # preview / image inline data) when all cached artifacts exist with
+        # matching provenance, or [] otherwise. We then materialize their
+        # blobs to the per-cell tmpdir so the harness can deserialize them.
+        existing_display_outputs = cell.display_outputs or (
+            [cell.display_output] if cell.display_output is not None else []
+        )
+        cached_display_models = self.session._resolve_cached_display_outputs(
+            cell_id, provenance_hash, existing_display_outputs
+        )
+        cached_displays: list[dict[str, Any]] = []
+        for index, cached in enumerate(cached_display_models):
+            display_artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___display__{index}"
+            display_art = artifact_mgr.artifact_store.get_latest_version(display_artifact_id)
+            if display_art is None:
+                continue  # Should not happen — helper validated existence.
+            blob = artifact_mgr.artifact_store.read_blob(display_art.id, display_art.version)
+            if blob is None:
+                continue
+            content_type = _artifact_content_type(display_art)
+            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
+            file_name = f"__display__{index}{ext}"
+            (cell_output_dir / file_name).write_bytes(blob)
+            meta = cached.model_dump()
+            meta["file"] = file_name
+            cached_displays.append(meta)
+
+        # A cell with no consumed vars *and* no cached displays has nothing
+        # to cache — treat as miss so the cell executes for side effects.
+        # A display-only cell with cached displays is a legitimate cache hit.
+        if not consumed_vars and not cached_displays:
             return {"cache_hit": False, "provenance_hash": provenance_hash}
 
         cached_outputs: dict[str, dict[str, str]] = {}
@@ -3460,39 +3495,12 @@ class CellExecutor:
             uri = f"strata://artifact/{canonical_art.id}@v={canonical_art.version}"
             cell.artifact_uris[var_name] = uri
             cell.artifact_uri = uri
-        cell.cache_hit = True
 
-        # Restore cached display outputs. Display artifacts live under
-        # the same ``nb_<nbid>_cell_<cid>_var_<name>`` prefix but with
-        # a ``__display__N`` variable name (see _store_display_outputs).
-        # Iterate them in N-order and materialize blobs to the per-cell
-        # tmpdir so the harness can deserialize them.
-        display_prefix = f"nb_{notebook_id}_cell_{cell_id}_var___display__"
-        display_arts = artifact_mgr.artifact_store.list_latest_by_id_prefix(display_prefix)
-        cached_displays: list[dict[str, Any]] = []
-        # Sort by trailing N so the broadcast preserves display ordering.
-        for art in sorted(
-            display_arts,
-            key=lambda a: int(a.id[len(display_prefix) :].split("@")[0] or "0"),
-        ):
-            blob = artifact_mgr.artifact_store.read_blob(art.id, art.version)
-            if blob is None:
-                continue
-            content_type = _artifact_content_type(art)
-            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
-            # Match the harness's __display__N{ext} convention.
-            display_name = art.id[len(display_prefix) :].split("@")[0]
-            file_name = f"__display__{display_name}{ext}"
-            (cell_output_dir / file_name).write_bytes(blob)
-            cached_displays.append(
-                {
-                    "content_type": content_type,
-                    "file": file_name,
-                    "artifact_uri": f"strata://artifact/{art.id}@v={art.version}",
-                }
-            )
-        cell.display_outputs = list(cached_displays)
-        cell.display_output = cached_displays[-1] if cached_displays else None
+        # Update session-side display state from the hydrated models.
+        cell.cache_hit = True
+        if cached_display_models:
+            cell.display_outputs = list(cached_display_models)
+            cell.display_output = cached_display_models[-1]
 
         return {
             "cache_hit": True,
@@ -3596,6 +3604,16 @@ class CellExecutor:
             )
         except Exception:
             pass
+
+        # Update session-side display state from the post-persist metadata
+        # so a later cache_check (via _resolve_cached_display_outputs)
+        # finds rich CellOutput objects rather than empty state. The
+        # dispatcher does this too via apply_execution_result_metadata,
+        # but doing it here keeps direct-call execute_batch consistent
+        # (tests, REPL).
+        if persisted_displays:
+            cell.display_outputs = [CellOutput(**d) for d in persisted_displays]
+            cell.display_output = cell.display_outputs[-1]
 
         uri = cell.artifact_uri or ""
         return {"ok": True, "uri": uri, "display_outputs": persisted_displays}
