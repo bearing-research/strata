@@ -251,6 +251,232 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Batch execution (run-all single-process mode)
+# ---------------------------------------------------------------------------
+#
+# Batched run-all exec's many cells in one Python process with a shared
+# namespace. Parent owns all strata-side bookkeeping (provenance, cache,
+# persist) and asks this harness to run cell bodies + serialize outputs.
+# Communication uses two pipes:
+#   - frame_out  — harness → parent (events + requests, line-delimited JSON)
+#   - resp_in    — parent → harness (responses to cache_check / persist)
+# Blob bytes travel as files in ``output_dir/<cell_id>/{var_name}{ext}``,
+# never inline in the JSON. See issue #26 for full design.
+
+
+_MISSING = object()
+
+
+def _send_frame(stream: Any, frame_type: str, payload: dict) -> None:
+    """Write one length-line JSON frame to the parent and flush."""
+    line = orjson.dumps({"type": frame_type, "payload": payload}) + b"\n"
+    stream.write(line)
+    stream.flush()
+
+
+def _recv_response(stream: Any) -> dict:
+    """Read one JSON response line from the parent."""
+    line = stream.readline()
+    if not line:
+        raise RuntimeError("Batch response pipe closed unexpectedly")
+    return orjson.loads(line)
+
+
+def _run_one_batched_cell(
+    cell: dict,
+    namespace: dict,
+    output_dir: Path,
+    frame_out: Any,
+    resp_in: Any,
+) -> tuple[str, str | None]:
+    """Execute one cell within a batch. Returns (status, failed_reason).
+
+    status ∈ {"ok", "cell_error", "persist_failed"}. failed_reason names
+    the trigger when status != "ok" (matches batch_end's "reason" field).
+    """
+    cell_id = cell["cell_id"]
+    source = cell["source"]
+    consumed_vars: list[str] = list(cell.get("consumed_vars") or [])
+    cell_env: dict = cell.get("env") or {}
+    mount_manifest: dict = cell.get("mount_manifest") or {}
+    source_hash: str = cell.get("source_hash", "")
+    env_hash: str = cell.get("env_hash", "")
+
+    cell_output_dir = output_dir / cell_id
+    cell_output_dir.mkdir(parents=True, exist_ok=True)
+
+    _send_frame(frame_out, "cell_start", {"cell_id": cell_id})
+
+    # Save existing namespace bindings under each mount name so we can
+    # restore on exit — protects any pre-existing user variable with the
+    # same name as a mount.
+    mount_names = list(mount_manifest.keys())
+    previous_bindings: dict[str, Any] = {
+        name: namespace.get(name, _MISSING) for name in mount_names
+    }
+    inject_mounts({"mounts": mount_manifest}, namespace)
+
+    try:
+        with apply_env_overrides({"env": cell_env}):
+            # Cache check — parent decides hit/miss.
+            _send_frame(frame_out, "cache_check", {"cell_id": cell_id})
+            response = _recv_response(resp_in)
+
+            if response.get("cache_hit"):
+                # Load cached outputs into namespace. Parent has already
+                # materialized blobs into cell_output_dir before responding.
+                cached_outputs: dict = response.get("cached_outputs") or {}
+                for var_name, spec in cached_outputs.items():
+                    content_type = spec.get("content_type", "")
+                    file_name = spec.get("file", "")
+                    if not content_type or not file_name:
+                        continue
+                    blob_path = cell_output_dir / file_name
+                    if not blob_path.exists():
+                        continue
+                    try:
+                        namespace[var_name] = _ser.deserialize_value(content_type, blob_path)
+                    except Exception as exc:
+                        print(
+                            f"Warning: failed to load cached {var_name} for {cell_id}: {exc}",
+                            file=sys.stderr,
+                        )
+                _send_frame(
+                    frame_out,
+                    "cell_output",
+                    {
+                        "cell_id": cell_id,
+                        "cache_hit": True,
+                        "outputs": cached_outputs,
+                        "display_outputs": response.get("cached_displays") or [],
+                    },
+                )
+                return ("ok", None)
+
+            # Cache miss — execute the cell body.
+            display_capture = _display.DisplayCapture()
+            display_capture.install(namespace)
+            stdout_capture = io.StringIO()
+            stderr_capture = io.StringIO()
+            old_stdout, old_stderr = sys.stdout, sys.stderr
+            sys.stdout = stdout_capture
+            sys.stderr = stderr_capture
+            try:
+                try:
+                    with display_capture.capture_side_effects():
+                        display_value = _exec_with_display(source, namespace)
+                except Exception as exc:
+                    _send_frame(
+                        frame_out,
+                        "cell_error",
+                        {
+                            "cell_id": cell_id,
+                            "error": str(exc),
+                            "traceback": traceback.format_exc(),
+                            "stdout": stdout_capture.getvalue(),
+                            "stderr": stderr_capture.getvalue(),
+                        },
+                    )
+                    return ("cell_error", "cell_error")
+
+                # Success: serialize consumed vars + displays.
+                outputs: dict[str, Any] = {}
+                for var_name in consumed_vars:
+                    if var_name not in namespace:
+                        continue
+                    try:
+                        outputs[var_name] = _ser.serialize_value(
+                            namespace[var_name], cell_output_dir, var_name
+                        )
+                    except Exception as exc:
+                        outputs[var_name] = {
+                            "error": str(exc),
+                            "type": type(namespace[var_name]).__name__,
+                        }
+
+                display_values = display_capture.resolve(display_value)
+                serialized_displays: list[dict[str, Any]] = []
+                for idx, display in enumerate(display_values):
+                    try:
+                        meta = _ser.serialize_value(display, cell_output_dir, f"display_{idx}")
+                        serialized_displays.append(meta)
+                    except Exception:
+                        # Display serialization errors don't abort the cell;
+                        # matches single-cell behavior.
+                        pass
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+
+            # Persist request — parent writes to artifact store.
+            _send_frame(
+                frame_out,
+                "persist",
+                {
+                    "cell_id": cell_id,
+                    "outputs": outputs,
+                    "display_outputs": serialized_displays,
+                    "stdout": stdout_capture.getvalue(),
+                    "stderr": stderr_capture.getvalue(),
+                    "source_hash": source_hash,
+                    "env_hash": env_hash,
+                },
+            )
+            ack = _recv_response(resp_in)
+            if not ack.get("ok"):
+                return ("persist_failed", "persist_failed")
+            return ("ok", None)
+    finally:
+        # Restore mount-name bindings — discard any cell-introduced ones,
+        # rebind whatever was there before.
+        for name, previous in previous_bindings.items():
+            if previous is _MISSING:
+                namespace.pop(name, None)
+            else:
+                namespace[name] = previous
+
+
+def execute_batch(
+    cells: list[dict],
+    upstream_inputs: dict,
+    output_dir: Path,
+    frame_out: Any,
+    resp_in: Any,
+) -> None:
+    """Execute a sequence of cells in one Python process.
+
+    ``cells`` is the per-cell list ``[{cell_id, source, consumed_vars,
+    env, mount_manifest, source_hash, env_hash}, ...]`` in notebook order.
+    ``upstream_inputs`` seeds the shared namespace from artifacts of
+    non-batched upstream cells (same ``{var: {content_type, file}}``
+    shape ``deserialize_inputs`` reads).
+
+    Streams frames over ``frame_out`` and reads responses from
+    ``resp_in``. Returns after emitting ``batch_end``; the caller is
+    responsible for closing the pipes.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Seed namespace from upstream artifacts.
+    namespace: dict[str, Any] = deserialize_inputs(
+        {"inputs": upstream_inputs, "output_dir": str(output_dir)}
+    )
+
+    for cell in cells:
+        status, reason = _run_one_batched_cell(cell, namespace, output_dir, frame_out, resp_in)
+        if status != "ok":
+            _send_frame(
+                frame_out,
+                "batch_end",
+                {"reason": reason, "failed_cell_id": cell["cell_id"]},
+            )
+            return
+
+    _send_frame(frame_out, "batch_end", {"reason": "complete"})
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
