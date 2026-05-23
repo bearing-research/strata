@@ -46,6 +46,7 @@ import hashlib
 import json
 import logging
 import os
+import shutil
 import tempfile
 import time
 import uuid
@@ -56,6 +57,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlunparse
 
 import httpx
+import orjson
 
 from strata.artifact_store import TransformSpec as ArtifactTransformSpec
 from strata.artifact_store import get_artifact_store
@@ -306,6 +308,33 @@ class CellExecutionResult:
         return payload
 
 
+@dataclass(kw_only=True)
+class BatchCellResult:
+    """Per-cell outcome inside a batched run-all execution."""
+
+    cell_id: str
+    status: str  # "ok" | "cache_hit" | "cell_error" | "persist_failed" | "not_run"
+    error: str | None = None
+    traceback: str | None = None
+    stdout: str = ""
+    stderr: str = ""
+
+
+@dataclass(kw_only=True)
+class BatchExecutionResult:
+    """Outcome of one ``CellExecutor.execute_batch`` invocation.
+
+    The dispatcher (``ws._execute_run_all``) uses this to decide which
+    cells still need to run via single-cell mode after the batch
+    completes or terminates early.
+    """
+
+    cell_results: list[BatchCellResult]
+    completed: bool  # True if batch_end with reason=complete
+    failed_cell_id: str | None = None
+    end_reason: str = "complete"  # "complete" | "cell_error" | "persist_failed" | "subprocess_died"
+
+
 class RemoteExecutionError(RuntimeError):
     """Execution failure with structured remote metadata for notebook UX."""
 
@@ -429,6 +458,34 @@ class CellExecutor:
             timeout_seconds,
             materialize_upstreams=True,
             use_cache=False,
+        )
+
+    async def execute_batch(
+        self,
+        cell_specs: list[dict[str, Any]],
+        *,
+        use_cache: bool = True,
+        batch_timeout_seconds: float = 600.0,
+    ) -> BatchExecutionResult:
+        """Execute a sequence of cells in one harness subprocess.
+
+        ``cell_specs`` is the list of cells in notebook order, each a dict
+        with keys ``cell_id``, ``source``, ``env``, ``mount_manifest``
+        (already resolved). Caller (``ws._execute_run_all`` in PR-b3) is
+        responsible for partitioning the notebook into batchable runs;
+        this method just executes whatever it's given.
+
+        Returns a ``BatchExecutionResult`` so the caller can decide which
+        cells still need to run via single-cell mode (workers, post-batch-
+        failure continuation, etc.). See issue #26 for the full design.
+
+        ``use_cache=False`` bypasses the per-cell cache check (rerun-all
+        semantics).
+        """
+        return await self._run_batch(
+            cell_specs,
+            use_cache=use_cache,
+            batch_timeout_seconds=batch_timeout_seconds,
         )
 
     async def _execute_cell(
@@ -2961,3 +3018,511 @@ class CellExecutor:
             execution_method=execution_method,
             mutation_warnings=mutation_warnings,
         )
+
+    # ------------------------------------------------------------------
+    # Run-all batching (PR-b2 of issue #26)
+    # ------------------------------------------------------------------
+
+    async def _run_batch(
+        self,
+        cell_specs: list[dict[str, Any]],
+        *,
+        use_cache: bool,
+        batch_timeout_seconds: float,
+    ) -> BatchExecutionResult:
+        """Run a sequence of cells in one harness subprocess.
+
+        See ``execute_batch`` for public docs. This handles all the
+        subprocess + pipe wiring + frame protocol service. PR-b2 ships
+        the happy/error paths; per-cell watchdog and full
+        stdout/stderr attribution are deferred to PR-b3.
+        """
+        # Match single-cell's fallback: venv interpreter if synced,
+        # otherwise PATH python (e.g. test environments that don't go
+        # through the full env-sync flow).
+        venv_python = self.session.venv_python or Path("python")
+
+        batch_tmpdir = Path(
+            tempfile.mkdtemp(
+                prefix=f"strata_batch_{uuid.uuid4().hex[:8]}_",
+                dir=str(self.session.path / ".strata"),
+            )
+        )
+        manifest_path = batch_tmpdir / "batch_manifest.json"
+
+        # Pipe pairs: frame_r/w (harness → parent), resp_r/w (parent → harness).
+        frame_r, frame_w = os.pipe()
+        resp_r, resp_w = os.pipe()
+
+        cell_results: dict[str, BatchCellResult] = {}
+        for spec in cell_specs:
+            cell_results[spec["cell_id"]] = BatchCellResult(
+                cell_id=spec["cell_id"],
+                status="not_run",
+            )
+
+        completed = False
+        end_reason = "subprocess_died"
+        failed_cell_id: str | None = None
+
+        try:
+            upstream_inputs = self._batch_resolve_upstream_inputs(cell_specs, batch_tmpdir)
+            manifest = {
+                "cells": cell_specs,
+                "upstream_inputs": upstream_inputs,
+            }
+            manifest_path.write_bytes(orjson.dumps(manifest))
+
+            env = {
+                **os.environ,
+                "STRATA_BATCH_FRAME_FD": str(frame_w),
+                "STRATA_BATCH_RESP_FD": str(resp_r),
+                "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
+            }
+
+            proc = await asyncio.create_subprocess_exec(
+                str(venv_python),
+                str(self.harness_path),
+                "--batch",
+                str(manifest_path),
+                env=env,
+                pass_fds=(frame_w, resp_r),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(self.session.path),
+            )
+
+            # Close parent-side copies of the harness-side fds so the
+            # harness's EOF detection works correctly when the subprocess
+            # exits.
+            os.close(frame_w)
+            os.close(resp_r)
+            frame_w = -1  # mark already-closed for finally
+            resp_r = -1
+
+            # Drain harness stdout/stderr concurrently. PR-b2 just sinks
+            # them to /dev/null to prevent pipe-buffer deadlock; full
+            # per-cell attribution lands in PR-b3.
+            assert proc.stdout is not None
+            assert proc.stderr is not None
+            stdout_task = asyncio.create_task(_drain_stream(proc.stdout))
+            stderr_task = asyncio.create_task(_drain_stream(proc.stderr))
+
+            # Wrap parent-side frame pipe as an asyncio StreamReader.
+            loop = asyncio.get_running_loop()
+            frame_reader = asyncio.StreamReader(loop=loop)
+            frame_protocol = asyncio.StreamReaderProtocol(frame_reader, loop=loop)
+            frame_file = os.fdopen(frame_r, "rb")
+            frame_r = -1  # ownership transferred to file
+            await loop.connect_read_pipe(lambda: frame_protocol, frame_file)
+
+            # Write side uses sync os.write — kernel pipe buffer absorbs
+            # the small JSON responses we send.
+            resp_w_fd = resp_w
+            resp_w = -1  # ownership transferred
+
+            def send_response(payload: dict) -> None:
+                line = orjson.dumps(payload) + b"\n"
+                os.write(resp_w_fd, line)
+
+            try:
+                end_reason, failed_cell_id = await asyncio.wait_for(
+                    self._batch_service_loop(
+                        frame_reader,
+                        send_response,
+                        cell_results,
+                        batch_tmpdir,
+                        use_cache=use_cache,
+                    ),
+                    timeout=batch_timeout_seconds,
+                )
+                completed = end_reason == "complete"
+            except TimeoutError:
+                proc.kill()
+                end_reason = "subprocess_died"
+                completed = False
+            finally:
+                # Always close the response fd so the harness sees EOF
+                # if it's still alive.
+                try:
+                    os.close(resp_w_fd)
+                except OSError:
+                    pass
+
+            await proc.wait()
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+        finally:
+            # Close any pipe fds still owned by the parent.
+            for fd in (frame_w, resp_r, frame_r, resp_w):
+                if fd >= 0:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            shutil.rmtree(batch_tmpdir, ignore_errors=True)
+
+        return BatchExecutionResult(
+            cell_results=list(cell_results.values()),
+            completed=completed,
+            failed_cell_id=failed_cell_id,
+            end_reason=end_reason,
+        )
+
+    async def _batch_service_loop(
+        self,
+        frame_reader: asyncio.StreamReader,
+        send_response: Callable[[dict], None],
+        cell_results: dict[str, BatchCellResult],
+        batch_tmpdir: Path,
+        *,
+        use_cache: bool,
+    ) -> tuple[str, str | None]:
+        """Read frames and dispatch service requests until ``batch_end``.
+
+        Returns (end_reason, failed_cell_id).
+        """
+        active_cell_id: str | None = None
+        end_reason = "subprocess_died"
+        failed_cell_id: str | None = None
+
+        while True:
+            line = await frame_reader.readline()
+            if not line:
+                # Pipe closed without batch_end — subprocess died.
+                break
+            try:
+                frame = orjson.loads(line)
+            except orjson.JSONDecodeError:
+                logger.warning("Batch harness emitted unparseable frame: %r", line[:200])
+                continue
+
+            ftype = frame.get("type")
+            payload = frame.get("payload") or {}
+
+            if ftype == "cell_start":
+                active_cell_id = payload.get("cell_id")
+            elif ftype == "cache_check":
+                response = await self._batch_service_cache_check(
+                    payload.get("cell_id", ""),
+                    batch_tmpdir,
+                    use_cache=use_cache,
+                )
+                send_response(response)
+            elif ftype == "persist":
+                response = await self._batch_service_persist(payload, batch_tmpdir)
+                if response.get("ok"):
+                    cell_results[payload["cell_id"]] = BatchCellResult(
+                        cell_id=payload["cell_id"],
+                        status="ok",
+                        stdout=payload.get("stdout", ""),
+                        stderr=payload.get("stderr", ""),
+                    )
+                send_response(response)
+            elif ftype == "cell_output":
+                if payload.get("cache_hit") and active_cell_id:
+                    cell_results[active_cell_id] = BatchCellResult(
+                        cell_id=active_cell_id,
+                        status="cache_hit",
+                    )
+            elif ftype == "cell_error":
+                cell_id = payload.get("cell_id", "")
+                cell_results[cell_id] = BatchCellResult(
+                    cell_id=cell_id,
+                    status="cell_error",
+                    error=payload.get("error"),
+                    traceback=payload.get("traceback"),
+                    stdout=payload.get("stdout", ""),
+                    stderr=payload.get("stderr", ""),
+                )
+            elif ftype == "batch_end":
+                end_reason = payload.get("reason", "complete")
+                failed_cell_id = payload.get("failed_cell_id")
+                break
+
+        return end_reason, failed_cell_id
+
+    def _batch_resolve_upstream_inputs(
+        self,
+        cell_specs: list[dict[str, Any]],
+        batch_tmpdir: Path,
+    ) -> dict[str, dict[str, str]]:
+        """Materialize artifacts of cells upstream of the batch into batch_tmpdir.
+
+        The harness seeds its namespace from these on entry. Variables
+        whose producing cell is also inside the batch are handled by the
+        in-batch flow and shouldn't be in this dict.
+        """
+        batch_cell_ids = {spec["cell_id"] for spec in cell_specs}
+        inputs: dict[str, dict[str, str]] = {}
+        upstream_dir = batch_tmpdir / "__upstream__"
+        upstream_dir.mkdir(parents=True, exist_ok=True)
+
+        for spec in cell_specs:
+            cell_id = spec["cell_id"]
+            cell = self.session.notebook_state.get_cell(cell_id)
+            if cell is None:
+                continue
+            for upstream_id in cell.upstream_ids:
+                if upstream_id in batch_cell_ids:
+                    continue
+                upstream_cell = self.session.notebook_state.get_cell(upstream_id)
+                if upstream_cell is None:
+                    continue
+                for var_name, uri in upstream_cell.artifact_uris.items():
+                    if var_name in inputs:
+                        continue
+                    spec_dict = self._materialize_artifact_to_dir(uri, upstream_dir, var_name)
+                    if spec_dict is not None:
+                        inputs[var_name] = spec_dict
+
+        # Inputs paths are relative to batch_tmpdir (since the harness
+        # passes output_dir=batch_tmpdir to deserialize_inputs).
+        return {
+            name: {
+                "content_type": spec["content_type"],
+                "file": f"__upstream__/{spec['file']}",
+            }
+            for name, spec in inputs.items()
+        }
+
+    def _materialize_artifact_to_dir(
+        self,
+        uri: str,
+        target_dir: Path,
+        var_name: str,
+    ) -> dict[str, str] | None:
+        """Read an artifact by URI and write its blob to ``target_dir/<var><ext>``.
+
+        Returns ``{content_type, file}`` or None on failure.
+        """
+        artifact_id, version = self._parse_artifact_uri(uri)
+        if not artifact_id:
+            return None
+        artifact_mgr = self.session.get_artifact_manager()
+        art = artifact_mgr.artifact_store.get_artifact(artifact_id, version)
+        if art is None:
+            return None
+        blob = artifact_mgr.artifact_store.read_blob(artifact_id, version)
+        if blob is None:
+            return None
+        content_type = _artifact_content_type(art)
+        ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
+        file_name = f"{var_name}{ext}"
+        (target_dir / file_name).write_bytes(blob)
+        return {"content_type": content_type, "file": file_name}
+
+    async def _batch_service_cache_check(
+        self,
+        cell_id: str,
+        batch_tmpdir: Path,
+        *,
+        use_cache: bool,
+    ) -> dict[str, Any]:
+        """Service a ``cache_check`` request from the batch harness.
+
+        Computes provenance via the existing single-cell helpers and
+        checks the artifact store. On hit, materializes cached blobs to
+        ``batch_tmpdir/<cell_id>/{var}{ext}`` AND mirrors single-cell
+        L823-844 (populates ``cell.artifact_uris`` + ``display_outputs``).
+        """
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            return {"cache_hit": False, "provenance_hash": ""}
+
+        source = cell.source
+        try:
+            prov = await self._compute_cell_provenance(cell_id, source)
+        except Exception as exc:
+            logger.warning("Batch cache_check provenance failed for %s: %s", cell_id, exc)
+            return {"cache_hit": False, "provenance_hash": ""}
+
+        provenance_hash = prov.provenance_hash
+        if not use_cache:
+            return {"cache_hit": False, "provenance_hash": provenance_hash}
+
+        cell_output_dir = batch_tmpdir / cell_id
+        cell_output_dir.mkdir(parents=True, exist_ok=True)
+        notebook_id = self.session.notebook_state.id
+        artifact_mgr = self.session.get_artifact_manager()
+        consumed_vars = (
+            self.session.dag.consumed_variables.get(cell_id, set())
+            if self.session.dag is not None
+            else set()
+        )
+
+        # A cell with no consumed vars has nothing meaningful to cache
+        # (PR-b3 handles display-only cache hits). Treat as miss so the
+        # cell executes for its side effects.
+        if not consumed_vars:
+            return {"cache_hit": False, "provenance_hash": provenance_hash}
+
+        cached_outputs: dict[str, dict[str, str]] = {}
+        for var_name in consumed_vars:
+            canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+            var_prov = derive_subkey(provenance_hash, var_name)
+            canonical_art = artifact_mgr.artifact_store.get_latest_version(canonical_id)
+            if canonical_art is None or canonical_art.provenance_hash != var_prov:
+                return {"cache_hit": False, "provenance_hash": provenance_hash}
+            blob = artifact_mgr.artifact_store.read_blob(canonical_art.id, canonical_art.version)
+            if blob is None:
+                return {"cache_hit": False, "provenance_hash": provenance_hash}
+            content_type = _artifact_content_type(canonical_art)
+            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
+            file_name = f"{var_name}{ext}"
+            (cell_output_dir / file_name).write_bytes(blob)
+            cached_outputs[var_name] = {
+                "content_type": content_type,
+                "file": file_name,
+            }
+            # Mirror single-cell L823-844 — populate artifact_uris so
+            # downstream cells in the batch resolve via _collect_input_hashes.
+            uri = f"strata://artifact/{canonical_art.id}@v={canonical_art.version}"
+            cell.artifact_uris[var_name] = uri
+            cell.artifact_uri = uri
+        cell.cache_hit = True
+
+        # Display outputs aren't covered by PR-b2's minimal cache-hit
+        # mirror — they ship in PR-b3 alongside the broader test suite.
+        return {
+            "cache_hit": True,
+            "provenance_hash": provenance_hash,
+            "cached_outputs": cached_outputs,
+            "cached_displays": [],
+        }
+
+    async def _batch_service_persist(
+        self,
+        payload: dict[str, Any],
+        batch_tmpdir: Path,
+    ) -> dict[str, Any]:
+        """Service a ``persist`` request from the batch harness.
+
+        Calls the existing single-cell persistence chain:
+        ``_write_module_export_outputs`` → ``_store_outputs`` →
+        ``_store_display_outputs``. Same code paths single-cell uses
+        post-L924; keeps ``cell.artifact_uris`` compatible.
+        """
+        cell_id = payload.get("cell_id", "")
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            return {"ok": False, "error": f"cell {cell_id} not found"}
+
+        cell_output_dir = batch_tmpdir / cell_id
+        if not cell_output_dir.exists():
+            return {"ok": False, "error": f"output dir missing for {cell_id}"}
+
+        # Recompute provenance (same as cache_check). Deterministic given
+        # the cell's current source + upstream artifact_uris.
+        try:
+            prov = await self._compute_cell_provenance(cell_id, cell.source)
+        except Exception as exc:
+            return {"ok": False, "error": f"provenance compute failed: {exc}"}
+
+        provenance_hash = prov.provenance_hash
+        source_hash = prov.source_hash
+        env_hash = prov.env_hash
+        input_hashes = self._collect_input_hashes(cell_id)
+
+        # Module export: scans source AST, writes synthetic .cell_module.json /
+        # .cell_instance.pickle into cell_output_dir if there are top-level
+        # defs/classes. _store_outputs picks them up in the same iteration.
+        try:
+            module_export_error = self._write_module_export_outputs(
+                cell_id,
+                cell.source,
+                cell_output_dir,
+                provenance_hash,
+                {},  # outputs dict; module export reads from AST, not this
+            )
+            if module_export_error:
+                logger.warning(
+                    "Batch module export warning for %s: %s", cell_id, module_export_error
+                )
+        except Exception as exc:
+            logger.warning("Batch module export failed for %s: %s", cell_id, exc)
+
+        # Persist consumed variables via the existing helper.
+        stored_ok = self._store_outputs(
+            cell_id,
+            cell_output_dir,
+            provenance_hash,
+            input_hashes,
+            source_hash=source_hash,
+            env_hash=env_hash,
+        )
+
+        # Persist display outputs.
+        display_outputs_meta = payload.get("display_outputs") or []
+        if display_outputs_meta:
+            try:
+                self._store_display_outputs(
+                    cell_id,
+                    cell_output_dir,
+                    provenance_hash,
+                    input_hashes,
+                    display_outputs_meta,
+                    source_hash=source_hash,
+                    env_hash=env_hash,
+                )
+            except Exception as exc:
+                logger.warning("Batch display persist failed for %s: %s", cell_id, exc)
+
+        if not stored_ok:
+            return {"ok": False, "error": "store_outputs returned False"}
+
+        # Record provenance + execution as single-cell does.
+        try:
+            self.session.record_successful_execution_provenance(
+                cell_id, provenance_hash, source_hash, env_hash
+            )
+        except Exception:
+            pass
+
+        uri = cell.artifact_uri or ""
+        return {"ok": True, "uri": uri}
+
+
+# ---------------------------------------------------------------------------
+# Batch helpers (module-level)
+# ---------------------------------------------------------------------------
+
+
+_ARTIFACT_EXT_BY_CONTENT_TYPE: dict[str, str] = {
+    "arrow/ipc": ".arrow",
+    "json/object": ".json",
+    "pickle/object": ".pickle",
+    "module/import": ".module.json",
+    "module/cell": ".cell_module.json",
+    "module/cell-instance": ".cell_instance.pickle",
+}
+
+
+def _artifact_content_type(artifact: Any) -> str:
+    """Extract content_type from an ``ArtifactVersion``'s transform_spec.
+
+    Content type lives in ``transform_spec.params.content_type`` — same
+    pattern ``NotebookArtifactManager.get_artifact_preview`` reads from.
+    Returns ``"pickle/object"`` if missing (safe default — round-trips
+    via cloudpickle).
+    """
+    spec_json = getattr(artifact, "transform_spec", None)
+    if not spec_json:
+        return "pickle/object"
+    try:
+        spec = json.loads(spec_json)
+        return spec.get("params", {}).get("content_type") or "pickle/object"
+    except (ValueError, KeyError, TypeError):
+        return "pickle/object"
+
+
+async def _drain_stream(stream: asyncio.StreamReader) -> None:
+    """Read and discard everything from ``stream`` until EOF.
+
+    PR-b2 sinks raw stdout/stderr to /dev/null to prevent kernel pipe
+    buffer deadlocks on chatty native code. PR-b3 will attribute reads
+    to the currently-active cell via the most-recent ``cell_start`` frame.
+    """
+    while True:
+        chunk = await stream.read(4096)
+        if not chunk:
+            return

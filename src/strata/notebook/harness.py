@@ -481,7 +481,49 @@ def execute_batch(
 # ---------------------------------------------------------------------------
 
 
+def batch_main() -> None:
+    """Batch-mode CLI entry. Invoked as ``python harness.py --batch <manifest>``.
+
+    Reads the cell list and upstream inputs from the manifest. Pipe file
+    descriptors come via ``STRATA_BATCH_FRAME_FD`` (write) and
+    ``STRATA_BATCH_RESP_FD`` (read); output dir from
+    ``STRATA_BATCH_OUTPUT_DIR``. Calls ``execute_batch`` and exits.
+    """
+    if len(sys.argv) < 3:
+        print("Usage: harness.py --batch <manifest_path>", file=sys.stderr)
+        sys.exit(1)
+
+    manifest_path = sys.argv[2]
+    manifest = load_manifest(manifest_path)
+
+    frame_fd = int(os.environ["STRATA_BATCH_FRAME_FD"])
+    resp_fd = int(os.environ["STRATA_BATCH_RESP_FD"])
+    output_dir = Path(os.environ["STRATA_BATCH_OUTPUT_DIR"])
+
+    # Open the inherited fds as buffered file objects. closefd=True so they
+    # close when this process exits.
+    frame_out = os.fdopen(frame_fd, "wb")
+    resp_in = os.fdopen(resp_fd, "rb")
+
+    execute_batch(
+        cells=manifest.get("cells", []),
+        upstream_inputs=manifest.get("upstream_inputs", {}),
+        output_dir=output_dir,
+        frame_out=frame_out,
+        resp_in=resp_in,
+    )
+
+    # execute_batch returns after emitting batch_end; flush + close the
+    # frame pipe so the parent's reader sees EOF promptly.
+    frame_out.flush()
+    frame_out.close()
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--batch":
+        batch_main()
+        return
+
     if len(sys.argv) < 2:
         print("Usage: harness.py <manifest_path>", file=sys.stderr)
         sys.exit(1)
