@@ -3080,6 +3080,15 @@ class CellExecutor:
                 "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
             }
 
+            # Spawn the batch harness as the leader of a new process
+            # group so a SIGKILL on timeout reaches every descendant
+            # (multiprocessing workers, DataLoader pools, …). Mirrors
+            # single-cell's _run_harness at L2486.
+            from strata.notebook.process_tree import (
+                subprocess_kwargs_for_new_group,
+                terminate_subprocess_tree,
+            )
+
             proc = await asyncio.create_subprocess_exec(
                 str(venv_python),
                 str(self.harness_path),
@@ -3090,6 +3099,7 @@ class CellExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.session.path),
+                **subprocess_kwargs_for_new_group(),
             )
 
             # Close parent-side copies of the harness-side fds so the
@@ -3138,7 +3148,11 @@ class CellExecutor:
                 )
                 completed = end_reason == "complete"
             except TimeoutError:
-                proc.kill()
+                # SIGTERM the whole descendant tree, not just the
+                # harness. User code may have spawned children
+                # (multiprocessing pools, native threads) that proc.kill()
+                # alone would leak.
+                await terminate_subprocess_tree(proc)
                 end_reason = "subprocess_died"
                 completed = False
             finally:
@@ -3210,10 +3224,24 @@ class CellExecutor:
                 send_response(response)
             elif ftype == "persist":
                 response = await self._batch_service_persist(payload, batch_tmpdir)
+                cell_id_pl = payload["cell_id"]
                 if response.get("ok"):
-                    cell_results[payload["cell_id"]] = BatchCellResult(
-                        cell_id=payload["cell_id"],
+                    cell_results[cell_id_pl] = BatchCellResult(
+                        cell_id=cell_id_pl,
                         status="ok",
+                        stdout=payload.get("stdout", ""),
+                        stderr=payload.get("stderr", ""),
+                    )
+                else:
+                    # Persist rejected (module-export violation, store_outputs
+                    # failure, etc.) — harness will see persist_err, emit
+                    # batch_end(reason="persist_failed"), and exit. Record
+                    # the failure here so the dispatcher (PR-b3) doesn't see
+                    # this cell as "not_run".
+                    cell_results[cell_id_pl] = BatchCellResult(
+                        cell_id=cell_id_pl,
+                        status="persist_failed",
+                        error=response.get("error"),
                         stdout=payload.get("stdout", ""),
                         stderr=payload.get("stderr", ""),
                     )
@@ -3426,6 +3454,11 @@ class CellExecutor:
         # Module export: scans source AST, writes synthetic .cell_module.json /
         # .cell_instance.pickle into cell_output_dir if there are top-level
         # defs/classes. _store_outputs picks them up in the same iteration.
+        # A returned error string means a downstream-consumed def/class can't
+        # be safely exported under the current V1 rules — single-cell mode
+        # converts that into success=False (executor.py L995). Batch must
+        # do the same: refuse to persist, signal the harness, so the batch
+        # ends and the cell shows as errored.
         try:
             module_export_error = self._write_module_export_outputs(
                 cell_id,
@@ -3434,12 +3467,10 @@ class CellExecutor:
                 provenance_hash,
                 {},  # outputs dict; module export reads from AST, not this
             )
-            if module_export_error:
-                logger.warning(
-                    "Batch module export warning for %s: %s", cell_id, module_export_error
-                )
         except Exception as exc:
-            logger.warning("Batch module export failed for %s: %s", cell_id, exc)
+            return {"ok": False, "error": f"module export raised: {exc}"}
+        if module_export_error:
+            return {"ok": False, "error": f"module export rejected: {module_export_error}"}
 
         # Persist consumed variables via the existing helper.
         stored_ok = self._store_outputs(

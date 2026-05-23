@@ -319,6 +319,104 @@ def test_batch_cache_hit_loads_from_disk_and_continues(batch_pipes, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_display_capture_reinstalls_per_cell(batch_pipes):
+    """Each cell needs its own DisplayCapture handler. ``install()`` uses
+    ``setdefault`` so once the namespace has a ``display`` key from cell A,
+    cell B's calls to ``display(...)`` would go to A's capture (and into
+    cell A's display values). Verify cell B's display captures cell B's
+    payload, not cell A's.
+    """
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+
+    cells = [
+        # ``display`` and ``Markdown`` are injected into the cell namespace
+        # by ``DisplayCapture.install`` — no import needed.
+        {
+            "cell_id": "c1",
+            "source": "display(Markdown('cell A'))\n",
+            "consumed_vars": [],
+            "env": {},
+            "mount_manifest": {},
+        },
+        {
+            "cell_id": "c2",
+            "source": "display(Markdown('cell B'))\n",
+            "consumed_vars": [],
+            "env": {},
+            "mount_manifest": {},
+        },
+    ]
+
+    thread, errors = _run_in_thread(cells, {}, output_dir, frame_w, resp_r)
+
+    frames: list[dict] = []
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        frames.append(frame)
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "p"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test"})
+        elif frame["type"] == "batch_end":
+            break
+
+    thread.join(timeout=5)
+    assert not errors
+
+    persists = {p["payload"]["cell_id"]: p["payload"] for p in frames if p["type"] == "persist"}
+    # Each cell should have produced exactly one display output. Without the
+    # fix, cell B's display call would have hit cell A's now-orphaned capture
+    # and cell B's display_outputs would be empty.
+    assert len(persists["c1"]["display_outputs"]) == 1, persists["c1"]["display_outputs"]
+    assert len(persists["c2"]["display_outputs"]) == 1, persists["c2"]["display_outputs"]
+
+
+def test_display_filenames_use_serializer_convention(batch_pipes):
+    """Harness serializes display outputs as ``__display__N{ext}``, the
+    naming convention the serializer's content-type detection recognizes
+    (``_is_display_variable_name`` in serializer.py L312). With ``display_N``
+    the values would be classified as regular pickles.
+    """
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+
+    cells = [
+        {
+            "cell_id": "c1",
+            "source": "display(Markdown('hello'))\n",
+            "consumed_vars": [],
+            "env": {},
+            "mount_manifest": {},
+        },
+    ]
+
+    thread, errors = _run_in_thread(cells, {}, output_dir, frame_w, resp_r)
+
+    frames: list[dict] = []
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        frames.append(frame)
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "p"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test"})
+        elif frame["type"] == "batch_end":
+            break
+
+    thread.join(timeout=5)
+    assert not errors
+
+    persist = next(p["payload"] for p in frames if p["type"] == "persist")
+    assert persist["display_outputs"], "expected at least one display output"
+    display_meta = persist["display_outputs"][0]
+    # Filename must start with __display__ so the serializer treats it
+    # as display content (not a regular pickle).
+    assert display_meta["file"].startswith("__display__"), display_meta
+
+
 def test_mount_name_save_restore(batch_pipes, tmp_path):
     """A cell-level mount must not clobber a pre-existing user variable
     with the same name. After the mount-declaring cell, the user value

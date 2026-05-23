@@ -354,6 +354,15 @@ def _run_one_batched_cell(
                 return ("ok", None)
 
             # Cache miss — execute the cell body.
+            #
+            # ``DisplayCapture.install`` uses ``setdefault`` (display/runtime.py
+            # L56) so once a key exists in the namespace it sticks. Single-cell
+            # mode gets away with this because each cell runs in a fresh
+            # process. In batch mode, namespace persists across cells; clear
+            # the per-cell display keys so the new capture's handlers actually
+            # install.
+            for _display_key in ("display", "Markdown"):
+                namespace.pop(_display_key, None)
             display_capture = _display.DisplayCapture()
             display_capture.install(namespace)
             stdout_capture = io.StringIO()
@@ -380,6 +389,15 @@ def _run_one_batched_cell(
                     return ("cell_error", "cell_error")
 
                 # Success: serialize consumed vars + displays.
+                #
+                # Known gap (see issue #26 round-7): instances of in-batch-
+                # defined classes serialize as ``pickle/object`` rather than
+                # ``module/cell-instance``. The single-cell flow tags the
+                # class via the parent's ``_write_module_export_outputs``
+                # *before* harness serialization. In batch we'd need to
+                # either pre-classify here or post-rewrite parent-side.
+                # Deferred to PR-b3 — affects content-type only; the
+                # pickled value still round-trips correctly.
                 outputs: dict[str, Any] = {}
                 for var_name in consumed_vars:
                     if var_name not in namespace:
@@ -398,7 +416,11 @@ def _run_one_batched_cell(
                 serialized_displays: list[dict[str, Any]] = []
                 for idx, display in enumerate(display_values):
                     try:
-                        meta = _ser.serialize_value(display, cell_output_dir, f"display_{idx}")
+                        # ``__display__N`` is the variable-name convention the
+                        # serializer recognizes as display output for content-
+                        # type detection (serializer.py ``_is_display_variable_name``).
+                        # ``display_N`` would be classified as a regular pickle.
+                        meta = _ser.serialize_value(display, cell_output_dir, f"__display__{idx}")
                         serialized_displays.append(meta)
                     except Exception:
                         # Display serialization errors don't abort the cell;
