@@ -346,8 +346,13 @@ cd frontend && npm run dev   # hot reload
 
 ### Notebook invariants
 
-1. **Artifact store is the sole source of truth** for inter-cell variables —
-   no in-memory cache, every read goes through the store.
+1. **Artifact store is the sole source of truth** for inter-cell variables
+   in **single-cell** execution — no in-memory cache, every read goes through
+   the store. The run-all batching path (`CellExecutor.execute_batch`,
+   issue #26) is the deliberate exception: cells in a batch share a live
+   Python namespace within one harness subprocess, and the store is the
+   *spill target* for later out-of-order single-cell re-runs. Single-cell
+   execution is unchanged.
 2. **Cell IDs are backend-generated** (8-char UUID prefix); the frontend
    never invents IDs.
 3. **DAG is authoritative on the backend**. Source updates are debounced and

@@ -65,7 +65,7 @@ from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
 from strata.notebook.immutability import MutationWarning
-from strata.notebook.models import CellLanguage, MountSpec, WorkerBackendType
+from strata.notebook.models import CellLanguage, MountMode, MountSpec, WorkerBackendType
 from strata.notebook.module_export import build_module_export_plan
 from strata.notebook.mounts import (
     MountCredentials,
@@ -3528,24 +3528,6 @@ _ARTIFACT_EXT_BY_CONTENT_TYPE: dict[str, str] = {
 }
 
 
-def _artifact_content_type(artifact: Any) -> str:
-    """Extract content_type from an ``ArtifactVersion``'s transform_spec.
-
-    Content type lives in ``transform_spec.params.content_type`` — same
-    pattern ``NotebookArtifactManager.get_artifact_preview`` reads from.
-    Returns ``"pickle/object"`` if missing (safe default — round-trips
-    via cloudpickle).
-    """
-    spec_json = getattr(artifact, "transform_spec", None)
-    if not spec_json:
-        return "pickle/object"
-    try:
-        spec = json.loads(spec_json)
-        return spec.get("params", {}).get("content_type") or "pickle/object"
-    except (ValueError, KeyError, TypeError):
-        return "pickle/object"
-
-
 async def _drain_stream(stream: asyncio.StreamReader) -> None:
     """Read and discard everything from ``stream`` until EOF.
 
@@ -3557,3 +3539,77 @@ async def _drain_stream(stream: asyncio.StreamReader) -> None:
         chunk = await stream.read(4096)
         if not chunk:
             return
+
+
+# ---------------------------------------------------------------------------
+# Batchability + partitioning (PR-b3 of issue #26)
+# ---------------------------------------------------------------------------
+
+
+def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
+    """Return whether ``cell`` is eligible for run-all batching.
+
+    Per issue #26: cells join a batch iff Python language, resolved
+    worker is ``"local"``, no ``# @loop`` annotation, no explicit
+    timeout at any level (annotation / cell / notebook), and no
+    read-write mount at any level. Non-batchable cells force a process
+    boundary and continue via single-cell ``execute_cell``.
+    """
+    if cell.language != CellLanguage.PYTHON:
+        return False
+
+    annotations = parse_annotations(cell.source)
+
+    if executor._resolve_effective_worker(cell.id, annotations.worker) != "local":
+        return False
+
+    if annotations.loop is not None:
+        return False
+
+    # Any explicit timeout at any level makes the cell non-batchable so
+    # the per-cell timeout can be enforced via single-cell's existing
+    # subprocess-level wait_for (PR-b3 keeps batch-level safety net only).
+    notebook_state = executor.session.notebook_state
+    if (
+        annotations.timeout is not None
+        or cell.timeout is not None
+        or notebook_state.timeout is not None
+    ):
+        return False
+
+    # Any rw mount at any level — sync_back must run synchronously after
+    # each successful cell, defer to single-cell.
+    all_mounts = list(annotations.mounts) + list(cell.mounts) + list(notebook_state.mounts)
+    if any(m.mode == MountMode.READ_WRITE for m in all_mounts):
+        return False
+
+    return True
+
+
+def partition_batchable_runs(
+    executor: CellExecutor, cells: list[Any]
+) -> list[tuple[str, list[Any]]]:
+    """Walk cells in notebook order, group consecutive batchable cells.
+
+    Returns ``[(kind, [cell, ...]), ...]`` where ``kind`` is
+    ``"batch"`` or ``"single"``. ``"single"`` runs always have one
+    cell; ``"batch"`` runs have one or more. Caller decides whether a
+    batch of size 1 is worth the subprocess overhead; partitioner stays
+    pure.
+    """
+    runs: list[tuple[str, list[Any]]] = []
+    current: list[Any] = []
+
+    for cell in cells:
+        if is_cell_batchable(executor, cell):
+            current.append(cell)
+        else:
+            if current:
+                runs.append(("batch", current))
+                current = []
+            runs.append(("single", [cell]))
+
+    if current:
+        runs.append(("batch", current))
+
+    return runs
