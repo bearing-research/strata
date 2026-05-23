@@ -45,11 +45,22 @@ jobs:
       - name: Start container
         run: |
           docker run -d --name strata-test -p 8765:8765 strata:test
-          sleep 10  # Wait for server to start
 
       - name: Health check
         run: |
-          curl -f http://localhost:8765/health
+          # Poll /health for up to 30s instead of a fixed sleep. Cold
+          # container startup on GH runners has been flaky at the prior
+          # 10s window. ``--retry-connrefused`` keeps curl trying while
+          # the listener is still binding.
+          curl -fsS --retry 30 --retry-delay 1 --retry-connrefused \
+            --retry-all-errors http://localhost:8765/health
+          # On failure, surface the container logs so the next failure
+          # is debuggable from CI alone.
+        # The "if failure" step below dumps logs.
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs strata-test || true
 
       - name: Check metrics endpoint
         run: |

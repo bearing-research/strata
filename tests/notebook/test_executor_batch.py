@@ -160,7 +160,8 @@ async def test_batch_blocked_module_export_fails_persist(tmp_path: Path):
     # cell.artifact_uris should be empty since persist was rejected.
     c1 = session.notebook_state.get_cell("c1")
     assert "add" not in c1.artifact_uris, (
-        f"add must not be persisted after module-export rejection; got artifact_uris={c1.artifact_uris}"
+        f"add must not be persisted after module-export rejection; "
+        f"got artifact_uris={c1.artifact_uris}"
     )
 
 
