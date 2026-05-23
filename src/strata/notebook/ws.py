@@ -22,7 +22,12 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cascade import CascadePlanner
 from strata.notebook.causality import skip_none
-from strata.notebook.executor import CellExecutionResult, CellExecutor
+from strata.notebook.executor import (
+    BatchCellResult,
+    CellExecutionResult,
+    CellExecutor,
+    partition_batchable_runs,
+)
 from strata.notebook.impact import ImpactAnalyzer
 from strata.notebook.inspect_repl import InspectManager
 from strata.notebook.models import CellLanguage, CellStaleness, CellStatus, WorkerBackendType
@@ -724,12 +729,17 @@ async def _handle_notebook_run_all(
     session: NotebookSession,
     execution_state: NotebookExecutionState,
     notebook_id: str,
+    payload: dict[str, Any],
 ) -> None:
     """Handle notebook_run_all message.
 
-    Execute all non-empty cells in notebook order, stopping on first failure.
+    Execute all non-empty cells in notebook order. ``continue_on_error``
+    (default ``True``) controls whether the run continues past a failed
+    cell — historically the loop stopped on first failure; with batching
+    (issue #26) the per-cell granularity makes continuing useful.
     """
     seq = execution_state.next_sequence()
+    continue_on_error = bool(payload.get("continue_on_error", True))
 
     # Skip inactive variants — they aren't in the DAG, so their references
     # don't resolve (e.g. `X_train` would NameError because the upstream
@@ -785,6 +795,7 @@ async def _handle_notebook_run_all(
             runnable_cells,
             execution_state,
             notebook_id,
+            continue_on_error=continue_on_error,
         ),
     )
     if not scheduled:
@@ -796,13 +807,16 @@ async def _handle_notebook_rerun_all(
     session: NotebookSession,
     execution_state: NotebookExecutionState,
     notebook_id: str,
+    payload: dict[str, Any],
 ) -> None:
     """Handle notebook_rerun_all message.
 
     Like ``notebook_run_all`` but every cell bypasses its own cache so the
-    entire notebook is re-executed end-to-end.
+    entire notebook is re-executed end-to-end. Accepts the same
+    ``continue_on_error`` (default ``True``) field as ``run_all``.
     """
     seq = execution_state.next_sequence()
+    continue_on_error = bool(payload.get("continue_on_error", True))
 
     runnable_cells = [
         cell.id
@@ -856,6 +870,7 @@ async def _handle_notebook_rerun_all(
             execution_state,
             notebook_id,
             force=True,
+            continue_on_error=continue_on_error,
         ),
     )
     if not scheduled:
@@ -1763,104 +1778,288 @@ async def _execute_run_all(
     execution_state: NotebookExecutionState,
     notebook_id: str,
     force: bool = False,
+    continue_on_error: bool = True,
 ) -> None:
     """Execute all requested notebook cells in notebook order.
 
-    When ``force`` is true, every cell bypasses its own cache (each cell still
-    materializes its upstreams from the artifact store as normal — the
-    sequential walk already produces fresh upstream artifacts for later cells).
+    ``force`` is rerun-all semantics: every cell bypasses its own cache.
+
+    The cells are partitioned into runs of consecutive batchable cells (per
+    ``executor.partition_batchable_runs``) — batches go through
+    ``CellExecutor.execute_batch``; non-batchable cells (workers, loops,
+    explicit timeouts, RW mounts) use the existing single-cell
+    ``execute_cell``. Once a cell fails, the rest of the run-all proceeds
+    with ``skip_upstream_materialization=True`` (or aborts entirely when
+    ``continue_on_error`` is False) so the failed cell isn't recursively
+    re-executed via ``_materialize_upstreams``.
     """
     del websocket
     seq = execution_state.next_sequence()
 
     executor = _make_executor_with_progress(session, notebook_id)
 
+    requested_ids = set(cell_ids)
+    runnable = [
+        cell
+        for cell in session.notebook_state.cells
+        if cell.id in requested_ids and cell.source.strip()
+    ]
+    partition = partition_batchable_runs(executor, runnable)
+
     logger.info(
-        "Run all for notebook %s: executing %d cells (force=%s): %s",
+        "Run all for notebook %s: %d cells, %d partitioned runs (force=%s, continue_on_error=%s)",
         notebook_id,
-        len(cell_ids),
+        len(runnable),
+        len(partition),
         force,
-        cell_ids,
+        continue_on_error,
     )
 
+    had_failure = False
     try:
-        for cell_id in cell_ids:
-            cell = next(
-                (
-                    candidate
-                    for candidate in session.notebook_state.cells
-                    if candidate.id == cell_id
-                ),
-                None,
-            )
-            if cell is None or not cell.source.strip():
+        for kind, cells_in_run in partition:
+            if had_failure and not continue_on_error:
+                break
+
+            # Size-1 batches gain nothing from subprocess amortization;
+            # route them through single-cell.
+            if kind == "batch" and len(cells_in_run) >= 2:
+                batch_result = await _run_partition_batch(
+                    session=session,
+                    executor=executor,
+                    cells_in_run=cells_in_run,
+                    seq=seq,
+                    notebook_id=notebook_id,
+                    force=force,
+                    execution_state=execution_state,
+                )
+                if not batch_result.completed:
+                    had_failure = True
+                    # Batch ended early — any cells after the failed one
+                    # are status=not_run. Per issue #26 round-5 design,
+                    # they continue via single-cell with
+                    # skip_upstream_materialization=True so the failed
+                    # upstream isn't recursively re-executed.
+                    not_run_ids = {
+                        r.cell_id for r in batch_result.cell_results if r.status == "not_run"
+                    }
+                    for cell in cells_in_run:
+                        if cell.id not in not_run_ids:
+                            continue
+                        if not continue_on_error:
+                            break
+                        await _run_partition_single_cell(
+                            session=session,
+                            executor=executor,
+                            cell=cell,
+                            seq=seq,
+                            notebook_id=notebook_id,
+                            force=force,
+                            skip_upstream=True,
+                            execution_state=execution_state,
+                        )
                 continue
 
-            execution_state.running_cell = cell_id
-            session.mark_cell_running(cell_id)
+            for cell in cells_in_run:
+                if had_failure and not continue_on_error:
+                    break
+                ok = await _run_partition_single_cell(
+                    session=session,
+                    executor=executor,
+                    cell=cell,
+                    seq=seq,
+                    notebook_id=notebook_id,
+                    force=force,
+                    skip_upstream=had_failure,
+                    execution_state=execution_state,
+                )
+                if not ok:
+                    had_failure = True
+    finally:
+        execution_state.running_cell = None
+
+
+async def _run_partition_batch(
+    *,
+    session: NotebookSession,
+    executor: CellExecutor,
+    cells_in_run: list,
+    seq: int,
+    notebook_id: str,
+    force: bool,
+    execution_state: NotebookExecutionState,
+):
+    """Execute a partition run via ``execute_batch`` + stream per-cell broadcasts.
+
+    Returns the raw ``BatchExecutionResult`` so the caller can identify
+    the cells that ended up ``status=not_run`` and route them through
+    single-cell continuation.
+    """
+    cell_specs = [
+        {
+            "cell_id": cell.id,
+            "source": cell.source,
+            "consumed_vars": sorted(
+                session.dag.consumed_variables.get(cell.id, set())
+                if session.dag is not None
+                else set()
+            ),
+            "env": dict(cell.env),
+            "mount_manifest": {},
+            "source_hash": "",
+            "env_hash": "",
+        }
+        for cell in cells_in_run
+    ]
+
+    cells_by_id = {c.id: c for c in cells_in_run}
+
+    async def _emit(result: BatchCellResult) -> None:
+        cell = cells_by_id.get(result.cell_id)
+        if cell is None:
+            return
+
+        execution_state.running_cell = result.cell_id
+
+        # Brief running broadcast so the frontend transitions idle → running →
+        # ready in order. Batched cells complete fast enough that the gap
+        # between this and the output frame is hardly visible.
+        session.mark_cell_running(result.cell_id)
+        await _broadcast_message(
+            notebook_id,
+            _make_message(
+                MessageType.CELL_STATUS,
+                seq,
+                _running_payload(session, result.cell_id, cell.source),
+            ),
+        )
+
+        synthetic = CellExecutionResult(
+            cell_id=result.cell_id,
+            success=result.status in ("ok", "cache_hit"),
+            stdout=result.stdout,
+            stderr=result.stderr,
+            outputs=dict(result.outputs),
+            display_outputs=list(result.display_outputs),
+            duration_ms=0.0,  # Per-cell timing isn't tracked inside batches.
+            cache_hit=result.cache_hit,
+            error=result.error,
+            execution_method="batch" if not result.cache_hit else "cached",
+        )
+
+        session.record_execution(result.cell_id, 0.0, result.cache_hit)
+        session.apply_execution_result_metadata(result.cell_id, synthetic)
+        await _broadcast_execution_result(notebook_id, seq, result.cell_id, synthetic)
+
+        if synthetic.success:
+            previous_snapshot = session.capture_cell_state_snapshot()
+            await _refresh_and_broadcast_changed_staleness(
+                session,
+                notebook_id,
+                seq,
+                previous_snapshot,
+                preserve_ready_cell_id=result.cell_id,
+            )
+        else:
+            session.mark_cell_error(result.cell_id)
             await _broadcast_message(
                 notebook_id,
                 _make_message(
-                    MessageType.CELL_STATUS, seq, _running_payload(session, cell_id, cell.source)
+                    MessageType.CELL_STATUS,
+                    seq,
+                    {"cell_id": result.cell_id, "status": CellStatus.ERROR},
                 ),
             )
 
-            try:
-                if force:
-                    result = await executor.execute_cell_rerun(cell_id, cell.source)
-                else:
-                    result = await executor.execute_cell(cell_id, cell.source)
+    return await executor.execute_batch(
+        cell_specs,
+        use_cache=not force,
+        on_cell_event=_emit,
+    )
 
-                session.record_execution(cell_id, result.duration_ms, result.cache_hit)
-                session.apply_execution_result_metadata(cell_id, result)
-                await _broadcast_execution_result(notebook_id, seq, cell_id, result)
 
-                if result.success:
-                    previous_snapshot = session.capture_cell_state_snapshot()
-                    await _refresh_and_broadcast_changed_staleness(
-                        session,
-                        notebook_id,
-                        seq,
-                        previous_snapshot,
-                        preserve_ready_cell_id=cell_id,
-                    )
-                    continue
+async def _run_partition_single_cell(
+    *,
+    session: NotebookSession,
+    executor: CellExecutor,
+    cell,
+    seq: int,
+    notebook_id: str,
+    force: bool,
+    skip_upstream: bool,
+    execution_state: NotebookExecutionState,
+) -> bool:
+    """Existing per-cell broadcast flow. Returns True on success.
 
-                # Failure: mark + broadcast status. The cell_error
-                # frame was already emitted by the helper above.
-                session.mark_cell_error(cell_id)
-                await _broadcast_message(
-                    notebook_id,
-                    _make_message(
-                        MessageType.CELL_STATUS,
-                        seq,
-                        {"cell_id": cell_id, "status": CellStatus.ERROR},
-                    ),
-                )
-                break
+    ``skip_upstream`` is set when a prior cell in this run-all has failed —
+    avoids ``_materialize_upstreams`` recursively re-executing the failed
+    cell. Equivalent to single-cell continuation after batch failure per
+    issue #26 round-6 finding #3.
+    """
+    cell_id = cell.id
+    execution_state.running_cell = cell_id
+    session.mark_cell_running(cell_id)
+    await _broadcast_message(
+        notebook_id,
+        _make_message(
+            MessageType.CELL_STATUS, seq, _running_payload(session, cell_id, cell.source)
+        ),
+    )
 
-            except asyncio.CancelledError:
-                await _set_cell_idle(session, notebook_id, seq, cell_id)
-                raise
-            except Exception as exc:
-                session.mark_cell_error(cell_id)
-                await _broadcast_message(
-                    notebook_id,
-                    _make_message(
-                        MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(exc)}
-                    ),
-                )
-                await _broadcast_message(
-                    notebook_id,
-                    _make_message(
-                        MessageType.CELL_STATUS,
-                        seq,
-                        {"cell_id": cell_id, "status": CellStatus.ERROR},
-                    ),
-                )
-                break
-    finally:
-        execution_state.running_cell = None
+    try:
+        if force:
+            result = await executor.execute_cell_rerun(cell_id, cell.source)
+        elif skip_upstream:
+            result = await executor.execute_cell(
+                cell_id, cell.source, skip_upstream_materialization=True
+            )
+        else:
+            result = await executor.execute_cell(cell_id, cell.source)
+
+        session.record_execution(cell_id, result.duration_ms, result.cache_hit)
+        session.apply_execution_result_metadata(cell_id, result)
+        await _broadcast_execution_result(notebook_id, seq, cell_id, result)
+
+        if result.success:
+            previous_snapshot = session.capture_cell_state_snapshot()
+            await _refresh_and_broadcast_changed_staleness(
+                session,
+                notebook_id,
+                seq,
+                previous_snapshot,
+                preserve_ready_cell_id=cell_id,
+            )
+            return True
+
+        session.mark_cell_error(cell_id)
+        await _broadcast_message(
+            notebook_id,
+            _make_message(
+                MessageType.CELL_STATUS,
+                seq,
+                {"cell_id": cell_id, "status": CellStatus.ERROR},
+            ),
+        )
+        return False
+
+    except asyncio.CancelledError:
+        await _set_cell_idle(session, notebook_id, seq, cell_id)
+        raise
+    except Exception as exc:
+        session.mark_cell_error(cell_id)
+        await _broadcast_message(
+            notebook_id,
+            _make_message(MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(exc)}),
+        )
+        await _broadcast_message(
+            notebook_id,
+            _make_message(
+                MessageType.CELL_STATUS,
+                seq,
+                {"cell_id": cell_id, "status": CellStatus.ERROR},
+            ),
+        )
+        return False
 
 
 def _get_inspect_manager(notebook_id: str) -> InspectManager:
