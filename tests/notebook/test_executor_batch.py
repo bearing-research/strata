@@ -123,6 +123,48 @@ async def test_batch_stops_cleanly_on_cell_error(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_batch_blocked_module_export_fails_persist(tmp_path: Path):
+    """A cell that defines a top-level lambda (blocked from module export)
+    AND has a downstream consumer should fail to persist — matching
+    single-cell semantics. Batch must surface this as status=persist_failed,
+    NOT silently store as pickle/object.
+    """
+    # Top-level lambda is blocked from module export (per module_export.py
+    # _target_names / blocking_lambda_names paths). With a downstream
+    # consumer, single-cell mode returns success=False.
+    session = _make_session_with_cells(
+        tmp_path,
+        [
+            ("c1", "add = lambda x: x + 1\n"),
+            ("c2", "y = add(41)\n"),
+        ],
+    )
+    specs = _populate_consumed_vars(
+        [_cell_spec("c1", "add = lambda x: x + 1\n"), _cell_spec("c2", "y = add(41)\n")],
+        session,
+    )
+
+    executor = CellExecutor(session)
+    result = await executor.execute_batch(specs)
+
+    statuses = {r.cell_id: r.status for r in result.cell_results}
+    assert statuses["c1"] == "persist_failed", (
+        f"c1 should be persist_failed (blocked module export), got {statuses}"
+    )
+    # c2 must not have run — the batch ends on persist failure.
+    assert statuses["c2"] == "not_run"
+    assert result.end_reason == "persist_failed"
+    assert result.failed_cell_id == "c1"
+
+    # And critically: c1's `add` must NOT have been stored as a pickle.
+    # cell.artifact_uris should be empty since persist was rejected.
+    c1 = session.notebook_state.get_cell("c1")
+    assert "add" not in c1.artifact_uris, (
+        f"add must not be persisted after module-export rejection; got artifact_uris={c1.artifact_uris}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_batch_cache_hit_skips_execution(tmp_path: Path):
     """Run a 2-cell batch twice. c1's ``x`` is consumed by c2 (so it's in
     consumed_vars and persists). Second batch's c1 hits the cache via
