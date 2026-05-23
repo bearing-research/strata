@@ -57,8 +57,13 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse, urlunparse
 
 import httpx
-import orjson
 
+# Stdlib json (not orjson): executor.py is reachable from ``strata.config``
+# via the transitive ``strata.notebook.__init__`` import chain, so it must
+# import cleanly with only strata's *core* deps installed. orjson lives in
+# the ``[notebook]`` extra and isn't available in slim deployments like the
+# Docker image, which only installs ``[otel]``. The batch protocol frames
+# we serialize/deserialize here are small dicts — stdlib json is plenty.
 from strata.artifact_store import TransformSpec as ArtifactTransformSpec
 from strata.artifact_store import get_artifact_store
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
@@ -3071,7 +3076,7 @@ class CellExecutor:
                 "cells": cell_specs,
                 "upstream_inputs": upstream_inputs,
             }
-            manifest_path.write_bytes(orjson.dumps(manifest))
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
             env = {
                 **os.environ,
@@ -3132,7 +3137,7 @@ class CellExecutor:
             resp_w = -1  # ownership transferred
 
             def send_response(payload: dict) -> None:
-                line = orjson.dumps(payload) + b"\n"
+                line = (json.dumps(payload) + "\n").encode("utf-8")
                 os.write(resp_w_fd, line)
 
             try:
@@ -3205,8 +3210,8 @@ class CellExecutor:
                 # Pipe closed without batch_end — subprocess died.
                 break
             try:
-                frame = orjson.loads(line)
-            except orjson.JSONDecodeError:
+                frame = json.loads(line)
+            except json.JSONDecodeError:
                 logger.warning("Batch harness emitted unparseable frame: %r", line[:200])
                 continue
 
