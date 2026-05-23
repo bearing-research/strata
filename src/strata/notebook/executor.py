@@ -3256,6 +3256,12 @@ class CellExecutor:
                 response = await self._batch_service_persist(payload, batch_tmpdir)
                 cell_id_pl = payload["cell_id"]
                 if response.get("ok"):
+                    # Prefer post-persist display metadata (carries
+                    # artifact_uri) over the harness's pre-persist payload.
+                    # Mirrors single-cell at executor.py L1070-1078.
+                    display_outputs = response.get("display_outputs") or (
+                        payload.get("display_outputs") or []
+                    )
                     await _record(
                         cell_id_pl,
                         BatchCellResult(
@@ -3264,7 +3270,7 @@ class CellExecutor:
                             stdout=payload.get("stdout", ""),
                             stderr=payload.get("stderr", ""),
                             outputs=payload.get("outputs") or {},
-                            display_outputs=payload.get("display_outputs") or [],
+                            display_outputs=display_outputs,
                         ),
                     )
                 else:
@@ -3456,13 +3462,43 @@ class CellExecutor:
             cell.artifact_uri = uri
         cell.cache_hit = True
 
-        # Display outputs aren't covered by PR-b2's minimal cache-hit
-        # mirror — they ship in PR-b3 alongside the broader test suite.
+        # Restore cached display outputs. Display artifacts live under
+        # the same ``nb_<nbid>_cell_<cid>_var_<name>`` prefix but with
+        # a ``__display__N`` variable name (see _store_display_outputs).
+        # Iterate them in N-order and materialize blobs to the per-cell
+        # tmpdir so the harness can deserialize them.
+        display_prefix = f"nb_{notebook_id}_cell_{cell_id}_var___display__"
+        display_arts = artifact_mgr.artifact_store.list_latest_by_id_prefix(display_prefix)
+        cached_displays: list[dict[str, Any]] = []
+        # Sort by trailing N so the broadcast preserves display ordering.
+        for art in sorted(
+            display_arts,
+            key=lambda a: int(a.id[len(display_prefix) :].split("@")[0] or "0"),
+        ):
+            blob = artifact_mgr.artifact_store.read_blob(art.id, art.version)
+            if blob is None:
+                continue
+            content_type = _artifact_content_type(art)
+            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
+            # Match the harness's __display__N{ext} convention.
+            display_name = art.id[len(display_prefix) :].split("@")[0]
+            file_name = f"__display__{display_name}{ext}"
+            (cell_output_dir / file_name).write_bytes(blob)
+            cached_displays.append(
+                {
+                    "content_type": content_type,
+                    "file": file_name,
+                    "artifact_uri": f"strata://artifact/{art.id}@v={art.version}",
+                }
+            )
+        cell.display_outputs = list(cached_displays)
+        cell.display_output = cached_displays[-1] if cached_displays else None
+
         return {
             "cache_hit": True,
             "provenance_hash": provenance_hash,
             "cached_outputs": cached_outputs,
-            "cached_displays": [],
+            "cached_displays": cached_displays,
         }
 
     async def _batch_service_persist(
@@ -3529,11 +3565,16 @@ class CellExecutor:
             env_hash=env_hash,
         )
 
-        # Persist display outputs.
+        # Persist display outputs. _store_display_outputs returns the
+        # post-persist metadata (with artifact_uri filled in); single-cell
+        # writes that back onto exec_result.display_outputs at L1070-1078.
+        # Carry it in the ack so the dispatcher's on_cell_event broadcasts
+        # the URI-bearing version rather than the pre-persist payload.
         display_outputs_meta = payload.get("display_outputs") or []
+        persisted_displays: list[dict[str, Any]] = []
         if display_outputs_meta:
             try:
-                self._store_display_outputs(
+                persisted_displays = self._store_display_outputs(
                     cell_id,
                     cell_output_dir,
                     provenance_hash,
@@ -3557,7 +3598,7 @@ class CellExecutor:
             pass
 
         uri = cell.artifact_uri or ""
-        return {"ok": True, "uri": uri}
+        return {"ok": True, "uri": uri, "display_outputs": persisted_displays}
 
 
 # ---------------------------------------------------------------------------

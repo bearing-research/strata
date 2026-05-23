@@ -341,3 +341,88 @@ class TestRunAllBatching:
                     f"c3 should run via continue_on_error=true single-cell continuation; "
                     f"got outputs={outputs} errors={errors}"
                 )
+
+    def test_run_all_passes_env_annotations_to_batch(self, setup):
+        """`# @env KEY=VALUE` reaches the batched cell. Regression for
+        #33 review finding #1 — the dispatcher had been dropping all env
+        when building cell_specs.
+        """
+        client, tmp = setup
+        nb = (
+            NotebookBuilder(tmp)
+            .add_cell(
+                "c1",
+                (
+                    "# @env STRATA_DISP_ENV_TEST=batched\n"
+                    "import os\nvalue = os.environ['STRATA_DISP_ENV_TEST']\n"
+                ),
+            )
+            .add_cell("c2", "y = value + '!'\n", after="c1")
+        )
+        with open_notebook_session(client, nb.path) as (sid, _session):
+            with ws_connect(client, sid) as ws:
+                ws.run_all()
+                c1 = ws.receive_until("cell_output", cell_id="c1")
+                # c2 exists just to make a size-≥2 batch (size-1 batches
+                # route through single-cell). Only c1 needs an assertion.
+                ws.receive_until("cell_output", cell_id="c2")
+
+                assert c1["payload"].get("execution_method") == "batch"
+                assert c1["payload"]["outputs"]["value"]["preview"] == "batched"
+
+    def test_rerun_all_continues_after_failure_without_re_running_failed_upstream(
+        self, setup, monkeypatch
+    ):
+        """rerun-all + mid-batch failure: continuation cells use
+        execute_cell_force (no materialize, no cache) instead of
+        execute_cell_rerun (which would materialize the failed upstream).
+
+        Regression for #33 review finding #2.
+        """
+        from strata.notebook import executor as executor_mod
+
+        client, tmp = setup
+        nb = (
+            NotebookBuilder(tmp)
+            .add_cell("c1", "a = 1")
+            .add_cell("c2_bad", "raise RuntimeError('boom')")
+            .add_cell("c3", "z = 99")
+        )
+
+        rerun_calls: list[tuple] = []
+        force_calls: list[tuple] = []
+
+        original_rerun = executor_mod.CellExecutor.execute_cell_rerun
+        original_force = executor_mod.CellExecutor.execute_cell_force
+
+        async def spy_rerun(self, cell_id, source, *args, **kwargs):
+            rerun_calls.append((cell_id, source))
+            return await original_rerun(self, cell_id, source, *args, **kwargs)
+
+        async def spy_force(self, cell_id, source, *args, **kwargs):
+            force_calls.append((cell_id, source))
+            return await original_force(self, cell_id, source, *args, **kwargs)
+
+        monkeypatch.setattr(executor_mod.CellExecutor, "execute_cell_rerun", spy_rerun)
+        monkeypatch.setattr(executor_mod.CellExecutor, "execute_cell_force", spy_force)
+
+        with open_notebook_session(client, nb.path) as (sid, _session):
+            with ws_connect(client, sid) as ws:
+                ws.rerun_all()
+                ws.receive_until("cell_error", cell_id="c2_bad")
+                ws.receive_until("cell_output", cell_id="c3")
+
+        # After the batch fails at c2_bad, c3's continuation must use
+        # execute_cell_force (no materialize, no cache) — NOT
+        # execute_cell_rerun (which would re-materialize c2_bad and
+        # recursively re-run the failed cell).
+        force_cell_ids = {cid for cid, _src in force_calls}
+        rerun_cell_ids = {cid for cid, _src in rerun_calls}
+        assert "c3" in force_cell_ids, (
+            f"c3 continuation should call execute_cell_force; "
+            f"got force={force_cell_ids} rerun={rerun_cell_ids}"
+        )
+        assert "c3" not in rerun_cell_ids, (
+            f"c3 continuation must not call execute_cell_rerun (would "
+            f"re-materialize failed upstream c2_bad); got rerun={rerun_cell_ids}"
+        )
