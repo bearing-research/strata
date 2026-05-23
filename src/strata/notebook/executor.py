@@ -323,6 +323,12 @@ class BatchCellResult:
     traceback: str | None = None
     stdout: str = ""
     stderr: str = ""
+    # outputs / display_outputs / cache_hit carry enough payload for the
+    # dispatcher (ws._execute_run_all) to fan out cell_output frames without
+    # going back to the harness or the artifact store.
+    outputs: dict[str, Any] = field(default_factory=dict)
+    display_outputs: list[dict[str, Any]] = field(default_factory=list)
+    cache_hit: bool = False
 
 
 @dataclass(kw_only=True)
@@ -471,12 +477,13 @@ class CellExecutor:
         *,
         use_cache: bool = True,
         batch_timeout_seconds: float = 600.0,
+        on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
     ) -> BatchExecutionResult:
         """Execute a sequence of cells in one harness subprocess.
 
         ``cell_specs`` is the list of cells in notebook order, each a dict
         with keys ``cell_id``, ``source``, ``env``, ``mount_manifest``
-        (already resolved). Caller (``ws._execute_run_all`` in PR-b3) is
+        (already resolved). Caller (``ws._execute_run_all``) is
         responsible for partitioning the notebook into batchable runs;
         this method just executes whatever it's given.
 
@@ -486,11 +493,18 @@ class CellExecutor:
 
         ``use_cache=False`` bypasses the per-cell cache check (rerun-all
         semantics).
+
+        ``on_cell_event`` is an optional async callback fired as each
+        per-cell ``BatchCellResult`` is recorded — lets the dispatcher
+        stream cell_output / cell_error frames in real time rather than
+        waiting for batch end. Default ``None`` keeps the method usable
+        in non-WS contexts (tests, REPL).
         """
         return await self._run_batch(
             cell_specs,
             use_cache=use_cache,
             batch_timeout_seconds=batch_timeout_seconds,
+            on_cell_event=on_cell_event,
         )
 
     async def _execute_cell(
@@ -3034,13 +3048,14 @@ class CellExecutor:
         *,
         use_cache: bool,
         batch_timeout_seconds: float,
+        on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
     ) -> BatchExecutionResult:
         """Run a sequence of cells in one harness subprocess.
 
         See ``execute_batch`` for public docs. This handles all the
         subprocess + pipe wiring + frame protocol service. PR-b2 ships
         the happy/error paths; per-cell watchdog and full
-        stdout/stderr attribution are deferred to PR-b3.
+        stdout/stderr attribution are deferred follow-ups.
         """
         # Match single-cell's fallback: venv interpreter if synced,
         # otherwise PATH python (e.g. test environments that don't go
@@ -3148,6 +3163,7 @@ class CellExecutor:
                         cell_results,
                         batch_tmpdir,
                         use_cache=use_cache,
+                        on_cell_event=on_cell_event,
                     ),
                     timeout=batch_timeout_seconds,
                 )
@@ -3195,14 +3211,23 @@ class CellExecutor:
         batch_tmpdir: Path,
         *,
         use_cache: bool,
+        on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
     ) -> tuple[str, str | None]:
         """Read frames and dispatch service requests until ``batch_end``.
 
-        Returns (end_reason, failed_cell_id).
+        Returns (end_reason, failed_cell_id). When ``on_cell_event`` is
+        provided, it's awaited after each per-cell ``BatchCellResult`` is
+        recorded — enables the dispatcher to stream cell_output / cell_error
+        broadcasts in real time instead of waiting for batch end.
         """
         active_cell_id: str | None = None
         end_reason = "subprocess_died"
         failed_cell_id: str | None = None
+
+        async def _record(cell_id: str, result: BatchCellResult) -> None:
+            cell_results[cell_id] = result
+            if on_cell_event is not None:
+                await on_cell_event(result)
 
         while True:
             line = await frame_reader.readline()
@@ -3231,41 +3256,58 @@ class CellExecutor:
                 response = await self._batch_service_persist(payload, batch_tmpdir)
                 cell_id_pl = payload["cell_id"]
                 if response.get("ok"):
-                    cell_results[cell_id_pl] = BatchCellResult(
-                        cell_id=cell_id_pl,
-                        status="ok",
-                        stdout=payload.get("stdout", ""),
-                        stderr=payload.get("stderr", ""),
+                    await _record(
+                        cell_id_pl,
+                        BatchCellResult(
+                            cell_id=cell_id_pl,
+                            status="ok",
+                            stdout=payload.get("stdout", ""),
+                            stderr=payload.get("stderr", ""),
+                            outputs=payload.get("outputs") or {},
+                            display_outputs=payload.get("display_outputs") or [],
+                        ),
                     )
                 else:
                     # Persist rejected (module-export violation, store_outputs
                     # failure, etc.) — harness will see persist_err, emit
                     # batch_end(reason="persist_failed"), and exit. Record
-                    # the failure here so the dispatcher (PR-b3) doesn't see
-                    # this cell as "not_run".
-                    cell_results[cell_id_pl] = BatchCellResult(
-                        cell_id=cell_id_pl,
-                        status="persist_failed",
-                        error=response.get("error"),
-                        stdout=payload.get("stdout", ""),
-                        stderr=payload.get("stderr", ""),
+                    # the failure here so the dispatcher doesn't see this
+                    # cell as "not_run".
+                    await _record(
+                        cell_id_pl,
+                        BatchCellResult(
+                            cell_id=cell_id_pl,
+                            status="persist_failed",
+                            error=response.get("error"),
+                            stdout=payload.get("stdout", ""),
+                            stderr=payload.get("stderr", ""),
+                        ),
                     )
                 send_response(response)
             elif ftype == "cell_output":
                 if payload.get("cache_hit") and active_cell_id:
-                    cell_results[active_cell_id] = BatchCellResult(
-                        cell_id=active_cell_id,
-                        status="cache_hit",
+                    await _record(
+                        active_cell_id,
+                        BatchCellResult(
+                            cell_id=active_cell_id,
+                            status="cache_hit",
+                            cache_hit=True,
+                            outputs=payload.get("outputs") or {},
+                            display_outputs=payload.get("display_outputs") or [],
+                        ),
                     )
             elif ftype == "cell_error":
                 cell_id = payload.get("cell_id", "")
-                cell_results[cell_id] = BatchCellResult(
-                    cell_id=cell_id,
-                    status="cell_error",
-                    error=payload.get("error"),
-                    traceback=payload.get("traceback"),
-                    stdout=payload.get("stdout", ""),
-                    stderr=payload.get("stderr", ""),
+                await _record(
+                    cell_id,
+                    BatchCellResult(
+                        cell_id=cell_id,
+                        status="cell_error",
+                        error=payload.get("error"),
+                        traceback=payload.get("traceback"),
+                        stdout=payload.get("stdout", ""),
+                        stderr=payload.get("stderr", ""),
+                    ),
                 )
             elif ftype == "batch_end":
                 end_reason = payload.get("reason", "complete")

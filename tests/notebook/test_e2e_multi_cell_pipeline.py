@@ -275,3 +275,69 @@ class TestRerunExecution:
                 }
                 assert outputs_by_cell["c1"]["payload"].get("cache_hit") is False
                 assert outputs_by_cell["c2"]["payload"].get("cache_hit") is False
+
+
+class TestRunAllBatching:
+    """run-all/rerun-all routes batchable runs through CellExecutor.execute_batch
+    instead of N single-cell subprocesses (#26 PR-b4)."""
+
+    def test_run_all_uses_batch_execution_method(self, setup):
+        """Three Python cells in notebook order form one batch; cell_output
+        frames carry execution_method="batch" (set on the synthetic
+        CellExecutionResult the dispatcher constructs from BatchCellResult)."""
+        client, tmp = setup
+        nb = (
+            NotebookBuilder(tmp)
+            .add_cell("c1", "a = 1")
+            .add_cell("c2", "b = a + 1", after="c1")
+            .add_cell("c3", "c = b + 1", after="c2")
+        )
+        with open_notebook_session(client, nb.path) as (sid, _session):
+            with ws_connect(client, sid) as ws:
+                ws.run_all()
+                ws.receive_until("cell_output", cell_id="c1")
+                ws.receive_until("cell_output", cell_id="c2")
+                ws.receive_until("cell_output", cell_id="c3")
+
+                outputs_by_cell = {
+                    m["payload"]["cell_id"]: m for m in ws.messages_of_type("cell_output")
+                }
+                # All three batched (one partition run, three Python cells).
+                for cell_id in ("c1", "c2", "c3"):
+                    method = outputs_by_cell[cell_id]["payload"].get("execution_method")
+                    assert method == "batch", (
+                        f"cell {cell_id} should have execution_method='batch', got {method!r}"
+                    )
+
+    def test_run_all_continue_on_error_runs_remaining_cells(self, setup):
+        """With continue_on_error=true (default), a failed cell mid-batch
+        doesn't stop the run. Cells after the failed one continue via
+        single-cell with skip_upstream_materialization=True; a cell that
+        doesn't depend on the failure succeeds."""
+        client, tmp = setup
+        nb = (
+            NotebookBuilder(tmp)
+            .add_cell("c1", "a = 1")
+            .add_cell("c2_bad", "raise RuntimeError('boom')")
+            .add_cell("c3", "z = 99")
+        )
+        with open_notebook_session(client, nb.path) as (sid, _session):
+            with ws_connect(client, sid) as ws:
+                ws.run_all()
+                # Wait for the terminal frame from each — could be cell_output
+                # or cell_error depending on success.
+                ws.receive_until_any_of(("cell_output", "cell_error"), cell_id="c1") if hasattr(
+                    ws, "receive_until_any_of"
+                ) else ws.receive_until("cell_output", cell_id="c1")
+                ws.receive_until("cell_error", cell_id="c2_bad")
+                ws.receive_until("cell_output", cell_id="c3")
+
+                # c1 succeeded, c2_bad errored, c3 ran independently and succeeded.
+                outputs = {m["payload"]["cell_id"] for m in ws.messages_of_type("cell_output")}
+                errors = {m["payload"]["cell_id"] for m in ws.messages_of_type("cell_error")}
+                assert "c1" in outputs
+                assert "c2_bad" in errors
+                assert "c3" in outputs, (
+                    f"c3 should run via continue_on_error=true single-cell continuation; "
+                    f"got outputs={outputs} errors={errors}"
+                )
