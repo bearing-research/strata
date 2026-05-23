@@ -365,7 +365,12 @@ class CellExecutor:
     # ------------------------------------------------------------------
 
     async def execute_cell(
-        self, cell_id: str, source: str, timeout_seconds: float = 30
+        self,
+        cell_id: str,
+        source: str,
+        timeout_seconds: float = 30,
+        *,
+        skip_upstream_materialization: bool = False,
     ) -> CellExecutionResult:
         """Materialise a cell: ensure inputs → cache check → execute → store.
 
@@ -373,12 +378,22 @@ class CellExecutor:
         docstring for how this relates to Strata Core's transform
         ``materialize`` SDK (they are deliberately separate pipelines that
         share the artifact-store substrate).
+
+        ``skip_upstream_materialization`` is the seam used by batch
+        continuation (``execute_batch`` → fall-back loop after a batched
+        cell errors). When ``True``, the cell trusts whatever artifacts
+        are already persisted and does not recursively re-execute its
+        upstreams. Direct-dependency-on-failed-upstream cells will hit
+        clean missing-artifact errors rather than re-running the cell
+        that already failed once. Cache lookup for the target cell is
+        unchanged — that's what differentiates this from
+        ``execute_cell_force``.
         """
         return await self._execute_cell(
             cell_id,
             source,
             timeout_seconds,
-            materialize_upstreams=True,
+            materialize_upstreams=not skip_upstream_materialization,
             use_cache=True,
         )
 
