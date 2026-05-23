@@ -27,14 +27,20 @@ def _make_session_with_cells(tmp_path: Path, cells: list[tuple[str, str]]) -> No
     return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
 
 
-def _cell_spec(cell_id: str, source: str) -> dict:
-    """Build a minimal batch cell-spec for tests with no env/mounts."""
+def _cell_spec(
+    cell_id: str,
+    source: str,
+    *,
+    env: dict[str, str] | None = None,
+    mount_manifest: dict[str, dict[str, str]] | None = None,
+) -> dict:
+    """Build a batch cell-spec for tests."""
     return {
         "cell_id": cell_id,
         "source": source,
         "consumed_vars": [],  # filled in below from the session
-        "env": {},
-        "mount_manifest": {},
+        "env": dict(env or {}),
+        "mount_manifest": dict(mount_manifest or {}),
         "source_hash": "",
         "env_hash": "",
     }
@@ -193,3 +199,88 @@ async def test_batch_cache_hit_skips_execution(tmp_path: Path):
     assert second.completed, f"second batch failed: {second.end_reason}"
     statuses = {r.cell_id: r.status for r in second.cell_results}
     assert statuses["c1"] == "cache_hit", f"c1 should cache-hit on re-run; got {statuses}"
+
+
+@pytest.mark.asyncio
+async def test_batch_env_overrides_reach_cell(tmp_path: Path):
+    """Cell-level env passed via cell_spec is bound when the cell runs.
+
+    Regression for #33 review finding #1: the dispatcher had been
+    dropping all env when building cell_specs.
+    """
+    session = _make_session_with_cells(
+        tmp_path,
+        [
+            ("c1", "import os\nvalue = os.environ['STRATA_BATCH_ENV_TEST']\n"),
+            ("c2", "y = value + '!'\n"),
+        ],
+    )
+    specs = _populate_consumed_vars(
+        [
+            _cell_spec(
+                "c1",
+                "import os\nvalue = os.environ['STRATA_BATCH_ENV_TEST']\n",
+                env={"STRATA_BATCH_ENV_TEST": "hello"},
+            ),
+            _cell_spec("c2", "y = value + '!'\n"),
+        ],
+        session,
+    )
+
+    executor = CellExecutor(session)
+    result = await executor.execute_batch(specs)
+
+    assert result.completed, f"batch errored: {result.end_reason}"
+    statuses = {r.cell_id: r.status for r in result.cell_results}
+    assert statuses == {"c1": "ok", "c2": "ok"}, (
+        f"c1 should read the env var; got {statuses} "
+        f"(if c1 is cell_error, the env didn't reach the harness)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_batch_cached_displays_round_trip(tmp_path: Path):
+    """Second batch invocation cache-hits and restores display outputs.
+
+    Regression for #33 review finding #3b: cache hit was returning
+    cached_displays=[] so displays were silently dropped on re-run.
+
+    c1 produces both a consumed variable (so cache_check finds something
+    to validate against) AND a display output.
+    """
+    session = _make_session_with_cells(
+        tmp_path,
+        [
+            ("c1", "x = 1\ndisplay(Markdown('first hello'))\n"),
+            ("c2", "y = x + 1\n"),
+        ],
+    )
+    specs = _populate_consumed_vars(
+        [
+            _cell_spec("c1", "x = 1\ndisplay(Markdown('first hello'))\n"),
+            _cell_spec("c2", "y = x + 1\n"),
+        ],
+        session,
+    )
+
+    executor = CellExecutor(session)
+    first = await executor.execute_batch(specs)
+    assert first.completed
+
+    c1_first = next(r for r in first.cell_results if r.cell_id == "c1")
+    assert c1_first.display_outputs, (
+        f"first run: c1 should have display_outputs, got {c1_first.display_outputs!r}"
+    )
+    # Post-persist metadata carries an artifact_uri (regression for #33 finding #3a).
+    assert c1_first.display_outputs[0].get("artifact_uri"), (
+        f"display metadata after persist should carry artifact_uri; "
+        f"got {c1_first.display_outputs[0]}"
+    )
+
+    second = await executor.execute_batch(specs)
+    assert second.completed
+    c1_second = next(r for r in second.cell_results if r.cell_id == "c1")
+    assert c1_second.status == "cache_hit"
+    assert c1_second.display_outputs, (
+        f"cache-hit c1 should restore display_outputs; got {c1_second.display_outputs!r}"
+    )

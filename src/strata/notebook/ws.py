@@ -1895,22 +1895,48 @@ async def _run_partition_batch(
     the cells that ended up ``status=not_run`` and route them through
     single-cell continuation.
     """
-    cell_specs = [
-        {
-            "cell_id": cell.id,
-            "source": cell.source,
-            "consumed_vars": sorted(
-                session.dag.consumed_variables.get(cell.id, set())
-                if session.dag is not None
-                else set()
-            ),
-            "env": dict(cell.env),
-            "mount_manifest": {},
-            "source_hash": "",
-            "env_hash": "",
-        }
-        for cell in cells_in_run
-    ]
+    cell_specs: list[dict[str, Any]] = []
+    for cell in cells_in_run:
+        annotations = parse_annotations(cell.source)
+
+        # Resolve effective env (notebook + cell + annotation layers) —
+        # matches single-cell's _resolve_effective_runtime_env path so
+        # # @env annotations and notebook-level overrides reach the
+        # batched cell.
+        effective_env = executor._resolve_effective_runtime_env(cell.id, annotations.env)
+
+        # Resolve and materialize RO mounts. The partitioner only batches
+        # cells without RW mounts, but RO mounts are allowed — we must
+        # download/cache their contents and pass local paths into the
+        # harness manifest, exactly like single-cell does. Empty list →
+        # no mounts → no work.
+        mount_specs = executor._resolve_cell_mount_specs(cell.id, cell.source)
+        mount_manifest: dict[str, dict[str, str]] = {}
+        if mount_specs:
+            resolved_mounts = await executor._mount_resolver.prepare_mounts(mount_specs)
+            mount_manifest = {
+                name: {
+                    "local_path": str(rm.local_path),
+                    "mode": rm.spec.mode.value,
+                }
+                for name, rm in resolved_mounts.items()
+            }
+
+        cell_specs.append(
+            {
+                "cell_id": cell.id,
+                "source": cell.source,
+                "consumed_vars": sorted(
+                    session.dag.consumed_variables.get(cell.id, set())
+                    if session.dag is not None
+                    else set()
+                ),
+                "env": effective_env,
+                "mount_manifest": mount_manifest,
+                "source_hash": "",
+                "env_hash": "",
+            }
+        )
 
     cells_by_id = {c.id: c for c in cells_in_run}
 
@@ -2007,7 +2033,14 @@ async def _run_partition_single_cell(
     )
 
     try:
-        if force:
+        if force and skip_upstream:
+            # Continuation after a batch failure during rerun-all needs
+            # BOTH "bypass target cache" AND "don't recursively
+            # materialize the failed upstream." execute_cell_force is
+            # exactly this combination (materialize_upstreams=False +
+            # use_cache=False).
+            result = await executor.execute_cell_force(cell_id, cell.source)
+        elif force:
             result = await executor.execute_cell_rerun(cell_id, cell.source)
         elif skip_upstream:
             result = await executor.execute_cell(
