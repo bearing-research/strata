@@ -6,8 +6,6 @@ import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
-import tomli_w
-
 from strata.notebook.models import (
     CellMeta,
     CellOutput,
@@ -304,5 +302,7 @@ def _rewrite_notebook_toml(path: Path, toml_data: dict) -> None:
     ``NotebookToml``. Used when the migration helper has already
     stripped legacy runtime sections from ``toml_data``.
     """
+    from strata.notebook.writer import _dump_notebook_toml
+
     with open(path, "wb") as f:
-        tomli_w.dump(toml_data, f)
+        _dump_notebook_toml(toml_data, f)

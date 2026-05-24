@@ -54,6 +54,44 @@ def _serialize_mounts(mounts: list[MountSpec]) -> list[dict[str, Any]]:
     return result
 
 
+# Sections that should be rendered as ``[[name]]`` array-of-tables blocks
+# rather than tomli_w's default ``name = [{...}]`` inline form. tomli_w
+# has no knob for this — when every item dict only contains simple values
+# it always chooses inline, which doesn't match the shape the example
+# notebooks were committed in and makes structural edits look messy in
+# git diffs.
+_ARRAY_OF_TABLES_SECTIONS = ("workers", "mounts", "variant_group")
+
+
+def _dump_notebook_toml(data: dict[str, Any], fp: Any) -> None:
+    """Serialize a notebook.toml dict, forcing array-of-tables sections.
+
+    Lifts the ``[[workers]]``, ``[[mounts]]`` and ``[[variant_group]]``
+    sections out of ``data``, writes the rest with ``tomli_w.dump``, then
+    appends each item as a manually-formatted ``[[name]]`` block so the
+    on-disk shape matches what the example notebooks were committed in.
+    """
+    aot: dict[str, list[dict[str, Any]]] = {}
+    for key in _ARRAY_OF_TABLES_SECTIONS:
+        value = data.get(key)
+        if isinstance(value, list) and value:
+            aot[key] = value
+            data = {k: v for k, v in data.items() if k != key}
+
+    tomli_w.dump(data, fp)
+
+    for name, items in aot.items():
+        for item in items:
+            simple = {k: v for k, v in item.items() if not isinstance(v, dict)}
+            nested = {k: v for k, v in item.items() if isinstance(v, dict)}
+            fp.write(f"\n[[{name}]]\n".encode())
+            if simple:
+                tomli_w.dump(simple, fp)
+            for nested_key, nested_value in nested.items():
+                fp.write(f"\n[{name}.{nested_key}]\n".encode())
+                tomli_w.dump(nested_value, fp)
+
+
 _SENSITIVE_KEY_PATTERNS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL")
 
 
@@ -274,16 +312,8 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         "notebook_id": toml.notebook_id,
         "name": toml.name,
         **({"owner": toml.owner} if toml.owner else {}),
-        "created_at": (
-            toml.created_at.isoformat()
-            if isinstance(toml.created_at, datetime)
-            else toml.created_at
-        ),
-        "updated_at": (
-            toml.updated_at.isoformat()
-            if isinstance(toml.updated_at, datetime)
-            else toml.updated_at
-        ),
+        "created_at": toml.created_at,
+        "updated_at": toml.updated_at,
         "cells": [
             {
                 "id": cell.id,
@@ -340,7 +370,7 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
     }
 
     with open(notebook_toml_path, "wb") as f:
-        tomli_w.dump(toml_data, f)
+        _dump_notebook_toml(toml_data, f)
 
 
 # Packages the notebook harness/pool_worker/serializer import directly
@@ -696,10 +726,10 @@ def add_cell_to_notebook(
     cells_data.sort(key=lambda c: c.get("order", 0))
 
     toml_data["cells"] = cells_data
-    toml_data["updated_at"] = datetime.now(tz=UTC).isoformat()
+    toml_data["updated_at"] = datetime.now(tz=UTC)
 
     with open(notebook_toml_path, "wb") as f:
-        tomli_w.dump(toml_data, f)
+        _dump_notebook_toml(toml_data, f)
 
 
 def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
@@ -742,10 +772,10 @@ def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
     # Remove from cells list
     cells_data.pop(cell_idx)
     toml_data["cells"] = cells_data
-    toml_data["updated_at"] = datetime.now(tz=UTC).isoformat()
+    toml_data["updated_at"] = datetime.now(tz=UTC)
 
     with open(notebook_toml_path, "wb") as f:
-        tomli_w.dump(toml_data, f)
+        _dump_notebook_toml(toml_data, f)
 
 
 def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
@@ -775,10 +805,10 @@ def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
             new_cells.append(cell)
 
     toml_data["cells"] = new_cells
-    toml_data["updated_at"] = datetime.now(tz=UTC).isoformat()
+    toml_data["updated_at"] = datetime.now(tz=UTC)
 
     with open(notebook_toml_path, "wb") as f:
-        tomli_w.dump(toml_data, f)
+        _dump_notebook_toml(toml_data, f)
 
 
 def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
@@ -888,9 +918,9 @@ def _apply_notebook_toml_update(
     if not mutate(toml_data):
         return
 
-    toml_data["updated_at"] = datetime.now(tz=UTC).isoformat()
+    toml_data["updated_at"] = datetime.now(tz=UTC)
     with open(notebook_toml_path, "wb") as f:
-        tomli_w.dump(toml_data, f)
+        _dump_notebook_toml(toml_data, f)
 
 
 def update_notebook_mounts(notebook_dir: Path, mounts: list[MountSpec]) -> None:

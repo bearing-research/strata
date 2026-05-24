@@ -491,6 +491,70 @@ def test_sensitive_only_env_is_no_op_no_updated_at_bump():
         assert notebook_toml.read_bytes() == before
 
 
+def test_writer_emits_native_toml_datetime_and_array_of_tables(tmp_path: Path):
+    """notebook.toml writes use native TOML shapes, not stringified ones.
+
+    Two regressions were observed in committed example notebooks after a
+    routine variant switch:
+
+    1. ``updated_at`` flipped from a native TOML datetime to a quoted
+       ISO string because the writer called ``.isoformat()``.
+    2. ``[[variant_group]]`` collapsed to inline
+       ``variant_group = [{...}]`` because ``tomli_w`` chooses inline
+       form for simple list-of-dicts. Same applies to ``workers`` and
+       ``mounts``.
+
+    Both surfaced as noisy diffs on every legitimate edit. This test
+    pins the on-disk shape so they don't regress.
+    """
+    from strata.notebook.writer import (
+        update_notebook_mounts,
+        update_notebook_workers,
+    )
+
+    notebook_dir = create_notebook(tmp_path, "Shape Test")
+    notebook_toml = notebook_dir / "notebook.toml"
+
+    update_notebook_mounts(
+        notebook_dir,
+        [MountSpec(name="data", uri="s3://bucket/prefix", mode=MountMode.READ_ONLY)],
+    )
+    update_notebook_workers(
+        notebook_dir,
+        [WorkerSpec(name="local", backend=WorkerBackendType.LOCAL)],
+    )
+    set_variant_active(notebook_dir, "classifier", "logreg")
+
+    text = notebook_toml.read_text(encoding="utf-8")
+
+    # Native TOML datetime — no quotes, no T separator
+    assert 'updated_at = "' not in text, (
+        f"updated_at must serialize as native TOML datetime, got: {text!r}"
+    )
+    import re
+
+    assert re.search(
+        r"^updated_at = \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}",
+        text,
+        re.MULTILINE,
+    ), f"expected `updated_at = YYYY-MM-DD HH:MM:SS...`, got: {text!r}"
+
+    # Array-of-tables, not inline-table-in-array
+    assert "[[variant_group]]" in text, text
+    assert "variant_group = [" not in text, text
+    assert "[[mounts]]" in text, text
+    assert "mounts = [" not in text, text
+    assert "[[workers]]" in text, text
+    assert "workers = [" not in text, text
+
+    # Round-trips cleanly via tomllib (parser-level variant resolution
+    # requires actual cells which this test deliberately omits).
+    with open(notebook_toml, "rb") as f:
+        data = tomllib.load(f)
+    assert data["variant_group"] == [{"group": "classifier", "active": "logreg"}]
+    assert isinstance(data["updated_at"], datetime)
+
+
 def test_env_block_persists_when_mixed_with_non_sensitive():
     """A sensitive key alongside any non-sensitive value keeps the slot."""
     with tempfile.TemporaryDirectory() as tmpdir:
