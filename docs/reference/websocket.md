@@ -2,6 +2,10 @@
 
 The notebook UI communicates with the backend via a WebSocket connection for real-time updates.
 
+For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, owner gating, cold-start payload, grace window), start at the [Notebook Client Protocol](notebook-protocol.md) page; this page is the message-level reference.
+
+Every frame type below corresponds to a member of `strata.notebook.protocol.MessageType` — that enum is the canonical source. If the tables here and the enum diverge, the enum wins.
+
 ## Connection
 
 ```
@@ -31,13 +35,15 @@ All messages are JSON with this shape:
 
 ### Cell Execution
 
-| Type                   | Payload                                  | Description                        |
-| ---------------------- | ---------------------------------------- | ---------------------------------- |
-| `cell_execute`         | `{ "cell_id": "..." }`                   | Run cell (triggers cascade check)  |
-| `cell_execute_cascade` | `{ "cell_id": "...", "plan_id": "..." }` | Confirm cascade execution          |
-| `cell_execute_force`   | `{ "cell_id": "..." }`                   | Run cell ignoring staleness        |
-| `cell_cancel`          | `{ "cell_id": "..." }`                   | Cancel running cell                |
-| `notebook_run_all`     | `{}`                                     | Run all cells in topological order |
+| Type                   | Payload                                  | Description                                                 |
+| ---------------------- | ---------------------------------------- | ----------------------------------------------------------- |
+| `cell_execute`         | `{ "cell_id": "..." }`                   | Run cell (triggers cascade check)                           |
+| `cell_execute_cascade` | `{ "cell_id": "...", "plan_id": "..." }` | Confirm cascade execution                                   |
+| `cell_execute_force`   | `{ "cell_id": "..." }`                   | Run cell ignoring staleness (no upstream materialization)   |
+| `cell_execute_rerun`   | `{ "cell_id": "..." }`                   | Force re-execute target cell while cascading upstream rebuilds |
+| `cell_cancel`          | `{ "cell_id": "..." }`                   | Cancel running cell                                         |
+| `notebook_run_all`     | `{ "continue_on_error": true }`          | Run all cells in topological order (default continues on error) |
+| `notebook_rerun_all`   | `{ "continue_on_error": true }`          | Re-execute every cell with cache off                        |
 
 ### Cell Editing
 
@@ -67,7 +73,20 @@ All messages are JSON with this shape:
 | ------------------- | ---------------------- | --------------------------------------------------------------- |
 | `dependency_add`    | `{ "package": "..." }` | Compatibility shorthand for starting an `add` environment job   |
 | `dependency_remove` | `{ "package": "..." }` | Compatibility shorthand for starting a `remove` environment job |
-| `agent_cancel`      | `{}`                   | Cancel a running AI agent                                       |
+
+### Variants
+
+| Type                 | Payload                              | Description                                |
+| -------------------- | ------------------------------------ | ------------------------------------------ |
+| `variant_set_active` | `{ "group": "...", "name": "..." }`  | Switch the active variant in a group       |
+| `variant_add`        | `{ "group": "..." }`                 | Add a new variant cell, cloning the active |
+
+### AI Agent (client → server)
+
+| Type                      | Payload                                                | Description                                       |
+| ------------------------- | ------------------------------------------------------ | ------------------------------------------------- |
+| `agent_cancel`            | `{}`                                                   | Cancel a running AI agent                         |
+| `agent_confirm_response`  | `{ "job_id": "...", "approved": true, ... }`           | Reply to an `agent_confirm_request` from the server |
 
 ## Server → Client Messages
 
@@ -119,10 +138,12 @@ All messages are JSON with this shape:
 
 ### AI Agent
 
-| Type             | Payload                     | Description                              |
-| ---------------- | --------------------------- | ---------------------------------------- |
-| `agent_progress` | `{ "message": "...", ... }` | Incremental agent-loop status            |
-| `agent_done`     | `{ "ok": true, ... }`       | Agent finished, failed, or was cancelled |
+| Type                    | Payload                                                          | Description                                                  |
+| ----------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
+| `agent_text_delta`      | `{ "job_id": "...", "text": "..." }`                             | Streaming token delta from the agent's assistant message     |
+| `agent_confirm_request` | `{ "job_id": "...", "tool": "...", "args": {...}, ... }`         | Agent is asking the client to approve a destructive tool use |
+| `agent_progress`        | `{ "job_id": "...", "event": "...", "detail": "...", ... }`      | Incremental agent-loop status (tool start/end, iteration)    |
+| `agent_done`            | `{ "job_id": "...", "content": "...", "model": "...", ... }`     | Agent finished, failed, or was cancelled                     |
 
 ### Errors
 
@@ -145,11 +166,17 @@ What the client uses `seq` for:
 Disconnects happen — proxy timeouts, network drops, server restarts, tab sleep. The recovery protocol:
 
 1. **Client reconnects** to `ws://.../v1/notebooks/ws/{session_id}` with the same session ID. The session itself is in-memory on the server and survives reconnects; it's cleaned up only when closed explicitly via `DELETE /v1/notebooks/{session_id}` or when the server restarts.
-2. **Server accepts the reconnect** and resumes emitting messages from the session's existing `seq` counter (continuing, not resetting).
+2. **Server accepts the reconnect** and resumes emitting messages from the session's existing `seq` counter (continuing, not resetting). If the previous client disconnected within the **60-second cancel grace window** and a cell is still running, the execution survives the disconnect — the client picks up where it left off.
 3. **Client sends `notebook_sync`** as its first message after reconnecting. The server responds with `notebook_state` containing the full current state (cells, DAG, cell statuses, latest display outputs).
 4. **Client replaces local state** with the synced payload and resumes listening.
 
 There is **no replay** of missed messages — events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_iteration_progress` for a `@loop` cell, `cascade_progress`) are not.
+
+### Cancel-on-disconnect grace window
+
+When the **last** WebSocket for a notebook drops, the handler schedules a teardown task instead of running it immediately. Any incoming upgrade for the same `session_id` within ~60 seconds cancels the pending task and resumes against the preserved execution and inspect state. Past the window, the running execution is cancelled and inspect REPLs are closed.
+
+This is the trade-off Vue's close-tab-to-cancel semantics make with TUI-style transients: closing a tab still cancels (just after a ~60s delay), but a tmux detach or a network blip won't kill a long-running cell. The grace constant lives at `_GRACE_CANCEL_SECONDS` in `src/strata/notebook/ws.py` if you need to tune it for your deployment.
 
 ## Close codes
 

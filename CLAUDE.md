@@ -326,6 +326,12 @@ WebSocket `/v1/notebooks/ws/{notebook_id}`:
   `cell_iteration_progress`, `cascade_prompt`, `cascade_progress`,
   `dag_update`, `impact_preview`, `notebook_state`
 
+Frame-type strings are owned by the `MessageType` StrEnum in
+`src/strata/notebook/protocol.py`. The full client-author reference
+(bootstrap, auth model, reconnect grace, cold-start payload, every
+message type) is `docs/reference/notebook-protocol.md` — keep that doc
+in sync when adding routes / frames.
+
 ### Frontend (`frontend/`)
 
 Vue 3 + TS + Vite, talks to `http://localhost:8765` (override with
