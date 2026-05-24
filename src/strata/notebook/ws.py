@@ -1948,38 +1948,7 @@ async def _run_partition_batch(
             }
         )
 
-    # Broadcast cell_error for each mount-prep failure (full running →
-    # error sequence so the UI shows the cell transitioning correctly).
     cells_by_id = {c.id: c for c in cells_in_run}
-    for failed_cell_id, exc in mount_failed_cells:
-        failed_cell = cells_by_id[failed_cell_id]
-        execution_state.running_cell = failed_cell_id
-        session.mark_cell_running(failed_cell_id)
-        await _broadcast_message(
-            notebook_id,
-            _make_message(
-                MessageType.CELL_STATUS,
-                seq,
-                _running_payload(session, failed_cell_id, failed_cell.source),
-            ),
-        )
-        session.mark_cell_error(failed_cell_id)
-        await _broadcast_message(
-            notebook_id,
-            _make_message(
-                MessageType.CELL_ERROR,
-                seq,
-                {"cell_id": failed_cell_id, "error": f"Mount preparation failed: {exc}"},
-            ),
-        )
-        await _broadcast_message(
-            notebook_id,
-            _make_message(
-                MessageType.CELL_STATUS,
-                seq,
-                {"cell_id": failed_cell_id, "status": CellStatus.ERROR},
-            ),
-        )
 
     async def _emit(result: BatchCellResult) -> None:
         cell = cells_by_id.get(result.cell_id)
@@ -2038,29 +2007,52 @@ async def _run_partition_batch(
                 ),
             )
 
-    if not cell_specs:
-        # Every cell in this run hit a mount failure. Return a synthetic
-        # completed result so the dispatcher doesn't try to continue
-        # this run via execute_batch with an empty list (that'd spawn
-        # a subprocess for nothing).
-        from strata.notebook.executor import BatchExecutionResult
+    from strata.notebook.executor import BatchExecutionResult
 
-        return BatchExecutionResult(
-            cell_results=[
-                BatchCellResult(
-                    cell_id=cid, status="cell_error", error=f"Mount preparation failed: {exc}"
-                )
-                for cid, exc in mount_failed_cells
-            ],
+    # Run the surviving cells through the batch (if any).
+    if cell_specs:
+        batch_result = await executor.execute_batch(
+            cell_specs,
+            use_cache=not force,
+            on_cell_event=_emit,
+        )
+    else:
+        # Nothing left to batch — all cells had mount failures. Skip the
+        # subprocess spawn and synthesize a completed result.
+        batch_result = BatchExecutionResult(
+            cell_results=[],
             completed=True,
             end_reason="complete",
         )
 
-    return await executor.execute_batch(
-        cell_specs,
-        use_cache=not force,
-        on_cell_event=_emit,
-    )
+    # Now broadcast mount-failure cells via the same _emit path so they
+    # land in the WS stream AFTER the successful cells (not before — the
+    # prior shape emitted them before the batch ran, swapping notebook
+    # order). The results also get included in batch_result.cell_results
+    # so the dispatcher's had_failure / continue_on_error tracking sees
+    # them — otherwise mount failures were silently ignored by
+    # continue_on_error=false (#35 review finding #1).
+    for failed_cell_id, exc in mount_failed_cells:
+        synthetic = BatchCellResult(
+            cell_id=failed_cell_id,
+            status="cell_error",
+            error=f"Mount preparation failed: {exc}",
+            traceback=None,
+        )
+        await _emit(synthetic)
+        batch_result.cell_results.append(synthetic)
+
+    # Mount failures must flip completed → False so the dispatcher
+    # picks them up as a real batch-level failure (had_failure tracking,
+    # continue_on_error gate).
+    if mount_failed_cells:
+        batch_result.completed = False
+        if batch_result.end_reason == "complete":
+            batch_result.end_reason = "cell_error"
+        if batch_result.failed_cell_id is None:
+            batch_result.failed_cell_id = mount_failed_cells[0][0]
+
+    return batch_result
 
 
 async def _run_partition_single_cell(

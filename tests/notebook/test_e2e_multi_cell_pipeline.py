@@ -390,9 +390,12 @@ class TestRunAllBatching:
         with open_notebook_session(client, nb.path) as (sid, _session):
             with ws_connect(client, sid) as ws:
                 ws.run_all()
-                # Each cell hits a terminal frame.
+                # Mount failures now broadcast AFTER batch successes (per #35
+                # review), so c_good lands first via batch + then c_bad's
+                # synthetic error broadcast. Read forward until we see
+                # c_bad's error (the last terminal frame); messages_of_type
+                # then surfaces c_good's earlier output from the buffer.
                 ws.receive_until("cell_error", cell_id="c_bad")
-                ws.receive_until("cell_output", cell_id="c_good")
 
                 errors = {m["payload"]["cell_id"] for m in ws.messages_of_type("cell_error")}
                 outputs = {m["payload"]["cell_id"] for m in ws.messages_of_type("cell_output")}
