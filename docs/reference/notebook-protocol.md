@@ -1,5 +1,15 @@
 # Notebook Client Protocol
 
+!!! warning "Forward-looking — depends on PRs #46, #47, #48"
+    This page describes behavior introduced in three companion PRs that have
+    not yet landed on `main`: the `MessageType` enum extraction (#46),
+    the `/{session_id}/...` owner gate (#47), and the 60s reconnect
+    grace window (#48). The doc PR is parked in draft until those
+    dependencies merge; if you're reading this from a branch, treat the
+    "MessageType lives in `protocol.py`", "REST owner-gates by default",
+    and "60s reconnect window" sections as forward-looking until the
+    dependency PRs land.
+
 A single reference for writing a non-Vue client (TUI, scripting, third-party
 integration) against the notebook backend. The deeper per-endpoint and
 per-frame details live in [REST API Reference](rest-api.md) and
