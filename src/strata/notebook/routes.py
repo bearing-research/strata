@@ -36,6 +36,7 @@ from strata.notebook.models import (
     MountSpec,
     WorkerSpec,
 )
+from strata.notebook.protocol import MessageType
 from strata.notebook.python_versions import (
     current_python_minor,
     normalize_python_minor,
@@ -3164,7 +3165,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
                 await _broadcast_message(
                     notebook_id,
                     {
-                        "type": "agent_text_delta",
+                        "type": MessageType.AGENT_TEXT_DELTA,
                         "seq": 0,
                         "ts": ts,
                         "payload": {"job_id": job_id, "text": payload.get("text", "")},
@@ -3175,7 +3176,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
                 await _broadcast_message(
                     notebook_id,
                     {
-                        "type": "agent_confirm_request",
+                        "type": MessageType.AGENT_CONFIRM_REQUEST,
                         "seq": 0,
                         "ts": ts,
                         "payload": {**payload, "job_id": job_id},
@@ -3185,7 +3186,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
             await _broadcast_message(
                 notebook_id,
                 {
-                    "type": "agent_progress",
+                    "type": MessageType.AGENT_PROGRESS,
                     "seq": 0,
                     "ts": ts,
                     "payload": {
@@ -3218,7 +3219,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
             await _broadcast_message(
                 notebook_id,
                 {
-                    "type": "agent_done",
+                    "type": MessageType.AGENT_DONE,
                     "seq": 0,
                     "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     "payload": {
@@ -3250,7 +3251,7 @@ async def run_agent(notebook_id: str, session: SessionDep, req: AgentRequest) ->
                 await _broadcast_message(
                     notebook_id,
                     {
-                        "type": "agent_done",
+                        "type": MessageType.AGENT_DONE,
                         "seq": 0,
                         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                         "payload": {

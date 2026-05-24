@@ -51,6 +51,7 @@ from strata.notebook.models import (
 )
 from strata.notebook.mounts import MountFingerprinter, resolve_cell_mounts
 from strata.notebook.parser import parse_notebook
+from strata.notebook.protocol import MessageType
 from strata.notebook.provenance import (
     compute_provenance_hash,
     compute_source_hash,
@@ -1881,7 +1882,7 @@ class NotebookSession:
             )
             self.environment_job = job
 
-        await self._broadcast_environment_job_event("environment_job_started", job)
+        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_STARTED, job)
         task = asyncio.create_task(
             self._run_environment_job(
                 job,
@@ -1975,7 +1976,7 @@ class NotebookSession:
                     for dep in list_resolved_dependencies(self.path)
                 ]
             await self._broadcast_environment_job_message(
-                "environment_job_finished",
+                MessageType.ENVIRONMENT_JOB_FINISHED,
                 payload,
             )
             if job.action in {"add", "remove"}:
@@ -1995,7 +1996,7 @@ class NotebookSession:
                         "resolved_dependencies", []
                     )
                 await self._broadcast_environment_job_message(
-                    "dependency_changed",
+                    MessageType.DEPENDENCY_CHANGED,
                     legacy_payload,
                 )
                 await self._broadcast_environment_staleness_updates(job.stale_cell_ids)
@@ -2055,7 +2056,7 @@ class NotebookSession:
     ) -> tuple[list[str], RequirementsImportResult]:
         """Run a requirements/environment.yaml import as a background job."""
         job.phase = "preparing_import"
-        await self._broadcast_environment_job_event("environment_job_progress", job)
+        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
 
         if requirements_text is not None:
             result = await import_requirements_text_streaming(
@@ -2198,15 +2199,15 @@ class NotebookSession:
         """Refresh runtime metadata and staleness after a successful env mutation."""
         if refresh_runtime:
             job.phase = "refreshing_runtime"
-            await self._broadcast_environment_job_event("environment_job_progress", job)
+            await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
             await asyncio.to_thread(self.refresh_environment_runtime)
 
         job.phase = "invalidating_warm_pool"
-        await self._broadcast_environment_job_event("environment_job_progress", job)
+        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
         await self._invalidate_warm_pool_for_environment_change()
 
         job.phase = "recomputing_staleness"
-        await self._broadcast_environment_job_event("environment_job_progress", job)
+        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
         try:
             await asyncio.to_thread(update_environment_metadata, self.path)
         except Exception:
@@ -2219,7 +2220,7 @@ class NotebookSession:
             if staleness.status != CellStatus.READY
         ]
         job.phase = "starting_warm_pool"
-        await self._broadcast_environment_job_event("environment_job_progress", job)
+        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
         try:
             await self._ensure_warm_pool_started()
         except Exception:
@@ -2263,11 +2264,11 @@ class NotebookSession:
         else:
             job.stderr = text
             job.stderr_truncated = truncated
-        await self._broadcast_environment_job_event("environment_job_progress", job)
+        await self._broadcast_environment_job_event(MessageType.ENVIRONMENT_JOB_PROGRESS, job)
 
     async def _broadcast_environment_job_event(
         self,
-        event_type: str,
+        event_type: MessageType,
         job: EnvironmentJobSnapshot,
     ) -> None:
         """Broadcast a single environment-job state snapshot over notebook WS."""
@@ -2278,7 +2279,7 @@ class NotebookSession:
 
     async def _broadcast_environment_job_message(
         self,
-        event_type: str,
+        event_type: MessageType,
         payload: dict[str, Any],
     ) -> None:
         """Send a structured notebook environment-job message to WS clients."""
@@ -2328,7 +2329,7 @@ class NotebookSession:
             await broadcast_notebook_message(
                 self.id,
                 {
-                    "type": "cell_status",
+                    "type": MessageType.CELL_STATUS,
                     "seq": next_notebook_sequence(self.id),
                     "ts": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
                     "payload": payload,
