@@ -3614,6 +3614,11 @@ class CellExecutor:
         if persisted_displays:
             cell.display_outputs = [CellOutput(**d) for d in persisted_displays]
             cell.display_output = cell.display_outputs[-1]
+        # Persist display state to .strata/runtime.json so it survives
+        # notebook reopens (single-cell does this at executor.py L1113).
+        # Without it, a batched display cell shows correctly in the live
+        # session but loses its display on next open.
+        self.session.persist_display_outputs(cell_id, persisted_displays or None)
 
         uri = cell.artifact_uri or ""
         return {"ok": True, "uri": uri, "display_outputs": persisted_displays}
