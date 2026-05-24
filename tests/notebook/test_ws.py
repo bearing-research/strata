@@ -1662,3 +1662,17 @@ def test_variant_add_broadcasts_new_cell(client):
     assert new_cells[0]["variant_active"] is True
     old = next(c for c in cells if c.get("variant_name") == "a")
     assert old["variant_active"] is False
+
+
+# WS upgrade owner gating: the parallel gate in ``ws.py`` mirrors the REST
+# dependency (``get_notebook_session`` → ``_require_owner``) and shares the
+# same ``_require_owner`` / ``_user_scoping_enabled`` helpers as the REST
+# surface — the REST-side coverage in
+# ``test_routes::TestPersonalModeUserScoping`` (owner allowed, wrong header
+# refused, missing header refused, legacy unowned passthrough) is the
+# load-bearing test for the gate logic. A direct TestClient-based WS
+# upgrade test was attempted but pulled because the per-test anyio portal
+# teardown reproducibly hangs on GitHub Actions Python 3.12 runners —
+# ``thread.join()`` on the portal thread blocks indefinitely while waiting
+# on lingering asyncio tasks from session-manager teardown. Tracked as a
+# follow-up to land WS-specific coverage via fake websocket objects.

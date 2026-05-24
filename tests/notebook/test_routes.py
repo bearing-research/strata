@@ -1696,7 +1696,7 @@ class TestPersonalModeUserScoping:
         assert _sanitize_user_dir_name("") is None
         assert _sanitize_user_dir_name("...") is None  # all-trim chars
 
-    def test_session_keyed_routes_owner_gated(self, configured_state):
+    def test_session_keyed_routes_owner_gated(self, client, configured_state, tmp_path):
         """A leaked session_id must not be a bearer capability across users.
 
         Before #41 the WS upgrade refused cross-owner reconnects but the
@@ -1708,44 +1708,90 @@ class TestPersonalModeUserScoping:
         itself, so it implies the same gate for every other SessionDep
         route by construction.
         """
-        client = TestClient(create_test_app())
-        with tempfile.TemporaryDirectory() as tmpdir:
-            storage_root = Path(tmpdir)
-            configured_state(storage_root)
-            alice_root = self._user_subdir(storage_root, "alice@example.com")
+        configured_state(tmp_path)
+        alice_root = self._user_subdir(tmp_path, "alice@example.com")
 
-            create_resp = client.post(
-                "/v1/notebooks/create",
-                json={"parent_path": str(alice_root), "name": "Alice NB"},
-                headers={self.HEADER: "alice@example.com"},
-            )
-            assert create_resp.status_code == 200
-            alice_nb = alice_root / "alice_nb"
+        create_resp = client.post(
+            "/v1/notebooks/create",
+            json={"parent_path": str(alice_root), "name": "Alice NB"},
+            headers={self.HEADER: "alice@example.com"},
+        )
+        assert create_resp.status_code == 200
+        session_id = create_resp.json()["session_id"]
 
-            opened = client.post(
-                "/v1/notebooks/open",
-                json={"path": str(alice_nb)},
-                headers={self.HEADER: "alice@example.com"},
-            )
-            assert opened.status_code == 200
-            session_id = opened.json()["session_id"]
+        # Alice (owner): allowed.
+        ok = client.get(
+            f"/v1/notebooks/{session_id}/cells",
+            headers={self.HEADER: "alice@example.com"},
+        )
+        assert ok.status_code == 200
 
-            # Alice (owner): allowed.
-            ok = client.get(
-                f"/v1/notebooks/{session_id}/cells",
-                headers={self.HEADER: "alice@example.com"},
-            )
-            assert ok.status_code == 200
+        # Bob (non-owner) with a valid session_id: 404 — same shape the
+        # dep returns for a genuinely missing notebook so probes can't
+        # enumerate owners.
+        denied = client.get(
+            f"/v1/notebooks/{session_id}/cells",
+            headers={self.HEADER: "bob@example.com"},
+        )
+        assert denied.status_code == 404
+        assert denied.json() == {"detail": "Notebook not found"}
 
-            # Bob (non-owner) with a valid session_id: 404 — same shape
-            # the dep returns for a genuinely missing notebook so probes
-            # can't enumerate owners.
-            denied = client.get(
-                f"/v1/notebooks/{session_id}/cells",
-                headers={self.HEADER: "bob@example.com"},
-            )
-            assert denied.status_code == 404
-            assert denied.json() == {"detail": "Notebook not found"}
+        # Missing identity header: must NOT silently bypass the gate.
+        # ``_caller_identity`` returns None for both "header unset" and
+        # "header omitted from this request"; the second case must close
+        # on owned notebooks — otherwise the bypass is "just don't send
+        # the header."
+        bypass = client.get(f"/v1/notebooks/{session_id}/cells")
+        assert bypass.status_code == 404
+        assert bypass.json() == {"detail": "Notebook not found"}
+
+    def test_legacy_unowned_notebook_still_accessible_when_scoping_on(
+        self, client, configured_state, tmp_path
+    ):
+        """An ``owner = None`` notebook stays accessible to any caller.
+
+        Per-user scoping was added to a backend that already had
+        notebooks in the wild without an owner field. Closing the
+        missing-header bypass for owned notebooks must not also close
+        legacy unowned notebooks, or every pre-scoping notebook becomes
+        suddenly inaccessible.
+        """
+        configured_state(tmp_path)
+        alice_root = self._user_subdir(tmp_path, "alice@example.com")
+
+        # Pre-scoping notebooks were created without ``owner``; mimic
+        # that by stamping it then stripping the field on disk before
+        # opening the session.
+        create_resp = client.post(
+            "/v1/notebooks/create",
+            json={"parent_path": str(alice_root), "name": "Legacy NB"},
+            headers={self.HEADER: "alice@example.com"},
+        )
+        assert create_resp.status_code == 200
+        legacy_nb = alice_root / "legacy_nb"
+        toml_path = legacy_nb / "notebook.toml"
+        text = toml_path.read_text(encoding="utf-8")
+        toml_path.write_text(
+            "\n".join(line for line in text.splitlines() if not line.startswith("owner =")),
+            encoding="utf-8",
+        )
+
+        opened = client.post(
+            "/v1/notebooks/open",
+            json={"path": str(legacy_nb)},
+            headers={self.HEADER: "alice@example.com"},
+        )
+        assert opened.status_code == 200
+        session_id = opened.json()["session_id"]
+
+        no_header = client.get(f"/v1/notebooks/{session_id}/cells")
+        assert no_header.status_code == 200
+
+        wrong_header = client.get(
+            f"/v1/notebooks/{session_id}/cells",
+            headers={self.HEADER: "bob@example.com"},
+        )
+        assert wrong_header.status_code == 200
 
 
 # ---------------------------------------------------------------------------
