@@ -294,6 +294,50 @@ async def test_batch_cached_displays_round_trip(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_per_cell_watchdog_kills_hung_cell(tmp_path: Path):
+    """A cell that hangs inside the batch is killed at its per-cell timeout
+    instead of consuming the whole batch_timeout_seconds budget.
+    Subsequent cells in the batch end up status=not_run.
+    """
+    session = _make_session_with_cells(
+        tmp_path,
+        [
+            ("c1", "x = 1\n"),
+            ("c_hang", "import time\ntime.sleep(60)\n"),
+            ("c3", "y = 2\n"),
+        ],
+    )
+    specs = _populate_consumed_vars(
+        [
+            _cell_spec("c1", "x = 1\n"),
+            _cell_spec("c_hang", "import time\ntime.sleep(60)\n"),
+            _cell_spec("c3", "y = 2\n"),
+        ],
+        session,
+    )
+
+    executor = CellExecutor(session)
+    # 2s per-cell timeout; batch_timeout_seconds left at default 600 so we
+    # know any pass under ~5s came from the per-cell kill, not the outer
+    # safety net.
+    result = await executor.execute_batch(specs, cell_timeout_seconds=2.0)
+
+    assert not result.completed
+    assert result.end_reason == "cell_timeout"
+    assert result.failed_cell_id == "c_hang"
+
+    statuses = {r.cell_id: r.status for r in result.cell_results}
+    assert statuses["c1"] == "ok"
+    assert statuses["c_hang"] == "cell_error"
+    assert (
+        "timed out"
+        in (next(r for r in result.cell_results if r.cell_id == "c_hang").error or "").lower()
+    )
+    # c3 was never reached — harness was killed before it started.
+    assert statuses.get("c3", "not_run") == "not_run"
+
+
+@pytest.mark.asyncio
 async def test_display_only_cell_is_cacheable(tmp_path: Path):
     """A cell that produces displays but no consumed variables should
     cache-hit on re-run. Regression for #34 review finding #2 — the

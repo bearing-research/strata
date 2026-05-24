@@ -86,6 +86,10 @@ from strata.notebook.mounts import (
     parse_mount_uri,
     resolve_cell_mounts,
 )
+from strata.notebook.process_tree import (
+    subprocess_kwargs_for_new_group,
+    terminate_subprocess_tree,
+)
 from strata.notebook.provenance import (
     compute_provenance_hash,
     compute_source_hash,
@@ -483,6 +487,7 @@ class CellExecutor:
         *,
         use_cache: bool = True,
         batch_timeout_seconds: float = 600.0,
+        cell_timeout_seconds: float = 30.0,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
     ) -> BatchExecutionResult:
         """Execute a sequence of cells in one harness subprocess.
@@ -510,6 +515,7 @@ class CellExecutor:
             cell_specs,
             use_cache=use_cache,
             batch_timeout_seconds=batch_timeout_seconds,
+            cell_timeout_seconds=cell_timeout_seconds,
             on_cell_event=on_cell_event,
         )
 
@@ -3054,14 +3060,14 @@ class CellExecutor:
         *,
         use_cache: bool,
         batch_timeout_seconds: float,
+        cell_timeout_seconds: float = 30.0,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
     ) -> BatchExecutionResult:
         """Run a sequence of cells in one harness subprocess.
 
         See ``execute_batch`` for public docs. This handles all the
-        subprocess + pipe wiring + frame protocol service. PR-b2 ships
-        the happy/error paths; per-cell watchdog and full
-        stdout/stderr attribution are deferred follow-ups.
+        subprocess + pipe wiring + frame protocol service + per-cell
+        watchdog. Stdout/stderr per-cell attribution is still deferred.
         """
         # Match single-cell's fallback: venv interpreter if synced,
         # otherwise PATH python (e.g. test environments that don't go
@@ -3110,11 +3116,6 @@ class CellExecutor:
             # group so a SIGKILL on timeout reaches every descendant
             # (multiprocessing workers, DataLoader pools, …). Mirrors
             # single-cell's _run_harness at L2486.
-            from strata.notebook.process_tree import (
-                subprocess_kwargs_for_new_group,
-                terminate_subprocess_tree,
-            )
-
             proc = await asyncio.create_subprocess_exec(
                 str(venv_python),
                 str(self.harness_path),
@@ -3161,6 +3162,23 @@ class CellExecutor:
                 line = (json.dumps(payload) + "\n").encode("utf-8")
                 os.write(resp_w_fd, line)
 
+            # Per-cell watchdog state. The service loop integrates the
+            # timeout into its readline via asyncio.wait_for, so we don't
+            # need a separate task (which had ugly lifecycle issues with
+            # TestClient's loop teardown). On timeout, the service loop
+            # sets state["timed_out"]+cell_id and SIGKILLs the harness;
+            # readline then returns "" on next iteration and the loop
+            # exits. Cells with explicit timeouts are non-batchable (see
+            # is_cell_batchable), so the default applies to every cell.
+            watchdog_state: dict[str, Any] = {
+                "active_cell_id": None,
+                "active_started_at": None,
+                "active_timeout": cell_timeout_seconds,
+                "timed_out": False,
+                "timeout_cell_id": None,
+                "proc": proc,
+            }
+
             try:
                 end_reason, failed_cell_id = await asyncio.wait_for(
                     self._batch_service_loop(
@@ -3170,6 +3188,7 @@ class CellExecutor:
                         batch_tmpdir,
                         use_cache=use_cache,
                         on_cell_event=on_cell_event,
+                        watchdog_state=watchdog_state,
                     ),
                     timeout=batch_timeout_seconds,
                 )
@@ -3189,6 +3208,27 @@ class CellExecutor:
                     os.close(resp_w_fd)
                 except OSError:
                     pass
+
+            # If the watchdog SIGKILL'd the harness, the service loop
+            # returned with end_reason="subprocess_died" — override with
+            # the per-cell timeout details so the dispatcher sees the
+            # specific cell that hung.
+            if watchdog_state["timed_out"] and watchdog_state["timeout_cell_id"]:
+                timed_out_id = watchdog_state["timeout_cell_id"]
+                timed_out_result = BatchCellResult(
+                    cell_id=timed_out_id,
+                    status="cell_error",
+                    error=(
+                        f"Cell execution timed out after "
+                        f"{watchdog_state['active_timeout']}s (per-cell watchdog)"
+                    ),
+                )
+                cell_results[timed_out_id] = timed_out_result
+                if on_cell_event is not None:
+                    await on_cell_event(timed_out_result)
+                end_reason = "cell_timeout"
+                failed_cell_id = timed_out_id
+                completed = False
 
             await proc.wait()
             await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
@@ -3218,6 +3258,7 @@ class CellExecutor:
         *,
         use_cache: bool,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
+        watchdog_state: dict[str, Any] | None = None,
     ) -> tuple[str, str | None]:
         """Read frames and dispatch service requests until ``batch_end``.
 
@@ -3236,7 +3277,33 @@ class CellExecutor:
                 await on_cell_event(result)
 
         while True:
-            line = await frame_reader.readline()
+            # Per-cell watchdog: when a cell is active, cap the readline
+            # at its remaining timeout. On expiry, SIGKILL the harness,
+            # record the cell as cell_error, exit the loop.
+            if watchdog_state is not None and watchdog_state.get("active_started_at"):
+                started = watchdog_state["active_started_at"]
+                timeout = watchdog_state["active_timeout"]
+                remaining = timeout - (time.time() - started)
+                if remaining <= 0:
+                    watchdog_state["timed_out"] = True
+                    watchdog_state["timeout_cell_id"] = watchdog_state["active_cell_id"]
+                    try:
+                        await terminate_subprocess_tree(watchdog_state["proc"])
+                    except Exception:
+                        pass
+                    break
+                try:
+                    line = await asyncio.wait_for(frame_reader.readline(), timeout=remaining)
+                except TimeoutError:
+                    watchdog_state["timed_out"] = True
+                    watchdog_state["timeout_cell_id"] = watchdog_state["active_cell_id"]
+                    try:
+                        await terminate_subprocess_tree(watchdog_state["proc"])
+                    except Exception:
+                        pass
+                    break
+            else:
+                line = await frame_reader.readline()
             if not line:
                 # Pipe closed without batch_end — subprocess died.
                 break
@@ -3251,6 +3318,11 @@ class CellExecutor:
 
             if ftype == "cell_start":
                 active_cell_id = payload.get("cell_id")
+                # Watchdog window: from cell_start until any completion
+                # frame (cell_output cache_hit, cell_error, or persist).
+                if watchdog_state is not None and active_cell_id:
+                    watchdog_state["active_cell_id"] = active_cell_id
+                    watchdog_state["active_started_at"] = time.time()
             elif ftype == "cache_check":
                 response = await self._batch_service_cache_check(
                     payload.get("cell_id", ""),
@@ -3296,6 +3368,12 @@ class CellExecutor:
                         ),
                     )
                 send_response(response)
+                # Cell finished (either persisted ok or persist failed);
+                # close the watchdog window so the harness's between-cells
+                # idle time doesn't trip it.
+                if watchdog_state is not None:
+                    watchdog_state["active_cell_id"] = None
+                    watchdog_state["active_started_at"] = None
             elif ftype == "cell_output":
                 if payload.get("cache_hit") and active_cell_id:
                     await _record(
@@ -3308,6 +3386,9 @@ class CellExecutor:
                             display_outputs=payload.get("display_outputs") or [],
                         ),
                     )
+                if watchdog_state is not None:
+                    watchdog_state["active_cell_id"] = None
+                    watchdog_state["active_started_at"] = None
             elif ftype == "cell_error":
                 cell_id = payload.get("cell_id", "")
                 await _record(
@@ -3321,6 +3402,9 @@ class CellExecutor:
                         stderr=payload.get("stderr", ""),
                     ),
                 )
+                if watchdog_state is not None:
+                    watchdog_state["active_cell_id"] = None
+                    watchdog_state["active_started_at"] = None
             elif ftype == "batch_end":
                 end_reason = payload.get("reason", "complete")
                 failed_cell_id = payload.get("failed_cell_id")
