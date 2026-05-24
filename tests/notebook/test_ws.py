@@ -1626,7 +1626,7 @@ def test_grace_window_preserves_inspect_state_on_reconnect(client, temp_notebook
 
     # Inside the grace window: state must be preserved.
     assert session.id in _notebook_inspect_managers
-    assert close_all_calls == 0
+    assert not close_all_calls
 
     # Reconnect cancels the pending teardown and resumes.
     with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
@@ -1641,7 +1641,7 @@ def test_grace_window_preserves_inspect_state_on_reconnect(client, temp_notebook
         websocket.receive_json()
         # Still alive.
         assert session.id in _notebook_inspect_managers
-        assert close_all_calls == 0
+        assert not close_all_calls
 
 
 def test_grace_window_expires_drops_state(client, temp_notebook, app, monkeypatch):
@@ -1777,7 +1777,11 @@ def test_grace_window_preserves_active_execution_on_reconnect(
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError:
+                # Cancellation is the expected path — the test injected a
+                # bare ``asyncio.sleep(60)`` whose only normal exit is
+                # ``CancelledError``. Any other exception should surface so
+                # we notice if cleanup behavior regresses.
                 pass
 
         client.portal.call(_cancel_injected, captured["task"])

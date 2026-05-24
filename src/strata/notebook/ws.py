@@ -514,6 +514,8 @@ async def _cleanup_notebook_websocket(
     try:
         connections.remove(websocket)
     except ValueError:
+        # Already removed — concurrent cleanup paths (server shutdown,
+        # repeated disconnect) can race here. The removal is idempotent.
         pass
 
     if connections:
