@@ -162,6 +162,7 @@ def parse_notebook(directory: Path) -> NotebookState:
     notebook_toml = NotebookToml(
         notebook_id=toml_data.get("notebook_id", ""),
         name=toml_data.get("name", "Untitled Notebook"),
+        owner=toml_data.get("owner"),
         created_at=created_at,
         updated_at=updated_at,
         worker=toml_data.get("worker"),

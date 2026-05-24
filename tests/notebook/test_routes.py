@@ -1696,6 +1696,57 @@ class TestPersonalModeUserScoping:
         assert _sanitize_user_dir_name("") is None
         assert _sanitize_user_dir_name("...") is None  # all-trim chars
 
+    def test_session_keyed_routes_owner_gated(self, configured_state):
+        """A leaked session_id must not be a bearer capability across users.
+
+        Before #41 the WS upgrade refused cross-owner reconnects but the
+        ``/{session_id}/...`` REST routes did not. Pin that any
+        SessionDep-backed route owned by Alice returns 404 (the same
+        generic body the WS upgrade closes with) when Bob holds the id.
+
+        ``cells`` is a representative read; the test covers the dependency
+        itself, so it implies the same gate for every other SessionDep
+        route by construction.
+        """
+        client = TestClient(create_test_app())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            storage_root = Path(tmpdir)
+            configured_state(storage_root)
+            alice_root = self._user_subdir(storage_root, "alice@example.com")
+
+            create_resp = client.post(
+                "/v1/notebooks/create",
+                json={"parent_path": str(alice_root), "name": "Alice NB"},
+                headers={self.HEADER: "alice@example.com"},
+            )
+            assert create_resp.status_code == 200
+            alice_nb = alice_root / "alice_nb"
+
+            opened = client.post(
+                "/v1/notebooks/open",
+                json={"path": str(alice_nb)},
+                headers={self.HEADER: "alice@example.com"},
+            )
+            assert opened.status_code == 200
+            session_id = opened.json()["session_id"]
+
+            # Alice (owner): allowed.
+            ok = client.get(
+                f"/v1/notebooks/{session_id}/cells",
+                headers={self.HEADER: "alice@example.com"},
+            )
+            assert ok.status_code == 200
+
+            # Bob (non-owner) with a valid session_id: 404 — same shape
+            # the dep returns for a genuinely missing notebook so probes
+            # can't enumerate owners.
+            denied = client.get(
+                f"/v1/notebooks/{session_id}/cells",
+                headers={self.HEADER: "bob@example.com"},
+            )
+            assert denied.status_code == 404
+            assert denied.json() == {"detail": "Notebook not found"}
+
 
 # ---------------------------------------------------------------------------
 # Connections

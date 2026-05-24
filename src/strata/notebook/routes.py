@@ -77,17 +77,25 @@ def get_session_manager() -> SessionManager:
     return _session_manager
 
 
-def get_notebook_session(notebook_id: str) -> NotebookSession:
+def get_notebook_session(notebook_id: str, request: Request) -> NotebookSession:
     """FastAPI dependency: resolve ``notebook_id`` to an open session.
 
     Raises ``HTTPException(404)`` when the notebook is not known to the
-    session manager. Used as ``session: SessionDep`` on every route
-    that targets a specific notebook so individual handlers don't
-    re-implement the lookup-and-404 dance.
+    session manager *or* when the caller doesn't own it. Used as
+    ``session: SessionDep`` on every route that targets a specific
+    notebook so individual handlers don't re-implement the lookup-and-
+    404 dance.
+
+    The owner gate matches the WS upgrade behavior in ``ws.py`` — a
+    leaked ``session_id`` is no longer a bearer capability for these
+    routes. Generic 404 instead of 403 so probes can't enumerate
+    notebook owners. Unowned notebooks and single-user deployments
+    (``personal_mode_user_header`` unset) pass through unchanged.
     """
     session = _session_manager.get_session(notebook_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Notebook not found")
+    _require_owner(session.notebook_state.owner, _caller_identity(request))
     return session
 
 
@@ -1055,11 +1063,9 @@ async def import_jupyter_notebook(
 
 
 @router.delete("/{notebook_id}")
-async def delete_notebook(notebook_id: str, session: SessionDep, request: Request) -> dict:
+async def delete_notebook(notebook_id: str, session: SessionDep) -> dict:
     """Delete a notebook directory and all notebook-owned runtime state."""
     _require_personal_mode_notebook_delete()
-
-    _require_owner(session.notebook_state.owner, _caller_identity(request))
 
     if session.has_active_environment_mutation():
         _raise_environment_busy(
