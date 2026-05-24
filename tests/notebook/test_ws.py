@@ -1575,6 +1575,274 @@ def test_inspect_sessions_closed_when_last_websocket_disconnects(
     assert session.id not in _notebook_inspect_managers
 
 
+def test_grace_window_preserves_inspect_state_on_reconnect(client, temp_notebook, app, monkeypatch):
+    """A disconnect-then-reconnect within the grace window keeps state.
+
+    Without the grace window, the inspect manager would be dropped the
+    moment the WS context exits. The TUI's target audience (tmux / SSH
+    sessions) would lose any open inspect REPL on a network blip — bad
+    UX for exactly the users the reconnect window exists for.
+    """
+    notebook_dir, _ = temp_notebook
+
+    from strata.notebook.inspect_repl import InspectManager
+    from strata.notebook.routes import get_session_manager
+    from strata.notebook.ws import _notebook_inspect_managers
+
+    # Long enough window that the test thread can't accidentally cross
+    # it; the reconnect cancels the task explicitly.
+    monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 30.0)
+
+    session_manager = get_session_manager()
+    session = session_manager.open_notebook(notebook_dir)
+
+    close_all_calls = 0
+
+    async def fake_open_session(self, cell_id, notebook_session):
+        return SimpleNamespace(ready=True), "ready"
+
+    async def fake_close_all(self):
+        nonlocal close_all_calls
+        close_all_calls += 1
+
+    monkeypatch.setattr(InspectManager, "open_session", fake_open_session)
+    monkeypatch.setattr(InspectManager, "close_all", fake_close_all)
+
+    cell = next((c for c in session.notebook_state.cells if "x" in c.references), None)
+    assert cell is not None
+
+    # First connection opens an inspect REPL.
+    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
+        websocket.send_json(
+            {
+                "type": "inspect_open",
+                "seq": 1,
+                "ts": "2026-03-23T00:00:00Z",
+                "payload": {"cell_id": cell.id},
+            }
+        )
+        response = websocket.receive_json()
+        assert response["type"] == "inspect_result"
+
+    # Inside the grace window: state must be preserved.
+    assert session.id in _notebook_inspect_managers
+    assert not close_all_calls
+
+    # Reconnect cancels the pending teardown and resumes.
+    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
+        websocket.send_json(
+            {
+                "type": "notebook_sync",
+                "seq": 1,
+                "ts": "2026-03-23T00:00:00Z",
+                "payload": {},
+            }
+        )
+        websocket.receive_json()
+        # Still alive.
+        assert session.id in _notebook_inspect_managers
+        assert not close_all_calls
+
+
+def test_grace_window_expires_drops_state(client, temp_notebook, app, monkeypatch):
+    """When the grace window elapses with no reconnect, state is dropped."""
+    notebook_dir, _ = temp_notebook
+
+    from strata.notebook.inspect_repl import InspectManager
+    from strata.notebook.routes import get_session_manager
+    from strata.notebook.ws import _notebook_grace_tasks, _notebook_inspect_managers
+
+    # Short window: long enough that the test thread observes the
+    # "pending teardown" state, short enough that polling for completion
+    # doesn't drag the suite.
+    monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 0.1)
+
+    session_manager = get_session_manager()
+    session = session_manager.open_notebook(notebook_dir)
+
+    close_all_calls = 0
+
+    async def fake_open_session(self, cell_id, notebook_session):
+        return SimpleNamespace(ready=True), "ready"
+
+    async def fake_close_all(self):
+        nonlocal close_all_calls
+        close_all_calls += 1
+
+    monkeypatch.setattr(InspectManager, "open_session", fake_open_session)
+    monkeypatch.setattr(InspectManager, "close_all", fake_close_all)
+
+    cell = next((c for c in session.notebook_state.cells if "x" in c.references), None)
+    assert cell is not None
+
+    # Hold the TestClient open across requests so the server's event loop
+    # outlives the WS context; without this, the grace task scheduled at
+    # disconnect would die with the portal.
+    with client:
+        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
+            websocket.send_json(
+                {
+                    "type": "inspect_open",
+                    "seq": 1,
+                    "ts": "2026-03-23T00:00:00Z",
+                    "payload": {"cell_id": cell.id},
+                }
+            )
+            websocket.receive_json()
+
+        # A grace task was scheduled — state is still alive.
+        assert session.id in _notebook_grace_tasks
+        assert session.id in _notebook_inspect_managers
+
+        # Poll until the task runs in the server's background event loop.
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            if close_all_calls and session.id not in _notebook_inspect_managers:
+                break
+            time.sleep(0.02)
+
+    assert close_all_calls == 1
+    assert session.id not in _notebook_inspect_managers
+    assert session.id not in _notebook_grace_tasks
+
+
+def test_grace_window_preserves_active_execution_on_reconnect(
+    client, temp_notebook, app, monkeypatch
+):
+    """A running execution task survives a disconnect-reconnect cycle within the window.
+
+    This is the load-bearing #42 contract: tmux detach during a long
+    cell, reconnect within the window, find the cell still running.
+    The inspect-state companion test covers a different cleanup hook;
+    this one targets ``NotebookExecutionState.execution_task`` which is
+    the actual mechanism behind cancel-on-disconnect.
+    """
+    notebook_dir, _ = temp_notebook
+
+    from strata.notebook.routes import get_session_manager
+    from strata.notebook.ws import _ensure_execution_state, _notebook_execution_state
+
+    monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 30.0)
+
+    session_manager = get_session_manager()
+    session = session_manager.open_notebook(notebook_dir)
+
+    captured: dict[str, asyncio.Task[None]] = {}
+
+    async def long_sleep() -> None:
+        await asyncio.sleep(60)
+
+    async def inject_task() -> asyncio.Task[None]:
+        state = _ensure_execution_state(session.id)
+        task = asyncio.create_task(long_sleep())
+        state.execution_task = task
+        return task
+
+    with client:
+        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws:
+            ws.send_json(
+                {
+                    "type": "notebook_sync",
+                    "seq": 1,
+                    "ts": "2026-05-25T00:00:00Z",
+                    "payload": {},
+                }
+            )
+            ws.receive_json()
+            captured["task"] = client.portal.call(inject_task)
+
+        # Inside grace window: task is still alive.
+        assert not captured["task"].done(), (
+            "execution task was cancelled before the grace window expired"
+        )
+        assert _notebook_execution_state.get(session.id) is not None
+
+        # Reconnect cancels the pending teardown — task stays alive.
+        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws:
+            ws.send_json(
+                {
+                    "type": "notebook_sync",
+                    "seq": 1,
+                    "ts": "2026-05-25T00:00:00Z",
+                    "payload": {},
+                }
+            )
+            ws.receive_json()
+            assert not captured["task"].done()
+            assert _notebook_execution_state.get(session.id) is not None
+
+        # Test cleanup — cancel the injected long-running task so the
+        # next test's loop doesn't inherit it.
+        async def _cancel_injected(task: asyncio.Task[None]) -> None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                # Cancellation is the expected path — the test injected a
+                # bare ``asyncio.sleep(60)`` whose only normal exit is
+                # ``CancelledError``. Any other exception should surface so
+                # we notice if cleanup behavior regresses.
+                pass
+
+        client.portal.call(_cancel_injected, captured["task"])
+
+
+def test_grace_window_expiry_cancels_active_execution(client, temp_notebook, app, monkeypatch):
+    """Past the grace window with no reconnect, the running execution task is cancelled."""
+    notebook_dir, _ = temp_notebook
+
+    from strata.notebook.routes import get_session_manager
+    from strata.notebook.ws import (
+        _ensure_execution_state,
+        _notebook_execution_state,
+        _notebook_grace_tasks,
+    )
+
+    monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 0.1)
+
+    session_manager = get_session_manager()
+    session = session_manager.open_notebook(notebook_dir)
+
+    captured: dict[str, asyncio.Task[None]] = {}
+
+    async def long_sleep() -> None:
+        await asyncio.sleep(60)
+
+    async def inject_task() -> asyncio.Task[None]:
+        state = _ensure_execution_state(session.id)
+        task = asyncio.create_task(long_sleep())
+        state.execution_task = task
+        return task
+
+    with client:
+        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws:
+            ws.send_json(
+                {
+                    "type": "notebook_sync",
+                    "seq": 1,
+                    "ts": "2026-05-25T00:00:00Z",
+                    "payload": {},
+                }
+            )
+            ws.receive_json()
+            captured["task"] = client.portal.call(inject_task)
+
+        assert not captured["task"].done()
+        assert session.id in _notebook_grace_tasks
+
+        # Poll for the grace task to fire and cancel the execution.
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            if captured["task"].done() and session.id not in _notebook_execution_state:
+                break
+            time.sleep(0.02)
+
+        assert captured["task"].done()
+        assert captured["task"].cancelled()
+        assert session.id not in _notebook_execution_state
+        assert session.id not in _notebook_grace_tasks
+
+
 def test_cell_source_update(client, temp_notebook, app):
     """Test cell_source_update triggers DAG recomputation."""
     notebook_dir, notebook_state = temp_notebook

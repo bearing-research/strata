@@ -103,6 +103,15 @@ _notebook_execution_state: dict[str, NotebookExecutionState] = {}
 # Per-notebook inspect managers
 _notebook_inspect_managers: dict[str, InspectManager] = {}
 
+# Pending "cancel after grace period" tasks. When the last WS disconnects
+# we don't tear down execution + inspect state immediately — the user may
+# be reconnecting after a tmux detach / VPN blip / browser refresh, and
+# cancelling a long-running cell because of that is bad UX. We schedule a
+# grace-period task instead, and any incoming WS upgrade for the same
+# notebook cancels the pending teardown.
+_notebook_grace_tasks: dict[str, asyncio.Task[None]] = {}
+_GRACE_CANCEL_SECONDS = 60.0
+
 
 def _get_session_manager() -> SessionManager:
     """Get the session manager from routes module."""
@@ -394,24 +403,13 @@ async def _release_execution_request(
             execution_state.requested_cell = None
 
 
-async def _cleanup_notebook_websocket(
-    notebook_id: str,
-    websocket: WebSocket,
-) -> None:
-    """Remove a WebSocket and clean notebook-scoped runtime state if needed."""
-    connections = _notebook_connections.get(notebook_id)
-    if connections is None:
-        return
+async def _tear_down_notebook_state(notebook_id: str) -> None:
+    """Cancel the active execution task and drop inspect/exec state.
 
-    try:
-        connections.remove(websocket)
-    except ValueError:
-        pass
-
-    if connections:
-        return
-
-    del _notebook_connections[notebook_id]
+    Split out of ``_cleanup_notebook_websocket`` so the grace-period task
+    can call it after the reconnect window expires. Idempotent — safe to
+    call when state has already been drained.
+    """
     execution_state = _notebook_execution_state.get(notebook_id)
     if execution_state is not None:
         task = execution_state.active_task()
@@ -429,6 +427,89 @@ async def _cleanup_notebook_websocket(
                 "Failed to close inspect sessions during cleanup for notebook %s",
                 notebook_id,
             )
+
+
+async def _grace_cancel_then_tear_down(notebook_id: str, grace_seconds: float) -> None:
+    """Wait the grace window, then drop notebook state if nobody reconnected.
+
+    Spawned as a background task by ``_cleanup_notebook_websocket`` when
+    the last WS for a notebook disconnects. A reconnect during the
+    window cancels this task before it fires; otherwise the running cell
+    is cancelled and execution / inspect state is dropped.
+    """
+    try:
+        await asyncio.sleep(grace_seconds)
+    except asyncio.CancelledError:
+        # A new client reconnected during the grace window; preserve
+        # state by exiting before the teardown runs.
+        raise
+    if _notebook_connections.get(notebook_id):
+        # Defense-in-depth: a reconnect happened but the cancellation
+        # raced; the task scheduler dropped the cancel. Honor the
+        # connections list as the source of truth.
+        return
+    try:
+        await _tear_down_notebook_state(notebook_id)
+    finally:
+        _notebook_grace_tasks.pop(notebook_id, None)
+
+
+async def _cleanup_notebook_websocket(
+    notebook_id: str,
+    websocket: WebSocket,
+) -> None:
+    """Remove a WebSocket and schedule notebook teardown if it was the last one."""
+    connections = _notebook_connections.get(notebook_id)
+    if connections is None:
+        return
+
+    try:
+        connections.remove(websocket)
+    except ValueError:
+        # Already removed — concurrent cleanup paths (server shutdown,
+        # repeated disconnect) can race here. The removal is idempotent.
+        pass
+
+    if connections:
+        return
+
+    del _notebook_connections[notebook_id]
+
+    # Don't tear down immediately — give the client a chance to reconnect
+    # within the grace window (tmux detach, VPN blip, browser refresh).
+    # Replace any existing grace task; the scheduler will discard the
+    # old one when garbage-collected.
+    existing = _notebook_grace_tasks.pop(notebook_id, None)
+    if existing is not None and not existing.done():
+        existing.cancel()
+
+    if _GRACE_CANCEL_SECONDS <= 0:
+        # Tests opt into immediate teardown by zeroing the grace window;
+        # also covers server-shutdown paths where deferring would leak.
+        await _tear_down_notebook_state(notebook_id)
+        return
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop (e.g. shutdown without a live loop) — tear down inline.
+        await _tear_down_notebook_state(notebook_id)
+        return
+    _notebook_grace_tasks[notebook_id] = loop.create_task(
+        _grace_cancel_then_tear_down(notebook_id, _GRACE_CANCEL_SECONDS)
+    )
+
+
+def _cancel_pending_grace_teardown(notebook_id: str) -> None:
+    """Abort any pending teardown task for ``notebook_id``.
+
+    Called from the WS upgrade handler when a new client reconnects to a
+    notebook that's mid-grace-period. Preserves the running execution
+    task + inspect sessions across the disconnect.
+    """
+    task = _notebook_grace_tasks.pop(notebook_id, None)
+    if task is not None and not task.done():
+        task.cancel()
 
 
 # ============================================================================
@@ -504,6 +585,11 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
 
     # Accept connection
     await websocket.accept()
+
+    # If a previous client disconnected within the grace window and the
+    # cell is still running, abort the pending teardown so we keep the
+    # execution alive for this reconnect.
+    _cancel_pending_grace_teardown(notebook_id)
 
     # Add to connections list
     if notebook_id not in _notebook_connections:

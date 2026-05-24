@@ -96,6 +96,12 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
     if not request.node.get_closest_marker("warm_pool"):
         monkeypatch.setattr("strata.notebook.pool.WarmProcessPool.start", _noop_start)
 
+    # The production WS handler holds onto execution + inspect state for
+    # 60s after the last disconnect so a reconnecting client doesn't lose
+    # a running cell. In tests we want the teardown to fire immediately
+    # on context exit unless a specific test exercises the grace window.
+    monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 0.0)
+
     if request.node.get_closest_marker("integration"):
         return
 
