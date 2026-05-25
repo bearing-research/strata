@@ -17,7 +17,6 @@ from strata.notebook.writer import (
     write_cell,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures + helpers
 # ---------------------------------------------------------------------------
@@ -66,9 +65,7 @@ def set_server_state(monkeypatch, **config):
     """
     monkeypatch.setattr(
         "strata.server._state",
-        SimpleNamespace(
-            config=SimpleNamespace(**{"transforms_config": {}, **config})
-        ),
+        SimpleNamespace(config=SimpleNamespace(**{"transforms_config": {}, **config})),
     )
 
 
@@ -562,9 +559,7 @@ def test_delete_by_path_removes_directory_without_session(client, tmp_path):
     notebook_dir = create_notebook(tmp_path, "Forgotten Notebook")
     assert notebook_dir.exists()
 
-    response = client.post(
-        "/v1/notebooks/delete-by-path", json={"path": str(notebook_dir)}
-    )
+    response = client.post("/v1/notebooks/delete-by-path", json={"path": str(notebook_dir)})
 
     assert response.status_code == 200
     data = response.json()
@@ -577,9 +572,7 @@ def test_delete_by_path_closes_open_session_before_removal(client, tmp_path):
     notebook_dir = create_notebook(tmp_path, "Open And Delete")
     session_id = open_session_id(client, notebook_dir)
 
-    response = client.post(
-        "/v1/notebooks/delete-by-path", json={"path": str(notebook_dir)}
-    )
+    response = client.post("/v1/notebooks/delete-by-path", json={"path": str(notebook_dir)})
 
     assert response.status_code == 200
     assert not notebook_dir.exists()
@@ -624,9 +617,7 @@ def test_delete_by_path_rejects_service_mode(client, deployment_mode_state, tmp_
     notebook_dir = create_notebook(tmp_path, "Service Path Delete")
     deployment_mode_state("service")
 
-    response = client.post(
-        "/v1/notebooks/delete-by-path", json={"path": str(notebook_dir)}
-    )
+    response = client.post("/v1/notebooks/delete-by-path", json={"path": str(notebook_dir)})
 
     assert response.status_code == 403
     assert notebook_dir.exists()
@@ -972,9 +963,7 @@ def test_update_notebook_worker(client, tmp_path):
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
 
-    response = client.put(
-        f"/v1/notebooks/{session_id}/worker", json={"worker": "gpu-default"}
-    )
+    response = client.put(f"/v1/notebooks/{session_id}/worker", json={"worker": "gpu-default"})
 
     assert response.status_code == 200
     data = response.json()
@@ -1113,9 +1102,7 @@ def test_list_notebook_workers_in_service_mode(client, service_mode_worker_state
     data = response.json()
     assert data["definitions_editable"] is False
     assert any(
-        worker["name"] == "gpu-a100"
-        and worker["source"] == "server"
-        and worker["allowed"] is True
+        worker["name"] == "gpu-a100" and worker["source"] == "server" and worker["allowed"] is True
         for worker in data["workers"]
     )
 
@@ -1185,15 +1172,11 @@ def test_update_notebook_worker_requires_allowlisted_service_worker(
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
 
-    blocked = client.put(
-        f"/v1/notebooks/{session_id}/worker", json={"worker": "gpu-shadow"}
-    )
+    blocked = client.put(f"/v1/notebooks/{session_id}/worker", json={"worker": "gpu-shadow"})
     assert blocked.status_code == 403
     assert "not allowed in service mode" in blocked.json()["detail"]
 
-    allowed = client.put(
-        f"/v1/notebooks/{session_id}/worker", json={"worker": "gpu-a100"}
-    )
+    allowed = client.put(f"/v1/notebooks/{session_id}/worker", json={"worker": "gpu-a100"})
     assert allowed.status_code == 200
     payload = allowed.json()
     assert payload["worker"] == "gpu-a100"
@@ -1219,17 +1202,13 @@ def test_update_notebook_worker_rejects_disabled_service_worker(
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
 
-    blocked = client.put(
-        f"/v1/notebooks/{session_id}/worker", json={"worker": "gpu-a100"}
-    )
+    blocked = client.put(f"/v1/notebooks/{session_id}/worker", json={"worker": "gpu-a100"})
 
     assert blocked.status_code == 403
     assert "disabled by server policy" in blocked.json()["detail"]
 
 
-def test_update_notebook_workers_probes_executor_health(
-    client, notebook_executor_server, tmp_path
-):
+def test_update_notebook_workers_probes_executor_health(client, notebook_executor_server, tmp_path):
     """Configured notebook workers should surface healthy executor probes."""
     notebook_dir = create_notebook(tmp_path, "Worker Health Test")
     session_id = open_session_id(client, notebook_dir)
@@ -1251,8 +1230,7 @@ def test_update_notebook_workers_probes_executor_health(
     assert response.status_code == 200
     data = response.json()
     assert any(
-        worker["name"] == "gpu-a100" and worker["health"] == "healthy"
-        for worker in data["workers"]
+        worker["name"] == "gpu-a100" and worker["health"] == "healthy" for worker in data["workers"]
     )
 
 
@@ -1262,9 +1240,7 @@ def test_update_notebook_timeout_and_env(client, tmp_path):
     add_cell_to_notebook(notebook_dir, "cell-1")
     session_id = open_session_id(client, notebook_dir)
 
-    timeout_response = client.put(
-        f"/v1/notebooks/{session_id}/timeout", json={"timeout": 7.5}
-    )
+    timeout_response = client.put(f"/v1/notebooks/{session_id}/timeout", json={"timeout": 7.5})
     assert timeout_response.status_code == 200
     assert timeout_response.json()["timeout"] == 7.5
 
@@ -1316,9 +1292,7 @@ def test_update_cell_source(client, tmp_path):
     session_id = open_session_id(client, notebook_dir)
 
     new_source = "x = 2 + 2"
-    response = client.put(
-        f"/v1/notebooks/{session_id}/cells/cell-1", json={"source": new_source}
-    )
+    response = client.put(f"/v1/notebooks/{session_id}/cells/cell-1", json={"source": new_source})
 
     assert response.status_code == 200
     assert response.json()["cell"]["source"] == new_source
@@ -1376,9 +1350,7 @@ def test_rename_notebook(client, tmp_path):
     notebook_dir = create_notebook(tmp_path, "Original Name")
     session_id = open_session_id(client, notebook_dir)
 
-    response = client.put(
-        f"/v1/notebooks/{session_id}/name", json={"name": "New Name"}
-    )
+    response = client.put(f"/v1/notebooks/{session_id}/name", json={"name": "New Name"})
 
     assert response.status_code == 200
     assert response.json()["name"] == "New Name"
@@ -1389,9 +1361,7 @@ def test_rename_notebook_rejects_blank_name(client, tmp_path):
     notebook_dir = create_notebook(tmp_path, "Original Name")
     session_id = open_session_id(client, notebook_dir)
 
-    response = client.put(
-        f"/v1/notebooks/{session_id}/name", json={"name": "   "}
-    )
+    response = client.put(f"/v1/notebooks/{session_id}/name", json={"name": "   "})
 
     assert response.status_code == 422
 
@@ -1553,9 +1523,7 @@ class TestCellIterationsEndpoint:
             iteration=0,
         )
 
-        response = client.get(
-            f"/v1/notebooks/{session_id}/cells/loop/iterations?variable=other"
-        )
+        response = client.get(f"/v1/notebooks/{session_id}/cells/loop/iterations?variable=other")
 
         assert response.status_code == 200
         payload = response.json()
@@ -1613,9 +1581,7 @@ class TestPersonalModeUserScoping:
         """``/config`` returns ``<base>/<user>`` so the frontend creates there."""
         configured_state(tmp_path)
 
-        response = client.get(
-            "/v1/notebooks/config", headers={self.HEADER: "alice@example.com"}
-        )
+        response = client.get("/v1/notebooks/config", headers={self.HEADER: "alice@example.com"})
 
         assert response.status_code == 200
         expected = self._user_subdir(tmp_path, "alice@example.com").resolve()
@@ -1672,9 +1638,7 @@ class TestPersonalModeUserScoping:
             headers={self.HEADER: "bob@example.com"},
         )
 
-        response = client.get(
-            "/v1/notebooks/discover", headers={self.HEADER: "alice@example.com"}
-        )
+        response = client.get("/v1/notebooks/discover", headers={self.HEADER: "alice@example.com"})
 
         assert response.status_code == 200
         names = {nb["name"] for nb in response.json()["notebooks"]}
@@ -1880,9 +1844,7 @@ def test_update_notebook_connections_preserves_unknown_driver_extras(client, tmp
         "future_extra": "preserve-me",
         "auth": {"user": "${SF_USER}", "api_token": "${SF_TOKEN}"},
     }
-    resp = client.put(
-        f"/v1/notebooks/{nb_id}/connections", json={"connections": [body]}
-    )
+    resp = client.put(f"/v1/notebooks/{nb_id}/connections", json={"connections": [body]})
 
     assert resp.status_code == 200, resp.text
     out = resp.json()["connections"][0]
