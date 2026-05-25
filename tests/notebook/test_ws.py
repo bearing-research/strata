@@ -26,87 +26,151 @@ _MINIMAL_PNG_LITERAL = (
 )
 _MARKDOWN_LITERAL = '"# Title\\n\\nRendered over websocket."'
 
+# Sentinel timestamp for protocol envelopes. No test asserts on the value;
+# the date is arbitrary and uniform so we don't reintroduce drift like the
+# 2026-03-23 / 2026-03-30 / 2026-05-25 spread the file used to carry.
+_TS = "2026-01-01T00:00:00Z"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def open_session(notebook_dir):
+    """Open a notebook session via the route layer."""
+    from strata.notebook.routes import get_session_manager
+
+    return get_session_manager().open_notebook(notebook_dir)
+
+
+def ws_send(websocket, msg_type, payload=None, *, seq=1):
+    """Send a notebook WS protocol message with the standard envelope.
+
+    Centralizes the ``{type, seq, ts, payload}`` shape every emit site used to
+    build inline. The timestamp is a sentinel — tests don't assert on it.
+    """
+    websocket.send_json(
+        {
+            "type": msg_type,
+            "seq": seq,
+            "ts": _TS,
+            "payload": payload if payload is not None else {},
+        }
+    )
+
+
+def receive_message_type(websocket, msg_type, *, max_messages=20):
+    """Drain frames until one matches ``msg_type`` (str or iterable of str)."""
+    accepted = {msg_type} if isinstance(msg_type, str) else set(msg_type)
+    for _ in range(max_messages):
+        response = websocket.receive_json()
+        if response["type"] in accepted:
+            return response
+    raise AssertionError(f"Did not receive {msg_type} within {max_messages} messages")
+
+
+def receive_execution_terminal(websocket, cell_id: str) -> tuple[dict, dict]:
+    """Collect the output/error message and terminal status for one execution."""
+    output_message = None
+    terminal_status = None
+
+    for _ in range(20):
+        response = websocket.receive_json()
+        if (
+            response["type"] in ("cell_output", "cell_error")
+            and response.get("payload", {}).get("cell_id") == cell_id
+        ):
+            output_message = response
+        if (
+            response["type"] == "cell_status"
+            and response["payload"].get("cell_id") == cell_id
+            and response["payload"]["status"] in ("ready", "error")
+        ):
+            terminal_status = response
+            break
+
+    assert output_message is not None
+    assert terminal_status is not None
+    return output_message, terminal_status
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def temp_notebook():
-    """Create a temporary notebook with simple cells."""
+    """Create a temporary notebook with three linear cells (x → y → z)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-
-        # Create notebook structure
         notebook_dir = create_notebook(tmpdir, "test_notebook")
 
-        # Create simple cells
-        cells_data = [
-            ("root", "x = 1"),
-            ("middle", "y = x + 1"),
-            ("leaf", "z = y + 1"),
-        ]
-
-        for cell_id, source in cells_data:
+        for cell_id, source in (("root", "x = 1"), ("middle", "y = x + 1"), ("leaf", "z = y + 1")):
             add_cell_to_notebook(notebook_dir, cell_id)
             write_cell(notebook_dir, cell_id, source)
 
-        # Parse the notebook
         notebook_state = parse_notebook(notebook_dir)
-
         yield notebook_dir, notebook_state
 
 
 @pytest.fixture
+def notebook_session(temp_notebook):
+    """Open a session over ``temp_notebook`` and yield (notebook_dir, session).
+
+    The common-case fixture for WS tests. Use ``temp_notebook`` + ``open_session``
+    explicitly when the test must mutate cells (e.g. overwrite ``root``) before
+    the session resolves.
+    """
+    notebook_dir, _ = temp_notebook
+    yield notebook_dir, open_session(notebook_dir)
+
+
+@pytest.fixture(scope="module")
 def app():
-    """Create FastAPI test app with notebook routes."""
+    """FastAPI app with notebook routes. Module-scoped — the router is stateless."""
     from fastapi import FastAPI
 
     from strata.notebook.routes import router as notebook_router
     from strata.notebook.ws import router as notebook_ws_router
 
-    app = FastAPI()
-    app.include_router(notebook_router)
-    app.include_router(notebook_ws_router)
-
-    return app
+    fastapi_app = FastAPI()
+    fastapi_app.include_router(notebook_router)
+    fastapi_app.include_router(notebook_ws_router)
+    return fastapi_app
 
 
 @pytest.fixture
 def client(app):
-    """Create TestClient for the app."""
+    """TestClient bound to the module-scoped app."""
     return TestClient(app)
 
 
-def test_notebook_sync(client, temp_notebook, app):
-    """Test notebook_sync message returns full notebook state."""
-    notebook_dir, notebook_state = temp_notebook
+def _ws(client, session):
+    """Shorthand for ``client.websocket_connect`` against a notebook session."""
+    return client.websocket_connect(f"/v1/notebooks/ws/{session.id}")
 
-    # Register notebook with session manager
-    from strata.notebook.routes import get_session_manager
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
 
-    # Connect WebSocket
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        # Send notebook_sync
-        websocket.send_json(
-            {
-                "type": "notebook_sync",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {},
-            }
-        )
 
-        # Receive notebook_state
+def test_notebook_sync(client, notebook_session):
+    """notebook_sync returns a full notebook state snapshot."""
+    _, session = notebook_session
+
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "notebook_sync")
         response = websocket.receive_json()
-        assert response["type"] == "notebook_state"
-        assert "payload" in response
-        state = response["payload"]
-        assert "id" in state
-        assert "cells" in state
-        assert "dag" in state
+
+    assert response["type"] == "notebook_state"
+    state = response["payload"]
+    assert {"id", "cells", "dag"} <= state.keys()
 
 
-def test_serialize_dag_edges_uses_frontend_field_names(temp_notebook):
+def test_serialize_dag_edges_uses_frontend_field_names(notebook_session):
     """Edges sent to the frontend must use ``from_cell_id`` / ``to_cell_id``.
 
     Regression for a field-name drift in ``broadcast_notebook_sync`` (used by
@@ -116,12 +180,7 @@ def test_serialize_dag_edges_uses_frontend_field_names(temp_notebook):
     cell lookup and the DAG view rendered as disconnected nodes after every
     agent edit until the user hard-refreshed.
     """
-    from strata.notebook.routes import get_session_manager
-
-    notebook_dir, _ = temp_notebook
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
+    _, session = notebook_session
     edges = session.dag.serialize_edges() if session.dag else []
     assert edges, "fixture defines x->y->z, expected at least one DAG edge"
     for edge in edges:
@@ -130,7 +189,7 @@ def test_serialize_dag_edges_uses_frontend_field_names(temp_notebook):
         )
 
 
-def test_broadcast_notebook_sync_emits_correct_edge_field_names(temp_notebook):
+def test_broadcast_notebook_sync_emits_correct_edge_field_names(notebook_session):
     """End-to-end: ``broadcast_notebook_sync`` must put correctly-keyed edges on the wire.
 
     Same regression as above but exercises the full agent-broadcast path: a
@@ -138,16 +197,11 @@ def test_broadcast_notebook_sync_emits_correct_edge_field_names(temp_notebook):
     this test ever flips back to ``from`` / ``to``, the agent edit flow has
     drifted again and the DAG view will silently break.
     """
-    import asyncio
     import json
 
-    from strata.notebook.routes import get_session_manager
     from strata.notebook.ws import _notebook_connections, broadcast_notebook_sync
 
-    notebook_dir, _ = temp_notebook
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
+    _, session = notebook_session
     captured: list[dict] = []
 
     class FakeWebSocket:
@@ -172,15 +226,12 @@ def test_broadcast_notebook_sync_emits_correct_edge_field_names(temp_notebook):
         )
 
 
-def test_notebook_sync_includes_causality_and_staleness(client, temp_notebook, app):
+def test_notebook_sync_includes_causality_and_staleness(client, temp_notebook):
     """notebook_sync should return enriched cell state, not just bare DAG fields."""
-    notebook_dir, _ = temp_notebook
-
     from strata.notebook.executor import CellExecutor
-    from strata.notebook.routes import get_session_manager
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    notebook_dir, _ = temp_notebook
+    session = open_session(notebook_dir)
 
     async def _prime() -> None:
         executor = CellExecutor(session)
@@ -193,65 +244,49 @@ def test_notebook_sync_includes_causality_and_staleness(client, temp_notebook, a
 
     asyncio.run(_prime())
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "notebook_sync",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {},
-            }
-        )
-
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "notebook_sync")
         response = websocket.receive_json()
-        assert response["type"] == "notebook_state"
-        state = response["payload"]
-        root = next(cell for cell in state["cells"] if cell["id"] == "root")
 
-        assert root["status"] == "idle"
-        assert "staleness_reasons" in root
-        assert root["causality"]["reason"] == "self"
+    assert response["type"] == "notebook_state"
+    root = next(cell for cell in response["payload"]["cells"] if cell["id"] == "root")
+    assert root["status"] == "idle"
+    assert "staleness_reasons" in root
+    assert root["causality"]["reason"] == "self"
 
 
 def test_notebook_sync_includes_remote_execution_metadata(
     client,
     temp_notebook,
-    app,
     notebook_executor_server,
     notebook_build_server,
 ):
     """Notebook sync should retain remote execution metadata from the live session."""
-    notebook_dir, _ = temp_notebook
-
     from strata.notebook.executor import CellExecutor
     from strata.notebook.models import WorkerBackendType, WorkerSpec
-    from strata.notebook.routes import get_session_manager
 
+    notebook_dir, _ = temp_notebook
+    worker_config = {
+        "url": notebook_executor_server["execute_url"],
+        "transport": "signed",
+        "strata_url": notebook_build_server["base_url"],
+    }
     notebook_build_server["config"].transforms_config["notebook_workers"] = [
         {
             "name": "gpu-http-signed",
             "backend": "executor",
             "runtime_id": "gpu-http-signed-a100",
-            "config": {
-                "url": notebook_executor_server["execute_url"],
-                "transport": "signed",
-                "strata_url": notebook_build_server["base_url"],
-            },
+            "config": worker_config,
         }
     ]
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    session = open_session(notebook_dir)
     session.notebook_state.workers = [
         WorkerSpec(
             name="gpu-http-signed",
             backend=WorkerBackendType.EXECUTOR,
             runtime_id="gpu-http-signed-a100",
-            config={
-                "url": notebook_executor_server["execute_url"],
-                "transport": "signed",
-                "strata_url": notebook_build_server["base_url"],
-            },
+            config=worker_config,
         )
     ]
     root = next(c for c in session.notebook_state.cells if c.id == "root")
@@ -263,73 +298,42 @@ def test_notebook_sync_includes_remote_execution_metadata(
 
     asyncio.run(_prime())
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "notebook_sync",
-                "seq": 1,
-                "ts": "2026-03-30T00:00:00Z",
-                "payload": {},
-            }
-        )
-
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "notebook_sync")
         response = websocket.receive_json()
-        assert response["type"] == "notebook_state"
-        state = response["payload"]
-        root = next(cell for cell in state["cells"] if cell["id"] == "root")
 
-        assert root["execution_method"] == "executor"
-        assert root["remote_worker"] == "gpu-http-signed"
-        assert root["remote_transport"] == "signed"
-        assert isinstance(root["remote_build_id"], str)
-        assert root["remote_build_state"] == "ready"
-        assert root["remote_error_code"] is None
-
-
-def test_cell_execute_no_cascade(client, temp_notebook, app):
-    """Test cell_execute on a root cell (no cascade needed)."""
-    notebook_dir, notebook_state = temp_notebook
-
-    # Register notebook
-    from strata.notebook.routes import get_session_manager
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    # Connect WebSocket
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        # Find root cell
-        root_cell = next((c for c in session.notebook_state.cells if c.upstream_ids == []), None)
-        if not root_cell:
-            # If no root (no DAG), just pick first cell
-            root_cell = session.notebook_state.cells[0]
-
-        # Send cell_execute
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": root_cell.id},
-            }
-        )
-
-        # Should receive cell_status(running)
-        response = websocket.receive_json()
-        assert response["type"] == "cell_status"
-        assert response["payload"]["status"] == "running"
-
-        # Should receive cell_output or cell_error
-        response = websocket.receive_json()
-        assert response["type"] in ["cell_output", "cell_error"]
+    assert response["type"] == "notebook_state"
+    root = next(cell for cell in response["payload"]["cells"] if cell["id"] == "root")
+    assert root["execution_method"] == "executor"
+    assert root["remote_worker"] == "gpu-http-signed"
+    assert root["remote_transport"] == "signed"
+    assert isinstance(root["remote_build_id"], str)
+    assert root["remote_build_state"] == "ready"
+    assert root["remote_error_code"] is None
 
 
-def test_cell_execute_emits_explicit_display_payload(client, temp_notebook, app):
+def test_cell_execute_no_cascade(client, notebook_session):
+    """cell_execute on a root cell does not trigger cascade."""
+    _, session = notebook_session
+    root_cell = next(
+        (c for c in session.notebook_state.cells if not c.upstream_ids),
+        session.notebook_state.cells[0],
+    )
+
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": root_cell.id})
+
+        running = websocket.receive_json()
+        assert running["type"] == "cell_status"
+        assert running["payload"]["status"] == "running"
+
+        result = websocket.receive_json()
+        assert result["type"] in ("cell_output", "cell_error")
+
+
+def test_cell_execute_emits_explicit_display_payload(client, temp_notebook):
     """Image-like last-expression results should be sent in the dedicated display payload."""
     notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
-
     write_cell(
         notebook_dir,
         "root",
@@ -341,36 +345,23 @@ class Display:
 Display()
 """,
     )
+    session = open_session(notebook_dir)
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": "root"})
+        output_message, terminal_status = receive_execution_terminal(websocket, "root")
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": "root"},
-            }
-        )
-
-        output_message, terminal_status = _receive_execution_terminal_messages(websocket, "root")
-
-        assert output_message["type"] == "cell_output"
-        assert output_message["payload"]["display"]["content_type"] == "image/png"
-        assert output_message["payload"]["display"]["inline_data_url"].startswith(
-            "data:image/png;base64,"
-        )
-        assert terminal_status["payload"]["status"] == "ready"
+    assert output_message["type"] == "cell_output"
+    assert output_message["payload"]["display"]["content_type"] == "image/png"
+    assert output_message["payload"]["display"]["inline_data_url"].startswith(
+        "data:image/png;base64,"
+    )
+    assert terminal_status["payload"]["status"] == "ready"
 
 
-def test_cell_execute_emits_explicit_markdown_display_payload(client, temp_notebook, app):
+def test_cell_execute_emits_explicit_markdown_display_payload(client, temp_notebook):
     """Markdown last-expression results should be sent in the dedicated display payload."""
     notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
-
     write_cell(
         notebook_dir,
         "root",
@@ -382,37 +373,24 @@ class Display:
 Display()
 """,
     )
+    session = open_session(notebook_dir)
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": "root"})
+        output_message, terminal_status = receive_execution_terminal(websocket, "root")
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": "root"},
-            }
-        )
-
-        output_message, terminal_status = _receive_execution_terminal_messages(websocket, "root")
-
-        assert output_message["type"] == "cell_output"
-        assert output_message["payload"]["display"]["content_type"] == "text/markdown"
-        assert (
-            output_message["payload"]["display"]["markdown_text"]
-            == "# Title\n\nRendered over websocket."
-        )
-        assert terminal_status["payload"]["status"] == "ready"
+    assert output_message["type"] == "cell_output"
+    assert output_message["payload"]["display"]["content_type"] == "text/markdown"
+    assert (
+        output_message["payload"]["display"]["markdown_text"]
+        == "# Title\n\nRendered over websocket."
+    )
+    assert terminal_status["payload"]["status"] == "ready"
 
 
-def test_cell_execute_emits_display_side_effect_payload(client, temp_notebook, app):
+def test_cell_execute_emits_display_side_effect_payload(client, temp_notebook):
     """display(...) side effects should be surfaced through the websocket display payload."""
     notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
-
     write_cell(
         notebook_dir,
         "root",
@@ -420,37 +398,23 @@ def test_cell_execute_emits_display_side_effect_payload(client, temp_notebook, a
 display(Markdown("# Side effect\\n\\nVia websocket."))
 """,
     )
+    session = open_session(notebook_dir)
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": "root"})
+        output_message, terminal_status = receive_execution_terminal(websocket, "root")
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": "root"},
-            }
-        )
-
-        output_message, terminal_status = _receive_execution_terminal_messages(websocket, "root")
-
-        assert output_message["type"] == "cell_output"
-        assert output_message["payload"]["display"]["content_type"] == "text/markdown"
-        assert (
-            output_message["payload"]["display"]["markdown_text"]
-            == "# Side effect\n\nVia websocket."
-        )
-        assert terminal_status["payload"]["status"] == "ready"
+    assert output_message["type"] == "cell_output"
+    assert output_message["payload"]["display"]["content_type"] == "text/markdown"
+    assert (
+        output_message["payload"]["display"]["markdown_text"] == "# Side effect\n\nVia websocket."
+    )
+    assert terminal_status["payload"]["status"] == "ready"
 
 
-def test_cell_execute_emits_multiple_display_payloads_in_order(client, temp_notebook, app):
+def test_cell_execute_emits_multiple_display_payloads_in_order(client, temp_notebook):
     """Ordered visible outputs should be sent together, with the last one preserved as display."""
     notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
-
     write_cell(
         notebook_dir,
         "root",
@@ -459,42 +423,30 @@ display(Markdown("# First"))
 42
 """,
     )
+    session = open_session(notebook_dir)
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": "root"})
+        output_message, terminal_status = receive_execution_terminal(websocket, "root")
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": "root"},
-            }
-        )
-
-        output_message, terminal_status = _receive_execution_terminal_messages(websocket, "root")
-
-        assert output_message["type"] == "cell_output"
-        assert len(output_message["payload"]["displays"]) == 2
-        assert output_message["payload"]["displays"][0]["content_type"] == "text/markdown"
-        assert output_message["payload"]["displays"][0]["markdown_text"] == "# First"
-        assert output_message["payload"]["displays"][1]["content_type"] == "json/object"
-        assert output_message["payload"]["displays"][1]["preview"] == 42
-        assert output_message["payload"]["display"]["content_type"] == "json/object"
-        assert output_message["payload"]["display"]["preview"] == 42
-        assert terminal_status["payload"]["status"] == "ready"
+    payload = output_message["payload"]
+    assert output_message["type"] == "cell_output"
+    assert len(payload["displays"]) == 2
+    assert payload["displays"][0]["content_type"] == "text/markdown"
+    assert payload["displays"][0]["markdown_text"] == "# First"
+    assert payload["displays"][1]["content_type"] == "json/object"
+    assert payload["displays"][1]["preview"] == 42
+    assert payload["display"]["content_type"] == "json/object"
+    assert payload["display"]["preview"] == 42
+    assert terminal_status["payload"]["status"] == "ready"
 
 
-def test_cell_execute_refreshes_downstream_staleness(client, temp_notebook, app):
+def test_cell_execute_refreshes_downstream_staleness(client, temp_notebook):
     """Successful execution should immediately invalidate downstream cell state."""
-    notebook_dir, _ = temp_notebook
-
     from strata.notebook.executor import CellExecutor
-    from strata.notebook.routes import get_session_manager
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    notebook_dir, _ = temp_notebook
+    session = open_session(notebook_dir)
 
     async def _prime() -> None:
         executor = CellExecutor(session)
@@ -510,53 +462,29 @@ def test_cell_execute_refreshes_downstream_staleness(client, temp_notebook, app)
     write_cell(notebook_dir, "root", "x = 2")
     session.re_analyze_cell("root")
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": "root"},
-            }
-        )
-
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": "root"})
         messages = [websocket.receive_json() for _ in range(5)]
-        status_updates = [msg["payload"] for msg in messages if msg["type"] == "cell_status"]
 
-        assert any(p["cell_id"] == "root" and p["status"] == "ready" for p in status_updates)
-        assert any(p["cell_id"] == "middle" and p["status"] == "idle" for p in status_updates)
-        assert any(p["cell_id"] == "leaf" and p["status"] == "idle" for p in status_updates)
+    status_updates = [msg["payload"] for msg in messages if msg["type"] == "cell_status"]
+    assert any(p["cell_id"] == "root" and p["status"] == "ready" for p in status_updates)
+    assert any(p["cell_id"] == "middle" and p["status"] == "idle" for p in status_updates)
+    assert any(p["cell_id"] == "leaf" and p["status"] == "idle" for p in status_updates)
 
 
-def test_cell_execute_surfaces_module_export_error(client, temp_notebook, app):
+def test_cell_execute_surfaces_module_export_error(client, temp_notebook):
     """Unsupported cross-cell code export should surface as a direct cell error."""
     notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
-
     # ``x = len([])`` is a non-literal runtime assignment; plain literal
     # constants (``x = 1``) would now export fine alongside the def.
-    write_cell(
-        notebook_dir,
-        "root",
-        "x = len([])\n\ndef add(y):\n    return x + y\n",
-    )
+    write_cell(notebook_dir, "root", "x = len([])\n\ndef add(y):\n    return x + y\n")
     write_cell(notebook_dir, "middle", "result = add(2)")
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    session = open_session(notebook_dir)
     session.re_analyze_cell("root")
     session.re_analyze_cell("middle")
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-31T00:00:00Z",
-                "payload": {"cell_id": "root"},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": "root"})
 
         running = websocket.receive_json()
         assert running["type"] == "cell_status"
@@ -575,29 +503,17 @@ def test_cell_execute_surfaces_module_export_error(client, temp_notebook, app):
         assert terminal["payload"]["status"] == "error"
 
 
-def test_cell_execute_surfaces_module_export_lambda_error(client, temp_notebook, app):
+def test_cell_execute_surfaces_module_export_lambda_error(client, temp_notebook):
     """The WS path should surface top-level lambda export errors clearly."""
     notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
-
     write_cell(notebook_dir, "root", "add = lambda y: y + 1\n")
     write_cell(notebook_dir, "middle", "result = add(2)")
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    session = open_session(notebook_dir)
     session.re_analyze_cell("root")
     session.re_analyze_cell("middle")
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-31T00:00:00Z",
-                "payload": {"cell_id": "root"},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": "root"})
 
         running = websocket.receive_json()
         assert running["type"] == "cell_status"
@@ -613,21 +529,18 @@ def test_cell_execute_surfaces_module_export_lambda_error(client, temp_notebook,
         assert terminal["payload"]["status"] == "error"
 
 
-def test_cell_execute_uses_warm_pool_when_available(client, temp_notebook, app, monkeypatch):
-    """Test the WebSocket path is wired to use the session warm pool."""
-    notebook_dir, _ = temp_notebook
-
+def test_cell_execute_uses_warm_pool_when_available(client, notebook_session, monkeypatch):
+    """The WebSocket path is wired to use the session warm pool."""
     from strata.notebook.executor import CellExecutor
     from strata.notebook.pool import PooledCellExecutor, WarmProcessPool
-    from strata.notebook.routes import get_session_manager
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    _, session = notebook_session
     session.warm_pool = cast(WarmProcessPool, object())
 
-    root_cell = next((c for c in session.notebook_state.cells if c.upstream_ids == []), None)
-    if not root_cell:
-        root_cell = session.notebook_state.cells[0]
+    root_cell = next(
+        (c for c in session.notebook_state.cells if not c.upstream_ids),
+        session.notebook_state.cells[0],
+    )
 
     warm_calls = 0
 
@@ -662,73 +575,23 @@ def test_cell_execute_uses_warm_pool_when_available(client, temp_notebook, app, 
         return True
 
     monkeypatch.setattr(
-        PooledCellExecutor,
-        "execute_with_pool",
-        staticmethod(fake_execute_with_pool),
+        PooledCellExecutor, "execute_with_pool", staticmethod(fake_execute_with_pool)
     )
     monkeypatch.setattr(CellExecutor, "_store_outputs", fake_store_outputs)
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": root_cell.id},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": root_cell.id})
+        output_message, final_status = receive_execution_terminal(websocket, root_cell.id)
 
-        output_message = None
-        final_status = None
-        for _ in range(10):
-            response = websocket.receive_json()
-            if response["type"] in ["cell_output", "cell_error"]:
-                output_message = response
-            if response["type"] == "cell_status" and response["payload"]["status"] in [
-                "ready",
-                "error",
-            ]:
-                final_status = response
-                break
-
-        assert output_message is not None
-        assert final_status is not None
-        assert output_message["type"] == "cell_output"
-        assert output_message["payload"]["execution_method"] == "warm"
-        assert warm_calls == 1
+    assert output_message["type"] == "cell_output"
+    assert output_message["payload"]["execution_method"] == "warm"
+    assert final_status["payload"]["status"] == "ready"
+    assert warm_calls == 1
 
 
-def _receive_execution_terminal_messages(websocket, cell_id: str) -> tuple[dict, dict]:
-    """Collect the output/error message and terminal status for one execution."""
-    output_message = None
-    terminal_status = None
-
-    for _ in range(20):
-        response = websocket.receive_json()
-        if (
-            response["type"] in ["cell_output", "cell_error"]
-            and response.get("payload", {}).get("cell_id") == cell_id
-        ):
-            output_message = response
-        if (
-            response["type"] == "cell_status"
-            and response["payload"].get("cell_id") == cell_id
-            and response["payload"]["status"] in ["ready", "error"]
-        ):
-            terminal_status = response
-            break
-
-    assert output_message is not None
-    assert terminal_status is not None
-    return output_message, terminal_status
-
-
-def test_notebook_run_all_emits_multiple_display_payloads_in_order(client, temp_notebook, app):
+def test_notebook_run_all_emits_multiple_display_payloads_in_order(client, temp_notebook):
     """Run-all should preserve ordered display payloads on the websocket path."""
     notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
-
     write_cell(
         notebook_dir,
         "root",
@@ -737,39 +600,27 @@ display(Markdown("# First"))
 42
 """,
     )
+    session = open_session(notebook_dir)
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "notebook_run_all")
+        output_message, terminal_status = receive_execution_terminal(websocket, "root")
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "notebook_run_all",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {},
-            }
-        )
-
-        output_message, terminal_status = _receive_execution_terminal_messages(websocket, "root")
-
-        assert output_message["type"] == "cell_output"
-        assert len(output_message["payload"]["displays"]) == 2
-        assert output_message["payload"]["displays"][0]["content_type"] == "text/markdown"
-        assert output_message["payload"]["displays"][0]["markdown_text"] == "# First"
-        assert output_message["payload"]["displays"][1]["content_type"] == "json/object"
-        assert output_message["payload"]["displays"][1]["preview"] == 42
-        assert output_message["payload"]["display"]["content_type"] == "json/object"
-        assert output_message["payload"]["display"]["preview"] == 42
-        assert terminal_status["payload"]["status"] == "ready"
+    payload = output_message["payload"]
+    assert output_message["type"] == "cell_output"
+    assert len(payload["displays"]) == 2
+    assert payload["displays"][0]["content_type"] == "text/markdown"
+    assert payload["displays"][0]["markdown_text"] == "# First"
+    assert payload["displays"][1]["content_type"] == "json/object"
+    assert payload["displays"][1]["preview"] == 42
+    assert payload["display"]["content_type"] == "json/object"
+    assert payload["display"]["preview"] == 42
+    assert terminal_status["payload"]["status"] == "ready"
 
 
-def test_cell_execute_cascade_emits_multiple_display_payloads_in_order(client, temp_notebook, app):
+def test_cell_execute_cascade_emits_multiple_display_payloads_in_order(client, temp_notebook):
     """Cascade execution should preserve ordered display payloads for the target cell."""
     notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
-
     write_cell(
         notebook_dir,
         "leaf",
@@ -778,53 +629,36 @@ display(Markdown("# First"))
 y + 1
 """,
     )
+    session = open_session(notebook_dir)
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": "leaf"},
-            }
-        )
-
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": "leaf"})
         prompt = websocket.receive_json()
         assert prompt["type"] == "cascade_prompt"
 
-        websocket.send_json(
-            {
-                "type": "cell_execute_cascade",
-                "seq": 2,
-                "ts": "2026-03-23T00:00:01Z",
-                "payload": {"cell_id": "leaf", "plan_id": prompt["payload"]["plan_id"]},
-            }
+        ws_send(
+            websocket,
+            "cell_execute_cascade",
+            {"cell_id": "leaf", "plan_id": prompt["payload"]["plan_id"]},
+            seq=2,
         )
+        output_message, terminal_status = receive_execution_terminal(websocket, "leaf")
 
-        output_message, terminal_status = _receive_execution_terminal_messages(websocket, "leaf")
+    payload = output_message["payload"]
+    assert output_message["type"] == "cell_output"
+    assert len(payload["displays"]) == 2
+    assert payload["displays"][0]["content_type"] == "text/markdown"
+    assert payload["displays"][0]["markdown_text"] == "# First"
+    assert payload["displays"][1]["content_type"] == "json/object"
+    assert payload["displays"][1]["preview"] == 3
+    assert payload["display"]["content_type"] == "json/object"
+    assert payload["display"]["preview"] == 3
+    assert terminal_status["payload"]["status"] == "ready"
 
-        assert output_message["type"] == "cell_output"
-        assert len(output_message["payload"]["displays"]) == 2
-        assert output_message["payload"]["displays"][0]["content_type"] == "text/markdown"
-        assert output_message["payload"]["displays"][0]["markdown_text"] == "# First"
-        assert output_message["payload"]["displays"][1]["content_type"] == "json/object"
-        assert output_message["payload"]["displays"][1]["preview"] == 3
-        assert output_message["payload"]["display"]["content_type"] == "json/object"
-        assert output_message["payload"]["display"]["preview"] == 3
-        assert terminal_status["payload"]["status"] == "ready"
 
-
-def test_cell_execute_blocked_when_environment_runtime_is_unavailable(client, temp_notebook, app):
+def test_cell_execute_blocked_when_environment_runtime_is_unavailable(client, notebook_session):
     """Execution should be blocked when no notebook runtime is available after bootstrap failure."""
-    notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    _, session = notebook_session
     cell_id = session.notebook_state.cells[0].id
     session.environment_job = None
     session.venv_python = None
@@ -833,31 +667,21 @@ def test_cell_execute_blocked_when_environment_runtime_is_unavailable(client, te
     session.environment_sync_error = "Failed to start notebook environment initialization: boom"
     session.environment_sync_notice = None
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": cell_id},
-            }
-        )
-
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": cell_id})
         response = websocket.receive_json()
-        assert response["type"] == "error"
-        assert response["payload"]["code"] == "ENVIRONMENT_BUSY"
-        assert "environment" in response["payload"]["error"].lower()
+
+    assert response["type"] == "error"
+    assert response["payload"]["code"] == "ENVIRONMENT_BUSY"
+    assert "environment" in response["payload"]["error"].lower()
 
 
 def test_environment_job_submission_rejects_execution_already_accepted(monkeypatch, temp_notebook):
     """Execution acceptance should block env jobs before the task starts."""
-    notebook_dir, _ = temp_notebook
-
     from strata.notebook import ws as notebook_ws
-    from strata.notebook.routes import get_session_manager
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    notebook_dir, _ = temp_notebook
+    session = open_session(notebook_dir)
     execution_state = notebook_ws._ensure_execution_state(session.id)
     entered_schedule = asyncio.Event()
     release_schedule = asyncio.Event()
@@ -908,144 +732,114 @@ def test_environment_job_submission_rejects_execution_already_accepted(monkeypat
     asyncio.run(_exercise())
 
 
-def test_ws_execute_supports_http_executor_worker(
-    client, temp_notebook, app, notebook_executor_server
-):
-    """The live WebSocket execution path should support HTTP notebook workers."""
-    notebook_dir, _ = temp_notebook
+def _http_worker_config(executor_url, *, build_url=None, transport=None):
+    """Build a worker config dict for HTTP executor tests."""
+    config = {"url": executor_url}
+    if transport:
+        config["transport"] = transport
+    if build_url:
+        config["strata_url"] = build_url
+    return config
 
+
+def _attach_worker(session, name, runtime_id, config):
+    """Attach a single HTTP-executor worker to the session and return it."""
     from strata.notebook.models import WorkerBackendType, WorkerSpec
-    from strata.notebook.routes import get_session_manager
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
     session.notebook_state.workers = [
         WorkerSpec(
-            name="gpu-http",
+            name=name,
             backend=WorkerBackendType.EXECUTOR,
-            runtime_id="gpu-http-a100",
-            config={"url": notebook_executor_server["execute_url"]},
+            runtime_id=runtime_id,
+            config=config,
         )
     ]
+    return session.notebook_state.workers[0]
+
+
+def test_ws_execute_supports_http_executor_worker(
+    client, notebook_session, notebook_executor_server
+):
+    """The live WebSocket execution path should support HTTP notebook workers."""
+    _, session = notebook_session
+    _attach_worker(
+        session,
+        "gpu-http",
+        "gpu-http-a100",
+        _http_worker_config(notebook_executor_server["execute_url"]),
+    )
     root_cell = next(c for c in session.notebook_state.cells if c.id == "root")
     root_cell.worker = "gpu-http"
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-30T00:00:00Z",
-                "payload": {"cell_id": root_cell.id},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": root_cell.id})
+        output_message, terminal_status = receive_execution_terminal(websocket, root_cell.id)
 
-        output_message, terminal_status = _receive_execution_terminal_messages(
-            websocket, root_cell.id
-        )
-
-        assert output_message["type"] == "cell_output"
-        assert output_message["payload"]["execution_method"] == "executor"
-        assert output_message["payload"]["remote_worker"] == "gpu-http"
-        assert output_message["payload"]["remote_transport"] == "direct"
-        assert output_message["payload"]["outputs"]["x"]["preview"] == 1
-        assert terminal_status["payload"]["status"] == "ready"
+    payload = output_message["payload"]
+    assert output_message["type"] == "cell_output"
+    assert payload["execution_method"] == "executor"
+    assert payload["remote_worker"] == "gpu-http"
+    assert payload["remote_transport"] == "direct"
+    assert payload["outputs"]["x"]["preview"] == 1
+    assert terminal_status["payload"]["status"] == "ready"
 
 
 def test_ws_execute_supports_signed_http_executor_worker(
     client,
-    temp_notebook,
-    app,
+    notebook_session,
     notebook_executor_server,
     notebook_build_server,
 ):
     """The live WebSocket path should support signed remote notebook workers."""
-    notebook_dir, _ = temp_notebook
-
-    from strata.notebook.models import WorkerBackendType, WorkerSpec
-    from strata.notebook.routes import get_session_manager
-
+    _, session = notebook_session
+    config = _http_worker_config(
+        notebook_executor_server["execute_url"],
+        build_url=notebook_build_server["base_url"],
+        transport="signed",
+    )
     notebook_build_server["config"].transforms_config["notebook_workers"] = [
         {
             "name": "gpu-http-signed",
             "backend": "executor",
             "runtime_id": "gpu-http-signed-a100",
-            "config": {
-                "url": notebook_executor_server["execute_url"],
-                "transport": "signed",
-                "strata_url": notebook_build_server["base_url"],
-            },
+            "config": config,
         }
     ]
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-    session.notebook_state.workers = [
-        WorkerSpec(
-            name="gpu-http-signed",
-            backend=WorkerBackendType.EXECUTOR,
-            runtime_id="gpu-http-signed-a100",
-            config={
-                "url": notebook_executor_server["execute_url"],
-                "transport": "signed",
-                "strata_url": notebook_build_server["base_url"],
-            },
-        )
-    ]
+    _attach_worker(session, "gpu-http-signed", "gpu-http-signed-a100", config)
     root_cell = next(c for c in session.notebook_state.cells if c.id == "root")
     root_cell.worker = "gpu-http-signed"
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-30T00:00:00Z",
-                "payload": {"cell_id": root_cell.id},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": root_cell.id})
+        first_output, first_terminal = receive_execution_terminal(websocket, root_cell.id)
 
-        first_output, first_terminal = _receive_execution_terminal_messages(websocket, root_cell.id)
-
+        first_payload = first_output["payload"]
         assert first_output["type"] == "cell_output"
-        assert first_output["payload"]["execution_method"] == "executor"
-        assert first_output["payload"]["remote_worker"] == "gpu-http-signed"
-        assert first_output["payload"]["remote_transport"] == "signed"
-        assert isinstance(first_output["payload"]["remote_build_id"], str)
-        assert first_output["payload"]["outputs"]["x"]["preview"] == 1
+        assert first_payload["execution_method"] == "executor"
+        assert first_payload["remote_worker"] == "gpu-http-signed"
+        assert first_payload["remote_transport"] == "signed"
+        assert isinstance(first_payload["remote_build_id"], str)
+        assert first_payload["outputs"]["x"]["preview"] == 1
         assert first_terminal["payload"]["status"] == "ready"
 
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 2,
-                "ts": "2026-03-30T00:00:01Z",
-                "payload": {"cell_id": root_cell.id},
-            }
-        )
+        ws_send(websocket, "cell_execute", {"cell_id": root_cell.id}, seq=2)
+        second_output, second_terminal = receive_execution_terminal(websocket, root_cell.id)
 
-        second_output, second_terminal = _receive_execution_terminal_messages(
-            websocket, root_cell.id
-        )
-
-        assert second_output["type"] == "cell_output"
-        assert second_output["payload"]["execution_method"] == "cached"
-        assert second_output["payload"]["remote_worker"] == "gpu-http-signed"
-        assert second_output["payload"]["remote_transport"] == "signed"
-        assert "remote_build_id" not in second_output["payload"]
-        assert second_terminal["payload"]["status"] == "ready"
+    second_payload = second_output["payload"]
+    assert second_output["type"] == "cell_output"
+    assert second_payload["execution_method"] == "cached"
+    assert second_payload["remote_worker"] == "gpu-http-signed"
+    assert second_payload["remote_transport"] == "signed"
+    assert "remote_build_id" not in second_payload
+    assert second_terminal["payload"]["status"] == "ready"
 
 
 def test_ws_execute_supports_signed_http_executor_worker_with_class_instances(
     client,
-    app,
     notebook_executor_server,
     notebook_build_server,
 ):
     """The live WS path should preserve exported class instances over signed transport."""
-    from strata.notebook.models import WorkerBackendType, WorkerSpec
-    from strata.notebook.routes import get_session_manager
-
     with tempfile.TemporaryDirectory() as tmpdir:
         notebook_dir = create_notebook(Path(tmpdir), "signed_class_instances")
         add_cell_to_notebook(notebook_dir, "cell1")
@@ -1066,134 +860,88 @@ class Person:
         write_cell(notebook_dir, "cell2", "p = Person()")
         write_cell(notebook_dir, "cell3", "rendered = str(p)")
 
+        config = _http_worker_config(
+            notebook_executor_server["execute_url"],
+            build_url=notebook_build_server["base_url"],
+            transport="signed",
+        )
         notebook_build_server["config"].transforms_config["notebook_workers"] = [
             {
                 "name": "gpu-http-signed",
                 "backend": "executor",
                 "runtime_id": "gpu-http-signed-a100",
-                "config": {
-                    "url": notebook_executor_server["execute_url"],
-                    "transport": "signed",
-                    "strata_url": notebook_build_server["base_url"],
-                },
+                "config": config,
             }
         ]
 
-        session_manager = get_session_manager()
-        session = session_manager.open_notebook(notebook_dir)
-        session.notebook_state.workers = [
-            WorkerSpec(
-                name="gpu-http-signed",
-                backend=WorkerBackendType.EXECUTOR,
-                runtime_id="gpu-http-signed-a100",
-                config={
-                    "url": notebook_executor_server["execute_url"],
-                    "transport": "signed",
-                    "strata_url": notebook_build_server["base_url"],
-                },
-            )
-        ]
+        session = open_session(notebook_dir)
+        _attach_worker(session, "gpu-http-signed", "gpu-http-signed-a100", config)
         for cell in session.notebook_state.cells:
             cell.worker = "gpu-http-signed"
 
-        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
+        with _ws(client, session) as websocket:
             for cell_id in ("cell1", "cell2", "cell3"):
-                websocket.send_json(
-                    {
-                        "type": "cell_execute",
-                        "seq": 1,
-                        "ts": "2026-03-31T00:00:00Z",
-                        "payload": {"cell_id": cell_id},
-                    }
-                )
-                output_message, terminal_status = _receive_execution_terminal_messages(
-                    websocket, cell_id
-                )
+                ws_send(websocket, "cell_execute", {"cell_id": cell_id})
+                output_message, terminal_status = receive_execution_terminal(websocket, cell_id)
+                payload = output_message["payload"]
                 assert output_message["type"] == "cell_output"
-                assert output_message["payload"]["execution_method"] == "executor"
-                assert output_message["payload"]["remote_worker"] == "gpu-http-signed"
-                assert output_message["payload"]["remote_transport"] == "signed"
-                assert output_message["payload"]["remote_build_state"] == "ready"
+                assert payload["execution_method"] == "executor"
+                assert payload["remote_worker"] == "gpu-http-signed"
+                assert payload["remote_transport"] == "signed"
+                assert payload["remote_build_state"] == "ready"
                 assert terminal_status["payload"]["status"] == "ready"
 
-            websocket.send_json(
-                {
-                    "type": "notebook_sync",
-                    "seq": 2,
-                    "ts": "2026-03-31T00:00:01Z",
-                    "payload": {},
-                }
-            )
+            ws_send(websocket, "notebook_sync", seq=2)
             response = websocket.receive_json()
-            assert response["type"] == "notebook_state"
-            state = response["payload"]
-            cell2 = next(cell for cell in state["cells"] if cell["id"] == "cell2")
-            cell3 = next(cell for cell in state["cells"] if cell["id"] == "cell3")
 
-            assert "p" in cell2["artifact_uris"]
-            assert cell2["remote_transport"] == "signed"
-            assert cell2["remote_build_state"] == "ready"
-            assert cell2["status"] == "ready"
-            assert cell3["remote_transport"] == "signed"
-            assert cell3["remote_build_state"] == "ready"
-            assert cell3["status"] == "ready"
+        assert response["type"] == "notebook_state"
+        state = response["payload"]
+        cell2 = next(cell for cell in state["cells"] if cell["id"] == "cell2")
+        cell3 = next(cell for cell in state["cells"] if cell["id"] == "cell3")
+
+        assert "p" in cell2["artifact_uris"]
+        assert cell2["remote_transport"] == "signed"
+        assert cell2["remote_build_state"] == "ready"
+        assert cell2["status"] == "ready"
+        assert cell3["remote_transport"] == "signed"
+        assert cell3["remote_build_state"] == "ready"
+        assert cell3["status"] == "ready"
 
 
-def test_ws_execute_reports_unavailable_http_executor_worker(client, temp_notebook, app):
+def test_ws_execute_reports_unavailable_http_executor_worker(client, notebook_session):
     """The live WS path should surface unreachable HTTP executor workers."""
-    notebook_dir, _ = temp_notebook
-
-    from strata.notebook.models import WorkerBackendType, WorkerSpec
-    from strata.notebook.routes import get_session_manager
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-    session.notebook_state.workers = [
-        WorkerSpec(
-            name="gpu-http-dead",
-            backend=WorkerBackendType.EXECUTOR,
-            runtime_id="gpu-http-dead-a100",
-            config={"url": "http://127.0.0.1:9/v1/execute"},
-        )
-    ]
+    _, session = notebook_session
+    _attach_worker(
+        session,
+        "gpu-http-dead",
+        "gpu-http-dead-a100",
+        _http_worker_config("http://127.0.0.1:9/v1/execute"),
+    )
     root_cell = next(c for c in session.notebook_state.cells if c.id == "root")
     root_cell.worker = "gpu-http-dead"
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-30T00:00:00Z",
-                "payload": {"cell_id": root_cell.id},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": root_cell.id})
+        output_message, terminal_status = receive_execution_terminal(websocket, root_cell.id)
 
-        output_message, terminal_status = _receive_execution_terminal_messages(
-            websocket, root_cell.id
-        )
-
-        assert output_message["type"] == "cell_error"
-        assert "Remote executor request failed" in output_message["payload"]["error"]
-        assert terminal_status["payload"]["status"] == "error"
+    assert output_message["type"] == "cell_error"
+    assert "Remote executor request failed" in output_message["payload"]["error"]
+    assert terminal_status["payload"]["status"] == "error"
 
 
 def test_ws_execute_reports_signed_finalize_failure(
     client,
-    temp_notebook,
-    app,
+    notebook_session,
     notebook_executor_server,
     notebook_build_server,
     monkeypatch,
 ):
     """The live WS path should surface signed transport finalize failures."""
-    notebook_dir, _ = temp_notebook
-
-    from strata.notebook.models import WorkerBackendType, WorkerSpec
-    from strata.notebook.routes import get_session_manager
     from strata.transforms.signed_urls import (
         generate_build_manifest as real_generate_build_manifest,
     )
+
+    _, session = notebook_session
 
     class _BadFinalizeManifest:
         def __init__(self, manifest):
@@ -1208,78 +956,50 @@ def test_ws_execute_reports_signed_finalize_failure(
         return _BadFinalizeManifest(real_generate_build_manifest(*args, **kwargs))
 
     monkeypatch.setattr(
-        "strata.notebook.executor.generate_build_manifest",
-        fake_generate_build_manifest,
+        "strata.notebook.executor.generate_build_manifest", fake_generate_build_manifest
     )
 
+    config = _http_worker_config(
+        notebook_executor_server["execute_url"],
+        build_url=notebook_build_server["base_url"],
+        transport="signed",
+    )
     notebook_build_server["config"].transforms_config["notebook_workers"] = [
         {
             "name": "gpu-http-signed",
             "backend": "executor",
             "runtime_id": "gpu-http-signed-a100",
-            "config": {
-                "url": notebook_executor_server["execute_url"],
-                "transport": "signed",
-                "strata_url": notebook_build_server["base_url"],
-            },
+            "config": config,
         }
     ]
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-    session.notebook_state.workers = [
-        WorkerSpec(
-            name="gpu-http-signed",
-            backend=WorkerBackendType.EXECUTOR,
-            runtime_id="gpu-http-signed-a100",
-            config={
-                "url": notebook_executor_server["execute_url"],
-                "transport": "signed",
-                "strata_url": notebook_build_server["base_url"],
-            },
-        )
-    ]
+    _attach_worker(session, "gpu-http-signed", "gpu-http-signed-a100", config)
     root_cell = next(c for c in session.notebook_state.cells if c.id == "root")
     root_cell.worker = "gpu-http-signed"
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-30T00:00:00Z",
-                "payload": {"cell_id": root_cell.id},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": root_cell.id})
+        output_message, terminal_status = receive_execution_terminal(websocket, root_cell.id)
 
-        output_message, terminal_status = _receive_execution_terminal_messages(
-            websocket, root_cell.id
-        )
-
-        assert output_message["type"] == "cell_error"
-        assert "Failed to finalize notebook bundle build" in output_message["payload"]["error"]
-        assert output_message["payload"]["remote_worker"] == "gpu-http-signed"
-        assert output_message["payload"]["remote_transport"] == "signed"
-        assert isinstance(output_message["payload"]["remote_build_id"], str)
-        assert output_message["payload"]["remote_build_state"] == "failed"
-        assert output_message["payload"]["remote_error_code"] == "FINALIZE_FAILED"
-        assert terminal_status["payload"]["status"] == "error"
+    payload = output_message["payload"]
+    assert output_message["type"] == "cell_error"
+    assert "Failed to finalize notebook bundle build" in payload["error"]
+    assert payload["remote_worker"] == "gpu-http-signed"
+    assert payload["remote_transport"] == "signed"
+    assert isinstance(payload["remote_build_id"], str)
+    assert payload["remote_build_state"] == "failed"
+    assert payload["remote_error_code"] == "FINALIZE_FAILED"
+    assert terminal_status["payload"]["status"] == "error"
 
 
 def test_ws_cancelled_signed_http_executor_marks_build_failed(
     client,
-    temp_notebook,
-    app,
+    notebook_session,
     notebook_executor_server,
     notebook_build_server,
     monkeypatch,
 ):
     """Cancelling signed remote execution over WS should fail the build cleanly."""
-    notebook_dir, _ = temp_notebook
-
-    from strata.notebook.models import WorkerBackendType, WorkerSpec
-    from strata.notebook.routes import get_session_manager
-
+    _, session = notebook_session
     started = threading.Event()
 
     async def _slow_run_harness(
@@ -1292,62 +1012,33 @@ def test_ws_cancelled_signed_http_executor_marks_build_failed(
         await asyncio.sleep(60)
         return {
             "success": True,
-            "variables": {
-                "x": {
-                    "content_type": "json/object",
-                    "file": "x.json",
-                    "preview": 1,
-                }
-            },
+            "variables": {"x": {"content_type": "json/object", "file": "x.json", "preview": 1}},
             "stdout": "",
             "stderr": "",
             "mutation_warnings": [],
         }
 
-    monkeypatch.setattr(
-        "strata.notebook.remote_executor._run_harness",
-        _slow_run_harness,
-    )
+    monkeypatch.setattr("strata.notebook.remote_executor._run_harness", _slow_run_harness)
 
+    config = _http_worker_config(
+        notebook_executor_server["execute_url"],
+        build_url=notebook_build_server["base_url"],
+        transport="signed",
+    )
     notebook_build_server["config"].transforms_config["notebook_workers"] = [
         {
             "name": "gpu-http-signed",
             "backend": "executor",
             "runtime_id": "gpu-http-signed-a100",
-            "config": {
-                "url": notebook_executor_server["execute_url"],
-                "transport": "signed",
-                "strata_url": notebook_build_server["base_url"],
-            },
+            "config": config,
         }
     ]
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-    session.notebook_state.workers = [
-        WorkerSpec(
-            name="gpu-http-signed",
-            backend=WorkerBackendType.EXECUTOR,
-            runtime_id="gpu-http-signed-a100",
-            config={
-                "url": notebook_executor_server["execute_url"],
-                "transport": "signed",
-                "strata_url": notebook_build_server["base_url"],
-            },
-        )
-    ]
+    _attach_worker(session, "gpu-http-signed", "gpu-http-signed-a100", config)
     root_cell = next(c for c in session.notebook_state.cells if c.id == "root")
     root_cell.worker = "gpu-http-signed"
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-30T00:00:00Z",
-                "payload": {"cell_id": root_cell.id},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": root_cell.id})
 
         running = websocket.receive_json()
         assert running["type"] == "cell_status"
@@ -1355,14 +1046,7 @@ def test_ws_cancelled_signed_http_executor_marks_build_failed(
         assert running["payload"]["status"] == "running"
         assert started.wait(timeout=2.0)
 
-        websocket.send_json(
-            {
-                "type": "cell_cancel",
-                "seq": 2,
-                "ts": "2026-03-30T00:00:01Z",
-                "payload": {"cell_id": root_cell.id},
-            }
-        )
+        ws_send(websocket, "cell_cancel", {"cell_id": root_cell.id}, seq=2)
 
         idle_message = None
         for _ in range(10):
@@ -1374,7 +1058,6 @@ def test_ws_cancelled_signed_http_executor_marks_build_failed(
             ):
                 idle_message = response
                 break
-
         assert idle_message is not None
 
     for _ in range(20):
@@ -1389,98 +1072,47 @@ def test_ws_cancelled_signed_http_executor_marks_build_failed(
     assert stats["building"] == 0
 
 
-def test_cascade_prompt_is_sent_only_to_requesting_websocket(client, temp_notebook, app):
+def test_cascade_prompt_is_sent_only_to_requesting_websocket(client, notebook_session):
     """A cascade prompt should not fan out to other clients on the notebook."""
-    notebook_dir, _ = temp_notebook
+    _, session = notebook_session
 
-    from strata.notebook.routes import get_session_manager
+    with _ws(client, session) as ws1, _ws(client, session) as ws2:
+        ws_send(ws1, "cell_execute", {"cell_id": "middle"})
+        response = ws1.receive_json()
+        assert response["type"] == "cascade_prompt"
+        assert response["payload"]["cell_id"] == "middle"
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws1:
-        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws2:
-            ws1.send_json(
-                {
-                    "type": "cell_execute",
-                    "seq": 1,
-                    "ts": "2026-03-23T00:00:00Z",
-                    "payload": {"cell_id": "middle"},
-                }
-            )
-
-            response = ws1.receive_json()
-            assert response["type"] == "cascade_prompt"
-            assert response["payload"]["cell_id"] == "middle"
-
-            with pytest.raises(Exception):
-                ws2.receive_json(timeout=0.1)
+        with pytest.raises(Exception):
+            ws2.receive_json(timeout=0.1)
 
 
-def test_impact_preview_is_sent_only_to_requesting_websocket(client, temp_notebook, app):
+def test_impact_preview_is_sent_only_to_requesting_websocket(client, notebook_session):
     """Impact preview responses should stay scoped to the requesting client."""
-    notebook_dir, _ = temp_notebook
+    _, session = notebook_session
 
-    from strata.notebook.routes import get_session_manager
+    with _ws(client, session) as ws1, _ws(client, session) as ws2:
+        ws_send(ws1, "impact_preview_request", {"cell_id": "middle"})
+        response = ws1.receive_json()
+        assert response["type"] == "impact_preview"
+        assert response["payload"]["target_cell_id"] == "middle"
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws1:
-        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws2:
-            ws1.send_json(
-                {
-                    "type": "impact_preview_request",
-                    "seq": 1,
-                    "ts": "2026-03-23T00:00:00Z",
-                    "payload": {"cell_id": "middle"},
-                }
-            )
-
-            response = ws1.receive_json()
-            assert response["type"] == "impact_preview"
-            assert response["payload"]["target_cell_id"] == "middle"
-
-            with pytest.raises(Exception):
-                ws2.receive_json(timeout=0.1)
+        with pytest.raises(Exception):
+            ws2.receive_json(timeout=0.1)
 
 
-def test_inspect_repl_round_trip(client, temp_notebook, app):
-    """Test the live inspect REPL path over WebSocket."""
-    notebook_dir, _ = temp_notebook
+def test_inspect_repl_round_trip(client, notebook_session):
+    """The inspect REPL round-trips over the websocket."""
+    _, session = notebook_session
+    middle_cell = next(c for c in session.notebook_state.cells if "x" in c.references)
 
-    from strata.notebook.routes import get_session_manager
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    middle_cell = next((c for c in session.notebook_state.cells if "x" in c.references), None)
-    assert middle_cell is not None
-
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "inspect_open",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": middle_cell.id},
-            }
-        )
-
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "inspect_open", {"cell_id": middle_cell.id})
         response = websocket.receive_json()
         assert response["type"] == "inspect_result"
         assert response["payload"]["action"] == "open"
         assert response["payload"]["ok"] is True
 
-        websocket.send_json(
-            {
-                "type": "inspect_eval",
-                "seq": 2,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": middle_cell.id, "expr": "x + 1"},
-            }
-        )
-
+        ws_send(websocket, "inspect_eval", {"cell_id": middle_cell.id, "expr": "x + 1"}, seq=2)
         response = websocket.receive_json()
         assert response["type"] == "inspect_result"
         assert response["payload"]["action"] == "eval"
@@ -1488,451 +1120,282 @@ def test_inspect_repl_round_trip(client, temp_notebook, app):
         assert response["payload"]["result"] == "2"
         assert response["payload"]["type"] == "int"
 
-        websocket.send_json(
-            {
-                "type": "inspect_close",
-                "seq": 3,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": middle_cell.id},
-            }
-        )
-
+        ws_send(websocket, "inspect_close", {"cell_id": middle_cell.id}, seq=3)
         response = websocket.receive_json()
         assert response["type"] == "inspect_result"
         assert response["payload"]["action"] == "close"
         assert response["payload"]["ok"] is True
 
 
-def test_active_websocket_session_is_not_evicted(client, temp_notebook, app):
+def test_active_websocket_session_is_not_evicted(client, notebook_session):
     """TTL eviction should skip sessions that still have connected sockets."""
-    notebook_dir, _ = temp_notebook
-
     from strata.notebook.routes import get_session_manager
 
+    _, session = notebook_session
     session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
     session.last_accessed = time.time() - session_manager.SESSION_TTL_SECONDS - 60
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
+    with _ws(client, session) as websocket:
         session_manager._evict_stale()
         assert session.id in session_manager.list_sessions()
 
-        websocket.send_json(
-            {
-                "type": "notebook_sync",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {},
-            }
-        )
+        ws_send(websocket, "notebook_sync")
         websocket.receive_json()
         assert session.last_accessed > time.time() - 5
 
 
-def test_inspect_sessions_closed_when_last_websocket_disconnects(
-    client, temp_notebook, app, monkeypatch
-):
-    """Disconnecting the last socket should close notebook inspect sessions."""
-    notebook_dir, _ = temp_notebook
-
+def _patch_inspect_manager(monkeypatch, *, close_counter):
+    """Patch InspectManager.open_session / close_all and count close calls."""
     from strata.notebook.inspect_repl import InspectManager
-    from strata.notebook.routes import get_session_manager
-    from strata.notebook.ws import _notebook_inspect_managers
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    close_all_calls = 0
 
     async def fake_open_session(self, cell_id, notebook_session):
         return SimpleNamespace(ready=True), "ready"
 
     async def fake_close_all(self):
-        nonlocal close_all_calls
-        close_all_calls += 1
+        close_counter["count"] += 1
 
     monkeypatch.setattr(InspectManager, "open_session", fake_open_session)
     monkeypatch.setattr(InspectManager, "close_all", fake_close_all)
 
-    middle_cell = next((c for c in session.notebook_state.cells if "x" in c.references), None)
-    assert middle_cell is not None
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "inspect_open",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": middle_cell.id},
-            }
-        )
+def test_inspect_sessions_closed_when_last_websocket_disconnects(
+    client, notebook_session, monkeypatch
+):
+    """Disconnecting the last socket should close notebook inspect sessions."""
+    from strata.notebook.ws import _notebook_inspect_managers
 
+    _, session = notebook_session
+    close_counter = {"count": 0}
+    _patch_inspect_manager(monkeypatch, close_counter=close_counter)
+
+    middle_cell = next(c for c in session.notebook_state.cells if "x" in c.references)
+
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "inspect_open", {"cell_id": middle_cell.id})
         response = websocket.receive_json()
         assert response["type"] == "inspect_result"
         assert response["payload"]["ok"] is True
 
-    assert close_all_calls == 1
+    assert close_counter["count"] == 1
     assert session.id not in _notebook_inspect_managers
 
 
-def test_grace_window_preserves_inspect_state_on_reconnect(client, temp_notebook, app, monkeypatch):
-    """A disconnect-then-reconnect within the grace window keeps state.
+def _open_inspect_and_disconnect(client, session, cell_id):
+    """Open an inspect REPL on ``cell_id``, then close the WS cleanly."""
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "inspect_open", {"cell_id": cell_id})
+        websocket.receive_json()
 
-    Without the grace window, the inspect manager would be dropped the
-    moment the WS context exits. The TUI's target audience (tmux / SSH
-    sessions) would lose any open inspect REPL on a network blip — bad
-    UX for exactly the users the reconnect window exists for.
+
+def _inject_long_running_execution(client, session):
+    """Open a WS, sync, then inject a long-sleep task as the active execution.
+
+    Returns the injected task. Caller is responsible for cancelling it
+    when the test ends so the next test's loop doesn't inherit it.
     """
-    notebook_dir, _ = temp_notebook
+    from strata.notebook.ws import _ensure_execution_state
 
-    from strata.notebook.inspect_repl import InspectManager
-    from strata.notebook.routes import get_session_manager
+    async def long_sleep() -> None:
+        await asyncio.sleep(60)
+
+    async def inject_task() -> asyncio.Task[None]:
+        state = _ensure_execution_state(session.id)
+        task = asyncio.create_task(long_sleep())
+        state.execution_task = task
+        return task
+
+    with _ws(client, session) as ws:
+        ws_send(ws, "notebook_sync")
+        ws.receive_json()
+        return client.portal.call(inject_task)
+
+
+def _cancel_async_task(client, task):
+    """Cancel an injected task from the server's event loop."""
+
+    async def _cancel(task_to_cancel: asyncio.Task[None]) -> None:
+        task_to_cancel.cancel()
+        try:
+            await task_to_cancel
+        except asyncio.CancelledError:
+            pass
+
+    client.portal.call(_cancel, task)
+
+
+def test_grace_window_preserves_inspect_state_on_reconnect(client, notebook_session, monkeypatch):
+    """Disconnect-then-reconnect within the grace window keeps inspect state.
+
+    Without the grace window, the inspect manager would be dropped the moment
+    the WS context exits. The TUI's tmux / SSH audience would lose any open
+    inspect REPL on a network blip — bad UX for exactly the users the window
+    exists for.
+    """
     from strata.notebook.ws import _notebook_inspect_managers
 
-    # Long enough window that the test thread can't accidentally cross
-    # it; the reconnect cancels the task explicitly.
+    _, session = notebook_session
+    # Long enough that the test thread can't accidentally cross it; the
+    # reconnect cancels the task explicitly.
     monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 30.0)
+    close_counter = {"count": 0}
+    _patch_inspect_manager(monkeypatch, close_counter=close_counter)
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    close_all_calls = 0
-
-    async def fake_open_session(self, cell_id, notebook_session):
-        return SimpleNamespace(ready=True), "ready"
-
-    async def fake_close_all(self):
-        nonlocal close_all_calls
-        close_all_calls += 1
-
-    monkeypatch.setattr(InspectManager, "open_session", fake_open_session)
-    monkeypatch.setattr(InspectManager, "close_all", fake_close_all)
-
-    cell = next((c for c in session.notebook_state.cells if "x" in c.references), None)
-    assert cell is not None
-
-    # First connection opens an inspect REPL.
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "inspect_open",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": cell.id},
-            }
-        )
-        response = websocket.receive_json()
-        assert response["type"] == "inspect_result"
+    cell = next(c for c in session.notebook_state.cells if "x" in c.references)
+    _open_inspect_and_disconnect(client, session, cell.id)
 
     # Inside the grace window: state must be preserved.
     assert session.id in _notebook_inspect_managers
-    assert not close_all_calls
+    assert close_counter["count"] == 0
 
     # Reconnect cancels the pending teardown and resumes.
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "notebook_sync",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "notebook_sync")
         websocket.receive_json()
-        # Still alive.
         assert session.id in _notebook_inspect_managers
-        assert not close_all_calls
+        assert close_counter["count"] == 0
 
 
-def test_grace_window_expires_drops_state(client, temp_notebook, app, monkeypatch):
+def test_grace_window_expires_drops_state(client, notebook_session, monkeypatch):
     """When the grace window elapses with no reconnect, state is dropped."""
-    notebook_dir, _ = temp_notebook
-
-    from strata.notebook.inspect_repl import InspectManager
-    from strata.notebook.routes import get_session_manager
     from strata.notebook.ws import _notebook_grace_tasks, _notebook_inspect_managers
 
-    # Short window: long enough that the test thread observes the
-    # "pending teardown" state, short enough that polling for completion
-    # doesn't drag the suite.
+    _, session = notebook_session
+    # Short window: long enough that the test thread observes the "pending
+    # teardown" state, short enough that polling for completion doesn't drag
+    # the suite.
     monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 0.1)
+    close_counter = {"count": 0}
+    _patch_inspect_manager(monkeypatch, close_counter=close_counter)
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    close_all_calls = 0
-
-    async def fake_open_session(self, cell_id, notebook_session):
-        return SimpleNamespace(ready=True), "ready"
-
-    async def fake_close_all(self):
-        nonlocal close_all_calls
-        close_all_calls += 1
-
-    monkeypatch.setattr(InspectManager, "open_session", fake_open_session)
-    monkeypatch.setattr(InspectManager, "close_all", fake_close_all)
-
-    cell = next((c for c in session.notebook_state.cells if "x" in c.references), None)
-    assert cell is not None
+    cell = next(c for c in session.notebook_state.cells if "x" in c.references)
 
     # Hold the TestClient open across requests so the server's event loop
     # outlives the WS context; without this, the grace task scheduled at
     # disconnect would die with the portal.
     with client:
-        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-            websocket.send_json(
-                {
-                    "type": "inspect_open",
-                    "seq": 1,
-                    "ts": "2026-03-23T00:00:00Z",
-                    "payload": {"cell_id": cell.id},
-                }
-            )
-            websocket.receive_json()
+        _open_inspect_and_disconnect(client, session, cell.id)
 
-        # A grace task was scheduled — state is still alive.
         assert session.id in _notebook_grace_tasks
         assert session.id in _notebook_inspect_managers
 
         # Poll until the task runs in the server's background event loop.
         deadline = time.time() + 2.0
         while time.time() < deadline:
-            if close_all_calls and session.id not in _notebook_inspect_managers:
+            if close_counter["count"] and session.id not in _notebook_inspect_managers:
                 break
             time.sleep(0.02)
 
-    assert close_all_calls == 1
+    assert close_counter["count"] == 1
     assert session.id not in _notebook_inspect_managers
     assert session.id not in _notebook_grace_tasks
 
 
 def test_grace_window_preserves_active_execution_on_reconnect(
-    client, temp_notebook, app, monkeypatch
+    client, notebook_session, monkeypatch
 ):
     """A running execution task survives a disconnect-reconnect cycle within the window.
 
-    This is the load-bearing #42 contract: tmux detach during a long
-    cell, reconnect within the window, find the cell still running.
-    The inspect-state companion test covers a different cleanup hook;
-    this one targets ``NotebookExecutionState.execution_task`` which is
-    the actual mechanism behind cancel-on-disconnect.
+    Load-bearing #42 contract: tmux detach during a long cell, reconnect
+    within the window, find the cell still running. This targets
+    ``NotebookExecutionState.execution_task`` — the actual mechanism behind
+    cancel-on-disconnect — rather than the inspect cleanup hook.
     """
-    notebook_dir, _ = temp_notebook
+    from strata.notebook.ws import _notebook_execution_state
 
-    from strata.notebook.routes import get_session_manager
-    from strata.notebook.ws import _ensure_execution_state, _notebook_execution_state
-
+    _, session = notebook_session
     monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 30.0)
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    captured: dict[str, asyncio.Task[None]] = {}
-
-    async def long_sleep() -> None:
-        await asyncio.sleep(60)
-
-    async def inject_task() -> asyncio.Task[None]:
-        state = _ensure_execution_state(session.id)
-        task = asyncio.create_task(long_sleep())
-        state.execution_task = task
-        return task
-
     with client:
-        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws:
-            ws.send_json(
-                {
-                    "type": "notebook_sync",
-                    "seq": 1,
-                    "ts": "2026-05-25T00:00:00Z",
-                    "payload": {},
-                }
-            )
-            ws.receive_json()
-            captured["task"] = client.portal.call(inject_task)
+        task = _inject_long_running_execution(client, session)
 
         # Inside grace window: task is still alive.
-        assert not captured["task"].done(), (
-            "execution task was cancelled before the grace window expired"
-        )
+        assert not task.done(), "execution task was cancelled before the grace window expired"
         assert _notebook_execution_state.get(session.id) is not None
 
         # Reconnect cancels the pending teardown — task stays alive.
-        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws:
-            ws.send_json(
-                {
-                    "type": "notebook_sync",
-                    "seq": 1,
-                    "ts": "2026-05-25T00:00:00Z",
-                    "payload": {},
-                }
-            )
+        with _ws(client, session) as ws:
+            ws_send(ws, "notebook_sync")
             ws.receive_json()
-            assert not captured["task"].done()
+            assert not task.done()
             assert _notebook_execution_state.get(session.id) is not None
 
-        # Test cleanup — cancel the injected long-running task so the
-        # next test's loop doesn't inherit it.
-        async def _cancel_injected(task: asyncio.Task[None]) -> None:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                # Cancellation is the expected path — the test injected a
-                # bare ``asyncio.sleep(60)`` whose only normal exit is
-                # ``CancelledError``. Any other exception should surface so
-                # we notice if cleanup behavior regresses.
-                pass
-
-        client.portal.call(_cancel_injected, captured["task"])
+        _cancel_async_task(client, task)
 
 
-def test_grace_window_expiry_cancels_active_execution(client, temp_notebook, app, monkeypatch):
+def test_grace_window_expiry_cancels_active_execution(client, notebook_session, monkeypatch):
     """Past the grace window with no reconnect, the running execution task is cancelled."""
-    notebook_dir, _ = temp_notebook
+    from strata.notebook.ws import _notebook_execution_state, _notebook_grace_tasks
 
-    from strata.notebook.routes import get_session_manager
-    from strata.notebook.ws import (
-        _ensure_execution_state,
-        _notebook_execution_state,
-        _notebook_grace_tasks,
-    )
-
+    _, session = notebook_session
     monkeypatch.setattr("strata.notebook.ws._GRACE_CANCEL_SECONDS", 0.1)
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    captured: dict[str, asyncio.Task[None]] = {}
-
-    async def long_sleep() -> None:
-        await asyncio.sleep(60)
-
-    async def inject_task() -> asyncio.Task[None]:
-        state = _ensure_execution_state(session.id)
-        task = asyncio.create_task(long_sleep())
-        state.execution_task = task
-        return task
-
     with client:
-        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws:
-            ws.send_json(
-                {
-                    "type": "notebook_sync",
-                    "seq": 1,
-                    "ts": "2026-05-25T00:00:00Z",
-                    "payload": {},
-                }
-            )
-            ws.receive_json()
-            captured["task"] = client.portal.call(inject_task)
+        task = _inject_long_running_execution(client, session)
 
-        assert not captured["task"].done()
+        assert not task.done()
         assert session.id in _notebook_grace_tasks
 
         # Poll for the grace task to fire and cancel the execution.
         deadline = time.time() + 2.0
         while time.time() < deadline:
-            if captured["task"].done() and session.id not in _notebook_execution_state:
+            if task.done() and session.id not in _notebook_execution_state:
                 break
             time.sleep(0.02)
 
-        assert captured["task"].done()
-        assert captured["task"].cancelled()
+        assert task.done()
+        assert task.cancelled()
         assert session.id not in _notebook_execution_state
         assert session.id not in _notebook_grace_tasks
 
 
-def test_cell_source_update(client, temp_notebook, app):
-    """Test cell_source_update triggers DAG recomputation."""
-    notebook_dir, notebook_state = temp_notebook
+def test_cell_source_update(client, notebook_session):
+    """cell_source_update triggers DAG recomputation."""
+    _, session = notebook_session
+    cell_id = session.notebook_state.cells[0].id
 
-    # Register notebook
-    from strata.notebook.routes import get_session_manager
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_source_update", {"cell_id": cell_id, "source": "x = 2\ny = 3"})
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    # Connect WebSocket
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        # Send cell_source_update
-        cell_id = session.notebook_state.cells[0].id
-        websocket.send_json(
-            {
-                "type": "cell_source_update",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": cell_id, "source": "x = 2\ny = 3"},
-            }
-        )
-
-        # Should receive dag_update
         response = websocket.receive_json()
         assert response["type"] == "dag_update"
         assert "edges" in response["payload"]
         assert "topological_order" in response["payload"]
 
-        # May receive cell_status updates
+        # Drain any trailing cell_status updates.
         while True:
             try:
                 response = websocket.receive_json(timeout=0.1)
             except Exception:
                 break
             if response["type"] == "cell_status":
-                # Cell status updates are expected
                 assert "status" in response["payload"]
 
 
-def test_cell_cancel(client, temp_notebook, app):
-    """Test cell_cancel stops execution."""
-    notebook_dir, notebook_state = temp_notebook
+def test_cell_cancel(client, notebook_session):
+    """cell_cancel stops execution."""
+    _, session = notebook_session
+    cell_id = session.notebook_state.cells[0].id
 
-    # Register notebook
-    from strata.notebook.routes import get_session_manager
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    # Connect WebSocket
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        cell_id = session.notebook_state.cells[0].id
-
-        # Send cell_cancel
-        websocket.send_json(
-            {
-                "type": "cell_cancel",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": cell_id},
-            }
-        )
-
-        # Should receive cell_status(idle)
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_cancel", {"cell_id": cell_id})
         response = websocket.receive_json()
-        assert response["type"] == "cell_status"
-        assert response["payload"]["status"] == "idle"
+
+    assert response["type"] == "cell_status"
+    assert response["payload"]["status"] == "idle"
 
 
 def test_cell_cancel_interrupts_running_execution_on_same_websocket(
-    client, temp_notebook, app, monkeypatch
+    client, notebook_session, monkeypatch
 ):
     """A single WebSocket can cancel its own in-flight execution."""
-    notebook_dir, _ = temp_notebook
-
     from strata.notebook.executor import CellExecutor
-    from strata.notebook.routes import get_session_manager
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    _, session = notebook_session
     cell_id = session.notebook_state.cells[0].id
-
     cancelled = threading.Event()
 
     async def fake_execute_cell(self, cell_id: str, source: str, timeout_seconds: float = 30):
-        del self
-        del cell_id
-        del source
-        del timeout_seconds
+        del self, cell_id, source, timeout_seconds
         try:
             await asyncio.sleep(60)
         except asyncio.CancelledError:
@@ -1941,84 +1404,42 @@ def test_cell_cancel_interrupts_running_execution_on_same_websocket(
 
     monkeypatch.setattr(CellExecutor, "execute_cell", fake_execute_cell)
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": cell_id},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": cell_id})
+        running = websocket.receive_json()
+        assert running["type"] == "cell_status"
+        assert running["payload"]["cell_id"] == cell_id
+        assert running["payload"]["status"] == "running"
 
-        response = websocket.receive_json()
-        assert response["type"] == "cell_status"
-        assert response["payload"]["cell_id"] == cell_id
-        assert response["payload"]["status"] == "running"
-
-        websocket.send_json(
-            {
-                "type": "cell_cancel",
-                "seq": 2,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": cell_id},
-            }
-        )
-
-        response = websocket.receive_json()
-        assert response["type"] == "cell_status"
-        assert response["payload"]["cell_id"] == cell_id
-        assert response["payload"]["status"] == "idle"
+        ws_send(websocket, "cell_cancel", {"cell_id": cell_id}, seq=2)
+        idle = websocket.receive_json()
+        assert idle["type"] == "cell_status"
+        assert idle["payload"]["cell_id"] == cell_id
+        assert idle["payload"]["status"] == "idle"
 
     assert cancelled.is_set()
 
 
-def test_stale_cell_cancel_does_not_clobber_ready_state(client, temp_notebook, app):
+def test_stale_cell_cancel_does_not_clobber_ready_state(client, notebook_session):
     """A late cancel should not rewrite a completed cell back to idle."""
-    notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    _, session = notebook_session
     cell_id = session.notebook_state.cells[0].id
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": cell_id},
-            }
-        )
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": cell_id})
 
         while True:
             msg = websocket.receive_json()
             if (
                 msg["type"] == "cell_status"
                 and msg["payload"]["cell_id"] == cell_id
-                and msg["payload"]["status"] in ["ready", "error"]
+                and msg["payload"]["status"] in ("ready", "error")
             ):
                 assert msg["payload"]["status"] == "ready"
                 break
 
-        websocket.send_json(
-            {
-                "type": "cell_cancel",
-                "seq": 2,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": cell_id},
-            }
-        )
-        websocket.send_json(
-            {
-                "type": "notebook_sync",
-                "seq": 3,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {},
-            }
-        )
+        ws_send(websocket, "cell_cancel", {"cell_id": cell_id}, seq=2)
+        ws_send(websocket, "notebook_sync", seq=3)
 
         messages = []
         while True:
@@ -2027,41 +1448,31 @@ def test_stale_cell_cancel_does_not_clobber_ready_state(client, temp_notebook, a
             if response["type"] == "notebook_state":
                 break
 
-        idle_messages = [
-            msg
-            for msg in messages
-            if msg["type"] == "cell_status"
-            and msg["payload"].get("cell_id") == cell_id
-            and msg["payload"].get("status") == "idle"
-        ]
-        assert idle_messages == []
+    idle_messages = [
+        msg
+        for msg in messages
+        if msg["type"] == "cell_status"
+        and msg["payload"].get("cell_id") == cell_id
+        and msg["payload"].get("status") == "idle"
+    ]
+    assert idle_messages == []
 
-        state = messages[-1]["payload"]["cells"]
-        cell = next(c for c in state if c["id"] == cell_id)
-        assert cell["status"] == "ready"
+    cells = messages[-1]["payload"]["cells"]
+    cell = next(c for c in cells if c["id"] == cell_id)
+    assert cell["status"] == "ready"
 
 
-def test_last_websocket_disconnect_cancels_running_execution(
-    client, temp_notebook, app, monkeypatch
-):
+def test_last_websocket_disconnect_cancels_running_execution(client, notebook_session, monkeypatch):
     """Closing the final socket should cancel the active notebook execution."""
-    notebook_dir, _ = temp_notebook
-
     from strata.notebook.executor import CellExecutor
-    from strata.notebook.routes import get_session_manager
     from strata.notebook.ws import _notebook_execution_state
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    _, session = notebook_session
     cell_id = session.notebook_state.cells[0].id
-
     cancelled = threading.Event()
 
     async def fake_execute_cell(self, cell_id: str, source: str, timeout_seconds: float = 30):
-        del self
-        del cell_id
-        del source
-        del timeout_seconds
+        del self, cell_id, source, timeout_seconds
         try:
             await asyncio.sleep(60)
         except asyncio.CancelledError:
@@ -2070,16 +1481,8 @@ def test_last_websocket_disconnect_cancels_running_execution(
 
     monkeypatch.setattr(CellExecutor, "execute_cell", fake_execute_cell)
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": cell_id},
-            }
-        )
-
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": cell_id})
         response = websocket.receive_json()
         assert response["type"] == "cell_status"
         assert response["payload"]["status"] == "running"
@@ -2098,43 +1501,23 @@ def test_last_websocket_disconnect_cancels_running_execution(
         assert state.requested_cell is None
 
 
-def test_malformed_message(client, temp_notebook, app):
-    """Test handling of malformed messages."""
-    notebook_dir, notebook_state = temp_notebook
+def test_malformed_message(client, notebook_session):
+    """Malformed messages produce a generic error frame."""
+    _, session = notebook_session
 
-    # Register notebook
-    from strata.notebook.routes import get_session_manager
-
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
-
-    # Connect WebSocket
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        # Send message without cell_id
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {},  # Missing cell_id
-            }
-        )
-
-        # Should receive error
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute")  # missing cell_id
         response = websocket.receive_json()
-        assert response["type"] == "error"
-        assert "error" in response["payload"]
+
+    assert response["type"] == "error"
+    assert "error" in response["payload"]
 
 
-def test_cell_execute_blocked_while_environment_job_running(client, temp_notebook, app):
+def test_cell_execute_blocked_while_environment_job_running(client, notebook_session):
     """Cell execution should be rejected while an environment job is active."""
-    notebook_dir, _ = temp_notebook
-
-    from strata.notebook.routes import get_session_manager
     from strata.notebook.session import EnvironmentJobSnapshot
 
-    session_manager = get_session_manager()
-    session = session_manager.open_notebook(notebook_dir)
+    _, session = notebook_session
     cell_id = session.notebook_state.cells[0].id
     session.environment_job = EnvironmentJobSnapshot(
         id="job-1",
@@ -2145,26 +1528,18 @@ def test_cell_execute_blocked_while_environment_job_running(client, temp_noteboo
         started_at=1,
     )
 
-    with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as websocket:
-        websocket.send_json(
-            {
-                "type": "cell_execute",
-                "seq": 1,
-                "ts": "2026-03-23T00:00:00Z",
-                "payload": {"cell_id": cell_id},
-            }
-        )
-
+    with _ws(client, session) as websocket:
+        ws_send(websocket, "cell_execute", {"cell_id": cell_id})
         response = websocket.receive_json()
-        assert response["type"] == "error"
-        assert response["payload"]["code"] == "ENVIRONMENT_BUSY"
+
+    assert response["type"] == "error"
+    assert response["payload"]["code"] == "ENVIRONMENT_BUSY"
 
 
-def test_unknown_notebook(client, app):
-    """Test connecting to non-existent notebook."""
-    # Try to connect to non-existent notebook
-    with pytest.raises(Exception):  # Should raise connection error
-        with client.websocket_connect("/v1/notebooks/ws/nonexistent") as _websocket:
+def test_unknown_notebook(client):
+    """Connecting to a non-existent notebook should fail the upgrade."""
+    with pytest.raises(Exception):
+        with client.websocket_connect("/v1/notebooks/ws/nonexistent"):
             pass
 
 
@@ -2172,24 +1547,22 @@ class TestRunningPayloadHelper:
     """Tests for the ``_running_payload`` helper that decorates the
     ``cell_status: running`` broadcast with remote worker metadata.
 
-    Local cells must keep the existing, minimal payload so existing
-    clients don't regress. Remote cells must include ``remote_worker``
-    and ``remote_transport`` so the UI can render a live dispatch badge
-    while the cell executes on the remote worker.
+    Local cells must keep the existing, minimal payload so existing clients
+    don't regress. Remote cells must include ``remote_worker`` and
+    ``remote_transport`` so the UI can render a live dispatch badge while
+    the cell executes on the remote worker.
     """
 
     @staticmethod
     def _build_session(tmp_path, cells):
         """Build a NotebookSession with the given (cell_id, source) pairs.
 
-        The notebook is created with two pre-registered workers: a
-        DataFusion cluster at port 9000 and a GPU worker at 9001, both
-        configured as HTTP executors.
+        The notebook is created with two pre-registered workers: a DataFusion
+        cluster at port 9000 and a GPU worker at 9001, both configured as
+        HTTP executors.
         """
         from strata.notebook.models import WorkerBackendType, WorkerSpec
-        from strata.notebook.parser import parse_notebook
         from strata.notebook.session import NotebookSession
-        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
 
         notebook_dir = create_notebook(tmp_path, "RunningPayloadTest", initialize_environment=False)
         prev_id = None
@@ -2264,7 +1637,7 @@ class TestRunningPayloadHelper:
         assert payload["remote_worker"] == "df-cluster"
 
 
-def test_variant_add_broadcasts_new_cell(client, app):
+def test_variant_add_broadcasts_new_cell(client):
     """variant_add must broadcast notebook_state (with the new cell's full
     payload), not just dag_update — otherwise the frontend skips the new
     cell and the user sees the active variant 'disappear'."""
@@ -2273,36 +1646,19 @@ def test_variant_add_broadcasts_new_cell(client, app):
         add_cell_to_notebook(notebook_dir, "model_a")
         write_cell(notebook_dir, "model_a", "# @variant g a\npreds = 1\n")
 
-        from strata.notebook.routes import get_session_manager
-
-        session = get_session_manager().open_notebook(notebook_dir)
-        with client.websocket_connect(f"/v1/notebooks/ws/{session.id}") as ws:
-            ws.send_json(
-                {
-                    "type": "variant_add",
-                    "seq": 1,
-                    "ts": "2026-05-10T00:00:00Z",
-                    "payload": {"group": "g"},
-                }
-            )
+        session = open_session(notebook_dir)
+        with _ws(client, session) as ws:
+            ws_send(ws, "variant_add", {"group": "g"})
             # Look for the notebook_state broadcast (other messages like
             # cell_status may interleave).
-            for _ in range(10):
-                response = ws.receive_json()
-                if response["type"] == "notebook_state":
-                    break
-            else:
-                raise AssertionError("Never received notebook_state for variant_add")
+            response = receive_message_type(ws, "notebook_state", max_messages=10)
 
-        state = response["payload"]
-        cells = state["cells"]
-        # Both the original and the new variant must be in the payload
-        # with full source attached.
-        new_cells = [c for c in cells if c.get("variant_name") == "a_copy"]
-        assert len(new_cells) == 1
-        assert "# @variant g a_copy" in new_cells[0]["source"]
-        assert "preds = 1" in new_cells[0]["source"]
-        # New variant is active; old becomes inactive.
-        assert new_cells[0]["variant_active"] is True
-        old = next(c for c in cells if c.get("variant_name") == "a")
-        assert old["variant_active"] is False
+    cells = response["payload"]["cells"]
+    new_cells = [c for c in cells if c.get("variant_name") == "a_copy"]
+    assert len(new_cells) == 1
+    assert "# @variant g a_copy" in new_cells[0]["source"]
+    assert "preds = 1" in new_cells[0]["source"]
+    # New variant is active; old becomes inactive.
+    assert new_cells[0]["variant_active"] is True
+    old = next(c for c in cells if c.get("variant_name") == "a")
+    assert old["variant_active"] is False
