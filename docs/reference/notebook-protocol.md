@@ -1,15 +1,5 @@
 # Notebook Client Protocol
 
-!!! warning "Forward-looking — depends on PRs #46, #47, #48"
-    This page describes behavior introduced in three companion PRs that have
-    not yet landed on `main`: the `MessageType` enum extraction (#46),
-    the `/{session_id}/...` owner gate (#47), and the 60s reconnect
-    grace window (#48). The doc PR is parked in draft until those
-    dependencies merge; if you're reading this from a branch, treat the
-    "MessageType lives in `protocol.py`", "REST owner-gates by default",
-    and "60s reconnect window" sections as forward-looking until the
-    dependency PRs land.
-
 A single reference for writing a non-Vue client (TUI, scripting, third-party
 integration) against the notebook backend. The deeper per-endpoint and
 per-frame details live in [REST API Reference](rest-api.md) and
@@ -95,10 +85,11 @@ stores the session id from the open response.
     `owner` field (and notebooks created by services that don't send the
     header) accept any caller.
 
-The owner gate was previously asymmetric — only WS upgrades enforced it; a
-leaked `session_id` was a bearer capability for the REST surface. As of
-PR #47 every `SessionDep` route inherits the check by routing through
-`get_notebook_session`. There are no opt-outs.
+Both surfaces share a single gate: every `SessionDep` route routes through
+`get_notebook_session`, which resolves the session and immediately calls
+`_require_owner`. The WS upgrade applies the same check before
+`accept()`. A leaked `session_id` is *not* a bearer capability — owner
+enforcement is symmetric across REST and WS, with no opt-outs.
 
 ### Service mode
 
@@ -149,11 +140,11 @@ corresponding panel:
 
 ## Reconnection and the cancel-on-disconnect grace window
 
-The WS handler used to cancel any in-flight execution and drop inspect /
-execution state the instant the last connection dropped. PR #48 introduced a
-**60-second reconnect grace window**: when the last client disconnects, the
-teardown is scheduled instead of run inline. Any incoming upgrade for the
-same notebook within the window cancels the pending teardown and resumes
+When the last WS for a notebook drops, the handler does *not* cancel the
+in-flight execution and drop inspect / execution state immediately.
+Instead it schedules a teardown task that fires after a
+**60-second reconnect grace window**; any incoming upgrade for the same
+notebook within that window cancels the pending teardown and resumes
 against the preserved execution state.
 
 What this means for a client:
@@ -181,11 +172,9 @@ for the message-level detail.
 ## Message types
 
 The full list of WS frame types lives on the [WebSocket Protocol](websocket.md)
-page; the catch is that **every type now corresponds to a member of
-`strata.notebook.protocol.MessageType`** (PR #46). Before that PR, seven
-S→C frame types (`environment_job_*`, `dependency_changed`, `agent_*`) were
-raw string literals emitted ad-hoc. A non-Vue client can now enumerate the
-canonical set by iterating the enum:
+page. **Every type corresponds to a member of
+`strata.notebook.protocol.MessageType`** — that enum is the canonical
+source. A non-Vue client can enumerate the full set by iterating it:
 
 ```python
 from strata.notebook.protocol import MessageType
