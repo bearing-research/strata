@@ -407,8 +407,7 @@ display(Markdown("# Side effect\\n\\nVia websocket."))
     assert output_message["type"] == "cell_output"
     assert output_message["payload"]["display"]["content_type"] == "text/markdown"
     assert (
-        output_message["payload"]["display"]["markdown_text"]
-        == "# Side effect\n\nVia websocket."
+        output_message["payload"]["display"]["markdown_text"] == "# Side effect\n\nVia websocket."
     )
     assert terminal_status["payload"]["status"] == "ready"
 
@@ -530,9 +529,7 @@ def test_cell_execute_surfaces_module_export_lambda_error(client, temp_notebook)
         assert terminal["payload"]["status"] == "error"
 
 
-def test_cell_execute_uses_warm_pool_when_available(
-    client, notebook_session, monkeypatch
-):
+def test_cell_execute_uses_warm_pool_when_available(client, notebook_session, monkeypatch):
     """The WebSocket path is wired to use the session warm pool."""
     from strata.notebook.executor import CellExecutor
     from strata.notebook.pool import PooledCellExecutor, WarmProcessPool
@@ -1015,9 +1012,7 @@ def test_ws_cancelled_signed_http_executor_marks_build_failed(
         await asyncio.sleep(60)
         return {
             "success": True,
-            "variables": {
-                "x": {"content_type": "json/object", "file": "x.json", "preview": 1}
-            },
+            "variables": {"x": {"content_type": "json/object", "file": "x.json", "preview": 1}},
             "stdout": "",
             "stderr": "",
             "mutation_warnings": [],
@@ -1228,9 +1223,7 @@ def _cancel_async_task(client, task):
     client.portal.call(_cancel, task)
 
 
-def test_grace_window_preserves_inspect_state_on_reconnect(
-    client, notebook_session, monkeypatch
-):
+def test_grace_window_preserves_inspect_state_on_reconnect(client, notebook_session, monkeypatch):
     """Disconnect-then-reconnect within the grace window keeps inspect state.
 
     Without the grace window, the inspect manager would be dropped the moment
@@ -1329,9 +1322,7 @@ def test_grace_window_preserves_active_execution_on_reconnect(
         _cancel_async_task(client, task)
 
 
-def test_grace_window_expiry_cancels_active_execution(
-    client, notebook_session, monkeypatch
-):
+def test_grace_window_expiry_cancels_active_execution(client, notebook_session, monkeypatch):
     """Past the grace window with no reconnect, the running execution task is cancelled."""
     from strata.notebook.ws import _notebook_execution_state, _notebook_grace_tasks
 
@@ -1471,9 +1462,7 @@ def test_stale_cell_cancel_does_not_clobber_ready_state(client, notebook_session
     assert cell["status"] == "ready"
 
 
-def test_last_websocket_disconnect_cancels_running_execution(
-    client, notebook_session, monkeypatch
-):
+def test_last_websocket_disconnect_cancels_running_execution(client, notebook_session, monkeypatch):
     """Closing the final socket should cancel the active notebook execution."""
     from strata.notebook.executor import CellExecutor
     from strata.notebook.ws import _notebook_execution_state
@@ -1575,9 +1564,7 @@ class TestRunningPayloadHelper:
         from strata.notebook.models import WorkerBackendType, WorkerSpec
         from strata.notebook.session import NotebookSession
 
-        notebook_dir = create_notebook(
-            tmp_path, "RunningPayloadTest", initialize_environment=False
-        )
+        notebook_dir = create_notebook(tmp_path, "RunningPayloadTest", initialize_environment=False)
         prev_id = None
         for cell_id, source in cells:
             add_cell_to_notebook(notebook_dir, cell_id, prev_id)
