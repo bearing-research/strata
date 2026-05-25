@@ -80,6 +80,7 @@ nav:
   - Core:
     - Quickstart: getting-started/core.md
   - API Reference:
+    - Notebook Client Protocol: reference/notebook-protocol.md
     - REST API: reference/rest-api.md
     - WebSocket Protocol: reference/websocket.md
     - Executor Protocol: reference/executor-protocol.md
