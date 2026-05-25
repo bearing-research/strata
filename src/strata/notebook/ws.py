@@ -570,6 +570,12 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     # leaked notebook_id would let user B observe user A's live state
     # (status, console, DAG) over WS even after the REST surface has
     # been locked down.
+    #
+    # Same close-on-missing-header rule as ``_require_owner`` in routes.py:
+    # if per-user scoping is configured but the request omitted the
+    # identity header, deny — otherwise the bypass is "just don't send
+    # the header." Single-user deployments (header unset) keep their
+    # existing pass-through behavior.
     owner = session.notebook_state.owner
     if owner is not None:
         try:
@@ -578,7 +584,15 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
             header_name = get_state().config.personal_mode_user_header
         except RuntimeError:
             header_name = None
-        caller = (websocket.headers.get(header_name) or "").strip() or None if header_name else None
+        scoping_enabled = bool(header_name)
+        caller: str | None
+        if header_name:
+            caller = (websocket.headers.get(header_name) or "").strip() or None
+        else:
+            caller = None
+        if caller is None and scoping_enabled:
+            await websocket.close(code=1008, reason="Notebook not found")
+            return
         if caller is not None and owner != caller:
             await websocket.close(code=1008, reason="Notebook not found")
             return

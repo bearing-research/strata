@@ -77,17 +77,25 @@ def get_session_manager() -> SessionManager:
     return _session_manager
 
 
-def get_notebook_session(notebook_id: str) -> NotebookSession:
+def get_notebook_session(notebook_id: str, request: Request) -> NotebookSession:
     """FastAPI dependency: resolve ``notebook_id`` to an open session.
 
     Raises ``HTTPException(404)`` when the notebook is not known to the
-    session manager. Used as ``session: SessionDep`` on every route
-    that targets a specific notebook so individual handlers don't
-    re-implement the lookup-and-404 dance.
+    session manager *or* when the caller doesn't own it. Used as
+    ``session: SessionDep`` on every route that targets a specific
+    notebook so individual handlers don't re-implement the lookup-and-
+    404 dance.
+
+    The owner gate matches the WS upgrade behavior in ``ws.py`` — a
+    leaked ``session_id`` is no longer a bearer capability for these
+    routes. Generic 404 instead of 403 so probes can't enumerate
+    notebook owners. Unowned notebooks and single-user deployments
+    (``personal_mode_user_header`` unset) pass through unchanged.
     """
     session = _session_manager.get_session(notebook_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Notebook not found")
+    _require_owner(session.notebook_state.owner, _caller_identity(request))
     return session
 
 
@@ -218,6 +226,25 @@ def _require_personal_mode_notebook_delete() -> None:
         )
 
 
+def _user_scoping_enabled() -> bool:
+    """Return whether the server is configured to read a per-request identity header.
+
+    Distinguishes single-user mode (no ``personal_mode_user_header``
+    configured — all callers act as a global user) from per-user mode
+    (header configured — every owned notebook must see a matching
+    caller). Without this distinction ``_caller_identity`` returning
+    ``None`` is ambiguous and an owned notebook would accept a request
+    that simply omits the configured header.
+    """
+    try:
+        from strata.server import get_state
+
+        state = get_state()
+    except RuntimeError:
+        return False
+    return bool(getattr(state.config, "personal_mode_user_header", None))
+
+
 def _caller_identity(request: Request) -> str | None:
     """Resolve the calling user's identity for personal-mode scoping.
 
@@ -227,12 +254,12 @@ def _caller_identity(request: Request) -> str | None:
     read; when it's unset the deployment behaves as single-user and this
     function returns ``None`` for every request — no scoping kicks in.
 
-    Returning ``None`` is also the correct behavior when the header is
-    configured but missing from a particular request (e.g. health
-    checks, internal services). Endpoints that depend on identity for
-    ACL decisions must treat ``None`` as "no identity available" — they
-    can either fall back to global behavior or refuse the request,
-    whichever matches the operation's safety profile.
+    Returns ``None`` both when the header isn't configured *and* when it
+    is configured but missing from a particular request. Callers that
+    care about that distinction (notably ``_require_owner``) must
+    consult ``_user_scoping_enabled`` separately — treating a missing
+    header as "no identity" would let any caller bypass owner gating on
+    an owned notebook by simply omitting the configured header.
     """
     try:
         from strata.server import get_state
@@ -258,13 +285,21 @@ def _require_owner(notebook_owner: str | None, caller: str | None) -> None:
     - Unowned notebooks (``notebook_owner is None``) remain accessible to any
       caller — they're either legacy notebooks created before scoping was
       enabled, or notebooks created by services that don't carry a header.
-    - When ``personal_mode_user_header`` is unset (and so ``caller`` is None),
-      every notebook acts as if unowned and access is allowed. This preserves
-      single-user behavior on local deployments.
-    - When the notebook is owned and the caller's identity differs, raise
-      403. Use a generic "not found" body so probes can't enumerate owners.
+    - When ``personal_mode_user_header`` is unset, scoping is off and every
+      notebook acts as if unowned. Single-user behavior on local
+      deployments is preserved.
+    - When ``personal_mode_user_header`` *is* configured and the request
+      didn't carry it, deny — otherwise a leaked ``session_id`` could be
+      used to drive an owned notebook by simply omitting the identity
+      header. The gate must close on both "wrong user" and "no user".
+    - When the notebook is owned and the caller's identity differs, deny.
+      Use a generic "not found" body so probes can't enumerate owners.
     """
-    if notebook_owner is None or caller is None:
+    if notebook_owner is None:
+        return
+    if caller is None:
+        if _user_scoping_enabled():
+            raise HTTPException(status_code=404, detail="Notebook not found")
         return
     if notebook_owner != caller:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -1055,11 +1090,9 @@ async def import_jupyter_notebook(
 
 
 @router.delete("/{notebook_id}")
-async def delete_notebook(notebook_id: str, session: SessionDep, request: Request) -> dict:
+async def delete_notebook(notebook_id: str, session: SessionDep) -> dict:
     """Delete a notebook directory and all notebook-owned runtime state."""
     _require_personal_mode_notebook_delete()
-
-    _require_owner(session.notebook_state.owner, _caller_identity(request))
 
     if session.has_active_environment_mutation():
         _raise_environment_busy(
