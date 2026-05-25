@@ -636,6 +636,15 @@ y + 1
 
     with _ws(client, session) as websocket:
         ws_send(websocket, "cell_execute", {"cell_id": "leaf"})
+        prompt = websocket.receive_json()
+        assert prompt["type"] == "cascade_prompt"
+
+        ws_send(
+            websocket,
+            "cell_execute_cascade",
+            {"cell_id": "leaf", "plan_id": prompt["payload"]["plan_id"]},
+            seq=2,
+        )
         output_message, terminal_status = receive_execution_terminal(websocket, "leaf")
 
     payload = output_message["payload"]
@@ -644,7 +653,9 @@ y + 1
     assert payload["displays"][0]["content_type"] == "text/markdown"
     assert payload["displays"][0]["markdown_text"] == "# First"
     assert payload["displays"][1]["content_type"] == "json/object"
+    assert payload["displays"][1]["preview"] == 3
     assert payload["display"]["content_type"] == "json/object"
+    assert payload["display"]["preview"] == 3
     assert terminal_status["payload"]["status"] == "ready"
 
 
