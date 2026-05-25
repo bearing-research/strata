@@ -170,7 +170,21 @@ class NotebookTUI(App[None]):
                 json={"path": str(self.notebook_path)},
                 headers=self.auth_headers,
             )
-            response.raise_for_status()
+            if response.is_error:
+                # Surface the server's ``{"detail": "..."}`` body — without it
+                # the user sees a bare "400 Bad Request" and has to dig
+                # through server logs to find e.g. "personal mode only" or
+                # "path outside configured storage."
+                detail = ""
+                try:
+                    body = response.json()
+                    if isinstance(body, dict):
+                        detail = body.get("detail") or ""
+                except ValueError:
+                    detail = response.text.strip()
+                raise RuntimeError(
+                    f"server returned {response.status_code}" + (f": {detail}" if detail else "")
+                )
             data = response.json()
             self.session_id = data["session_id"]
             self.sub_title = data.get("name") or self.notebook_path.name
