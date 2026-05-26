@@ -314,6 +314,26 @@ class TestIntegrationRealRscript:
         assert "df" in result.references
         assert "col" not in result.references
 
+    def test_single_multichar_name_not_split_into_chars(self):
+        """``df <- 1`` returns ``defines=['df']``, never ``['d', 'f']``.
+
+        Regression for #71: ``analyze_cell.R`` previously emitted
+        ``cat(jsonlite::toJSON(result, auto_unbox = TRUE))``, which
+        collapses 1-element character vectors to scalar JSON strings.
+        Python's ``list(payload['defines'])`` then iterated the scalar
+        ``"df"`` character-by-character. The fix wraps ``defines`` /
+        ``references`` in ``I()`` so they stay as arrays even at
+        length 1. Single-char names like ``"x"`` accidentally
+        round-trip correctly under the bug (``list("x") == ['x']``),
+        so the failure mode only shows up for multi-char names — pin
+        that here.
+        """
+        cell = _make_cell("df <- 1")
+        result = _RAnalyzer().analyze(cell, session=None)
+        assert result.defines == ["df"]
+        assert "d" not in result.defines
+        assert "f" not in result.defines
+
     def test_parse_error_returns_empty(self):
         cell = _make_cell("x <-")  # incomplete
         result = _RAnalyzer().analyze(cell, session=None)

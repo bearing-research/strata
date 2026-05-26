@@ -175,6 +175,13 @@ result <- tryCatch(
 # ---------------------------------------------------------------------------
 
 if (has_jsonlite) {
+  # ``I()`` pins ``defines`` / ``references`` as arrays so a single-name
+  # cell (``c("df")``) round-trips as ``["df"]`` rather than the scalar
+  # ``"df"`` that ``auto_unbox = TRUE`` would emit — the Python side
+  # then does ``list("df")`` and gets ``['d', 'f']``. ``parse_error``
+  # is a true scalar string, so it stays auto-unboxed.
+  result$defines <- I(result$defines)
+  result$references <- I(result$references)
   cat(jsonlite::toJSON(result, auto_unbox = TRUE))
 } else {
   # Manual JSON emit — keep this in lockstep with what the Python
