@@ -486,12 +486,45 @@ def execute_batch(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Seed namespace from upstream artifacts.
-    namespace: dict[str, Any] = deserialize_inputs(
-        {"inputs": upstream_inputs, "output_dir": str(output_dir)}
-    )
+    # Seed namespace from upstream artifacts. Done inline (rather than
+    # via deserialize_inputs) so a single R-only artifact doesn't
+    # abort the whole subprocess pre-``cell_start`` — the parent would
+    # then see ``subprocess_died`` instead of the actionable
+    # StrataRArtifactError. Per-variable failures are stashed and
+    # surfaced as a ``cell_error`` on the first cell that references
+    # the tainted variable.
+    namespace: dict[str, Any] = {}
+    tainted_inputs: dict[str, _ser.StrataRArtifactError] = {}
+    for var_name, spec in (upstream_inputs or {}).items():
+        content_type = spec.get("content_type", "")
+        file_name = spec.get("file", "")
+        if not file_name:
+            print(f"Warning: no file path for input {var_name}", file=sys.stderr)
+            continue
+        full_path = output_dir / file_name
+        if not full_path.exists():
+            print(f"Warning: input file not found: {full_path}", file=sys.stderr)
+            continue
+        try:
+            namespace[var_name] = _ser.deserialize_value(content_type, full_path)
+        except _ser.StrataRArtifactError as exc:
+            tainted_inputs[var_name] = _ser.StrataRArtifactError(
+                exc.file_path, variable_name=var_name
+            )
+        except Exception as exc:
+            print(f"Error deserializing {var_name}: {exc}", file=sys.stderr)
 
     for cell in cells:
+        blocker = _first_tainted_reference(cell["source"], tainted_inputs)
+        if blocker is not None:
+            _emit_tainted_cell_error(cell["cell_id"], blocker, frame_out)
+            _send_frame(
+                frame_out,
+                "batch_end",
+                {"reason": "cell_error", "failed_cell_id": cell["cell_id"]},
+            )
+            return
+
         status, reason = _run_one_batched_cell(cell, namespace, output_dir, frame_out, resp_in)
         if status != "ok":
             _send_frame(
@@ -502,6 +535,53 @@ def execute_batch(
             return
 
     _send_frame(frame_out, "batch_end", {"reason": "complete"})
+
+
+def _first_tainted_reference(
+    source: str,
+    tainted_inputs: dict[str, _ser.StrataRArtifactError],
+) -> _ser.StrataRArtifactError | None:
+    """Return the first tainted-upstream error that a cell's source references.
+
+    Word-boundary match — keeps ``fit`` from spuriously triggering on
+    ``unfit_data`` or string literals like ``"fit_score"``. AST-walk
+    would be more precise, but a single regex pass over the source
+    catches the cases the reviewer cares about (the consumer using
+    the bare name as an identifier).
+    """
+    if not tainted_inputs:
+        return None
+    import re
+
+    for var_name, exc in tainted_inputs.items():
+        if re.search(rf"\b{re.escape(var_name)}\b", source):
+            return exc
+    return None
+
+
+def _emit_tainted_cell_error(
+    cell_id: str,
+    exc: _ser.StrataRArtifactError,
+    frame_out: Any,
+) -> None:
+    """Emit cell_start + cell_error for a cell blocked on a tainted upstream.
+
+    Mirrors the frame shape ``_run_one_batched_cell`` would emit on a
+    body-level exception, so consumers of the frame protocol don't
+    need a separate branch for this case.
+    """
+    _send_frame(frame_out, "cell_start", {"cell_id": cell_id})
+    _send_frame(
+        frame_out,
+        "cell_error",
+        {
+            "cell_id": cell_id,
+            "error": str(exc),
+            "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+            "stdout": "",
+            "stderr": "",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
