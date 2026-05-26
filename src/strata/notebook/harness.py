@@ -78,6 +78,12 @@ def deserialize_inputs(manifest: dict) -> dict[str, Any]:
 
         try:
             inputs[var_name] = _ser.deserialize_value(content_type, full_path)
+        except _ser.StrataRArtifactError as e:
+            # R-only payload from an upstream R cell. Re-raise with the
+            # variable name attached so the cell fails loudly instead
+            # of silently leaving `var_name` undefined and triggering
+            # an unhelpful NameError further down.
+            raise _ser.StrataRArtifactError(e.file_path, variable_name=var_name) from e
         except Exception as e:
             print(f"Error deserializing {var_name}: {e}", file=sys.stderr)
 

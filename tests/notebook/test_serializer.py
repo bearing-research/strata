@@ -16,6 +16,9 @@ import pytest
 from strata.notebook import Markdown
 from strata.notebook import serializer as serializer_module
 from strata.notebook.serializer import (
+    EXT_TO_CONTENT_TYPE,
+    ContentType,
+    StrataRArtifactError,
     deserialize_value,
     serialize_value,
 )
@@ -842,3 +845,56 @@ class TestLargeDataFrames:
                 df_loaded = df_loaded.to_pandas()
 
             pd.testing.assert_frame_equal(df_loaded, df)
+
+
+class TestRdsArtifactRefusal:
+    """``application/x-r-rds`` artifacts are R-only — Python deserialization must fail loudly.
+
+    The harness.R fallback tier produces RDS blobs (saveRDS) for any
+    value that isn't a data.frame/tibble or a JSON-able scalar/list.
+    Python has no RDS reader, so the dispatcher's job is to surface a
+    structured error pointing the user back to R for an Arrow re-export
+    instead of throwing a confusing "Unknown content type" or returning
+    raw bytes.
+    """
+
+    def test_content_type_registered(self):
+        # The ContentType enum and the file-extension table both need
+        # the RDS entry so executor._store_outputs's ``.rds`` ingestion
+        # path and the deserializer's dispatch table stay in sync.
+        assert ContentType.RDS_OBJECT == "application/x-r-rds"
+        assert EXT_TO_CONTENT_TYPE[".rds"] == ContentType.RDS_OBJECT
+
+    def test_deserialize_rds_raises_structured_error(self, tmp_path):
+        rds_path = tmp_path / "model.rds"
+        rds_path.write_bytes(b"\x1f\x8b\x08\x00fakerds")
+
+        with pytest.raises(StrataRArtifactError) as excinfo:
+            deserialize_value(ContentType.RDS_OBJECT, rds_path)
+
+        err = excinfo.value
+        assert err.code == "R_ONLY_ARTIFACT"
+        assert err.file_path == rds_path
+        # The default message (no variable name yet — that's filled in
+        # by the Python harness layer) points the user at the fix.
+        assert "saveRDS" in str(err)
+        assert "data.frame" in str(err)
+
+    def test_deserialize_rds_raises_via_raw_string_content_type(self, tmp_path):
+        # Callers from outside the notebook package pass the raw
+        # content-type string, not the enum. Both forms must dispatch
+        # to the same handler.
+        rds_path = tmp_path / "obj.rds"
+        rds_path.write_bytes(b"rds")
+
+        with pytest.raises(StrataRArtifactError):
+            deserialize_value("application/x-r-rds", rds_path)
+
+    def test_error_carries_variable_name_when_set(self, tmp_path):
+        rds_path = tmp_path / "fit.rds"
+        rds_path.write_bytes(b"rds")
+
+        err = StrataRArtifactError(rds_path, variable_name="fit")
+
+        assert err.variable_name == "fit"
+        assert "fit" in str(err)

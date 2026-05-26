@@ -1,6 +1,6 @@
 """Shared serialization/deserialization for notebook cell values.
 
-Supports seven content types:
+Supports these content types:
   arrow/ipc    — Anything Arrow-representable (PyArrow Tables/RecordBatch,
                  pandas DataFrames/Series, numpy ndarrays of any dim,
                  numpy scalars, typed Python primitives like datetime /
@@ -14,6 +14,8 @@ Supports seven content types:
   module/cell  — Synthetic module export for top-level defs/classes
   module/cell-instance — Instance of a synthetic notebook-exported class
   pickle/object — everything else
+  application/x-r-rds — R-only RDS blob produced by harness.R; refuses to
+                 deserialize from Python (raises ``StrataRArtifactError``).
 
 This module is loaded dynamically by harness.py, pool_worker.py, and
 inspect_repl.py via ``importlib.util``, since those scripts run inside
@@ -73,6 +75,51 @@ class ContentType(StrEnum):
     MODULE_IMPORT = "module/import"
     MODULE_CELL = "module/cell"
     MODULE_CELL_INSTANCE = "module/cell-instance"
+    # R-only payload — saveRDS() blob produced by harness.R for any
+    # value that isn't a data.frame/tibble (Arrow tier) or
+    # atomic/list (JSON tier). The bytes are unreadable from Python;
+    # ``_deserialize_rds`` raises ``StrataRArtifactError`` to tell
+    # the user to re-export from R as a data.frame for cross-language
+    # handoff.
+    RDS_OBJECT = "application/x-r-rds"
+
+
+class StrataRArtifactError(RuntimeError):
+    """Raised when a Python cell tries to consume an R-only RDS artifact.
+
+    Attached attributes give callers the context to render a useful
+    error to the user without re-parsing the message string:
+
+    ``code``         — stable identifier ``R_ONLY_ARTIFACT``
+    ``file_path``    — on-disk path of the RDS blob (debugging only)
+    ``variable_name``— upstream variable, when known. Populated by the
+                       Python harness when it catches the error during
+                       input deserialization.
+    """
+
+    code = "R_ONLY_ARTIFACT"
+
+    def __init__(
+        self,
+        file_path: Path | str,
+        *,
+        variable_name: str | None = None,
+        message: str | None = None,
+    ) -> None:
+        self.file_path = Path(file_path)
+        self.variable_name = variable_name
+        if message is None:
+            target = (
+                f"variable '{variable_name}'" if variable_name else f"artifact at {self.file_path}"
+            )
+            message = (
+                f"Cannot consume R-only artifact ({target}) from Python: "
+                "the upstream R cell stored this value via saveRDS(), which "
+                "Python cannot read. Re-export the upstream as a data.frame "
+                "or tibble (handed across as Arrow IPC) for cross-language "
+                "consumption."
+            )
+        super().__init__(message)
 
 
 class SerializedPayload(TypedDict):
@@ -1039,6 +1086,7 @@ EXT_TO_CONTENT_TYPE: dict[str, ContentType] = {
     ".module.json": ContentType.MODULE_IMPORT,
     ".cell_module.json": ContentType.MODULE_CELL,
     ".cell_instance.pickle": ContentType.MODULE_CELL_INSTANCE,
+    ".rds": ContentType.RDS_OBJECT,
 }
 
 
@@ -1197,6 +1245,14 @@ def _deserialize_json(file_path: Path) -> Any:
 
 def _deserialize_markdown(file_path: Path) -> str:
     return file_path.read_text(encoding="utf-8")
+
+
+def _deserialize_rds(file_path: Path) -> Any:
+    # RDS payloads are R's native binary format; Python has no reader.
+    # Raise the structured error here so any Python caller that tries
+    # to consume an R-only artifact gets the suggested-fix message
+    # instead of a generic "Unknown content type" or bytes garbage.
+    raise StrataRArtifactError(file_path)
 
 
 def _deserialize_pickle(file_path: Path) -> Any:
@@ -1424,4 +1480,8 @@ _HANDLERS: dict[str, _Handler] = {
     ContentType.MODULE_CELL_INSTANCE: _Handler(
         _serialize_cell_instance, _deserialize_cell_instance
     ),
+    # No serialize side — Python never produces RDS; the file is
+    # always written by harness.R. The deserializer raises rather
+    # than returning a value.
+    ContentType.RDS_OBJECT: _Handler(None, _deserialize_rds),
 }

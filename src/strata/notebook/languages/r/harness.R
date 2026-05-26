@@ -75,12 +75,15 @@ dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 #
 # Content types we know about:
 #
-#   arrow/ipc        → tibble / data.frame via `arrow::read_ipc_stream`
-#   json/object      → R list via `jsonlite::fromJSON`
-#   pickle/object    → unreadable from R, raise with a clear message
-#                       so the user knows to re-export from Python as
-#                       a DataFrame for Arrow handoff
-#   *                → unknown — raise
+#   arrow/ipc              → tibble / data.frame via `arrow::read_ipc_stream`
+#   json/object            → R list via `jsonlite::fromJSON`
+#   application/x-r-rds    → arbitrary R value via `readRDS` (R-only, the
+#                             fast path for round-tripping objects
+#                             between R cells without an Arrow detour)
+#   pickle/object          → unreadable from R, raise with a clear message
+#                             so the user knows to re-export from Python as
+#                             a DataFrame for Arrow handoff
+#   *                      → unknown — raise
 
 deserialize_input <- function(name, spec, output_dir) {
   ct <- spec$content_type
@@ -96,6 +99,9 @@ deserialize_input <- function(name, spec, output_dir) {
   }
   if (identical(ct, "json/object")) {
     return(jsonlite::fromJSON(full_path, simplifyVector = FALSE))
+  }
+  if (identical(ct, "application/x-r-rds")) {
+    return(readRDS(full_path))
   }
   if (identical(ct, "pickle/object")) {
     stop(sprintf(
