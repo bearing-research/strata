@@ -22,12 +22,20 @@ from strata.notebook.languages.analyzer import (
     get_language_analyzer,
     register_language_analyzer,
 )
+from strata.notebook.languages.executor import (
+    LanguageExecutor,
+    get_language_executor,
+    register_language_executor,
+)
 
 __all__ = [
     "AnalyzedCell",
     "LanguageAnalyzer",
+    "LanguageExecutor",
     "UnknownLanguageError",
     "analyze_cell_by_language",
     "get_language_analyzer",
+    "get_language_executor",
     "register_language_analyzer",
+    "register_language_executor",
 ]

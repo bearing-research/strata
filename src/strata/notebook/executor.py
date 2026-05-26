@@ -73,7 +73,6 @@ from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import (
     CellLanguage,
     CellOutput,
-    MountMode,
     MountSpec,
     WorkerBackendType,
 )
@@ -764,51 +763,59 @@ class CellExecutor:
         materialize_upstreams: bool,
         use_cache: bool,
     ) -> CellExecutionResult:
+        """Dispatch a cell to the right language executor.
+
+        Per-language behaviour (subprocess vs LLM vs ADBC vs no-op) lives
+        in adapters under ``strata.notebook.languages``. Missing cells
+        default to the Python pipeline — historical behaviour for cells
+        that have been removed from state mid-execution.
+        """
+        from strata.notebook.languages import get_language_executor
+
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is not None:
+            cell.cache_hit = False
+            language_executor = get_language_executor(cell.language)
+        else:
+            language_executor = get_language_executor(CellLanguage.PYTHON)
+
+        return await language_executor.execute(
+            self,
+            cell_id,
+            source,
+            start_time,
+            timeout_seconds=timeout_seconds,
+            materialize_upstreams=materialize_upstreams,
+            use_cache=use_cache,
+        )
+
+    async def _execute_python_cell(
+        self,
+        cell_id: str,
+        source: str,
+        timeout_seconds: float,
+        start_time: float,
+        *,
+        materialize_upstreams: bool,
+        use_cache: bool,
+    ) -> CellExecutionResult:
+        """Python cell pipeline: provenance → upstream → cache check →
+        subprocess harness → persist.
+
+        Extracted from the previous ``_materialize_cell`` body so the
+        dispatch surface stays small. The body is unchanged — the only
+        difference vs the pre-#54 method is the absence of the
+        prompt/sql/markdown branches at the top (those now route via
+        the language registry).
+        """
         remote_metadata: dict[str, str] = {}
         try:
+            # Re-fetch the cell — the dispatch wrapper already reset
+            # ``cell.cache_hit = False`` (so we don't reset it again),
+            # but the downstream pipeline still threads ``cell`` through
+            # cache-check / persist / artifact-store calls and the
+            # variable used to be in scope from the wrapper's top.
             cell = self.session.notebook_state.get_cell(cell_id)
-            if cell is not None:
-                cell.cache_hit = False
-
-            # Prompt cells use a dedicated executor (LLM call, no subprocess)
-            if cell is not None and cell.language == CellLanguage.PROMPT:
-                return await self._execute_prompt_cell(
-                    cell_id,
-                    source,
-                    start_time,
-                    materialize_upstreams=materialize_upstreams,
-                    use_cache=use_cache,
-                )
-
-            # SQL cells use a dedicated executor (ADBC query, no subprocess).
-            if cell is not None and cell.language == CellLanguage.SQL:
-                return await self._execute_sql_cell(
-                    cell_id,
-                    source,
-                    start_time,
-                    materialize_upstreams=materialize_upstreams,
-                    use_cache=use_cache,
-                )
-
-            # Markdown cells are pure prose — no execution, no subprocess,
-            # no provenance chain. Return success with no display outputs:
-            # the frontend already renders the source in-place via the
-            # cell's preview view, so emitting it again as a display
-            # output would just duplicate the same content in the output
-            # panel below the editor.
-            if cell is not None and cell.language == CellLanguage.MARKDOWN:
-                # ``start_time`` is wall-clock (``time.time()``), so subtract
-                # in the same clock — mixing ``monotonic()`` here produces a
-                # ~1.7e12 ms negative because the two clocks have different
-                # epochs.
-                duration_ms = (time.time() - start_time) * 1000
-                return CellExecutionResult(
-                    cell_id=cell_id,
-                    success=True,
-                    duration_ms=duration_ms,
-                    execution_method="cached",
-                    cache_hit=True,
-                )
 
             # ① Materialise every upstream cell whose artifact is missing.
             #   This is the recursive ``materialize`` call — each upstream
@@ -3744,41 +3751,14 @@ async def _drain_stream(stream: asyncio.StreamReader) -> None:
 def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     """Return whether ``cell`` is eligible for run-all batching.
 
-    Per issue #26: cells join a batch iff Python language, resolved
-    worker is ``"local"``, no ``# @loop`` annotation, no explicit
-    timeout at any level (annotation / cell / notebook), and no
-    read-write mount at any level. Non-batchable cells force a process
-    boundary and continue via single-cell ``execute_cell``.
+    Delegates to the language executor's ``is_batchable`` — PYTHON's
+    adapter runs the full check (worker resolution, no ``# @loop``,
+    no explicit timeout at any level, no rw mount at any level); other
+    languages return ``False`` unconditionally.
     """
-    if cell.language != CellLanguage.PYTHON:
-        return False
+    from strata.notebook.languages import get_language_executor
 
-    annotations = parse_annotations(cell.source)
-
-    if executor._resolve_effective_worker(cell.id, annotations.worker) != "local":
-        return False
-
-    if annotations.loop is not None:
-        return False
-
-    # Any explicit timeout at any level makes the cell non-batchable so
-    # the per-cell timeout can be enforced via single-cell's existing
-    # subprocess-level wait_for (PR-b3 keeps batch-level safety net only).
-    notebook_state = executor.session.notebook_state
-    if (
-        annotations.timeout is not None
-        or cell.timeout is not None
-        or notebook_state.timeout is not None
-    ):
-        return False
-
-    # Any rw mount at any level — sync_back must run synchronously after
-    # each successful cell, defer to single-cell.
-    all_mounts = list(annotations.mounts) + list(cell.mounts) + list(notebook_state.mounts)
-    if any(m.mode == MountMode.READ_WRITE for m in all_mounts):
-        return False
-
-    return True
+    return get_language_executor(cell.language).is_batchable(cell, executor)
 
 
 def partition_batchable_runs(
