@@ -6,23 +6,20 @@ itself against the ``LanguageAnalyzer`` registry from #54.
 
 R support is being landed incrementally per #53:
 
-- **#56 (this PR)** — ``RLanguageAnalyzer`` (DAG defines/references via
-  shelled-out ``Rscript`` with codetools). Lets R cells participate in
-  the DAG before they can execute.
+- **#56** — ``RLanguageAnalyzer`` (DAG defines/references via shelled-out
+  ``Rscript``). Lets R cells participate in the DAG before they can execute.
 - **#55** — renv per-notebook environment.
-- **#57** — ``harness.R`` + ``LanguageExecutor`` adapter so R cells
+- **#57 (this PR)** — ``harness.R`` + ``LanguageExecutor`` adapter so R cells
   actually run.
 - **#58** — Arrow/RDS serialization tiers for cross-language exchange.
 - **#59** — integration tests.
-
-Attempting to execute an R cell before #57 lands raises
-``UnknownLanguageError`` from the executor registry — the right shape
-(loud failure, not silent fallthrough to Python).
 """
 
 from __future__ import annotations
 
-# Importing the analyzer module runs its ``register_language_analyzer``
-# call at module load time. Anyone importing ``strata.notebook.languages``
-# transitively gets the R analyzer wired in.
+# Importing the analyzer + executor modules runs their respective
+# ``register_language_analyzer`` / ``register_language_executor`` calls
+# at module load time. Anyone importing ``strata.notebook.languages``
+# transitively gets the R analyzer + executor wired in.
 from strata.notebook.languages.r import analyzer as _analyzer  # noqa: F401
+from strata.notebook.languages.r import executor as _executor  # noqa: F401

@@ -328,17 +328,3 @@ class TestIntegrationRealRscript:
 # ---------------------------------------------------------------------------
 # Executor side: R cells should fail loudly until #57 lands
 # ---------------------------------------------------------------------------
-
-
-class TestExecutorRefusesUntil57:
-    """R cell execution must raise ``UnknownLanguageError`` pre-#57."""
-
-    def test_no_executor_registered(self):
-        from strata.notebook.languages import get_language_executor
-        from strata.notebook.languages.executor import (
-            UnknownLanguageError as ExecutorUnknownLanguageError,
-        )
-
-        with pytest.raises(ExecutorUnknownLanguageError) as excinfo:
-            get_language_executor(CellLanguage.R)
-        assert "r" in repr(excinfo.value).lower()
