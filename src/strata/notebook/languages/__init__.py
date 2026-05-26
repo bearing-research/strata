@@ -14,6 +14,12 @@ the split rationale.
 
 from __future__ import annotations
 
+# Per-language sub-packages register their adapters at import time. The
+# core analyzer / executor module above only knows the four built-in
+# languages (Python, prompt, SQL, markdown); R + future languages live
+# under their own sub-packages so importing the core registry doesn't
+# pull every language's helpers along.
+from strata.notebook.languages import r as _r  # noqa: F401, E402
 from strata.notebook.languages.analyzer import (
     AnalyzedCell,
     LanguageAnalyzer,
