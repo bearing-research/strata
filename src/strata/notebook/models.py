@@ -369,6 +369,15 @@ class NotebookToml(BaseModel):
             "environment."
         ),
     )
+    r: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "R environment metadata under ``[r]``. Mirrors the Python "
+            "side's ``[environment]`` block (lockfile hash, last sync "
+            "timestamp, R version). Populated by ``_renv_sync`` after "
+            "a successful ``renv::restore()``."
+        ),
+    )
     # Preserved in TOML round-trip but not used at runtime
     artifacts: dict = Field(default_factory=dict)
     environment: dict = Field(default_factory=dict)
@@ -682,6 +691,15 @@ class NotebookState(BaseModel):
             "project_id / environment / path routing. Non-sensitive; the "
             "token that authenticates to the manager lives in the process "
             "environment, never here."
+        ),
+    )
+    r: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "R environment metadata under ``[r]``: lockfile hash, last "
+            "renv-sync timestamp, R version. Populated by ``_renv_sync`` "
+            "after a successful ``renv::restore()``. Mirrors the Python "
+            "side's ``[environment]`` block."
         ),
     )
     cells: list[CellState] = Field(default_factory=list, description="Cells with source")
