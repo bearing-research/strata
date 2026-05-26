@@ -18,7 +18,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from strata.notebook.analyzer import analyze_cell
 from strata.notebook.annotation_validation import validate_cell_annotations
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.causality import CausalityChain, compute_causality_on_staleness, skip_none
@@ -457,42 +456,16 @@ class NotebookSession:
 
         Updates notebook_state with defines/references/upstream/downstream/isLeaf.
         """
-        # Analyze each cell (dispatch by language)
-        from strata.notebook.prompt_analyzer import analyze_prompt_cell
+        # Per-language analyzer dispatch lives in ``strata.notebook.languages``;
+        # adding a new language is a registry entry, not a branch here.
+        from strata.notebook.languages import analyze_cell_by_language
 
         cell_analyses = []
         for cell in self.notebook_state.cells:
-            if cell.language == CellLanguage.PROMPT:
-                prompt_analysis = analyze_prompt_cell(cell.source)
-                defines = prompt_analysis.defines
-                references = prompt_analysis.references
-                mutation_defines: list[str] = []
-            elif cell.language == CellLanguage.SQL:
-                from strata.notebook.sql.analyzer import analyze_sql_cell
-
-                # Resolve the dialect for table extraction lazily —
-                # bind-placeholder references work even when the
-                # connection isn't declared yet (regex path), so
-                # passing dialect=None keeps the cell DAG-correct
-                # while the executor will re-extract tables with the
-                # resolved dialect at execute time.
-                dialect = self._resolve_sql_dialect(cell)
-                sql_analysis = analyze_sql_cell(cell.source, dialect=dialect)
-                defines = sql_analysis.defines
-                references = sql_analysis.references
-                mutation_defines = []
-            elif cell.language == CellLanguage.MARKDOWN:
-                # Markdown cells are pure prose — no Python identifiers
-                # to define or reference, so they sit isolated in the
-                # DAG with no edges in or out.
-                defines = []
-                references = []
-                mutation_defines = []
-            else:
-                analysis = analyze_cell(cell.source)
-                defines = analysis.defines
-                references = analysis.references
-                mutation_defines = analysis.mutation_defines
+            analyzed = analyze_cell_by_language(cell, self)
+            defines = list(analyzed.defines)
+            references = list(analyzed.references)
+            mutation_defines = list(analyzed.mutation_defines)
 
             # Loop cells read the carry variable from upstream on iter 0
             # even when Python scoping sees it as a local (because the
@@ -653,28 +626,15 @@ class NotebookSession:
         if not cell:
             return
 
-        # Re-analyze just this cell (dispatch by language)
-        if cell.language == CellLanguage.PROMPT:
-            from strata.notebook.prompt_analyzer import analyze_prompt_cell
+        # Per-language analyzer dispatch lives in
+        # ``strata.notebook.languages``; ``analyze_cell_by_language``
+        # returns the unified ``AnalyzedCell`` shape regardless of the
+        # underlying language.
+        from strata.notebook.languages import analyze_cell_by_language
 
-            prompt_analysis = analyze_prompt_cell(cell.source)
-            cell.defines = prompt_analysis.defines
-            cell.references = prompt_analysis.references
-        elif cell.language == CellLanguage.SQL:
-            from strata.notebook.sql.analyzer import analyze_sql_cell
-
-            dialect = self._resolve_sql_dialect(cell)
-            sql_analysis = analyze_sql_cell(cell.source, dialect=dialect)
-            cell.defines = sql_analysis.defines
-            cell.references = sql_analysis.references
-        elif cell.language == CellLanguage.MARKDOWN:
-            # Markdown is prose — no identifiers in or out of the DAG.
-            cell.defines = []
-            cell.references = []
-        else:
-            analysis = analyze_cell(cell.source)
-            cell.defines = analysis.defines
-            cell.references = analysis.references
+        analyzed = analyze_cell_by_language(cell, self)
+        cell.defines = list(analyzed.defines)
+        cell.references = list(analyzed.references)
 
         # Rebuild full DAG (since one cell changed, downstream may be affected)
         self._analyze_and_build_dag()
