@@ -167,6 +167,13 @@ class CellLanguage(StrEnum):
     PROMPT = "prompt"
     SQL = "sql"
     MARKDOWN = "markdown"
+    # R is in flight via #53 — analyzer landed via #56, executor lands
+    # via #57. The enum value exists so notebooks can declare R cells
+    # before #57 ships; trying to execute one before #57 lands will
+    # raise ``UnknownLanguageError`` from the executor registry, which
+    # is the right shape (loud failure, not silent fallthrough to
+    # Python).
+    R = "r"
 
 
 class DiagnosticSeverity(StrEnum):
