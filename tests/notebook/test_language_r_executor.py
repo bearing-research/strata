@@ -273,9 +273,7 @@ class TestHarnessVariableSelection:
         manifest_path.write_text(
             json.dumps(
                 {
-                    "source": (
-                        "model <- lm(b ~ a, data = data.frame(a = 1:3, b = c(2, 4, 6)))"
-                    ),
+                    "source": ("model <- lm(b ~ a, data = data.frame(a = 1:3, b = c(2, 4, 6)))"),
                     "inputs": {},
                     "output_dir": str(tmp_path),
                     "mounts": {},
