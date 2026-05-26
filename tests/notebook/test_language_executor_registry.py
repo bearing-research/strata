@@ -20,7 +20,7 @@ from strata.notebook.models import CellLanguage
 
 
 class TestBuiltInRegistrations:
-    """The four shipped languages must resolve at import time."""
+    """The five shipped languages must resolve at import time."""
 
     def test_python_registered(self):
         assert get_language_executor(CellLanguage.PYTHON) is not None
@@ -34,6 +34,10 @@ class TestBuiltInRegistrations:
     def test_markdown_registered(self):
         assert get_language_executor(CellLanguage.MARKDOWN) is not None
 
+    def test_r_registered(self):
+        """``languages.r`` registers its adapter at package import time."""
+        assert get_language_executor(CellLanguage.R) is not None
+
 
 class TestBehaviourFlags:
     """Behaviour flags drive staleness gates in session.compute_staleness."""
@@ -43,7 +47,7 @@ class TestBehaviourFlags:
         assert get_language_executor(CellLanguage.MARKDOWN).skips_execution_provenance is True
 
     def test_others_compute_provenance(self):
-        for lang in (CellLanguage.PYTHON, CellLanguage.PROMPT, CellLanguage.SQL):
+        for lang in (CellLanguage.PYTHON, CellLanguage.PROMPT, CellLanguage.SQL, CellLanguage.R):
             assert get_language_executor(lang).skips_execution_provenance is False, lang
 
     def test_prompt_and_sql_have_alternate_cache_scheme(self):
@@ -51,10 +55,11 @@ class TestBehaviourFlags:
         assert get_language_executor(CellLanguage.PROMPT).has_alternate_cache_scheme is True
         assert get_language_executor(CellLanguage.SQL).has_alternate_cache_scheme is True
 
-    def test_python_and_markdown_use_generic_cache_scheme(self):
-        """Python stores under the standard per-variable hash; markdown has no cache."""
+    def test_python_markdown_r_use_generic_cache_scheme(self):
+        """These store under the standard per-variable hash (or nothing for markdown)."""
         assert get_language_executor(CellLanguage.PYTHON).has_alternate_cache_scheme is False
         assert get_language_executor(CellLanguage.MARKDOWN).has_alternate_cache_scheme is False
+        assert get_language_executor(CellLanguage.R).has_alternate_cache_scheme is False
 
 
 class TestErrors:
@@ -111,7 +116,7 @@ class TestIsBatchableShortcuts:
 
     @pytest.mark.parametrize(
         "language",
-        [CellLanguage.PROMPT, CellLanguage.SQL, CellLanguage.MARKDOWN],
+        [CellLanguage.PROMPT, CellLanguage.SQL, CellLanguage.MARKDOWN, CellLanguage.R],
     )
     def test_non_python_languages_return_false(self, language):
         """No need to fabricate a cell; the adapter ignores it for these.
@@ -119,6 +124,7 @@ class TestIsBatchableShortcuts:
         The PYTHON adapter's ``is_batchable`` runs the full
         worker/loop/timeout/mount check and needs a real cell + executor;
         end-to-end behaviour is covered in ``test_executor_batch.py``.
+        R defers batching to a future phase per #57.
         """
         # Sentinel cell + executor — should never be touched.
         sentinel = object()

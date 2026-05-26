@@ -394,6 +394,7 @@ class CellExecutor:
     ):
         self.session = session
         self.harness_path = Path(__file__).parent / "harness.py"
+        self.r_harness_path = Path(__file__).parent / "languages" / "r" / "harness.R"
         self.pool = pool
         # Guard against DAG cycles during recursive materialisation.
         # Per-instance is correct: cycles are only meaningful within a single
@@ -1164,6 +1165,260 @@ class CellExecutor:
                 duration_ms=duration_ms,
                 error=f"Execution failed: {e}",
             ).apply_remote_metadata(**remote_metadata)
+            self.session.persist_display_output(cell_id, None)
+            self.session.apply_execution_result_metadata(cell_id, error_result)
+            return error_result
+
+    async def _execute_r_cell(
+        self,
+        cell_id: str,
+        source: str,
+        timeout_seconds: float,
+        start_time: float,
+        *,
+        materialize_upstreams: bool,
+        use_cache: bool,
+    ) -> CellExecutionResult:
+        """R cell pipeline: provenance → upstream → cache check →
+        Rscript harness → persist.
+
+        Phase 1 (#57) is local-only — there is no worker resolution, no
+        warm pool, and no HTTP-executor dispatch. R workers and pooled
+        execution are intentionally deferred to keep the initial slice
+        small. The cache / mount / storage layers are reused unchanged
+        because they are language-agnostic: they key off provenance
+        hashes and on-disk file extensions, both of which the R harness
+        produces in exactly the same shape as the Python one.
+        """
+        try:
+            cell = self.session.notebook_state.get_cell(cell_id)
+
+            if materialize_upstreams:
+                await self._materialize_upstreams(cell_id)
+
+            prov = await self._compute_cell_provenance(cell_id, source)
+            source_hash = prov.source_hash
+            runtime_env = prov.runtime_env
+            env_hash = prov.env_hash
+            input_hashes = prov.input_hashes
+            mount_specs = prov.mount_specs
+            provenance_hash = prov.provenance_hash
+
+            if prov.has_rw_mount:
+                use_cache = False
+
+            logger.info(
+                "execute_r_cell %s: source_hash=%s env_hash=%s provenance=%s",
+                cell_id,
+                source_hash[:12],
+                env_hash[:12],
+                provenance_hash[:12],
+            )
+
+            artifact_mgr = self.session.get_artifact_manager()
+            consumed_vars = (
+                self.session.dag.consumed_variables.get(cell_id, set())
+                if self.session.dag
+                else set()
+            )
+
+            cached_artifact = None
+            if cell is not None:
+                current_display_outputs = cell.display_outputs or (
+                    [cell.display_output] if cell.display_output is not None else []
+                )
+            else:
+                current_display_outputs = []
+            cached_display_outputs = (
+                self.session._resolve_cached_display_outputs(
+                    cell_id,
+                    provenance_hash,
+                    current_display_outputs,
+                )
+                if cell is not None
+                else []
+            )
+            if use_cache:
+                if consumed_vars:
+                    first_var = sorted(consumed_vars)[0]
+                    var_prov = derive_subkey(provenance_hash, first_var)
+                    cached_artifact = artifact_mgr.find_cached(var_prov)
+                else:
+                    cached_artifact = artifact_mgr.find_cached(provenance_hash)
+
+            notebook_id = self.session.notebook_state.id
+            if use_cache and cached_artifact is not None and consumed_vars:
+                for var_name in consumed_vars:
+                    canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+                    var_prov = derive_subkey(provenance_hash, var_name)
+                    canonical_art = artifact_mgr.artifact_store.get_latest_version(
+                        canonical_id,
+                    )
+                    if canonical_art is None or canonical_art.provenance_hash != var_prov:
+                        cached_artifact = None
+                        break
+
+            if cached_artifact is not None or (not consumed_vars and cached_display_outputs):
+                duration_ms = (time.time() - start_time) * 1000
+                if cell:
+                    cell.cache_hit = True
+                    cell.display_outputs = list(cached_display_outputs)
+                    cell.display_output = (
+                        cached_display_outputs[-1] if cached_display_outputs else None
+                    )
+                    for var_name in consumed_vars:
+                        canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+                        canonical_art = artifact_mgr.artifact_store.get_latest_version(
+                            canonical_id,
+                        )
+                        if canonical_art:
+                            uri = f"strata://artifact/{canonical_art.id}@v={canonical_art.version}"
+                            cell.artifact_uris[var_name] = uri
+                            cell.artifact_uri = uri
+                cached_result = CellExecutionResult(
+                    cell_id=cell_id,
+                    success=True,
+                    outputs={},
+                    display_outputs=[output.model_dump() for output in cached_display_outputs],
+                    display_output=(
+                        cached_display_outputs[-1].model_dump() if cached_display_outputs else None
+                    ),
+                    duration_ms=duration_ms,
+                    cache_hit=True,
+                    artifact_uri=(
+                        f"strata://artifact/{cached_artifact.id}@v={cached_artifact.version}"
+                        if cached_artifact is not None
+                        else (
+                            cached_display_outputs[-1].artifact_uri
+                            if cached_display_outputs
+                            else None
+                        )
+                    ),
+                    execution_method="cached",
+                )
+                self.session.record_successful_execution_provenance(
+                    cell_id,
+                    provenance_hash,
+                    source_hash,
+                    env_hash,
+                )
+                self.session.apply_execution_result_metadata(cell_id, cached_result)
+                return cached_result
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                output_dir = Path(tmpdir)
+                input_specs = self._load_input_blobs(cell_id, output_dir)
+                resolved_mounts = await self._prepare_mounts(mount_specs)
+                manifest_path = self._write_manifest(
+                    source,
+                    input_specs,
+                    output_dir,
+                    runtime_env,
+                    resolved_mounts,
+                )
+
+                result = await self._run_r_harness(manifest_path, timeout_seconds)
+
+                duration_ms = (time.time() - start_time) * 1000
+                exec_result = self._parse_result(cell_id, result, duration_ms, "cold")
+
+                if exec_result.success:
+                    self.session.record_successful_execution_provenance(
+                        cell_id,
+                        provenance_hash,
+                        source_hash,
+                        env_hash,
+                    )
+                    stored_ok = self._store_outputs(
+                        cell_id,
+                        output_dir,
+                        provenance_hash,
+                        input_hashes,
+                        source_hash=source_hash,
+                        env_hash=env_hash,
+                    )
+                    if not stored_ok:
+                        logger.error(
+                            "R cell %s executed OK but artifact storage failed.",
+                            cell_id,
+                        )
+                        exec_result = CellExecutionResult(
+                            cell_id=cell_id,
+                            success=False,
+                            stdout=exec_result.stdout,
+                            stderr=exec_result.stderr,
+                            outputs=exec_result.outputs,
+                            duration_ms=exec_result.duration_ms,
+                            error=(
+                                "Cell executed successfully but failed to "
+                                "store output artifacts. Check server logs."
+                            ),
+                            execution_method=exec_result.execution_method,
+                        )
+
+                    if exec_result.success:
+                        exec_result.display_outputs = self._store_display_outputs(
+                            cell_id,
+                            output_dir,
+                            provenance_hash,
+                            input_hashes,
+                            exec_result.display_outputs,
+                            source_hash=source_hash,
+                            env_hash=env_hash,
+                        )
+                        exec_result.display_output = (
+                            exec_result.display_outputs[-1] if exec_result.display_outputs else None
+                        )
+
+                    if exec_result.success and resolved_mounts:
+                        try:
+                            await self._mount_resolver.sync_back(resolved_mounts)
+                        except Exception as exc:
+                            logger.exception(
+                                "Failed to sync-back RW mounts for R cell %s",
+                                cell_id,
+                            )
+                            exec_result = CellExecutionResult(
+                                cell_id=cell_id,
+                                success=False,
+                                stdout=exec_result.stdout,
+                                stderr=exec_result.stderr,
+                                outputs=exec_result.outputs,
+                                duration_ms=exec_result.duration_ms,
+                                error=(
+                                    "Cell executed successfully but failed to sync "
+                                    f"read-write mounts: {exc}"
+                                ),
+                                execution_method=exec_result.execution_method,
+                                mutation_warnings=exec_result.mutation_warnings,
+                            )
+
+                self.session.persist_display_outputs(
+                    cell_id,
+                    exec_result.display_outputs if exec_result.success else None,
+                )
+                self.session.apply_execution_result_metadata(cell_id, exec_result)
+                return exec_result
+
+        except TimeoutError:
+            duration_ms = (time.time() - start_time) * 1000
+            timeout_result = CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                duration_ms=duration_ms,
+                error=f"R cell execution timed out after {timeout_seconds}s",
+            )
+            self.session.persist_display_output(cell_id, None)
+            self.session.apply_execution_result_metadata(cell_id, timeout_result)
+            return timeout_result
+        except Exception as e:
+            duration_ms = (time.time() - start_time) * 1000
+            error_result = CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                duration_ms=duration_ms,
+                error=f"R execution failed: {e}",
+            )
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, error_result)
             return error_result
@@ -2355,6 +2610,7 @@ class CellExecutor:
                 ".module.json",
                 ".json",
                 ".pickle",
+                ".rds",
             ]:
                 output_file = output_dir / f"{var_name}{ext}"
                 if output_file.exists():
@@ -2370,6 +2626,13 @@ class CellExecutor:
                             ".module.json": "module/import",
                             ".cell_module.json": "module/cell",
                             ".cell_instance.pickle": "module/cell-instance",
+                            # R-only payload from harness.R's RDS fallback
+                            # tier. Stored under its own content_type so the
+                            # downstream consumer that #58 wires up (R cell
+                            # reading the artifact back, or a Python cell
+                            # being told the value is R-only) can recognise
+                            # the tag without scanning bytes.
+                            ".rds": "application/x-r-rds",
                         }
                         content_type = content_type_map.get(ext, "pickle/object")
 
@@ -2413,7 +2676,7 @@ class CellExecutor:
                     "_store_outputs %s: no output file for consumed var %s "
                     "("
                     "looked for %s.arrow/.json/.pickle/"
-                    ".cell_module.json/.cell_instance.pickle in %s"
+                    ".cell_module.json/.cell_instance.pickle/.rds in %s"
                     ")",
                     cell_id,
                     var_name,
@@ -2622,6 +2885,85 @@ class CellExecutor:
                 "success": False,
                 "error": (
                     stderr_text.strip() or "Harness exited without producing a result manifest"
+                ),
+                "stderr": stderr_text,
+                "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
+                "variables": {},
+            }
+        with open(result_path) as f:
+            return json.load(f)
+
+    async def _run_r_harness(
+        self,
+        manifest_path: Path,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        """Run the R harness script via Rscript.
+
+        Mirrors ``_run_harness`` shape — process-group teardown,
+        timeout handling, harness-result.json fallback — but swaps the
+        ``uv run python harness.py`` command for ``Rscript harness.R``.
+        ``cwd`` is the notebook directory so ``.Rprofile`` activates
+        the project's renv library (Phase 1: renv per notebook from
+        ``_renv_sync`` in #55).
+        """
+        rscript = shutil.which("Rscript")
+        if rscript is None:
+            return {
+                "success": False,
+                "error": (
+                    "Rscript not found on PATH. Install R "
+                    "(https://cran.r-project.org/) and reopen the notebook."
+                ),
+                "stderr": "",
+                "stdout": "",
+                "variables": {},
+            }
+
+        cmd = [rscript, str(self.r_harness_path), str(manifest_path)]
+
+        from strata.notebook.process_tree import (
+            subprocess_kwargs_for_new_group,
+            terminate_subprocess_tree,
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(self.session.path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            **subprocess_kwargs_for_new_group(),
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=timeout_seconds,
+            )
+        except asyncio.CancelledError:
+            logger.info(
+                "R cell execution cancelled; terminating Rscript pid=%s",
+                proc.pid,
+            )
+            try:
+                await asyncio.shield(terminate_subprocess_tree(proc))
+            except Exception:
+                logger.exception(
+                    "Failed to terminate cancelled Rscript subprocess tree pid=%s",
+                    proc.pid,
+                )
+            raise
+        except TimeoutError:
+            await terminate_subprocess_tree(proc)
+            raise TimeoutError()
+
+        result_path = manifest_path.parent / "harness-result.json"
+        if not result_path.exists():
+            stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
+            return {
+                "success": False,
+                "error": (
+                    stderr_text.strip() or "Rscript exited without producing a result manifest"
                 ),
                 "stderr": stderr_text,
                 "stdout": stdout.decode("utf-8", errors="replace") if stdout else "",
