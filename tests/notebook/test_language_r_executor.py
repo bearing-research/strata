@@ -27,11 +27,7 @@ from strata.notebook.languages.r.executor import _RExecutor
 from strata.notebook.models import CellLanguage
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
-
-rscript_available = pytest.mark.skipif(
-    shutil.which("Rscript") is None,
-    reason="Rscript not on PATH",
-)
+from tests.notebook.conftest import skip_if_no_r as rscript_available
 
 
 def _make_r_notebook(tmp_path: Path, *, cells: list[tuple[str, str | None, str]]):

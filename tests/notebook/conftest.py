@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import shlex
+import shutil
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -14,6 +16,66 @@ import uvicorn
 
 from strata.config import StrataConfig
 from tests.conftest import find_free_port, wait_for_server
+
+# ---------------------------------------------------------------------------
+# R availability — central skip markers for integration tests
+# ---------------------------------------------------------------------------
+#
+# R-based tests live in a few spots (analyzer integration, executor
+# integration, the cross-language capstone in #59). Each one used to
+# roll its own ``shutil.which("Rscript")`` skipif; consolidate them
+# here so the skip reason wording stays consistent and the arrow-
+# package probe doesn't get duplicated across files.
+
+
+def _r_arrow_available() -> bool:
+    """Probe ``requireNamespace("arrow")`` once at conftest import.
+
+    Returning True requires Rscript on PATH *and* the R-side arrow
+    package loadable. The 30s timeout is generous — a healthy R
+    install resolves the namespace in well under a second; the only
+    reason this could hang is a stale RPROFILE doing network I/O,
+    which we'd rather skip with a clear reason than block CI on.
+
+    Runs at module load: when Rscript is absent (most dev machines,
+    Windows CI) the probe short-circuits without spawning — so the
+    one-shot Rscript cost is paid only when R is actually installed
+    *and* this conftest is loaded, which is also the only time it
+    could matter.
+    """
+    if shutil.which("Rscript") is None:
+        return False
+    try:
+        proc = subprocess.run(
+            [
+                "Rscript",
+                "-e",
+                'q(status = if (requireNamespace("arrow", quietly = TRUE)) 0 else 1)',
+            ],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return proc.returncode == 0
+
+
+_RSCRIPT_AVAILABLE = shutil.which("Rscript") is not None
+_R_ARROW_AVAILABLE = _r_arrow_available()
+
+skip_if_no_r = pytest.mark.skipif(
+    not _RSCRIPT_AVAILABLE,
+    reason="Rscript not on PATH; install R (https://cran.r-project.org/) to run",
+)
+
+skip_if_no_r_arrow = pytest.mark.skipif(
+    not _R_ARROW_AVAILABLE,
+    reason=(
+        "R 'arrow' package not loadable; install with "
+        "`install.packages('arrow')` to run cross-language tests"
+    ),
+)
 
 
 def _check_notebook_extra() -> None:
@@ -287,3 +349,67 @@ def notebook_personal_server(tmp_path: Path):
         server_module._state = None
         reset_artifact_store()
         reset_build_store()
+
+
+# ---------------------------------------------------------------------------
+# R-enabled notebook factory
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def r_notebook(tmp_path: Path):
+    """Factory: build a notebook with mixed Python + R cells.
+
+    Sibling of the Iceberg ``temp_warehouse`` for R (issue #59 capstone).
+    Returns a callable
+
+        make(cells=[(cell_id, after_id, source, language), ...])
+            → (notebook_dir, NotebookSession)
+
+    that builds the on-disk notebook, parses it, forces per-cell
+    language to match ``language`` (parser defaults to Python; the
+    forced override mirrors ``_make_r_notebook`` in
+    ``test_language_r_executor.py`` so dispatch picks the right
+    executor).
+
+    The session's ``__init__`` runs ``_analyze_and_build_dag`` — for
+    R cells that spawns ``Rscript`` to drive ``analyze_cell.R``, so
+    callers must guard with ``skip_if_no_r``.
+
+    No renv restore here. Tests that need the R ``arrow`` package
+    rely on the system R install (gated with ``skip_if_no_r_arrow``);
+    pre-restored renv libraries land in a follow-up PR once the renv
+    bootstrap helper is wired into the fixture.
+    """
+    from strata.notebook.models import CellLanguage
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import (
+        add_cell_to_notebook,
+        create_notebook,
+        write_cell,
+    )
+
+    _language_map = {
+        "python": CellLanguage.PYTHON,
+        "r": CellLanguage.R,
+    }
+
+    def _make(cells: list[tuple[str, str | None, str, str]]):
+        notebook_dir = create_notebook(
+            tmp_path / "r_notebook",
+            "R Notebook",
+            initialize_environment=False,
+        )
+        for cell_id, after_id, source, language in cells:
+            add_cell_to_notebook(notebook_dir, cell_id, after_id, language=language)
+            write_cell(notebook_dir, cell_id, source)
+
+        notebook_state = parse_notebook(notebook_dir)
+        by_id = {cid: lang for cid, _after, _src, lang in cells}
+        for cell in notebook_state.cells:
+            cell.language = _language_map[by_id[cell.id]]
+        session = NotebookSession(notebook_state, notebook_dir)
+        return notebook_dir, session
+
+    return _make
