@@ -225,26 +225,94 @@ class TestIntegrationRealRscript:
     """
 
     def test_simple_assign(self):
+        """Acceptance example: ``y <- x + 1`` references only ``x``."""
         cell = _make_cell("y <- x + 1")
         result = _RAnalyzer().analyze(cell, session=None)
         assert "y" in result.defines
-        assert "x" in result.references
+        # ONLY ``x`` should be a reference — not ``+`` or anything else.
+        # The walker skips function-call ops so binary operators don't
+        # show up.
+        assert result.references == ["x"]
 
-    def test_multiple_assigns(self):
+    def test_multiple_assigns_locally_defined_not_a_reference(self):
+        """``y <- 1; z <- y + 1`` — ``y`` is defined locally before being read.
+
+        Cross-cell DAG only cares about inputs from other cells. A name
+        that's both defined and later read in the same cell isn't a
+        cross-cell input, so it must NOT appear in references.
+        """
         cell = _make_cell("y <- 1\nz <- y + 1")
         result = _RAnalyzer().analyze(cell, session=None)
-        # ``y`` is defined here and also referenced inside the second
-        # expression; the helper filters self-defines out of references
-        # to match Python's convention.
         assert set(result.defines) >= {"y", "z"}
         assert "y" not in result.references
+        assert result.references == []
 
-    def test_library_call_not_a_reference(self):
-        """``library(arrow)`` shouldn't surface ``arrow`` as a free variable."""
+    def test_read_before_write_self_assign(self):
+        """``y <- y + 1`` reads the upstream ``y`` before redefining it.
+
+        Regression for PR #67 review finding: the codetools-based
+        approach used to drop self-assign reads because it treated any
+        locally-assigned name as a local-only binding. The new walker
+        applies the read-before-locally-defined rule per statement, so
+        the upstream ``y`` survives as a real DAG dependency.
+        """
+        cell = _make_cell("y <- y + 1")
+        result = _RAnalyzer().analyze(cell, session=None)
+        assert "y" in result.defines
+        assert "y" in result.references
+
+    def test_read_before_write_subscript_filter(self):
+        """``df <- df[complete.cases(df), ]`` keeps ``df`` as a reference.
+
+        Same shape as the self-assign case, but with the
+        ``complete.cases`` function call inside. Confirms that the
+        walker recurses through function-arg subtrees while still
+        skipping the function name itself (no ``complete.cases`` in
+        references).
+        """
+        cell = _make_cell("df <- df[complete.cases(df), ]")
+        result = _RAnalyzer().analyze(cell, session=None)
+        assert "df" in result.defines
+        assert "df" in result.references
+        assert "complete.cases" not in result.references
+        # ``[`` is also a function call internally — must not leak.
+        assert "[" not in result.references
+
+    def test_function_call_names_not_references(self):
+        """Acceptance example: ``library(arrow); df <- read_parquet(...)``.
+
+        Neither ``arrow`` (NSE library arg) nor ``read_parquet`` (function
+        call name) is a cross-cell reference. Regression for PR #67
+        review finding: previously the codetools approach included
+        ``refs$functions`` which leaked function names like
+        ``read_parquet`` into references.
+        """
         cell = _make_cell("library(arrow)\ndf <- read_parquet('a.parquet')")
         result = _RAnalyzer().analyze(cell, session=None)
-        assert "arrow" not in result.references
         assert "df" in result.defines
+        assert "arrow" not in result.references
+        assert "read_parquet" not in result.references
+        # No data references — the only inputs are the file path
+        # literal and the package.
+        assert result.references == []
+
+    def test_namespace_access_not_a_reference(self):
+        """``arrow::read_parquet(path)`` — neither side of ``::`` is a reference."""
+        cell = _make_cell("df <- arrow::read_parquet(path)")
+        result = _RAnalyzer().analyze(cell, session=None)
+        assert "df" in result.defines
+        # ``path`` is a real data reference (literal name passed as arg).
+        assert "path" in result.references
+        assert "arrow" not in result.references
+        assert "read_parquet" not in result.references
+
+    def test_member_access_only_lhs_is_a_reference(self):
+        """``df$col`` — ``df`` is read; ``col`` is a slot name, not a reference."""
+        cell = _make_cell("x <- df$col")
+        result = _RAnalyzer().analyze(cell, session=None)
+        assert "x" in result.defines
+        assert "df" in result.references
+        assert "col" not in result.references
 
     def test_parse_error_returns_empty(self):
         cell = _make_cell("x <-")  # incomplete
