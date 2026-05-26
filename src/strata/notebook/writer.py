@@ -361,6 +361,7 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         ),
         **({"ai": toml.ai} if toml.ai else {}),
         **({"secret_manager": toml.secret_manager} if toml.secret_manager else {}),
+        **({"r": toml.r} if toml.r else {}),
         # Runtime state that used to live in this file — ``artifacts``
         # (display outputs), ``environment`` (sync timestamps, package
         # counts), ``cache`` — now lives in ``.strata/runtime.json``.
@@ -567,6 +568,69 @@ def _uv_sync(notebook_dir: Path, *, timeout: int = 60, python_version: str | Non
     except subprocess.CalledProcessError as exc:
         _logger.warning(
             "uv sync failed in %s: %s",
+            notebook_dir,
+            exc.stderr.decode(errors="replace") if exc.stderr else "(no stderr)",
+        )
+    return False
+
+
+def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
+    """Run ``renv::restore()`` in *notebook_dir*.
+
+    R counterpart of ``_uv_sync``: ensures the notebook's renv library
+    matches its ``renv.lock`` on session open. Returns ``True`` on
+    success, ``False`` on failure (logged, never raised) so a missing
+    R install or a stale lockfile doesn't crash notebook open.
+
+    The default timeout is 10 minutes — first install of a notebook's R
+    dependencies can mean compiling CRAN sources, which is slow on
+    binary-deprived platforms (macOS arm64 still hits source builds for
+    a handful of packages as of 2026). ``_uv_sync``'s 60s default is
+    fine because uv ships pre-built wheels for almost everything;
+    renv::restore() doesn't have that luxury.
+
+    Pre-#57: callers wire this in once they need a populated R
+    library. Session-open auto-sync lands with the R harness so the
+    cost is paid once the notebook actually wants to run an R cell,
+    not on every notebook open.
+    """
+    # Lockfile check comes BEFORE the Rscript lookup. The common
+    # pre-renv-init state — a notebook with R cells but no
+    # ``renv.lock`` yet — must be a no-op success regardless of
+    # whether R is installed. The bootstrap path (write ``.Rprofile``
+    # + call ``renv::init()``) lands in #57's harness wiring, and
+    # until that ships the absence of a lockfile is the expected
+    # initial state, not a failure.
+    if not (notebook_dir / "renv.lock").exists():
+        _logger.debug("renv.lock missing in %s — nothing to restore", notebook_dir)
+        return True
+
+    rscript = shutil.which("Rscript")
+    if rscript is None:
+        _logger.warning("Rscript not found on PATH — skipping renv restore")
+        return False
+
+    try:
+        # No ``--vanilla`` / ``--no-init-file``: the project's
+        # ``.Rprofile`` is what sources ``renv/activate.R`` to put the
+        # project library on ``.libPaths()``. Without it ``renv::restore()``
+        # can't see the project library and tries to install everything
+        # into the user's default lib — usually failing because that
+        # lib doesn't have renv installed in the first place.
+        subprocess.run(
+            [rscript, "-e", "renv::restore(prompt = FALSE)"],
+            cwd=str(notebook_dir),
+            timeout=timeout,
+            capture_output=True,
+            check=True,
+        )
+        _logger.debug("renv::restore() succeeded in %s", notebook_dir)
+        return True
+    except subprocess.TimeoutExpired:
+        _logger.warning("renv::restore() timed out after %ds in %s", timeout, notebook_dir)
+    except subprocess.CalledProcessError as exc:
+        _logger.warning(
+            "renv::restore() failed in %s: %s",
             notebook_dir,
             exc.stderr.decode(errors="replace") if exc.stderr else "(no stderr)",
         )
