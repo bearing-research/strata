@@ -51,7 +51,9 @@ class LanguageAnalyzer(Protocol):
     the protocol surface small and explicit.
     """
 
-    def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell: ...
+    def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
+        """Return defines / references / mutation_defines for ``cell``."""
+        ...
 
 
 class UnknownLanguageError(LookupError):
