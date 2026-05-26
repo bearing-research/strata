@@ -39,7 +39,6 @@ from strata.notebook.env import (
     narrow_env_for_provenance,
 )
 from strata.notebook.models import (
-    CellLanguage,
     CellOutput,
     CellStaleness,
     CellState,
@@ -705,10 +704,16 @@ class NotebookSession:
             if cell is None:
                 continue
 
-            # Markdown cells are pure prose — they have no inputs, no
-            # subprocess, and can never be stale. Mark ready and move on
-            # without computing provenance hashes or hitting the cache.
-            if cell.language == CellLanguage.MARKDOWN:
+            # Languages that skip the provenance chain (today: markdown,
+            # since it's pure prose with no inputs or subprocess) are
+            # always READY — no hashing, no cache lookup. The protocol
+            # exposes this via ``skips_execution_provenance`` so adding
+            # another no-execution language (TBD) doesn't need an edit
+            # here.
+            from strata.notebook.languages import get_language_executor
+
+            language_executor = get_language_executor(cell.language)
+            if language_executor.skips_execution_provenance:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 continue
 
@@ -773,20 +778,16 @@ class NotebookSession:
                     cell.display_output = cached_display_outputs[-1]
                     staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 else:
+                    # Languages with an alternate per-variable cache
+                    # scheme (today PROMPT + SQL) store artifacts under
+                    # a hash the generic per-variable lookup above
+                    # can't match. The wrapper persists the generic
+                    # provenance hash via
+                    # ``record_successful_execution_provenance`` so we
+                    # preserve READY status when it matches despite a
+                    # cache miss. Same logic kicks in for leaf cells.
                     can_preserve_uncached_ready = (
-                        (
-                            cell.is_leaf
-                            or cell.language == CellLanguage.PROMPT
-                            # SQL cells store artifacts under a
-                            # SQL-specific per-variable hash
-                            # (compute_sql_provenance_hash), so the
-                            # generic per-variable lookup above won't
-                            # match. The wrapper persists the
-                            # generic hash via
-                            # ``record_successful_execution_provenance``
-                            # so this path keeps the cell READY.
-                            or cell.language == CellLanguage.SQL
-                        )
+                        (cell.is_leaf or language_executor.has_alternate_cache_scheme)
                         and cell.status == CellStatus.READY
                         and cell.last_provenance_hash == provenance_hash
                     )
