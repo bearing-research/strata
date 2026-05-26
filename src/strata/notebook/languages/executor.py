@@ -75,9 +75,13 @@ class LanguageExecutor(Protocol):
         timeout_seconds: float,
         materialize_upstreams: bool,
         use_cache: bool,
-    ) -> CellExecutionResult: ...
+    ) -> CellExecutionResult:
+        """Run the cell and return its execution result."""
+        ...
 
-    def is_batchable(self, cell: CellState, executor: CellExecutor) -> bool: ...
+    def is_batchable(self, cell: CellState, executor: CellExecutor) -> bool:
+        """Return whether ``cell`` is eligible for run-all batching."""
+        ...
 
 
 class UnknownLanguageError(LookupError):
