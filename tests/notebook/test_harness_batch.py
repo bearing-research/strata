@@ -480,3 +480,155 @@ def test_mount_name_save_restore(batch_pipes, tmp_path):
         f["payload"] for f in frames if f["type"] == "persist" and f["payload"]["cell_id"] == "c3"
     )
     assert persist_c3["outputs"]["still_user"]["preview"] == "user value"
+
+
+# ---------------------------------------------------------------------------
+# R-only artifact (RDS) seeding
+# ---------------------------------------------------------------------------
+
+
+def test_batch_surfaces_rds_input_as_first_consumer_cell_error(batch_pipes):
+    """An RDS upstream consumed by a Python cell becomes a cell_error
+    on the first consumer — not subprocess_died.
+
+    Pre-fix behaviour: ``deserialize_inputs`` raised ``StrataRArtifactError``
+    inside ``execute_batch`` before any ``cell_start`` frame fired, so the
+    parent's frame-reader hit EOF and reported the batch as
+    ``subprocess_died``. The fix defers the error to the first cell whose
+    source references the tainted variable, emitting a proper
+    ``cell_start`` + ``cell_error`` + ``batch_end`` sequence with the
+    structured "re-export as data.frame" message.
+    """
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+
+    # Drop an RDS blob in the dir the harness reads upstream inputs from.
+    # Bytes are irrelevant — the dispatcher rejects on content_type.
+    rds_path = output_dir / "fit.rds"
+    rds_path.write_bytes(b"\x1f\x8b\x08\x00fakerds")
+
+    upstream_inputs = {
+        "fit": {
+            "content_type": "application/x-r-rds",
+            "file": "fit.rds",
+        }
+    }
+
+    cells = [
+        # c1 doesn't reference `fit` — should run cleanly.
+        {
+            "cell_id": "c1",
+            "source": "x = 1",
+            "consumed_vars": ["x"],
+            "env": {},
+            "mount_manifest": {},
+        },
+        # c2 references `fit` — first cell that triggers the tainted error.
+        {
+            "cell_id": "c2",
+            "source": "score = fit + 1",
+            "consumed_vars": ["score"],
+            "env": {},
+            "mount_manifest": {},
+        },
+        # c3 must NOT start once c2 errors.
+        {
+            "cell_id": "c3",
+            "source": "y = 2",
+            "consumed_vars": ["y"],
+            "env": {},
+            "mount_manifest": {},
+        },
+    ]
+
+    thread, errors = _run_in_thread(cells, upstream_inputs, output_dir, frame_w, resp_r)
+
+    frames: list[dict] = []
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        frames.append(frame)
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "abc"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test"})
+        elif frame["type"] == "batch_end":
+            break
+
+    thread.join(timeout=5)
+    # Critical: no exception escaped — the previous behaviour was a raw
+    # propagation that the test thread captured here.
+    assert not errors, f"execute_batch let the error escape: {errors}"
+
+    types = [f["type"] for f in frames]
+    # c1 ran normally (cell_start + cache_check + persist).
+    assert types.count("cell_start") == 2, f"expected only c1+c2 to start, got: {types}"
+
+    cell_errors = [f for f in frames if f["type"] == "cell_error"]
+    assert len(cell_errors) == 1
+    err_payload = cell_errors[0]["payload"]
+    assert err_payload["cell_id"] == "c2"
+    # The structured message — variable name + saveRDS + data.frame
+    # suggestion — must all be present so the UI surfaces the
+    # actionable text rather than NameError.
+    assert "fit" in err_payload["error"]
+    assert "saveRDS" in err_payload["error"]
+    assert "data.frame" in err_payload["error"]
+
+    end_frame = frames[-1]
+    assert end_frame["type"] == "batch_end"
+    assert end_frame["payload"]["reason"] == "cell_error"
+    assert end_frame["payload"]["failed_cell_id"] == "c2"
+
+
+def test_batch_word_boundary_avoids_spurious_taint(batch_pipes):
+    """``fit`` in another identifier (``unfit_data``) or a string literal
+    must not trigger the tainted-input branch.
+
+    Without word-boundary matching, a tainted ``fit`` would block any
+    cell whose source contained the substring ``fit`` — including
+    ``unfit_data = ...``, comments, and string literals like
+    ``"benefit"``. Use a clearly substring-only case here so the
+    test fails loudly if the matcher regresses to ``var in source``.
+    """
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+
+    rds_path = output_dir / "fit.rds"
+    rds_path.write_bytes(b"rds")
+
+    upstream_inputs = {"fit": {"content_type": "application/x-r-rds", "file": "fit.rds"}}
+
+    cells = [
+        {
+            "cell_id": "c1",
+            # ``unfit_data`` and ``fitness`` contain ``fit`` as a substring
+            # but neither is the bare identifier — must NOT trip taint.
+            "source": "unfit_data = 1\nfitness = unfit_data + 1",
+            "consumed_vars": ["unfit_data", "fitness"],
+            "env": {},
+            "mount_manifest": {},
+        },
+    ]
+
+    thread, errors = _run_in_thread(cells, upstream_inputs, output_dir, frame_w, resp_r)
+
+    frames: list[dict] = []
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        frames.append(frame)
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "p"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test"})
+        elif frame["type"] == "batch_end":
+            break
+
+    thread.join(timeout=5)
+    assert not errors
+
+    cell_errors = [f for f in frames if f["type"] == "cell_error"]
+    assert not cell_errors, f"taint matcher mis-fired on substring: {cell_errors}"
+    end_frame = frames[-1]
+    assert end_frame["payload"]["reason"] == "complete"

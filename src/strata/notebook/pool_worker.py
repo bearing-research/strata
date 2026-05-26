@@ -176,37 +176,45 @@ def execute_harness(manifest: dict) -> dict:
     namespace: dict[str, Any] = {}
     display_capture = _display.DisplayCapture()
 
-    # Deserialize inputs
-    for var_name, spec in inputs.items():
-        content_type = spec.get("content_type", "")
-        file_name = spec.get("file", "")
-        if not file_name:
-            continue
-        full_path = output_dir / file_name
-        if not full_path.exists():
-            continue
-        try:
-            namespace[var_name] = _ser.deserialize_value(content_type, full_path)
-        except Exception as exc:
-            print(f"Error deserializing {var_name}: {exc}", file=sys.stderr)
-
-    _inject_mounts(manifest, namespace)
-    display_capture.install(namespace)
-
-    namespace_before = set(namespace.keys())
-    input_identities = {name: id(namespace[name]) for name in namespace_before}
-    input_snapshots = _immut.snapshot_inputs(namespace, list(namespace_before))
-    mutation_set = set(manifest.get("mutation_defines") or [])
-
     old_stdout, old_stderr = sys.stdout, sys.stderr
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
-    sys.stdout = stdout_buf
-    sys.stderr = stderr_buf
 
     _skip = {"__builtins__", "__name__", "__doc__", "__package__"}
 
     try:
+        # Deserialize inputs. Done inside the try/except so a
+        # StrataRArtifactError (R-only RDS artifact consumed by a
+        # Python cell) produces the same structured error result as
+        # any other failure — previously this loop ran outside the
+        # try and a swallowed RDS error regressed to ``NameError: fit``
+        # once the cell body ran.
+        for var_name, spec in inputs.items():
+            content_type = spec.get("content_type", "")
+            file_name = spec.get("file", "")
+            if not file_name:
+                continue
+            full_path = output_dir / file_name
+            if not full_path.exists():
+                continue
+            try:
+                namespace[var_name] = _ser.deserialize_value(content_type, full_path)
+            except _ser.StrataRArtifactError as exc:
+                raise _ser.StrataRArtifactError(exc.file_path, variable_name=var_name) from exc
+            except Exception as exc:
+                print(f"Error deserializing {var_name}: {exc}", file=sys.stderr)
+
+        _inject_mounts(manifest, namespace)
+        display_capture.install(namespace)
+
+        namespace_before = set(namespace.keys())
+        input_identities = {name: id(namespace[name]) for name in namespace_before}
+        input_snapshots = _immut.snapshot_inputs(namespace, list(namespace_before))
+        mutation_set = set(manifest.get("mutation_defines") or [])
+
+        sys.stdout = stdout_buf
+        sys.stderr = stderr_buf
+
         with _apply_env_overrides(manifest):
             with display_capture.capture_side_effects():
                 _display_value = _exec_with_display(source, namespace)

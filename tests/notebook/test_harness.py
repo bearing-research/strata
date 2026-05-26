@@ -470,3 +470,59 @@ class TestHarnessLoopUntil:
 
         assert result["success"] is True
         assert result["loop"]["until_reached"] is True
+
+
+class TestHarnessRdsInput:
+    """A Python cell consuming an R-only RDS input fails loudly.
+
+    The R harness's RDS fallback tier produces ``.rds`` artifacts that
+    Python has no way to read. When a downstream Python cell lists such
+    an artifact as an input, ``deserialize_inputs`` must surface the
+    structured ``StrataRArtifactError`` so the user sees the suggested
+    fix ("re-export as data.frame") instead of a vague NameError when
+    the cell later references the missing variable.
+    """
+
+    def test_rds_input_surfaces_structured_error(self, harness_script):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+
+            # The bytes don't need to be a real RDS blob — the
+            # dispatcher rejects on content_type, not on file shape.
+            rds_path = tmpdir / "fit.rds"
+            rds_path.write_bytes(b"\x1f\x8b\x08\x00fakerds")
+
+            manifest = {
+                "source": "result = fit",  # would raise NameError if input swallowed
+                "inputs": {
+                    "fit": {
+                        "content_type": "application/x-r-rds",
+                        "file": "fit.rds",
+                    }
+                },
+                "output_dir": str(tmpdir),
+            }
+            manifest_path = tmpdir / "manifest.json"
+            with open(manifest_path, "w") as f:
+                json.dump(manifest, f)
+
+            subprocess.run(
+                [sys.executable, str(harness_script), str(manifest_path)],
+                cwd=str(tmpdir),
+                capture_output=True,
+            )
+
+            with open(tmpdir / "harness-result.json") as f:
+                result = json.load(f)
+
+        assert result["success"] is False
+        # The variable name + the saveRDS-suggested-fix wording both
+        # come from StrataRArtifactError.__init__; without the harness
+        # re-raise (or with the previous swallow-and-continue path),
+        # this assertion would fail.
+        assert "fit" in result["error"]
+        assert "saveRDS" in result["error"]
+        assert "data.frame" in result["error"]
+        # The cell body itself never ran, so the NameError leak we
+        # were guarding against can't happen.
+        assert "NameError" not in result["error"]

@@ -1,0 +1,60 @@
+"""Unit tests for ``pool_worker.execute_harness`` — the in-process cell
+executor that the warm pool dispatches into.
+
+These tests exercise the manifest → result function directly without
+spinning up the warm pool itself; the pool's job is just to feed a
+manifest path through stdin and read the result line, so the contract
+worth pinning here is the result dict produced for tricky input states.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from strata.notebook.pool_worker import execute_harness
+
+
+class TestExecuteHarnessRdsInput:
+    """An R-only RDS upstream consumed by a Python cell must surface
+    the structured ``StrataRArtifactError`` instead of swallowing it
+    and regressing to ``NameError: name 'fit' is not defined`` once
+    the cell body runs.
+
+    The warm pool is the default WebSocket execution path, so a
+    swallow here breaks the common user experience even when the
+    cold-subprocess harness (``harness.py``) handles it correctly.
+    """
+
+    def test_rds_input_surfaces_structured_error(self, tmp_path: Path) -> None:
+        rds_path = tmp_path / "fit.rds"
+        # Dispatch rejects on content_type, not file shape — these bytes
+        # never get parsed.
+        rds_path.write_bytes(b"\x1f\x8b\x08\x00fakerds")
+
+        manifest = {
+            "source": "result = fit + 1",  # would NameError if swallowed
+            "inputs": {
+                "fit": {
+                    "content_type": "application/x-r-rds",
+                    "file": "fit.rds",
+                }
+            },
+            "output_dir": str(tmp_path),
+        }
+
+        result = execute_harness(manifest)
+
+        assert result["success"] is False
+        # The structured message — variable name + saveRDS + data.frame
+        # suggestion — gives the user the actionable fix instead of a
+        # bare NameError.
+        error = result["error"]
+        assert "fit" in error
+        assert "saveRDS" in error
+        assert "data.frame" in error
+        # Critical regression assertion: the previous behaviour swallowed
+        # the deserialize error into stderr and the cell body then raised
+        # NameError. The fix must surface the structured error type
+        # instead.
+        assert "NameError" not in error
+        assert "StrataRArtifactError" in error
