@@ -27,19 +27,27 @@ from strata.notebook.writer import _renv_sync, create_notebook, write_notebook_t
 
 
 class TestRenvSyncMissingRscript:
-    """When Rscript isn't on PATH, the helper logs + returns False."""
+    """When Rscript isn't on PATH **and** there's a lockfile, return False."""
 
-    def test_returns_false_without_rscript(self, monkeypatch, tmp_path):
+    def test_returns_false_without_rscript_when_lockfile_exists(self, monkeypatch, tmp_path):
+        """A real restore is needed but R isn't available — surface the failure."""
         monkeypatch.setattr(shutil, "which", lambda name: None)
-        # Even with an existing renv.lock, no Rscript → False.
         (tmp_path / "renv.lock").write_text("")
         assert _renv_sync(tmp_path) is False
 
 
 class TestRenvSyncNoLockfile:
-    """Missing ``renv.lock`` is treated as success — nothing to restore."""
+    """Missing ``renv.lock`` is success regardless of R availability.
 
-    def test_returns_true_when_lockfile_missing(self, monkeypatch, tmp_path):
+    The pre-bootstrap state (notebook has R cells, ``renv::init()``
+    hasn't run yet) must not surface as a failure — that's the
+    expected initial state, not an error. Particularly important
+    when R isn't installed locally: we don't want notebook open to
+    fail "renv sync failed" for a user who hasn't even installed R
+    yet but is editing R cells via the Vue UI.
+    """
+
+    def test_returns_true_when_lockfile_missing_with_rscript(self, monkeypatch, tmp_path):
         monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
         # No renv.lock in tmp_path.
         called = []
@@ -52,6 +60,17 @@ class TestRenvSyncNoLockfile:
 
         assert _renv_sync(tmp_path) is True
         assert called == [], "should not invoke Rscript when nothing to restore"
+
+    def test_returns_true_when_lockfile_missing_without_rscript(self, monkeypatch, tmp_path):
+        """The "R not installed" case: still nothing to do, still success.
+
+        Lockfile check runs before ``shutil.which("Rscript")`` so a
+        user without R installed who hasn't yet bootstrapped renv
+        doesn't get a spurious failure. Review feedback on PR #68.
+        """
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        # No renv.lock in tmp_path.
+        assert _renv_sync(tmp_path) is True
 
 
 class TestRenvSyncSubprocessFailures:
@@ -106,6 +125,32 @@ class TestRenvSyncHappyPath:
         # Confirm cwd is set to the notebook dir; renv resolves the
         # project off cwd.
         assert cwd == str(tmp_path)
+
+    def test_does_not_pass_vanilla_or_no_init_file(self, monkeypatch, tmp_path):
+        """``.Rprofile`` must run — it's what activates the project's renv.
+
+        Review feedback on PR #68: ``--no-init-file`` / ``--vanilla``
+        flags disable ``.Rprofile``, which is what sources
+        ``renv/activate.R`` to put the project library on
+        ``.libPaths()``. Without it ``renv::restore()`` can't see the
+        project library and tries to install everything into the
+        user's default lib — usually failing because that lib doesn't
+        even have renv installed.
+        """
+        monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
+        (tmp_path / "renv.lock").write_text("")
+
+        captured_args: list[str] = []
+
+        def fake_run(args, **kwargs):
+            captured_args.extend(args)
+            return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        _renv_sync(tmp_path)
+
+        assert "--vanilla" not in captured_args
+        assert "--no-init-file" not in captured_args
 
 
 class TestRenvSyncDefaultTimeout:

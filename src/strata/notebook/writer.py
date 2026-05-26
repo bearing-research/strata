@@ -594,23 +594,31 @@ def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
     cost is paid once the notebook actually wants to run an R cell,
     not on every notebook open.
     """
+    # Lockfile check comes BEFORE the Rscript lookup. The common
+    # pre-renv-init state — a notebook with R cells but no
+    # ``renv.lock`` yet — must be a no-op success regardless of
+    # whether R is installed. The bootstrap path (write ``.Rprofile``
+    # + call ``renv::init()``) lands in #57's harness wiring, and
+    # until that ships the absence of a lockfile is the expected
+    # initial state, not a failure.
+    if not (notebook_dir / "renv.lock").exists():
+        _logger.debug("renv.lock missing in %s — nothing to restore", notebook_dir)
+        return True
+
     rscript = shutil.which("Rscript")
     if rscript is None:
         _logger.warning("Rscript not found on PATH — skipping renv restore")
         return False
 
-    if not (notebook_dir / "renv.lock").exists():
-        # No lockfile to restore from. Treated as success so callers
-        # don't surface "renv sync failed" for the common pre-renv-init
-        # state where a notebook has R cells but hasn't been
-        # bootstrapped yet. The bootstrap path (write ``.Rprofile`` +
-        # call ``renv::init()``) lands in #57's harness wiring.
-        _logger.debug("renv.lock missing in %s — nothing to restore", notebook_dir)
-        return True
-
     try:
+        # No ``--vanilla`` / ``--no-init-file``: the project's
+        # ``.Rprofile`` is what sources ``renv/activate.R`` to put the
+        # project library on ``.libPaths()``. Without it ``renv::restore()``
+        # can't see the project library and tries to install everything
+        # into the user's default lib — usually failing because that
+        # lib doesn't have renv installed in the first place.
         subprocess.run(
-            [rscript, "--no-init-file", "--vanilla", "-e", "renv::restore(prompt = FALSE)"],
+            [rscript, "-e", "renv::restore(prompt = FALSE)"],
             cwd=str(notebook_dir),
             timeout=timeout,
             capture_output=True,
