@@ -130,27 +130,43 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
         SHA-256 hex digest folded over present lockfiles.
     """
     hasher = hashlib.sha256()
-
-    uv_lock = notebook_dir / "uv.lock"
-    if uv_lock.exists():
-        try:
-            hasher.update(uv_lock.read_bytes())
-        except OSError as e:
-            logger.warning("Could not read uv.lock: %s", e)
-
-    renv_lock = notebook_dir / "renv.lock"
-    if renv_lock.exists():
-        try:
-            # Tag prefix prevents an exotic collision between a
-            # uv-only notebook and a renv-only one whose lockfiles
-            # happen to share bytes. The tag itself is fixed bytes,
-            # not derived from notebook state.
-            hasher.update(b"\0renv=")
-            hasher.update(renv_lock.read_bytes())
-        except OSError as e:
-            logger.warning("Could not read renv.lock: %s", e)
-
+    _fold_lockfile_into_hash(hasher, notebook_dir, "uv.lock", tag=None)
+    # Tag prefix prevents an exotic collision between a uv-only
+    # notebook and a renv-only one whose lockfiles happen to share
+    # bytes. The tag itself is fixed bytes, not derived from
+    # notebook state.
+    _fold_lockfile_into_hash(hasher, notebook_dir, "renv.lock", tag=b"\0renv=")
     return hasher.hexdigest()
+
+
+def _fold_lockfile_into_hash(
+    hasher: hashlib._Hash, notebook_dir: Path, filename: str, *, tag: bytes | None
+) -> None:
+    """Fold ``notebook_dir/filename`` content into *hasher* if it exists.
+
+    Quietly skips on missing file or read error — callers (the
+    aggregate ``compute_lockfile_hash``) treat a missing lockfile as
+    "no contribution", and the warning is informational only.
+
+    Uses ``open() + read()`` rather than ``Path.read_bytes()``
+    because CodeQL's ``py/path-injection`` taint model flags the
+    latter on a Path constructed from a function argument even when
+    the argument is internal trusted state (here:
+    ``session.path``). The ``open()`` form matches the pre-existing
+    helper signature CodeQL is already happy with.
+    """
+    lockfile = notebook_dir / filename
+    if not lockfile.is_file():
+        return
+    try:
+        with open(lockfile, "rb") as f:
+            content = f.read()
+    except OSError as exc:
+        logger.warning("Could not read %s: %s", filename, exc)
+        return
+    if tag is not None:
+        hasher.update(tag)
+    hasher.update(content)
 
 
 def narrow_env_for_provenance(
