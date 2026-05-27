@@ -156,7 +156,7 @@ def _fold_lockfile_into_hash(
     helper signature CodeQL is already happy with.
     """
     lockfile = notebook_dir / filename
-    if not lockfile.is_file():
+    if not lockfile.exists():
         return
     try:
         with open(lockfile, "rb") as f:
