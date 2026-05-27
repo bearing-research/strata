@@ -1117,49 +1117,6 @@ def update_notebook_env(notebook_dir: Path, env: dict[str, str]) -> None:
         tomli_w.dump(toml_data, f)
 
 
-def update_notebook_r_block(notebook_dir: Path, r_block: dict[str, Any]) -> None:
-    """Persist the ``[r]`` block — lock hash, sync timestamp, R version.
-
-    Mirror of ``update_notebook_env`` for the R side: read the toml,
-    overwrite (or remove) the ``[r]`` block, write back. The
-    notebook.toml's other sections round-trip unchanged.
-
-    An empty dict removes the block — matches the
-    ``write_notebook_toml`` invariant that an empty ``[r]`` doesn't
-    appear in the file.
-
-    ``updated_at`` is only bumped when the block actually changes —
-    successive ``_renv_sync`` calls with the same lockfile produce
-    the same ``lock_hash`` but a new ``last_synced_at`` timestamp,
-    which counts as a change here (the timestamp shift is the whole
-    point of recording the sync). Repeated session opens that hit
-    a cache-hit ``_renv_sync`` will still rewrite the file each time;
-    that's accepted because the on-disk record is the source of
-    truth for "when did the env last get restored".
-    """
-    notebook_dir = Path(notebook_dir)
-    notebook_toml_path = notebook_dir / "notebook.toml"
-
-    with open(notebook_toml_path, "rb") as f:
-        toml_data = tomllib.load(f)
-
-    existing = toml_data.get("r")
-
-    if not r_block:
-        if existing is None:
-            return
-        toml_data.pop("r", None)
-    else:
-        if existing == r_block:
-            return
-        toml_data["r"] = dict(r_block)
-
-    toml_data["updated_at"] = datetime.now(tz=UTC).isoformat()
-
-    with open(notebook_toml_path, "wb") as f:
-        tomli_w.dump(toml_data, f)
-
-
 def update_cell_display_outputs(
     notebook_dir: Path,
     cell_id: str,

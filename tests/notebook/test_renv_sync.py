@@ -19,12 +19,8 @@ from types import SimpleNamespace
 
 from strata.notebook.models import NotebookToml
 from strata.notebook.parser import parse_notebook
-from strata.notebook.writer import (
-    _renv_sync,
-    create_notebook,
-    update_notebook_r_block,
-    write_notebook_toml,
-)
+from strata.notebook.runtime_state import RRuntime, load_runtime_state, save_runtime_state
+from strata.notebook.writer import _renv_sync, create_notebook, write_notebook_toml
 
 # ---------------------------------------------------------------------------
 # _renv_sync wrapper
@@ -228,80 +224,6 @@ class TestRBlockSchema:
         assert "\nr =" not in text
 
 
-class TestUpdateNotebookRBlock:
-    """``update_notebook_r_block`` mirrors the partial-update pattern of
-    ``update_notebook_env``: read the toml, overwrite just the ``[r]``
-    block, write back. Other sections round-trip unchanged."""
-
-    def test_writes_block_when_absent(self, tmp_path: Path):
-        notebook_dir = create_notebook(tmp_path, "Update R Block", initialize_environment=False)
-
-        update_notebook_r_block(
-            notebook_dir,
-            {
-                "lock_hash": "cafe" * 16,
-                "last_synced_at": 1717003200000,
-                "r_version": "4.4.1",
-            },
-        )
-
-        state = parse_notebook(notebook_dir)
-        assert state.r["lock_hash"] == "cafe" * 16
-        assert state.r["last_synced_at"] == 1717003200000
-        assert state.r["r_version"] == "4.4.1"
-
-    def test_overwrites_existing_block(self, tmp_path: Path):
-        notebook_dir = create_notebook(tmp_path, "Overwrite R Block", initialize_environment=False)
-        update_notebook_r_block(notebook_dir, {"lock_hash": "old", "last_synced_at": 1})
-
-        update_notebook_r_block(notebook_dir, {"lock_hash": "new", "last_synced_at": 2})
-
-        state = parse_notebook(notebook_dir)
-        assert state.r["lock_hash"] == "new"
-        assert state.r["last_synced_at"] == 2
-
-    def test_empty_dict_removes_block(self, tmp_path: Path):
-        notebook_dir = create_notebook(tmp_path, "Remove R Block", initialize_environment=False)
-        update_notebook_r_block(notebook_dir, {"lock_hash": "x", "last_synced_at": 1})
-
-        update_notebook_r_block(notebook_dir, {})
-
-        text = (notebook_dir / "notebook.toml").read_text(encoding="utf-8")
-        assert "[r]" not in text
-
-    def test_no_op_when_block_unchanged(self, tmp_path: Path):
-        """Calling with identical content leaves the file untouched.
-
-        Mirrors ``update_notebook_env``'s anti-churn invariant: typing
-        an API key or hitting a cached ``_renv_sync`` shouldn't bump
-        ``updated_at`` on the committed notebook.
-        """
-        notebook_dir = create_notebook(tmp_path, "Idempotent R Block", initialize_environment=False)
-        update_notebook_r_block(notebook_dir, {"lock_hash": "z", "last_synced_at": 1})
-        before = (notebook_dir / "notebook.toml").read_bytes()
-
-        update_notebook_r_block(notebook_dir, {"lock_hash": "z", "last_synced_at": 1})
-        after = (notebook_dir / "notebook.toml").read_bytes()
-
-        assert before == after, "no-change update must not rewrite the toml"
-
-    def test_does_not_touch_other_sections(self, tmp_path: Path):
-        """Updating ``[r]`` leaves ``[env]`` and other blocks unchanged."""
-        notebook_dir = create_notebook(tmp_path, "Other Sections", initialize_environment=False)
-        toml = NotebookToml(
-            notebook_id="multi",
-            name="Other Sections",
-            env={"DEBUG": "true"},
-        )
-        write_notebook_toml(notebook_dir, toml)
-
-        update_notebook_r_block(notebook_dir, {"lock_hash": "h", "last_synced_at": 1})
-
-        state = parse_notebook(notebook_dir)
-        assert state.env == {"DEBUG": "true"}
-        assert state.r["lock_hash"] == "h"
-
-
 # ---------------------------------------------------------------------------
 # Session.ensure_renv_synced — wiring _renv_sync into open
 # ---------------------------------------------------------------------------
@@ -309,9 +231,16 @@ class TestUpdateNotebookRBlock:
 
 class TestEnsureRenvSynced:
     """``ensure_renv_synced`` is the session-side hook that runs
-    ``_renv_sync`` on open. Pins the three honest user-facing
-    behaviours: no-op without a lockfile, [r] block populated on
-    success, [r] block left alone on failure."""
+    ``_renv_sync`` on open. Pins:
+
+    * No-op without a lockfile (Python-only notebooks pay nothing).
+    * Successful sync persists to ``.strata/runtime.json`` (not to
+      committed ``notebook.toml`` — runtime state lives in
+      ``runtime.json`` so reopens don't churn the committed file).
+    * Hash-unchanged reopens short-circuit before spawning
+      ``Rscript``.
+    * Failed sync leaves the prior runtime entry untouched.
+    """
 
     def _make_session(self, notebook_dir):
         from strata.notebook.session import NotebookSession
@@ -319,85 +248,152 @@ class TestEnsureRenvSynced:
         state = parse_notebook(notebook_dir)
         return NotebookSession(state, notebook_dir)
 
-    def test_no_op_without_renv_lock(self, tmp_path: Path, monkeypatch):
-        """Python-only notebook (no renv.lock): the [r] block stays absent
-        and ``_renv_sync`` is never even called.
-        """
+    def _stub_renv_sync(self, monkeypatch, *, ok: bool):
         from strata.notebook import session as session_module
 
-        called: list[Path] = []
+        calls: list[Path] = []
 
         def _fake_renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
-            called.append(notebook_dir)
-            return True
+            calls.append(notebook_dir)
+            return ok
 
         monkeypatch.setattr(session_module, "_renv_sync", _fake_renv_sync)
-
-        notebook_dir = create_notebook(tmp_path, "No R", initialize_environment=False)
-        session = self._make_session(notebook_dir)
-
-        session.ensure_renv_synced()
-
-        assert called == [], "_renv_sync must not be called when renv.lock is missing"
-        state = parse_notebook(notebook_dir)
-        assert state.r == {}
-
-    def test_success_populates_r_block(self, tmp_path: Path, monkeypatch):
-        """Real-looking ``renv.lock`` + a ``_renv_sync`` success stub
-        produces a populated [r] block with lock_hash + last_synced_at."""
-        from strata.notebook import session as session_module
-
-        def _fake_renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
-            return True
-
-        monkeypatch.setattr(session_module, "_renv_sync", _fake_renv_sync)
-        # Stub the R version probe so the test doesn't depend on
-        # whether Rscript is installed on the host.
         monkeypatch.setattr(
             session_module.NotebookSession,
             "_probe_r_version",
             lambda self: "4.4.1",
         )
+        return calls
 
+    def test_no_op_without_renv_lock(self, tmp_path: Path, monkeypatch):
+        """Python-only notebook: ``_renv_sync`` never called, runtime
+        ``r`` block stays at the empty default, and the committed
+        ``notebook.toml`` is byte-identical before and after.
+        """
+        calls = self._stub_renv_sync(monkeypatch, ok=True)
+        notebook_dir = create_notebook(tmp_path, "No R", initialize_environment=False)
+        toml_before = (notebook_dir / "notebook.toml").read_bytes()
+
+        session = self._make_session(notebook_dir)
+        session.ensure_renv_synced()
+
+        assert calls == [], "_renv_sync must not be called when renv.lock is missing"
+        assert load_runtime_state(notebook_dir).r == RRuntime()
+        assert (notebook_dir / "notebook.toml").read_bytes() == toml_before
+
+    def test_success_persists_to_runtime_json(self, tmp_path: Path, monkeypatch):
+        """A successful sync writes ``r`` into ``runtime.json``, not into
+        the committed ``notebook.toml``. P2 from #87 review: per-session
+        timestamps must not bump ``notebook.toml``'s ``updated_at``.
+        """
+        import hashlib
+
+        self._stub_renv_sync(monkeypatch, ok=True)
         notebook_dir = create_notebook(tmp_path, "Has R", initialize_environment=False)
         renv_content = '{"R": {"Version": "4.4.1"}, "Packages": {"arrow": "1.0"}}\n'
         (notebook_dir / "renv.lock").write_text(renv_content, encoding="utf-8")
-        session = self._make_session(notebook_dir)
+        toml_before = (notebook_dir / "notebook.toml").read_bytes()
 
+        session = self._make_session(notebook_dir)
         session.ensure_renv_synced()
 
-        state = parse_notebook(notebook_dir)
-        # Hash matches what update_notebook_r_block was handed, so a
-        # later open with the same lockfile reads back as a cache hit.
-        import hashlib
+        runtime = load_runtime_state(notebook_dir).r
+        assert runtime.lock_hash == hashlib.sha256(renv_content.encode()).hexdigest()
+        assert runtime.r_version == "4.4.1"
+        assert runtime.last_synced_at > 0
+        assert runtime.has_lockfile is True
 
-        assert state.r["lock_hash"] == hashlib.sha256(renv_content.encode()).hexdigest()
-        assert state.r["r_version"] == "4.4.1"
-        assert isinstance(state.r["last_synced_at"], int)
+        # The on-disk [r] block stays empty (the committed config has
+        # no opinion on runtime state) and notebook.toml is byte-
+        # identical — no churn.
+        assert parse_notebook(notebook_dir).r == {}
+        assert (notebook_dir / "notebook.toml").read_bytes() == toml_before
 
-    def test_failure_leaves_r_block_untouched(self, tmp_path: Path, monkeypatch):
-        """``_renv_sync`` returning False (Rscript missing, timeout,
-        non-zero exit) must leave the [r] block as-is. Stamping a
-        new ``last_synced_at`` after a failure would lie about when
-        the env was last good."""
-        from strata.notebook import session as session_module
+    def test_hash_unchanged_short_circuits(self, tmp_path: Path, monkeypatch):
+        """A second open against the same lockfile must NOT spawn Rscript.
 
-        def _fake_renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
-            return False
+        P3 from #87 review: the session-reuse path now calls
+        ``ensure_renv_synced`` on every reopen; the hash short-circuit
+        is what keeps that free.
+        """
+        calls = self._stub_renv_sync(monkeypatch, ok=True)
+        notebook_dir = create_notebook(tmp_path, "Cached R", initialize_environment=False)
+        renv_content = '{"R": {"Version": "4.4.1"}}\n'
+        (notebook_dir / "renv.lock").write_text(renv_content, encoding="utf-8")
 
-        monkeypatch.setattr(session_module, "_renv_sync", _fake_renv_sync)
+        session = self._make_session(notebook_dir)
+        session.ensure_renv_synced()
+        first_runtime = load_runtime_state(notebook_dir).r
+        assert len(calls) == 1
 
+        # Second call — same lockfile bytes — must short-circuit.
+        session.ensure_renv_synced()
+        second_runtime = load_runtime_state(notebook_dir).r
+
+        assert len(calls) == 1, "second call must not re-spawn _renv_sync"
+        # Runtime entry unchanged — the short-circuit doesn't even
+        # re-stamp ``last_synced_at``.
+        assert first_runtime == second_runtime
+
+    def test_lockfile_edit_triggers_resync(self, tmp_path: Path, monkeypatch):
+        """Editing ``renv.lock`` invalidates the hash, so the next call
+        runs ``_renv_sync`` and updates the runtime entry."""
+        calls = self._stub_renv_sync(monkeypatch, ok=True)
+        notebook_dir = create_notebook(tmp_path, "Edited R", initialize_environment=False)
+        (notebook_dir / "renv.lock").write_text('{"R": {"Version": "4.4.0"}}\n', encoding="utf-8")
+
+        session = self._make_session(notebook_dir)
+        session.ensure_renv_synced()
+        first_hash = load_runtime_state(notebook_dir).r.lock_hash
+
+        (notebook_dir / "renv.lock").write_text('{"R": {"Version": "4.4.1"}}\n', encoding="utf-8")
+        session.ensure_renv_synced()
+        second_hash = load_runtime_state(notebook_dir).r.lock_hash
+
+        assert len(calls) == 2, "lockfile edit must re-run _renv_sync"
+        assert first_hash != second_hash
+
+    def test_failure_leaves_runtime_untouched(self, tmp_path: Path, monkeypatch):
+        """``_renv_sync`` returning False (Rscript missing, timeout, etc.)
+        must leave any prior ``RRuntime`` entry alone — stamping a fresh
+        timestamp after a failure would lie about the last-good sync."""
+        self._stub_renv_sync(monkeypatch, ok=False)
         notebook_dir = create_notebook(tmp_path, "Failing R", initialize_environment=False)
         (notebook_dir / "renv.lock").write_text("{}\n", encoding="utf-8")
-        # Pre-seed an [r] block as if a prior successful sync had run.
-        update_notebook_r_block(
-            notebook_dir,
-            {"lock_hash": "previous-good", "last_synced_at": 1},
-        )
-        session = self._make_session(notebook_dir)
 
+        # Pre-seed the runtime entry as if a prior good sync had run.
+        seed = RRuntime(
+            lock_hash="previous-good-hash",
+            r_version="4.3.0",
+            last_synced_at=1,
+            has_lockfile=True,
+        )
+        state = load_runtime_state(notebook_dir)
+        state.r = seed
+        save_runtime_state(notebook_dir, state)
+
+        session = self._make_session(notebook_dir)
         session.ensure_renv_synced()
 
-        state = parse_notebook(notebook_dir)
-        assert state.r["lock_hash"] == "previous-good"
-        assert state.r["last_synced_at"] == 1
+        runtime = load_runtime_state(notebook_dir).r
+        # The new lockfile has a different hash, so the short-circuit
+        # didn't fire — ``_renv_sync`` was actually called and failed.
+        # The prior runtime entry must survive untouched.
+        assert runtime == seed
+
+    def test_lockfile_removed_clears_runtime_entry(self, tmp_path: Path, monkeypatch):
+        """When a notebook removes its ``renv.lock``, the runtime entry
+        clears back to the empty default — no phantom hash hangs around."""
+        self._stub_renv_sync(monkeypatch, ok=True)
+        notebook_dir = create_notebook(tmp_path, "Cleared R", initialize_environment=False)
+        (notebook_dir / "renv.lock").write_text("{}\n", encoding="utf-8")
+
+        session = self._make_session(notebook_dir)
+        session.ensure_renv_synced()
+        assert load_runtime_state(notebook_dir).r.has_lockfile is True
+
+        # User removes renv.lock and reopens — the next ensure clears.
+        (notebook_dir / "renv.lock").unlink()
+        session.ensure_renv_synced()
+
+        assert load_runtime_state(notebook_dir).r == RRuntime()

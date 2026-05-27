@@ -21,6 +21,7 @@ import type {
   ManagedWorkerSpec,
   NotebookEnvironment,
   NotebookRuntimeConfig,
+  RNotebookEnvironment,
   VariantGroup,
   VariantMember,
   WorkerCatalogEntry,
@@ -82,6 +83,12 @@ const notebook = reactive<Notebook>({
     hasLockfile: false,
     venvPython: null,
     interpreterSource: 'unknown',
+  },
+  rEnvironment: {
+    lockHash: '',
+    rVersion: '',
+    lastSyncedAt: 0,
+    hasLockfile: false,
   },
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -434,9 +441,30 @@ function syncResolvedDependenciesFromBackend(raw: any) {
     : []
 }
 
+function parseBackendREnvironment(raw: any): RNotebookEnvironment {
+  return {
+    lockHash: String(raw?.lock_hash ?? raw?.lockHash ?? ''),
+    rVersion: String(raw?.r_version ?? raw?.rVersion ?? ''),
+    lastSyncedAt: Number(raw?.last_synced_at ?? raw?.lastSyncedAt ?? 0),
+    hasLockfile: raw?.has_lockfile === true || raw?.hasLockfile === true,
+  }
+}
+
+function syncNotebookREnvironmentFromBackend(raw: any) {
+  notebook.rEnvironment = parseBackendREnvironment(raw)
+}
+
 function syncEnvironmentPayloadFromBackend(data: any) {
   if (data?.environment) {
     syncNotebookEnvironmentFromBackend(data.environment)
+  }
+  // R-side env is parallel to Python's. Backend always emits the
+  // ``r_environment`` field (with zero fields when the notebook has
+  // no renv.lock), so absence here means we're talking to a
+  // pre-#87 server — leave the store's default zero entry in
+  // place rather than wiping anything.
+  if (data?.r_environment) {
+    syncNotebookREnvironmentFromBackend(data.r_environment)
   }
   if ('environment_job' in (data || {})) {
     syncEnvironmentOperationFromBackend(data.environment_job)

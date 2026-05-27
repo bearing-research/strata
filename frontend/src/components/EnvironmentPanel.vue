@@ -124,6 +124,15 @@ const shortLockfileHash = computed(() =>
   notebook.environment.lockfileHash ? notebook.environment.lockfileHash.slice(0, 12) : 'none',
 )
 
+const shortRLockHash = computed(() =>
+  notebook.rEnvironment.lockHash ? notebook.rEnvironment.lockHash.slice(0, 12) : 'none',
+)
+
+const rLastSyncedLabel = computed(() => {
+  if (!notebook.rEnvironment.lastSyncedAt) return 'Not synced yet'
+  return new Date(notebook.rEnvironment.lastSyncedAt).toLocaleString()
+})
+
 const lastSyncedLabel = computed(() => {
   if (!notebook.environment.lastSyncedAt) return 'Not synced yet'
   return new Date(notebook.environment.lastSyncedAt).toLocaleString()
@@ -469,6 +478,33 @@ function downloadRequirements() {
           Interpreter: <code>{{ notebook.environment.venvPython }}</code>
         </div>
         <div v-else-if="!notebook.environment.hasLockfile">Lockfile not created yet</div>
+      </div>
+
+      <!--
+        R-side environment summary — rendered only when the notebook
+        ships a ``renv.lock``. Backed by RRuntime on the server
+        (``.strata/runtime.json``). Sibling of the Python env stats
+        above; intentionally a thin read-only summary in this PR.
+        Package list + install-from-UI come with PR C.
+      -->
+      <div v-if="notebook.rEnvironment.hasLockfile" class="env-r-section">
+        <div class="env-r-header">R Environment</div>
+        <div class="env-stats">
+          <div class="env-stat">
+            <span class="env-stat-label">R version</span>
+            <span class="env-stat-value">{{ notebook.rEnvironment.rVersion || 'Unknown' }}</span>
+          </div>
+          <div class="env-stat">
+            <span class="env-stat-label">renv.lock</span>
+            <span class="env-stat-value" :title="notebook.rEnvironment.lockHash">
+              {{ shortRLockHash }}
+            </span>
+          </div>
+          <div class="env-stat">
+            <span class="env-stat-label">Last sync</span>
+            <span class="env-stat-value">{{ rLastSyncedLabel }}</span>
+          </div>
+        </div>
       </div>
 
       <div v-if="lastActionLabel" class="env-action">
@@ -978,6 +1014,21 @@ function downloadRequirements() {
 .env-meta code {
   color: var(--accent-primary);
   word-break: break-all;
+}
+
+.env-r-section {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+.env-r-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .env-action {

@@ -419,6 +419,16 @@ export interface NotebookEnvironment {
   interpreterSource: 'unknown' | 'venv' | 'path'
 }
 
+// R-side runtime environment, parallel to NotebookEnvironment.
+// Populated when a notebook ships a ``renv.lock``; absent / all-zero
+// otherwise. Backed by RRuntime in src/strata/notebook/runtime_state.py.
+export interface RNotebookEnvironment {
+  lockHash: string
+  rVersion: string
+  lastSyncedAt: number
+  hasLockfile: boolean
+}
+
 export interface NotebookRuntimeConfig {
   deploymentMode: 'personal' | 'service'
   defaultParentPath: string
@@ -493,6 +503,10 @@ export interface Notebook {
   variantGroups: VariantGroup[]
   /** Environment info */
   environment: NotebookEnvironment
+  /** R-side environment info. Populated when ``renv.lock`` is present;
+   * fields are zero / empty otherwise (matches the
+   * default-RRuntime backend serialization). */
+  rEnvironment: RNotebookEnvironment
   /** Published outputs exposed as stable endpoints */
   publishedOutputs?: PublishedOutput[]
   /** Global metadata */
