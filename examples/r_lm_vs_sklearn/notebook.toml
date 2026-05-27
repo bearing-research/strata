@@ -1,0 +1,10 @@
+notebook_id = "r-lm-vs-sklearn-001"
+name = "R lm() vs scikit-learn"
+created_at = 2026-05-26 00:00:00+00:00
+updated_at = 2026-05-26 00:00:00+00:00
+cells = [
+    { id = "build-data", file = "build_data.py", language = "python", order = 0 },
+    { id = "fit-lm", file = "fit_lm.r", language = "r", order = 1 },
+    { id = "fit-sklearn", file = "fit_sklearn.py", language = "python", order = 2 },
+    { id = "compare", file = "compare.py", language = "python", order = 3 },
+]

@@ -1,0 +1,16 @@
+[project]
+name = "r-lm-vs-sklearn"
+version = "0.1.0"
+description = "Mixed Python + R notebook: fit a linear model with R's lm() and compare side-by-side with scikit-learn"
+requires-python = "==3.12.*"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+    "pandas>=2.0.0",
+    "numpy>=2.0.0",
+    "scikit-learn>=1.5.0",
+]
+
+[tool.uv]
+managed = true
