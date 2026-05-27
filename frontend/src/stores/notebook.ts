@@ -447,9 +447,7 @@ function syncResolvedDependenciesFromBackend(raw: any) {
 function parseBackendREnvironment(raw: any): RNotebookEnvironment {
   const syncStateRaw = String(raw?.sync_state ?? raw?.syncState ?? 'absent')
   const syncState = (
-    ['absent', 'never', 'ok', 'outdated', 'failed'].includes(syncStateRaw)
-      ? syncStateRaw
-      : 'absent'
+    ['absent', 'never', 'ok', 'outdated', 'failed'].includes(syncStateRaw) ? syncStateRaw : 'absent'
   ) as RNotebookEnvironment['syncState']
   const errRaw = raw?.sync_error ?? raw?.syncError
   return {
