@@ -190,6 +190,100 @@ jobs:
         run: |
           uv run pytest tests/test_executor_protocol.py -v --tb=short
 
+  # R-cell integration tests — separate job because R is a distinct
+  # runtime from Python, and installing it inside the matrix unit-tests
+  # job would multiply the (~30s) install cost across every Py × OS
+  # cell without any new signal (R doesn't care about the Python
+  # version). Ubuntu + macOS only — the issue #59 ship gate is
+  # "Linux + macOS green", and Windows skips notebook tests at the
+  # unit-tests level already.
+  r-tests:
+    name: R Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    env:
+      RUSTUP_TOOLCHAIN: stable
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      # Same macOS Homebrew rust eviction the unit-tests job needs —
+      # see the rationale comment up there. The setup-rust-toolchain
+      # action's auto-detect path leaves cargo and rustup pointing at
+      # different homes otherwise, and `uv sync` dies inside maturin.
+      - name: Remove Homebrew rust on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew list --formula 2>/dev/null | grep -E '^(rust|rustup-init|rustup)$' \
+            | xargs -I {} brew uninstall --force --ignore-dependencies {} \
+            || true
+          rm -rf /opt/homebrew/etc/.rustup
+          which rustup 2>/dev/null || echo "rustup removed"
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6  # v1
+        with:
+          toolchain: stable
+          cache-workspaces: rust
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          version: "latest"
+
+      - name: Install dependencies and build Rust extension
+        run: uv sync --python 3.12 --all-extras
+
+      # ``use-public-rspm: true`` points install.packages() at
+      # https://packagemanager.posit.co — pre-compiled Linux binaries
+      # turn the ~10-min source compile of ``arrow`` into a ~30s
+      # binary download. macOS uses CRAN's native ``.tgz`` binaries.
+      - name: Set up R
+        uses: r-lib/actions/setup-r@a51a8012b0aab7c32ef9d19bf54da93f3254335e  # v2
+        with:
+          r-version: "release"
+          use-public-rspm: true
+
+      # Direct install instead of ``setup-r-dependencies`` — that
+      # action expects a DESCRIPTION or renv.lock at the project root,
+      # which Strata doesn't ship at the top level (the per-notebook
+      # renv.lock lives inside individual notebook dirs). Pin
+      # dependencies inline; if Phase 2 adds more R packages, switch
+      # to a real lockfile.
+      #
+      # ``jsonlite`` is the manifest-IO codec the harness uses
+      # unconditionally (``harness.R::library(jsonlite)`` at L38);
+      # ``arrow`` is lazy-loaded only when a cell actually serializes
+      # a data.frame, but the cross-language tests do exactly that, so
+      # both are required for the suite to pass.
+      - name: Install R 'jsonlite' + 'arrow' packages
+        shell: Rscript {0}
+        run: |
+          install.packages(c("jsonlite", "arrow"))
+          for (pkg in c("jsonlite", "arrow")) {
+            if (!requireNamespace(pkg, quietly = TRUE)) {
+              stop(sprintf("'%s' install reported success but namespace is not loadable", pkg))
+            }
+          }
+
+      # Targeted suite rather than the full notebook suite — the
+      # unit-tests matrix already runs everything else; this job only
+      # needs to exercise the R-marked tier that the matrix skips for
+      # lack of Rscript.
+      - name: Run R-related test files
+        shell: bash
+        run: |
+          uv run pytest \
+            tests/notebook/test_r_cells.py \
+            tests/notebook/test_language_r_executor.py \
+            tests/notebook/test_language_r_analyzer.py \
+            -v --tb=short
+
   notebook-browser-smoke:
     name: Notebook Browser Smoke
     runs-on: ubuntu-latest
