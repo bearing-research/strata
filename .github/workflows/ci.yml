@@ -255,12 +255,20 @@ jobs:
       # renv.lock lives inside individual notebook dirs). Pin
       # dependencies inline; if Phase 2 adds more R packages, switch
       # to a real lockfile.
-      - name: Install R 'arrow' package
+      #
+      # ``jsonlite`` is the manifest-IO codec the harness uses
+      # unconditionally (``harness.R::library(jsonlite)`` at L38);
+      # ``arrow`` is lazy-loaded only when a cell actually serializes
+      # a data.frame, but the cross-language tests do exactly that, so
+      # both are required for the suite to pass.
+      - name: Install R 'jsonlite' + 'arrow' packages
         shell: Rscript {0}
         run: |
-          install.packages("arrow")
-          if (!requireNamespace("arrow", quietly = TRUE)) {
-            stop("'arrow' install reported success but namespace is not loadable")
+          install.packages(c("jsonlite", "arrow"))
+          for (pkg in c("jsonlite", "arrow")) {
+            if (!requireNamespace(pkg, quietly = TRUE)) {
+              stop(sprintf("'%s' install reported success but namespace is not loadable", pkg))
+            }
           }
 
       # Targeted suite rather than the full notebook suite — the
