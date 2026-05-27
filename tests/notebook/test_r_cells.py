@@ -189,3 +189,156 @@ async def test_r_cell_mount_injects_path_and_reads_file(r_notebook, tmp_path):
     # writes it as a 1-element array (json/object) or scalar depending
     # on auto_unbox. The preview faithfully reproduces the value.
     assert "hello from a mount" in str(r1.outputs["content"]["preview"])
+
+
+# ---------------------------------------------------------------------------
+# Error-shape tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_r_syntax_error_surfaces_as_failure(r_notebook):
+    """An unparseable R cell fails the cell, not the harness.
+
+    Distinct from a runtime ``stop()`` — R signals parse errors via
+    ``parse()`` before any user code runs. harness.R's outer
+    ``tryCatch`` around ``parse(text = source_text)`` catches it,
+    records the message + ``sys.calls()`` traceback, and writes
+    ``success: false`` to ``harness-result.json``.
+
+    Runtime errors are pinned separately in
+    ``test_language_r_executor.py::TestExecuteSimpleRCell::test_runtime_error_surfaces_as_failure``.
+    """
+    src = "x <-"  # incomplete expression, no RHS
+    _, session = r_notebook(cells=[("c1", None, src, "r")])
+    executor = CellExecutor(session)
+
+    result = await executor.execute_cell("c1", src)
+
+    assert result.success is False
+    # The exact R parse-error wording varies across R versions but
+    # always mentions ``unexpected`` or ``end of input``. Either is
+    # a sufficient signal that the failure surfaced from R's parser
+    # rather than from some harness layer.
+    err = (result.error or "").lower()
+    assert "unexpected" in err or "end of" in err, (
+        f"expected an R parse-error message, got: {result.error!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Provenance / cache behaviour
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_r_cell_cache_hits_on_unchanged_re_run(r_notebook):
+    """Running the same R cell twice: second run is a cache hit.
+
+    Provenance is language-agnostic (``(source_hash, env_hash,
+    sorted_inputs)``) so R cells use the exact same cache path as
+    Python cells. This test is the R analogue of
+    ``test_executor.py``'s display-cache-hit cases — pins that the
+    R execution flow ends with a stored artifact + cached metadata,
+    and that a second invocation skips the harness spawn.
+
+    Why a downstream consumer cell: the executor's cache lookup
+    keys off ``derive_subkey(provenance_hash, first_consumed_var)``
+    when ``consumed_variables`` is non-empty, matching the per-var
+    artifact-store path used at write time. A leaf cell with no
+    downstream consumer falls through the alternate ``find_cached
+    (provenance_hash)`` branch where storage and lookup keys
+    differ, and the second run looks like a cache miss for
+    bookkeeping reasons rather than a real one. The smoke + RDS
+    + mount cases earlier in this file all run as the *producer*
+    side of a multi-cell chain, so this is the only spot the
+    distinction matters.
+    """
+    src = "value <- 7"
+    py_downstream = "scaled = value\n"
+    _, session = r_notebook(
+        cells=[
+            ("c1", None, src, "r"),
+            ("c2", "c1", py_downstream, "python"),
+        ]
+    )
+    executor = CellExecutor(session)
+
+    first = await executor.execute_cell("c1", src)
+    assert first.success is True, first.error
+    assert first.cache_hit is False
+    # harness.R's JSON tier formats atomic scalars via ``format()`` —
+    # ``7`` reads back as the string ``"7"``, not the int.
+    assert first.outputs["value"]["preview"] == "7"
+
+    second = await executor.execute_cell("c1", src)
+    assert second.success is True, second.error
+    assert second.cache_hit is True
+    # ``CellExecutionResult.outputs`` is intentionally empty on the
+    # cache-hit branch (executor.py L1281) — the artifact is already
+    # in the store, so the result is a thin pointer. The
+    # ``execution_method == "cached"`` field is the cleanest
+    # signal that the harness was skipped.
+    assert second.execution_method == "cached"
+
+
+@pytest.mark.asyncio
+async def test_r_cell_source_change_invalidates_cache(r_notebook):
+    """Editing the cell source flips the provenance hash → cache miss.
+
+    The cell ID stays the same; only the body changes. Pins that
+    ``source_hash`` participates in provenance for R cells the same
+    way it does for Python cells (and that the R harness re-runs on
+    the new body).
+    """
+    # Downstream Python cell pins ``value`` as a consumed variable so
+    # the cache lookup uses ``derive_subkey(provenance, "value")`` —
+    # matching the per-var write path. See the unchanged-rerun test
+    # above for the why.
+    src_v1 = "value <- 1"
+    src_v2 = "value <- 2"
+    py_downstream = "doubled = value\n"
+    _, session = r_notebook(
+        cells=[
+            ("c1", None, src_v1, "r"),
+            ("c2", "c1", py_downstream, "python"),
+        ]
+    )
+    executor = CellExecutor(session)
+
+    first = await executor.execute_cell("c1", src_v1)
+    assert first.success is True, first.error
+    assert first.cache_hit is False
+    # harness.R's JSON tier formats atomic scalars as strings.
+    assert first.outputs["value"]["preview"] == "1"
+
+    second = await executor.execute_cell("c1", src_v2)
+    assert second.success is True, second.error
+    assert second.cache_hit is False, "source change must invalidate cache"
+    assert second.outputs["value"]["preview"] == "2"
+
+
+# ---------------------------------------------------------------------------
+# Annotation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_r_cell_env_annotation_visible_to_rscript(r_notebook):
+    """``# @env KEY=value`` injects into the R cell's Sys.getenv().
+
+    The annotation parser (``annotations.py``) is language-agnostic
+    — it scans the leading ``#``-comment block of *any* cell — and
+    harness.R's ``Sys.setenv`` block applies the manifest's ``env``
+    dict to the R process before the cell body runs. This test pins
+    that contract end-to-end: an annotation declared on an R cell
+    is readable via ``Sys.getenv`` from inside the same cell.
+    """
+    src = "# @env STRATA_TEST_VAR=hello-from-annotation\nvalue <- Sys.getenv('STRATA_TEST_VAR')\n"
+    _, session = r_notebook(cells=[("c1", None, src, "r")])
+    executor = CellExecutor(session)
+
+    result = await executor.execute_cell("c1", src)
+
+    assert result.success is True, result.error
+    assert result.outputs["value"]["preview"] == "hello-from-annotation"
