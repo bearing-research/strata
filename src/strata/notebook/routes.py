@@ -481,7 +481,16 @@ def _serialize_dependency_info_list(dependencies: list) -> list[dict]:
 
 
 def _serialize_environment_payload(session: NotebookSession) -> dict:
-    """Serialize the current environment plus direct and resolved dependencies."""
+    """Serialize the current environment plus direct and resolved dependencies.
+
+    ``r_environment`` is always present — even on Python-only
+    notebooks it serialises to a stable shape (``has_lockfile: false``,
+    ``sync_state: "absent"``). The frontend store's
+    ``syncEnvironmentPayloadFromBackend`` relies on this field being
+    present in *every* env-related payload (GET /environment, env
+    job responses, sync/add/remove dependency updates) so R UI
+    state can refresh without a full notebook reopen.
+    """
     return {
         "environment": session.serialize_environment_state(),
         "environment_job": session.serialize_environment_job_state(),
@@ -490,6 +499,7 @@ def _serialize_environment_payload(session: NotebookSession) -> dict:
         "resolved_dependencies": _serialize_dependency_info_list(
             list_resolved_dependencies(session.path)
         ),
+        "r_environment": session.serialize_r_environment_state(),
     }
 
 

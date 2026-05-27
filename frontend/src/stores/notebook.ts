@@ -85,10 +85,13 @@ const notebook = reactive<Notebook>({
     interpreterSource: 'unknown',
   },
   rEnvironment: {
+    hasLockfile: false,
+    currentLockHash: '',
     lockHash: '',
     rVersion: '',
     lastSyncedAt: 0,
-    hasLockfile: false,
+    syncState: 'absent',
+    syncError: null,
   },
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -442,11 +445,21 @@ function syncResolvedDependenciesFromBackend(raw: any) {
 }
 
 function parseBackendREnvironment(raw: any): RNotebookEnvironment {
+  const syncStateRaw = String(raw?.sync_state ?? raw?.syncState ?? 'absent')
+  const syncState = (
+    ['absent', 'never', 'ok', 'outdated', 'failed'].includes(syncStateRaw)
+      ? syncStateRaw
+      : 'absent'
+  ) as RNotebookEnvironment['syncState']
+  const errRaw = raw?.sync_error ?? raw?.syncError
   return {
+    hasLockfile: raw?.has_lockfile === true || raw?.hasLockfile === true,
+    currentLockHash: String(raw?.current_lock_hash ?? raw?.currentLockHash ?? ''),
     lockHash: String(raw?.lock_hash ?? raw?.lockHash ?? ''),
     rVersion: String(raw?.r_version ?? raw?.rVersion ?? ''),
     lastSyncedAt: Number(raw?.last_synced_at ?? raw?.lastSyncedAt ?? 0),
-    hasLockfile: raw?.has_lockfile === true || raw?.hasLockfile === true,
+    syncState,
+    syncError: typeof errRaw === 'string' && errRaw.length > 0 ? errRaw : null,
   }
 }
 

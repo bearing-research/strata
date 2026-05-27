@@ -77,14 +77,26 @@ class RRuntime:
     rather than the committed ``notebook.toml`` so the per-session
     ``last_synced_at`` doesn't churn the on-disk notebook definition.
 
-    All fields default to empty / zero so a missing ``r`` key on disk and
-    Python-only notebooks alike resolve to a well-formed empty dataclass.
+    Fields:
+
+    * ``lock_hash`` / ``r_version`` / ``last_synced_at`` — the *last
+      successful* sync. A failed re-sync leaves these alone so the UI
+      can still show "last good state was X".
+    * ``sync_error`` — error message from the most recent sync attempt.
+      Cleared on success. Non-empty value means the latest attempt
+      failed; the rest of the fields may still reflect a prior good
+      sync (or all be empty if no sync has ever succeeded).
+
+    All fields default to empty / zero. ``has_lockfile`` is NOT
+    cached here — it's a current-disk fact (``renv.lock`` exists)
+    derived at serialization time, not a "did we successfully sync
+    once" historical claim.
     """
 
     lock_hash: str = ""
     r_version: str = ""
     last_synced_at: int = 0
-    has_lockfile: bool = False
+    sync_error: str = ""
 
 
 @dataclass
