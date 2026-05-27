@@ -32,6 +32,7 @@ from strata.notebook.languages.r.analyzer import (
     _source_hash,
 )
 from strata.notebook.models import CellLanguage, CellState
+from tests.notebook.conftest import skip_if_no_r as _skip_no_rscript
 
 
 @pytest.fixture(autouse=True)
@@ -206,13 +207,6 @@ class TestCaching:
 # ---------------------------------------------------------------------------
 # Integration tests — real Rscript
 # ---------------------------------------------------------------------------
-
-
-_RSCRIPT_AVAILABLE = shutil.which("Rscript") is not None
-_skip_no_rscript = pytest.mark.skipif(
-    not _RSCRIPT_AVAILABLE,
-    reason="Rscript not on PATH; install R (https://www.r-project.org/) to run",
-)
 
 
 @_skip_no_rscript
