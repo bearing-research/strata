@@ -49,6 +49,7 @@ strata run examples/iris_classification
 | [`s3_mount/`](s3_mount/) | `# @mount` annotation — read data from an S3 bucket as a local `Path`. |
 | [`sql_orders_report/`](sql_orders_report/) | SQL cells with DuckDB; SQL and Python interleave through the same DAG. |
 | [`review_triage/`](review_triage/) | Prompt cell with `@output_schema` — structured LLM output validated against JSON Schema. |
+| [`r_lm_vs_sklearn/`](r_lm_vs_sklearn/) | R cells next to Python — fit `lm()` in R, the same model in sklearn, compare side-by-side over Arrow. |
 
 ### Larger applied examples
 
