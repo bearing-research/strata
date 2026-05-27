@@ -1370,6 +1370,42 @@ async def get_environment_status(notebook_id: str, session: SessionDep) -> dict:
     return _serialize_environment_payload(session)
 
 
+@router.get("/{notebook_id}/r-packages")
+async def get_r_packages(notebook_id: str, session: SessionDep) -> dict:
+    """Return the R packages installed in the notebook's renv project library.
+
+    Separate endpoint from ``GET /environment`` so the synchronous
+    Rscript spawn (~1-2s) doesn't block every state sync /
+    dependency mutation / env refresh response. The env panel
+    calls this on mount + manual refresh; nothing else hits it.
+
+    Response shape:
+
+    .. code-block:: json
+
+        {
+          "packages": [{"name": "arrow", "version": "14.0.0"}, ...],
+          "packages_status": "ok",
+          "packages_error": null
+        }
+
+    ``packages_status`` values:
+    - ``ok``                — listing succeeded.
+    - ``absent``            — notebook has no ``renv.lock``.
+    - ``rscript_missing``   — Rscript not on PATH; install R.
+    - ``renv_not_active``   — Rscript ran but renv hasn't activated
+                              (pre-init notebooks).
+    - ``failed``            — subprocess error; ``packages_error``
+                              has a short message.
+    """
+    r_state = session.serialize_r_environment_state(include_packages=True)
+    return {
+        "packages": r_state["packages"],
+        "packages_status": r_state["packages_status"],
+        "packages_error": r_state["packages_error"],
+    }
+
+
 @router.get("/config")
 async def get_notebook_runtime_config(request: Request) -> dict:
     """Return frontend runtime defaults for notebook creation/open flows."""

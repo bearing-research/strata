@@ -92,7 +92,12 @@ const notebook = reactive<Notebook>({
     lastSyncedAt: 0,
     syncState: 'absent',
     syncError: null,
+    // Default to ``unknown`` so the panel's first render renders
+    // a "loading" indicator rather than a misleading "no packages
+    // installed" — the env panel fetches the list on mount.
     packages: [],
+    packagesStatus: 'unknown',
+    packagesError: null,
   },
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -445,19 +450,20 @@ function syncResolvedDependenciesFromBackend(raw: any) {
     : []
 }
 
-function parseBackendREnvironment(raw: any): RNotebookEnvironment {
+function parseBackendREnvironment(
+  raw: any,
+): Omit<RNotebookEnvironment, 'packages' | 'packagesStatus' | 'packagesError'> {
+  // The env-state payload omits the package list — that's served
+  // by a separate ``GET /r-packages`` route so notebook open /
+  // state sync / env refresh paths don't pay a synchronous Rscript
+  // spawn. Callers reuse the store's existing
+  // ``packages``/``packagesStatus``/``packagesError`` fields and
+  // overwrite them via ``fetchRPackagesAction``.
   const syncStateRaw = String(raw?.sync_state ?? raw?.syncState ?? 'absent')
   const syncState = (
     ['absent', 'never', 'ok', 'outdated', 'failed'].includes(syncStateRaw) ? syncStateRaw : 'absent'
   ) as RNotebookEnvironment['syncState']
   const errRaw = raw?.sync_error ?? raw?.syncError
-  const packagesRaw = Array.isArray(raw?.packages) ? raw.packages : []
-  const packages = packagesRaw
-    .map((p: any) => ({
-      name: String(p?.name ?? ''),
-      version: String(p?.version ?? ''),
-    }))
-    .filter((p: { name: string }) => p.name.length > 0)
   return {
     hasLockfile: raw?.has_lockfile === true || raw?.hasLockfile === true,
     currentLockHash: String(raw?.current_lock_hash ?? raw?.currentLockHash ?? ''),
@@ -466,12 +472,53 @@ function parseBackendREnvironment(raw: any): RNotebookEnvironment {
     lastSyncedAt: Number(raw?.last_synced_at ?? raw?.lastSyncedAt ?? 0),
     syncState,
     syncError: typeof errRaw === 'string' && errRaw.length > 0 ? errRaw : null,
-    packages,
   }
 }
 
 function syncNotebookREnvironmentFromBackend(raw: any) {
-  notebook.rEnvironment = parseBackendREnvironment(raw)
+  // Overlay the parsed env-state fields on top of the existing
+  // packages/packagesStatus/packagesError fields so a state-sync
+  // doesn't clobber a previously-fetched package listing.
+  notebook.rEnvironment = {
+    ...notebook.rEnvironment,
+    ...parseBackendREnvironment(raw),
+  }
+}
+
+async function fetchRPackagesAction(): Promise<void> {
+  const sid = sessionId()
+  if (!sid) return
+  const strata = useStrata()
+  try {
+    const data = await strata.getRPackages(sid)
+    const packagesRaw = Array.isArray(data?.packages) ? data.packages : []
+    const packages = packagesRaw
+      .map((p: any) => ({
+        name: String(p?.name ?? ''),
+        version: String(p?.version ?? ''),
+      }))
+      .filter((p: { name: string }) => p.name.length > 0)
+    const statusRaw = String(data?.packages_status ?? 'unknown')
+    const status = (
+      ['absent', 'ok', 'rscript_missing', 'renv_not_active', 'failed'].includes(statusRaw)
+        ? statusRaw
+        : 'unknown'
+    ) as RNotebookEnvironment['packagesStatus']
+    const errRaw = data?.packages_error
+    notebook.rEnvironment = {
+      ...notebook.rEnvironment,
+      packages,
+      packagesStatus: status,
+      packagesError: typeof errRaw === 'string' && errRaw.length > 0 ? errRaw : null,
+    }
+  } catch (err) {
+    notebook.rEnvironment = {
+      ...notebook.rEnvironment,
+      packages: [],
+      packagesStatus: 'failed',
+      packagesError: (err as Error).message || 'Failed to fetch R packages',
+    }
+  }
 }
 
 function syncEnvironmentPayloadFromBackend(data: any) {
@@ -3390,6 +3437,7 @@ export function useNotebook() {
     fetchServerWorkerRegistry,
     fetchDependencies,
     fetchEnvironment,
+    fetchRPackagesAction,
     addDependencyAction,
     updatePythonVersionAction,
     removeDependencyAction,

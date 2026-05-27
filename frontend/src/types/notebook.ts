@@ -458,10 +458,31 @@ export interface RNotebookEnvironment {
   syncState: 'absent' | 'never' | 'ok' | 'outdated' | 'failed'
   /** Error message from the most recent failed attempt, or null. */
   syncError: string | null
-  /** Packages installed in the project library, sorted by name.
-   * Empty when the notebook has no renv.lock or when Rscript is
-   * unavailable. Backend reads from ``installed.packages()``. */
+  /** Packages installed in the renv project library, sorted by name.
+   *
+   * Populated by an explicit ``GET /v1/notebooks/{id}/r-packages``
+   * fetch — the env-state serialization on open / state sync /
+   * env refresh deliberately omits the package list so those
+   * paths don't pay a synchronous Rscript spawn. The env panel
+   * fetches lazily on mount.
+   *
+   * ``packagesStatus`` disambiguates "the probe failed" from
+   * "the library is empty" — both produce ``packages: []``.
+   */
   packages: RPackageInfo[]
+  /** Outcome of the most recent ``installed.packages()`` probe.
+   *
+   * - ``unknown``           — the panel hasn't fetched yet.
+   * - ``absent``            — no renv.lock; nothing to probe.
+   * - ``ok``                — listing succeeded.
+   * - ``rscript_missing``   — Rscript not on PATH.
+   * - ``renv_not_active``   — renv hasn't activated (pre-init).
+   * - ``failed``            — subprocess error; ``packagesError``
+   *                           has the message.
+   */
+  packagesStatus: 'unknown' | 'absent' | 'ok' | 'rscript_missing' | 'renv_not_active' | 'failed'
+  /** Short error message when ``packagesStatus === 'failed'``. */
+  packagesError: string | null
 }
 
 // One R package installed in the project's renv library.
