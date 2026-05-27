@@ -360,7 +360,20 @@ async function openNotebook(path: string): Promise<NotebookSessionPayload> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
-    timeoutMs: 120_000, // uv sync can take 30-60s on cold start
+    // 10 minutes — matches the backend's ``_renv_sync`` timeout
+    // (``writer.py:_renv_sync``). A cold first-open of a notebook
+    // with ``renv.lock`` can spend that long compiling R packages
+    // from source. Same-or-cached-lockfile reopens short-circuit
+    // inside ``ensure_renv_synced`` in milliseconds, so this
+    // generous cap only matters on the first restore. Python-only
+    // notebooks' ``uv sync`` finishes well under a minute even on
+    // cold start, so this isn't a regression for them.
+    //
+    // Background-restore + WS-pushed progress is the architectural
+    // answer for the slow first-open UX; this timeout bump is the
+    // minimum guard that "open didn't time out the wire" doesn't
+    // shadow a real, working restore in progress.
+    timeoutMs: 600_000,
   })
   if (!resp.ok) {
     throw new Error(`Failed to open notebook: ${resp.status}`)

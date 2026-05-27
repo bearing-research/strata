@@ -1758,16 +1758,36 @@ class NotebookSession:
         )
 
     def _renv_library_present(self) -> bool:
-        """Probe whether the project's renv library directory exists.
+        """Probe whether the project's renv library exists *and* has content.
 
-        renv installs into ``<notebook>/renv/library/`` by default.
-        If the directory was deleted (manual cleanup, ``rm -rf .strata``-
-        style accidents, container rebuilds) the runtime metadata can
-        survive while the actual library doesn't — the next R cell
-        run would fail with "no package called ...". Probing here
-        catches the divergence on session open instead.
+        renv installs into ``<notebook>/renv/library/<platform>/<R>/<pkg>``.
+        An empty ``renv/library`` directory is meaningless — it can
+        survive a wiped or never-completed restore while the
+        runtime metadata claims a successful sync. Requiring the
+        directory to be non-empty catches the "renv/library was
+        recreated empty (test fixture, mid-aborted restore,
+        manual cleanup script that left the parent dir)" case the
+        bare existence check missed.
+
+        This is still a cheap probe — it stops at the first directory
+        entry. Validating each package's integrity would require
+        spawning ``renv::status()``, defeating the short-circuit
+        purpose (the whole point is to skip Rscript on a fast path).
         """
-        return (self.path / "renv" / "library").exists()
+        library = self.path / "renv" / "library"
+        if not library.is_dir():
+            return False
+        try:
+            # ``next(iter(...))`` returns the first child entry or
+            # raises ``StopIteration`` if the dir is empty.
+            next(iter(library.iterdir()))
+        except StopIteration:
+            return False
+        except OSError:
+            # Permission denied / I/O error — assume not usable
+            # rather than short-circuiting against a broken library.
+            return False
+        return True
 
     def _probe_r_version(self) -> str | None:
         """Best-effort: ask ``Rscript`` for its version string.

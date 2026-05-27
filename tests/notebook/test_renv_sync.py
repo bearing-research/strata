@@ -270,13 +270,22 @@ class TestEnsureRenvSynced:
 
     @staticmethod
     def _seed_renv_library(notebook_dir: Path) -> None:
-        """Create the ``renv/library`` directory so the existence probe
-        in ``_renv_library_present`` returns True. The fake
-        ``_renv_sync`` doesn't actually install anything; the
-        short-circuit path needs the directory to be present for
-        the second-open optimisation to fire.
+        """Create the ``renv/library`` directory **with at least one
+        entry** so ``_renv_library_present`` returns True.
+
+        The fake ``_renv_sync`` doesn't actually install anything;
+        the short-circuit path needs the library to look like a real
+        renv project's library, not just an empty directory. We
+        write a single sentinel directory under
+        ``renv/library/<platform>/`` to mirror renv's actual
+        layout — the probe stops at the first child entry so we
+        don't have to build a full package tree.
         """
-        (notebook_dir / "renv" / "library").mkdir(parents=True, exist_ok=True)
+        library = notebook_dir / "renv" / "library" / "x86_64-pc-linux-gnu-R-4.4"
+        library.mkdir(parents=True, exist_ok=True)
+        # Stub a package directory so a future "library must contain
+        # a real package" tightening doesn't silently re-break this.
+        (library / "stub_package").mkdir(exist_ok=True)
 
     def test_no_op_without_renv_lock(self, tmp_path: Path, monkeypatch):
         """Python-only notebook: ``_renv_sync`` never called, runtime
@@ -374,6 +383,33 @@ class TestEnsureRenvSynced:
         assert len(calls) == 2, (
             "missing renv/library must trigger a fresh _renv_sync "
             "even when the lockfile hash hasn't changed"
+        )
+
+    def test_short_circuit_rejects_empty_library_directory(self, tmp_path: Path, monkeypatch):
+        """``renv/library/`` existing as an empty directory does NOT count
+        as a healthy library. Pre-fix the probe only checked
+        ``.exists()`` — an empty dir (left over from an aborted
+        restore, manual cleanup that wiped the contents but not the
+        parent, or a test fixture) would pass and the UI would
+        report "in sync" while packages are missing.
+        """
+        calls = self._stub_renv_sync(monkeypatch, ok=True)
+        notebook_dir = create_notebook(tmp_path, "Empty Library", initialize_environment=False)
+        (notebook_dir / "renv.lock").write_text("{}\n", encoding="utf-8")
+
+        session = self._make_session(notebook_dir)
+        session.ensure_renv_synced()
+        assert len(calls) == 1
+
+        # Recreate ``renv/library`` as an empty directory — the
+        # probe-only-checks-exists() bug would have passed this.
+        (notebook_dir / "renv" / "library").mkdir(parents=True, exist_ok=True)
+
+        session.ensure_renv_synced()
+
+        assert len(calls) == 2, (
+            "empty renv/library must trigger a fresh _renv_sync; the "
+            "directory existing alone is not evidence the project is restored"
         )
 
     def test_lockfile_edit_triggers_resync(self, tmp_path: Path, monkeypatch):
