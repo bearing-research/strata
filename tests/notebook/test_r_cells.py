@@ -91,3 +91,101 @@ async def test_py_to_r_to_py_arrow_roundtrip(r_notebook):
     assert r3.success is True, r3.error
     # 11 + 22 + 33 == 66.
     assert r3.outputs["total"]["preview"] == 66
+
+
+@pytest.mark.asyncio
+async def test_r_only_rds_artifact_rejected_by_downstream_python_cell(r_notebook):
+    """An R cell that produces a non-tabular value stores it as RDS;
+    a downstream Python cell consuming it fails with the structured
+    ``StrataRArtifactError`` instead of a ``NameError``.
+
+    Two cells:
+      c1 (R)      — build a classed list (``structure(list(...),
+                    class = ...)``). Not a ``data.frame``, not a bare
+                    list (``is.object()`` is TRUE), so harness.R's
+                    serializer falls through to the ``write_rds``
+                    tier with ``content_type =
+                    "application/x-r-rds"``.
+      c2 (Python) — references ``model``. The harness's
+                    ``deserialize_inputs`` hits the registered
+                    RDS handler, which raises ``StrataRArtifactError``
+                    with the upstream variable name. The cell fails
+                    *before* the body runs — no chance for a confusing
+                    ``NameError: 'model'`` to surface.
+
+    This is the cross-language counterpart to the unit tests in
+    ``test_serializer.py::TestRdsArtifactRefusal`` and
+    ``test_harness.py::TestHarnessRdsInput``. Those pin the
+    deserializer + harness re-raise in isolation; this test pins the
+    full notebook-level flow that #58 was designed for.
+    """
+    r_c1 = 'model <- structure(list(coef = 1.5, intercept = 0.0), class = "fit_model")\n'
+    py_c2 = "score = model['coef']\n"
+
+    _, session = r_notebook(
+        cells=[
+            ("c1", None, r_c1, "r"),
+            ("c2", "c1", py_c2, "python"),
+        ]
+    )
+    executor = CellExecutor(session)
+
+    r1 = await executor.execute_cell("c1", r_c1)
+    assert r1.success is True, r1.error
+    assert r1.outputs["model"]["content_type"] == "application/x-r-rds"
+    # The R harness tags r_only=true on the payload so downstream
+    # consumers can decide before opening the blob.
+    assert r1.outputs["model"].get("r_only") is True
+
+    r2 = await executor.execute_cell("c2", py_c2)
+    assert r2.success is False, "Python cell must reject R-only RDS upstream"
+    err = r2.error or ""
+    # The structured error names the variable + suggests the fix.
+    assert "model" in err, f"variable name missing from error: {err!r}"
+    assert "saveRDS" in err, f"saveRDS hint missing: {err!r}"
+    assert "data.frame" in err, f"re-export hint missing: {err!r}"
+    # Critical regression assertion — pre-#58 (and pre-#72 fix-up),
+    # the deserialize error was swallowed and the cell body raised
+    # ``NameError: 'model'`` instead.
+    assert "NameError" not in err, f"regressed to NameError: {err!r}"
+
+
+@pytest.mark.asyncio
+async def test_r_cell_mount_injects_path_and_reads_file(r_notebook, tmp_path):
+    """``# @mount data file://<path>`` binds ``data`` inside an R cell
+    the same way it binds inside a Python cell.
+
+    The R harness's ``inject_mounts`` (in ``harness.R``) assigns each
+    mount-name → ``local_path`` string into the cell environment. R
+    has no native ``Path`` type, so the binding is a plain character
+    vector — ``file.path(data, "x.txt")`` constructs the full path
+    just like ``data / "x.txt"`` would in Python.
+
+    This test exercises:
+      * Annotation parsing on R cells (the same parser handles both
+        languages — see #54's dispatch refactor).
+      * Mount resolution + injection through ``_resolve_mounts`` /
+        ``inject_mounts``.
+      * ``readLines`` against a file under the mount root.
+
+    Read-only ``file://`` mount — no need to exercise rw / cloud
+    scheme variants here; those have dedicated coverage in
+    ``test_mounts.py`` and the e2e_mounts_* files.
+    """
+    mount_dir = tmp_path / "shared_data"
+    mount_dir.mkdir()
+    (mount_dir / "greeting.txt").write_text("hello from a mount\n", encoding="utf-8")
+
+    r_src = (
+        f'# @mount data file://{mount_dir}\ncontent <- readLines(file.path(data, "greeting.txt"))\n'
+    )
+
+    _, session = r_notebook(cells=[("c1", None, r_src, "r")])
+    executor = CellExecutor(session)
+
+    r1 = await executor.execute_cell("c1", r_src)
+    assert r1.success is True, r1.error
+    # ``readLines`` returns a character vector; harness.R's JSON tier
+    # writes it as a 1-element array (json/object) or scalar depending
+    # on auto_unbox. The preview faithfully reproduces the value.
+    assert "hello from a mount" in str(r1.outputs["content"]["preview"])
