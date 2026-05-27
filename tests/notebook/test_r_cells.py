@@ -324,6 +324,53 @@ async def test_r_cell_source_change_invalidates_cache(r_notebook):
 
 
 @pytest.mark.asyncio
+async def test_r_cell_renv_lock_change_invalidates_cache(r_notebook):
+    """Editing ``renv.lock`` in the notebook dir invalidates R cell caches.
+
+    Pins the #59 acceptance criterion "renv.lock change invalidates
+    all R cells (env hash changed)". The actual env-hash extension
+    is unit-tested in ``test_env.py`` (no R needed); this end-to-end
+    test confirms the executor's R cell path picks up the new hash
+    and treats the next run as a cache miss.
+
+    No real ``renv::restore()`` happens — the system R + the
+    ``arrow`` / ``jsonlite`` packages installed via the ``r-tests``
+    CI step are what the cell actually loads against. We're only
+    pinning that the lockfile's *content* feeds provenance, not
+    that the libraries it pins are the ones loaded.
+    """
+    src = "value <- 99"
+    py_downstream = "passthrough = value\n"
+    notebook_dir, session = r_notebook(
+        cells=[
+            ("c1", None, src, "r"),
+            ("c2", "c1", py_downstream, "python"),
+        ]
+    )
+    executor = CellExecutor(session)
+
+    # Write a minimal renv.lock with one package. Bytes don't have
+    # to be a real renv lockfile — env-hash computation hashes the
+    # bytes, not the schema.
+    renv_lock = notebook_dir / "renv.lock"
+    renv_lock.write_text('{"R": {"Version": "4.4.0"}, "Packages": {"arrow": "1.0"}}\n')
+
+    first = await executor.execute_cell("c1", src)
+    assert first.success is True, first.error
+    assert first.cache_hit is False
+
+    # Same source + same renv.lock → cache hit.
+    second = await executor.execute_cell("c1", src)
+    assert second.cache_hit is True, "no-change re-run must hit the cache"
+
+    # Edit renv.lock (different pinned arrow version) → env_hash
+    # changes → provenance hash changes → cache miss.
+    renv_lock.write_text('{"R": {"Version": "4.4.0"}, "Packages": {"arrow": "2.0"}}\n')
+    third = await executor.execute_cell("c1", src)
+    assert third.cache_hit is False, "renv.lock edit must invalidate cache"
+
+
+@pytest.mark.asyncio
 async def test_r_cell_env_annotation_visible_to_rscript(r_notebook):
     """``# @env KEY=value`` injects into the R cell's Sys.getenv().
 

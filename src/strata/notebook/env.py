@@ -99,35 +99,58 @@ def collect_referenced_env_keys(source: str) -> set[str]:
 
 
 def compute_lockfile_hash(notebook_dir: Path) -> str:
-    """Compute SHA-256 hash of uv.lock (lockfile dependencies).
+    """Compute SHA-256 hash over the notebook's lockfiles.
 
-    For v1 simplification: hash the entire uv.lock file.
-    Filtering to runtime-only deps is a future optimization.
+    Folds together:
 
-    If uv.lock doesn't exist (e.g., notebook has no dependencies),
-    return a sentinel hash (empty string hash).
+    * ``uv.lock`` — Python dependency pins (the original behaviour).
+    * ``renv.lock`` — R dependency pins, when present. Contributes
+      under a ``\\0renv=`` tag so a renv.lock with bytes identical to
+      some hypothetical uv.lock can't collide.
+
+    Backward compatibility: when ``renv.lock`` is absent the result
+    is byte-identical to the pre-#59 hash (single ``sha256(uv.lock)``
+    call), so Python-only notebooks see no cache invalidation from
+    this change.
+
+    Why include renv.lock here rather than a new R-specific helper:
+    ``compute_execution_env_hash`` calls this once per provenance
+    pass and doesn't otherwise know the cell's language. Threading
+    language-awareness through would expand the call sites for no
+    benefit — the *only* additional input is renv.lock content,
+    which is cheap to read whether or not the notebook has R cells.
+
+    If renv.lock doesn't exist (e.g., notebook has no R deps) and
+    uv.lock doesn't either, return the sentinel empty-string hash.
 
     Args:
         notebook_dir: Path to notebook directory
 
     Returns:
-        SHA-256 hex digest of lockfile contents, or empty hash if not found
+        SHA-256 hex digest folded over present lockfiles.
     """
-    lockfile_path = notebook_dir / "uv.lock"
+    hasher = hashlib.sha256()
 
-    if not lockfile_path.exists():
-        # No lockfile — return sentinel hash (hash of empty string)
-        # This allows notebooks without lockfiles to still work
-        return hashlib.sha256(b"").hexdigest()
+    uv_lock = notebook_dir / "uv.lock"
+    if uv_lock.exists():
+        try:
+            hasher.update(uv_lock.read_bytes())
+        except OSError as e:
+            logger.warning("Could not read uv.lock: %s", e)
 
-    try:
-        with open(lockfile_path, "rb") as f:
-            lockfile_content = f.read()
-        return hashlib.sha256(lockfile_content).hexdigest()
-    except Exception as e:
-        # If we can't read the lockfile, log and return sentinel
-        logger.warning("Could not read uv.lock: %s", e)
-        return hashlib.sha256(b"").hexdigest()
+    renv_lock = notebook_dir / "renv.lock"
+    if renv_lock.exists():
+        try:
+            # Tag prefix prevents an exotic collision between a
+            # uv-only notebook and a renv-only one whose lockfiles
+            # happen to share bytes. The tag itself is fixed bytes,
+            # not derived from notebook state.
+            hasher.update(b"\0renv=")
+            hasher.update(renv_lock.read_bytes())
+        except OSError as e:
+            logger.warning("Could not read renv.lock: %s", e)
+
+    return hasher.hexdigest()
 
 
 def narrow_env_for_provenance(

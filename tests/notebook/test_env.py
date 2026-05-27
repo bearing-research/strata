@@ -60,6 +60,78 @@ def test_lockfile_hash_consistent_across_calls(tmp_path):
     assert len(set(hashes)) == 1  # All same
 
 
+def test_lockfile_hash_unchanged_for_uv_only_notebook(tmp_path):
+    """Adding renv.lock support must not invalidate uv-only notebooks.
+
+    Regression for #59 PR 4: ``compute_lockfile_hash`` was extended
+    to fold ``renv.lock`` into the digest, but a Python-only
+    notebook (no renv.lock present) must still produce the same
+    bytes-as-input hash it did pre-change — otherwise every cached
+    R-free notebook on disk loses its cache the moment this lands.
+    """
+    lockfile = tmp_path / "uv.lock"
+    lockfile.write_text("[[package]]\nname = 'pandas'\nversion = '2.0'\n")
+
+    actual = compute_lockfile_hash(tmp_path)
+    expected = hashlib.sha256(lockfile.read_bytes()).hexdigest()
+
+    assert actual == expected, (
+        "uv-only notebook hash must match raw sha256(uv.lock) for back-compat with pre-#59 caches."
+    )
+
+
+def test_lockfile_hash_renv_lock_changes_digest(tmp_path):
+    """A renv.lock change must produce a different hash.
+
+    Acceptance criterion from #59: ``renv.lock change invalidates
+    all R cells (env hash changed)``. The notebook here has both
+    uv.lock and renv.lock; we mutate only renv.lock and assert the
+    digest drifts.
+    """
+    (tmp_path / "uv.lock").write_text("[[package]]\nname = 'pandas'\n")
+    (tmp_path / "renv.lock").write_text('{"Packages": {"arrow": "1.0"}}')
+    before = compute_lockfile_hash(tmp_path)
+
+    (tmp_path / "renv.lock").write_text('{"Packages": {"arrow": "2.0"}}')
+    after = compute_lockfile_hash(tmp_path)
+
+    assert before != after, "renv.lock edit must invalidate the lockfile hash"
+
+
+def test_lockfile_hash_renv_only_notebook(tmp_path):
+    """R-only notebook (no uv.lock, just renv.lock) produces a stable hash.
+
+    Future configuration — there's no concrete user story for an
+    R-only Strata notebook yet, but the helper must not crash, and
+    repeated calls with the same renv.lock must agree.
+    """
+    (tmp_path / "renv.lock").write_text('{"R": {"Version": "4.4.0"}}')
+
+    a = compute_lockfile_hash(tmp_path)
+    b = compute_lockfile_hash(tmp_path)
+    assert a == b
+
+    # Sanity: the renv tag prefix makes the R-only hash distinct
+    # from the no-lockfiles sentinel (empty sha256).
+    assert a != hashlib.sha256(b"").hexdigest()
+
+
+def test_lockfile_hash_uv_and_renv_combined(tmp_path):
+    """Adding renv.lock to an existing uv.lock notebook drifts the hash.
+
+    Pins the rule "renv.lock contributes to the hash" from the
+    *other* direction: not just renv→renv edits, but introducing
+    renv.lock into a previously uv-only notebook also invalidates.
+    """
+    (tmp_path / "uv.lock").write_text("[[package]]\nname = 'pandas'\n")
+    uv_only = compute_lockfile_hash(tmp_path)
+
+    (tmp_path / "renv.lock").write_text('{"Packages": {"arrow": "1.0"}}')
+    uv_plus_renv = compute_lockfile_hash(tmp_path)
+
+    assert uv_only != uv_plus_renv
+
+
 def test_collect_referenced_env_keys_subscript():
     """``os.environ['KEY']`` should be detected."""
     assert collect_referenced_env_keys("import os\nx = os.environ['APP_MODE']") == {"APP_MODE"}
