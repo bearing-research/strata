@@ -2,7 +2,7 @@
 
 export type CellId = string
 
-export type CellLanguage = 'python' | 'prompt' | 'markdown' | 'sql'
+export type CellLanguage = 'python' | 'prompt' | 'markdown' | 'sql' | 'r'
 export type MountMode = 'ro' | 'rw'
 export type WorkerBackend = 'local' | 'executor'
 export type WorkerHealth = 'healthy' | 'unknown' | 'unavailable' | 'warming'

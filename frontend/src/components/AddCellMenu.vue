@@ -10,6 +10,7 @@ interface CellTypeOption {
 const CELL_TYPES: CellTypeOption[] = [
   { language: 'python', label: 'Python', description: 'Code cell — the default' },
   { language: 'sql', label: 'SQL', description: 'Query a connected database' },
+  { language: 'r', label: 'R', description: 'R cell — stats and tidyverse' },
   { language: 'prompt', label: 'Prompt', description: 'LLM-powered template' },
   { language: 'markdown', label: 'Markdown', description: 'Documentation / prose' },
 ]
