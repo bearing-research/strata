@@ -68,9 +68,11 @@ from strata.notebook.workers import (
     worker_supports_notebook_execution,
 )
 from strata.notebook.writer import (
+    _renv_sync,
     _uv_sync,
     update_cell_display_outputs,
     update_environment_metadata,
+    update_notebook_r_block,
 )
 
 if TYPE_CHECKING:
@@ -1598,6 +1600,108 @@ class NotebookSession:
             self.path,
         )
 
+    def ensure_renv_synced(self) -> None:
+        """Ensure the notebook's R environment matches its ``renv.lock``.
+
+        Mirror of ``ensure_venv_synced`` for the R side. No-op when the
+        notebook has no ``renv.lock`` (every Python-only notebook): the
+        underlying ``_renv_sync`` short-circuits and returns True, and we
+        record no ``[r]`` block on the toml. When ``renv.lock`` exists
+        but ``Rscript`` isn't on PATH, ``_renv_sync`` logs a warning and
+        returns False; we honour the same "session opens regardless"
+        contract that ``ensure_venv_synced`` uses.
+
+        On success with a real lockfile, populate the ``[r]`` block with
+        the lockfile hash, the sync timestamp, and the R version string
+        so subsequent opens can decide whether a re-sync is needed (and
+        so the UI has something to render in the environment panel).
+        """
+        lockfile = self.path / "renv.lock"
+        if not lockfile.exists():
+            # Python-only notebook (or R notebook pre-init). Nothing to
+            # do; leave the ``[r]`` block as whatever the on-disk toml
+            # already has (typically empty / missing).
+            return
+
+        started = _time.perf_counter()
+        ok = _renv_sync(self.path)
+        duration_ms = int((_time.perf_counter() - started) * 1000)
+
+        if not ok:
+            # ``_renv_sync`` already logged the cause (Rscript missing,
+            # timeout, non-zero exit). Leave the ``[r]`` block alone so
+            # a stale ``lock_hash`` doesn't suggest the cell is fresh.
+            logger.warning(
+                "renv sync failed for %s after %dms; R cells will run against the system R library",
+                self.path,
+                duration_ms,
+            )
+            return
+
+        try:
+            lock_bytes = lockfile.read_bytes()
+        except OSError as exc:
+            logger.warning("Could not read renv.lock to hash: %s", exc)
+            return
+
+        self._persist_r_block(
+            lock_hash=hashlib.sha256(lock_bytes).hexdigest(),
+            last_synced_at=int(_time.time() * 1000),
+            r_version=self._probe_r_version(),
+        )
+
+    def _probe_r_version(self) -> str | None:
+        """Best-effort: ask ``Rscript`` for its version string.
+
+        Returns ``None`` when ``Rscript`` isn't on PATH or the probe
+        fails for any reason — the ``[r]`` block tolerates a missing
+        ``r_version`` field, so a failed probe just records lock_hash
+        + timestamp without it.
+        """
+        rscript = shutil.which("Rscript")
+        if rscript is None:
+            return None
+        try:
+            proc = subprocess.run(  # noqa: S603 — rscript resolved via shutil.which
+                [rscript, "-e", "cat(R.version$major, R.version$minor, sep='.')"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            logger.debug("R version probe failed: %s", exc)
+            return None
+        if proc.returncode != 0:
+            return None
+        version = proc.stdout.strip()
+        return version or None
+
+    def _persist_r_block(
+        self,
+        *,
+        lock_hash: str,
+        last_synced_at: int,
+        r_version: str | None,
+    ) -> None:
+        """Write the ``[r]`` block back to the notebook's ``notebook.toml``.
+
+        Mirrors the partial-update pattern of ``update_notebook_env``
+        and friends: read the toml, overwrite just the ``[r]`` block,
+        write back. Skips other sections — concurrent edits to those
+        survive unchanged.
+        """
+        new_r_block: dict[str, Any] = {
+            "lock_hash": lock_hash,
+            "last_synced_at": last_synced_at,
+        }
+        if r_version is not None:
+            new_r_block["r_version"] = r_version
+        try:
+            update_notebook_r_block(self.path, new_r_block)
+        except Exception as exc:
+            logger.warning("Skipping [r] block persist; toml write failed: %s", exc)
+
     def refresh_environment_runtime(self) -> None:
         """Refresh runtime metadata from an existing notebook venv.
 
@@ -2404,6 +2508,20 @@ class SessionManager:
             # Log warning but don't fail — notebook can still be opened,
             # it just won't be able to execute cells
             logger.warning("Failed to sync venv: %s", e)
+
+        # Ensure the R environment matches its lockfile. No-op when
+        # the notebook has no ``renv.lock``, so Python-only notebooks
+        # don't pay the Rscript probe cost. Same "log + continue"
+        # contract as the venv sync above: a failed R sync doesn't
+        # block opening the notebook.
+        try:
+            if timing is None:
+                session.ensure_renv_synced()
+            else:
+                with timing.phase("session_renv_sync"):
+                    session.ensure_renv_synced()
+        except Exception as e:
+            logger.warning("Failed to sync renv: %s", e)
 
         # M6: Initialize and start warm process pool
         try:
