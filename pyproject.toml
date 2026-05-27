@@ -1,6 +1,6 @@
 [project]
 name = "strata-notebook"
-version = "0.1.0"
+version = "0.2.0"
 description = "A content-addressed computation graph with an interactive notebook UI"
 readme = "README.md"
 authors = [
@@ -114,6 +114,7 @@ dev = [
 docs = [
     "mkdocs>=1.6.0",
     "mkdocs-material>=9.5.0",
+    "mike>=2.1.0",
 ]
 
 [project.scripts]

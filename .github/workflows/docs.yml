@@ -1,11 +1,26 @@
 name: Docs
 
+# Versioned docs via ``mike``. The deploy strategy:
+#
+#   * push to ``main``     → ``mike deploy dev`` (preview of the
+#                            next release; the ``dev`` alias overwrites
+#                            in-place on every push).
+#   * push of a ``v*`` tag → ``mike deploy <version> latest``, then
+#                            ``mike set-default latest``. The version
+#                            gets a pinned snapshot; ``latest`` always
+#                            points at the most recent release.
+#
+# PRs only build with ``--strict`` (no deploy) so docs changes catch
+# broken links before merging without touching ``gh-pages``.
+
 on:
   push:
     branches: [main]
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+    tags:
+      - 'v*'
   pull_request:
     paths:
       - 'docs/**'
@@ -19,15 +34,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          # ``mike`` reads the gh-pages branch + pushes back to it.
+          # ``fetch-depth: 0`` makes both available.
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
 
       - name: Install docs dependencies
         run: uv sync --group docs --no-install-project
 
-      - name: Build docs
+      - name: Validate build (PRs)
+        if: github.event_name == 'pull_request'
         run: uv run mkdocs build --strict
 
-      - name: Deploy to GitHub Pages
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: uv run mkdocs gh-deploy --force
+      - name: Configure git for mike
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy dev (push to main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: uv run mike deploy --push --update-aliases dev
+
+      - name: Deploy release version (push of v* tag)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        # ``${ref_name#v}`` strips the leading ``v`` from a tag like
+        # ``v0.2.0`` so the alias becomes ``0.2.0``. Mike also accepts
+        # short forms like ``0.2`` but pinning the full triple keeps
+        # patch releases distinguishable.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          uv run mike deploy --push --update-aliases "$VERSION" latest
+          uv run mike set-default --push latest

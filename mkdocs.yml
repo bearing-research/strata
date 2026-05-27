@@ -99,3 +99,20 @@ nav:
 
 exclude_docs: |
   internal/
+
+# Versioned docs via `mike`. Material's `extra.version` block renders
+# the version-picker dropdown in the header; `mike` populates the
+# ``versions.json`` mike maintains under the ``gh-pages`` root.
+#
+# Aliases used:
+#   * ``latest`` — points to the most recent release tag. Default
+#     entrypoint, so a bare visit to the site lands here.
+#   * ``dev``   — tracks ``main``. Updated by the docs.yml workflow on
+#     every push to main; deployable read-only preview of the
+#     next-release content.
+#   * ``<version>`` — pinned snapshot per release tag (``0.1``, ``0.2``,
+#     ...). Pushed by the release-driven workflow.
+extra:
+  version:
+    provider: mike
+    default: latest

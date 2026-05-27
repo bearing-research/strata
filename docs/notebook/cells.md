@@ -1,6 +1,6 @@
 # Cell Types
 
-Strata Notebook has four cell kinds:
+Strata Notebook has five cell kinds:
 
 | Kind       | What it runs                            | Created by                                                    |
 | ---------- | --------------------------------------- | ------------------------------------------------------------- |
@@ -8,8 +8,9 @@ Strata Notebook has four cell kinds:
 | **Prompt** | A text template sent to an AI model     | Pick **Prompt** from the **+ Add cell** menu                  |
 | **SQL**    | A query against a connected database    | Pick **SQL** from the **+ Add cell** menu                     |
 | **Loop**   | A Python cell executed N times in a row | Add a Python cell, then put a `# @loop` annotation at the top |
+| **R** *(experimental)* | R source via the system `Rscript` | Hand-edit `notebook.toml`; UI integration is 0.3.0 |
 
-All four participate in the DAG, cache by provenance hash, and can be routed to remote workers. Pick the kind that matches the shape of the computation, this page walks through each.
+All five participate in the DAG, cache by provenance hash, and can be routed to remote workers. Pick the kind that matches the shape of the computation, this page walks through each.
 
 See [Concepts](concepts.md) for the execution model; see [Cell Annotations](annotations.md) for the full per-annotation reference.
 
@@ -671,6 +672,48 @@ Reach for loop cells when **being able to inspect or fork from iteration k matte
 
 ---
 
+## R Cells *(experimental, 0.2.0)*
+
+R cells run R source via the system `Rscript`, with the same provenance + caching + Arrow-IPC artifact pipeline as Python cells. Data crosses the language boundary as `arrow/ipc`: a `pandas.DataFrame` produced by a Python cell becomes a `data.frame` in the next R cell; an R `data.frame` (or `tibble`) becomes a `pandas.DataFrame` in the next Python cell. Non-tabular R values (S3 objects, lists with classes, environments) are stored as RDS and tagged `r_only=true` — a downstream Python cell that consumes one fails with a structured `StrataRArtifactError` rather than a confusing `NameError`.
+
+### What's experimental about it
+
+R support lands at the execution layer in 0.2.0. Three pieces are deliberately deferred:
+
+1. **UI integration.** The frontend's `+ Add cell` menu doesn't list R yet. To add an R cell, edit `notebook.toml` directly — find the `cells` array and add a row with `language = "r"` and a `cells/<id>.r` file.
+2. **Automatic `renv::restore()`.** The `_renv_sync` helper exists and the `[r]` block schema in `notebook.toml` is reserved, but session-open does not yet call into the helper. Users install R packages manually (`Rscript -e 'install.packages(c("arrow", "jsonlite"))'`) and any cell-specific dependencies live in the system R library.
+3. **Structured missing-package errors.** Python cells get a "click to install" hint when an `import` fails; R cells don't surface that signal yet.
+
+The R Phase 2 issues that close these gaps are tracked on GitHub: [#80](https://github.com/bearing-research/strata/issues/80) (ggplot → PNG display), [#81](https://github.com/bearing-research/strata/issues/81) (warm Rscript pool), [#82](https://github.com/bearing-research/strata/issues/82) (renv library fixture), [#83](https://github.com/bearing-research/strata/issues/83) (R version matrix on CI), [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
+
+### What you need today
+
+- R `>= 4.2` on `PATH` (Strata calls `Rscript`).
+- The `arrow` and `jsonlite` R packages installed in the system / project library — the harness loads both.
+
+### Example
+
+See [`examples/r_lm_vs_sklearn/`](https://github.com/bearing-research/strata/tree/main/examples/r_lm_vs_sklearn) for a working notebook: a Python cell synthesises a housing dataset, an R cell fits `lm(price ~ sqft + bedrooms + age + location, data = housing_train)` and returns tidy coefficient + model-stats + prediction `data.frame`s, a Python cell fits the same model with `LinearRegression` and prints a side-by-side comparison. The R formula's auto-factor-encoding of `location` is the one-line stats-edge moment.
+
+### R-cell annotations
+
+The same annotation parser handles both Python and R cells (`#`-prefixed comments at the top of the source). Supported on R cells:
+
+| Annotation                 | Effect                                                                  |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `# @name <text>`           | Cell display name in the UI.                                            |
+| `# @env KEY=value`         | Sets `Sys.getenv("KEY")` for the cell's process.                        |
+| `# @mount data file:///x`  | Binds `data` inside the R cell to the mount's local path (a character string — R has no `pathlib.Path`).  |
+| `# @timeout 60`            | Per-cell execution timeout in seconds.                                  |
+
+Loop annotations (`@loop`, `@loop_until`) and prompt-cell annotations (`@output_schema` etc.) do not apply to R cells.
+
+### What if Rscript isn't installed?
+
+An R cell whose harness can't find `Rscript` on `PATH` returns a clean cell-level failure with the message `Rscript not found on PATH. Install R (https://cran.r-project.org/) and reopen the notebook.` No server crash, no other cells affected.
+
+---
+
 ## Choosing between kinds
 
 | Reach for a… | When you want…                                                                                         |
@@ -679,7 +722,8 @@ Reach for loop cells when **being able to inspect or fork from iteration k matte
 | Prompt cell  | An AI response as a first-class, cached, DAG-participating artifact.                                   |
 | SQL cell     | A query against a connected database, with bind parameters, schema discovery, and probe-based caching. |
 | Loop cell    | Iterative refinement where pausing or forking from an intermediate state matters.                      |
+| R cell *(experimental)* | A computation where R's stats / formula syntax / domain packages are the right tool, while keeping the rest of the pipeline in Python. |
 
-Mixing is encouraged, a typical pipeline might be a SQL cell for extraction → Python cells for transformation → a prompt cell for narrative summarization.
+Mixing is encouraged, a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.
 
 Any kind of cell can also live inside a [variant group](annotations.md#variant-cells) a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.

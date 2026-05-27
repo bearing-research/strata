@@ -2,8 +2,199 @@
 
 All notable changes to Strata will be documented in this file.
 
-The project is at 0.1.0 — its first stable release. Entries here focus on
-user-visible changes and release framing rather than exhaustive commit history.
+Entries focus on user-visible changes and release framing rather than
+exhaustive commit history.
+
+## 0.2.0 — 2026-05-27
+
+Second release. Headline: **R cells (experimental)** alongside Python in
+the same notebook with cross-language Arrow handoff. Plus run-all
+batching that amortises subprocess cost across consecutive Python cells,
+a 60-second WS reconnect grace so a flaky network doesn't kill a running
+execution, real-emulator integration tests for the S3 / Azure / GCS mount
+schemes, and versioned docs via `mike`.
+
+Upgrading from 0.1.0 is non-breaking. The artifact cache stays valid —
+`compute_lockfile_hash` was extended to fold `renv.lock` content but
+yields byte-identical output for notebooks without one (every existing
+Python-only notebook). The WS protocol gained reconnect + MessageType
+frames; external WS clients that ignore unknown frame types are
+unaffected. No Python API surface removed.
+
+### Added
+
+#### R cells (experimental)
+
+R support lands at the execution layer with a deliberate "experimental"
+label — cells execute end-to-end, cross-language Arrow exchange works,
+provenance/caching is language-agnostic, but the UX layer (Add-R-cell
+in the menu, R environment panel, automatic `renv::restore()` on open)
+is queued for 0.3.0. You can use R cells today by hand-editing
+`notebook.toml` and installing R + `arrow` + `jsonlite` yourself; the
+example notebook below shows the shape.
+
+- `LanguageExecutor` + `LanguageAnalyzer` protocols + registries under
+  `src/strata/notebook/languages/` — generalises the cell-language story
+  beyond Python.
+- R DAG analyzer (`languages/r/analyze_cell.R`) — defines/references via
+  Rscript walking the parsed expression tree; source-hash cache keeps
+  re-analysis cheap.
+- R harness (`languages/r/harness.R`) — manifest-driven cell-execution
+  subprocess. Reads inputs via `arrow::read_ipc_stream`, runs the cell
+  body, writes outputs as Arrow IPC (for `data.frame` / tibble), JSON
+  (for atomic scalars / lists), or RDS (everything else, tagged
+  `r_only=true`).
+- `ContentType.RDS_OBJECT = "application/x-r-rds"` + the
+  `StrataRArtifactError` exception — Python cells consuming an R-only
+  RDS artifact fail with a structured "re-export as `data.frame`" hint
+  instead of a `NameError`. Same gating in the batch harness and the
+  warm-pool worker.
+- `renv.lock` content participates in the env hash via
+  `compute_lockfile_hash`, so editing the lockfile invalidates R cells'
+  cache the same way `uv.lock` invalidates Python cells'. Backward-
+  compatible: notebooks without `renv.lock` see byte-identical hashes.
+- `_renv_sync` helper + `[r]` block schema in `notebook.toml`. The
+  helper is defined; the auto-wiring on session open is 0.3.0.
+- `# @mount`, `# @env KEY=VAL`, and `# @name` annotations work on R
+  cells with no R-specific parser changes — the annotation parser is
+  language-agnostic.
+- New `examples/r_lm_vs_sklearn/` notebook — Python cell builds a
+  housing DataFrame, R cell fits `lm(price ~ sqft + bedrooms + age +
+  location)`, Python cell fits the same model with sklearn and prints
+  a side-by-side comparison.
+- CI `r-tests` job runs on Ubuntu + macOS via `r-lib/actions/setup-r`
+  with the `arrow` + `jsonlite` packages installed from posit/RSPM
+  binaries. The cross-language test suite (`tests/notebook/test_r_cells.py`)
+  exercises Py→R→Py Arrow round-trip, R-only RDS refusal, mount
+  injection on R cells, syntax/runtime error shapes, cache hit/miss,
+  `renv.lock` change invalidation, and env-annotation injection.
+
+#### Run-all batching
+
+Consecutive Python cells share a single harness subprocess on
+`run all` / `rerun all`, amortising the ~150ms cold-start across the
+batch. R cells are still single-cell (Phase 2). Mixed notebooks
+partition into per-language runs automatically.
+
+- `harness.execute_batch` library entry point + `--batch` CLI flag —
+  one subprocess executes a sequence of cells against a shared
+  namespace, communicating cache-check / persist requests with the
+  parent over JSON-line pipes.
+- `CellExecutor.execute_batch` orchestration with per-cell timeout
+  watchdog inside the batch subprocess (a hung cell can't take down
+  the whole run).
+- `is_cell_batchable` gate keeps the partitioner conservative —
+  prompts, SQL, R cells, and any cell with `# @worker` / `# @mount
+  rw` opt out automatically.
+
+#### Reconnect resilience
+
+- 60-second WS reconnect grace before the server tears down a session's
+  execution state — a Wi-Fi blip mid-cell no longer kills the run.
+- `MessageType` StrEnum extracted to `protocol.py` — single canonical
+  source for every C↔S frame name, removes string-literal drift across
+  the codebase + the docs.
+- New `docs/reference/notebook-protocol.md` — the full client-author
+  reference (bootstrap, auth model, reconnect grace, cold-start payload,
+  every message type) so external clients can target the WS protocol
+  without reading server code.
+- `notebook.toml` write path preserves TOML datetime values and the
+  `array-of-tables` shape, so a saved-and-reopened notebook produces a
+  byte-identical TOML for unchanged sections.
+
+#### Mount integration tests
+
+- S3 mount tests against MinIO via `testcontainers`.
+- Azure mount tests against the Azurite emulator.
+- GCS mount tests against `fake-gcs-server`.
+- The notebook-side mount-credentials hook (`MountResolver`) gets
+  exercised against all three, so credential resolution + path
+  normalisation regressions surface in CI rather than at first remote
+  upload.
+
+#### Rerun cells
+
+- `↻` button + Cmd+Shift+Enter rerun a single cell bypassing its cache
+  (and rerunning stale upstreams).
+- `notebook_rerun_all` WS message + UI "Rerun all" entry — cascade with
+  cache disabled, useful when you've changed something the provenance
+  hash can't see (a non-deterministic data source, an outside-the-
+  notebook file the cell reads, etc.).
+
+#### Versioned docs
+
+- Documentation site is now version-aware via `mike`. Visit
+  `https://bearing-research.github.io/strata/` — the version dropdown
+  in the header lets readers pick `latest` (always the current
+  release) or a pinned version (`0.2.0`, `0.1.0`, ...). Pre-release
+  preview lives under `dev`.
+
+### Changed
+
+- Docs site builds + deploys via `mike` instead of `mkdocs gh-deploy`.
+  PRs that touch `docs/` still validate `--strict` without touching
+  `gh-pages`; main pushes update the `dev` alias; release tags pin
+  a versioned snapshot + the `latest` alias.
+- `create_notebook`'s `pyproject.toml` shape is built from metadata
+  rather than templated as a string — adding a default dep is now a
+  one-line list edit instead of a multi-place template change.
+- `MountResolver` derives its TOML on-disk shape from
+  `MountSpec.model_dump()` rather than a hand-rolled mapping, so
+  schema changes only touch one place.
+- `test_routes.py` + `test_ws.py` boilerplate collapses into shared
+  helpers / fixtures — net subtraction in the test suite, fewer places
+  to drift on protocol changes.
+- README's Highlights section calls out R cells (experimental), DAG
+  view, loop cells, prompt-cell variable resolution, and auto-install
+  hints. The buried feature list under "Quick Start" is gone.
+
+### Fixed
+
+- `notebook.toml` TOML datetime values and `array-of-tables` rows no
+  longer churn on a round-trip save (#45). Pre-fix, saving a notebook
+  with no edits would rewrite datetime fields as strings + collapse
+  array-of-tables into inline tables, polluting git diffs.
+- `/{session_id}/...` routes are now owner-gated in personal mode with
+  `STRATA_PERSONAL_MODE_USER_HEADER` set (#41). Pre-fix, a request
+  with the proxy-supplied user header could read another user's session
+  state via `GET /v1/notebooks/{id}/cells`.
+- Three correctness gaps in the run-all dispatcher and three in the
+  batch dispatcher, caught by review (#34, #35, #36).
+- The 1-element identifier collapse in the R analyzer's JSON emit
+  (`auto_unbox = TRUE` was eating single-name vectors). Wrapped
+  `defines` / `references` in `jsonlite::I()`.
+- The R analyzer walker mis-attributing reads under in-place mutations
+  (`df <- df[complete.cases(df), ]` correctly keeps `df` in
+  references).
+- macOS / Linux + Python 3.14 SQLite I/O flake in cache_warm tests gets
+  one retry (`tests/conftest.py`); Iceberg `temp_warehouse` fixture
+  disposes its catalog engine before yield to close the related flake.
+
+### Security
+
+- **Phase A scorecard hygiene** — `SECURITY.md`, Dependabot config,
+  least-privilege workflow permissions.
+- **Phase C SHA pinning** — every GitHub Action across every workflow
+  pinned to a 40-char commit SHA with the version annotation in a
+  trailing comment. CI dependency updates flow through Dependabot
+  group PRs.
+- WS upgrade owner-gating closes the cross-session-read path noted
+  above.
+
+### Compatibility
+
+- **Cache:** non-breaking for Python-only notebooks. `compute_lockfile_hash`
+  was extended to fold `renv.lock`, but the extension is a no-op when
+  the file is absent (every Python-only notebook gets byte-identical
+  hash output).
+- **WS protocol:** the new `MessageType` extraction is purely a
+  refactor — frame strings are unchanged. The new reconnect-grace
+  + per-cell-watchdog frames are additive; clients that ignore unknown
+  frames continue to work.
+- **REST API:** unchanged.
+- **Wheel ABI:** still `abi3-py312` (one wheel per platform covers 3.12+).
+- **Python deps:** no breaking changes; R support is fully optional
+  (Python-only users don't need R installed).
 
 ## 0.1.0 — 2026-05-20
 

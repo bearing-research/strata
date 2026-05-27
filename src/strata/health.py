@@ -87,7 +87,7 @@ class HealthReport:
     status: HealthStatus
     checks: list[DependencyCheck]
     timestamp: float
-    version: str = "0.1.0"
+    version: str = "0.2.0"
 
     def to_dict(self) -> HealthReportDict:
         return {

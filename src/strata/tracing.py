@@ -100,7 +100,7 @@ def init_tracing(
         resource = Resource.create(
             {
                 "service.name": os.environ.get("OTEL_SERVICE_NAME", service_name),
-                "service.version": "0.1.0",
+                "service.version": "0.2.0",
             }
         )
 
@@ -114,7 +114,7 @@ def init_tracing(
 
         # Set as global tracer provider
         trace.set_tracer_provider(provider)
-        _tracer = trace.get_tracer("strata", "0.1.0")
+        _tracer = trace.get_tracer("strata", "0.2.0")
 
         return True
 
