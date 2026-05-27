@@ -2,9 +2,13 @@ name: Docs
 
 # Versioned docs via ``mike``. The deploy strategy:
 #
-#   * push to ``main``     → ``mike deploy dev`` (preview of the
-#                            next release; the ``dev`` alias overwrites
-#                            in-place on every push).
+#   * push to ``main``     → ``mike deploy dev``. Plus, only if no
+#                            ``latest`` alias exists yet (i.e. before
+#                            the first ``v*`` tag has shipped),
+#                            ``mike set-default dev`` so the site root
+#                            points somewhere coherent. Once ``latest``
+#                            exists, main pushes leave the default
+#                            alone — the tag path owns it.
 #   * push of a ``v*`` tag → ``mike deploy <version> latest``, then
 #                            ``mike set-default latest``. The version
 #                            gets a pinned snapshot; ``latest`` always
@@ -12,6 +16,15 @@ name: Docs
 #
 # PRs only build with ``--strict`` (no deploy) so docs changes catch
 # broken links before merging without touching ``gh-pages``.
+#
+# One-time bootstrap (run locally from a fresh clone with the
+# ``gh-pages`` branch checked out, before the first mike deploy):
+#
+#     uv run --group docs mike delete --all --push
+#
+# That wipes the legacy flat ``mkdocs gh-deploy`` content left from
+# pre-mike releases. Skip on a fresh repo with no prior gh-pages
+# history.
 
 on:
   push:
@@ -56,7 +69,19 @@ jobs:
 
       - name: Deploy dev (push to main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: uv run mike deploy --push --update-aliases dev
+        # First ``mike deploy`` to update the ``dev`` alias with the
+        # latest main snapshot. Then, only if no ``latest`` alias
+        # exists yet, point the site default at ``dev`` so visitors
+        # to the root URL during the pre-first-tag window land
+        # somewhere coherent. Once any ``v*`` tag ships,
+        # ``mike list`` includes ``latest`` and this conditional
+        # short-circuits — the tag path's ``mike set-default latest``
+        # remains the canonical default.
+        run: |
+          uv run mike deploy --push --update-aliases dev
+          if ! uv run mike list 2>/dev/null | grep -qE '(^|[, ])latest($|[, ])'; then
+            uv run mike set-default --push dev
+          fi
 
       - name: Deploy release version (push of v* tag)
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
