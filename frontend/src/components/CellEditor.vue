@@ -946,7 +946,19 @@ function outputKey(output: CellOutput, index: number): string {
             </span>
           </div>
           <pre class="output-error-detail">{{ cell.output.error }}</pre>
-          <div v-if="cell.suggestInstall" class="suggest-install">
+          <!--
+            Install button is gated on language. ``uv add`` only works
+            for Python packages; firing it for an R suggestion would
+            install the wrong thing (or a Python package that happens
+            to share the name) into the wrong env. R cells still see
+            the structured hint as a read-only label so the user
+            knows the missing package; the install action lands when
+            the R env-job path ships.
+          -->
+          <div
+            v-if="cell.suggestInstall && cell.suggestInstallLanguage === 'python'"
+            class="suggest-install"
+          >
             <span
               >Missing package <code>{{ cell.suggestInstall }}</code></span
             >
@@ -961,6 +973,16 @@ function outputKey(output: CellOutput, index: number): string {
                   : `Install ${cell.suggestInstall}`
               }}
             </button>
+          </div>
+          <div
+            v-else-if="cell.suggestInstall && cell.suggestInstallLanguage === 'r'"
+            class="suggest-install suggest-install-readonly"
+          >
+            <span
+              >Missing R package <code>{{ cell.suggestInstall }}</code> — run
+              <code>install.packages("{{ cell.suggestInstall }}")</code> in an R cell to
+              install.</span
+            >
           </div>
         </div>
         <template v-else>
@@ -1798,6 +1820,13 @@ function outputKey(output: CellOutput, index: number): string {
 .suggest-install code {
   color: var(--accent-primary);
   font-weight: 600;
+}
+
+/* R-only variant — no install button (action endpoint not yet wired).
+   Slightly muted tint so it reads as advisory rather than actionable. */
+.suggest-install-readonly {
+  background: var(--bg-input);
+  border-color: var(--border-subtle);
 }
 .btn-install {
   background: var(--accent-primary);

@@ -2631,6 +2631,11 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
         payload["error"] = result.error
         if result.suggest_install:
             payload["suggest_install"] = result.suggest_install
+            # Carry the language tag so the frontend can dispatch to
+            # the right install endpoint (uv vs install.packages).
+            # Default to ``"python"`` for back-compat with cell results
+            # produced before ``suggest_install_language`` was added.
+            payload["suggest_install_language"] = result.suggest_install_language or "python"
 
     for field_name in (
         "remote_worker",

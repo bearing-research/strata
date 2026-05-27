@@ -32,6 +32,7 @@ from strata.notebook.dependencies import (
     import_requirements_text,
     import_requirements_text_streaming,
     list_dependencies,
+    list_r_packages,
 )
 from strata.notebook.env import (
     compute_execution_env_hash,
@@ -1185,7 +1186,7 @@ class NotebookSession:
             "interpreter_source": self.environment_interpreter_source,
         }
 
-    def serialize_r_environment_state(self) -> dict[str, Any]:
+    def serialize_r_environment_state(self, *, include_packages: bool = True) -> dict[str, Any]:
         """Serialize the R-side runtime environment for the UI.
 
         ``has_lockfile`` is derived from disk — the UI must show R
@@ -1195,6 +1196,12 @@ class NotebookSession:
         from ``RRuntime`` in ``.strata/runtime.json`` and reflect
         the *last successful* sync; ``sync_error`` carries the
         *latest attempt's* error.
+
+        ``include_packages``: when True, spawn ``Rscript`` to list
+        ``installed.packages()`` in the project library. Adds
+        ~1-2s on cold paths (one Rscript startup) — callers that
+        don't render the package list (e.g., env-job acknowledgement
+        responses) can opt out via ``include_packages=False``.
 
         ``sync_state`` is derived for the UI:
 
@@ -1235,6 +1242,17 @@ class NotebookSession:
         else:
             sync_state = "outdated"
 
+        # Listing the project library is a separate ~1-2s Rscript
+        # spawn; only do it when callers actually need the package
+        # list (the env panel does; the env-job acknowledgement
+        # response doesn't). When the notebook has no lockfile,
+        # skip the spawn — there's no R env to enumerate anyway.
+        packages: list[dict[str, str]] = []
+        if include_packages and has_lockfile:
+            packages = [
+                {"name": pkg.name, "version": pkg.version} for pkg in list_r_packages(self.path)
+            ]
+
         return {
             "has_lockfile": has_lockfile,
             "current_lock_hash": current_lock_hash,
@@ -1244,6 +1262,7 @@ class NotebookSession:
             "last_synced_at": runtime.last_synced_at,
             "sync_state": sync_state,
             "sync_error": runtime.sync_error or None,
+            "packages": packages,
         }
 
     def serialize_environment_job_state(self) -> dict[str, Any] | None:

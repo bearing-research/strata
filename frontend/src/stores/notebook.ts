@@ -92,6 +92,7 @@ const notebook = reactive<Notebook>({
     lastSyncedAt: 0,
     syncState: 'absent',
     syncError: null,
+    packages: [],
   },
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -450,6 +451,13 @@ function parseBackendREnvironment(raw: any): RNotebookEnvironment {
     ['absent', 'never', 'ok', 'outdated', 'failed'].includes(syncStateRaw) ? syncStateRaw : 'absent'
   ) as RNotebookEnvironment['syncState']
   const errRaw = raw?.sync_error ?? raw?.syncError
+  const packagesRaw = Array.isArray(raw?.packages) ? raw.packages : []
+  const packages = packagesRaw
+    .map((p: any) => ({
+      name: String(p?.name ?? ''),
+      version: String(p?.version ?? ''),
+    }))
+    .filter((p: { name: string }) => p.name.length > 0)
   return {
     hasLockfile: raw?.has_lockfile === true || raw?.hasLockfile === true,
     currentLockHash: String(raw?.current_lock_hash ?? raw?.currentLockHash ?? ''),
@@ -458,6 +466,7 @@ function parseBackendREnvironment(raw: any): RNotebookEnvironment {
     lastSyncedAt: Number(raw?.last_synced_at ?? raw?.lastSyncedAt ?? 0),
     syncState,
     syncError: typeof errRaw === 'string' && errRaw.length > 0 ? errRaw : null,
+    packages,
   }
 }
 
@@ -1741,8 +1750,18 @@ function initializeWebSocket() {
         if (p.execution_method === 'executor') {
           updateWorkerHealth(effectiveWorkerNameForCell(cell), 'healthy')
         }
-        // Capture suggest_install for "click to install" UX
+        // Capture suggest_install + language for "click to install"
+        // UX. The button in CellEditor.vue only shows for ``python``;
+        // an R suggestion hydrates the field so it appears in tests
+        // and future install actions, but the visible button stays
+        // hidden until the R install endpoint ships.
         cell.suggestInstall = p.suggest_install || undefined
+        cell.suggestInstallLanguage =
+          p.suggest_install_language === 'r'
+            ? 'r'
+            : p.suggest_install_language === 'python'
+              ? 'python'
+              : undefined
       }
 
       setCellOutput(cellId, output, displayOutputs)
@@ -1805,6 +1824,12 @@ function initializeWebSocket() {
         }
         cell.output = { contentType: 'json/object', error }
         cell.suggestInstall = p.suggest_install || undefined
+        cell.suggestInstallLanguage =
+          p.suggest_install_language === 'r'
+            ? 'r'
+            : p.suggest_install_language === 'python'
+              ? 'python'
+              : undefined
       }
     })
 

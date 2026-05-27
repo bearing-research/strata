@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shlex
+import shutil
 import subprocess
 import threading
 import time
@@ -426,6 +427,81 @@ def list_resolved_dependencies(notebook_dir: Path) -> list[DependencyInfo]:
 
     resolved.sort(key=lambda dep: dep.name)
     return resolved
+
+
+@dataclass
+class RPackageInfo:
+    """One R package installed in the notebook's library.
+
+    Lightweight parallel to ``DependencyInfo`` for the R side — the
+    env panel renders both lists side by side. ``version`` is the
+    string CRAN/renv stores (R doesn't use PEP 440); render as-is.
+    """
+
+    name: str
+    version: str
+
+
+def list_r_packages(notebook_dir: Path, *, timeout: int = 30) -> list[RPackageInfo]:
+    """List R packages installed in the notebook's library.
+
+    Spawns ``Rscript`` with ``cwd=notebook_dir`` so the project's
+    ``.Rprofile`` (renv activator) puts the project library on
+    ``.libPaths()`` before ``installed.packages()`` runs. With
+    renv, that returns the per-notebook library; without renv it
+    falls through to the system library — the latter is the
+    pre-bootstrap state.
+
+    Returns ``[]`` when ``Rscript`` isn't on PATH, the subprocess
+    fails, or the output can't be parsed. Same "log + continue"
+    contract the rest of the R surface uses; the env panel renders
+    an empty list rather than erroring.
+    """
+    rscript = shutil.which("Rscript")
+    if rscript is None:
+        return []
+
+    # ``installed.packages()`` returns a character matrix; loop in
+    # R rather than using ``apply`` because ``apply`` on a 1-row
+    # matrix returns a vector and the parsing diverges. The for-loop
+    # always emits ``<name>\t<version>\n`` per package, no
+    # special-casing needed.
+    r_snippet = (
+        "ip <- installed.packages()\n"
+        "for (i in seq_len(nrow(ip))) {\n"
+        '  cat(ip[i, "Package"], ip[i, "Version"], sep = "\\t")\n'
+        '  cat("\\n")\n'
+        "}"
+    )
+
+    try:
+        proc = subprocess.run(  # noqa: S603 — rscript resolved via shutil.which
+            [rscript, "-e", r_snippet],
+            cwd=str(notebook_dir),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.debug("R package listing failed: %s", exc)
+        return []
+
+    if proc.returncode != 0:
+        logger.debug(
+            "R package listing returned non-zero (%d): %s",
+            proc.returncode,
+            proc.stderr.strip()[:200],
+        )
+        return []
+
+    packages: list[RPackageInfo] = []
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split("\t")
+        if len(parts) >= 2 and parts[0] and parts[1]:
+            packages.append(RPackageInfo(name=parts[0], version=parts[1]))
+    packages.sort(key=lambda pkg: pkg.name)
+    return packages
 
 
 def export_requirements_text(notebook_dir: Path) -> str:
