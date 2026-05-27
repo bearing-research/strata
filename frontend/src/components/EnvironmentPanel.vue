@@ -124,6 +124,36 @@ const shortLockfileHash = computed(() =>
   notebook.environment.lockfileHash ? notebook.environment.lockfileHash.slice(0, 12) : 'none',
 )
 
+// Show the current-on-disk lockfile hash, not the last-good-sync
+// hash — the user wants to see what their renv.lock looks like
+// *now*. ``syncState`` carries whether that matches the last
+// successful sync.
+const shortRLockHash = computed(() =>
+  notebook.rEnvironment.currentLockHash
+    ? notebook.rEnvironment.currentLockHash.slice(0, 12)
+    : 'none',
+)
+
+const rLastSyncedLabel = computed(() => {
+  if (!notebook.rEnvironment.lastSyncedAt) return 'Not synced yet'
+  return new Date(notebook.rEnvironment.lastSyncedAt).toLocaleString()
+})
+
+const rSyncStateLabel = computed(() => {
+  switch (notebook.rEnvironment.syncState) {
+    case 'ok':
+      return 'In sync'
+    case 'never':
+      return 'Not synced yet'
+    case 'outdated':
+      return 'Lockfile edited'
+    case 'failed':
+      return 'Last sync failed'
+    default:
+      return ''
+  }
+})
+
 const lastSyncedLabel = computed(() => {
   if (!notebook.environment.lastSyncedAt) return 'Not synced yet'
   return new Date(notebook.environment.lastSyncedAt).toLocaleString()
@@ -469,6 +499,44 @@ function downloadRequirements() {
           Interpreter: <code>{{ notebook.environment.venvPython }}</code>
         </div>
         <div v-else-if="!notebook.environment.hasLockfile">Lockfile not created yet</div>
+      </div>
+
+      <!--
+        R-side environment summary — rendered whenever the notebook
+        ships a ``renv.lock`` on disk (``hasLockfile`` is derived
+        from current disk state by the backend, not from the last
+        successful sync). Showing this even on never-synced /
+        failed-sync notebooks is the whole point — the user needs to
+        see *why* the env is broken, not have the UI silently hide.
+
+        Package list + install-from-UI land in PR C.
+      -->
+      <div v-if="notebook.rEnvironment.hasLockfile" class="env-r-section">
+        <div class="env-r-header">
+          <span>R Environment</span>
+          <span class="env-r-state" :class="`r-state-${notebook.rEnvironment.syncState}`">
+            {{ rSyncStateLabel }}
+          </span>
+        </div>
+        <div class="env-stats">
+          <div class="env-stat">
+            <span class="env-stat-label">R version</span>
+            <span class="env-stat-value">{{ notebook.rEnvironment.rVersion || 'Unknown' }}</span>
+          </div>
+          <div class="env-stat">
+            <span class="env-stat-label">renv.lock</span>
+            <span class="env-stat-value" :title="notebook.rEnvironment.currentLockHash">
+              {{ shortRLockHash }}
+            </span>
+          </div>
+          <div class="env-stat">
+            <span class="env-stat-label">Last sync</span>
+            <span class="env-stat-value">{{ rLastSyncedLabel }}</span>
+          </div>
+        </div>
+        <div v-if="notebook.rEnvironment.syncError" class="env-r-error">
+          {{ notebook.rEnvironment.syncError }}
+        </div>
       </div>
 
       <div v-if="lastActionLabel" class="env-action">
@@ -978,6 +1046,58 @@ function downloadRequirements() {
 .env-meta code {
   color: var(--accent-primary);
   word-break: break-all;
+}
+
+.env-r-section {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+.env-r-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.env-r-state {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.r-state-ok {
+  color: var(--accent-success);
+  background: var(--tint-success, rgba(0, 128, 0, 0.08));
+}
+
+.r-state-failed,
+.r-state-outdated {
+  color: var(--accent-warn, #b07000);
+  background: var(--tint-warn, rgba(176, 112, 0, 0.1));
+}
+
+.r-state-never {
+  color: var(--text-secondary);
+  background: var(--bg-input);
+}
+
+.env-r-error {
+  margin-top: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--accent-error, #c0392b);
+  background: var(--tint-error, rgba(192, 57, 43, 0.08));
+  border-radius: 3px;
 }
 
 .env-action {

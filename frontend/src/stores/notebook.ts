@@ -21,6 +21,7 @@ import type {
   ManagedWorkerSpec,
   NotebookEnvironment,
   NotebookRuntimeConfig,
+  RNotebookEnvironment,
   VariantGroup,
   VariantMember,
   WorkerCatalogEntry,
@@ -82,6 +83,15 @@ const notebook = reactive<Notebook>({
     hasLockfile: false,
     venvPython: null,
     interpreterSource: 'unknown',
+  },
+  rEnvironment: {
+    hasLockfile: false,
+    currentLockHash: '',
+    lockHash: '',
+    rVersion: '',
+    lastSyncedAt: 0,
+    syncState: 'absent',
+    syncError: null,
   },
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -434,9 +444,38 @@ function syncResolvedDependenciesFromBackend(raw: any) {
     : []
 }
 
+function parseBackendREnvironment(raw: any): RNotebookEnvironment {
+  const syncStateRaw = String(raw?.sync_state ?? raw?.syncState ?? 'absent')
+  const syncState = (
+    ['absent', 'never', 'ok', 'outdated', 'failed'].includes(syncStateRaw) ? syncStateRaw : 'absent'
+  ) as RNotebookEnvironment['syncState']
+  const errRaw = raw?.sync_error ?? raw?.syncError
+  return {
+    hasLockfile: raw?.has_lockfile === true || raw?.hasLockfile === true,
+    currentLockHash: String(raw?.current_lock_hash ?? raw?.currentLockHash ?? ''),
+    lockHash: String(raw?.lock_hash ?? raw?.lockHash ?? ''),
+    rVersion: String(raw?.r_version ?? raw?.rVersion ?? ''),
+    lastSyncedAt: Number(raw?.last_synced_at ?? raw?.lastSyncedAt ?? 0),
+    syncState,
+    syncError: typeof errRaw === 'string' && errRaw.length > 0 ? errRaw : null,
+  }
+}
+
+function syncNotebookREnvironmentFromBackend(raw: any) {
+  notebook.rEnvironment = parseBackendREnvironment(raw)
+}
+
 function syncEnvironmentPayloadFromBackend(data: any) {
   if (data?.environment) {
     syncNotebookEnvironmentFromBackend(data.environment)
+  }
+  // R-side env is parallel to Python's. Backend always emits the
+  // ``r_environment`` field (with zero fields when the notebook has
+  // no renv.lock), so absence here means we're talking to a
+  // pre-#87 server — leave the store's default zero entry in
+  // place rather than wiping anything.
+  if (data?.r_environment) {
+    syncNotebookREnvironmentFromBackend(data.r_environment)
   }
   if ('environment_job' in (data || {})) {
     syncEnvironmentOperationFromBackend(data.environment_job)

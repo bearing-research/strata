@@ -419,6 +419,40 @@ export interface NotebookEnvironment {
   interpreterSource: 'unknown' | 'venv' | 'path'
 }
 
+// R-side runtime environment, parallel to NotebookEnvironment.
+// Populated for any notebook that ships a ``renv.lock`` — even
+// when the latest restore failed, so the UI can surface the
+// failure instead of hiding the R section entirely.
+//
+// Source of truth for "is there a renv.lock right now?" is
+// ``hasLockfile`` (derived from disk at serialize time).
+// ``lockHash`` / ``rVersion`` / ``lastSyncedAt`` reflect the *last
+// successful* sync; ``syncError`` carries the *latest attempt's*
+// error message.
+export interface RNotebookEnvironment {
+  hasLockfile: boolean
+  /** sha256(renv.lock) on disk right now. Compare against
+   * ``lockHash`` (last good sync) to know if the user edited
+   * the lockfile since the last successful restore. */
+  currentLockHash: string
+  /** Lockfile hash at the last *successful* renv::restore(). */
+  lockHash: string
+  /** R version at the last *successful* renv::restore(). */
+  rVersion: string
+  /** Epoch-ms timestamp of the last *successful* renv::restore(),
+   * or 0 if never. */
+  lastSyncedAt: number
+  /** Overall R-environment state.
+   *  - ``absent``:   no renv.lock on disk
+   *  - ``never``:    lockfile present but never successfully synced
+   *  - ``ok``:       last sync matched the current lockfile + no error
+   *  - ``outdated``: lockfile edited since the last good sync
+   *  - ``failed``:   the latest sync attempt errored */
+  syncState: 'absent' | 'never' | 'ok' | 'outdated' | 'failed'
+  /** Error message from the most recent failed attempt, or null. */
+  syncError: string | null
+}
+
 export interface NotebookRuntimeConfig {
   deploymentMode: 'personal' | 'service'
   defaultParentPath: string
@@ -493,6 +527,10 @@ export interface Notebook {
   variantGroups: VariantGroup[]
   /** Environment info */
   environment: NotebookEnvironment
+  /** R-side environment info. Populated when ``renv.lock`` is present;
+   * fields are zero / empty otherwise (matches the
+   * default-RRuntime backend serialization). */
+  rEnvironment: RNotebookEnvironment
   /** Published outputs exposed as stable endpoints */
   publishedOutputs?: PublishedOutput[]
   /** Global metadata */
