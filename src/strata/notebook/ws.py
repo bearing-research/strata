@@ -237,6 +237,25 @@ async def _set_cell_idle(
     )
 
 
+async def _broadcast_downstream_stale(
+    notebook_id: str, seq: int, affected_cell_ids: list[str]
+) -> None:
+    """Broadcast STALE status for cells downstream of a just-errored cell.
+
+    ``Session.mark_cell_error`` returns the list of downstream cells
+    whose status it flipped from READY → STALE; this helper pushes
+    a cell_status frame for each so the frontend stops showing them
+    green when an upstream cell is red.
+    """
+    for cell_id in affected_cell_ids:
+        await _broadcast_message(
+            notebook_id,
+            _make_message(
+                MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": CellStatus.STALE}
+            ),
+        )
+
+
 async def _broadcast_staleness_updates(
     session: NotebookSession,
     notebook_id: str,
@@ -1641,19 +1660,20 @@ async def _execute_cell_directly(
                 preserve_ready_cell_id=cell_id,
             )
         else:
-            session.mark_cell_error(cell_id)
+            downstream_stale = session.mark_cell_error(cell_id)
             await _broadcast_message(
                 notebook_id,
                 _make_message(
                     MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": CellStatus.ERROR}
                 ),
             )
+            await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
 
     except asyncio.CancelledError:
         await _set_cell_idle(session, notebook_id, seq, cell_id)
         raise
     except Exception as e:
-        session.mark_cell_error(cell_id)
+        downstream_stale = session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
             _make_message(MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(e)}),
@@ -1662,6 +1682,7 @@ async def _execute_cell_directly(
             notebook_id,
             _make_message(MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": "error"}),
         )
+        await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
     finally:
         execution_state.running_cell = None
 
@@ -1796,7 +1817,7 @@ async def _execute_cascade(
                 await _set_cell_idle(session, notebook_id, seq, cell_id)
                 raise
             except Exception as e:
-                session.mark_cell_error(cell_id)
+                downstream_stale = session.mark_cell_error(cell_id)
                 await _broadcast_message(
                     notebook_id,
                     _make_message(
@@ -1809,6 +1830,7 @@ async def _execute_cascade(
                         MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": "error"}
                     ),
                 )
+                await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
                 cascade_failed = True
         if not cascade_failed:
             previous_snapshot = session.capture_cell_state_snapshot()
@@ -2049,7 +2071,7 @@ async def _run_partition_batch(
                 preserve_ready_cell_id=result.cell_id,
             )
         else:
-            session.mark_cell_error(result.cell_id)
+            downstream_stale = session.mark_cell_error(result.cell_id)
             await _broadcast_message(
                 notebook_id,
                 _make_message(
@@ -2058,6 +2080,7 @@ async def _run_partition_batch(
                     {"cell_id": result.cell_id, "status": CellStatus.ERROR},
                 ),
             )
+            await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
 
     from strata.notebook.executor import BatchExecutionResult
 
@@ -2167,7 +2190,7 @@ async def _run_partition_single_cell(
             )
             return True
 
-        session.mark_cell_error(cell_id)
+        downstream_stale = session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
             _make_message(
@@ -2176,13 +2199,14 @@ async def _run_partition_single_cell(
                 {"cell_id": cell_id, "status": CellStatus.ERROR},
             ),
         )
+        await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
         return False
 
     except asyncio.CancelledError:
         await _set_cell_idle(session, notebook_id, seq, cell_id)
         raise
     except Exception as exc:
-        session.mark_cell_error(cell_id)
+        downstream_stale = session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
             _make_message(MessageType.CELL_ERROR, seq, {"cell_id": cell_id, "error": str(exc)}),
@@ -2195,6 +2219,7 @@ async def _run_partition_single_cell(
                 {"cell_id": cell_id, "status": CellStatus.ERROR},
             ),
         )
+        await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
         return False
 
 
@@ -2524,11 +2549,12 @@ async def execute_cell_for_agent(
 
         return result
     except Exception:
-        session.mark_cell_error(cell_id)
+        downstream_stale = session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
             _make_message(MessageType.CELL_STATUS, 0, {"cell_id": cell_id, "status": "error"}),
         )
+        await _broadcast_downstream_stale(notebook_id, 0, downstream_stale)
         raise
 
 

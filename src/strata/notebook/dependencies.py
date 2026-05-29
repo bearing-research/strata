@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shlex
 import shutil
 import subprocess
@@ -561,6 +562,435 @@ def list_r_packages(notebook_dir: Path, *, timeout: int = 30) -> RPackageListing
             packages.append(RPackageInfo(name=parts[0], version=parts[1]))
     packages.sort(key=lambda pkg: pkg.name)
     return RPackageListing(packages=packages, status="ok", error=None)
+
+
+# ---------------------------------------------------------------------------
+# R bootstrap + install (parallels ``add_dependency``)
+# ---------------------------------------------------------------------------
+#
+# Mirror of the Python side: ``renv_init`` / ``renv_add`` wrap
+# ``Rscript -e ...`` calls with bounded stdout/stderr capture and
+# the same per-notebook lock so concurrent installs can't clobber
+# ``renv.lock``. Reuse ``EnvironmentOperationLog`` so the env-panel
+# UI renders the operation block identically to ``uv add``.
+
+# CRAN package names: a letter then letters/digits/periods. No
+# dashes, no shell metacharacters. We reject anything else before
+# it reaches the Rscript snippet to avoid command injection — the
+# package name is concatenated into the snippet body.
+_R_PACKAGE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.]*$")
+
+
+def is_valid_r_package_name(name: str) -> bool:
+    """Whether *name* is a syntactically valid CRAN package name."""
+    return bool(_R_PACKAGE_NAME_RE.fullmatch(name or ""))
+
+
+@dataclass
+class _RscriptCommandResult:
+    """Internal subprocess result wrapper for Rscript invocations."""
+
+    success: bool
+    error: str | None
+    operation_log: EnvironmentOperationLog
+
+
+def _run_rscript_command(
+    notebook_dir: Path,
+    snippet: str,
+    *,
+    timeout: int,
+    display_name: str,
+) -> _RscriptCommandResult:
+    """Run an Rscript ``-e`` snippet, capture bounded UI logs.
+
+    Mirror of ``_run_uv_command`` for the R side. Same timeout /
+    truncation / error-shape contract so the env-panel renders both
+    operations identically.
+    """
+    rscript = shutil.which("Rscript")
+    formatted_command = f"Rscript -e {shlex.quote(snippet)}"
+
+    if rscript is None:
+        return _RscriptCommandResult(
+            success=False,
+            error="Rscript not found on PATH",
+            operation_log=EnvironmentOperationLog(command=formatted_command),
+        )
+
+    started = time.perf_counter()
+    try:
+        completed = subprocess.run(  # noqa: S603 — rscript resolved via shutil.which
+            [rscript, "-e", snippet],
+            cwd=str(notebook_dir),
+            timeout=timeout,
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+    except subprocess.TimeoutExpired as exc:
+        stdout, stdout_truncated = _trim_output_for_ui(exc.stdout)
+        stderr, stderr_truncated = _trim_output_for_ui(exc.stderr)
+        return _RscriptCommandResult(
+            success=False,
+            error=f"{display_name} timed out after {timeout}s",
+            operation_log=EnvironmentOperationLog(
+                command=formatted_command,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                stdout=stdout,
+                stderr=stderr,
+                stdout_truncated=stdout_truncated,
+                stderr_truncated=stderr_truncated,
+            ),
+        )
+    except subprocess.CalledProcessError as exc:
+        stdout, stdout_truncated = _trim_output_for_ui(exc.stdout)
+        stderr, stderr_truncated = _trim_output_for_ui(exc.stderr)
+        return _RscriptCommandResult(
+            success=False,
+            error=f"{display_name} failed (exit {exc.returncode})",
+            operation_log=EnvironmentOperationLog(
+                command=formatted_command,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                stdout=stdout,
+                stderr=stderr,
+                stdout_truncated=stdout_truncated,
+                stderr_truncated=stderr_truncated,
+            ),
+        )
+
+    stdout, stdout_truncated = _trim_output_for_ui(completed.stdout)
+    stderr, stderr_truncated = _trim_output_for_ui(completed.stderr)
+    return _RscriptCommandResult(
+        success=True,
+        error=None,
+        operation_log=EnvironmentOperationLog(
+            command=formatted_command,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            stdout=stdout,
+            stderr=stderr,
+            stdout_truncated=stdout_truncated,
+            stderr_truncated=stderr_truncated,
+        ),
+    )
+
+
+async def run_rscript_command_streaming(
+    notebook_dir: Path,
+    snippet: str,
+    *,
+    timeout: int,
+    display_name: str,
+    on_update: Callable[[str, str, bool], Awaitable[None] | None] | None = None,
+) -> _RscriptCommandResult:
+    """Run an Rscript ``-e`` snippet asynchronously with streamed stdout/stderr.
+
+    Mirror of ``run_uv_command_streaming`` for the R side. ``subprocess.run``
+    only delivers stdout/stderr after the process exits — useless for a
+    5–10 min ``arrow`` source compile during ``renv::init``, where the
+    user looks at the env-panel and sees no progress. Switching to
+    ``asyncio.create_subprocess_exec`` + PIPE-streamed reads + an
+    ``on_update`` callback lets ``session.py`` broadcast
+    ``environment_job_progress`` frames as chunks arrive so the R
+    card's stdout tail populates live.
+    """
+    rscript = shutil.which("Rscript")
+    formatted_command = f"Rscript -e {shlex.quote(snippet)}"
+
+    if rscript is None:
+        return _RscriptCommandResult(
+            success=False,
+            error="Rscript not found on PATH",
+            operation_log=EnvironmentOperationLog(command=formatted_command),
+        )
+
+    started = time.perf_counter()
+    stdout_buffer = _BoundedOutputBuffer()
+    stderr_buffer = _BoundedOutputBuffer()
+
+    async def _emit_update(stream_name: str, text: str, truncated: bool) -> None:
+        if on_update is None:
+            return
+        maybe_awaitable = on_update(stream_name, text, truncated)
+        if asyncio.iscoroutine(maybe_awaitable):
+            await maybe_awaitable
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            rscript,
+            "-e",
+            snippet,
+            cwd=str(notebook_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return _RscriptCommandResult(
+            success=False,
+            error="Rscript not found on PATH",
+            operation_log=EnvironmentOperationLog(
+                command=formatted_command,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            ),
+        )
+
+    async def _read_stream(
+        stream: asyncio.StreamReader | None,
+        name: str,
+        buffer: _BoundedOutputBuffer,
+    ) -> None:
+        if stream is None:
+            return
+        while True:
+            chunk = await stream.read(4096)
+            if not chunk:
+                return
+            text = chunk.decode(errors="replace")
+            buffer.append(text)
+            await _emit_update(name, buffer.text, buffer.truncated)
+
+    stdout_task = asyncio.create_task(_read_stream(process.stdout, "stdout", stdout_buffer))
+    stderr_task = asyncio.create_task(_read_stream(process.stderr, "stderr", stderr_buffer))
+
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(stdout_task, stderr_task, process.wait()),
+            timeout=timeout,
+        )
+    except TimeoutError:
+        process.kill()
+        await asyncio.gather(stdout_task, stderr_task, process.wait(), return_exceptions=True)
+        return _RscriptCommandResult(
+            success=False,
+            error=f"{display_name} timed out after {timeout}s",
+            operation_log=EnvironmentOperationLog(
+                command=formatted_command,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                stdout=stdout_buffer.text,
+                stderr=stderr_buffer.text,
+                stdout_truncated=stdout_buffer.truncated,
+                stderr_truncated=stderr_buffer.truncated,
+            ),
+        )
+
+    operation_log = EnvironmentOperationLog(
+        command=formatted_command,
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        stdout=stdout_buffer.text,
+        stderr=stderr_buffer.text,
+        stdout_truncated=stdout_buffer.truncated,
+        stderr_truncated=stderr_buffer.truncated,
+    )
+
+    if process.returncode == 0:
+        return _RscriptCommandResult(success=True, error=None, operation_log=operation_log)
+
+    return _RscriptCommandResult(
+        success=False,
+        error=f"{display_name} failed (exit {process.returncode})",
+        operation_log=operation_log,
+    )
+
+
+@dataclass
+class RJobResult:
+    """Result of an R-side env job (``renv::init`` / ``renv::install``).
+
+    Mirror of ``DependencyChangeResult`` for the R side — same
+    ``lockfile_changed`` semantics so the staleness propagation that
+    runs after a Python ``add`` runs after an ``r_add`` too.
+    """
+
+    success: bool
+    action: str  # "r_init" | "r_add"
+    package: str | None
+    lockfile_changed: bool = False
+    error: str | None = None
+    operation_log: EnvironmentOperationLog | None = None
+
+
+def _renv_lockfile_hash(notebook_dir: Path) -> str:
+    """SHA-256 of ``renv.lock``, or sentinel hash when absent.
+
+    Separate from ``_lockfile_hash`` (which hashes ``uv.lock``) —
+    the two files live side by side and the per-language jobs
+    track their respective hashes for lockfile-changed
+    bookkeeping.
+
+    Reuses ``_fold_lockfile_into_hash`` (no tag) so the renv.lock-only
+    read goes through the same ``open() + read()`` path that keeps
+    CodeQL's ``py/path-injection`` model happy with a Path built from
+    trusted-internal ``session.path`` — see that helper's docstring.
+    With no tag this yields ``sha256(renv.lock bytes)`` when present and
+    ``sha256(b"")`` when absent, matching the prior semantics.
+    """
+    import hashlib
+
+    from strata.notebook.env import _fold_lockfile_into_hash
+
+    hasher = hashlib.sha256()
+    _fold_lockfile_into_hash(hasher, notebook_dir, "renv.lock", tag=None)
+    return hasher.hexdigest()
+
+
+async def renv_init(
+    notebook_dir: Path,
+    *,
+    timeout: int = 900,
+    on_update: Callable[[str, str, bool], Awaitable[None] | None] | None = None,
+) -> RJobResult:
+    """Bootstrap renv in *notebook_dir* with streamed Rscript output.
+
+    Async because the underlying ``arrow`` source compile takes several
+    minutes; ``on_update(stream, text, truncated)`` fires per chunk of
+    stdout/stderr so the env-panel's stdout tail populates live
+    instead of staying empty until exit. The 900s default matches
+    ``renv_add`` for the same compile-from-source reason on platforms
+    without pre-built binaries (Linux aarch64, fresh macOS).
+
+    Holds the per-notebook lock for the duration so a concurrent
+    ``renv_add`` can't race against init. Lock acquire goes through
+    ``asyncio.to_thread`` so the asyncio event loop stays responsive
+    if the lock is held.
+    """
+    lock = _get_notebook_lock(notebook_dir)
+    await asyncio.to_thread(lock.acquire)
+    try:
+        return await _renv_init_locked(notebook_dir, timeout=timeout, on_update=on_update)
+    finally:
+        lock.release()
+
+
+async def _renv_init_locked(
+    notebook_dir: Path,
+    *,
+    timeout: int,
+    on_update: Callable[[str, str, bool], Awaitable[None] | None] | None,
+) -> RJobResult:
+    old_hash = _renv_lockfile_hash(notebook_dir)
+    # Bootstrap sequence:
+    #   1. Install renv to the user's site library if missing (CRAN
+    #      cloud mirror is renv's own default).
+    #   2. ``renv::init(bare = TRUE)`` scaffolds ``.Rprofile`` +
+    #      ``renv/activate.R`` and creates an empty project library.
+    #   3. Install harness transport deps (``jsonlite``, ``arrow``).
+    #      The harness needs both to receive cell inputs and emit
+    #      results — without them every R cell fails with
+    #      ``library(jsonlite) : there is no package called 'jsonlite'``
+    #      because ``.Rprofile``'s ``renv::activate()`` has already
+    #      scoped ``.libPaths()`` to the empty project library.
+    #   4. ``renv::snapshot()`` writes ``renv.lock``. ``bare = TRUE``
+    #      skips the implicit post-init snapshot, so without this
+    #      step ``renv.lock`` never appears on disk and the UI
+    #      keeps showing the bootstrap button.
+    snippet = "\n".join(
+        [
+            'if (!requireNamespace("renv", quietly = TRUE)) {',
+            '  install.packages("renv", repos = "https://cloud.r-project.org", quiet = TRUE)',
+            "}",
+            "renv::init(bare = TRUE)",
+            'renv::install(c("jsonlite", "arrow"))',
+            'renv::snapshot(type = "all", prompt = FALSE)',
+        ]
+    )
+    result = await run_rscript_command_streaming(
+        notebook_dir,
+        snippet,
+        timeout=timeout,
+        display_name="renv::init",
+        on_update=on_update,
+    )
+    if not result.success:
+        return RJobResult(
+            success=False,
+            action="r_init",
+            package=None,
+            error=result.error,
+            operation_log=result.operation_log,
+        )
+    new_hash = _renv_lockfile_hash(notebook_dir)
+    return RJobResult(
+        success=True,
+        action="r_init",
+        package=None,
+        lockfile_changed=old_hash != new_hash,
+        operation_log=result.operation_log,
+    )
+
+
+async def renv_add(
+    notebook_dir: Path,
+    package: str,
+    *,
+    timeout: int = 600,
+    on_update: Callable[[str, str, bool], Awaitable[None] | None] | None = None,
+) -> RJobResult:
+    """Install + snapshot an R package via ``renv::install`` + ``renv::snapshot``.
+
+    Async + streaming for the same reason as ``renv_init``: a single
+    package can pull in a binary chain that compiles for minutes.
+    ``snapshot(type = "all")`` forces the lockfile to reflect the
+    actual library state rather than renv's default "only packages
+    referenced in source" mode.
+
+    Rejects package names that don't match the CRAN convention
+    before the snippet runs — the name is concatenated into the
+    Rscript body and we don't want shell metacharacters or quoting
+    games making it into the spawn.
+    """
+    if not is_valid_r_package_name(package):
+        return RJobResult(
+            success=False,
+            action="r_add",
+            package=package,
+            error=(
+                f"Invalid R package name: {package!r}. CRAN names match "
+                "[A-Za-z][A-Za-z0-9.]* — no dashes, no shell metacharacters."
+            ),
+        )
+    lock = _get_notebook_lock(notebook_dir)
+    await asyncio.to_thread(lock.acquire)
+    try:
+        return await _renv_add_locked(notebook_dir, package, timeout=timeout, on_update=on_update)
+    finally:
+        lock.release()
+
+
+async def _renv_add_locked(
+    notebook_dir: Path,
+    package: str,
+    *,
+    timeout: int,
+    on_update: Callable[[str, str, bool], Awaitable[None] | None] | None,
+) -> RJobResult:
+    old_hash = _renv_lockfile_hash(notebook_dir)
+    # Embed the name as a double-quoted R string literal. ``is_valid_r_package_name``
+    # already rejected anything but [A-Za-z0-9.] so escape concerns are moot —
+    # ``ggplot2`` becomes ``renv::install("ggplot2"); renv::snapshot(type = "all")``.
+    snippet = f'renv::install("{package}"); renv::snapshot(type = "all", prompt = FALSE)'
+    result = await run_rscript_command_streaming(
+        notebook_dir,
+        snippet,
+        timeout=timeout,
+        display_name="renv::install",
+        on_update=on_update,
+    )
+    if not result.success:
+        return RJobResult(
+            success=False,
+            action="r_add",
+            package=package,
+            error=result.error,
+            operation_log=result.operation_log,
+        )
+    new_hash = _renv_lockfile_hash(notebook_dir)
+    return RJobResult(
+        success=True,
+        action="r_add",
+        package=package,
+        lockfile_changed=old_hash != new_hash,
+        operation_log=result.operation_log,
+    )
 
 
 def export_requirements_text(notebook_dir: Path) -> str:

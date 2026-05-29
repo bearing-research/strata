@@ -717,13 +717,31 @@ class EnvironmentJobRequest(BaseModel):
     @classmethod
     def validate_action_field(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if normalized not in {"add", "remove", "sync", "import"}:
+        # ``r_init`` / ``r_add`` reuse the env-job machinery for the
+        # R side — Rscript subprocess + same job tracking + same WS
+        # broadcast frames. ``change_python`` is the existing
+        # Python-version change action.
+        if normalized not in {
+            "add",
+            "remove",
+            "sync",
+            "import",
+            "change_python",
+            "r_init",
+            "r_add",
+        }:
             raise ValueError("Unsupported environment job action")
         return normalized
 
     @field_validator("package")
     @classmethod
     def validate_package_field(cls, value: str | None) -> str | None:
+        # The REST-layer sanitizer rejects shell metacharacters for
+        # *any* action. The R-specific name-shape check (CRAN
+        # convention) runs server-side in ``submit_environment_job``
+        # — combining both layers means a bad R name fails fast at
+        # the REST boundary AND is double-checked before the
+        # Rscript subprocess sees it.
         if value is None:
             return None
         return validate_package_name(value)
@@ -1490,6 +1508,24 @@ async def submit_environment_job(
                     "environment_yaml and do not accept a package"
                 ),
             )
+    if req.action == "r_init" and (
+        req.package is not None or req.requirements is not None or req.environment_yaml is not None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="r_init does not accept a package or import content",
+        )
+    if req.action == "r_add":
+        if not req.package:
+            raise HTTPException(
+                status_code=400,
+                detail="r_add requires a package name",
+            )
+        if req.requirements is not None or req.environment_yaml is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="r_add does not accept import content",
+            )
 
     try:
         await session.submit_environment_job(
@@ -1498,6 +1534,12 @@ async def submit_environment_job(
             requirements_text=req.requirements,
             environment_yaml_text=req.environment_yaml,
         )
+    except ValueError as exc:
+        # Server-side validation (e.g. Rscript missing, renv not
+        # initialised, invalid R package name). Surface as 400 so the
+        # frontend can render a targeted error rather than a generic
+        # 500.
+        raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         _raise_environment_busy(session, str(exc))
 

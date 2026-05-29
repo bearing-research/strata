@@ -31,6 +31,7 @@ from strata.notebook.dependencies import (
     import_environment_yaml_text_streaming,
     import_requirements_text,
     import_requirements_text_streaming,
+    is_valid_r_package_name,
     list_dependencies,
     list_r_packages,
     list_resolved_dependencies,
@@ -39,6 +40,8 @@ from strata.notebook.dependencies import (
     preview_environment_yaml_text,
     preview_requirements_text,
     remove_dependency,
+    renv_add,
+    renv_init,
 )
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import CellStaleness, CellStatus
@@ -1031,3 +1034,278 @@ class TestListRPackages:
         list_r_packages(tmp_path)
 
         assert captured["cwd"] == str(tmp_path)
+
+
+# ============================================================================
+# R package install + bootstrap (renv::init / renv::install)
+# ============================================================================
+
+
+class TestIsValidRPackageName:
+    """Reject anything outside CRAN's ``[A-Za-z][A-Za-z0-9.]*`` shape.
+
+    The name is concatenated into an Rscript ``-e`` body, so the
+    validator is the only line of defence against shell or R-code
+    injection. ``ggplot2`` is fine; ``ggplot2; system('rm -rf /')``
+    is not.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        ["arrow", "ggplot2", "data.table", "R6", "rmarkdown"],
+    )
+    def test_accepts_valid_names(self, name):
+        assert is_valid_r_package_name(name)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "",  # empty
+            "2arrow",  # starts with digit
+            "ggplot-2",  # dash (not allowed by CRAN)
+            "arrow; rm",  # shell metacharacter
+            'arrow"; system("ls"); "',  # quote injection
+            "package/with/slashes",
+            "package\nname",  # newline
+        ],
+    )
+    def test_rejects_invalid_names(self, name):
+        assert not is_valid_r_package_name(name)
+
+
+def _make_fake_rscript_streaming(
+    *,
+    success: bool,
+    stdout: str = "",
+    stderr: str = "",
+    error: str | None = None,
+    side_effect=None,
+    captured_snippets: list[str] | None = None,
+):
+    """Build a stand-in for ``run_rscript_command_streaming``.
+
+    Captures the snippet (so tests can assert what R code ran) and
+    exercises the ``on_update`` callback (so the wiring from
+    streaming → ``environment_job_progress`` is covered). Used by
+    the ``renv_init`` / ``renv_add`` tests to avoid mocking
+    ``asyncio.create_subprocess_exec`` line by line.
+    """
+    from strata.notebook.dependencies import _RscriptCommandResult
+
+    async def fake(notebook_dir, snippet, *, timeout, display_name, on_update=None):
+        del notebook_dir, timeout
+        if captured_snippets is not None:
+            captured_snippets.append(snippet)
+        if on_update is not None:
+            if stdout:
+                await on_update("stdout", stdout, False)
+            if stderr:
+                await on_update("stderr", stderr, False)
+        if side_effect is not None:
+            side_effect()
+        return _RscriptCommandResult(
+            success=success,
+            error=error or (f"{display_name} failed (exit 1)" if not success else None),
+            operation_log=EnvironmentOperationLog(
+                command=f"Rscript -e {snippet!r}",
+                duration_ms=11,
+                stdout=stdout,
+                stderr=stderr,
+                stdout_truncated=False,
+                stderr_truncated=False,
+            ),
+        )
+
+    return fake
+
+
+class TestRenvInit:
+    """``renv_init`` streams ``Rscript -e <bootstrap snippet>`` and
+    surfaces lockfile-change + operation log to the env-panel."""
+
+    @pytest.mark.asyncio
+    async def test_rscript_missing(self, monkeypatch, tmp_path):
+        """Without Rscript on PATH the streaming helper fails fast with a
+        clear error before spawning a subprocess. Use the real helper
+        (no mock) so we cover the actual shutil.which short-circuit."""
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+
+        result = await renv_init(tmp_path)
+
+        assert result.success is False
+        assert result.action == "r_init"
+        assert "Rscript not found" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_success_writes_lockfile_change_signal(self, monkeypatch, tmp_path):
+        """A successful init creates ``renv.lock`` — we detect the new
+        hash and report ``lockfile_changed=True``."""
+        from strata.notebook import dependencies as deps_module
+
+        captured: list[str] = []
+
+        def write_lockfile():
+            (tmp_path / "renv.lock").write_text('{"R": {"Version": "4.4.1"}}', encoding="utf-8")
+
+        monkeypatch.setattr(
+            deps_module,
+            "run_rscript_command_streaming",
+            _make_fake_rscript_streaming(
+                success=True,
+                stdout="renv 1.0.7 initialised\n",
+                side_effect=write_lockfile,
+                captured_snippets=captured,
+            ),
+        )
+
+        result = await renv_init(tmp_path)
+
+        assert result.success is True
+        assert result.action == "r_init"
+        assert result.lockfile_changed is True
+        assert result.operation_log is not None
+        snippet = captured[0]
+        assert "renv::init(bare = TRUE)" in snippet
+        assert 'renv::install(c("jsonlite", "arrow"))' in snippet
+        assert "renv::snapshot" in snippet
+
+    @pytest.mark.asyncio
+    async def test_progress_callback_fires_during_streaming(self, monkeypatch, tmp_path):
+        """The whole point of PR G: ``on_update`` must be invoked while
+        the subprocess is running so ``environment_job_progress`` frames
+        go out live during a multi-minute arrow compile."""
+        from strata.notebook import dependencies as deps_module
+
+        monkeypatch.setattr(
+            deps_module,
+            "run_rscript_command_streaming",
+            _make_fake_rscript_streaming(
+                success=True,
+                stdout="installing arrow\n",
+                stderr="compiling C++\n",
+                side_effect=lambda: (tmp_path / "renv.lock").write_text("{}", encoding="utf-8"),
+            ),
+        )
+
+        seen: list[tuple[str, str, bool]] = []
+
+        async def on_update(stream, text, truncated):
+            seen.append((stream, text, truncated))
+
+        result = await renv_init(tmp_path, on_update=on_update)
+
+        assert result.success is True
+        # Both stdout and stderr chunks should have been forwarded.
+        streams = {stream for stream, _, _ in seen}
+        assert streams == {"stdout", "stderr"}
+
+    @pytest.mark.asyncio
+    async def test_failure_surfaces_stderr(self, monkeypatch, tmp_path):
+        """When ``renv::init`` exits non-zero the error + stderr are
+        captured for the env-panel render."""
+        from strata.notebook import dependencies as deps_module
+
+        monkeypatch.setattr(
+            deps_module,
+            "run_rscript_command_streaming",
+            _make_fake_rscript_streaming(
+                success=False,
+                stderr="renv error: corrupted .Rprofile",
+                error="renv::init failed (exit 1)",
+            ),
+        )
+
+        result = await renv_init(tmp_path)
+
+        assert result.success is False
+        assert result.action == "r_init"
+        assert "exit 1" in (result.error or "")
+        assert result.operation_log is not None
+        assert "corrupted .Rprofile" in result.operation_log.stderr
+
+
+class TestRenvAdd:
+    """``renv_add`` streams ``renv::install + renv::snapshot`` for one
+    package."""
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_package_name(self, monkeypatch, tmp_path):
+        """Bad name short-circuits before any subprocess. The package
+        name lands inside the snippet body, so the validator is
+        load-bearing for safety, not just polish."""
+        from strata.notebook import dependencies as deps_module
+
+        async def must_not_run(*a, **kw):
+            pytest.fail("must not spawn for invalid package name")
+
+        monkeypatch.setattr(deps_module, "run_rscript_command_streaming", must_not_run)
+
+        result = await renv_add(tmp_path, "ggplot2; rm -rf /")
+
+        assert result.success is False
+        assert result.action == "r_add"
+        assert "Invalid R package name" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_success_calls_install_and_snapshot(self, monkeypatch, tmp_path):
+        """The R snippet must call both ``renv::install`` AND
+        ``renv::snapshot`` — install puts the package in the library;
+        snapshot writes it to the lockfile. Dropping snapshot would
+        let the on-disk library and lockfile drift."""
+        from strata.notebook import dependencies as deps_module
+
+        (tmp_path / "renv.lock").write_text('{"Packages": {}}', encoding="utf-8")
+        captured: list[str] = []
+
+        def write_new_lockfile():
+            (tmp_path / "renv.lock").write_text(
+                '{"Packages": {"arrow": {"Version": "14.0.0"}}}', encoding="utf-8"
+            )
+
+        monkeypatch.setattr(
+            deps_module,
+            "run_rscript_command_streaming",
+            _make_fake_rscript_streaming(
+                success=True,
+                stdout="installed arrow\n",
+                side_effect=write_new_lockfile,
+                captured_snippets=captured,
+            ),
+        )
+
+        result = await renv_add(tmp_path, "arrow")
+
+        assert result.success is True
+        assert result.action == "r_add"
+        assert result.package == "arrow"
+        assert result.lockfile_changed is True
+        snippet = captured[0]
+        assert 'renv::install("arrow")' in snippet
+        assert "renv::snapshot" in snippet
+        assert 'type = "all"' in snippet
+        assert "prompt = FALSE" in snippet
+
+    @pytest.mark.asyncio
+    async def test_failure_surfaces_error(self, monkeypatch, tmp_path):
+        """CRAN package doesn't exist / network failure: error +
+        stderr land in the operation_log, lockfile_changed is False."""
+        from strata.notebook import dependencies as deps_module
+
+        (tmp_path / "renv.lock").write_text('{"Packages": {}}', encoding="utf-8")
+        monkeypatch.setattr(
+            deps_module,
+            "run_rscript_command_streaming",
+            _make_fake_rscript_streaming(
+                success=False,
+                stderr="package 'nonexistent' is not available",
+                error="renv::install failed (exit 1)",
+            ),
+        )
+
+        result = await renv_add(tmp_path, "nonexistent")
+
+        assert result.success is False
+        assert result.action == "r_add"
+        assert "exit 1" in (result.error or "")
+        assert result.operation_log is not None
+        assert "not available" in result.operation_log.stderr
