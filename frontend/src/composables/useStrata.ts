@@ -996,6 +996,40 @@ async function addDependency(notebookId: string, pkg: string): Promise<Environme
   return readJson<EnvironmentResponse>(resp)
 }
 
+// R-side env jobs ride the same ``environment/jobs`` endpoint —
+// just a different ``action`` string. The backend dispatches to
+// Rscript instead of uv. Frontend gets the same job-progress
+// frames and the same env-state refresh in the 202 response.
+async function initRenv(notebookId: string): Promise<EnvironmentResponse> {
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/environment/jobs`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'r_init' }),
+    },
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to initialise renv')
+  }
+  return readJson<EnvironmentResponse>(resp)
+}
+
+async function addRPackage(notebookId: string, pkg: string): Promise<EnvironmentResponse> {
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/environment/jobs`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'r_add', package: pkg }),
+    },
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to install R package')
+  }
+  return readJson<EnvironmentResponse>(resp)
+}
+
 async function removeDependency(notebookId: string, pkg: string): Promise<EnvironmentResponse> {
   const resp = await fetchWithTimeout(
     `${STRATA_BASE}/v1/notebooks/${notebookId}/environment/jobs`,
@@ -1409,6 +1443,8 @@ export function useStrata() {
     removeDependency,
     getEnvironmentStatus,
     getRPackages,
+    initRenv,
+    addRPackage,
     syncEnvironment,
     exportRequirements,
     previewRequirementsImport,

@@ -446,6 +446,11 @@ export interface RNotebookEnvironment {
   lockHash: string
   /** R version at the last *successful* renv::restore(). */
   rVersion: string
+  /** R version of ``Rscript`` on PATH right now (probed once per
+   * session). Falls back here when ``rVersion`` is empty (no
+   * lockfile / never synced) so the R card can always show
+   * *some* version info next to the status pill. */
+  systemRVersion: string
   /** Epoch-ms timestamp of the last *successful* renv::restore(),
    * or 0 if never. */
   lastSyncedAt: number
@@ -501,8 +506,15 @@ export interface NotebookRuntimeConfig {
   pythonSelectionFixed: boolean
 }
 
+// ``r_init`` and ``r_add`` reuse the same env-job UI surface as
+// the Python actions — same progress block, same status icons,
+// just different ``command`` text in the operation log. Keeping
+// the union open at the type level avoids per-language branching
+// in the env panel rendering.
+export type EnvironmentJobAction = 'add' | 'remove' | 'sync' | 'import' | 'r_init' | 'r_add'
+
 export interface EnvironmentActionSummary {
-  action: 'add' | 'remove' | 'sync' | 'import'
+  action: EnvironmentJobAction
   packageName: string | null
   lockfileChanged: boolean
   staleCellCount: number
@@ -511,7 +523,7 @@ export interface EnvironmentActionSummary {
 
 export interface EnvironmentOperation {
   id: string
-  action: 'add' | 'remove' | 'sync' | 'import'
+  action: EnvironmentJobAction
   status: 'running' | 'completed' | 'failed'
   packageName: string | null
   phase: string | null

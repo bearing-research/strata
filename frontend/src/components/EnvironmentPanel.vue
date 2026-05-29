@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import { useStrata } from '../composables/useStrata'
 import PythonVersionModal from './PythonVersionModal.vue'
@@ -30,6 +30,8 @@ const {
   fetchDependencies,
   fetchEnvironment,
   fetchRPackagesAction,
+  initRenvAction,
+  addRPackageAction,
   connected,
   updatePythonVersionAction,
 } = useNotebook()
@@ -158,7 +160,32 @@ const rLastSyncedLabel = computed(() => {
   return new Date(notebook.rEnvironment.lastSyncedAt).toLocaleString()
 })
 
+// True while the user has fired an R-side env-job (init or install)
+// that hasn't reported back as completed/failed yet. We use this to
+// flip the R card into a "live" rendering so the user sees what's
+// happening without scrolling to the shared footer.
+const rOperationRunning = computed(
+  () =>
+    environmentMutationActive.value &&
+    (environmentOperation.value?.action === 'r_init' ||
+      environmentOperation.value?.action === 'r_add'),
+)
+
+const rOperationIsInit = computed(
+  () => environmentMutationActive.value && environmentOperation.value?.action === 'r_init',
+)
+
+// Status pill label: while an R env-job is running the label
+// reflects the live operation; otherwise it falls back to the
+// persisted ``syncState``. Without renv set up we say "System R"
+// not "Not set up" — R cells still work in that state (using
+// the system R library), and "Not set up" read as alarming to
+// users whose cells were running fine.
 const rSyncStateLabel = computed(() => {
+  if (rOperationRunning.value) {
+    return rOperationIsInit.value ? 'Bootstrapping…' : 'Installing…'
+  }
+  if (!notebook.rEnvironment.hasLockfile) return 'System R'
   switch (notebook.rEnvironment.syncState) {
     case 'ok':
       return 'In sync'
@@ -169,9 +196,115 @@ const rSyncStateLabel = computed(() => {
     case 'failed':
       return 'Last sync failed'
     default:
-      return ''
+      return 'Unknown'
   }
 })
+
+// R-side dot color maps onto the shared ``.state-*`` palette used by
+// Python so both cards' status pills feel like part of the same
+// component. The mapping is deliberate: ``never`` → pending (neutral
+// progress), ``outdated`` → fallback (warning), ``failed`` → failed.
+const rStateDotClass = computed(() => {
+  if (rOperationRunning.value) return 'state-pending'
+  if (!notebook.rEnvironment.hasLockfile) return 'state-unknown'
+  switch (notebook.rEnvironment.syncState) {
+    case 'ok':
+      return 'state-ready'
+    case 'never':
+      return 'state-pending'
+    case 'outdated':
+      return 'state-fallback'
+    case 'failed':
+      return 'state-failed'
+    default:
+      return 'state-unknown'
+  }
+})
+
+// Tail of the running operation's stdout/stderr so the bootstrap
+// card can show *what* is currently compiling without forcing the
+// user to expand the footer's collapsed log block. We keep it
+// short (last 6 lines) because long arrow compile output would
+// otherwise dominate the panel.
+const rOperationTail = computed(() => {
+  if (!rOperationRunning.value) return ''
+  const op = environmentOperation.value
+  if (!op) return ''
+  const text = (op.stderr || '') + (op.stderr && op.stdout ? '\n' : '') + (op.stdout || '')
+  if (!text) return ''
+  const lines = text
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+  return lines.slice(-6).join('\n')
+})
+
+// Ticker so the bootstrap duration counter updates while the
+// subprocess is running. ``Date.now()`` isn't reactive so a static
+// computed would freeze at "0s" until the next WS message bumps
+// ``environmentOperation``. We only tick while an R job is live
+// so the panel doesn't burn cycles in steady state.
+const nowMs = ref(Date.now())
+let nowTickHandle: number | null = null
+watch(
+  rOperationRunning,
+  (running) => {
+    if (running) {
+      nowMs.value = Date.now()
+      if (nowTickHandle === null) {
+        nowTickHandle = window.setInterval(() => {
+          nowMs.value = Date.now()
+        }, 1000)
+      }
+    } else if (nowTickHandle !== null) {
+      window.clearInterval(nowTickHandle)
+      nowTickHandle = null
+    }
+  },
+  { immediate: true },
+)
+onUnmounted(() => {
+  if (nowTickHandle !== null) {
+    window.clearInterval(nowTickHandle)
+    nowTickHandle = null
+  }
+})
+
+const rOperationDurationLabel = computed(() => {
+  if (!rOperationRunning.value) return ''
+  const op = environmentOperation.value
+  if (!op) return ''
+  const elapsedSec = Math.floor((nowMs.value - op.startedAt) / 1000)
+  if (elapsedSec < 60) return `${elapsedSec}s`
+  const m = Math.floor(elapsedSec / 60)
+  const s = elapsedSec - m * 60
+  return `${m}m ${s}s`
+})
+
+// Show the R section whenever the notebook has any R cell or
+// a lockfile already exists. Pre-bootstrap notebooks (R cells
+// present but no renv.lock) need the section visible so the
+// "Initialize renv" button has somewhere to live.
+const hasAnyRCell = computed(() =>
+  notebook.cells.some((c: { language: string }) => c.language === 'r'),
+)
+const showRSection = computed(() => notebook.rEnvironment.hasLockfile || hasAnyRCell.value)
+
+// R package input — mirrors ``newPackage`` for Python. Same name
+// shape the backend validator enforces: ``[A-Za-z][A-Za-z0-9.]*``.
+const newRPackage = ref('')
+const newRPackageValid = computed(() => /^[A-Za-z][A-Za-z0-9.]*$/.test(newRPackage.value.trim()))
+
+async function submitInitRenv() {
+  await initRenvAction()
+}
+
+async function submitAddRPackage() {
+  const pkg = newRPackage.value.trim()
+  if (!pkg) return
+  await addRPackageAction(pkg)
+  newRPackage.value = ''
+}
 
 // Empty-list message — varies by the listing-probe outcome so the
 // user can tell "the library is empty" from "the probe couldn't
@@ -440,17 +573,24 @@ function downloadRequirements() {
     </button>
 
     <div v-if="showPanel" class="env-content">
-      <div class="env-header">
-        <div class="env-status-block">
-          <div class="env-status">
-            <span class="status-dot" :class="syncStateClass"></span>
-            <span>{{ syncStateLabel }}</span>
+      <!--
+        Python card. Holds everything Python-specific so the panel
+        reads top-to-bottom as "Python config, then R config, then
+        a shared footer that captures cross-language operations and
+        history". The section chrome (`env-section`) is the same
+        for both languages so the visual weight matches.
+      -->
+      <section class="env-section env-section--python">
+        <header class="env-section-header">
+          <div class="env-section-title">
+            <span class="env-section-label">Python</span>
+            <span class="env-section-state">
+              <span class="status-dot" :class="syncStateClass"></span>
+              {{ syncStateLabel }}
+            </span>
           </div>
-          <div class="env-status-help">
-            Rebuilds the notebook <code>.venv</code> from <code>pyproject.toml</code> and
-            <code>uv.lock</code>, refreshes runtime metadata, and resets warm execution state.
-          </div>
-        </div>
+        </header>
+
         <div class="env-actions">
           <button
             class="btn-sync"
@@ -489,127 +629,421 @@ function downloadRequirements() {
             Import env.yaml
           </button>
         </div>
-      </div>
 
-      <div class="env-stats">
-        <div class="env-stat">
-          <span class="env-stat-label">Requested Python</span>
-          <button
-            type="button"
-            class="env-stat-value env-stat-button"
-            :disabled="environmentMutationActive"
-            :title="
-              environmentMutationActive
-                ? 'Cannot change Python while another environment update is running'
-                : 'Click to change the notebook\'s Python version'
-            "
-            @click="openPythonModal"
-          >
-            {{ notebook.environment.requestedPythonVersion || 'Unknown' }}
-          </button>
-        </div>
-        <div class="env-stat">
-          <span class="env-stat-label">Runtime Python</span>
-          <span class="env-stat-value">{{
-            notebook.environment.runtimePythonVersion ||
-            notebook.environment.pythonVersion ||
-            'Unknown'
-          }}</span>
-        </div>
-        <div class="env-stat">
-          <span class="env-stat-label">Declared</span>
-          <span class="env-stat-value">{{ notebook.environment.declaredPackageCount }}</span>
-        </div>
-        <div class="env-stat">
-          <span class="env-stat-label">Resolved</span>
-          <span class="env-stat-value">{{ notebook.environment.resolvedPackageCount }}</span>
-        </div>
-        <div class="env-stat">
-          <span class="env-stat-label">Lockfile</span>
-          <span class="env-stat-value" :title="notebook.environment.lockfileHash">
-            {{ shortLockfileHash }}
-          </span>
-        </div>
-      </div>
-
-      <div class="env-meta">
-        <div>Last sync: {{ lastSyncedLabel }}</div>
-        <div>Last sync duration: {{ lastSyncDurationLabel }}</div>
-        <div>Runtime source: {{ interpreterSourceLabel }}</div>
-        <div v-if="notebook.environment.venvPython">
-          Interpreter: <code>{{ notebook.environment.venvPython }}</code>
-        </div>
-        <div v-else-if="!notebook.environment.hasLockfile">Lockfile not created yet</div>
-      </div>
-
-      <!--
-        R-side environment summary — rendered whenever the notebook
-        ships a ``renv.lock`` on disk (``hasLockfile`` is derived
-        from current disk state by the backend, not from the last
-        successful sync). Showing this even on never-synced /
-        failed-sync notebooks is the whole point — the user needs to
-        see *why* the env is broken, not have the UI silently hide.
-
-        Package list + install-from-UI land in PR C.
-      -->
-      <div v-if="notebook.rEnvironment.hasLockfile" class="env-r-section">
-        <div class="env-r-header">
-          <span>R Environment</span>
-          <span class="env-r-state" :class="`r-state-${notebook.rEnvironment.syncState}`">
-            {{ rSyncStateLabel }}
-          </span>
-        </div>
         <div class="env-stats">
           <div class="env-stat">
-            <span class="env-stat-label">R version</span>
-            <span class="env-stat-value">{{ notebook.rEnvironment.rVersion || 'Unknown' }}</span>
+            <span class="env-stat-label">Requested Python</span>
+            <button
+              type="button"
+              class="env-stat-value env-stat-button"
+              :disabled="environmentMutationActive"
+              :title="
+                environmentMutationActive
+                  ? 'Cannot change Python while another environment update is running'
+                  : 'Click to change the notebook\'s Python version'
+              "
+              @click="openPythonModal"
+            >
+              {{ notebook.environment.requestedPythonVersion || 'Unknown' }}
+            </button>
           </div>
           <div class="env-stat">
-            <span class="env-stat-label">renv.lock</span>
-            <span class="env-stat-value" :title="notebook.rEnvironment.currentLockHash">
-              {{ shortRLockHash }}
+            <span class="env-stat-label">Runtime Python</span>
+            <span class="env-stat-value">{{
+              notebook.environment.runtimePythonVersion ||
+              notebook.environment.pythonVersion ||
+              'Unknown'
+            }}</span>
+          </div>
+          <div class="env-stat">
+            <span class="env-stat-label">Declared</span>
+            <span class="env-stat-value">{{ notebook.environment.declaredPackageCount }}</span>
+          </div>
+          <div class="env-stat">
+            <span class="env-stat-label">Resolved</span>
+            <span class="env-stat-value">{{ notebook.environment.resolvedPackageCount }}</span>
+          </div>
+          <div class="env-stat">
+            <span class="env-stat-label">Lockfile</span>
+            <span class="env-stat-value" :title="notebook.environment.lockfileHash">
+              {{ shortLockfileHash }}
             </span>
           </div>
-          <div class="env-stat">
-            <span class="env-stat-label">Last sync</span>
-            <span class="env-stat-value">{{ rLastSyncedLabel }}</span>
-          </div>
         </div>
-        <div v-if="notebook.rEnvironment.syncError" class="env-r-error">
-          {{ notebook.rEnvironment.syncError }}
+
+        <div class="env-meta">
+          <div>Last sync: {{ lastSyncedLabel }}</div>
+          <div>Last sync duration: {{ lastSyncDurationLabel }}</div>
+          <div>Runtime source: {{ interpreterSourceLabel }}</div>
+          <div v-if="notebook.environment.venvPython">
+            Interpreter: <code>{{ notebook.environment.venvPython }}</code>
+          </div>
+          <div v-else-if="!notebook.environment.hasLockfile">Lockfile not created yet</div>
         </div>
 
         <!--
-          Installed-package list, mirroring the Python ``dependencies``
-          surface above. ``packagesStatus`` (separate from
-          ``syncState``) tells the user what happened with the
-          listing probe — a renv-not-active or failed probe should
-          NOT look like "library is empty".
+        Requirements editor is Python-specific (requirements.txt /
+        environment.yaml), so it lives inside the Python card. Renders
+        inline above the package list when the user clicks any of the
+        Import/Export buttons in the header.
+      -->
+        <div v-if="requirementsMode" class="requirements-editor">
+          <div class="requirements-header">
+            <strong>{{
+              requirementsMode === 'requirements-export'
+                ? 'requirements.txt Export'
+                : requirementsMode === 'yaml-import'
+                  ? 'environment.yaml Import'
+                  : 'requirements.txt Import'
+            }}</strong>
+            <button class="btn-link" @click="closeRequirementsEditor">Close</button>
+          </div>
+          <p class="requirements-help">
+            {{
+              requirementsMode === 'requirements-export'
+                ? 'These are the direct notebook dependencies managed by pyproject.toml and uv.lock.'
+                : requirementsMode === 'yaml-import'
+                  ? 'Paste or upload a Conda-style environment.yaml. Preview first; apply will replace the notebook’s direct dependencies. Channels and python pins are imported best-effort and may be ignored with warnings.'
+                  : 'Paste or upload plain package specifiers, one per line. Preview first; apply will replace the notebook’s direct dependencies. Comments are allowed; pip flags and nested includes are not.'
+            }}
+          </p>
+          <div v-if="requirementsMode !== 'requirements-export'" class="requirements-file-row">
+            <label class="file-picker">
+              <input
+                type="file"
+                :accept="
+                  requirementsMode === 'yaml-import'
+                    ? '.yaml,.yml,text/yaml,text/x-yaml'
+                    : '.txt,text/plain'
+                "
+                @change="handleImportFile"
+              />
+              Load file
+            </label>
+            <span v-if="importFileName" class="file-name">{{ importFileName }}</span>
+          </div>
+          <textarea
+            v-model="requirementsText"
+            class="requirements-textarea"
+            :readonly="requirementsMode === 'requirements-export'"
+            :placeholder="
+              requirementsMode === 'yaml-import'
+                ? 'name: demo\ndependencies:\n  - python=3.13\n  - pyarrow=18.0.0\n  - pip:\n      - requests==2.32.3'
+                : 'pandas==2.2.3\nnumpy>=2.0'
+            "
+          />
+          <div v-if="environmentImportPreview && hasFreshImportPreview" class="import-preview">
+            <div class="import-preview-summary">
+              {{ environmentImportPreview.importedCount }} direct package{{
+                environmentImportPreview.importedCount === 1 ? '' : 's'
+              }}
+              after import · {{ environmentImportPreview.additions.length }} add ·
+              {{ environmentImportPreview.removals.length }} remove ·
+              {{ environmentImportPreview.unchanged.length }} unchanged
+            </div>
 
-          Read-only in this release — manual ``install.packages()``
-          inside an R cell remains the way to add R deps until the
-          env-job machinery extends to R.
+            <div v-if="environmentImportPreview.additions.length > 0" class="import-preview-block">
+              <strong>Add</strong>
+              <ul class="import-preview-list">
+                <li
+                  v-for="dep in environmentImportPreview.additions"
+                  :key="`add-${dep.name}-${dep.specifier}`"
+                >
+                  <code>{{ dep.name }}{{ dep.specifier || '' }}</code>
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="environmentImportPreview.removals.length > 0" class="import-preview-block">
+              <strong>Remove</strong>
+              <ul class="import-preview-list">
+                <li
+                  v-for="dep in environmentImportPreview.removals"
+                  :key="`remove-${dep.name}-${dep.specifier}`"
+                >
+                  <code>{{ dep.name }}{{ dep.specifier || '' }}</code>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div class="requirements-actions">
+            <button
+              v-if="requirementsMode === 'requirements-export'"
+              class="btn-secondary"
+              :disabled="!requirementsText"
+              @click="downloadRequirements"
+            >
+              Download
+            </button>
+            <button
+              v-if="requirementsMode !== 'requirements-export'"
+              class="btn-secondary"
+              :disabled="
+                !connected ||
+                environmentMutationActive ||
+                dependencyLoading ||
+                environmentLoading ||
+                !requirementsText.trim()
+              "
+              @click="previewImport"
+            >
+              {{ environmentLoading ? 'Previewing…' : 'Preview Import' }}
+            </button>
+            <button
+              v-if="requirementsMode !== 'requirements-export'"
+              class="btn-sync"
+              :disabled="
+                !connected ||
+                environmentMutationActive ||
+                dependencyLoading ||
+                environmentLoading ||
+                !requirementsText.trim() ||
+                !hasFreshImportPreview
+              "
+              @click="applyRequirementsImport"
+            >
+              {{ environmentLoading ? 'Importing…' : 'Apply Import' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="package-view-bar">
+          <div class="package-view-tabs">
+            <button
+              class="package-view-tab"
+              :class="{ active: packageView === 'declared' }"
+              @click="packageView = 'declared'"
+            >
+              Declared
+            </button>
+            <button
+              class="package-view-tab"
+              :class="{ active: packageView === 'resolved' }"
+              @click="packageView = 'resolved'"
+            >
+              Resolved
+            </button>
+          </div>
+          <input
+            v-model="packageFilter"
+            type="text"
+            class="package-filter"
+            placeholder="Filter packages"
+          />
+        </div>
+
+        <div class="add-dep">
+          <input
+            v-model="newPackage"
+            type="text"
+            placeholder="Add package (e.g. pandas)"
+            class="dep-input"
+            :disabled="
+              !connected || environmentMutationActive || dependencyLoading || environmentLoading
+            "
+            @keydown.enter="addPackage"
+          />
+          <button
+            class="btn-add"
+            :disabled="
+              !connected ||
+              environmentMutationActive ||
+              dependencyLoading ||
+              environmentLoading ||
+              !newPackage.trim()
+            "
+            @click="addPackage"
+          >
+            {{ environmentMutationActive ? '…' : dependencyLoading ? '…' : '+' }}
+          </button>
+        </div>
+
+        <div v-if="dependencyError" class="dep-error">
+          {{ dependencyError }}
+        </div>
+
+        <div v-if="currentPackageList.length === 0" class="dep-empty">
+          {{ packageView === 'declared' ? 'No declared packages' : 'No resolved packages' }}
+        </div>
+        <ul v-else class="dep-list">
+          <li
+            v-for="dep in currentPackageList"
+            :key="`${packageView}-${dep.name}-${dep.specifier}-${dep.version}`"
+            class="dep-item"
+          >
+            <div class="dep-details">
+              <span class="dep-name">{{ dep.name }}</span>
+              <span class="dep-version">{{
+                packageView === 'resolved'
+                  ? dep.version || 'unknown'
+                  : dep.version || dep.specifier || 'unpinned'
+              }}</span>
+            </div>
+            <button
+              v-if="packageView === 'declared'"
+              class="btn-remove"
+              title="Remove"
+              :disabled="environmentMutationActive || dependencyLoading || environmentLoading"
+              @click="removePackage(dep.name)"
+            >
+              Remove
+            </button>
+          </li>
+        </ul>
+      </section>
+
+      <!--
+        R card. Renders whenever the notebook has any R cell or an
+        existing renv.lock. Pre-bootstrap state (R cells present,
+        no lockfile yet) shows the "Initialize renv" affordance so
+        the user has a discoverable entry point.
+      -->
+      <section v-if="showRSection" class="env-section env-section--r">
+        <header class="env-section-header">
+          <div class="env-section-title">
+            <span class="env-section-label">R</span>
+            <span class="env-section-state">
+              <span class="status-dot" :class="rStateDotClass"></span>
+              {{ rSyncStateLabel }}
+              <span v-if="rOperationRunning" class="env-section-state-duration">
+                · {{ rOperationDurationLabel }}
+              </span>
+            </span>
+          </div>
+        </header>
+
+        <!--
+          Live state — an ``r_init`` or ``r_add`` env-job is
+          currently running. Shows the command, a hint about why
+          this is slow (arrow source compile), and a tail of the
+          subprocess output. Without this the R card looked
+          identical whether nothing was happening or a 10-min
+          arrow compile was in flight; the user had to scroll to
+          the shared operation footer to know.
         -->
-        <details v-if="notebook.rEnvironment.packages.length > 0" class="env-r-packages" open>
-          <summary class="env-r-packages-summary">
-            Installed packages
-            <span class="env-r-count">{{ notebook.rEnvironment.packages.length }}</span>
-          </summary>
-          <ul class="env-r-package-list">
-            <li v-for="pkg in notebook.rEnvironment.packages" :key="pkg.name" class="env-r-package">
-              <span class="env-r-package-name">{{ pkg.name }}</span>
-              <span class="env-r-package-version">{{ pkg.version }}</span>
-            </li>
-          </ul>
-        </details>
-        <div v-else-if="rPackagesEmptyMessage" class="env-r-empty">
-          {{ rPackagesEmptyMessage }}
+        <div v-if="rOperationRunning" class="env-r-live">
+          <div class="env-r-live-headline">
+            <span class="env-r-live-spinner" aria-hidden="true">⏳</span>
+            {{ rOperationIsInit ? 'Setting up renv…' : 'Installing R package…' }}
+          </div>
+          <div v-if="environmentOperation" class="env-r-live-command">
+            <code>{{ environmentOperation.command }}</code>
+          </div>
+          <p v-if="rOperationIsInit" class="env-r-live-hint">
+            First run compiles the <code>arrow</code> R package from source — typically 5–10 minutes
+            on macOS. Subsequent installs reuse the cached binary.
+          </p>
+          <pre v-if="rOperationTail" class="env-r-live-tail">{{ rOperationTail }}</pre>
         </div>
-        <div v-if="notebook.rEnvironment.packagesStatus === 'failed'" class="env-r-error">
-          Couldn't list packages: {{ notebook.rEnvironment.packagesError || 'unknown error' }}
-        </div>
-      </div>
 
+        <!--
+          Bootstrap state — no ``renv.lock`` on disk yet and no
+          init in flight. ``renv::init(bare = TRUE)`` creates the
+          lockfile + empty project library; user adds packages
+          explicitly via the form below afterwards. Predictable
+          diffs > frictionless auto-init: matches uv's explicit
+          ``add`` pattern.
+        -->
+        <div v-else-if="!notebook.rEnvironment.hasLockfile" class="env-r-bootstrap">
+          <div v-if="notebook.rEnvironment.systemRVersion" class="env-r-bootstrap-meta">
+            R {{ notebook.rEnvironment.systemRVersion }} · system library
+          </div>
+          <p class="env-r-bootstrap-explainer">
+            R cells are running against your system R library. For reproducible builds, initialize a
+            project-scoped <code>renv</code> — this records <code>renv.lock</code> and installs
+            <code>jsonlite</code> + <code>arrow</code> into the notebook's library. First run can
+            take 5–10 min while <code>arrow</code> compiles from source; subsequent installs reuse
+            the binary.
+          </p>
+          <button
+            type="button"
+            class="env-r-button"
+            :disabled="environmentMutationActive"
+            @click="submitInitRenv"
+          >
+            Initialize renv
+          </button>
+        </div>
+
+        <template v-else>
+          <div class="env-stats">
+            <div class="env-stat">
+              <span class="env-stat-label">R version</span>
+              <span class="env-stat-value">{{ notebook.rEnvironment.rVersion || 'Unknown' }}</span>
+            </div>
+            <div class="env-stat">
+              <span class="env-stat-label">renv.lock</span>
+              <span class="env-stat-value" :title="notebook.rEnvironment.currentLockHash">
+                {{ shortRLockHash }}
+              </span>
+            </div>
+            <div class="env-stat">
+              <span class="env-stat-label">Last sync</span>
+              <span class="env-stat-value">{{ rLastSyncedLabel }}</span>
+            </div>
+          </div>
+          <div v-if="notebook.rEnvironment.syncError" class="env-r-error">
+            {{ notebook.rEnvironment.syncError }}
+          </div>
+
+          <!--
+            Add-R-package form. Submit fires `r_add` through the
+            env-job pipeline; the shared operation block below
+            renders progress just like a `uv add`.
+          -->
+          <form class="env-r-add-form" @submit.prevent="submitAddRPackage">
+            <input
+              v-model="newRPackage"
+              type="text"
+              class="env-r-add-input"
+              placeholder="R package (e.g. ggplot2)"
+              :disabled="environmentMutationActive"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <button
+              type="submit"
+              class="env-r-button"
+              :disabled="
+                !newRPackageValid || environmentMutationActive || !notebook.rEnvironment.hasLockfile
+              "
+            >
+              Install
+            </button>
+          </form>
+
+          <details v-if="notebook.rEnvironment.packages.length > 0" class="env-r-packages" open>
+            <summary class="env-r-packages-summary">
+              Installed packages
+              <span class="env-r-count">{{ notebook.rEnvironment.packages.length }}</span>
+            </summary>
+            <ul class="env-r-package-list">
+              <li
+                v-for="pkg in notebook.rEnvironment.packages"
+                :key="pkg.name"
+                class="env-r-package"
+              >
+                <span class="env-r-package-name">{{ pkg.name }}</span>
+                <span class="env-r-package-version">{{ pkg.version }}</span>
+              </li>
+            </ul>
+          </details>
+          <div v-else-if="rPackagesEmptyMessage" class="env-r-empty">
+            {{ rPackagesEmptyMessage }}
+          </div>
+          <div v-if="notebook.rEnvironment.packagesStatus === 'failed'" class="env-r-error">
+            Couldn't list packages: {{ notebook.rEnvironment.packagesError || 'unknown error' }}
+          </div>
+        </template>
+      </section>
+
+      <!--
+        Shared footer — cross-language operation state, history, and
+        errors. ``env-job`` machinery is shared between ``uv add`` /
+        ``renv::install`` / etc., so a single timeline shows the user
+        every recent environment change regardless of which card
+        triggered it.
+      -->
       <div v-if="lastActionLabel" class="env-action">
         {{ lastActionLabel }}
       </div>
@@ -696,210 +1130,6 @@ function downloadRequirements() {
           </li>
         </ul>
       </div>
-
-      <div v-if="requirementsMode" class="requirements-editor">
-        <div class="requirements-header">
-          <strong>{{
-            requirementsMode === 'requirements-export'
-              ? 'requirements.txt Export'
-              : requirementsMode === 'yaml-import'
-                ? 'environment.yaml Import'
-                : 'requirements.txt Import'
-          }}</strong>
-          <button class="btn-link" @click="closeRequirementsEditor">Close</button>
-        </div>
-        <p class="requirements-help">
-          {{
-            requirementsMode === 'requirements-export'
-              ? 'These are the direct notebook dependencies managed by pyproject.toml and uv.lock.'
-              : requirementsMode === 'yaml-import'
-                ? 'Paste or upload a Conda-style environment.yaml. Preview first; apply will replace the notebook’s direct dependencies. Channels and python pins are imported best-effort and may be ignored with warnings.'
-                : 'Paste or upload plain package specifiers, one per line. Preview first; apply will replace the notebook’s direct dependencies. Comments are allowed; pip flags and nested includes are not.'
-          }}
-        </p>
-        <div v-if="requirementsMode !== 'requirements-export'" class="requirements-file-row">
-          <label class="file-picker">
-            <input
-              type="file"
-              :accept="
-                requirementsMode === 'yaml-import'
-                  ? '.yaml,.yml,text/yaml,text/x-yaml'
-                  : '.txt,text/plain'
-              "
-              @change="handleImportFile"
-            />
-            Load file
-          </label>
-          <span v-if="importFileName" class="file-name">{{ importFileName }}</span>
-        </div>
-        <textarea
-          v-model="requirementsText"
-          class="requirements-textarea"
-          :readonly="requirementsMode === 'requirements-export'"
-          :placeholder="
-            requirementsMode === 'yaml-import'
-              ? 'name: demo\ndependencies:\n  - python=3.13\n  - pyarrow=18.0.0\n  - pip:\n      - requests==2.32.3'
-              : 'pandas==2.2.3\nnumpy>=2.0'
-          "
-        />
-        <div v-if="environmentImportPreview && hasFreshImportPreview" class="import-preview">
-          <div class="import-preview-summary">
-            {{ environmentImportPreview.importedCount }} direct package{{
-              environmentImportPreview.importedCount === 1 ? '' : 's'
-            }}
-            after import · {{ environmentImportPreview.additions.length }} add ·
-            {{ environmentImportPreview.removals.length }} remove ·
-            {{ environmentImportPreview.unchanged.length }} unchanged
-          </div>
-
-          <div v-if="environmentImportPreview.additions.length > 0" class="import-preview-block">
-            <strong>Add</strong>
-            <ul class="import-preview-list">
-              <li
-                v-for="dep in environmentImportPreview.additions"
-                :key="`add-${dep.name}-${dep.specifier}`"
-              >
-                <code>{{ dep.name }}{{ dep.specifier || '' }}</code>
-              </li>
-            </ul>
-          </div>
-
-          <div v-if="environmentImportPreview.removals.length > 0" class="import-preview-block">
-            <strong>Remove</strong>
-            <ul class="import-preview-list">
-              <li
-                v-for="dep in environmentImportPreview.removals"
-                :key="`remove-${dep.name}-${dep.specifier}`"
-              >
-                <code>{{ dep.name }}{{ dep.specifier || '' }}</code>
-              </li>
-            </ul>
-          </div>
-        </div>
-        <div class="requirements-actions">
-          <button
-            v-if="requirementsMode === 'requirements-export'"
-            class="btn-secondary"
-            :disabled="!requirementsText"
-            @click="downloadRequirements"
-          >
-            Download
-          </button>
-          <button
-            v-if="requirementsMode !== 'requirements-export'"
-            class="btn-secondary"
-            :disabled="
-              !connected ||
-              environmentMutationActive ||
-              dependencyLoading ||
-              environmentLoading ||
-              !requirementsText.trim()
-            "
-            @click="previewImport"
-          >
-            {{ environmentLoading ? 'Previewing…' : 'Preview Import' }}
-          </button>
-          <button
-            v-if="requirementsMode !== 'requirements-export'"
-            class="btn-sync"
-            :disabled="
-              !connected ||
-              environmentMutationActive ||
-              dependencyLoading ||
-              environmentLoading ||
-              !requirementsText.trim() ||
-              !hasFreshImportPreview
-            "
-            @click="applyRequirementsImport"
-          >
-            {{ environmentLoading ? 'Importing…' : 'Apply Import' }}
-          </button>
-        </div>
-      </div>
-
-      <div class="package-view-bar">
-        <div class="package-view-tabs">
-          <button
-            class="package-view-tab"
-            :class="{ active: packageView === 'declared' }"
-            @click="packageView = 'declared'"
-          >
-            Declared
-          </button>
-          <button
-            class="package-view-tab"
-            :class="{ active: packageView === 'resolved' }"
-            @click="packageView = 'resolved'"
-          >
-            Resolved
-          </button>
-        </div>
-        <input
-          v-model="packageFilter"
-          type="text"
-          class="package-filter"
-          placeholder="Filter packages"
-        />
-      </div>
-
-      <div class="add-dep">
-        <input
-          v-model="newPackage"
-          type="text"
-          placeholder="Add package (e.g. pandas)"
-          class="dep-input"
-          :disabled="
-            !connected || environmentMutationActive || dependencyLoading || environmentLoading
-          "
-          @keydown.enter="addPackage"
-        />
-        <button
-          class="btn-add"
-          :disabled="
-            !connected ||
-            environmentMutationActive ||
-            dependencyLoading ||
-            environmentLoading ||
-            !newPackage.trim()
-          "
-          @click="addPackage"
-        >
-          {{ environmentMutationActive ? '…' : dependencyLoading ? '…' : '+' }}
-        </button>
-      </div>
-
-      <div v-if="dependencyError" class="dep-error">
-        {{ dependencyError }}
-      </div>
-
-      <div v-if="currentPackageList.length === 0" class="dep-empty">
-        {{ packageView === 'declared' ? 'No declared packages' : 'No resolved packages' }}
-      </div>
-      <ul v-else class="dep-list">
-        <li
-          v-for="dep in currentPackageList"
-          :key="`${packageView}-${dep.name}-${dep.specifier}-${dep.version}`"
-          class="dep-item"
-        >
-          <div class="dep-details">
-            <span class="dep-name">{{ dep.name }}</span>
-            <span class="dep-version">{{
-              packageView === 'resolved'
-                ? dep.version || 'unknown'
-                : dep.version || dep.specifier || 'unpinned'
-            }}</span>
-          </div>
-          <button
-            v-if="packageView === 'declared'"
-            class="btn-remove"
-            title="Remove"
-            :disabled="environmentMutationActive || dependencyLoading || environmentLoading"
-            @click="removePackage(dep.name)"
-          >
-            Remove
-          </button>
-        </li>
-      </ul>
     </div>
 
     <PythonVersionModal
@@ -957,40 +1187,67 @@ function downloadRequirements() {
 
 .env-content {
   margin-top: 8px;
-}
-
-.env-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.env-status-block {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
 }
 
-.env-status {
+/*
+ * Language card chrome. The bordered + padded card gives Python and
+ * R clear visual separation so the R section no longer reads as a
+ * Python sub-block. Both cards use identical structure; the
+ * ``--python`` / ``--r`` modifiers only exist to allow tinted
+ * borders if we want differentiation later.
+ */
+.env-section {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--bg-card, var(--bg-input));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.env-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.env-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.env-section-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+/*
+ * Status pill has a neutral background; the colored ``.status-dot``
+ * (using the shared ``.state-*`` palette) does the signaling. This
+ * keeps the pill from screaming green/red while still giving an
+ * at-a-glance health indicator.
+ */
+.env-section-state {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.env-status-help {
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-input);
   color: var(--text-secondary);
   font-size: 11px;
-  line-height: 1.4;
-  max-width: 320px;
-}
-
-.env-status-help code {
-  color: var(--accent-primary);
+  font-weight: 500;
 }
 
 .status-dot {
@@ -1119,49 +1376,6 @@ function downloadRequirements() {
   word-break: break-all;
 }
 
-.env-r-section {
-  margin-top: 12px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border-subtle);
-}
-
-.env-r-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.env-r-state {
-  font-size: 10px;
-  font-weight: 500;
-  padding: 2px 6px;
-  border-radius: 3px;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.r-state-ok {
-  color: var(--accent-success);
-  background: var(--tint-success, rgba(0, 128, 0, 0.08));
-}
-
-.r-state-failed,
-.r-state-outdated {
-  color: var(--accent-warn, #b07000);
-  background: var(--tint-warn, rgba(176, 112, 0, 0.1));
-}
-
-.r-state-never {
-  color: var(--text-secondary);
-  background: var(--bg-input);
-}
-
 .env-r-error {
   margin-top: 6px;
   padding: 6px 8px;
@@ -1227,6 +1441,137 @@ function downloadRequirements() {
   font-size: 11px;
   font-style: italic;
   color: var(--text-secondary);
+}
+
+.env-r-bootstrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.env-r-bootstrap-explainer {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.env-r-bootstrap-meta {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.env-r-bootstrap-explainer code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  color: var(--accent-primary);
+}
+
+.env-r-live {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 10px;
+  border-radius: 6px;
+  background: var(--tint-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+.env-r-live-headline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.env-r-live-spinner {
+  font-size: 14px;
+}
+
+.env-r-live-command {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.env-r-live-hint {
+  margin: 2px 0 0 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.env-r-live-hint code {
+  color: var(--accent-primary);
+  font-size: 10px;
+}
+
+.env-r-live-tail {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  border-radius: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.env-section-state-duration {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.env-r-add-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.env-r-add-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--tint-primary);
+  border: 1px solid var(--bg-input);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.env-r-add-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.env-r-button {
+  border: 1px solid var(--border-strong);
+  background: var(--tint-primary);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.env-r-button:hover:not(:disabled) {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.env-r-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .env-action {
