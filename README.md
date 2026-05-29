@@ -38,7 +38,7 @@ blobs or execution metadata bleeding into the history.
 - **git-friendly:** notebooks are plain `.py` files plus a TOML manifest — readable diffs, no JSON blobs
 - **prompt cells:** LLM calls are first-class DAG nodes, `{{ variable }}` interpolation from upstream cells, cached by template + inputs + model config
 - **SQL cells:** named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery
-- **R cells (experimental, 0.2.0):** Python and R cells share a DAG; cross-language Arrow exchange means a `pandas.DataFrame` is a `data.frame` for the next cell. Hand-edit `notebook.toml` to opt in for now — UI integration + automatic `renv::restore()` are queued for 0.3.0
+- **R cells (0.2.0):** Python and R cells share a DAG; cross-language Arrow exchange means a `pandas.DataFrame` is a `data.frame` for the next cell. First-class in the UI — Add-R-cell menu, an R environment panel with one-click renv bootstrap + package install, and automatic `renv::restore()` on open
 - **loop cells:** `# @loop max_iter=N carry=state` iterates a cell with explicit carry between steps — each iteration is its own artifact
 - **distributed:** `# @worker gpu-fly` dispatches a single cell to a remote box — bring your own compute
 - **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3 / GCS / Azure prefix a local `pathlib.Path`

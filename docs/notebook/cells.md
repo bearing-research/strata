@@ -8,7 +8,7 @@ Strata Notebook has five cell kinds:
 | **Prompt** | A text template sent to an AI model     | Pick **Prompt** from the **+ Add cell** menu                  |
 | **SQL**    | A query against a connected database    | Pick **SQL** from the **+ Add cell** menu                     |
 | **Loop**   | A Python cell executed N times in a row | Add a Python cell, then put a `# @loop` annotation at the top |
-| **R** *(experimental)* | R source via the system `Rscript` | Hand-edit `notebook.toml`; UI integration is 0.3.0 |
+| **R**      | R source via the system `Rscript`       | Pick **R** from the **+ Add cell** menu                      |
 
 All five participate in the DAG, cache by provenance hash, and can be routed to remote workers. Pick the kind that matches the shape of the computation, this page walks through each.
 
@@ -672,24 +672,29 @@ Reach for loop cells when **being able to inspect or fork from iteration k matte
 
 ---
 
-## R Cells *(experimental, 0.2.0)*
+## R Cells *(0.2.0)*
 
-R cells run R source via the system `Rscript`, with the same provenance + caching + Arrow-IPC artifact pipeline as Python cells. Data crosses the language boundary as `arrow/ipc`: a `pandas.DataFrame` produced by a Python cell becomes a `data.frame` in the next R cell; an R `data.frame` (or `tibble`) becomes a `pandas.DataFrame` in the next Python cell. Non-tabular R values (S3 objects, lists with classes, environments) are stored as RDS and tagged `r_only=true` — a downstream Python cell that consumes one fails with a structured `StrataRArtifactError` rather than a confusing `NameError`.
+R is a first-class notebook language alongside Python. R cells run R source via the system `Rscript`, with the same provenance + caching + Arrow-IPC artifact pipeline as Python cells. Data crosses the language boundary as `arrow/ipc`: a `pandas.DataFrame` produced by a Python cell becomes a `data.frame` in the next R cell; an R `data.frame` (or `tibble`) becomes a `pandas.DataFrame` in the next Python cell. Non-tabular R values (S3 objects, lists with classes, environments) are stored as RDS and tagged `r_only=true` — a downstream Python cell that consumes one fails with a structured `StrataRArtifactError` rather than a confusing `NameError`.
 
-### What's experimental about it
+### R environments
 
-R support lands at the execution layer in 0.2.0. Three pieces are deliberately deferred:
+R environments are managed from the **Environment** panel, at parity with Python's uv-backed venv:
 
-1. **UI integration.** The frontend's `+ Add cell` menu doesn't list R yet. To add an R cell, edit `notebook.toml` directly — find the `cells` array and add a row with `language = "r"` and a `cells/<id>.r` file.
-2. **Automatic `renv::restore()`.** The `_renv_sync` helper exists and the `[r]` block schema in `notebook.toml` is reserved, but session-open does not yet call into the helper. Users install R packages manually (`Rscript -e 'install.packages(c("arrow", "jsonlite"))'`) and any cell-specific dependencies live in the system R library.
-3. **Structured missing-package errors.** Python cells get a "click to install" hint when an `import` fails; R cells don't surface that signal yet.
+- **System R by default.** A notebook with no `renv.lock` runs R cells against your system R library. The R card reads **System R** and shows the detected R version — cells work immediately as long as `arrow` + `jsonlite` are available system-wide.
+- **One-click renv bootstrap.** **Initialize renv** creates a project-scoped, reproducible environment: it installs `renv` if missing, inits a bare project library, installs `jsonlite` + `arrow`, and snapshots to `renv.lock`. Progress streams live on the card (the first run compiles `arrow` from source, which takes a few minutes). When it finishes the card flips to **In sync**.
+- **Per-package install.** A missing-package error in an R cell surfaces a structured hint with an **Install** button that runs `renv::install()` + `renv::snapshot()` for the named package.
+- **Automatic restore on open.** Opening a notebook that has an `renv.lock` restores the project library automatically — the `uv sync` analogue for R. Editing `renv.lock` invalidates R cells' cache the same way editing `uv.lock` invalidates Python cells'.
 
-The R Phase 2 issues that close these gaps are tracked on GitHub: [#80](https://github.com/bearing-research/strata/issues/80) (ggplot → PNG display), [#81](https://github.com/bearing-research/strata/issues/81) (warm Rscript pool), [#82](https://github.com/bearing-research/strata/issues/82) (renv library fixture), [#83](https://github.com/bearing-research/strata/issues/83) (R version matrix on CI), [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
+`renv.lock` is committed config (like `uv.lock`); the built `renv/library/` is gitignored.
+
+### What's still ahead
+
+R execution is complete; remaining R polish is tracked on GitHub: [#80](https://github.com/bearing-research/strata/issues/80) (ggplot → PNG display), [#81](https://github.com/bearing-research/strata/issues/81) (warm Rscript pool), [#82](https://github.com/bearing-research/strata/issues/82) (renv library fixture), [#83](https://github.com/bearing-research/strata/issues/83) (R version matrix on CI), [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
 
 ### What you need today
 
 - R `>= 4.2` on `PATH` (Strata calls `Rscript`).
-- The `arrow` and `jsonlite` R packages installed in the system / project library — the harness loads both.
+- The `arrow` and `jsonlite` R packages — either available in the system R library, or installed into a project library via **Initialize renv** in the Environment panel (which installs both for you).
 
 ### Example
 
@@ -722,7 +727,7 @@ An R cell whose harness can't find `Rscript` on `PATH` returns a clean cell-leve
 | Prompt cell  | An AI response as a first-class, cached, DAG-participating artifact.                                   |
 | SQL cell     | A query against a connected database, with bind parameters, schema discovery, and probe-based caching. |
 | Loop cell    | Iterative refinement where pausing or forking from an intermediate state matters.                      |
-| R cell *(experimental)* | A computation where R's stats / formula syntax / domain packages are the right tool, while keeping the rest of the pipeline in Python. |
+| R cell       | A computation where R's stats / formula syntax / domain packages are the right tool, while keeping the rest of the pipeline in Python. |
 
 Mixing is encouraged, a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.
 

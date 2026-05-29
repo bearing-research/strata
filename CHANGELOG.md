@@ -5,14 +5,16 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## 0.2.0 — 2026-05-27
+## 0.2.0 — 2026-05-29
 
-Second release. Headline: **R cells (experimental)** alongside Python in
-the same notebook with cross-language Arrow handoff. Plus run-all
-batching that amortises subprocess cost across consecutive Python cells,
-a 60-second WS reconnect grace so a flaky network doesn't kill a running
-execution, real-emulator integration tests for the S3 / Azure / GCS mount
-schemes, and versioned docs via `mike`.
+Second release. Headline: **R cells** alongside Python in the same
+notebook with cross-language Arrow handoff — first-class in the UI, with
+an R environment panel (one-click renv bootstrap + package install) and
+automatic `renv::restore()` on open. Plus run-all batching that amortises
+subprocess cost across consecutive Python cells, a 60-second WS reconnect
+grace so a flaky network doesn't kill a running execution, real-emulator
+integration tests for the S3 / Azure / GCS mount schemes, and versioned
+docs via `mike`.
 
 Upgrading from 0.1.0 is non-breaking. The artifact cache stays valid —
 `compute_lockfile_hash` was extended to fold `renv.lock` content but
@@ -23,15 +25,14 @@ unaffected. No Python API surface removed.
 
 ### Added
 
-#### R cells (experimental)
+#### R cells
 
-R support lands at the execution layer with a deliberate "experimental"
-label — cells execute end-to-end, cross-language Arrow exchange works,
-provenance/caching is language-agnostic, but the UX layer (Add-R-cell
-in the menu, R environment panel, automatic `renv::restore()` on open)
-is queued for 0.3.0. You can use R cells today by hand-editing
-`notebook.toml` and installing R + `arrow` + `jsonlite` yourself; the
-example notebook below shows the shape.
+R is a first-class notebook language alongside Python: cells execute
+end-to-end, cross-language Arrow exchange works, provenance/caching is
+language-agnostic, and the full UX layer ships in this release — R cells
+in the Add-cell menu, an R environment panel with one-click renv
+bootstrap + package install, and automatic `renv::restore()` on open.
+The example notebook below shows the shape.
 
 - `LanguageExecutor` + `LanguageAnalyzer` protocols + registries under
   `src/strata/notebook/languages/` — generalises the cell-language story
@@ -53,8 +54,21 @@ example notebook below shows the shape.
   `compute_lockfile_hash`, so editing the lockfile invalidates R cells'
   cache the same way `uv.lock` invalidates Python cells'. Backward-
   compatible: notebooks without `renv.lock` see byte-identical hashes.
-- `_renv_sync` helper + `[r]` block schema in `notebook.toml`. The
-  helper is defined; the auto-wiring on session open is 0.3.0.
+- `_renv_sync` helper + `[r]` block schema in `notebook.toml`, wired into
+  session open: opening a notebook with an `renv.lock` restores the
+  project library automatically (the `uv sync` analogue for R).
+- R cells in the Add-cell menu with the correct `.R` file extension —
+  no more hand-editing `notebook.toml` to add one.
+- R environment panel at parity with Python: a stacked R card shows the
+  current renv state (System R vs in-sync vs lockfile-edited), a one-click
+  **Initialize renv** bootstrap (install renv → bare project library →
+  `jsonlite` + `arrow` → snapshot) with live streamed progress, and a
+  per-package **Install** action driven off the missing-package hint. R
+  environment jobs stream stdout/stderr over the WS and persist a synced
+  R runtime (lock hash + timestamp + R version) on success.
+- A missing-package error in an R cell surfaces a structured install hint;
+  an erroring R cell now marks its READY downstream cells stale instead of
+  leaving them green.
 - `# @mount`, `# @env KEY=VAL`, and `# @name` annotations work on R
   cells with no R-specific parser changes — the annotation parser is
   language-agnostic.
@@ -144,9 +158,9 @@ partition into per-language runs automatically.
 - `test_routes.py` + `test_ws.py` boilerplate collapses into shared
   helpers / fixtures — net subtraction in the test suite, fewer places
   to drift on protocol changes.
-- README's Highlights section calls out R cells (experimental), DAG
-  view, loop cells, prompt-cell variable resolution, and auto-install
-  hints. The buried feature list under "Quick Start" is gone.
+- README's Highlights section calls out R cells, DAG view, loop cells,
+  prompt-cell variable resolution, and auto-install hints. The buried
+  feature list under "Quick Start" is gone.
 
 ### Fixed
 
