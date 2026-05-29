@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shlex
+import shutil
 import subprocess
 import threading
 import time
@@ -426,6 +427,140 @@ def list_resolved_dependencies(notebook_dir: Path) -> list[DependencyInfo]:
 
     resolved.sort(key=lambda dep: dep.name)
     return resolved
+
+
+@dataclass
+class RPackageInfo:
+    """One R package installed in the notebook's renv project library.
+
+    Lightweight parallel to ``DependencyInfo`` for the R side — the
+    env panel renders both lists side by side. ``version`` is the
+    string CRAN/renv stores (R doesn't use PEP 440); render as-is.
+    """
+
+    name: str
+    version: str
+
+
+@dataclass
+class RPackageListing:
+    """Result of listing R packages installed in the project library.
+
+    Two-state result so the UI can distinguish "the probe failed"
+    from "the library is empty" — both produce an empty ``packages``
+    list but only the former carries a non-``None`` ``error``.
+
+    ``status`` values:
+
+    * ``"ok"`` — listing succeeded. ``packages`` is the live content
+      of the renv project library (possibly empty when nothing's
+      installed yet).
+    * ``"rscript_missing"`` — Rscript not on PATH; install R to
+      enable R cells.
+    * ``"renv_not_active"`` — Rscript ran but the project's
+      ``.Rprofile`` didn't activate renv (pre-``renv::init()``
+      state, or broken activator). The project library directory
+      doesn't exist; treat as empty.
+    * ``"failed"`` — subprocess error (timeout, non-zero exit,
+      malformed output). ``error`` carries a short message for the
+      UI to surface.
+    """
+
+    packages: list[RPackageInfo]
+    status: str
+    error: str | None = None
+
+
+def list_r_packages(notebook_dir: Path, *, timeout: int = 30) -> RPackageListing:
+    """List R packages installed in the notebook's renv project library.
+
+    Spawns ``Rscript`` with ``cwd=notebook_dir`` so the project's
+    ``.Rprofile`` (renv activator) sources before the snippet runs.
+    The R snippet scopes ``installed.packages()`` to the renv project
+    library via ``renv::paths$library(project = getwd())`` —
+    *without* this scope, ``installed.packages()`` enumerates every
+    directory in ``.libPaths()`` (system + user + project) and the
+    UI ends up labeling base R packages as "installed in the project
+    library".
+
+    When renv isn't loadable in the spawned process (pre-init
+    notebooks, broken ``.Rprofile``), the snippet emits a sentinel
+    line ``RENV_NOT_ACTIVE`` and exits 0; that surfaces as
+    ``status = "renv_not_active"`` in the result so the UI can show
+    a targeted hint rather than the misleading "no packages
+    installed".
+    """
+    rscript = shutil.which("Rscript")
+    if rscript is None:
+        return RPackageListing(packages=[], status="rscript_missing", error=None)
+
+    # ``installed.packages(lib.loc = renv::paths$library(...))`` is the
+    # canonical way to enumerate just the project library. Wrap the
+    # renv lookup in ``tryCatch`` so a missing renv namespace (pre-
+    # bootstrap or broken activate) doesn't surface as "Rscript exited
+    # non-zero" — instead emit ``RENV_NOT_ACTIVE`` and let the Python
+    # side translate. ``apply`` on a 1-row matrix collapses to a
+    # vector; loop instead so parsing stays uniform regardless of
+    # package count.
+    r_snippet = "\n".join(
+        [
+            "lib <- tryCatch(",
+            "  renv::paths$library(project = getwd()),",
+            "  error = function(e) NULL",
+            ")",
+            "if (is.null(lib) || !dir.exists(lib)) {",
+            '  cat("RENV_NOT_ACTIVE\\n")',
+            "} else {",
+            "  ip <- installed.packages(lib.loc = lib)",
+            "  for (i in seq_len(nrow(ip))) {",
+            '    cat(ip[i, "Package"], ip[i, "Version"], sep = "\\t")',
+            '    cat("\\n")',
+            "  }",
+            "}",
+        ]
+    )
+
+    try:
+        proc = subprocess.run(  # noqa: S603 — rscript resolved via shutil.which
+            [rscript, "-e", r_snippet],
+            cwd=str(notebook_dir),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        logger.debug("R package listing timed out: %s", exc)
+        return RPackageListing(
+            packages=[], status="failed", error=f"Rscript timed out after {timeout}s"
+        )
+    except OSError as exc:
+        logger.debug("R package listing failed to spawn: %s", exc)
+        return RPackageListing(packages=[], status="failed", error=str(exc))
+
+    if proc.returncode != 0:
+        snippet = proc.stderr.strip()[:200] or proc.stdout.strip()[:200]
+        logger.debug(
+            "R package listing returned non-zero (%d): %s",
+            proc.returncode,
+            snippet,
+        )
+        return RPackageListing(
+            packages=[],
+            status="failed",
+            error=snippet or f"Rscript exited with code {proc.returncode}",
+        )
+
+    if "RENV_NOT_ACTIVE" in proc.stdout:
+        return RPackageListing(packages=[], status="renv_not_active", error=None)
+
+    packages: list[RPackageInfo] = []
+    for line in proc.stdout.splitlines():
+        parts = line.strip().split("	")
+        if len(parts) >= 2 and parts[0] and parts[1]:
+            packages.append(RPackageInfo(name=parts[0], version=parts[1]))
+    packages.sort(key=lambda pkg: pkg.name)
+    return RPackageListing(packages=packages, status="ok", error=None)
 
 
 def export_requirements_text(notebook_dir: Path) -> str:

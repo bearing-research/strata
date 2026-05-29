@@ -264,8 +264,15 @@ export interface Cell {
   annotations?: CellAnnotations
   /** Causality chain explaining why this cell is stale */
   causality?: CausalityChain
-  /** Suggested package to install (when execution fails with ModuleNotFoundError) */
+  /** Suggested package to install (when execution fails with a
+   * recognisable missing-package error). */
   suggestInstall?: string
+  /** Language the suggested install applies to. ``"python"`` → the
+   * cell install button calls ``uv add``. ``"r"`` → the button is
+   * hidden until the R install action ships (manual
+   * ``install.packages()`` in an R cell remains the workaround).
+   * Backend always emits this when ``suggestInstall`` is set. */
+  suggestInstallLanguage?: 'python' | 'r'
   /** Shadow warnings from the DAG builder */
   shadowWarnings?: string[]
   /** Annotation validation diagnostics (set on open/reload, never during typing) */
@@ -451,6 +458,39 @@ export interface RNotebookEnvironment {
   syncState: 'absent' | 'never' | 'ok' | 'outdated' | 'failed'
   /** Error message from the most recent failed attempt, or null. */
   syncError: string | null
+  /** Packages installed in the renv project library, sorted by name.
+   *
+   * Populated by an explicit ``GET /v1/notebooks/{id}/r-packages``
+   * fetch — the env-state serialization on open / state sync /
+   * env refresh deliberately omits the package list so those
+   * paths don't pay a synchronous Rscript spawn. The env panel
+   * fetches lazily on mount.
+   *
+   * ``packagesStatus`` disambiguates "the probe failed" from
+   * "the library is empty" — both produce ``packages: []``.
+   */
+  packages: RPackageInfo[]
+  /** Outcome of the most recent ``installed.packages()`` probe.
+   *
+   * - ``unknown``           — the panel hasn't fetched yet.
+   * - ``absent``            — no renv.lock; nothing to probe.
+   * - ``ok``                — listing succeeded.
+   * - ``rscript_missing``   — Rscript not on PATH.
+   * - ``renv_not_active``   — renv hasn't activated (pre-init).
+   * - ``failed``            — subprocess error; ``packagesError``
+   *                           has the message.
+   */
+  packagesStatus: 'unknown' | 'absent' | 'ok' | 'rscript_missing' | 'renv_not_active' | 'failed'
+  /** Short error message when ``packagesStatus === 'failed'``. */
+  packagesError: string | null
+}
+
+// One R package installed in the project's renv library.
+// Parallel to ``DependencyInfo`` for the Python side. R uses CRAN
+// version strings rather than PEP 440 — render the version as-is.
+export interface RPackageInfo {
+  name: string
+  version: string
 }
 
 export interface NotebookRuntimeConfig {

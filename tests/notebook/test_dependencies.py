@@ -10,9 +10,11 @@ Validates:
 from __future__ import annotations
 
 import asyncio
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -21,6 +23,8 @@ from fastapi.testclient import TestClient
 from strata.notebook.dependencies import (
     DependencyChangeResult,
     EnvironmentOperationLog,
+    RPackageInfo,
+    RPackageListing,
     add_dependency,
     export_requirements_text,
     import_environment_yaml_text,
@@ -28,6 +32,7 @@ from strata.notebook.dependencies import (
     import_requirements_text,
     import_requirements_text_streaming,
     list_dependencies,
+    list_r_packages,
     list_resolved_dependencies,
     parse_environment_yaml_text,
     parse_requirements_text,
@@ -865,3 +870,164 @@ class TestDependencyWebSocket:
                 status2 = ws.receive_until("cell_status", cell_id="c2")
                 assert status1["payload"]["status"] == "idle"
                 assert status2["payload"]["status"] == "idle"
+
+
+# ============================================================================
+# R package listing
+# ============================================================================
+
+
+class TestListRPackages:
+    """``list_r_packages`` parses ``installed.packages()`` output for the UI.
+
+    Returns an ``RPackageListing`` that explicitly distinguishes
+    "the probe failed" from "the project library is empty" — the
+    bare-list-returning shape lost that distinction and the UI
+    rendered "no packages installed" on probe failures (Codex
+    review on #88).
+    """
+
+    def test_rscript_missing_returns_status(self, monkeypatch, tmp_path):
+        """No Rscript on PATH → ``status='rscript_missing'``, no spawn."""
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **kw: pytest.fail("Rscript missing → must not invoke subprocess.run"),
+        )
+        result = list_r_packages(tmp_path)
+        assert result == RPackageListing(packages=[], status="rscript_missing", error=None)
+
+    def test_parses_installed_packages_output(self, monkeypatch, tmp_path):
+        """Two-column tab output → ``RPackageInfo`` entries, sorted by name,
+        with ``status='ok'``."""
+        monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
+        sample_stdout = "tibble\t3.2.1\narrow\t14.0.0\njsonlite\t1.8.7\n"
+
+        def fake_run(args, **kwargs):
+            assert args[0] == "/fake/Rscript"
+            # Confirm we scope to the project library via renv —
+            # a bare ``installed.packages()`` would enumerate every
+            # ``.libPaths()`` entry (P1 from #88 review).
+            assert "renv::paths$library" in args[2]
+            assert "lib.loc = lib" in args[2]
+            return SimpleNamespace(returncode=0, stdout=sample_stdout, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        result = list_r_packages(tmp_path)
+
+        assert result.status == "ok"
+        assert result.error is None
+        assert result.packages == [
+            RPackageInfo(name="arrow", version="14.0.0"),
+            RPackageInfo(name="jsonlite", version="1.8.7"),
+            RPackageInfo(name="tibble", version="3.2.1"),
+        ]
+
+    def test_renv_not_active_sentinel(self, monkeypatch, tmp_path):
+        """When the R snippet can't load renv (pre-bootstrap notebook,
+        broken activator) it emits the ``RENV_NOT_ACTIVE`` sentinel
+        and exits 0 — surface as ``status='renv_not_active'`` so the
+        UI can render a targeted hint."""
+        monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **kw: SimpleNamespace(returncode=0, stdout="RENV_NOT_ACTIVE\n", stderr=""),
+        )
+
+        result = list_r_packages(tmp_path)
+
+        assert result == RPackageListing(packages=[], status="renv_not_active", error=None)
+
+    def test_empty_library_status_ok(self, monkeypatch, tmp_path):
+        """Empty project library: status ``ok`` + empty packages list.
+        Different from the failure modes — the UI shows "no packages
+        installed" only on the ``ok``-but-empty case."""
+        monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **kw: SimpleNamespace(returncode=0, stdout="", stderr=""),
+        )
+
+        result = list_r_packages(tmp_path)
+
+        assert result == RPackageListing(packages=[], status="ok", error=None)
+
+    def test_nonzero_exit_returns_failed_status(self, monkeypatch, tmp_path):
+        """Rscript exits non-zero (corrupt R install, etc.) →
+        ``status='failed'`` + error message from stderr. Pre-fix
+        this returned the same empty list as a healthy empty
+        library, and the UI couldn't tell them apart."""
+        monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **kw: SimpleNamespace(
+                returncode=1, stdout="", stderr="cannot find R installation"
+            ),
+        )
+
+        result = list_r_packages(tmp_path)
+
+        assert result.status == "failed"
+        assert result.packages == []
+        assert result.error == "cannot find R installation"
+
+    def test_timeout_returns_failed_status(self, monkeypatch, tmp_path):
+        """Hanging Rscript → ``status='failed'`` with a timeout message."""
+        monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
+
+        def fake_run(*a, **kw):
+            raise subprocess.TimeoutExpired(cmd="Rscript", timeout=30)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        result = list_r_packages(tmp_path)
+
+        assert result.status == "failed"
+        assert result.packages == []
+        assert result.error and "timed out" in result.error
+
+    def test_skips_malformed_lines(self, monkeypatch, tmp_path):
+        """Lines without name+version columns are silently dropped — the
+        loop tolerates a single bad line without losing the rest. Final
+        status is still ``ok`` (the malformed lines aren't an error)."""
+        monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
+        sample_stdout = (
+            "arrow\t14.0.0\n"
+            "garbage-line-no-tab\n"
+            "\t\n"  # empty fields
+            "tibble\t3.2.1\n"
+        )
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **kw: SimpleNamespace(returncode=0, stdout=sample_stdout, stderr=""),
+        )
+
+        result = list_r_packages(tmp_path)
+
+        assert result.status == "ok"
+        assert result.packages == [
+            RPackageInfo(name="arrow", version="14.0.0"),
+            RPackageInfo(name="tibble", version="3.2.1"),
+        ]
+
+    def test_runs_with_notebook_cwd(self, monkeypatch, tmp_path):
+        """Rscript runs with cwd=notebook_dir so ``.Rprofile`` activates
+        renv and ``renv::paths$library(project = getwd())`` resolves
+        to the project's library, not the system library."""
+        monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
+        captured: dict[str, str | None] = {}
+
+        def fake_run(args, **kwargs):
+            captured["cwd"] = kwargs.get("cwd")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        list_r_packages(tmp_path)
+
+        assert captured["cwd"] == str(tmp_path)

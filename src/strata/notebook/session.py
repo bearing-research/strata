@@ -32,6 +32,7 @@ from strata.notebook.dependencies import (
     import_requirements_text,
     import_requirements_text_streaming,
     list_dependencies,
+    list_r_packages,
 )
 from strata.notebook.env import (
     compute_execution_env_hash,
@@ -1185,7 +1186,7 @@ class NotebookSession:
             "interpreter_source": self.environment_interpreter_source,
         }
 
-    def serialize_r_environment_state(self) -> dict[str, Any]:
+    def serialize_r_environment_state(self, *, include_packages: bool = False) -> dict[str, Any]:
         """Serialize the R-side runtime environment for the UI.
 
         ``has_lockfile`` is derived from disk — the UI must show R
@@ -1195,6 +1196,16 @@ class NotebookSession:
         from ``RRuntime`` in ``.strata/runtime.json`` and reflect
         the *last successful* sync; ``sync_error`` carries the
         *latest attempt's* error.
+
+        ``include_packages`` (default ``False``): when True, spawn
+        ``Rscript`` to list the renv project library. The default
+        is deliberately False because this path is called from
+        ``serialize_notebook_state`` and ``_serialize_environment_payload``
+        (both fire on every state sync / env refresh / dependency
+        mutation) and a synchronous Rscript spawn on each call would
+        block the open response on a multi-second probe. The R env
+        panel calls a dedicated ``GET /v1/notebooks/{id}/r-packages``
+        route to fetch the package list separately when it mounts.
 
         ``sync_state`` is derived for the UI:
 
@@ -1235,6 +1246,21 @@ class NotebookSession:
         else:
             sync_state = "outdated"
 
+        # Listing the project library is a ~1-2s Rscript spawn — the
+        # default ``include_packages=False`` keeps state-sync paths
+        # fast. The dedicated R-packages route opts in by passing
+        # ``include_packages=True``. When the notebook has no
+        # lockfile, skip the spawn even on opt-in — there's no R env
+        # to enumerate.
+        packages: list[dict[str, str]] = []
+        packages_status = "absent"
+        packages_error: str | None = None
+        if include_packages and has_lockfile:
+            listing = list_r_packages(self.path)
+            packages = [{"name": pkg.name, "version": pkg.version} for pkg in listing.packages]
+            packages_status = listing.status
+            packages_error = listing.error
+
         return {
             "has_lockfile": has_lockfile,
             "current_lock_hash": current_lock_hash,
@@ -1244,6 +1270,17 @@ class NotebookSession:
             "last_synced_at": runtime.last_synced_at,
             "sync_state": sync_state,
             "sync_error": runtime.sync_error or None,
+            # Package list + listing-probe outcome. ``packages_status``
+            # disambiguates "the probe failed" from "the library is
+            # empty" — both produce an empty ``packages`` array.
+            # ``packages_status`` values: ``"absent"`` (no lockfile or
+            # ``include_packages=False`` — no probe attempted),
+            # ``"ok"``, ``"rscript_missing"``, ``"renv_not_active"``,
+            # or ``"failed"``. ``packages_error`` carries a short
+            # message when ``packages_status == "failed"``.
+            "packages": packages,
+            "packages_status": packages_status,
+            "packages_error": packages_error,
         }
 
     def serialize_environment_job_state(self) -> dict[str, Any] | None:

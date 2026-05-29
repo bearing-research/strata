@@ -1019,6 +1019,27 @@ async function getEnvironmentStatus(notebookId: string): Promise<EnvironmentResp
   return readJson<EnvironmentResponse>(resp)
 }
 
+interface RPackagesResponse {
+  packages?: Array<{ name?: string; version?: string }>
+  packages_status?: string
+  packages_error?: string | null
+}
+
+async function getRPackages(notebookId: string): Promise<RPackagesResponse> {
+  // Separate from getEnvironmentStatus because it spawns Rscript
+  // (~1-2s). The env panel calls this on mount + manual refresh;
+  // notebook open / state sync don't.
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${notebookId}/r-packages`, {
+    // 30s — generous for a one-Rscript-spawn listing on cold start.
+    // The backend itself imposes a 30s timeout on the subprocess.
+    timeoutMs: 45_000,
+  })
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to load R packages')
+  }
+  return readJson<RPackagesResponse>(resp)
+}
+
 async function syncEnvironment(notebookId: string): Promise<EnvironmentResponse> {
   const resp = await fetchWithTimeout(
     `${STRATA_BASE}/v1/notebooks/${notebookId}/environment/jobs`,
@@ -1387,6 +1408,7 @@ export function useStrata() {
     addDependency,
     removeDependency,
     getEnvironmentStatus,
+    getRPackages,
     syncEnvironment,
     exportRequirements,
     previewRequirementsImport,

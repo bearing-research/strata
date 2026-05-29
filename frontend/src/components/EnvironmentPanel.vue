@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
 import { useStrata } from '../composables/useStrata'
 import PythonVersionModal from './PythonVersionModal.vue'
@@ -29,9 +29,28 @@ const {
   clearEnvironmentImportPreview,
   fetchDependencies,
   fetchEnvironment,
+  fetchRPackagesAction,
   connected,
   updatePythonVersionAction,
 } = useNotebook()
+
+// R packages fetched separately from the env state so the open
+// path doesn't block on a synchronous Rscript spawn. Trigger the
+// fetch on mount + whenever the R sync state changes (a fresh
+// renv::restore() can produce a different package list).
+onMounted(() => {
+  if (notebook.rEnvironment.hasLockfile) {
+    fetchRPackagesAction()
+  }
+})
+watch(
+  () => [notebook.rEnvironment.hasLockfile, notebook.rEnvironment.syncState] as const,
+  ([hasLockfile, syncState], [, prevSync]) => {
+    if (hasLockfile && syncState !== prevSync) {
+      fetchRPackagesAction()
+    }
+  },
+)
 
 const strata = useStrata()
 
@@ -149,6 +168,28 @@ const rSyncStateLabel = computed(() => {
       return 'Lockfile edited'
     case 'failed':
       return 'Last sync failed'
+    default:
+      return ''
+  }
+})
+
+// Empty-list message — varies by the listing-probe outcome so the
+// user can tell "the library is empty" from "the probe couldn't
+// run". ``failed`` status renders its own error block below the
+// list (with the actual error text), so we don't repeat it here.
+const rPackagesEmptyMessage = computed(() => {
+  if (notebook.rEnvironment.packages.length > 0) return ''
+  switch (notebook.rEnvironment.packagesStatus) {
+    case 'ok':
+      return 'No R packages installed in the project library.'
+    case 'rscript_missing':
+      return 'Rscript not available — install R to list packages.'
+    case 'renv_not_active':
+      return 'renv has not been initialised in this notebook yet.'
+    case 'unknown':
+      return 'Loading packages…'
+    case 'absent':
+    case 'failed':
     default:
       return ''
   }
@@ -536,6 +577,36 @@ function downloadRequirements() {
         </div>
         <div v-if="notebook.rEnvironment.syncError" class="env-r-error">
           {{ notebook.rEnvironment.syncError }}
+        </div>
+
+        <!--
+          Installed-package list, mirroring the Python ``dependencies``
+          surface above. ``packagesStatus`` (separate from
+          ``syncState``) tells the user what happened with the
+          listing probe — a renv-not-active or failed probe should
+          NOT look like "library is empty".
+
+          Read-only in this release — manual ``install.packages()``
+          inside an R cell remains the way to add R deps until the
+          env-job machinery extends to R.
+        -->
+        <details v-if="notebook.rEnvironment.packages.length > 0" class="env-r-packages" open>
+          <summary class="env-r-packages-summary">
+            Installed packages
+            <span class="env-r-count">{{ notebook.rEnvironment.packages.length }}</span>
+          </summary>
+          <ul class="env-r-package-list">
+            <li v-for="pkg in notebook.rEnvironment.packages" :key="pkg.name" class="env-r-package">
+              <span class="env-r-package-name">{{ pkg.name }}</span>
+              <span class="env-r-package-version">{{ pkg.version }}</span>
+            </li>
+          </ul>
+        </details>
+        <div v-else-if="rPackagesEmptyMessage" class="env-r-empty">
+          {{ rPackagesEmptyMessage }}
+        </div>
+        <div v-if="notebook.rEnvironment.packagesStatus === 'failed'" class="env-r-error">
+          Couldn't list packages: {{ notebook.rEnvironment.packagesError || 'unknown error' }}
         </div>
       </div>
 
@@ -1098,6 +1169,64 @@ function downloadRequirements() {
   color: var(--accent-error, #c0392b);
   background: var(--tint-error, rgba(192, 57, 43, 0.08));
   border-radius: 3px;
+}
+
+.env-r-packages {
+  margin-top: 8px;
+}
+
+.env-r-packages-summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.env-r-count {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+  background: var(--bg-input);
+  border-radius: 2px;
+}
+
+.env-r-package-list {
+  margin: 6px 0 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 200px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.env-r-package {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 4px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.env-r-package:last-child {
+  border-bottom: none;
+}
+
+.env-r-package-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.env-r-package-version {
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.env-r-empty {
+  margin-top: 6px;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-secondary);
 }
 
 .env-action {
