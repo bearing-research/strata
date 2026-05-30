@@ -16,11 +16,13 @@ import type {
   MountSpec,
   CellAnnotations,
   EnvironmentActionSummary,
+  EnvironmentJobAction,
   EnvironmentOperation,
   EditableWorkerSpec,
   ManagedWorkerSpec,
   NotebookEnvironment,
   NotebookRuntimeConfig,
+  RNotebookEnvironment,
   VariantGroup,
   VariantMember,
   WorkerCatalogEntry,
@@ -82,6 +84,22 @@ const notebook = reactive<Notebook>({
     hasLockfile: false,
     venvPython: null,
     interpreterSource: 'unknown',
+  },
+  rEnvironment: {
+    hasLockfile: false,
+    currentLockHash: '',
+    lockHash: '',
+    rVersion: '',
+    systemRVersion: '',
+    lastSyncedAt: 0,
+    syncState: 'absent',
+    syncError: null,
+    // Default to ``unknown`` so the panel's first render renders
+    // a "loading" indicator rather than a misleading "no packages
+    // installed" — the env panel fetches the list on mount.
+    packages: [],
+    packagesStatus: 'unknown',
+    packagesError: null,
   },
   createdAt: Date.now(),
   updatedAt: Date.now(),
@@ -372,11 +390,19 @@ function parseDependencyInfo(raw: any): DependencyInfo {
 
 function parseEnvironmentOperation(raw: any): EnvironmentOperation | null {
   if (!raw || typeof raw !== 'object') return null
+  // Whitelist mirrors the backend's ``EnvironmentJobRequest`` valid_actions.
+  // Missing entries here previously caused ``r_init`` / ``r_add`` jobs to
+  // parse as ``null`` — the env-operation panel flashed once on the
+  // optimistic local ``beginEnvironmentOperation`` call, then got wiped
+  // by the WS ``environment_job_started`` round-trip.
   const action =
     raw.action === 'add' ||
     raw.action === 'remove' ||
     raw.action === 'sync' ||
-    raw.action === 'import'
+    raw.action === 'import' ||
+    raw.action === 'r_init' ||
+    raw.action === 'r_add' ||
+    raw.action === 'change_python'
       ? raw.action
       : null
   if (!action) return null
@@ -434,9 +460,89 @@ function syncResolvedDependenciesFromBackend(raw: any) {
     : []
 }
 
+function parseBackendREnvironment(
+  raw: any,
+): Omit<RNotebookEnvironment, 'packages' | 'packagesStatus' | 'packagesError'> {
+  // The env-state payload omits the package list — that's served
+  // by a separate ``GET /r-packages`` route so notebook open /
+  // state sync / env refresh paths don't pay a synchronous Rscript
+  // spawn. Callers reuse the store's existing
+  // ``packages``/``packagesStatus``/``packagesError`` fields and
+  // overwrite them via ``fetchRPackagesAction``.
+  const syncStateRaw = String(raw?.sync_state ?? raw?.syncState ?? 'absent')
+  const syncState = (
+    ['absent', 'never', 'ok', 'outdated', 'failed'].includes(syncStateRaw) ? syncStateRaw : 'absent'
+  ) as RNotebookEnvironment['syncState']
+  const errRaw = raw?.sync_error ?? raw?.syncError
+  return {
+    hasLockfile: raw?.has_lockfile === true || raw?.hasLockfile === true,
+    currentLockHash: String(raw?.current_lock_hash ?? raw?.currentLockHash ?? ''),
+    lockHash: String(raw?.lock_hash ?? raw?.lockHash ?? ''),
+    rVersion: String(raw?.r_version ?? raw?.rVersion ?? ''),
+    systemRVersion: String(raw?.system_r_version ?? raw?.systemRVersion ?? ''),
+    lastSyncedAt: Number(raw?.last_synced_at ?? raw?.lastSyncedAt ?? 0),
+    syncState,
+    syncError: typeof errRaw === 'string' && errRaw.length > 0 ? errRaw : null,
+  }
+}
+
+function syncNotebookREnvironmentFromBackend(raw: any) {
+  // Overlay the parsed env-state fields on top of the existing
+  // packages/packagesStatus/packagesError fields so a state-sync
+  // doesn't clobber a previously-fetched package listing.
+  notebook.rEnvironment = {
+    ...notebook.rEnvironment,
+    ...parseBackendREnvironment(raw),
+  }
+}
+
+async function fetchRPackagesAction(): Promise<void> {
+  const sid = sessionId()
+  if (!sid) return
+  const strata = useStrata()
+  try {
+    const data = await strata.getRPackages(sid)
+    const packagesRaw = Array.isArray(data?.packages) ? data.packages : []
+    const packages = packagesRaw
+      .map((p: any) => ({
+        name: String(p?.name ?? ''),
+        version: String(p?.version ?? ''),
+      }))
+      .filter((p: { name: string }) => p.name.length > 0)
+    const statusRaw = String(data?.packages_status ?? 'unknown')
+    const status = (
+      ['absent', 'ok', 'rscript_missing', 'renv_not_active', 'failed'].includes(statusRaw)
+        ? statusRaw
+        : 'unknown'
+    ) as RNotebookEnvironment['packagesStatus']
+    const errRaw = data?.packages_error
+    notebook.rEnvironment = {
+      ...notebook.rEnvironment,
+      packages,
+      packagesStatus: status,
+      packagesError: typeof errRaw === 'string' && errRaw.length > 0 ? errRaw : null,
+    }
+  } catch (err) {
+    notebook.rEnvironment = {
+      ...notebook.rEnvironment,
+      packages: [],
+      packagesStatus: 'failed',
+      packagesError: (err as Error).message || 'Failed to fetch R packages',
+    }
+  }
+}
+
 function syncEnvironmentPayloadFromBackend(data: any) {
   if (data?.environment) {
     syncNotebookEnvironmentFromBackend(data.environment)
+  }
+  // R-side env is parallel to Python's. Backend always emits the
+  // ``r_environment`` field (with zero fields when the notebook has
+  // no renv.lock), so absence here means we're talking to a
+  // pre-#87 server — leave the store's default zero entry in
+  // place rather than wiping anything.
+  if (data?.r_environment) {
+    syncNotebookREnvironmentFromBackend(data.r_environment)
   }
   if ('environment_job' in (data || {})) {
     syncEnvironmentOperationFromBackend(data.environment_job)
@@ -994,7 +1100,7 @@ function parseBackendNotebookRuntimeConfig(raw: any): NotebookRuntimeConfig {
 }
 
 function setEnvironmentActionSummary(raw: {
-  action: 'add' | 'remove' | 'sync' | 'import'
+  action: EnvironmentJobAction
   packageName?: string | null
   lockfileChanged?: boolean
   staleCellCount?: number
@@ -1702,8 +1808,18 @@ function initializeWebSocket() {
         if (p.execution_method === 'executor') {
           updateWorkerHealth(effectiveWorkerNameForCell(cell), 'healthy')
         }
-        // Capture suggest_install for "click to install" UX
+        // Capture suggest_install + language for "click to install"
+        // UX. The button in CellEditor.vue only shows for ``python``;
+        // an R suggestion hydrates the field so it appears in tests
+        // and future install actions, but the visible button stays
+        // hidden until the R install endpoint ships.
         cell.suggestInstall = p.suggest_install || undefined
+        cell.suggestInstallLanguage =
+          p.suggest_install_language === 'r'
+            ? 'r'
+            : p.suggest_install_language === 'python'
+              ? 'python'
+              : undefined
       }
 
       setCellOutput(cellId, output, displayOutputs)
@@ -1766,6 +1882,12 @@ function initializeWebSocket() {
         }
         cell.output = { contentType: 'json/object', error }
         cell.suggestInstall = p.suggest_install || undefined
+        cell.suggestInstallLanguage =
+          p.suggest_install_language === 'r'
+            ? 'r'
+            : p.suggest_install_language === 'python'
+              ? 'python'
+              : undefined
       }
     })
 
@@ -2032,6 +2154,15 @@ function initializeWebSocket() {
           : []
         if (job.action === 'import') {
           environmentImportPreview.value = null
+        }
+        // R jobs ship a fresh ``r_environment`` block in the finished
+        // payload (the panel's status pill + lock hash + last sync
+        // come from there), but the installed-package listing is
+        // fetched on demand via a dedicated route. Trigger that
+        // refresh here so the package list reflects the post-install
+        // library without waiting for the next panel mount.
+        if (job.action === 'r_init' || job.action === 'r_add') {
+          void fetchRPackagesAction()
         }
       } else {
         const message = job.error || 'Environment update failed'
@@ -2440,6 +2571,74 @@ async function addDependencyAction(pkg: string) {
       'failed',
       extractOperationLogPayload(err?.payload),
       `uv add ${pkg}`,
+    )
+  }
+}
+
+async function initRenvAction() {
+  const sid = sessionId()
+  if (!sid) return
+  dependencyError.value = null
+  environmentError.value = null
+  environmentWarnings.value = []
+  environmentImportPreview.value = null
+  const command = "Rscript -e 'renv::init(bare = TRUE)'"
+  // Reuse the env-operation block for visual parity with uv jobs —
+  // the action enum has been widened (see types/notebook.ts) but
+  // the UI render is unchanged.
+  beginEnvironmentOperation('r_init' as any, command, null)
+  const strata = useStrata()
+  try {
+    const data = await strata.initRenv(sid)
+    syncEnvironmentPayloadFromBackend(data)
+    if (data.cells && Array.isArray(data.cells)) {
+      syncCellsFromBackend(data.cells)
+    }
+    // The 202 response just acknowledges the job submission; the
+    // background job is still running. ``handleEnvironmentJobMessage``
+    // fires ``fetchRPackagesAction`` when the WS finished frame
+    // lands with a completed status — no eager fetch here, which
+    // would race against the still-running subprocess and pull
+    // pre-install package state.
+  } catch (err: any) {
+    dependencyError.value = err.message || 'Failed to initialise renv'
+    syncEnvironmentPayloadFromBackend(err?.payload)
+    finishEnvironmentOperation(
+      'r_init' as any,
+      'failed',
+      extractOperationLogPayload(err?.payload),
+      command,
+    )
+  }
+}
+
+async function addRPackageAction(pkg: string) {
+  const sid = sessionId()
+  if (!sid) return
+  dependencyError.value = null
+  environmentError.value = null
+  environmentWarnings.value = []
+  environmentImportPreview.value = null
+  const command = `Rscript -e 'renv::install("${pkg}"); renv::snapshot(type = "all", prompt = FALSE)'`
+  beginEnvironmentOperation('r_add' as any, command, pkg)
+  const strata = useStrata()
+  try {
+    const data = await strata.addRPackage(sid, pkg)
+    syncEnvironmentPayloadFromBackend(data)
+    if (data.cells && Array.isArray(data.cells)) {
+      syncCellsFromBackend(data.cells)
+    }
+    // 202 only. WS ``environment_job_finished`` triggers the
+    // package-list refresh once the job actually completes — see
+    // ``handleEnvironmentJobMessage``.
+  } catch (err: any) {
+    dependencyError.value = err.message || `Failed to install R package ${pkg}`
+    syncEnvironmentPayloadFromBackend(err?.payload)
+    finishEnvironmentOperation(
+      'r_add' as any,
+      'failed',
+      extractOperationLogPayload(err?.payload),
+      command,
     )
   }
 }
@@ -3326,7 +3525,10 @@ export function useNotebook() {
     fetchServerWorkerRegistry,
     fetchDependencies,
     fetchEnvironment,
+    fetchRPackagesAction,
     addDependencyAction,
+    initRenvAction,
+    addRPackageAction,
     updatePythonVersionAction,
     removeDependencyAction,
     syncEnvironmentAction,

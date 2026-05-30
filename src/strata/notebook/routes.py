@@ -481,7 +481,16 @@ def _serialize_dependency_info_list(dependencies: list) -> list[dict]:
 
 
 def _serialize_environment_payload(session: NotebookSession) -> dict:
-    """Serialize the current environment plus direct and resolved dependencies."""
+    """Serialize the current environment plus direct and resolved dependencies.
+
+    ``r_environment`` is always present — even on Python-only
+    notebooks it serialises to a stable shape (``has_lockfile: false``,
+    ``sync_state: "absent"``). The frontend store's
+    ``syncEnvironmentPayloadFromBackend`` relies on this field being
+    present in *every* env-related payload (GET /environment, env
+    job responses, sync/add/remove dependency updates) so R UI
+    state can refresh without a full notebook reopen.
+    """
     return {
         "environment": session.serialize_environment_state(),
         "environment_job": session.serialize_environment_job_state(),
@@ -490,6 +499,7 @@ def _serialize_environment_payload(session: NotebookSession) -> dict:
         "resolved_dependencies": _serialize_dependency_info_list(
             list_resolved_dependencies(session.path)
         ),
+        "r_environment": session.serialize_r_environment_state(),
     }
 
 
@@ -707,13 +717,31 @@ class EnvironmentJobRequest(BaseModel):
     @classmethod
     def validate_action_field(cls, value: str) -> str:
         normalized = value.strip().lower()
-        if normalized not in {"add", "remove", "sync", "import"}:
+        # ``r_init`` / ``r_add`` reuse the env-job machinery for the
+        # R side — Rscript subprocess + same job tracking + same WS
+        # broadcast frames. ``change_python`` is the existing
+        # Python-version change action.
+        if normalized not in {
+            "add",
+            "remove",
+            "sync",
+            "import",
+            "change_python",
+            "r_init",
+            "r_add",
+        }:
             raise ValueError("Unsupported environment job action")
         return normalized
 
     @field_validator("package")
     @classmethod
     def validate_package_field(cls, value: str | None) -> str | None:
+        # The REST-layer sanitizer rejects shell metacharacters for
+        # *any* action. The R-specific name-shape check (CRAN
+        # convention) runs server-side in ``submit_environment_job``
+        # — combining both layers means a bad R name fails fast at
+        # the REST boundary AND is double-checked before the
+        # Rscript subprocess sees it.
         if value is None:
             return None
         return validate_package_name(value)
@@ -1360,6 +1388,42 @@ async def get_environment_status(notebook_id: str, session: SessionDep) -> dict:
     return _serialize_environment_payload(session)
 
 
+@router.get("/{notebook_id}/r-packages")
+async def get_r_packages(notebook_id: str, session: SessionDep) -> dict:
+    """Return the R packages installed in the notebook's renv project library.
+
+    Separate endpoint from ``GET /environment`` so the synchronous
+    Rscript spawn (~1-2s) doesn't block every state sync /
+    dependency mutation / env refresh response. The env panel
+    calls this on mount + manual refresh; nothing else hits it.
+
+    Response shape:
+
+    .. code-block:: json
+
+        {
+          "packages": [{"name": "arrow", "version": "14.0.0"}, ...],
+          "packages_status": "ok",
+          "packages_error": null
+        }
+
+    ``packages_status`` values:
+    - ``ok``                — listing succeeded.
+    - ``absent``            — notebook has no ``renv.lock``.
+    - ``rscript_missing``   — Rscript not on PATH; install R.
+    - ``renv_not_active``   — Rscript ran but renv hasn't activated
+                              (pre-init notebooks).
+    - ``failed``            — subprocess error; ``packages_error``
+                              has a short message.
+    """
+    r_state = session.serialize_r_environment_state(include_packages=True)
+    return {
+        "packages": r_state["packages"],
+        "packages_status": r_state["packages_status"],
+        "packages_error": r_state["packages_error"],
+    }
+
+
 @router.get("/config")
 async def get_notebook_runtime_config(request: Request) -> dict:
     """Return frontend runtime defaults for notebook creation/open flows."""
@@ -1444,6 +1508,24 @@ async def submit_environment_job(
                     "environment_yaml and do not accept a package"
                 ),
             )
+    if req.action == "r_init" and (
+        req.package is not None or req.requirements is not None or req.environment_yaml is not None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="r_init does not accept a package or import content",
+        )
+    if req.action == "r_add":
+        if not req.package:
+            raise HTTPException(
+                status_code=400,
+                detail="r_add requires a package name",
+            )
+        if req.requirements is not None or req.environment_yaml is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="r_add does not accept import content",
+            )
 
     try:
         await session.submit_environment_job(
@@ -1452,6 +1534,12 @@ async def submit_environment_job(
             requirements_text=req.requirements,
             environment_yaml_text=req.environment_yaml,
         )
+    except ValueError as exc:
+        # Server-side validation (e.g. Rscript missing, renv not
+        # initialised, invalid R package name). Surface as 400 so the
+        # frontend can render a targeted error rather than a generic
+        # 500.
+        raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
         _raise_environment_busy(session, str(exc))
 

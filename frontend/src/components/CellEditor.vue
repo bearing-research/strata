@@ -38,6 +38,7 @@ const {
   closeInspect,
   availableWorkers,
   addDependencyAction,
+  addRPackageAction,
   setVariantActive,
   addVariant,
   cancelCellWebSocket,
@@ -465,11 +466,20 @@ const installTargetPackage = computed(
   () => installRequestedPackage.value || props.cell.suggestInstall || null,
 )
 
+// Match both ``add`` (Python ``uv add``) and ``r_add`` (R
+// ``renv::install``) here. Pre-PR H the R install button kept its
+// "Install <pkg>" label forever during an r_add and never
+// surfaced the completion hint, because both checks only
+// recognised the Python action enum.
+function isInstallAction(action: string | null | undefined): boolean {
+  return action === 'add' || action === 'r_add'
+}
+
 const installInProgress = computed(() => {
   return (
     environmentMutationActive.value &&
-    environmentOperation.value?.action === 'add' &&
-    normalizePackageName(environmentOperation.value.packageName) ===
+    isInstallAction(environmentOperation.value?.action) &&
+    normalizePackageName(environmentOperation.value?.packageName) ===
       normalizePackageName(installTargetPackage.value)
   )
 })
@@ -478,8 +488,8 @@ const installCompleted = computed(() => {
   return (
     !!installRequestedPackage.value &&
     !props.cell.suggestInstall &&
-    environmentLastAction.value?.action === 'add' &&
-    normalizePackageName(environmentLastAction.value.packageName) ===
+    isInstallAction(environmentLastAction.value?.action) &&
+    normalizePackageName(environmentLastAction.value?.packageName) ===
       normalizePackageName(installRequestedPackage.value)
   )
 })
@@ -488,7 +498,15 @@ async function installSuggestedPackage() {
   const pkg = props.cell.suggestInstall
   if (!pkg || installInProgress.value) return
   installRequestedPackage.value = pkg
-  await addDependencyAction(pkg)
+  // Dispatch to the matching env-job pipeline: Python -> ``uv add``,
+  // R -> ``renv::install`` + snapshot. Both go through the same
+  // background-job machinery; the cell-output hint just chooses the
+  // right entry point.
+  if (props.cell.suggestInstallLanguage === 'r') {
+    await addRPackageAction(pkg)
+  } else {
+    await addDependencyAction(pkg)
+  }
 }
 
 const outputExpanded = ref(false)
@@ -946,7 +964,19 @@ function outputKey(output: CellOutput, index: number): string {
             </span>
           </div>
           <pre class="output-error-detail">{{ cell.output.error }}</pre>
-          <div v-if="cell.suggestInstall" class="suggest-install">
+          <!--
+            Install button is language-aware: Python dispatches to
+            ``uv add``, R dispatches to ``renv::install`` (only after
+            ``renv::init`` has produced a lockfile). Pre-lockfile we
+            fall back to a read-only hint pointing the user at the
+            Environment panel's "Initialize renv" affordance, since
+            ``renv::install`` without a project lockfile would just
+            scribble into the system library.
+          -->
+          <div
+            v-if="cell.suggestInstall && cell.suggestInstallLanguage === 'python'"
+            class="suggest-install"
+          >
             <span
               >Missing package <code>{{ cell.suggestInstall }}</code></span
             >
@@ -961,6 +991,39 @@ function outputKey(output: CellOutput, index: number): string {
                   : `Install ${cell.suggestInstall}`
               }}
             </button>
+          </div>
+          <div
+            v-else-if="
+              cell.suggestInstall &&
+              cell.suggestInstallLanguage === 'r' &&
+              notebook.rEnvironment.hasLockfile
+            "
+            class="suggest-install"
+          >
+            <span
+              >Missing R package <code>{{ cell.suggestInstall }}</code></span
+            >
+            <button
+              class="btn-install"
+              :disabled="installInProgress || environmentMutationActive"
+              @click="installSuggestedPackage"
+            >
+              {{
+                installInProgress
+                  ? `Installing ${installTargetPackage}`
+                  : `Install ${cell.suggestInstall}`
+              }}
+            </button>
+          </div>
+          <div
+            v-else-if="cell.suggestInstall && cell.suggestInstallLanguage === 'r'"
+            class="suggest-install suggest-install-readonly"
+          >
+            <span
+              >Missing R package <code>{{ cell.suggestInstall }}</code> — open the Environment panel
+              and click <strong>Initialize renv</strong> to set up package management, then
+              re-run.</span
+            >
           </div>
         </div>
         <template v-else>
@@ -1798,6 +1861,13 @@ function outputKey(output: CellOutput, index: number): string {
 .suggest-install code {
   color: var(--accent-primary);
   font-weight: 600;
+}
+
+/* R-only variant — no install button (action endpoint not yet wired).
+   Slightly muted tint so it reads as advisory rather than actionable. */
+.suggest-install-readonly {
+  background: var(--bg-input);
+  border-color: var(--border-subtle);
 }
 .btn-install {
   background: var(--accent-primary);

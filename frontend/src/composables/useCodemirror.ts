@@ -11,7 +11,17 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { python } from '@codemirror/lang-python'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language'
+import {
+  syntaxHighlighting,
+  defaultHighlightStyle,
+  bracketMatching,
+  StreamLanguage,
+} from '@codemirror/language'
+// Legacy-modes package ships CM5 modes ported to CM6 — no first-party
+// ``@codemirror/lang-r`` exists yet, so wrap the legacy R mode in
+// ``StreamLanguage.define()`` to get syntax highlighting + indent in
+// R cells. Same pattern any CM6 ecosystem doc recommends for R.
+import { r as rLegacyMode } from '@codemirror/legacy-modes/mode/r'
 import { closeBrackets } from '@codemirror/autocomplete'
 import type { CellLanguage } from '../types/notebook'
 import { useTheme } from './useTheme'
@@ -72,8 +82,21 @@ export function useCodemirror(
   onMounted(() => {
     if (!container.value) return
 
+    // Per-language CodeMirror extension. ``prompt`` cells render as plain
+    // text (no syntax highlighting — the body is a template, not code).
+    // ``markdown`` uses the official lang-markdown package; ``r`` wraps
+    // the legacy CM5 R mode via ``StreamLanguage`` (no first-party
+    // ``@codemirror/lang-r`` exists yet); everything else (``python``,
+    // ``sql``, future additions) falls through to Python highlighting,
+    // which is the closest visual fit.
     const langExt =
-      opts.language === 'markdown' ? markdown() : opts.language === 'prompt' ? [] : python()
+      opts.language === 'markdown'
+        ? markdown()
+        : opts.language === 'prompt'
+          ? []
+          : opts.language === 'r'
+            ? StreamLanguage.define(rLegacyMode)
+            : python()
 
     const runKeymap = keymap.of([
       {

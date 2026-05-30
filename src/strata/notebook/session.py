@@ -32,6 +32,7 @@ from strata.notebook.dependencies import (
     import_requirements_text,
     import_requirements_text_streaming,
     list_dependencies,
+    list_r_packages,
 )
 from strata.notebook.env import (
     compute_execution_env_hash,
@@ -59,7 +60,12 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
     read_venv_runtime_python_version,
 )
-from strata.notebook.runtime_state import EnvironmentRuntime
+from strata.notebook.runtime_state import (
+    EnvironmentRuntime,
+    RRuntime,
+    load_runtime_state,
+    save_runtime_state,
+)
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
     build_worker_catalog,
@@ -68,6 +74,7 @@ from strata.notebook.workers import (
     worker_supports_notebook_execution,
 )
 from strata.notebook.writer import (
+    _renv_sync,
     _uv_sync,
     update_cell_display_outputs,
     update_environment_metadata,
@@ -856,15 +863,42 @@ class NotebookSession:
         if cell is not None:
             cell.status = CellStatus.RUNNING
 
-    def mark_cell_error(self, cell_id: str) -> None:
+    def mark_cell_error(self, cell_id: str) -> list[str]:
         """Mark a cell as errored in backend state.
 
         Companion to ``mark_cell_running`` / ``mark_executed_ready`` —
         the controlled way to record an execution failure on the cell.
+
+        Also walks the DAG downstream and flips any cell currently in
+        ``READY`` (i.e. showing a cached output from a previous good
+        run of the failed cell) to ``STALE``. Without this, the
+        downstream cell keeps reading its cached artifact — whose
+        inputs were materialised from the now-broken upstream's last
+        success — and the UI shows green even though the upstream
+        cell is red. Returns the list of downstream cells whose
+        status flipped, so the caller can broadcast cell-status
+        updates for them.
         """
         cell = self.notebook_state.get_cell(cell_id)
-        if cell is not None:
-            cell.status = CellStatus.ERROR
+        if cell is None:
+            return []
+        cell.status = CellStatus.ERROR
+        if self.dag is None:
+            return []
+        affected: list[str] = []
+        seen: set[str] = set()
+        queue = list(self.dag.cell_downstream.get(cell_id, []))
+        while queue:
+            nid = queue.pop()
+            if nid in seen:
+                continue
+            seen.add(nid)
+            downstream_cell = self.notebook_state.get_cell(nid)
+            if downstream_cell is not None and downstream_cell.status == CellStatus.READY:
+                downstream_cell.status = CellStatus.STALE
+                affected.append(nid)
+            queue.extend(self.dag.cell_downstream.get(nid, []))
+        return affected
 
     def apply_execution_result_metadata(self, cell_id: str, result: Any) -> None:
         """Persist transient execution metadata onto the session cell state."""
@@ -1096,6 +1130,7 @@ class NotebookSession:
         data["environment"] = self.serialize_environment_state()
         data["environment_job"] = self.serialize_environment_job_state()
         data["environment_job_history"] = self.serialize_environment_job_history()
+        data["r_environment"] = self.serialize_r_environment_state()
         return data
 
     def _probe_python_version(self, python_executable: Path) -> str:
@@ -1176,6 +1211,128 @@ class NotebookSession:
             "has_lockfile": (self.path / "uv.lock").exists(),
             "venv_python": str(self.venv_python) if self.venv_python else None,
             "interpreter_source": self.environment_interpreter_source,
+        }
+
+    @property
+    def _cached_system_r_version(self) -> str | None:
+        """One-shot R version probe, cached per session.
+
+        ``_probe_r_version`` spawns ``Rscript`` (10s timeout); we
+        only need it once per session — the system R binary doesn't
+        change underneath us. Without the cache, every
+        ``serialize_r_environment_state`` call (run on every state
+        sync, env refresh, dep mutation) would burn a subprocess
+        spawn just to show "R 4.6.0" in the header.
+        """
+        if hasattr(self, "_system_r_version_cache"):
+            return self._system_r_version_cache  # type: ignore[attr-defined]
+        version = self._probe_r_version()
+        self._system_r_version_cache = version  # type: ignore[attr-defined]
+        return version
+
+    def serialize_r_environment_state(self, *, include_packages: bool = False) -> dict[str, Any]:
+        """Serialize the R-side runtime environment for the UI.
+
+        ``has_lockfile`` is derived from disk — the UI must show R
+        information for any notebook that ships a ``renv.lock``,
+        including ones that never successfully synced (so the user
+        can see *why* the env is broken). The other fields come
+        from ``RRuntime`` in ``.strata/runtime.json`` and reflect
+        the *last successful* sync; ``sync_error`` carries the
+        *latest attempt's* error.
+
+        ``include_packages`` (default ``False``): when True, spawn
+        ``Rscript`` to list the renv project library. The default
+        is deliberately False because this path is called from
+        ``serialize_notebook_state`` and ``_serialize_environment_payload``
+        (both fire on every state sync / env refresh / dependency
+        mutation) and a synchronous Rscript spawn on each call would
+        block the open response on a multi-second probe. The R env
+        panel calls a dedicated ``GET /v1/notebooks/{id}/r-packages``
+        route to fetch the package list separately when it mounts.
+
+        ``sync_state`` is derived for the UI:
+
+        * ``absent``    — no ``renv.lock`` on disk (Python-only).
+        * ``never``     — lockfile exists, but no sync has ever
+                          succeeded (last_synced_at == 0) and the
+                          latest attempt didn't fail (no
+                          sync_error). Typically the brand-new
+                          state right after adding renv.lock.
+        * ``ok``        — last sync matched the current lockfile
+                          hash and no error.
+        * ``outdated``  — last good sync was against a different
+                          lockfile (user edited renv.lock); no
+                          error from the latest attempt yet.
+        * ``failed``    — the latest sync attempt failed
+                          (``sync_error`` is set).
+        """
+        runtime = load_runtime_state(self.path).r
+        lockfile = self.path / "renv.lock"
+        has_lockfile = lockfile.exists()
+
+        current_lock_hash = ""
+        if has_lockfile:
+            try:
+                current_lock_hash = hashlib.sha256(lockfile.read_bytes()).hexdigest()
+            except OSError:
+                pass
+
+        sync_state: str
+        if not has_lockfile:
+            sync_state = "absent"
+        elif runtime.sync_error:
+            sync_state = "failed"
+        elif runtime.last_synced_at == 0:
+            sync_state = "never"
+        elif current_lock_hash and runtime.lock_hash == current_lock_hash:
+            sync_state = "ok"
+        else:
+            sync_state = "outdated"
+
+        # Listing the project library is a ~1-2s Rscript spawn — the
+        # default ``include_packages=False`` keeps state-sync paths
+        # fast. The dedicated R-packages route opts in by passing
+        # ``include_packages=True``. When the notebook has no
+        # lockfile, skip the spawn even on opt-in — there's no R env
+        # to enumerate.
+        packages: list[dict[str, str]] = []
+        packages_status = "absent"
+        packages_error: str | None = None
+        if include_packages and has_lockfile:
+            listing = list_r_packages(self.path)
+            packages = [{"name": pkg.name, "version": pkg.version} for pkg in listing.packages]
+            packages_status = listing.status
+            packages_error = listing.error
+
+        return {
+            "has_lockfile": has_lockfile,
+            "current_lock_hash": current_lock_hash,
+            # The fields below are last-successful-sync state.
+            "lock_hash": runtime.lock_hash,
+            # ``r_version`` is the version recorded at the last good
+            # renv sync; ``system_r_version`` is the version of the
+            # Rscript on PATH right now. Falls back so the UI can
+            # always show *some* R version next to the status pill
+            # — without this the pre-init R card said "Not set up"
+            # with no other state, which read as broken even when
+            # R cells were running fine against the system library.
+            "r_version": runtime.r_version,
+            "system_r_version": self._cached_system_r_version,
+            "last_synced_at": runtime.last_synced_at,
+            "sync_state": sync_state,
+            "sync_error": runtime.sync_error or None,
+            # Package list + listing-probe outcome. ``packages_status``
+            # disambiguates "the probe failed" from "the library is
+            # empty" — both produce an empty ``packages`` array.
+            # ``packages_status`` values: ``"absent"`` (no lockfile or
+            # ``include_packages=False`` — no probe attempted),
+            # ``"ok"``, ``"rscript_missing"``, ``"renv_not_active"``,
+            # or ``"failed"``. ``packages_error`` carries a short
+            # message when ``packages_status == "failed"``.
+            "packages": packages,
+            "packages_status": packages_status,
+            "packages_error": packages_error,
         }
 
     def serialize_environment_job_state(self) -> dict[str, Any] | None:
@@ -1598,6 +1755,217 @@ class NotebookSession:
             self.path,
         )
 
+    def ensure_renv_synced(self) -> None:
+        """Ensure the notebook's R environment matches its ``renv.lock``.
+
+        Mirror of ``ensure_venv_synced`` for the R side. No-op when the
+        notebook has no ``renv.lock``. When the lockfile exists:
+
+        1. Hash the lockfile bytes. If the stored ``r.lock_hash`` in
+           ``.strata/runtime.json`` matches **and** the project's
+           ``renv/library`` directory still exists, skip the
+           ``Rscript`` spawn entirely — reopens against an
+           unchanged-and-still-installed lockfile are free.
+        2. Otherwise call ``_renv_sync`` synchronously. On success,
+           write the new hash + sync timestamp + R version into
+           ``runtime.json`` and clear any prior ``sync_error``. On
+           failure, record the error in ``runtime.json`` but leave
+           the last-good ``lock_hash`` / ``r_version`` /
+           ``last_synced_at`` alone — the UI distinguishes "last
+           good state was X, latest attempt failed" from "never
+           synced".
+
+        Runtime sync state lives in ``.strata/runtime.json``
+        (per-session, gitignored) rather than the committed
+        ``notebook.toml``. Re-opens with a cached library therefore
+        do not churn ``notebook.toml`` — its ``updated_at`` only
+        bumps on real structural edits.
+        """
+        lockfile = self.path / "renv.lock"
+        if not lockfile.exists():
+            # Python-only notebook (or R notebook pre-init). Clear any
+            # stale R runtime state so a notebook that previously had a
+            # lockfile and now doesn't doesn't keep a phantom hash or
+            # error message.
+            self._clear_r_runtime_if_present()
+            return
+
+        try:
+            lock_bytes = lockfile.read_bytes()
+        except OSError as exc:
+            logger.warning("Could not read renv.lock to hash: %s", exc)
+            return
+        lock_hash = hashlib.sha256(lock_bytes).hexdigest()
+
+        previous = load_runtime_state(self.path).r
+        if (
+            previous.lock_hash == lock_hash
+            and not previous.sync_error
+            and self._renv_library_present()
+        ):
+            # Cached restore — the on-disk library already matches the
+            # lockfile, the last sync succeeded, AND the project
+            # library directory hasn't been deleted out from under us.
+            # Skip the ~1-2s Rscript spawn. Matters in particular for
+            # the reuse-existing-session path which fires on every
+            # reopen.
+            logger.debug(
+                "renv sync skipped for %s — lockfile hash unchanged + library present (%s)",
+                self.path,
+                lock_hash[:12],
+            )
+            return
+
+        started = _time.perf_counter()
+        ok = _renv_sync(self.path)
+        duration_ms = int((_time.perf_counter() - started) * 1000)
+
+        if not ok:
+            # ``_renv_sync`` already logged the cause (Rscript missing,
+            # timeout, non-zero exit). Record the failure in
+            # runtime.json so the UI can render the failed state,
+            # but keep the last-good ``lock_hash`` / ``r_version`` /
+            # ``last_synced_at`` so users see "you had a working env
+            # at <T>, the most recent attempt against <new lockfile>
+            # failed" rather than losing the prior state.
+            err_message = (
+                f"renv::restore() failed after {duration_ms}ms. "
+                "Check Rscript is on PATH and renv.lock is well-formed."
+            )
+            self._record_r_sync_failure(err_message)
+            logger.warning(
+                "renv sync failed for %s after %dms; R cells will run against the system R library",
+                self.path,
+                duration_ms,
+            )
+            return
+
+        self._persist_r_runtime_success(
+            lock_hash=lock_hash,
+            last_synced_at=int(_time.time() * 1000),
+            r_version=self._probe_r_version(),
+        )
+
+    def _renv_library_present(self) -> bool:
+        """Probe whether the project's renv library exists *and* has content.
+
+        renv installs into ``<notebook>/renv/library/<platform>/<R>/<pkg>``.
+        An empty ``renv/library`` directory is meaningless — it can
+        survive a wiped or never-completed restore while the
+        runtime metadata claims a successful sync. Requiring the
+        directory to be non-empty catches the "renv/library was
+        recreated empty (test fixture, mid-aborted restore,
+        manual cleanup script that left the parent dir)" case the
+        bare existence check missed.
+
+        This is still a cheap probe — it stops at the first directory
+        entry. Validating each package's integrity would require
+        spawning ``renv::status()``, defeating the short-circuit
+        purpose (the whole point is to skip Rscript on a fast path).
+        """
+        library = self.path / "renv" / "library"
+        if not library.is_dir():
+            return False
+        try:
+            # ``next(iter(...))`` returns the first child entry or
+            # raises ``StopIteration`` if the dir is empty.
+            next(iter(library.iterdir()))
+        except StopIteration:
+            return False
+        except OSError:
+            # Permission denied / I/O error — assume not usable
+            # rather than short-circuiting against a broken library.
+            return False
+        return True
+
+    def _probe_r_version(self) -> str | None:
+        """Best-effort: ask ``Rscript`` for its version string.
+
+        Returns ``None`` when ``Rscript`` isn't on PATH or the probe
+        fails for any reason — ``RRuntime.r_version`` tolerates an
+        empty string, so a failed probe records lock_hash + timestamp
+        without it.
+        """
+        rscript = shutil.which("Rscript")
+        if rscript is None:
+            return None
+        try:
+            proc = subprocess.run(  # noqa: S603 — rscript resolved via shutil.which
+                [rscript, "-e", "cat(R.version$major, R.version$minor, sep='.')"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            logger.debug("R version probe failed: %s", exc)
+            return None
+        if proc.returncode != 0:
+            return None
+        version = proc.stdout.strip()
+        return version or None
+
+    def _persist_r_runtime_success(
+        self,
+        *,
+        lock_hash: str,
+        last_synced_at: int,
+        r_version: str | None,
+    ) -> None:
+        """Persist R sync state after a successful ``renv::restore()``.
+
+        Overwrites the runtime entry — clears any prior ``sync_error``
+        (the latest attempt succeeded) and stamps the new hash +
+        timestamp + R version.
+        """
+        try:
+            state = load_runtime_state(self.path)
+            state.r = RRuntime(
+                lock_hash=lock_hash,
+                r_version=r_version or "",
+                last_synced_at=last_synced_at,
+                sync_error="",
+            )
+            save_runtime_state(self.path, state)
+        except Exception as exc:
+            logger.warning("Skipping R runtime persist; write failed: %s", exc)
+
+    def _record_r_sync_failure(self, error: str) -> None:
+        """Record a failed ``renv::restore()`` attempt.
+
+        Keeps the last-good ``lock_hash`` / ``r_version`` /
+        ``last_synced_at`` so the UI can show "you had a working
+        env at <T>, the most recent attempt failed". Sets the
+        ``sync_error`` field so the UI knows there's a problem.
+        """
+        try:
+            state = load_runtime_state(self.path)
+            state.r = RRuntime(
+                lock_hash=state.r.lock_hash,
+                r_version=state.r.r_version,
+                last_synced_at=state.r.last_synced_at,
+                sync_error=error,
+            )
+            save_runtime_state(self.path, state)
+        except Exception as exc:
+            logger.warning("Skipping R runtime failure record; write failed: %s", exc)
+
+    def _clear_r_runtime_if_present(self) -> None:
+        """Reset the R runtime entry when the notebook has no ``renv.lock``.
+
+        Default ``RRuntime()`` matches the Python-only baseline. No-op
+        when the entry is already empty so a Python-only open doesn't
+        churn ``runtime.json``.
+        """
+        try:
+            state = load_runtime_state(self.path)
+            if state.r == RRuntime():
+                return
+            state.r = RRuntime()
+            save_runtime_state(self.path, state)
+        except Exception as exc:
+            logger.debug("R runtime clear skipped: %s", exc)
+
     def refresh_environment_runtime(self) -> None:
         """Refresh runtime metadata from an existing notebook venv.
 
@@ -1797,7 +2165,21 @@ class NotebookSession:
         python_version: str | None = None,
     ) -> EnvironmentJobSnapshot:
         """Start an asynchronous notebook environment job."""
-        if action not in {"add", "remove", "sync", "import", "change_python"}:
+        # R-side actions (``r_init``, ``r_add``) reuse the env-job
+        # machinery — same job tracking, same WS broadcast frames,
+        # same staleness propagation. The dispatch in
+        # ``_run_environment_job`` switches on ``action`` to call
+        # the right helper.
+        valid_actions = {
+            "add",
+            "remove",
+            "sync",
+            "import",
+            "change_python",
+            "r_init",
+            "r_add",
+        }
+        if action not in valid_actions:
             raise ValueError(f"Unsupported environment job action: {action}")
 
         if action == "import":
@@ -1809,6 +2191,26 @@ class NotebookSession:
         if action == "change_python" and not python_version:
             raise ValueError("change_python jobs require python_version")
 
+        # R-side validation: catch obvious user errors at submission
+        # rather than letting the subprocess fail mid-job.
+        if action in {"r_init", "r_add"} and not shutil.which("Rscript"):
+            raise ValueError(
+                "Rscript not found on PATH. Install R "
+                "(https://cran.r-project.org/) before initialising renv."
+            )
+        if action == "r_add":
+            from strata.notebook.dependencies import is_valid_r_package_name
+
+            if not package or not is_valid_r_package_name(package):
+                raise ValueError(
+                    "r_add requires a valid R package name (match ``[A-Za-z][A-Za-z0-9.]*``)."
+                )
+            if not (self.path / "renv.lock").exists():
+                raise ValueError(
+                    "renv not initialised in this notebook. Click "
+                    "'Initialize renv' before adding R packages."
+                )
+
         if action == "import":
             action_label = (
                 "requirements import"
@@ -1817,6 +2219,10 @@ class NotebookSession:
             )
         elif action == "change_python":
             action_label = f"change Python to {python_version}"
+        elif action == "r_init":
+            action_label = "renv::init"
+        elif action == "r_add":
+            action_label = f"renv::install {package}"
         else:
             action_label = f"{action} {package}".strip()
         with self._environment_state_lock:
@@ -1831,6 +2237,13 @@ class NotebookSession:
                 command = f"uv sync --python {requested_python}"
             elif action == "change_python":
                 command = f"uv sync (python {python_version})"
+            elif action == "r_init":
+                command = "Rscript -e 'renv::init(bare = TRUE)'"
+            elif action == "r_add":
+                command = (
+                    f'Rscript -e \'renv::install("{package}"); '
+                    'renv::snapshot(type = "all", prompt = FALSE)\''
+                )
 
             job = EnvironmentJobSnapshot(
                 id=str(uuid.uuid4()),
@@ -1881,6 +2294,8 @@ class NotebookSession:
                 stale_cell_ids = await self._run_change_python_environment_job(
                     job, new_minor=python_version
                 )
+            elif job.action in {"r_init", "r_add"}:
+                stale_cell_ids = await self._run_r_environment_job(job)
             else:
                 assert job.package is not None
                 stale_cell_ids = await self._run_dependency_environment_job(
@@ -1916,6 +2331,14 @@ class NotebookSession:
                 payload.update(
                     {
                         "environment": self.serialize_environment_state(),
+                        # Include r_environment in the finished payload so
+                        # successful r_init / r_add jobs flip the R panel
+                        # to the synced state without a manual reopen.
+                        # Pre-PR H this field was omitted; the store's
+                        # ``syncNotebookREnvironmentFromBackend`` skipped
+                        # the update and the card kept showing the
+                        # pre-job state (System R / outdated).
+                        "r_environment": self.serialize_r_environment_state(),
                         "dependencies": [
                             {
                                 "name": dep.name,
@@ -1967,6 +2390,67 @@ class NotebookSession:
                 current_task = asyncio.current_task()
                 if self.environment_job_task is current_task:
                     self.environment_job_task = None
+
+    async def _run_r_environment_job(self, job: EnvironmentJobSnapshot) -> list[str]:
+        """Run ``r_init`` / ``r_add`` as a background job.
+
+        Parallel to ``_run_dependency_environment_job`` for the R side.
+        ``renv_init`` / ``renv_add`` are native async streaming calls
+        (PR G) — the ``on_update`` callback fires per stdout/stderr
+        chunk so ``environment_job_progress`` frames go out live
+        during a multi-minute ``arrow`` compile, and the R card's
+        stdout tail in the env panel actually populates during the
+        run instead of only at the end.
+
+        Staleness propagation reuses ``_finalize_environment_job``:
+        when ``renv.lock`` changes, ``compute_lockfile_hash`` (which
+        folds renv.lock since #78) reports a different hash and
+        every cell's env_hash drifts. Python cells go stale alongside
+        R cells — that's an over-stale gap from sharing one
+        lockfile hash; making the env hash language-aware is a
+        Phase 2 follow-up (issue to file).
+        """
+        from strata.notebook.dependencies import renv_add, renv_init
+
+        old_lockfile_hash = compute_lockfile_hash(self.path)
+        on_update = lambda stream, text, truncated: self._update_environment_job_stream(  # noqa: E731
+            job,
+            stream=stream,
+            text=text,
+            truncated=truncated,
+        )
+
+        if job.action == "r_init":
+            result = await renv_init(self.path, on_update=on_update)
+        elif job.action == "r_add":
+            assert job.package is not None
+            result = await renv_add(self.path, job.package, on_update=on_update)
+        else:  # pragma: no cover — guarded by submit_environment_job
+            raise RuntimeError(f"Unsupported R job action: {job.action!r}")
+
+        if result.operation_log is not None:
+            self._apply_environment_operation_log(job, result.operation_log)
+        if not result.success:
+            raise RuntimeError(result.error or f"{job.action} failed")
+
+        # After a successful ``renv::init`` / ``renv::install`` + snapshot
+        # the project library matches the new ``renv.lock``. Persist that
+        # as the last-good sync so ``sync_state`` reports ``ok`` (not
+        # ``never`` / ``outdated``) and the next session open doesn't
+        # spuriously re-run ``renv::restore()`` to rebuild what we just
+        # built. The R version comes from the cached system probe — by
+        # construction the library was just populated with this R.
+        renv_lock = self.path / "renv.lock"
+        if renv_lock.exists():
+            new_lockfile_hash = hashlib.sha256(renv_lock.read_bytes()).hexdigest()
+            self._persist_r_runtime_success(
+                lock_hash=new_lockfile_hash,
+                last_synced_at=int(_time.time() * 1000),
+                r_version=self._cached_system_r_version,
+            )
+
+        job.lockfile_changed = compute_lockfile_hash(self.path) != old_lockfile_hash
+        return await self._finalize_environment_job(job, lockfile_changed=job.lockfile_changed)
 
     async def _run_dependency_environment_job(
         self,
@@ -2372,6 +2856,20 @@ class SessionManager:
                             existing.refresh_environment_runtime()
                 except Exception as e:
                     logger.warning("Failed to refresh existing notebook runtime: %s", e)
+                # Re-check renv.lock on every reopen. The hash short-circuit
+                # inside ``ensure_renv_synced`` keeps unchanged-lockfile
+                # reopens free; without this call, a notebook whose
+                # ``renv.lock`` changes while the session is still cached
+                # in the manager would silently run against the old R
+                # library on next open.
+                try:
+                    if timing is None:
+                        existing.ensure_renv_synced()
+                    else:
+                        with timing.phase("session_renv_sync"):
+                            existing.ensure_renv_synced()
+                except Exception as e:
+                    logger.warning("Failed to re-sync renv for existing session: %s", e)
                 existing.touch()
                 return existing
 
@@ -2404,6 +2902,20 @@ class SessionManager:
             # Log warning but don't fail — notebook can still be opened,
             # it just won't be able to execute cells
             logger.warning("Failed to sync venv: %s", e)
+
+        # Ensure the R environment matches its lockfile. No-op when
+        # the notebook has no ``renv.lock``, so Python-only notebooks
+        # don't pay the Rscript probe cost. Same "log + continue"
+        # contract as the venv sync above: a failed R sync doesn't
+        # block opening the notebook.
+        try:
+            if timing is None:
+                session.ensure_renv_synced()
+            else:
+                with timing.phase("session_renv_sync"):
+                    session.ensure_renv_synced()
+        except Exception as e:
+            logger.warning("Failed to sync renv: %s", e)
 
         # M6: Initialize and start warm process pool
         try:

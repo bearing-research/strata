@@ -2,7 +2,7 @@
 
 export type CellId = string
 
-export type CellLanguage = 'python' | 'prompt' | 'markdown' | 'sql'
+export type CellLanguage = 'python' | 'prompt' | 'markdown' | 'sql' | 'r'
 export type MountMode = 'ro' | 'rw'
 export type WorkerBackend = 'local' | 'executor'
 export type WorkerHealth = 'healthy' | 'unknown' | 'unavailable' | 'warming'
@@ -264,8 +264,15 @@ export interface Cell {
   annotations?: CellAnnotations
   /** Causality chain explaining why this cell is stale */
   causality?: CausalityChain
-  /** Suggested package to install (when execution fails with ModuleNotFoundError) */
+  /** Suggested package to install (when execution fails with a
+   * recognisable missing-package error). */
   suggestInstall?: string
+  /** Language the suggested install applies to. ``"python"`` → the
+   * cell install button calls ``uv add``. ``"r"`` → the button is
+   * hidden until the R install action ships (manual
+   * ``install.packages()`` in an R cell remains the workaround).
+   * Backend always emits this when ``suggestInstall`` is set. */
+  suggestInstallLanguage?: 'python' | 'r'
   /** Shadow warnings from the DAG builder */
   shadowWarnings?: string[]
   /** Annotation validation diagnostics (set on open/reload, never during typing) */
@@ -419,6 +426,78 @@ export interface NotebookEnvironment {
   interpreterSource: 'unknown' | 'venv' | 'path'
 }
 
+// R-side runtime environment, parallel to NotebookEnvironment.
+// Populated for any notebook that ships a ``renv.lock`` — even
+// when the latest restore failed, so the UI can surface the
+// failure instead of hiding the R section entirely.
+//
+// Source of truth for "is there a renv.lock right now?" is
+// ``hasLockfile`` (derived from disk at serialize time).
+// ``lockHash`` / ``rVersion`` / ``lastSyncedAt`` reflect the *last
+// successful* sync; ``syncError`` carries the *latest attempt's*
+// error message.
+export interface RNotebookEnvironment {
+  hasLockfile: boolean
+  /** sha256(renv.lock) on disk right now. Compare against
+   * ``lockHash`` (last good sync) to know if the user edited
+   * the lockfile since the last successful restore. */
+  currentLockHash: string
+  /** Lockfile hash at the last *successful* renv::restore(). */
+  lockHash: string
+  /** R version at the last *successful* renv::restore(). */
+  rVersion: string
+  /** R version of ``Rscript`` on PATH right now (probed once per
+   * session). Falls back here when ``rVersion`` is empty (no
+   * lockfile / never synced) so the R card can always show
+   * *some* version info next to the status pill. */
+  systemRVersion: string
+  /** Epoch-ms timestamp of the last *successful* renv::restore(),
+   * or 0 if never. */
+  lastSyncedAt: number
+  /** Overall R-environment state.
+   *  - ``absent``:   no renv.lock on disk
+   *  - ``never``:    lockfile present but never successfully synced
+   *  - ``ok``:       last sync matched the current lockfile + no error
+   *  - ``outdated``: lockfile edited since the last good sync
+   *  - ``failed``:   the latest sync attempt errored */
+  syncState: 'absent' | 'never' | 'ok' | 'outdated' | 'failed'
+  /** Error message from the most recent failed attempt, or null. */
+  syncError: string | null
+  /** Packages installed in the renv project library, sorted by name.
+   *
+   * Populated by an explicit ``GET /v1/notebooks/{id}/r-packages``
+   * fetch — the env-state serialization on open / state sync /
+   * env refresh deliberately omits the package list so those
+   * paths don't pay a synchronous Rscript spawn. The env panel
+   * fetches lazily on mount.
+   *
+   * ``packagesStatus`` disambiguates "the probe failed" from
+   * "the library is empty" — both produce ``packages: []``.
+   */
+  packages: RPackageInfo[]
+  /** Outcome of the most recent ``installed.packages()`` probe.
+   *
+   * - ``unknown``           — the panel hasn't fetched yet.
+   * - ``absent``            — no renv.lock; nothing to probe.
+   * - ``ok``                — listing succeeded.
+   * - ``rscript_missing``   — Rscript not on PATH.
+   * - ``renv_not_active``   — renv hasn't activated (pre-init).
+   * - ``failed``            — subprocess error; ``packagesError``
+   *                           has the message.
+   */
+  packagesStatus: 'unknown' | 'absent' | 'ok' | 'rscript_missing' | 'renv_not_active' | 'failed'
+  /** Short error message when ``packagesStatus === 'failed'``. */
+  packagesError: string | null
+}
+
+// One R package installed in the project's renv library.
+// Parallel to ``DependencyInfo`` for the Python side. R uses CRAN
+// version strings rather than PEP 440 — render the version as-is.
+export interface RPackageInfo {
+  name: string
+  version: string
+}
+
 export interface NotebookRuntimeConfig {
   deploymentMode: 'personal' | 'service'
   defaultParentPath: string
@@ -427,8 +506,15 @@ export interface NotebookRuntimeConfig {
   pythonSelectionFixed: boolean
 }
 
+// ``r_init`` and ``r_add`` reuse the same env-job UI surface as
+// the Python actions — same progress block, same status icons,
+// just different ``command`` text in the operation log. Keeping
+// the union open at the type level avoids per-language branching
+// in the env panel rendering.
+export type EnvironmentJobAction = 'add' | 'remove' | 'sync' | 'import' | 'r_init' | 'r_add'
+
 export interface EnvironmentActionSummary {
-  action: 'add' | 'remove' | 'sync' | 'import'
+  action: EnvironmentJobAction
   packageName: string | null
   lockfileChanged: boolean
   staleCellCount: number
@@ -437,7 +523,7 @@ export interface EnvironmentActionSummary {
 
 export interface EnvironmentOperation {
   id: string
-  action: 'add' | 'remove' | 'sync' | 'import'
+  action: EnvironmentJobAction
   status: 'running' | 'completed' | 'failed'
   packageName: string | null
   phase: string | null
@@ -493,6 +579,10 @@ export interface Notebook {
   variantGroups: VariantGroup[]
   /** Environment info */
   environment: NotebookEnvironment
+  /** R-side environment info. Populated when ``renv.lock`` is present;
+   * fields are zero / empty otherwise (matches the
+   * default-RRuntime backend serialization). */
+  rEnvironment: RNotebookEnvironment
   /** Published outputs exposed as stable endpoints */
   publishedOutputs?: PublishedOutput[]
   /** Global metadata */

@@ -164,21 +164,57 @@ def _resolve_worker_token(worker_spec: Any) -> str | None:
     return None
 
 
-def _detect_missing_module(error: str, stderr: str) -> str | None:
-    """Parse ModuleNotFoundError to extract package name.
+def _detect_missing_module(error: str, stderr: str) -> tuple[str, str] | None:
+    """Detect a missing package from a cell-execution failure message.
 
-    Returns the PyPI package name to suggest for ``uv add``, or None.
+    Returns ``(language, package_name)`` where ``language`` is
+    ``"python"`` or ``"r"`` so callers know which package manager
+    can resolve the suggestion (uv vs ``install.packages()``).
+    Returns ``None`` when no recognisable missing-package error is
+    present.
+
+    Recognised error shapes:
+
+    * Python — ``ModuleNotFoundError: No module named 'pkg'`` (full
+      form) and the short form ``No module named 'pkg'`` that the
+      harness emits. Top-level module is extracted, then mapped to
+      its PyPI distribution name via ``_MODULE_TO_PACKAGE`` for the
+      well-known import-vs-package divergences (cv2 → opencv-python,
+      PIL → Pillow, ...).
+
+    * R — ``Error in library(arrow) : there is no package called
+      'arrow'`` and its ``requireNamespace`` variant. The R name
+      maps 1:1 to the CRAN package name; no alias table needed.
+      Returned as ``("r", "arrow")``.
+
+    Frontend uses the language tag to decide which install
+    endpoint to dispatch to — ``uv add`` for Python, eventually
+    ``install.packages()`` for R. Until the R install action is
+    wired, the cell-level "Install" button is hidden for R cells.
     """
     import re
 
     combined = f"{error}\n{stderr}"
-    # Match full form: ModuleNotFoundError: No module named 'pkg'
-    # or short form from harness: No module named 'pkg'
-    m = re.search(r"No module named ['\"]([^'\"]+)['\"]", combined)
-    if not m:
-        return None
-    module = m.group(1).split(".")[0]  # top-level module
-    return _MODULE_TO_PACKAGE.get(module, module)
+
+    # Python: ``No module named 'pkg'`` (handles both
+    # ``ModuleNotFoundError: ...`` and the harness's short form).
+    py_match = re.search(r"No module named ['\"]([^'\"]+)['\"]", combined)
+    if py_match:
+        module = py_match.group(1).split(".")[0]
+        return ("python", _MODULE_TO_PACKAGE.get(module, module))
+
+    # R: ``there is no package called 'pkg'``. The error text from
+    # base R uses straight ASCII quotes (`'pkg'`) on Linux/macOS;
+    # accept both straight and Unicode curly quotes (`‘pkg’`) for
+    # locales that emit the prettier variant.
+    r_match = re.search(
+        r"there is no package called [‘'\"]([^’'\"]+)[’'\"]",
+        combined,
+    )
+    if r_match:
+        return ("r", r_match.group(1))
+
+    return None
 
 
 def _artifact_content_type(artifact: Any) -> str:
@@ -258,7 +294,11 @@ class CellExecutionResult:
     # cells. Surfaced so the UI can show "validated after N retries"
     # when non-zero.
     validation_retries: int = 0
-    suggest_install: str | None = None  # e.g. "requests"
+    suggest_install: str | None = None  # e.g. "requests" (Python) or "arrow" (R)
+    # Language the suggested install applies to — frontend dispatches
+    # to ``uv add`` for ``"python"``, ``install.packages()`` for ``"r"``.
+    # ``None`` when ``suggest_install`` is also ``None``.
+    suggest_install_language: str | None = None
     remote_worker: str | None = None
     remote_transport: str | None = None
     remote_build_id: str | None = None
@@ -311,6 +351,7 @@ class CellExecutionResult:
         for opt_field in (
             "validation_retries",
             "suggest_install",
+            "suggest_install_language",
             "remote_worker",
             "remote_transport",
             "remote_build_id",
@@ -3351,7 +3392,8 @@ class CellExecutor:
         if not result.get("success", False):
             error_msg = result.get("error", "Unknown error")
             stderr = result.get("stderr", "")
-            suggest = _detect_missing_module(error_msg, stderr)
+            detected = _detect_missing_module(error_msg, stderr)
+            suggest_lang, suggest_pkg = detected if detected else (None, None)
             return CellExecutionResult(
                 cell_id=cell_id,
                 success=False,
@@ -3360,7 +3402,8 @@ class CellExecutor:
                 error=error_msg,
                 duration_ms=duration_ms,
                 execution_method=execution_method,
-                suggest_install=suggest,
+                suggest_install=suggest_pkg,
+                suggest_install_language=suggest_lang,
             )
 
         outputs = {}

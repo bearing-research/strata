@@ -70,12 +70,43 @@ class EnvironmentRuntime:
 
 
 @dataclass
+class RRuntime:
+    """Snapshot of the notebook's R-side runtime after ``renv::restore()``.
+
+    Mirror of ``EnvironmentRuntime`` for R. Lives in ``.strata/runtime.json``
+    rather than the committed ``notebook.toml`` so the per-session
+    ``last_synced_at`` doesn't churn the on-disk notebook definition.
+
+    Fields:
+
+    * ``lock_hash`` / ``r_version`` / ``last_synced_at`` — the *last
+      successful* sync. A failed re-sync leaves these alone so the UI
+      can still show "last good state was X".
+    * ``sync_error`` — error message from the most recent sync attempt.
+      Cleared on success. Non-empty value means the latest attempt
+      failed; the rest of the fields may still reflect a prior good
+      sync (or all be empty if no sync has ever succeeded).
+
+    All fields default to empty / zero. ``has_lockfile`` is NOT
+    cached here — it's a current-disk fact (``renv.lock`` exists)
+    derived at serialization time, not a "did we successfully sync
+    once" historical claim.
+    """
+
+    lock_hash: str = ""
+    r_version: str = ""
+    last_synced_at: int = 0
+    sync_error: str = ""
+
+
+@dataclass
 class RuntimeState:
     """Root of ``.strata/runtime.json`` — keyed cells + environment snapshot."""
 
     schema_version: int = SCHEMA_VERSION
     cells: dict[str, CellRuntime] = field(default_factory=dict)
     environment: EnvironmentRuntime = field(default_factory=EnvironmentRuntime)
+    r: RRuntime = field(default_factory=RRuntime)
 
     def get_or_create_cell(self, cell_id: str) -> CellRuntime:
         """Return the per-cell entry, creating it on demand."""
@@ -114,6 +145,7 @@ def load_runtime_state(notebook_dir: Path) -> RuntimeState:
         schema_version=data.get("schema_version", SCHEMA_VERSION),
         cells={cid: CellRuntime(**entry) for cid, entry in data.get("cells", {}).items()},
         environment=EnvironmentRuntime(**data.get("environment", {})),
+        r=RRuntime(**data.get("r", {})),
     )
 
 

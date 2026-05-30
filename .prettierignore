@@ -1,0 +1,3 @@
+# renv-generated project files (committed verbatim so renv can recognise /
+# upgrade them) — our formatters must not rewrite them.
+examples/**/renv/

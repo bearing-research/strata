@@ -765,10 +765,13 @@ def add_cell_to_notebook(
     else:
         order = len(cells_data)
 
-    # Create cell file. Markdown cells use ``.md`` so the file is editable
-    # outside the notebook UI (in any markdown-aware editor) without the
-    # ``.py`` extension confusing syntax highlighters.
-    extension = "md" if language == "markdown" else "py"
+    # Create cell file with a language-matching extension so the source
+    # file is editable + linted outside the notebook UI (markdown editors
+    # for ``.md``, R-aware editors for ``.r``, etc.). Python is the
+    # fallback for anything else (SQL cells use ``.py`` historically;
+    # the cell harness reads source text by content, not extension).
+    extension_by_language = {"markdown": "md", "r": "r"}
+    extension = extension_by_language.get(language, "py")
     cell_filename = f"{cell_id}.{extension}"
     cells_dir = notebook_dir / "cells"
     cells_dir.mkdir(exist_ok=True)

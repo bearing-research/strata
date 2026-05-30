@@ -360,7 +360,20 @@ async function openNotebook(path: string): Promise<NotebookSessionPayload> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path }),
-    timeoutMs: 120_000, // uv sync can take 30-60s on cold start
+    // 10 minutes — matches the backend's ``_renv_sync`` timeout
+    // (``writer.py:_renv_sync``). A cold first-open of a notebook
+    // with ``renv.lock`` can spend that long compiling R packages
+    // from source. Same-or-cached-lockfile reopens short-circuit
+    // inside ``ensure_renv_synced`` in milliseconds, so this
+    // generous cap only matters on the first restore. Python-only
+    // notebooks' ``uv sync`` finishes well under a minute even on
+    // cold start, so this isn't a regression for them.
+    //
+    // Background-restore + WS-pushed progress is the architectural
+    // answer for the slow first-open UX; this timeout bump is the
+    // minimum guard that "open didn't time out the wire" doesn't
+    // shadow a real, working restore in progress.
+    timeoutMs: 600_000,
   })
   if (!resp.ok) {
     throw new Error(`Failed to open notebook: ${resp.status}`)
@@ -983,6 +996,40 @@ async function addDependency(notebookId: string, pkg: string): Promise<Environme
   return readJson<EnvironmentResponse>(resp)
 }
 
+// R-side env jobs ride the same ``environment/jobs`` endpoint —
+// just a different ``action`` string. The backend dispatches to
+// Rscript instead of uv. Frontend gets the same job-progress
+// frames and the same env-state refresh in the 202 response.
+async function initRenv(notebookId: string): Promise<EnvironmentResponse> {
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/environment/jobs`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'r_init' }),
+    },
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to initialise renv')
+  }
+  return readJson<EnvironmentResponse>(resp)
+}
+
+async function addRPackage(notebookId: string, pkg: string): Promise<EnvironmentResponse> {
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/environment/jobs`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'r_add', package: pkg }),
+    },
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to install R package')
+  }
+  return readJson<EnvironmentResponse>(resp)
+}
+
 async function removeDependency(notebookId: string, pkg: string): Promise<EnvironmentResponse> {
   const resp = await fetchWithTimeout(
     `${STRATA_BASE}/v1/notebooks/${notebookId}/environment/jobs`,
@@ -1004,6 +1051,27 @@ async function getEnvironmentStatus(notebookId: string): Promise<EnvironmentResp
     await throwApiError(resp, 'Failed to load notebook environment')
   }
   return readJson<EnvironmentResponse>(resp)
+}
+
+interface RPackagesResponse {
+  packages?: Array<{ name?: string; version?: string }>
+  packages_status?: string
+  packages_error?: string | null
+}
+
+async function getRPackages(notebookId: string): Promise<RPackagesResponse> {
+  // Separate from getEnvironmentStatus because it spawns Rscript
+  // (~1-2s). The env panel calls this on mount + manual refresh;
+  // notebook open / state sync don't.
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${notebookId}/r-packages`, {
+    // 30s — generous for a one-Rscript-spawn listing on cold start.
+    // The backend itself imposes a 30s timeout on the subprocess.
+    timeoutMs: 45_000,
+  })
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to load R packages')
+  }
+  return readJson<RPackagesResponse>(resp)
 }
 
 async function syncEnvironment(notebookId: string): Promise<EnvironmentResponse> {
@@ -1374,6 +1442,9 @@ export function useStrata() {
     addDependency,
     removeDependency,
     getEnvironmentStatus,
+    getRPackages,
+    initRenv,
+    addRPackage,
     syncEnvironment,
     exportRequirements,
     previewRequirementsImport,

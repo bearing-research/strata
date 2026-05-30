@@ -137,6 +137,41 @@ def test_add_cell():
         assert notebook_state.cells[1].id == cell2_id
 
 
+def test_add_cell_picks_extension_by_language():
+    """Cell source files use language-matching extensions.
+
+    Pre-PR-A every non-markdown language wrote ``.py``, so an R cell
+    added from the UI landed in ``cells/<id>.py`` despite the
+    ``language = "r"`` entry in ``notebook.toml``. Tools opening the
+    cell file from outside the UI (R-aware editors, lint passes,
+    grep-based scripts) would misclassify it. Verify each language
+    that has a dedicated extension gets the right one, and that
+    languages without one still default to ``.py``.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Extension Test")
+        cells_dir = notebook_dir / "cells"
+
+        cases = [
+            ("py-cell", "python", "py"),
+            ("md-cell", "markdown", "md"),
+            ("sql-cell", "sql", "py"),  # SQL keeps .py historically.
+            ("prompt-cell", "prompt", "py"),
+            ("r-cell", "r", "r"),
+        ]
+        for cell_id, language, expected_ext in cases:
+            add_cell_to_notebook(notebook_dir, cell_id, language=language)
+            assert (cells_dir / f"{cell_id}.{expected_ext}").exists(), (
+                f"language={language!r} should write a .{expected_ext} file"
+            )
+
+        # Notebook.toml round-trips the language correctly for each cell.
+        notebook_state = parse_notebook(notebook_dir)
+        by_id = {cell.id: cell.language for cell in notebook_state.cells}
+        assert by_id["r-cell"].value == "r"
+        assert by_id["md-cell"].value == "markdown"
+
+
 def test_add_cell_after():
     """Test adding cell after a specific cell."""
     with tempfile.TemporaryDirectory() as tmpdir:

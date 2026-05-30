@@ -29,53 +29,63 @@ from tests.notebook.e2e_fixtures import (
 
 
 class TestDetectMissingModule:
-    """_detect_missing_module extracts package names from errors."""
+    """_detect_missing_module extracts (language, package) from cell errors."""
 
     def test_simple_module(self):
         """Standard module name extraction."""
-        assert (
-            _detect_missing_module("ModuleNotFoundError: No module named 'requests'", "")
-            == "requests"
+        assert _detect_missing_module("ModuleNotFoundError: No module named 'requests'", "") == (
+            "python",
+            "requests",
         )
 
     def test_submodule(self):
         """Submodule import extracts top-level."""
-        assert (
-            _detect_missing_module("ModuleNotFoundError: No module named 'numpy.core'", "")
-            == "numpy"
+        assert _detect_missing_module("ModuleNotFoundError: No module named 'numpy.core'", "") == (
+            "python",
+            "numpy",
         )
 
     def test_double_quotes(self):
         """Double-quoted module name."""
-        assert (
-            _detect_missing_module('ModuleNotFoundError: No module named "pandas"', "") == "pandas"
+        assert _detect_missing_module('ModuleNotFoundError: No module named "pandas"', "") == (
+            "python",
+            "pandas",
         )
 
     def test_from_stderr(self):
         """Extraction from stderr."""
-        assert _detect_missing_module("", "ModuleNotFoundError: No module named 'flask'") == "flask"
+        assert _detect_missing_module("", "ModuleNotFoundError: No module named 'flask'") == (
+            "python",
+            "flask",
+        )
 
     def test_pil_to_pillow(self):
         """PIL maps to Pillow."""
-        assert _detect_missing_module("ModuleNotFoundError: No module named 'PIL'", "") == "Pillow"
+        assert _detect_missing_module("ModuleNotFoundError: No module named 'PIL'", "") == (
+            "python",
+            "Pillow",
+        )
 
     def test_sklearn_to_scikit(self):
         """sklearn maps to scikit-learn."""
-        assert (
-            _detect_missing_module("ModuleNotFoundError: No module named 'sklearn'", "")
-            == "scikit-learn"
+        assert _detect_missing_module("ModuleNotFoundError: No module named 'sklearn'", "") == (
+            "python",
+            "scikit-learn",
         )
 
     def test_cv2_to_opencv(self):
         """cv2 maps to opencv-python."""
-        assert (
-            _detect_missing_module("ModuleNotFoundError: No module named 'cv2'", "")
-            == "opencv-python"
+        assert _detect_missing_module("ModuleNotFoundError: No module named 'cv2'", "") == (
+            "python",
+            "opencv-python",
         )
 
     def test_yaml_to_pyyaml(self):
         """yaml maps to pyyaml."""
-        assert _detect_missing_module("ModuleNotFoundError: No module named 'yaml'", "") == "pyyaml"
+        assert _detect_missing_module("ModuleNotFoundError: No module named 'yaml'", "") == (
+            "python",
+            "pyyaml",
+        )
 
     def test_no_match(self):
         """Non-matching error returns None."""
@@ -84,6 +94,47 @@ class TestDetectMissingModule:
     def test_empty(self):
         """Empty strings return None."""
         assert _detect_missing_module("", "") is None
+
+    # ---------------------------------------------------------------------
+    # R cells emit a different shape — pinned here so the install button
+    # dispatches to install.packages() rather than uv add.
+    # ---------------------------------------------------------------------
+
+    def test_r_library_missing(self):
+        """``library(arrow)`` failure surfaces as an R suggestion."""
+        msg = "Error in library(arrow) : there is no package called 'arrow'"
+        assert _detect_missing_module(msg, "") == ("r", "arrow")
+
+    def test_r_require_namespace_missing(self):
+        """``requireNamespace`` produces the same error wording."""
+        msg = "Error: there is no package called 'tibble'"
+        assert _detect_missing_module(msg, "") == ("r", "tibble")
+
+    def test_r_unicode_curly_quotes(self):
+        """Some R locales emit ``‘pkg’`` (curly) instead of ``'pkg'``
+        (straight). Both must be detected — pinning the curly variant
+        because locale variation across CI runners has bitten other
+        regex-based detectors before.
+        """
+        msg = "Error in library(ggplot2) : there is no package called ‘ggplot2’"
+        assert _detect_missing_module(msg, "") == ("r", "ggplot2")
+
+    def test_r_error_from_stderr(self):
+        """R errors in stderr (Rscript writes warnings + errors there)
+        are detected too."""
+        stderr = "Error: there is no package called 'arrow'\nExecution halted"
+        assert _detect_missing_module("", stderr) == ("r", "arrow")
+
+    def test_python_match_wins_over_r_when_both_present(self):
+        """Mixed-language cells (rare) — Python error takes precedence
+        because that's the cell that actually failed. The regex order
+        in ``_detect_missing_module`` reflects this; pinning so a future
+        refactor doesn't quietly flip the precedence."""
+        msg = (
+            "ModuleNotFoundError: No module named 'pandas'\n"
+            "Error in library(arrow): there is no package called 'arrow'"
+        )
+        assert _detect_missing_module(msg, "") == ("python", "pandas")
 
 
 class TestExportEndpoint:
