@@ -199,15 +199,78 @@ if (!is.null(manifest$mutation_defines)) {
 
 exec_error <- NULL
 
+# ---------------------------------------------------------------------------
+# Plot capture device
+# ---------------------------------------------------------------------------
+# Open a PNG device so plots drawn during execution — base graphics (via
+# plot.new) and grid / ggplot / lattice (via grid.newpage) — render to
+# per-page files. `%03d` makes the device write one file per page.
+# Newpage hooks count real pages so a never-drawn device's trailing blank
+# page isn't mistaken for a plot. Device-open is best-effort: if no usable
+# graphics device is available the cell still runs, just without capture.
+plot_capture_enabled <- FALSE
+plot_device <- NULL
+plot_width <- 800L
+plot_height <- 600L
+plot_count_env <- new.env()
+plot_count_env$n <- 0L
+plot_pattern <- file.path(output_dir, "__rplot__%03d.png")
+tryCatch(
+  {
+    grDevices::png(
+      filename = plot_pattern,
+      width = plot_width, height = plot_height, res = 96L
+    )
+    plot_device <- grDevices::dev.cur()
+    plot_capture_enabled <- TRUE
+    setHook("plot.new", function(...) plot_count_env$n <- plot_count_env$n + 1L, "append")
+    setHook("grid.newpage", function(...) plot_count_env$n <- plot_count_env$n + 1L, "append")
+  },
+  error = function(e) {
+    plot_capture_enabled <<- FALSE
+  }
+)
+
+# Plot-like objects auto-print to the device when they're the visible
+# value of a top-level expression — so a bare trailing `p` (ggplot /
+# lattice / grob) renders, mirroring the notebook REPL. Non-plot visible
+# values are NOT printed, keeping stdout identical to a plain
+# `eval(parse(...))` for every non-plotting cell. Explicit `print(p)` /
+# `plot(p)` already render during eval and return invisibly, so they're
+# not double-drawn.
+# Only classes whose `print` method DRAWS to the active device — printing a
+# bare grob / gtable just dumps its text structure to stdout without
+# rendering, so those are deliberately excluded (use `grid.draw()` for them,
+# which draws during eval and is captured anyway).
+is_plot_like <- function(x) {
+  inherits(x, c("ggplot", "ggmatrix", "patchwork", "trellis", "recordedplot"))
+}
+
 tryCatch(
   {
     parsed <- parse(text = source_text)
-    eval(parsed, envir = cell_env)
+    for (expr in parsed) {
+      res <- withVisible(eval(expr, envir = cell_env))
+      if (isTRUE(res$visible) && is_plot_like(res$value)) {
+        print(res$value)
+      }
+    }
   },
   error = function(e) {
     exec_error <<- e
   }
 )
+
+# Flush + close the capture device and drop our newpage hooks. Closing by
+# device number leaves any device the cell opened itself untouched.
+if (plot_capture_enabled) {
+  setHook("plot.new", NULL, "replace")
+  setHook("grid.newpage", NULL, "replace")
+  # `invisible()` — `dev.off()` returns a visible value and this `if` is a
+  # top-level expression, so without it Rscript auto-prints "null device 1"
+  # into the captured stdout.
+  invisible(tryCatch(grDevices::dev.off(plot_device), error = function(e) NULL))
+}
 
 # Restore default sinks BEFORE reading the captured files; otherwise
 # `readLines` ends up writing to the same sink we're trying to drain.
@@ -310,10 +373,57 @@ serialize_value <- function(value, output_dir, var_name) {
   write_rds(value, output_dir, var_name)
 }
 
+# ---------------------------------------------------------------------------
+# Display capture (plots)
+# ---------------------------------------------------------------------------
+# Re-home each non-blank captured page to the `__display__N.png`
+# convention the parent's `_store_display_outputs` expects, and emit an
+# image/png display payload in the same wire shape as the Python harness:
+# base64 data URL in `inline_data_url`, `width` / `height`, `preview`
+# NULL. Only runs when a real page was drawn (newpage count > 0), so an
+# unused device's trailing blank PNG is dropped.
+plot_displays <- list()
+if (plot_capture_enabled && plot_count_env$n > 0L) {
+  plot_files <- sort(list.files(
+    output_dir,
+    pattern = "^__rplot__[0-9]+\\.png$"
+  ))
+  display_index <- 0L
+  for (pf in plot_files) {
+    src_path <- file.path(output_dir, pf)
+    size <- file.info(src_path)$size
+    if (is.na(size) || size == 0) next
+    target_name <- sprintf("__display__%d.png", display_index)
+    target_path <- file.path(output_dir, target_name)
+    file.rename(src_path, target_path)
+    raw_bytes <- readBin(target_path, what = "raw", n = file.info(target_path)$size)
+    plot_displays[[length(plot_displays) + 1L]] <- list(
+      content_type = "image/png",
+      file = target_name,
+      bytes = file.info(target_path)$size,
+      inline_data_url = paste0(
+        "data:image/png;base64,", jsonlite::base64_enc(raw_bytes)
+      ),
+      width = plot_width,
+      height = plot_height,
+      preview = NULL
+    )
+    display_index <- display_index + 1L
+  }
+}
+
+# Drop any stragglers — e.g. the trailing blank page an unused device writes
+# on close — so they don't clutter output_dir.
+invisible(unlink(list.files(
+  output_dir,
+  pattern = "^__rplot__[0-9]+\\.png$",
+  full.names = TRUE
+)))
+
 result <- list(
   success = is.null(exec_error),
   variables = list(),
-  displays = list(),
+  displays = plot_displays,
   stdout = stdout_text,
   stderr = stderr_text,
   mutation_warnings = list()
@@ -377,6 +487,16 @@ if (is.null(exec_error)) {
     vapply(sys.calls(), function(call) paste(deparse(call), collapse = " "), character(1)),
     collapse = "\n"
   )
+}
+
+# jsonlite serializes an empty R `list()` as a JSON array `[]`, but the
+# parent's `_parse_result` does `variables.items()` and needs a JSON object
+# `{}`. A named empty list serializes as `{}`. Without this a cell that
+# binds no variables — e.g. a plot-only cell — crashes the parse with
+# "'list' object has no attribute 'items'". (`displays` /
+# `mutation_warnings` are genuinely arrays, so they stay `[]`.)
+if (length(result$variables) == 0L) {
+  result$variables <- setNames(list(), character(0))
 }
 
 result_path <- file.path(output_dir, "harness-result.json")
