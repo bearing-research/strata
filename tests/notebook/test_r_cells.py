@@ -17,6 +17,7 @@ import base64
 import pytest
 
 from strata.notebook.executor import CellExecutor
+from strata.notebook.writer import _renv_sync
 from tests.notebook.conftest import (
     skip_if_no_r,
     skip_if_no_r_arrow,
@@ -498,3 +499,44 @@ async def test_r_cell_ggplot_emitted_as_png_display(r_notebook):
     assert result.success is True, result.error
     assert len(result.display_outputs) == 1
     _assert_png_display(result.display_outputs[0])
+
+
+@pytest.mark.asyncio
+async def test_renv_restore_populates_project_library_and_runs_cell(r_notebook_renv):
+    """A real ``renv::restore`` from a committed lockfile populates the
+    project library, and an R cell then runs against it — no mocks.
+
+    This is the renv capstone the #59 suite deferred: ``test_renv_sync.py``
+    monkeypatches ``subprocess.run``, and the plain ``r_notebook`` fixture
+    runs R cells against the system library. Here the committed
+    ``renv_jsonlite`` scaffold ships a lockfile but no built library, so
+    ``_renv_sync`` has to do a genuine restore. Pinned to ``jsonlite``
+    only, which restores in seconds from a binary.
+
+    Asserts, in order:
+      1. The scaffold has no project library yet (restore is the work).
+      2. ``_renv_sync`` reports success.
+      3. ``jsonlite`` is now installed under ``renv/library`` — proof the
+         restore actually populated the project-scoped library rather than
+         silently falling back to the system one.
+      4. An R cell that loads jsonlite executes against that library.
+    """
+    src = "library(jsonlite)\nout <- as.character(toJSON(list(ok = TRUE), auto_unbox = TRUE))\n"
+    notebook_dir, session = r_notebook_renv(cells=[("c1", None, src, "r")])
+
+    lib_root = notebook_dir / "renv" / "library"
+    assert not (lib_root.exists() and list(lib_root.rglob("jsonlite"))), (
+        "fixture should ship no pre-built library — restore is what's under test"
+    )
+
+    assert _renv_sync(notebook_dir) is True, "renv::restore() should succeed"
+
+    assert list(lib_root.rglob("jsonlite")), (
+        "renv::restore must install jsonlite into the project library"
+    )
+
+    executor = CellExecutor(session)
+    result = await executor.execute_cell("c1", src)
+
+    assert result.success is True, result.error
+    assert result.outputs["out"]["preview"] == '{"ok":true}'
