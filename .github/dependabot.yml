@@ -97,3 +97,25 @@ updates:
     commit-message:
       prefix: deps
       include: scope
+
+  # Keep the digest-pinned Docker base images current. The Dockerfiles
+  # pin `FROM` by tag + sha256 (Scorecard Pinned-Dependencies); without
+  # this ecosystem those digests go stale and miss base-image security
+  # patches. Covers the shipped image (/) and the df-cluster example.
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /examples/arxiv_classifier/df-cluster
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 3
+    groups:
+      docker:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: ci
+      include: scope

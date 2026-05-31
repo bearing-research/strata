@@ -12,7 +12,9 @@
 # Fly prints the URL — paste it into notebook.toml as a [[workers]]
 # entry with transport = "http" and url = "<fly-url>/v1/execute".
 
-FROM python:3.12-slim AS builder
+# Digest-pinned for reproducible builds (Scorecard Pinned-Dependencies).
+# Bump tag + digest together via `docker buildx imagetools inspect`.
+FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203 AS builder
 
 # Rust toolchain — required to build Strata's native extension.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -31,7 +33,7 @@ RUN pip install --no-cache-dir \
     "pyarrow>=18"
 
 # Slim runtime — copy the installed packages from the builder stage.
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:090ba77e2958f6af52a5341f788b50b032dd4ca28377d2893dcf1ecbdfdfe203
 
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
