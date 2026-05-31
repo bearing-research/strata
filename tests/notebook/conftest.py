@@ -28,14 +28,14 @@ from tests.conftest import find_free_port, wait_for_server
 # package probe doesn't get duplicated across files.
 
 
-def _r_arrow_available() -> bool:
-    """Probe ``requireNamespace("arrow")`` once at conftest import.
+def _r_package_available(package: str) -> bool:
+    """Probe ``requireNamespace(package)`` once at conftest import.
 
-    Returning True requires Rscript on PATH *and* the R-side arrow
-    package loadable. The 30s timeout is generous — a healthy R
-    install resolves the namespace in well under a second; the only
-    reason this could hang is a stale RPROFILE doing network I/O,
-    which we'd rather skip with a clear reason than block CI on.
+    Returning True requires Rscript on PATH *and* the named R package
+    loadable. The 30s timeout is generous — a healthy R install
+    resolves the namespace in well under a second; the only reason
+    this could hang is a stale RPROFILE doing network I/O, which we'd
+    rather skip with a clear reason than block CI on.
 
     Runs at module load: when Rscript is absent (most dev machines,
     Windows CI) the probe short-circuits without spawning — so the
@@ -50,7 +50,7 @@ def _r_arrow_available() -> bool:
             [
                 "Rscript",
                 "-e",
-                'q(status = if (requireNamespace("arrow", quietly = TRUE)) 0 else 1)',
+                f'q(status = if (requireNamespace("{package}", quietly = TRUE)) 0 else 1)',
             ],
             capture_output=True,
             timeout=30,
@@ -62,7 +62,8 @@ def _r_arrow_available() -> bool:
 
 
 _RSCRIPT_AVAILABLE = shutil.which("Rscript") is not None
-_R_ARROW_AVAILABLE = _r_arrow_available()
+_R_ARROW_AVAILABLE = _r_package_available("arrow")
+_R_GGPLOT2_AVAILABLE = _r_package_available("ggplot2")
 
 skip_if_no_r = pytest.mark.skipif(
     not _RSCRIPT_AVAILABLE,
@@ -74,6 +75,14 @@ skip_if_no_r_arrow = pytest.mark.skipif(
     reason=(
         "R 'arrow' package not loadable; install with "
         "`install.packages('arrow')` to run cross-language tests"
+    ),
+)
+
+skip_if_no_r_ggplot2 = pytest.mark.skipif(
+    not _R_GGPLOT2_AVAILABLE,
+    reason=(
+        "R 'ggplot2' package not loadable; install with "
+        "`install.packages('ggplot2')` to run the ggplot display test"
     ),
 )
 

@@ -12,10 +12,16 @@ behaviour, annotations, and real-renv restore land in follow-up PRs.
 
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from strata.notebook.executor import CellExecutor
-from tests.notebook.conftest import skip_if_no_r, skip_if_no_r_arrow
+from tests.notebook.conftest import (
+    skip_if_no_r,
+    skip_if_no_r_arrow,
+    skip_if_no_r_ggplot2,
+)
 
 pytestmark = [skip_if_no_r, skip_if_no_r_arrow]
 # Note: deliberately NOT ``@pytest.mark.integration``. That marker
@@ -389,3 +395,106 @@ async def test_r_cell_env_annotation_visible_to_rscript(r_notebook):
 
     assert result.success is True, result.error
     assert result.outputs["value"]["preview"] == "hello-from-annotation"
+
+
+def _assert_png_display(display: dict) -> None:
+    """A display payload is a persisted image/png with valid PNG bytes."""
+    assert display["content_type"] == "image/png"
+    assert display["bytes"] > 0
+    assert display["width"] == 800
+    assert display["height"] == 600
+    assert display.get("artifact_uri"), "display should be persisted as an artifact"
+    data_url = display["inline_data_url"]
+    assert data_url.startswith("data:image/png;base64,")
+    raw = base64.b64decode(data_url.split(",", 1)[1])
+    # PNG magic number — proves the base64 round-trips to real image bytes.
+    assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+@pytest.mark.asyncio
+async def test_r_cell_base_graphics_emitted_as_png_display(r_notebook):
+    """A base-graphics plot in an R cell becomes an image/png display.
+
+    Base graphics (``plot``) draw straight to the harness's capture
+    device during ``eval`` (the ``plot.new`` hook marks the page as
+    real), so the page is re-homed to ``__display__0.png`` and
+    surfaced through the same ``_store_display_outputs`` chain the
+    Python matplotlib path uses. No extra R packages needed — this is
+    the CI-safe core of #80.
+    """
+    src = "plot(1:10, (1:10)^2, main = 'quadratic')\n"
+    _, session = r_notebook(cells=[("c1", None, src, "r")])
+    executor = CellExecutor(session)
+
+    result = await executor.execute_cell("c1", src)
+
+    assert result.success is True, result.error
+    assert len(result.display_outputs) == 1
+    _assert_png_display(result.display_outputs[0])
+
+
+@pytest.mark.asyncio
+async def test_r_cell_multiple_plots_emit_ordered_displays(r_notebook):
+    """Two plots in one R cell produce two ordered image/png displays."""
+    src = "plot(1:10)\nhist(c(1, 1, 2, 3, 3, 3))\n"
+    _, session = r_notebook(cells=[("c1", None, src, "r")])
+    executor = CellExecutor(session)
+
+    result = await executor.execute_cell("c1", src)
+
+    assert result.success is True, result.error
+    assert len(result.display_outputs) == 2
+    for display in result.display_outputs:
+        _assert_png_display(display)
+    # Distinct artifacts, persisted in draw order.
+    assert result.display_outputs[0]["artifact_uri"] != result.display_outputs[1]["artifact_uri"]
+
+
+@pytest.mark.asyncio
+async def test_r_cell_without_plot_emits_no_display(r_notebook):
+    """A non-plotting R cell emits no displays and keeps stdout clean.
+
+    Guards the capture device's blank-page handling: the trailing
+    blank PNG an unused device writes on close must not be mistaken
+    for a real plot, and closing the device must not leak
+    ``null device 1`` into the captured stdout.
+    """
+    src = "x <- mean(1:100)\ncat('no plots here\\n')\n"
+    _, session = r_notebook(cells=[("c1", None, src, "r")])
+    executor = CellExecutor(session)
+
+    result = await executor.execute_cell("c1", src)
+
+    assert result.success is True, result.error
+    assert result.display_outputs == []
+    assert result.stdout.strip() == "no plots here"
+    # R scalar previews come back as formatted strings (harness.R write_json).
+    assert result.outputs["x"]["preview"] == "50.5"
+
+
+@skip_if_no_r_ggplot2
+@pytest.mark.asyncio
+async def test_r_cell_ggplot_emitted_as_png_display(r_notebook):
+    """A bare trailing ggplot object auto-renders to an image/png display.
+
+    The harness auto-prints the visible value of a top-level
+    expression when it's plot-like (``inherits(x, "ggplot")``), so a
+    notebook-style last-line ``p`` renders without an explicit
+    ``print(p)`` — mirroring the REPL. ``print.ggplot`` draws via
+    ``grid.newpage`` (hooked, marks the page real). Gated on ggplot2
+    being installed; skips cleanly in CI where it isn't.
+    """
+    src = (
+        "library(ggplot2)\n"
+        "df <- data.frame(x = 1:10, y = (1:10)^2)\n"
+        "p <- ggplot(df, aes(x, y)) + geom_point()\n"
+        "p\n"
+    )
+    _, session = r_notebook(cells=[("c1", None, src, "r")])
+    executor = CellExecutor(session)
+
+    result = await executor.execute_cell("c1", src)
+
+    assert result.success is True, result.error
+    assert len(result.display_outputs) == 1
+    _assert_png_display(result.display_outputs[0])
