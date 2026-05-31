@@ -28,14 +28,14 @@ from tests.conftest import find_free_port, wait_for_server
 # package probe doesn't get duplicated across files.
 
 
-def _r_arrow_available() -> bool:
-    """Probe ``requireNamespace("arrow")`` once at conftest import.
+def _r_package_available(package: str) -> bool:
+    """Probe ``requireNamespace(package)`` once at conftest import.
 
-    Returning True requires Rscript on PATH *and* the R-side arrow
-    package loadable. The 30s timeout is generous — a healthy R
-    install resolves the namespace in well under a second; the only
-    reason this could hang is a stale RPROFILE doing network I/O,
-    which we'd rather skip with a clear reason than block CI on.
+    Returning True requires Rscript on PATH *and* the named R package
+    loadable. The 30s timeout is generous — a healthy R install
+    resolves the namespace in well under a second; the only reason
+    this could hang is a stale RPROFILE doing network I/O, which we'd
+    rather skip with a clear reason than block CI on.
 
     Runs at module load: when Rscript is absent (most dev machines,
     Windows CI) the probe short-circuits without spawning — so the
@@ -50,7 +50,7 @@ def _r_arrow_available() -> bool:
             [
                 "Rscript",
                 "-e",
-                'q(status = if (requireNamespace("arrow", quietly = TRUE)) 0 else 1)',
+                f'q(status = if (requireNamespace("{package}", quietly = TRUE)) 0 else 1)',
             ],
             capture_output=True,
             timeout=30,
@@ -62,7 +62,8 @@ def _r_arrow_available() -> bool:
 
 
 _RSCRIPT_AVAILABLE = shutil.which("Rscript") is not None
-_R_ARROW_AVAILABLE = _r_arrow_available()
+_R_ARROW_AVAILABLE = _r_package_available("arrow")
+_R_GGPLOT2_AVAILABLE = _r_package_available("ggplot2")
 
 skip_if_no_r = pytest.mark.skipif(
     not _RSCRIPT_AVAILABLE,
@@ -74,6 +75,14 @@ skip_if_no_r_arrow = pytest.mark.skipif(
     reason=(
         "R 'arrow' package not loadable; install with "
         "`install.packages('arrow')` to run cross-language tests"
+    ),
+)
+
+skip_if_no_r_ggplot2 = pytest.mark.skipif(
+    not _R_GGPLOT2_AVAILABLE,
+    reason=(
+        "R 'ggplot2' package not loadable; install with "
+        "`install.packages('ggplot2')` to run the ggplot display test"
     ),
 )
 
@@ -410,6 +419,43 @@ def r_notebook(tmp_path: Path):
         for cell in notebook_state.cells:
             cell.language = _language_map[by_id[cell.id]]
         session = NotebookSession(notebook_state, notebook_dir)
+        return notebook_dir, session
+
+    return _make
+
+
+# Canonical minimal renv project committed under tests/notebook/fixtures/.
+# Pins only ``jsonlite`` (binary, restores in seconds from CRAN/RSPM or
+# renv's global cache) so a real ``renv::restore`` stays fast in CI. The
+# built ``renv/library`` is deliberately absent — restoring it is the
+# point of the integration test.
+_RENV_JSONLITE_FIXTURE = Path(__file__).parent / "fixtures" / "renv_jsonlite"
+
+
+@pytest.fixture
+def r_notebook_renv(r_notebook):
+    """Like ``r_notebook`` but with a real renv project scaffold attached.
+
+    Copies the committed jsonlite renv scaffold (``renv.lock`` +
+    ``.Rprofile`` + ``renv/activate.R`` + ``renv/settings.json``)
+    alongside the notebook, so a test can drive an actual
+    ``renv::restore`` end-to-end — the gap left open in #59, where the
+    plain ``r_notebook`` fixture runs against the system R library and
+    ``test_renv_sync.py`` only mocks ``subprocess.run``.
+
+    Deliberately does NOT run the restore itself: the test calls
+    ``_renv_sync`` (or opens the session) and asserts, keeping the
+    real-restore exercise visible in the test body. The ``renv/library``
+    is not committed — restoring it from the lockfile is what's under
+    test.
+    """
+    import shutil as _shutil
+
+    def _make(cells: list[tuple[str, str | None, str, str]]):
+        notebook_dir, session = r_notebook(cells)
+        _shutil.copy(_RENV_JSONLITE_FIXTURE / "renv.lock", notebook_dir / "renv.lock")
+        _shutil.copy(_RENV_JSONLITE_FIXTURE / ".Rprofile", notebook_dir / ".Rprofile")
+        _shutil.copytree(_RENV_JSONLITE_FIXTURE / "renv", notebook_dir / "renv")
         return notebook_dir, session
 
     return _make

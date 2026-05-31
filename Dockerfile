@@ -20,12 +20,15 @@
 #
 # syntax=docker/dockerfile:1
 
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.3-python3.13-trixie-slim
+# Pinned by digest for reproducible, supply-chain-safe builds (Scorecard
+# Pinned-Dependencies). Bump the tag and the digest together; resolve a new
+# digest with `docker buildx imagetools inspect <image:tag>`.
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.3-python3.13-trixie-slim@sha256:82f018bb3bd8b1d12c376c3e87da186ec1932cbf91bc8e73089feea6428fec00
 
 # =============================================================================
 # Stage 1a: Frontend Builder (Node.js)
 # =============================================================================
-FROM node:24-alpine AS frontend-builder
+FROM node:24-alpine@sha256:2bdb65ed1dab192432bc31c95f94155ca5ad7fc1392fb7eb7526ab682fa5bf14 AS frontend-builder
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
