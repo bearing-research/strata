@@ -687,9 +687,13 @@ R environments are managed from the **Environment** panel, at parity with Python
 
 `renv.lock` is committed config (like `uv.lock`); the built `renv/library/` is gitignored.
 
+### Plots
+
+R cells display plots inline, like a Python cell's matplotlib figure. Base graphics (`plot()`, `hist()`, …) and grid-based plots (ggplot2, lattice) are captured to PNG and rendered in the cell output. A bare trailing plot object auto-renders — a last-line `p` where `p <- ggplot(...)` shows the plot without an explicit `print(p)`, mirroring the R console. A cell that draws several plots produces an ordered list of image outputs.
+
 ### What's still ahead
 
-R execution is complete; remaining R polish is tracked on GitHub: [#80](https://github.com/bearing-research/strata/issues/80) (ggplot → PNG display), [#81](https://github.com/bearing-research/strata/issues/81) (warm Rscript pool), [#82](https://github.com/bearing-research/strata/issues/82) (renv library fixture), [#83](https://github.com/bearing-research/strata/issues/83) (R version matrix on CI), [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
+R execution and display are complete; remaining R polish is tracked on GitHub: [#81](https://github.com/bearing-research/strata/issues/81) (warm Rscript pool), [#83](https://github.com/bearing-research/strata/issues/83) (R version matrix on CI), [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
 
 ### What you need today
 

@@ -5,12 +5,13 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## 0.2.0 — 2026-05-29
+## 0.2.0 — 2026-06-03
 
 Second release. Headline: **R cells** alongside Python in the same
 notebook with cross-language Arrow handoff — first-class in the UI, with
-an R environment panel (one-click renv bootstrap + package install) and
-automatic `renv::restore()` on open. Plus run-all batching that amortises
+an R environment panel (one-click renv bootstrap + package install),
+automatic `renv::restore()` on open, and inline plot output (ggplot2 /
+base graphics render to PNG). Plus run-all batching that amortises
 subprocess cost across consecutive Python cells, a 60-second WS reconnect
 grace so a flaky network doesn't kill a running execution, real-emulator
 integration tests for the S3 / Azure / GCS mount schemes, and versioned
@@ -69,6 +70,10 @@ The example notebook below shows the shape.
 - A missing-package error in an R cell surfaces a structured install hint;
   an erroring R cell now marks its READY downstream cells stale instead of
   leaving them green.
+- Inline plot output for R cells: base graphics and grid-based plots
+  (ggplot2 / lattice) render to PNG and display in the cell like a Python
+  matplotlib figure. A bare trailing plot object auto-renders (REPL-style);
+  multiple plots in one cell produce ordered displays.
 - `# @mount`, `# @env KEY=VAL`, and `# @name` annotations work on R
   cells with no R-specific parser changes — the annotation parser is
   language-agnostic.
@@ -190,8 +195,14 @@ partition into per-language runs automatically.
   least-privilege workflow permissions.
 - **Phase C SHA pinning** — every GitHub Action across every workflow
   pinned to a 40-char commit SHA with the version annotation in a
-  trailing comment. CI dependency updates flow through Dependabot
-  group PRs.
+  trailing comment. Docker base images (the shipped image + the
+  df-cluster example) are pinned by `sha256` digest. A Dependabot
+  `docker` ecosystem keeps both digests and Action SHAs current via
+  weekly group PRs.
+- **Token-permission least privilege** — `docs.yml` and `release.yml`
+  default to read-only, escalating to `contents: write` only in the
+  single job that pushes the rendered site (mike → gh-pages) or creates
+  the GitHub Release.
 - WS upgrade owner-gating closes the cross-session-read path noted
   above.
 
