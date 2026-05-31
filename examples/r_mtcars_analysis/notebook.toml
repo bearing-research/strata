@@ -1,0 +1,11 @@
+notebook_id = "r-mtcars-analysis-001"
+name = "R: mtcars regression + inline plots"
+created_at = 2026-05-31 00:00:00+00:00
+updated_at = 2026-05-31 00:00:00+00:00
+cells = [
+    { id = "prep", file = "prep_data.r", language = "r", order = 0 },
+    { id = "summarise", file = "summarise.r", language = "r", order = 1 },
+    { id = "fit", file = "fit_model.r", language = "r", order = 2 },
+    { id = "plot-mpg", file = "plot_mpg.r", language = "r", order = 3 },
+    { id = "diagnostics", file = "diagnostics.r", language = "r", order = 4 },
+]

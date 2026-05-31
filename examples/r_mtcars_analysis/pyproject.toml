@@ -1,0 +1,17 @@
+[project]
+name = "r-mtcars-analysis"
+version = "0.1.0"
+description = "Pure-R notebook: mtcars regression with inline ggplot2 + base-graphics plots, every cell in R"
+requires-python = "==3.12.*"
+# Pure-R notebook: the cells run via Rscript against the packages in
+# renv.lock, not this venv. These are just the notebook harness baseline
+# that every Strata notebook's uv-managed env carries — Python isn't used
+# to execute any cell here.
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+]
+
+[tool.uv]
+managed = true
