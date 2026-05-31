@@ -422,3 +422,40 @@ def r_notebook(tmp_path: Path):
         return notebook_dir, session
 
     return _make
+
+
+# Canonical minimal renv project committed under tests/notebook/fixtures/.
+# Pins only ``jsonlite`` (binary, restores in seconds from CRAN/RSPM or
+# renv's global cache) so a real ``renv::restore`` stays fast in CI. The
+# built ``renv/library`` is deliberately absent — restoring it is the
+# point of the integration test.
+_RENV_JSONLITE_FIXTURE = Path(__file__).parent / "fixtures" / "renv_jsonlite"
+
+
+@pytest.fixture
+def r_notebook_renv(r_notebook):
+    """Like ``r_notebook`` but with a real renv project scaffold attached.
+
+    Copies the committed jsonlite renv scaffold (``renv.lock`` +
+    ``.Rprofile`` + ``renv/activate.R`` + ``renv/settings.json``)
+    alongside the notebook, so a test can drive an actual
+    ``renv::restore`` end-to-end — the gap left open in #59, where the
+    plain ``r_notebook`` fixture runs against the system R library and
+    ``test_renv_sync.py`` only mocks ``subprocess.run``.
+
+    Deliberately does NOT run the restore itself: the test calls
+    ``_renv_sync`` (or opens the session) and asserts, keeping the
+    real-restore exercise visible in the test body. The ``renv/library``
+    is not committed — restoring it from the lockfile is what's under
+    test.
+    """
+    import shutil as _shutil
+
+    def _make(cells: list[tuple[str, str | None, str, str]]):
+        notebook_dir, session = r_notebook(cells)
+        _shutil.copy(_RENV_JSONLITE_FIXTURE / "renv.lock", notebook_dir / "renv.lock")
+        _shutil.copy(_RENV_JSONLITE_FIXTURE / ".Rprofile", notebook_dir / ".Rprofile")
+        _shutil.copytree(_RENV_JSONLITE_FIXTURE / "renv", notebook_dir / "renv")
+        return notebook_dir, session
+
+    return _make
