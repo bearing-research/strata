@@ -102,3 +102,75 @@ jobs:
       # from a previous run don't mask cell-execution regressions.
       - name: Run notebook
         run: uv run strata run examples/${{ matrix.example }} --no-sync --force
+
+  # R-cell examples — a separate job because they need the R toolchain
+  # (Rscript + packages) on top of the Python build. Headless ``strata
+  # run`` executes R cells (#98) and restores each notebook's renv.lock
+  # into a project-scoped library on the way in, so no manual
+  # renv::restore step is needed — only the harness baseline (jsonlite +
+  # arrow) and renv itself are pre-installed; everything else (e.g.
+  # ggplot2 for r_mtcars_analysis) comes from the notebook's renv.lock.
+  r-examples:
+    name: example · ${{ matrix.example }} (R)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example:
+          - r_mtcars_analysis
+          - r_lm_vs_sklearn
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6  # v1
+        with:
+          toolchain: stable
+          cache-workspaces: rust
+
+      - name: Verify Rust toolchain
+        shell: bash
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+          cargo --version
+          rustc --version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          version: 'latest'
+
+      # use-public-rspm pulls binary packages on Ubuntu, turning a
+      # ~10-min source compile of arrow into a ~30s download.
+      - name: Set up R
+        uses: r-lib/actions/setup-r@a51a8012b0aab7c32ef9d19bf54da93f3254335e  # v2
+        with:
+          r-version: "release"
+          use-public-rspm: true
+
+      # Harness baseline (jsonlite + arrow) plus renv, which the
+      # notebook's auto-restore uses to install the rest from renv.lock.
+      - name: Install R 'jsonlite' + 'arrow' + 'renv' packages
+        shell: Rscript {0}
+        run: |
+          install.packages(c("jsonlite", "arrow", "renv"))
+          for (pkg in c("jsonlite", "arrow", "renv")) {
+            if (!requireNamespace(pkg, quietly = TRUE)) {
+              stop(sprintf("'%s' install reported success but namespace is not loadable", pkg))
+            }
+          }
+
+      - name: Build Strata (and the Rust extension)
+        run: uv sync --python 3.13 --all-extras
+
+      - name: Sync the example's per-notebook venv
+        working-directory: examples/${{ matrix.example }}
+        run: uv sync
+
+      # --no-sync because the Python venv is already synced above;
+      # ``strata run`` still restores the notebook's renv.lock into its
+      # project library before executing the R cells.
+      - name: Run notebook
+        run: uv run strata run examples/${{ matrix.example }} --no-sync --force

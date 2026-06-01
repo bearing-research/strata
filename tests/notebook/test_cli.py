@@ -10,16 +10,23 @@ import pytest
 
 from strata.notebook.cli import run_main
 from strata.notebook.executor import CellExecutionResult
+from tests.notebook.conftest import skip_if_no_r
 
 
-def _build_notebook(tmp_path: Path, *, cells: list[tuple[str, str, str | None]]) -> Path:
+def _build_notebook(
+    tmp_path: Path,
+    *,
+    cells: list[tuple[str, str, str | None]],
+    language: str = "python",
+) -> Path:
     """Create a notebook with the given cells.
 
     ``cells`` is a list of ``(cell_id, source, after_id)`` tuples in the
     order they should be added. Pass ``None`` for ``after_id`` to add
-    the first cell. The notebook is created with
-    ``initialize_environment=False`` so ``.venv/`` only exists when a
-    test explicitly asks for it (via ``_mk_fake_venv``).
+    the first cell. ``language`` applies to every cell (Python by
+    default; pass ``"r"`` for an R notebook). The notebook is created
+    with ``initialize_environment=False`` so ``.venv/`` only exists when
+    a test explicitly asks for it (via ``_mk_fake_venv``).
     """
     import shutil
 
@@ -36,7 +43,7 @@ def _build_notebook(tmp_path: Path, *, cells: list[tuple[str, str, str | None]])
     if stale_venv.exists():
         shutil.rmtree(stale_venv)
     for cell_id, source, after_id in cells:
-        add_cell_to_notebook(notebook_dir, cell_id, after_id)
+        add_cell_to_notebook(notebook_dir, cell_id, after_id, language=language)
         write_cell(notebook_dir, cell_id, source)
     return notebook_dir
 
@@ -204,3 +211,54 @@ class TestExecutionFlow:
 
         assert exit_code == 0
         assert set(honor_calls) == {"c1", "c2"}
+
+
+class TestRCellsHeadless:
+    """`strata run` executes R cells instead of skipping them (#98).
+
+    Real Rscript harness — no mock — so this is the end-to-end headless
+    R path that was previously a no-op. Gated on Rscript being present.
+    """
+
+    @skip_if_no_r
+    def test_r_cell_runs_not_skipped(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(
+            tmp_path,
+            cells=[("c1", "answer <- 6L * 7L\n", None)],
+            language="r",
+        )
+        _mk_fake_venv(notebook_dir)
+
+        exit_code = run_main([str(notebook_dir), "--no-sync", "--format", "json"])
+
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 0, payload
+        c1 = next(c for c in payload["cells"] if c["id"] == "c1")
+        assert c1["status"] == "ok", c1
+        # The old behaviour skipped R as an unsupported language.
+        assert "unsupported language" not in (c1.get("reason") or "")
+
+    @skip_if_no_r
+    def test_r_cell_failure_returns_1_and_skips_downstream(self, tmp_path, capsys):
+        """A genuine R error fails the cell (not a silent skip) and the
+        downstream R cell is skipped as upstream-failed."""
+        # c1 statically defines `answer` (so the DAG links c2 -> c1) but
+        # errors at runtime before the binding is made.
+        notebook_dir = _build_notebook(
+            tmp_path,
+            cells=[
+                ("c1", "answer <- stop('boom from R')\n", None),
+                ("c2", "y <- answer + 1\n", "c1"),
+            ],
+            language="r",
+        )
+        _mk_fake_venv(notebook_dir)
+
+        exit_code = run_main([str(notebook_dir), "--no-sync", "--format", "json"])
+
+        payload = json.loads(capsys.readouterr().out)
+        assert exit_code == 1, payload
+        by_id = {c["id"]: c for c in payload["cells"]}
+        assert by_id["c1"]["status"] == "error"
+        assert by_id["c2"]["status"] == "skipped"
+        assert by_id["c2"]["reason"] == "upstream failed"
