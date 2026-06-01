@@ -235,7 +235,17 @@ async def _run_async(args: argparse.Namespace) -> int:
     if (notebook_dir / "renv.lock").exists():
         if args.format == "human":
             print(_dim("restoring R environment…"))
-        await asyncio.to_thread(session.ensure_renv_synced)
+        # ``ensure_renv_synced`` swallows the expected failures (Rscript
+        # missing, timeout, non-zero restore) and records them as runtime
+        # state. Guard the unexpected ones (e.g. a non-executable Rscript
+        # raising) so they surface as a clean exit-2 setup error rather
+        # than an uncaught traceback.
+        try:
+            await asyncio.to_thread(session.ensure_renv_synced)
+        except Exception as exc:
+            print(f"error: R environment restore failed: {exc}", file=sys.stderr)
+            await _drain_warm_pool(session)
+            return 2
 
     # Header
     if args.format == "human":
