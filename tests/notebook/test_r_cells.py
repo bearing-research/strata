@@ -473,17 +473,59 @@ async def test_r_cell_without_plot_emits_no_display(r_notebook):
     assert result.outputs["x"]["preview"] == "50.5"
 
 
+@pytest.mark.asyncio
+async def test_r_cell_trailing_expression_auto_prints(r_notebook):
+    """A bare trailing expression auto-prints its value to stdout.
+
+    Regression guard: the plot-capture rewrite once gated auto-printing
+    to plot-like values only, so a cell ending in ``summary(df)`` / a bare
+    value produced empty stdout. The harness now prints every *visible*
+    top-level value (REPL semantics), so a result-displaying cell shows
+    its output again.
+    """
+    src = "df <- data.frame(a = c(1L, 2L, 3L))\nsum(df$a)\n"
+    _, session = r_notebook(cells=[("c1", None, src, "r")])
+    executor = CellExecutor(session)
+
+    result = await executor.execute_cell("c1", src)
+
+    assert result.success is True, result.error
+    assert result.display_outputs == []
+    # sum(1:3) == 6 — `[1] 6` auto-printed; the assignment stays invisible.
+    assert "6" in result.stdout
+
+
+@pytest.mark.asyncio
+async def test_r_cell_grid_draw_captured_as_png_display(r_notebook):
+    """Low-level grid drawing (no grid.newpage) is captured as a PNG.
+
+    Regression guard: capture used to gate on a ``grid.newpage`` /
+    ``plot.new`` page count, which ``grid.draw()`` doesn't trigger — so
+    real grid output drawn onto the device's first page was silently
+    dropped. Capture now keys off the files the device actually wrote.
+    ``grid`` ships with R, so no extra package gating is needed.
+    """
+    src = "library(grid)\ngrid.draw(circleGrob(r = 0.3))\n"
+    _, session = r_notebook(cells=[("c1", None, src, "r")])
+    executor = CellExecutor(session)
+
+    result = await executor.execute_cell("c1", src)
+
+    assert result.success is True, result.error
+    assert len(result.display_outputs) == 1
+    _assert_png_display(result.display_outputs[0])
+
+
 @skip_if_no_r_ggplot2
 @pytest.mark.asyncio
 async def test_r_cell_ggplot_emitted_as_png_display(r_notebook):
     """A bare trailing ggplot object auto-renders to an image/png display.
 
-    The harness auto-prints the visible value of a top-level
-    expression when it's plot-like (``inherits(x, "ggplot")``), so a
-    notebook-style last-line ``p`` renders without an explicit
-    ``print(p)`` — mirroring the REPL. ``print.ggplot`` draws via
-    ``grid.newpage`` (hooked, marks the page real). Gated on ggplot2
-    being installed; skips cleanly in CI where it isn't.
+    The harness auto-prints the visible value of a top-level expression,
+    so a notebook-style last-line ``p`` renders without an explicit
+    ``print(p)`` — mirroring the REPL. ``print.ggplot`` draws to the
+    capture device. Gated on ggplot2 being installed; skips cleanly in CI
+    where it isn't.
     """
     src = (
         "library(ggplot2)\n"
