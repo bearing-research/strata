@@ -198,12 +198,22 @@ jobs:
   # "Linux + macOS green", and Windows skips notebook tests at the
   # unit-tests level already.
   r-tests:
-    name: R Tests (${{ matrix.os }})
+    name: R Tests (${{ matrix.os }} · R ${{ matrix.r }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # Current R ("release") on both platforms, plus the previous minor
+      # ("oldrel-1") on Ubuntu so an R-version regression surfaces in CI
+      # without doubling the whole matrix. posit/RSPM serves binaries for
+      # both, so oldrel-1 doesn't trigger a source compile of arrow (#83).
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            r: release
+          - os: macos-latest
+            r: release
+          - os: ubuntu-latest
+            r: oldrel-1
 
     env:
       RUSTUP_TOOLCHAIN: stable
@@ -246,7 +256,7 @@ jobs:
       - name: Set up R
         uses: r-lib/actions/setup-r@a51a8012b0aab7c32ef9d19bf54da93f3254335e  # v2
         with:
-          r-version: "release"
+          r-version: ${{ matrix.r }}
           use-public-rspm: true
 
       # Direct install instead of ``setup-r-dependencies`` — that
