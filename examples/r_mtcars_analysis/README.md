@@ -56,8 +56,12 @@ uv run strata-notebook --host 127.0.0.1 --port 8765
 ```
 
 Open `examples/r_mtcars_analysis` from the Strata home page and run the
-cells top to bottom. (Note: the headless `strata run` CLI skips R cells
-— R executes through the notebook server.)
+cells top to bottom. Or run it headlessly — `strata run` executes R cells
+and restores the notebook's `renv.lock` on the way in:
+
+```bash
+uv run strata run examples/r_mtcars_analysis
+```
 
 ## Try this
 

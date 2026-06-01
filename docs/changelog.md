@@ -79,16 +79,26 @@ The example notebook below shows the shape.
 - `# @mount`, `# @env KEY=VAL`, and `# @name` annotations work on R
   cells with no R-specific parser changes — the annotation parser is
   language-agnostic.
+- Headless `strata run` executes R cells (previously skipped as an
+  unsupported language) and restores the notebook's `renv.lock` into a
+  project library first — so R and mixed notebooks run end-to-end from
+  the CLI for CI / scheduled jobs, not only through the server.
 - New `examples/r_lm_vs_sklearn/` notebook — Python cell builds a
   housing DataFrame, R cell fits `lm(price ~ sqft + bedrooms + age +
   location)`, Python cell fits the same model with sklearn and prints
   a side-by-side comparison.
+- New `examples/r_mtcars_analysis/` notebook — a pure-R analysis (every
+  cell R): `lm()` + `aggregate()` + inline ggplot2 and base-graphics
+  plots, showing the R DAG, `data.frame` Arrow handoff, and R-only (RDS)
+  object handoff between R cells.
 - CI `r-tests` job runs on Ubuntu + macOS via `r-lib/actions/setup-r`
   with the `arrow` + `jsonlite` packages installed from posit/RSPM
-  binaries. The cross-language test suite (`tests/notebook/test_r_cells.py`)
-  exercises Py→R→Py Arrow round-trip, R-only RDS refusal, mount
-  injection on R cells, syntax/runtime error shapes, cache hit/miss,
-  `renv.lock` change invalidation, and env-annotation injection.
+  binaries, against both R `release` and `oldrel-1`. The cross-language
+  suite (`tests/notebook/test_r_cells.py`) exercises Py→R→Py Arrow
+  round-trip, R-only RDS refusal, mount injection, error shapes, cache
+  hit/miss, `renv.lock` change invalidation, inline plot capture, real
+  `renv::restore`, and env-annotation injection; a separate `r-examples`
+  job runs the R example notebooks end-to-end via `strata run`.
 
 #### Run-all batching
 
@@ -171,6 +181,11 @@ partition into per-language runs automatically.
 
 ### Fixed
 
+- `strata run` without `--no-sync` no longer fails at environment sync
+  with "env sync finished without a status snapshot". The headless runner
+  read the session's currently-running-job slot (reset to `None` on
+  completion) instead of the returned job's terminal status, so the
+  default invocation aborted on every notebook before running a cell.
 - `notebook.toml` TOML datetime values and `array-of-tables` rows no
   longer churn on a round-trip save (#45). Pre-fix, saving a notebook
   with no edits would rewrite datetime fields as strings + collapse
