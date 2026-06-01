@@ -202,18 +202,18 @@ exec_error <- NULL
 # ---------------------------------------------------------------------------
 # Plot capture device
 # ---------------------------------------------------------------------------
-# Open a PNG device so plots drawn during execution — base graphics (via
-# plot.new) and grid / ggplot / lattice (via grid.newpage) — render to
-# per-page files. `%03d` makes the device write one file per page.
-# Newpage hooks count real pages so a never-drawn device's trailing blank
-# page isn't mistaken for a plot. Device-open is best-effort: if no usable
-# graphics device is available the cell still runs, just without capture.
+# Open a PNG device so plots drawn during execution render to per-page
+# files: base graphics (plot(), hist(), …), grid / ggplot / lattice (their
+# print methods draw via grid), and low-level grid drawing (grid.draw(),
+# grid.rect(), …). `%03d` makes the device write one file per page. A device
+# on which nothing is drawn writes no file at all, so emptiness needs no
+# special handling — the display step below picks up whatever files exist.
+# Device-open is best-effort: if no usable graphics device is available the
+# cell still runs, just without capture.
 plot_capture_enabled <- FALSE
 plot_device <- NULL
 plot_width <- 800L
 plot_height <- 600L
-plot_count_env <- new.env()
-plot_count_env$n <- 0L
 plot_pattern <- file.path(output_dir, "__rplot__%03d.png")
 tryCatch(
   {
@@ -223,35 +223,25 @@ tryCatch(
     )
     plot_device <- grDevices::dev.cur()
     plot_capture_enabled <- TRUE
-    setHook("plot.new", function(...) plot_count_env$n <- plot_count_env$n + 1L, "append")
-    setHook("grid.newpage", function(...) plot_count_env$n <- plot_count_env$n + 1L, "append")
   },
   error = function(e) {
     plot_capture_enabled <<- FALSE
   }
 )
 
-# Plot-like objects auto-print to the device when they're the visible
-# value of a top-level expression — so a bare trailing `p` (ggplot /
-# lattice / grob) renders, mirroring the notebook REPL. Non-plot visible
-# values are NOT printed, keeping stdout identical to a plain
-# `eval(parse(...))` for every non-plotting cell. Explicit `print(p)` /
-# `plot(p)` already render during eval and return invisibly, so they're
-# not double-drawn.
-# Only classes whose `print` method DRAWS to the active device — printing a
-# bare grob / gtable just dumps its text structure to stdout without
-# rendering, so those are deliberately excluded (use `grid.draw()` for them,
-# which draws during eval and is captured anyway).
-is_plot_like <- function(x) {
-  inherits(x, c("ggplot", "ggmatrix", "patchwork", "trellis", "recordedplot"))
-}
-
+# Evaluate each top-level expression and auto-print its *visible* value,
+# mirroring the R console / a notebook REPL: a bare trailing `summary(df)`
+# or `df` prints to stdout, and a bare ggplot / lattice object prints
+# through a method that draws to the capture device (rendered as a PNG
+# below). Invisible results — assignments, and `print(x)` / `plot(x)` which
+# return invisibly — are not re-printed, so explicit plotting isn't
+# double-drawn. Equivalent to `source(..., print.eval = TRUE)`.
 tryCatch(
   {
     parsed <- parse(text = source_text)
     for (expr in parsed) {
       res <- withVisible(eval(expr, envir = cell_env))
-      if (isTRUE(res$visible) && is_plot_like(res$value)) {
+      if (isTRUE(res$visible)) {
         print(res$value)
       }
     }
@@ -261,11 +251,9 @@ tryCatch(
   }
 )
 
-# Flush + close the capture device and drop our newpage hooks. Closing by
-# device number leaves any device the cell opened itself untouched.
+# Flush + close the capture device. Closing by device number leaves any
+# device the cell opened itself untouched.
 if (plot_capture_enabled) {
-  setHook("plot.new", NULL, "replace")
-  setHook("grid.newpage", NULL, "replace")
   # `invisible()` — `dev.off()` returns a visible value and this `if` is a
   # top-level expression, so without it Rscript auto-prints "null device 1"
   # into the captured stdout.
@@ -376,14 +364,15 @@ serialize_value <- function(value, output_dir, var_name) {
 # ---------------------------------------------------------------------------
 # Display capture (plots)
 # ---------------------------------------------------------------------------
-# Re-home each non-blank captured page to the `__display__N.png`
-# convention the parent's `_store_display_outputs` expects, and emit an
-# image/png display payload in the same wire shape as the Python harness:
-# base64 data URL in `inline_data_url`, `width` / `height`, `preview`
-# NULL. Only runs when a real page was drawn (newpage count > 0), so an
-# unused device's trailing blank PNG is dropped.
+# Re-home each captured page to the `__display__N.png` convention the
+# parent's `_store_display_outputs` expects, and emit an image/png display
+# payload in the same wire shape as the Python harness: base64 data URL in
+# `inline_data_url`, `width` / `height`, `preview` NULL. A device with
+# nothing drawn writes no file, so iterating the files that actually exist
+# (with the per-file non-empty guard below) is all the emptiness handling
+# needed — no page counting required.
 plot_displays <- list()
-if (plot_capture_enabled && plot_count_env$n > 0L) {
+if (plot_capture_enabled) {
   plot_files <- sort(list.files(
     output_dir,
     pattern = "^__rplot__[0-9]+\\.png$"
