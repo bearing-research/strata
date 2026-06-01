@@ -129,7 +129,7 @@ async def _sync_environment(session: Any) -> tuple[bool, str | None]:
     Returns ``(ok, error_message)``.
     """
     try:
-        await session.submit_environment_job(action="sync")
+        job = await session.submit_environment_job(action="sync")
     except Exception as exc:
         return False, f"failed to submit env sync job: {exc}"
 
@@ -138,9 +138,13 @@ async def _sync_environment(session: Any) -> tuple[bool, str | None]:
     except Exception as exc:
         return False, f"env sync raised: {exc}"
 
-    job = session.environment_job
-    if job is None:
-        return False, "env sync finished without a status snapshot"
+    # ``submit_environment_job`` returns the job snapshot, and
+    # ``_run_environment_job`` mutates *that same object* in place to its
+    # terminal status. Read it directly. ``session.environment_job`` is
+    # the "currently-running" slot and is reset to None the moment the
+    # job finishes — so reading it here always saw None and tripped a
+    # false "env sync finished without a status snapshot" error, which
+    # made ``strata run`` (without --no-sync) fail on every notebook.
     if job.status != "completed":
         message = job.error or f"env sync ended with status={job.status}"
         return False, message
