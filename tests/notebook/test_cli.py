@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from strata.notebook.cli import run_main
+from strata.notebook.cli import _sync_environment, run_main
 from strata.notebook.executor import CellExecutionResult
 from tests.notebook.conftest import skip_if_no_r
 
@@ -262,3 +263,50 @@ class TestRCellsHeadless:
         assert by_id["c1"]["status"] == "error"
         assert by_id["c2"]["status"] == "skipped"
         assert by_id["c2"]["reason"] == "upstream failed"
+
+
+class _FakeJob:
+    def __init__(self) -> None:
+        self.status = "running"
+        self.error: str | None = None
+
+
+class _FakeSyncSession:
+    """Reproduces the session's env-job lifecycle for ``_sync_environment``.
+
+    The real ``_run_environment_job`` mutates the returned job in place to
+    its terminal status and then resets ``environment_job`` to None. This
+    fake does the same — the None reset is exactly the condition that used
+    to trip the false "env sync finished without a status snapshot" error
+    (#99) when ``_sync_environment`` read the session attribute instead of
+    the returned job.
+    """
+
+    def __init__(self, *, final_status: str, error: str | None = None) -> None:
+        self._job = _FakeJob()
+        self._final_status = final_status
+        self._error = error
+        self.environment_job = None
+
+    async def submit_environment_job(self, *, action: str):
+        assert action == "sync"
+        self.environment_job = self._job  # the "currently running" slot
+        return self._job
+
+    async def wait_for_environment_job(self) -> None:
+        self._job.status = self._final_status
+        self._job.error = self._error
+        self.environment_job = None  # cleared on completion — the #99 trigger
+
+
+class TestSyncEnvironment:
+    def test_completed_sync_reports_success(self):
+        ok, err = asyncio.run(_sync_environment(_FakeSyncSession(final_status="completed")))
+        assert ok is True
+        assert err is None
+
+    def test_failed_sync_surfaces_error(self):
+        session = _FakeSyncSession(final_status="failed", error="uv lock conflict")
+        ok, err = asyncio.run(_sync_environment(session))
+        assert ok is False
+        assert "uv lock conflict" in (err or "")
