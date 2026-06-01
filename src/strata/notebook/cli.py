@@ -220,6 +220,19 @@ async def _run_async(args: argparse.Namespace) -> int:
             await _drain_warm_pool(session)
             return 2
 
+    # Restore the R environment from renv.lock, mirroring the server's
+    # session-open behaviour. Idempotent and cheap when the project
+    # library already matches the lockfile (it skips the Rscript spawn),
+    # and a no-op for Python-only notebooks — so it runs on the --no-sync
+    # path too. Without it, an R notebook that ships an renv.lock would
+    # execute its cells against an empty project library and fail with
+    # "there is no package called …". Runs in a thread because
+    # ``_renv_sync`` shells out to Rscript synchronously.
+    if (notebook_dir / "renv.lock").exists():
+        if args.format == "human":
+            print(_dim("restoring R environment…"))
+        await asyncio.to_thread(session.ensure_renv_synced)
+
     # Header
     if args.format == "human":
         print(f"running: {notebook_dir}")
@@ -255,8 +268,17 @@ async def _run_async(args: argparse.Namespace) -> int:
                 _print_cell_line(entry)
             continue
 
-        # Skip languages we can't execute headlessly.
-        if cell.language not in {CellLanguage.PYTHON, CellLanguage.PROMPT, CellLanguage.SQL}:
+        # Skip languages we can't execute headlessly. R cells run through
+        # the same language-executor dispatch the session uses (Rscript +
+        # harness.R); a missing `Rscript` surfaces as a clean cell error,
+        # not a crash, so R belongs in the executable set rather than the
+        # skip list.
+        if cell.language not in {
+            CellLanguage.PYTHON,
+            CellLanguage.PROMPT,
+            CellLanguage.SQL,
+            CellLanguage.R,
+        }:
             entry = {
                 "id": cell_id,
                 "label": f"[{cell.language}] {_cell_label(cell.source)}",
