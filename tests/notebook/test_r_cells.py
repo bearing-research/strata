@@ -158,6 +158,97 @@ async def test_r_only_rds_artifact_rejected_by_downstream_python_cell(r_notebook
 
 
 @pytest.mark.asyncio
+async def test_python_only_pickle_artifact_rejected_by_downstream_r_cell(r_notebook):
+    """A Python cell that produces a pickle-only value; a downstream R cell
+    consuming it fails with a *structured* ``success:false`` result, not a
+    crashed Rscript scraped for stderr.
+
+    This is the mirror image of
+    ``test_r_only_rds_artifact_rejected_by_downstream_python_cell``. Two cells:
+      c1 (Python) — bind a ``set`` (not Arrow-/JSON-representable, so the
+                    serializer falls through to ``pickle/object``).
+      c2 (R)      — references ``pyobj``. The R harness's
+                    ``deserialize_input`` hits the ``pickle/object`` branch,
+                    raises, and — now wrapped in a ``tryCatch`` — writes a
+                    structured failure envelope before the cell body runs.
+
+    Regression guard: pre-fix the ``stop()`` aborted Rscript *before* any
+    ``harness-result.json`` was written, so the executor fell back to its
+    "Rscript exited without producing a result manifest" stderr-scrape. The
+    error now rides the normal result envelope, symmetric with the RDS→Python
+    direction.
+    """
+    py_c1 = "pyobj = {1, 2, 3}\n"
+    r_c2 = "n <- length(pyobj)\n"
+
+    _, session = r_notebook(
+        cells=[
+            ("c1", None, py_c1, "python"),
+            ("c2", "c1", r_c2, "r"),
+        ]
+    )
+    executor = CellExecutor(session)
+
+    r1 = await executor.execute_cell("c1", py_c1)
+    assert r1.success is True, r1.error
+    assert r1.outputs["pyobj"]["content_type"] == "pickle/object"
+
+    r2 = await executor.execute_cell("c2", r_c2)
+    assert r2.success is False, "R cell must reject Python pickle upstream"
+    err = r2.error or ""
+    # The structured error names the variable + suggests the fix.
+    assert "pyobj" in err, f"variable name missing from error: {err!r}"
+    assert "pickle" in err, f"content-type hint missing: {err!r}"
+    assert "DataFrame" in err or "Arrow" in err, f"re-export hint missing: {err!r}"
+    # Critical regression assertion — the error must come from the structured
+    # envelope, NOT the missing-manifest fallback that an aborted Rscript hit.
+    assert "without producing a result manifest" not in err, (
+        f"regressed to missing-manifest fallback: {err!r}"
+    )
+    # And R's own "not found" must not leak through — the read fails cleanly
+    # before the cell body references the variable.
+    assert "not found" not in err, f"regressed to R NameError: {err!r}"
+
+
+@pytest.mark.asyncio
+async def test_python_numpy_array_into_r_warns_on_shape_flattening(r_notebook):
+    """A numpy ndarray crosses into R flattened, with a console warning.
+
+    R's Arrow reader is shape-blind — it can't reconstruct the
+    ``strata.arrow.shape=tensor`` an ndarray carries, so a 2-D array arrives
+    as a 1-column ``data.frame``. The handoff still *works* (the cell runs),
+    but it's a silent fidelity change without a warning. The harness now reads
+    the shape metadata and surfaces a warning in the cell's stderr console.
+
+    Two cells:
+      c1 (Python) — bind a 2×2 ``numpy`` array (``arrow/ipc`` shape=tensor).
+      c2 (R)      — read ``arr``; the harness warns before running the body.
+    """
+    py_c1 = "import numpy as np\narr = np.array([[1, 2], [3, 4]])\n"
+    r_c2 = "n <- nrow(arr)\n"
+
+    _, session = r_notebook(
+        cells=[
+            ("c1", None, py_c1, "python"),
+            ("c2", "c1", r_c2, "r"),
+        ]
+    )
+    executor = CellExecutor(session)
+
+    r1 = await executor.execute_cell("c1", py_c1)
+    assert r1.success is True, r1.error
+    assert r1.outputs["arr"]["content_type"] == "arrow/ipc"
+
+    r2 = await executor.execute_cell("c2", r_c2)
+    # The cell still succeeds — flattening is a fidelity change, not an error.
+    assert r2.success is True, r2.error
+    warn = r2.stderr or ""
+    assert "arr" in warn, f"variable name missing from warning: {warn!r}"
+    assert "tensor" in warn, f"shape missing from warning: {warn!r}"
+    assert "flattened" in warn, f"flatten hint missing from warning: {warn!r}"
+
+
+@pytest.mark.asyncio
 async def test_r_cell_mount_injects_path_and_reads_file(r_notebook, tmp_path):
     """``# @mount data file://<path>`` binds ``data`` inside an R cell
     the same way it binds inside a Python cell.
