@@ -1237,7 +1237,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Strata",
     description="Snapshot-aware serving layer for Iceberg tables",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 

@@ -1,33 +1,101 @@
 name: Docs
 
+# Versioned docs via ``mike``. The deploy strategy:
+#
+#   * push to ``main``     → ``mike deploy dev``. Plus, only if no
+#                            ``latest`` alias exists yet (i.e. before
+#                            the first ``v*`` tag has shipped),
+#                            ``mike set-default dev`` so the site root
+#                            points somewhere coherent. Once ``latest``
+#                            exists, main pushes leave the default
+#                            alone — the tag path owns it.
+#   * push of a ``v*`` tag → ``mike deploy <version> latest``, then
+#                            ``mike set-default latest``. The version
+#                            gets a pinned snapshot; ``latest`` always
+#                            points at the most recent release.
+#
+# PRs only build with ``--strict`` (no deploy) so docs changes catch
+# broken links before merging without touching ``gh-pages``.
+#
+# One-time bootstrap (run locally from a fresh clone with the
+# ``gh-pages`` branch checked out, before the first mike deploy):
+#
+#     uv run --group docs mike delete --all --push
+#
+# That wipes the legacy flat ``mkdocs gh-deploy`` content left from
+# pre-mike releases. Skip on a fresh repo with no prior gh-pages
+# history.
+
 on:
   push:
     branches: [main]
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+    tags:
+      - 'v*'
   pull_request:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
 
+# Default to read-only; the build job escalates to contents: write only
+# because the push paths run `mike`, which pushes the rendered site back
+# to the gh-pages branch. PR runs hit only the read-only `mkdocs build
+# --strict` step (Scorecard Token-Permissions: top-level least privilege).
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          # ``mike`` reads the gh-pages branch + pushes back to it.
+          # ``fetch-depth: 0`` makes both available.
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
 
       - name: Install docs dependencies
         run: uv sync --group docs --no-install-project
 
-      - name: Build docs
+      - name: Validate build (PRs)
+        if: github.event_name == 'pull_request'
         run: uv run mkdocs build --strict
 
-      - name: Deploy to GitHub Pages
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: uv run mkdocs gh-deploy --force
+      - name: Configure git for mike
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy dev (push to main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # First ``mike deploy`` to update the ``dev`` alias with the
+        # latest main snapshot. Then, only if no ``latest`` alias
+        # exists yet, point the site default at ``dev`` so visitors
+        # to the root URL during the pre-first-tag window land
+        # somewhere coherent. Once any ``v*`` tag ships,
+        # ``mike list`` includes ``latest`` and this conditional
+        # short-circuits — the tag path's ``mike set-default latest``
+        # remains the canonical default.
+        run: |
+          uv run mike deploy --push --update-aliases dev
+          if ! uv run mike list 2>/dev/null | grep -qE '(^|[, ])latest($|[, ])'; then
+            uv run mike set-default --push dev
+          fi
+
+      - name: Deploy release version (push of v* tag)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        # ``${ref_name#v}`` strips the leading ``v`` from a tag like
+        # ``v0.2.0`` so the alias becomes ``0.2.0``. Mike also accepts
+        # short forms like ``0.2`` but pinning the full triple keeps
+        # patch releases distinguishable.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          uv run mike deploy --push --update-aliases "$VERSION" latest
+          uv run mike set-default --push latest
