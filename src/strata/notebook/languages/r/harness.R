@@ -64,6 +64,36 @@ source_text <- if (is.null(manifest$source)) "" else manifest$source
 output_dir <- if (is.null(manifest$output_dir)) "/tmp/strata_output" else manifest$output_dir
 dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
 
+# Write a structured `success:false` envelope and stop. Used when input
+# deserialization fails (e.g. a Python-only artifact an R cell can't read) so
+# the parent surfaces a clean error instead of scraping stderr for a missing
+# manifest — symmetric with the Python harness's StrataRArtifactError path for
+# the reverse (R-only RDS consumed from Python) direction. Field shape matches
+# the exec-error envelope written at the bottom of this file.
+emit_failure_result <- function(message) {
+  result <- list(
+    success = FALSE,
+    error = message,
+    traceback = message,
+    variables = setNames(list(), character(0)),
+    displays = list(),
+    stdout = "",
+    stderr = message,
+    mutation_warnings = list()
+  )
+  jsonlite::write_json(
+    result,
+    file.path(output_dir, "harness-result.json"),
+    auto_unbox = TRUE, pretty = TRUE, null = "null", force = TRUE
+  )
+}
+
+# Warnings raised while deserializing inputs (before stdout/stderr sinks are
+# installed). Replayed into the cell's stderr console after execution so they
+# aren't lost to the bare process stderr. Currently: Python non-tabular Arrow
+# shapes (numpy array / scalar) that flatten when read into R.
+input_warnings <- character(0)
+
 # ---------------------------------------------------------------------------
 # Input deserialization
 # ---------------------------------------------------------------------------
@@ -95,7 +125,26 @@ deserialize_input <- function(name, spec, output_dir) {
 
   if (identical(ct, "arrow/ipc")) {
     ensure_arrow()
-    return(arrow::read_ipc_stream(full_path))
+    tbl <- arrow::read_ipc_stream(full_path, as_data_frame = FALSE)
+    # Python stamps `strata.arrow.shape` ∈ table|tensor|scalar in the schema
+    # metadata; only `table` round-trips faithfully into R. A numpy ndarray
+    # (`tensor`) flattens to a 1-column data.frame and a typed scalar arrives
+    # as a 1×1 frame — both silent without this. Best-effort: a metadata read
+    # failure must never break an otherwise-valid handoff.
+    shape <- tryCatch(tbl$schema$metadata[["strata.arrow.shape"]],
+                      error = function(e) NULL)
+    if (!is.null(shape) && !identical(shape, "table")) {
+      input_warnings[[length(input_warnings) + 1L]] <<- sprintf(
+        paste0(
+          "strata: variable '%s' was produced in Python as a non-tabular ",
+          "value (strata.arrow.shape=%s, e.g. a numpy array or scalar); R ",
+          "receives it flattened into a data.frame. Re-export it as a pandas ",
+          "DataFrame upstream for a faithful cross-language handoff."
+        ),
+        name, shape
+      )
+    }
+    return(as.data.frame(tbl))
   }
   if (identical(ct, "json/object")) {
     return(jsonlite::fromJSON(full_path, simplifyVector = FALSE))
@@ -105,15 +154,24 @@ deserialize_input <- function(name, spec, output_dir) {
   }
   if (identical(ct, "pickle/object")) {
     stop(sprintf(
-      "Cannot read variable '%s' (content_type=pickle/object) from R: ",
+      paste0(
+        "Cannot consume Python-only artifact (variable '%s', ",
+        "content_type=pickle/object) from R: the upstream Python cell stored ",
+        "this value via pickle, which R cannot read. Re-export the upstream ",
+        "as a pandas DataFrame / pyarrow Table (handed across as Arrow IPC) ",
+        "or a JSON-serializable object for cross-language consumption."
+      ),
       name
-    ), "Python pickled objects are not readable in R. ",
-    "Re-export the upstream variable as a pandas DataFrame / pyarrow Table ",
-    "(Arrow IPC) or a JSON-serializable object.")
+    ))
   }
 
   stop(sprintf(
-    "Cannot read variable '%s': unsupported content_type '%s'.",
+    paste0(
+      "Cannot consume Python-only artifact (variable '%s', content_type=%s) ",
+      "from R: this content type has no R reader. Re-export the upstream as a ",
+      "pandas DataFrame / pyarrow Table (Arrow IPC) or a JSON-serializable ",
+      "object for cross-language consumption."
+    ),
     name, ifelse(is.null(ct), "<null>", ct)
   ))
 }
@@ -121,12 +179,26 @@ deserialize_input <- function(name, spec, output_dir) {
 cell_env <- new.env(parent = globalenv())
 
 if (!is.null(manifest$inputs)) {
-  for (name in names(manifest$inputs)) {
-    assign(
-      name,
-      deserialize_input(name, manifest$inputs[[name]], output_dir),
-      envir = cell_env
-    )
+  input_error <- tryCatch(
+    {
+      for (name in names(manifest$inputs)) {
+        assign(
+          name,
+          deserialize_input(name, manifest$inputs[[name]], output_dir),
+          envir = cell_env
+        )
+      }
+      NULL
+    },
+    error = function(e) e
+  )
+  if (!is.null(input_error)) {
+    # A Python-only artifact (or otherwise unreadable input) — emit a
+    # structured failure and stop before opening the plot device / sinks,
+    # so the parent reads a clean `success:false` result rather than
+    # falling back to scraping stderr for a missing manifest.
+    emit_failure_result(conditionMessage(input_error))
+    quit(save = "no", status = 0L)
   }
 }
 
@@ -271,6 +343,12 @@ stdout_text <- paste(readLines(stdout_path, warn = FALSE), collapse = "\n")
 stderr_text <- paste(readLines(stderr_path, warn = FALSE), collapse = "\n")
 unlink(stdout_path)
 unlink(stderr_path)
+
+# Surface input-deserialization warnings (raised before the sinks were
+# installed) in the cell's stderr console.
+if (length(input_warnings) > 0L) {
+  stderr_text <- paste(c(input_warnings, stderr_text), collapse = "\n")
+}
 
 # ---------------------------------------------------------------------------
 # Output serialization
