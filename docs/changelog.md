@@ -202,6 +202,16 @@ partition into per-language runs automatically.
 - The R analyzer walker mis-attributing reads under in-place mutations
   (`df <- df[complete.cases(df), ]` correctly keeps `df` in
   references).
+- A Python-only artifact (a `pickle` value or a `module/*` content type)
+  consumed by an R cell now fails with a structured error naming the
+  variable and the re-export fix, instead of aborting the R subprocess
+  and surfacing a generic "Rscript exited without producing a result
+  manifest" — symmetric with the existing R-only (RDS) → Python guard
+  (#107).
+- A Python numpy array / non-tabular scalar read into an R cell now
+  warns that the value is flattened into a `data.frame` (the Arrow shape
+  metadata can't round-trip into R) instead of changing shape silently
+  (#107).
 - macOS / Linux + Python 3.14 SQLite I/O flake in cache_warm tests gets
   one retry (`tests/conftest.py`); Iceberg `temp_warehouse` fixture
   disposes its catalog engine before yield to close the related flake.
