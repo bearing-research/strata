@@ -1714,6 +1714,17 @@ function initializeWebSocket() {
       setCellStatus(cellId, status)
 
       const cell = cellMap.value.get(cellId)
+
+      // A fresh "running" from the backend starts a new execution —
+      // drop any stale stream buffer from a previous (e.g. cancelled)
+      // run. This covers run-all / rerun-all / cascade / force paths
+      // that don't go through the local execute* helpers, where a new
+      // attempt-1 stream would otherwise append onto the old text.
+      if (cell && status === 'running') {
+        cell.streamBuffer = undefined
+        cell.streamAttempt = undefined
+      }
+
       if (cell && status !== 'error' && cell.suggestInstall) {
         cell.suggestInstall = undefined
         if (cell.output?.error) {

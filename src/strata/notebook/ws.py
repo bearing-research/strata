@@ -1651,6 +1651,13 @@ async def _execute_cell_directly(
         else:
             result = await executor.execute_cell(cell_id, cell.source)
 
+        # Post-execution frames draw a fresh sequence: streaming frames
+        # emitted during execution (cell_output_delta,
+        # cell_iteration_progress) pull from the same per-notebook
+        # counter, so reusing the pre-execution seq would make the
+        # canonical result look older than the deltas it supersedes.
+        seq = execution_state.next_sequence()
+
         # Record execution for profiling before broadcasting so the
         # output payload reflects the just-recorded metadata.
         session.record_execution(cell_id, result.duration_ms, result.cache_hit)
@@ -1678,9 +1685,12 @@ async def _execute_cell_directly(
             await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
 
     except asyncio.CancelledError:
-        await _set_cell_idle(session, notebook_id, seq, cell_id)
+        await _set_cell_idle(session, notebook_id, execution_state.next_sequence(), cell_id)
         raise
     except Exception as e:
+        # Fresh seq for the same reason as the success path: deltas may
+        # have streamed before the failure.
+        seq = execution_state.next_sequence()
         downstream_stale = session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
@@ -1786,6 +1796,10 @@ async def _execute_cascade(
                 else:
                     result = await executor.execute_cell(cell_id, cell.source)
 
+                # Fresh seq after execution — streaming frames drew from
+                # the same counter; the result must not look older.
+                seq = execution_state.next_sequence()
+
                 # v1.1: Record execution for profiling
                 session.record_execution(cell_id, result.duration_ms, result.cache_hit)
                 session.apply_execution_result_metadata(cell_id, result)
@@ -1822,9 +1836,10 @@ async def _execute_cascade(
                     cascade_failed = True
 
             except asyncio.CancelledError:
-                await _set_cell_idle(session, notebook_id, seq, cell_id)
+                await _set_cell_idle(session, notebook_id, execution_state.next_sequence(), cell_id)
                 raise
             except Exception as e:
+                seq = execution_state.next_sequence()
                 downstream_stale = session.mark_cell_error(cell_id)
                 await _broadcast_message(
                     notebook_id,
@@ -2183,6 +2198,10 @@ async def _run_partition_single_cell(
         else:
             result = await executor.execute_cell(cell_id, cell.source)
 
+        # Fresh seq after execution — streaming frames drew from the
+        # same counter; the result must not look older.
+        seq = execution_state.next_sequence()
+
         session.record_execution(cell_id, result.duration_ms, result.cache_hit)
         session.apply_execution_result_metadata(cell_id, result)
         await _broadcast_execution_result(notebook_id, seq, cell_id, result)
@@ -2211,9 +2230,10 @@ async def _run_partition_single_cell(
         return False
 
     except asyncio.CancelledError:
-        await _set_cell_idle(session, notebook_id, seq, cell_id)
+        await _set_cell_idle(session, notebook_id, execution_state.next_sequence(), cell_id)
         raise
     except Exception as exc:
+        seq = execution_state.next_sequence()
         downstream_stale = session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
