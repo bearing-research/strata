@@ -11,6 +11,7 @@ import {
   workerWarningForEntry,
 } from '../utils/notebookWorkers'
 import { renderMarkdownToHtml } from '../utils/markdown'
+import { isStructuredStream, parsePartialJson } from '../utils/partialJson'
 
 const InspectPanel = defineAsyncComponent(() => import('./InspectPanel.vue'))
 
@@ -190,6 +191,31 @@ const executionMethodLabel = computed(() => {
  * see at a glance that a cell ran 7 iterations without opening the
  * inspect panel.
  */
+
+// --- Streamed prompt output (issues #110/#112) ---------------------------
+// Free-text streams render raw. Structured (JSON) streams are mostly
+// punctuation on one wrapped line, so we pretty-print whatever prefix is
+// structurally complete (fields pop in as the model finishes them) and
+// fall back to a char ticker + raw tail while the prefix is unparseable.
+
+const streamIsStructured = computed(() => isStructuredStream(props.cell.streamBuffer ?? ''))
+
+const streamPartialPretty = computed(() => {
+  if (!streamIsStructured.value) return ''
+  const parsed = parsePartialJson(props.cell.streamBuffer ?? '')
+  return parsed === undefined ? '' : JSON.stringify(parsed, null, 2)
+})
+
+const streamCharLabel = computed(() => {
+  const n = (props.cell.streamBuffer ?? '').length
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k chars` : `${n} chars`
+})
+
+const streamTail = computed(() => {
+  const buf = props.cell.streamBuffer ?? ''
+  return buf.length > 120 ? `…${buf.slice(-120)}` : buf
+})
+
 const loopProgressDone = computed(() => {
   const progress = props.cell.loopProgress
   if (!progress) return false
@@ -932,7 +958,14 @@ function outputKey(output: CellOutput, index: number): string {
         <span v-if="(cell.streamAttempt ?? 1) > 1" class="stream-retry-badge">
           &#x21BB; attempt {{ cell.streamAttempt }} — previous response failed schema validation
         </span>
-        <pre>{{ cell.streamBuffer }}</pre>
+        <template v-if="streamIsStructured">
+          <span class="stream-ticker" data-testid="stream-ticker">
+            streaming · {{ streamCharLabel }}
+          </span>
+          <pre v-if="streamPartialPretty">{{ streamPartialPretty }}</pre>
+          <pre v-else class="stream-tail">{{ streamTail }}</pre>
+        </template>
+        <pre v-else>{{ cell.streamBuffer }}</pre>
       </div>
 
       <!-- Console output (stdout/stderr) -->
@@ -1823,6 +1856,16 @@ function outputKey(output: CellOutput, index: number): string {
   margin-bottom: 4px;
   font-size: 10px;
   color: var(--text-tertiary, var(--text-secondary));
+}
+.stream-ticker {
+  display: inline-block;
+  margin-bottom: 4px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+.stream-tail {
+  opacity: 0.7;
 }
 
 /* Console output */
