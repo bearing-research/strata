@@ -3615,6 +3615,7 @@ source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
     { name = "fastapi" },
+    { name = "filelock" },
     { name = "httpx" },
     { name = "infisicalsdk" },
     { name = "jsonschema" },
@@ -3710,6 +3711,7 @@ requires-dist = [
     { name = "duckdb", specifier = ">=1.1.0" },
     { name = "duckdb", marker = "extra == 'sql-duckdb'", specifier = ">=1.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "filelock", specifier = ">=3.16.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "infisicalsdk", specifier = ">=1.0.16" },
     { name = "jsonschema", specifier = ">=4.0.0" },

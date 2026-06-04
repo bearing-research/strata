@@ -15,6 +15,7 @@ from importlib.metadata import PackageNotFoundError, metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import filelock
 import tomli_w
 from packaging.requirements import Requirement
 
@@ -605,6 +606,35 @@ def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
         _logger.debug("renv.lock missing in %s — nothing to restore", notebook_dir)
         return True
 
+    # Cross-process mutual exclusion (issue #102): a server serving
+    # this notebook dir and a ``strata run`` in another process must
+    # not run ``renv::restore()`` / ``renv::install()`` concurrently —
+    # renv has no locking of its own. Waiting up to *timeout* is the
+    # right behavior: once the other process finishes its restore,
+    # ours is a fast no-op against the already-restored library.
+    # Acquired before the Rscript lookup so the contended path is
+    # deterministic regardless of whether R is installed.
+    from strata.notebook.dependencies import renv_process_lock
+
+    process_lock = renv_process_lock(notebook_dir)
+    try:
+        process_lock.acquire(timeout=timeout)
+    except filelock.Timeout:
+        _logger.warning(
+            "renv restore skipped in %s — another process held the renv lock for over %ds",
+            notebook_dir,
+            timeout,
+        )
+        return False
+
+    try:
+        return _renv_restore_locked(notebook_dir, timeout=timeout)
+    finally:
+        process_lock.release()
+
+
+def _renv_restore_locked(notebook_dir: Path, *, timeout: int) -> bool:
+    """Run ``renv::restore()`` with the cross-process lock already held."""
     rscript = shutil.which("Rscript")
     if rscript is None:
         _logger.warning("Rscript not found on PATH — skipping renv restore")
