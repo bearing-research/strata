@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://bearing-research.github.io/strata/dev/deployment/codespaces/">
+        <link rel="canonical" href="https://bearing-research.github.io/strata/dev/notebook/agent-authoring/">
       
       
-        <link rel="prev" href="../fly/">
+        <link rel="prev" href="../cli/">
       
       
-        <link rel="next" href="../observability/">
+        <link rel="next" href="../import/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>GitHub Codespaces - Strata</title>
+        <title>Authoring Programmatically - Strata</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#github-codespaces" class="md-skip">
+        <a href="#authoring-notebooks-programmatically" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              GitHub Codespaces
+              Authoring Programmatically
             
           </span>
         </div>
@@ -265,10 +265,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../../getting-started/notebook/" class="md-tabs__link">
           
   
@@ -325,12 +327,10 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../../getting-started/installation/" class="md-tabs__link">
           
   
@@ -446,28 +446,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
-        
-          
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -485,7 +488,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -531,7 +534,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/concepts/" class="md-nav__link">
+      <a href="../concepts/" class="md-nav__link">
         
   
   
@@ -559,7 +562,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/comparison/" class="md-nav__link">
+      <a href="../comparison/" class="md-nav__link">
         
   
   
@@ -587,7 +590,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/examples/" class="md-nav__link">
+      <a href="../examples/" class="md-nav__link">
         
   
   
@@ -615,7 +618,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/cells/" class="md-nav__link">
+      <a href="../cells/" class="md-nav__link">
         
   
   
@@ -643,7 +646,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/annotations/" class="md-nav__link">
+      <a href="../annotations/" class="md-nav__link">
         
   
   
@@ -671,7 +674,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/workers/" class="md-nav__link">
+      <a href="../workers/" class="md-nav__link">
         
   
   
@@ -699,7 +702,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/ai/" class="md-nav__link">
+      <a href="../ai/" class="md-nav__link">
         
   
   
@@ -727,7 +730,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/environment/" class="md-nav__link">
+      <a href="../environment/" class="md-nav__link">
         
   
   
@@ -755,7 +758,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/secrets/" class="md-nav__link">
+      <a href="../secrets/" class="md-nav__link">
         
   
   
@@ -783,7 +786,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/cli/" class="md-nav__link">
+      <a href="../cli/" class="md-nav__link">
         
   
   
@@ -808,10 +811,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../notebook/agent-authoring/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authoring Programmatically
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -827,6 +857,114 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The loop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#on-disk-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On-disk layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notebooktoml-the-minimum-that-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        notebook.toml — the minimum that works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-variables-flow-between-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How variables flow between cells
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-cell-configuration-annotations-not-toml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-cell configuration: annotations, not TOML
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-validate-catches-vs-what-run-catches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What validate catches vs. what run catches
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#donts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Don'ts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked example
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -839,7 +977,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/import/" class="md-nav__link">
+      <a href="../import/" class="md-nav__link">
         
   
   
@@ -867,7 +1005,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/export/" class="md-nav__link">
+      <a href="../export/" class="md-nav__link">
         
   
   
@@ -895,7 +1033,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/keyboard/" class="md-nav__link">
+      <a href="../keyboard/" class="md-nav__link">
         
   
   
@@ -1217,31 +1355,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1259,7 +1394,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1333,7 +1468,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../modes/" class="md-nav__link">
+      <a href="../../deployment/modes/" class="md-nav__link">
         
   
   
@@ -1361,7 +1496,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../service-mode/" class="md-nav__link">
+      <a href="../../deployment/service-mode/" class="md-nav__link">
         
   
   
@@ -1389,7 +1524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../lifecycle/" class="md-nav__link">
+      <a href="../../deployment/lifecycle/" class="md-nav__link">
         
   
   
@@ -1417,7 +1552,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../privacy/" class="md-nav__link">
+      <a href="../../deployment/privacy/" class="md-nav__link">
         
   
   
@@ -1445,7 +1580,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../docker/" class="md-nav__link">
+      <a href="../../deployment/docker/" class="md-nav__link">
         
   
   
@@ -1473,7 +1608,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../fly/" class="md-nav__link">
+      <a href="../../deployment/fly/" class="md-nav__link">
         
   
   
@@ -1498,37 +1633,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    GitHub Codespaces
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../deployment/codespaces/" class="md-nav__link">
         
   
   
@@ -1544,70 +1652,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#whats-included" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What's included
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#setup-flow" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Setup flow
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#port-forwarding" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Port forwarding
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#first-time-startup" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        First-time startup
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1620,7 +1664,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../observability/" class="md-nav__link">
+      <a href="../../deployment/observability/" class="md-nav__link">
         
   
   
@@ -1675,10 +1719,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#whats-included" class="md-nav__link">
+  <a href="#the-loop" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What's included
+        The loop
       
     </span>
   </a>
@@ -1686,10 +1730,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#setup-flow" class="md-nav__link">
+  <a href="#on-disk-layout" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Setup flow
+        On-disk layout
       
     </span>
   </a>
@@ -1697,10 +1741,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#port-forwarding" class="md-nav__link">
+  <a href="#notebooktoml-the-minimum-that-works" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Port forwarding
+        notebook.toml — the minimum that works
       
     </span>
   </a>
@@ -1708,10 +1752,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-time-startup" class="md-nav__link">
+  <a href="#how-variables-flow-between-cells" class="md-nav__link">
     <span class="md-ellipsis">
       
-        First-time startup
+        How variables flow between cells
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-cell-configuration-annotations-not-toml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-cell configuration: annotations, not TOML
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-validate-catches-vs-what-run-catches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What validate catches vs. what run catches
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#donts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Don'ts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked example
       
     </span>
   </a>
@@ -1738,46 +1826,175 @@
   
 
 
-<h1 id="github-codespaces">GitHub Codespaces<a class="headerlink" href="#github-codespaces" title="Permanent link">&para;</a></h1>
-<p>Click <strong>"Open in Codespaces"</strong> on the repo to get a full development environment with the server running automatically.</p>
-<h2 id="whats-included">What's included<a class="headerlink" href="#whats-included" title="Permanent link">&para;</a></h2>
-<p>The <code>.devcontainer/</code> configuration provides:</p>
+<h1 id="authoring-notebooks-programmatically">Authoring Notebooks Programmatically<a class="headerlink" href="#authoring-notebooks-programmatically" title="Permanent link">&para;</a></h1>
+<p>A Strata notebook is a <strong>plain-text directory</strong> — TOML config plus one
+source file per cell. Anything that can write files can author one: a
+script, a code generator, or a coding agent (Claude Code, Codex, …). No
+server, no SDK, and no JSON blobs are involved.</p>
+<p>This page is the contract for external authors. If you follow it and the
+result doesn't open, validate, and run, that's a Strata bug — please
+report it.</p>
+<h2 id="the-loop">The loop<a class="headerlink" href="#the-loop" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>strata<span class="w"> </span>new<span class="w"> </span><span class="s2">&quot;My Analysis&quot;</span><span class="w"> </span>--no-env<span class="w">     </span><span class="c1"># 1. scaffold</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># 2. write cells/*.py, list them in notebook.toml</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>strata<span class="w"> </span>validate<span class="w"> </span>my_analysis<span class="w">           </span><span class="c1"># 3. static checks — cheap, run after every edit</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>strata<span class="w"> </span>run<span class="w"> </span>my_analysis<span class="w">                </span><span class="c1"># 4. execute (syncs the venv on first run)</span>
+</code></pre></div>
+<p><code>validate</code> and <code>run</code> both take <code>--format json</code> and use the same exit
+codes: <code>0</code> success (warnings allowed), <code>1</code> failure with structured
+findings on stdout, <code>2</code> invocation error on stderr. Iterate on the
+diagnostics until both exit <code>0</code>.</p>
+<h2 id="on-disk-layout">On-disk layout<a class="headerlink" href="#on-disk-layout" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>my_analysis/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── notebook.toml          # committed config: cells, env, workers, mounts
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├── pyproject.toml         # uv-managed dependencies
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├── uv.lock                # written by uv; do not hand-edit
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>├── cells/
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│   ├── load.py
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│   ├── notes.md
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│   └── stats.py
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>└── .strata/               # runtime state — NEVER create, edit, or commit
+</code></pre></div>
+<p><strong><code>.strata/</code> is hands-off.</strong> Display outputs, provenance hashes, console
+snapshots, and the artifact store live there; the server and CLI manage
+it entirely. It's gitignored. If you are generating a notebook from
+scratch, simply don't create it.</p>
+<h2 id="notebooktoml-the-minimum-that-works">notebook.toml — the minimum that works<a class="headerlink" href="#notebooktoml-the-minimum-that-works" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;my-analysis-001&quot;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;My Analysis&quot;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">cells</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;load&quot;</span><span class="p">,</span><span class="w">  </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;load.py&quot;</span><span class="p">,</span><span class="w">  </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;notes&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;notes.md&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;markdown&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;stats&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;stats.py&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="p">]</span>
+</code></pre></div>
+<p>The full schema (env, workers, mounts, connections, AI config) is
+<a href="../../reference/notebook-toml/">notebook.toml Schema</a>. Rules that matter
+when writing it by hand:</p>
 <ul>
-<li>Python 3.13 via devcontainer features</li>
-<li>Rust toolchain for the native extension</li>
-<li>Node.js 25 for frontend development</li>
-<li>VS Code extensions: Python, Ruff, Volar, rust-analyzer</li>
+<li><strong><code>notebook_id</code></strong> — any stable, unique string. The server generates
+  UUIDs; hand-written IDs just need to never change afterwards (artifacts
+  are keyed to it — renaming orphans the cache).</li>
+<li><strong>Cell <code>id</code></strong> — unique within the notebook, used in artifact keys and
+  API routes. The server generates 8-char UUID prefixes; hand-written
+  short names (<code>load</code>, <code>stats</code>) are fine. Don't reuse an ID after
+  deleting a cell.</li>
+<li><strong><code>file</code></strong> — relative to <code>cells/</code>. Conventional extensions: <code>.py</code>
+  (python, prompt), <code>.R</code> (r), <code>.sql</code> (sql), <code>.md</code> (markdown).</li>
+<li><strong><code>order</code></strong> — display order <em>and</em> reference-resolution order (see
+  below). Keep it consistent with the list order.</li>
+<li><strong><code>language</code></strong> — one of <code>python</code>, <code>r</code>, <code>sql</code>, <code>prompt</code>, <code>markdown</code>.</li>
 </ul>
-<h2 id="setup-flow">Setup flow<a class="headerlink" href="#setup-flow" title="Permanent link">&para;</a></h2>
-<ol>
-<li>
-<p><strong><code>postCreateCommand</code></strong> (<code>setup.sh</code>) runs once on container creation:</p>
+<h2 id="how-variables-flow-between-cells">How variables flow between cells<a class="headerlink" href="#how-variables-flow-between-cells" title="Permanent link">&para;</a></h2>
+<p>Each cell's top-level assignments are its <strong>defines</strong>; the free variables
+in its source are its <strong>references</strong>. A reference binds to the <strong>nearest
+earlier cell</strong> (by <code>order</code>) that defines that name — never to a later
+cell. There is no notebook-global mutable namespace: every cross-cell
+value is an immutable, content-addressed artifact.</p>
+<p>Practical consequences for generated code:</p>
 <ul>
-<li>Installs <code>uv</code></li>
-<li>Runs <code>uv sync</code> (builds Rust extension)</li>
-<li>Builds the frontend (<code>npm ci &amp;&amp; npm run build</code>)</li>
+<li>Put producers before consumers in <code>order</code>. A reference with no earlier
+  definer isn't an error at validate time (it could be an import or a
+  builtin), but it will <code>NameError</code> at run time.</li>
+<li>Only variables that downstream cells actually reference are persisted.</li>
+<li>Re-running with unchanged source + inputs + environment is a cache hit;
+  cells re-execute only when something upstream changed.</li>
+<li>Values cross cells by serialization (Arrow for tabular/numpy, JSON for
+  plain data, pickle otherwise) — write cells as if their inputs were
+  freshly deserialized, because they are.</li>
 </ul>
-</li>
-<li>
-<p><strong><code>postStartCommand</code></strong> (<code>start.sh</code>) runs on every container start:</p>
+<h2 id="per-cell-configuration-annotations-not-toml">Per-cell configuration: annotations, not TOML<a class="headerlink" href="#per-cell-configuration-annotations-not-toml" title="Permanent link">&para;</a></h2>
+<p>Cell-level settings are <code># @</code> comment lines at the top of the cell
+source — they always win over anything persisted elsewhere. The full
+surface is <a href="../annotations/">Cell Annotations</a>; the most common:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># @name revenue_model     ← stable display name</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># @timeout 120            ← per-cell timeout (seconds)</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># @worker gpu-box         ← run on a named worker</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># @env API_BASE=https://… ← per-cell env var</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># @mount data s3://bucket/path ro   ← injects `data` as a pathlib.Path</span>
+</code></pre></div>
+<p>Prompt cells (LLM calls) use the same mechanism:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># @name summary</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># @output_schema {&quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {&quot;verdict&quot;: {&quot;type&quot;: &quot;string&quot;}}, &quot;required&quot;: [&quot;verdict&quot;]}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">Summarize</span> <span class="p">{{</span> <span class="n">findings</span> <span class="p">}}</span> <span class="k">as</span> <span class="n">a</span> <span class="n">verdict</span><span class="o">.</span>
+</code></pre></div>
+<p><code>{{ var }}</code> interpolates upstream variables. <code>strata validate</code> checks
+annotation syntax (<code>loop_missing_carry</code>, malformed <code>@output_schema</code>,
+unknown workers, …) without calling any LLM.</p>
+<h2 id="what-validate-catches-vs-what-run-catches">What validate catches vs. what run catches<a class="headerlink" href="#what-validate-catches-vs-what-run-catches" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Caught by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Malformed <code>notebook.toml</code> (with TOML line numbers)</td>
+<td><code>validate</code></td>
+</tr>
+<tr>
+<td>Missing / unreadable cell file</td>
+<td><code>validate</code></td>
+</tr>
+<tr>
+<td>DAG cycle</td>
+<td><code>validate</code></td>
+</tr>
+<tr>
+<td>Bad annotation (<code>@loop</code> without <code>carry</code>, schema typos, unknown worker)</td>
+<td><code>validate</code></td>
+</tr>
+<tr>
+<td>Reference that resolves to nothing (import? typo?)</td>
+<td><code>run</code> (NameError)</td>
+</tr>
+<tr>
+<td>Wrong logic, missing dependency in <code>pyproject.toml</code></td>
+<td><code>run</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>run --format json</code> reports per-cell <code>status</code>, <code>error</code>, and <code>cache_hit</code>,
+and skips downstream cells when an upstream fails (<code>"reason": "upstream
+failed"</code>) — fix the first error and re-run; everything already correct is
+a cache hit.</p>
+<h2 id="donts">Don'ts<a class="headerlink" href="#donts" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Creates a scratch notebook directory if none exists</li>
-<li>Starts the Strata server in the background</li>
-<li>Waits for the health check to pass</li>
+<li><strong>Don't create or edit <code>.strata/</code></strong> — runtime state, machine-managed.</li>
+<li><strong>Don't hand-edit <code>uv.lock</code></strong> — declare dependencies in
+  <code>pyproject.toml</code> and let <code>strata run</code> / <code>uv sync</code> resolve.</li>
+<li><strong>Don't reuse cell IDs</strong> or change <code>notebook_id</code> after artifacts exist.</li>
+<li><strong>Don't encode per-cell config in <code>notebook.toml</code></strong> when an annotation
+  exists — annotations are the single per-cell configuration surface.</li>
+<li><strong>Don't write outputs into the notebook directory</strong> from cell code
+  unless you mean to commit them; artifacts already persist results.</li>
 </ul>
-</li>
-</ol>
-<h2 id="port-forwarding">Port forwarding<a class="headerlink" href="#port-forwarding" title="Permanent link">&para;</a></h2>
-<p>Port <strong>8765</strong> is forwarded automatically with <code>onAutoForward: "openBrowser"</code>, so your browser opens the notebook UI as soon as the server is ready.</p>
-<h2 id="first-time-startup">First-time startup<a class="headerlink" href="#first-time-startup" title="Permanent link">&para;</a></h2>
-<p>The initial <code>postCreateCommand</code> takes 3-5 minutes (Rust compilation). Subsequent starts are fast since the build is cached in the Codespace volume.</p>
-<p>PyPI wheels now ship, so the Codespace setup is <code>uv tool install
-strata-notebook</code> and finishes in under a minute. If you're using a
-Codespace to <strong>contribute to Strata</strong> (not just try it), install the
-Rust toolchain and clone the repo manually:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>--proto<span class="w"> </span><span class="s1">&#39;=https&#39;</span><span class="w"> </span>-sSf<span class="w"> </span>https://sh.rustup.rs<span class="w"> </span><span class="p">|</span><span class="w"> </span>sh<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>-y
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/bearing-research/strata.git
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">cd</span><span class="w"> </span>strata<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras
+<h2 id="worked-example">Worked example<a class="headerlink" href="#worked-example" title="Permanent link">&para;</a></h2>
+<p>This exact notebook is pinned by Strata's test suite
+(<code>TestHandWrittenNotebookContract</code>) — if it ever stops working, CI fails:</p>
+<p><code>notebook.toml</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;agent-handwritten-001&quot;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;Hand-written by an agent&quot;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">cells</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;load&quot;</span><span class="p">,</span><span class="w">  </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;load.py&quot;</span><span class="p">,</span><span class="w">  </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;doc&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;doc.md&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;markdown&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;stats&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;stats.py&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">]</span>
+</code></pre></div>
+<p><code>cells/load.py</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @name load</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">numbers</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span>
+</code></pre></div>
+<p><code>cells/stats.py</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">mean</span> <span class="o">=</span> <span class="n">total</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>$<span class="w"> </span>strata<span class="w"> </span>validate<span class="w"> </span>./handwritten<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>strata<span class="w"> </span>run<span class="w"> </span>./handwritten
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>✓<span class="w"> </span>valid<span class="w"> </span>—<span class="w"> </span><span class="m">3</span><span class="w"> </span>cell<span class="o">(</span>s<span class="o">)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>...
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="m">3</span><span class="w"> </span>ran<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span>.2s
 </code></pre></div>
 
 

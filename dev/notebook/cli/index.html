@@ -16,7 +16,7 @@
         <link rel="prev" href="../secrets/">
       
       
-        <link rel="next" href="../import/">
+        <link rel="next" href="../agent-authoring/">
       
       
         
@@ -928,10 +928,60 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#strata-validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        strata validate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#strata-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        strata new
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authoring Programmatically
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1768,6 +1818,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#strata-validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        strata validate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#strata-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        strata new
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1836,10 +1908,12 @@ invocation opens its own <code>NotebookSession</code>, runs the cells, and exits
 </tr>
 </tbody>
 </table>
-<p><code>--format json</code> writes one JSON object per cell as it finishes, followed by a
-final summary record, all to <strong>stdout</strong>. Errors and pre-flight diagnostics go
-to stderr regardless of format. Pipe stdout to <code>jq</code> for filtering, or capture
-to a file (<code>strata run ... --format json &gt; run.jsonl</code>) for later parsing.</p>
+<p><code>--format json</code> writes a single JSON object to <strong>stdout</strong> when the run
+finishes: <code>{"notebook", "success", "duration_ms", "cells": [...]}</code> with one
+entry per cell (<code>id</code>, <code>status</code> ∈ <code>ok|error|skipped</code>, <code>duration_ms</code>,
+<code>cache_hit</code>, plus <code>error</code> / <code>reason</code> where applicable). Errors and pre-flight
+diagnostics go to stderr regardless of format. Pipe stdout to <code>jq</code>:
+<code>strata run ... --format json | jq '.cells[] | select(.status == "error")'</code>.</p>
 <h3 id="exit-codes">Exit Codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1883,8 +1957,8 @@ even when some cells failed (each failure produces a JSON object with
 <a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">        </span><span class="nt">env</span><span class="p">:</span>
 <a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">          </span><span class="nt">OPENAI_API_KEY</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ secrets.OPENAI_API_KEY }}</span>
 </code></pre></div>
-<p><code>--format json</code> emits one JSON object per cell plus a summary record at the
-end, so downstream steps can grep/parse per-cell status without screen-scraping.</p>
+<p><code>--format json</code> emits a single structured result object, so downstream steps
+can parse per-cell status without screen-scraping.</p>
 <h2 id="what-gets-run">What Gets Run<a class="headerlink" href="#what-gets-run" title="Permanent link">&para;</a></h2>
 <p>Every cell in the notebook executes in topological order, exactly as if you
 had clicked <strong>Run All</strong> in the UI. Cached artifacts are reused, the first run
@@ -1908,6 +1982,38 @@ same way the server does. Secret-manager credentials (e.g.
 shell that invokes the command, they are never stored in the notebook.</p>
 <p>For notebooks that require env vars set only via the Runtime panel (never
 committed), export them before invoking <code>strata run</code>.</p>
+<h2 id="strata-validate"><code>strata validate</code><a class="headerlink" href="#strata-validate" title="Permanent link">&para;</a></h2>
+<p>Static checks without executing anything — no environment sync, no
+subprocesses, no LLM calls:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>validate<span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span><span class="o">[</span>--format<span class="w"> </span>human<span class="p">|</span>json<span class="o">]</span>
+</code></pre></div>
+<ul>
+<li><code>notebook.toml</code> parses and the cell files load</li>
+<li>the DAG builds without cycles</li>
+<li>per-cell annotation diagnostics — the <strong>same validation the server runs
+  on open / reload</strong> (<code>worker_unknown</code>, <code>loop_missing_carry</code>,
+  <code>sql_missing_connection</code>, malformed <code>@output_schema</code>, …)</li>
+</ul>
+<p>Exit codes mirror <code>strata run</code>: <code>0</code> valid (warnings allowed), <code>1</code> invalid
+(parse failure, DAG cycle, or any error-severity diagnostic), <code>2</code>
+invocation error. <code>--format json</code> emits
+<code>{"notebook", "valid", "errors", "cells", "summary"}</code> where each cell
+carries its <code>defines</code> / <code>references</code> (so you can check the DAG wiring you
+intended) and its <code>diagnostics</code> with <code>severity</code> / <code>code</code> / <code>message</code> /
+<code>line</code>.</p>
+<p>The intended loop for scripts and coding agents: <strong>write files → validate →
+fix → run</strong>. Validation is cheap enough to call after every edit; <code>strata
+run</code> is the expensive step. See
+<a href="../agent-authoring/">Authoring Notebooks Programmatically</a>.</p>
+<h2 id="strata-new"><code>strata new</code><a class="headerlink" href="#strata-new" title="Permanent link">&para;</a></h2>
+<p>Scaffold a notebook directory without the server:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>strata<span class="w"> </span>new<span class="w"> </span><span class="s2">&quot;My Analysis&quot;</span><span class="w"> </span><span class="o">[</span>--parent<span class="w"> </span>DIR<span class="o">]</span><span class="w"> </span><span class="o">[</span>--python<span class="w"> </span><span class="m">3</span>.12<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-env<span class="o">]</span><span class="w"> </span><span class="o">[</span>--format<span class="w"> </span>human<span class="p">|</span>json<span class="o">]</span>
+</code></pre></div>
+<p>Creates <code>&lt;parent&gt;/my_analysis/</code> with <code>notebook.toml</code>, <code>pyproject.toml</code>
+(pre-seeded with the notebook runtime packages), and an empty <code>cells/</code>
+directory, then syncs the venv (skip with <code>--no-env</code>; <code>strata run</code> syncs it
+later). Idempotent on an existing notebook directory: the <code>notebook_id</code> and
+any existing cells are preserved, so re-running it never orphans artifacts.</p>
 
 
 
