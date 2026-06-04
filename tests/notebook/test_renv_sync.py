@@ -14,9 +14,12 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+from strata.notebook.dependencies import renv_add, renv_init, renv_process_lock
 from strata.notebook.models import NotebookToml
 from strata.notebook.parser import parse_notebook
 from strata.notebook.runtime_state import RRuntime, load_runtime_state, save_runtime_state
@@ -175,6 +178,106 @@ class TestRenvSyncDefaultTimeout:
         # default is fine because uv ships wheels; renv doesn't have
         # that luxury.
         assert captured["timeout"] >= 300
+
+
+# ---------------------------------------------------------------------------
+# Cross-process renv lock (issue #102)
+# ---------------------------------------------------------------------------
+
+# Holds the renv process lock from a real second process, so the
+# contention below is genuine cross-process flock contention — a
+# second FileLock instance in the same process would also conflict
+# on POSIX, but that's an implementation detail we don't want to
+# depend on.
+_LOCK_HOLDER_SCRIPT = """
+import sys
+from filelock import FileLock
+lock = FileLock(sys.argv[1])
+lock.acquire()
+print("held", flush=True)
+sys.stdin.read()  # block until the parent closes stdin
+"""
+
+
+@contextmanager
+def _hold_renv_lock_in_subprocess(notebook_dir: Path):
+    """Spawn a child process that holds *notebook_dir*'s renv lock."""
+    lock_path = notebook_dir / ".strata" / "renv-process.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _LOCK_HOLDER_SCRIPT, str(lock_path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "held"
+        yield
+    finally:
+        assert proc.stdin is not None
+        proc.stdin.close()
+        proc.wait(timeout=30)
+
+
+class TestRenvCrossProcessLock:
+    """renv mutations are mutually exclusive across processes.
+
+    Issue #102: ``renv::restore()`` from a server and ``strata run``
+    (or two CLI runs) in separate processes used to hit the same
+    ``renv/library`` + ``renv.lock`` concurrently — the
+    ``threading.Lock`` in ``dependencies.py`` only serializes within
+    one process and renv has no locking of its own.
+    """
+
+    def test_lock_file_lives_under_strata_runtime_dir(self, tmp_path):
+        """The lock is runtime state — ``.strata/``, never committed."""
+        lock = renv_process_lock(tmp_path)
+        assert Path(lock.lock_file) == tmp_path / ".strata" / "renv-process.lock"
+        assert (tmp_path / ".strata").is_dir()
+
+    def test_renv_sync_blocked_by_other_process_returns_false(self, monkeypatch, tmp_path):
+        """Lock held elsewhere → give up after *timeout*, never spawn Rscript."""
+        (tmp_path / "renv.lock").write_text("")
+        monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
+
+        def boom(*args, **kwargs):
+            raise AssertionError("Rscript must not run while another process holds the lock")
+
+        with _hold_renv_lock_in_subprocess(tmp_path):
+            monkeypatch.setattr(subprocess, "run", boom)
+            assert _renv_sync(tmp_path, timeout=1) is False
+
+    def test_renv_sync_releases_lock_between_calls(self, monkeypatch, tmp_path):
+        """Back-to-back syncs in one process must not self-deadlock."""
+        monkeypatch.setattr(shutil, "which", lambda name: "/fake/Rscript")
+        (tmp_path / "renv.lock").write_text("")
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda *a, **kw: SimpleNamespace(returncode=0, stdout=b"", stderr=b""),
+        )
+
+        assert _renv_sync(tmp_path) is True
+        assert _renv_sync(tmp_path) is True
+
+    async def test_renv_add_blocked_by_other_process_fails_cleanly(self, tmp_path):
+        """``renv_add`` surfaces a structured failure, not a corrupted env."""
+        with _hold_renv_lock_in_subprocess(tmp_path):
+            result = await renv_add(tmp_path, "ggplot2", timeout=1)
+
+        assert result.success is False
+        assert result.action == "r_add"
+        assert result.package == "ggplot2"
+        assert "Another process" in (result.error or "")
+
+    async def test_renv_init_blocked_by_other_process_fails_cleanly(self, tmp_path):
+        with _hold_renv_lock_in_subprocess(tmp_path):
+            result = await renv_init(tmp_path, timeout=1)
+
+        assert result.success is False
+        assert result.action == "r_init"
+        assert "Another process" in (result.error or "")
 
 
 # ---------------------------------------------------------------------------

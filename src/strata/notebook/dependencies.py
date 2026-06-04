@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import filelock
 import tomli_w
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import SpecifierSet
@@ -43,6 +44,25 @@ def _get_notebook_lock(notebook_dir: Path) -> threading.Lock:
         if key not in _locks:
             _locks[key] = threading.Lock()
         return _locks[key]
+
+
+def renv_process_lock(notebook_dir: Path) -> filelock.FileLock:
+    """Cross-process lock guarding renv mutations for *notebook_dir*.
+
+    The ``threading.Lock`` above only serializes within one process.
+    ``renv::restore()`` / ``renv::install()`` can also run concurrently
+    from *different* processes — a server serving the notebook dir
+    while ``strata run`` syncs the same dir, or two concurrent CLI
+    runs — and renv has no locking of its own, risking a half-written
+    ``renv.lock`` or a partially-installed project library (issue #102).
+
+    The lock file lives under ``.strata/`` (gitignored runtime state)
+    so it never lands in committed notebooks. uv needs no equivalent:
+    it does its own cross-process locking on the venv and cache.
+    """
+    lock_dir = notebook_dir / ".strata"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    return filelock.FileLock(str(lock_dir / "renv-process.lock"))
 
 
 # ---------------------------------------------------------------------------
@@ -849,14 +869,32 @@ async def renv_init(
     without pre-built binaries (Linux aarch64, fresh macOS).
 
     Holds the per-notebook lock for the duration so a concurrent
-    ``renv_add`` can't race against init. Lock acquire goes through
+    ``renv_add`` can't race against init, plus the cross-process
+    ``renv_process_lock`` so a ``strata run`` in another process
+    can't restore mid-bootstrap. Lock acquires go through
     ``asyncio.to_thread`` so the asyncio event loop stays responsive
-    if the lock is held.
+    if a lock is held.
     """
     lock = _get_notebook_lock(notebook_dir)
     await asyncio.to_thread(lock.acquire)
     try:
-        return await _renv_init_locked(notebook_dir, timeout=timeout, on_update=on_update)
+        process_lock = renv_process_lock(notebook_dir)
+        try:
+            await asyncio.to_thread(process_lock.acquire, timeout)
+        except filelock.Timeout:
+            return RJobResult(
+                success=False,
+                action="r_init",
+                package=None,
+                error=(
+                    "Another process is mutating this notebook's R environment "
+                    f"(renv lock held for over {timeout}s). Retry once it finishes."
+                ),
+            )
+        try:
+            return await _renv_init_locked(notebook_dir, timeout=timeout, on_update=on_update)
+        finally:
+            process_lock.release()
     finally:
         lock.release()
 
@@ -951,7 +989,25 @@ async def renv_add(
     lock = _get_notebook_lock(notebook_dir)
     await asyncio.to_thread(lock.acquire)
     try:
-        return await _renv_add_locked(notebook_dir, package, timeout=timeout, on_update=on_update)
+        process_lock = renv_process_lock(notebook_dir)
+        try:
+            await asyncio.to_thread(process_lock.acquire, timeout)
+        except filelock.Timeout:
+            return RJobResult(
+                success=False,
+                action="r_add",
+                package=package,
+                error=(
+                    "Another process is mutating this notebook's R environment "
+                    f"(renv lock held for over {timeout}s). Retry once it finishes."
+                ),
+            )
+        try:
+            return await _renv_add_locked(
+                notebook_dir, package, timeout=timeout, on_update=on_update
+            )
+        finally:
+            process_lock.release()
     finally:
         lock.release()
 
