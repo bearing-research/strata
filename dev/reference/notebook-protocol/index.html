@@ -2108,8 +2108,8 @@ against the preserved execution state.</p>
   module-level number you can override at startup if you want a different
   default.</li>
 <li><strong>Missed deltas are not replayed.</strong> Per-cell deltas emitted while you were
-  disconnected (<code>cell_console</code> mid-stream, <code>cell_iteration_progress</code>,
-  <code>cascade_progress</code>) are dropped. On reconnect, send <code>notebook_sync</code> and
+  disconnected (<code>cell_console</code> mid-stream, <code>cell_output_delta</code>,
+  <code>cell_iteration_progress</code>, <code>cascade_progress</code>) are dropped. On reconnect, send <code>notebook_sync</code> and
   rebuild from the fresh <code>notebook_state</code>. Persisted state (finished
   <code>cell_status</code>, latest <code>cell_output</code>) survives — it's recovered through
   the snapshot.</li>
