@@ -1676,3 +1676,42 @@ def test_variant_add_broadcasts_new_cell(client):
 # ``thread.join()`` on the portal thread blocks indefinitely while waiting
 # on lingering asyncio tasks from session-manager teardown. Tracked as a
 # follow-up to land WS-specific coverage via fake websocket objects.
+
+
+# ---------------------------------------------------------------------------
+# Prompt-cell streaming broadcast wiring (issue #110)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_make_executor_with_progress_wires_prompt_delta_broadcast(
+    notebook_session, monkeypatch
+):
+    """``_make_executor_with_progress`` must wire ``on_prompt_delta`` to a
+    ``cell_output_delta`` broadcast, mirroring the loop-progress wiring.
+    Tested through the callback directly (fake broadcast, no WS upgrade —
+    see the TestClient WS portal hang note in the test-suite memory)."""
+    from strata.notebook import ws as ws_module
+    from strata.notebook.ws import _make_executor_with_progress
+
+    _, session = notebook_session
+    broadcasts: list[tuple[str, dict]] = []
+
+    async def fake_broadcast(notebook_id, message):
+        broadcasts.append((notebook_id, message))
+
+    monkeypatch.setattr(ws_module, "_broadcast_message", fake_broadcast)
+
+    executor = _make_executor_with_progress(session, "nb-stream-test")
+    assert executor.on_prompt_delta is not None
+    assert executor.on_iteration_complete is not None
+
+    payload = {"cell_id": "p1", "attempt": 1, "kind": "delta", "text": "chunk"}
+    await executor.on_prompt_delta(payload)
+
+    assert len(broadcasts) == 1
+    notebook_id, message = broadcasts[0]
+    assert notebook_id == "nb-stream-test"
+    assert message["type"] == "cell_output_delta"
+    assert message["payload"] == payload
+    assert isinstance(message["seq"], int)

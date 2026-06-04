@@ -48,6 +48,15 @@ class MessageType(StrEnum):
     ERROR = "error"
     CELL_STATUS = "cell_status"
     CELL_OUTPUT = "cell_output"
+    # Incremental output while a cell is still running. Today only
+    # prompt cells emit it (LLM response streaming, issue #110); the
+    # name is deliberately generic so SQL / long-running rich output
+    # can adopt the same frame. Payload: ``{cell_id, attempt, kind,
+    # text}`` where ``kind`` is ``"delta"`` (append) or ``"retry"``
+    # (schema validation failed — clear the buffer, new attempt).
+    # Deltas are ephemeral display state: never persisted, never
+    # replayed on reconnect; the final CELL_OUTPUT is canonical.
+    CELL_OUTPUT_DELTA = "cell_output_delta"
     CELL_CONSOLE = "cell_console"
     CELL_ERROR = "cell_error"
     CELL_ITERATION_PROGRESS = "cell_iteration_progress"

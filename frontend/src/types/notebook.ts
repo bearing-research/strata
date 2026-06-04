@@ -279,6 +279,13 @@ export interface Cell {
   annotationDiagnostics?: AnnotationDiagnostic[]
   /** Live loop-cell progress — hydrated from WS ``cell_iteration_progress`` messages */
   loopProgress?: LoopProgress
+  /** Live streamed partial output (prompt cells) — hydrated from WS
+   * ``cell_output_delta`` frames. Ephemeral display state: cleared by the
+   * final ``cell_output`` / ``cell_error`` frame and never persisted. */
+  streamBuffer?: string
+  /** Attempt number for the in-flight stream (>1 after schema-validation
+   * retries; the buffer resets between attempts). */
+  streamAttempt?: number
   /** Captured stdout from the last execution (persisted so it survives reopens) */
   consoleStdout?: string
   /** Captured stderr from the last execution (persisted so it survives reopens) */
@@ -692,6 +699,7 @@ export type WsClientMessageType =
 export type WsServerMessageType =
   | 'cell_status' // Cell status changed (includes causality chain)
   | 'cell_output' // Cell produced output (artifact data for display)
+  | 'cell_output_delta' // Streamed partial output while running (prompt cells)
   | 'cell_console' // Incremental console output (stdout/stderr)
   | 'cell_error' // Cell execution failed
   | 'cell_assertions' // Assertion results from cell execution

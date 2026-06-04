@@ -1594,7 +1594,15 @@ def _make_executor_with_progress(
             _make_message(MessageType.CELL_ITERATION_PROGRESS, seq, progress),
         )
 
+    async def _broadcast_prompt_delta(payload: dict[str, Any]) -> None:
+        seq = next_notebook_sequence(notebook_id)
+        await _broadcast_message(
+            notebook_id,
+            _make_message(MessageType.CELL_OUTPUT_DELTA, seq, payload),
+        )
+
     executor.on_iteration_complete = _broadcast_iteration_progress
+    executor.on_prompt_delta = _broadcast_prompt_delta
     return executor
 
 

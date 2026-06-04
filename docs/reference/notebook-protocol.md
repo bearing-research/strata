@@ -156,8 +156,8 @@ What this means for a client:
   module-level number you can override at startup if you want a different
   default.
 - **Missed deltas are not replayed.** Per-cell deltas emitted while you were
-  disconnected (`cell_console` mid-stream, `cell_iteration_progress`,
-  `cascade_progress`) are dropped. On reconnect, send `notebook_sync` and
+  disconnected (`cell_console` mid-stream, `cell_output_delta`,
+  `cell_iteration_progress`, `cascade_progress`) are dropped. On reconnect, send `notebook_sync` and
   rebuild from the fresh `notebook_state`. Persisted state (finished
   `cell_status`, latest `cell_output`) survives — it's recovered through
   the snapshot.

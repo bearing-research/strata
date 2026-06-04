@@ -1793,6 +1793,9 @@ function initializeWebSocket() {
 
       const cell = cellMap.value.get(cellId)
       if (cell) {
+        // The canonical output replaces any streamed partial buffer.
+        cell.streamBuffer = undefined
+        cell.streamAttempt = undefined
         cell.durationMs = p.duration_ms
         cell.displayOutputs = displayOutputs
         // If cell_output carries fresh stdout/stderr, overwrite.
@@ -1823,6 +1826,28 @@ function initializeWebSocket() {
       }
 
       setCellOutput(cellId, output, displayOutputs)
+    })
+
+    wsInstance.onMessage('cell_output_delta', (msg: WsMessage) => {
+      const p = msg.payload as Record<string, any>
+      const cellId = p.cell_id as CellId
+      const cell = cellMap.value.get(cellId)
+      if (!cell) return
+      const text = typeof p.text === 'string' ? p.text : ''
+      const attempt = Number(p.attempt) || 1
+      if (p.kind === 'retry') {
+        // Schema validation failed and the backend is retrying —
+        // clear the buffer so attempt N's invalid JSON never fuses
+        // with attempt N+1's corrected output.
+        cell.streamBuffer = ''
+        cell.streamAttempt = attempt
+        return
+      }
+      if (cell.streamAttempt !== attempt) {
+        cell.streamBuffer = ''
+        cell.streamAttempt = attempt
+      }
+      cell.streamBuffer = (cell.streamBuffer ?? '') + text
     })
 
     wsInstance.onMessage('cell_iteration_progress', (msg: WsMessage) => {
@@ -1868,6 +1893,8 @@ function initializeWebSocket() {
       const cell = cellMap.value.get(cellId)
       if (cell) {
         cell.status = 'error'
+        cell.streamBuffer = undefined
+        cell.streamAttempt = undefined
         cell.displayOutputs = []
         applyRemoteExecutionMetadata(cell, p)
         const workerName = effectiveWorkerNameForCell(cell)
@@ -2304,6 +2331,10 @@ async function executeCellWebSocket(cellId: CellId) {
   if (cell?.loopProgress) {
     cell.loopProgress = undefined
   }
+  if (cell) {
+    cell.streamBuffer = undefined
+    cell.streamAttempt = undefined
+  }
 
   setCellStatus(cellId, 'running')
   wsInstance.executeCell(cellId)
@@ -2393,6 +2424,10 @@ async function executeRerunWebSocket(cellId: CellId) {
   const cell = cellMap.value.get(cellId)
   if (cell?.loopProgress) {
     cell.loopProgress = undefined
+  }
+  if (cell) {
+    cell.streamBuffer = undefined
+    cell.streamAttempt = undefined
   }
   setCellStatus(cellId, 'running')
   wsInstance.executeRerun(cellId)

@@ -140,6 +140,10 @@ async def chat_completion(
 async def chat_completion_stream(
     config: LlmConfig,
     messages: list[dict[str, str]],
+    *,
+    temperature: float | None = None,
+    output_type: str | None = None,
+    output_schema: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream a chat completion as text deltas.
 
@@ -148,10 +152,36 @@ async def chat_completion_stream(
     "output_tokens": int}`` event when the stream ends. The OpenAI-compatible
     API returns ``data: ...`` SSE lines; we parse them and pull
     ``choices[0].delta.content``.
+
+    ``temperature`` / ``output_type`` / ``output_schema`` shape the request
+    body exactly like the unary ``_chat_completion_openai_compat`` path —
+    OpenAI supports ``response_format`` (including ``json_schema``) with
+    ``stream: true``; the deltas are simply the raw JSON text as it
+    generates. This function is OpenAI-compat only: the Anthropic native
+    tool-use path (Anthropic + schema) has no streaming equivalent here
+    yet, so callers that need it must fall back to ``chat_completion``
+    (see ``execute_prompt_cell``).
     """
     model = config.model
     input_tokens = 0
     output_tokens = 0
+
+    request_body: dict[str, Any] = {
+        "model": config.model,
+        "messages": messages,
+        max_output_tokens_param(config.base_url): config.max_output_tokens,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+    if temperature is not None:
+        request_body["temperature"] = temperature
+    response_format = response_format_for(
+        config.base_url,
+        output_type=output_type,
+        output_schema=output_schema,
+    )
+    if response_format is not None:
+        request_body["response_format"] = response_format
 
     async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
         async with client.stream(
@@ -162,13 +192,7 @@ async def chat_completion_stream(
                 "Content-Type": "application/json",
                 "Accept": "text/event-stream",
             },
-            json={
-                "model": config.model,
-                "messages": messages,
-                max_output_tokens_param(config.base_url): config.max_output_tokens,
-                "stream": True,
-                "stream_options": {"include_usage": True},
-            },
+            json=request_body,
         ) as resp:
             if not resp.is_success:
                 body = (await resp.aread()).decode("utf-8", errors="replace")[:1000]

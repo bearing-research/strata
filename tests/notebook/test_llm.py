@@ -623,3 +623,95 @@ class TestChatCompletionDispatch:
         await chat_completion(config, [{"role": "user", "content": "hi"}])
 
         assert captured_urls == ["https://api.anthropic.com/v1/chat/completions"]
+
+
+class TestChatCompletionStreamRequestShape:
+    """``chat_completion_stream`` shapes its request body like the unary
+    OpenAI-compat path (issue #110): ``temperature`` and a
+    provider-appropriate ``response_format`` ride along with
+    ``stream: true``, and both stay off the body when not requested so
+    the agent chat caller is byte-identical to before.
+    """
+
+    _SSE_BODY = (
+        b'data: {"choices":[{"delta":{"content":"hel"}}]}\n\n'
+        b'data: {"choices":[{"delta":{"content":"lo"}}],'
+        b'"usage":{"prompt_tokens":5,"completion_tokens":2},"model":"m-live"}\n\n'
+        b"data: [DONE]\n\n"
+    )
+
+    def _patch_transport(self, monkeypatch, captured_bodies: list[dict]):
+        import httpx
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            import json as _json
+
+            captured_bodies.append(_json.loads(request.content))
+            return httpx.Response(
+                200,
+                content=self._SSE_BODY,
+                headers={"Content-Type": "text/event-stream"},
+            )
+
+        transport = httpx.MockTransport(handler)
+        original_client = httpx.AsyncClient
+
+        def patched_client(*args, **kwargs):
+            kwargs["transport"] = transport
+            return original_client(*args, **kwargs)
+
+        monkeypatch.setattr(httpx, "AsyncClient", patched_client)
+
+    @pytest.mark.asyncio
+    async def test_schema_and_temperature_land_in_body(self, monkeypatch):
+        from strata.notebook.llm import LlmConfig, chat_completion_stream
+
+        captured: list[dict] = []
+        self._patch_transport(monkeypatch, captured)
+
+        config = LlmConfig(base_url="https://api.openai.com/v1", api_key="k", model="m")
+        events = [
+            event
+            async for event in chat_completion_stream(
+                config,
+                [{"role": "user", "content": "hi"}],
+                temperature=0.2,
+                output_type="json",
+                output_schema=_SIMPLE_SCHEMA,
+            )
+        ]
+
+        body = captured[0]
+        assert body["stream"] is True
+        assert body["temperature"] == 0.2
+        # OpenAI base URL + schema → json_schema response_format, same
+        # as the unary dispatcher.
+        assert body["response_format"]["type"] == "json_schema"
+
+        # Deltas accumulate to the full content; usage comes from the
+        # final chunk.
+        deltas = [e["text"] for e in events if e["type"] == "delta"]
+        assert "".join(deltas) == "hello"
+        done = events[-1]
+        assert done["type"] == "done"
+        assert done["model"] == "m-live"
+        assert done["input_tokens"] == 5
+        assert done["output_tokens"] == 2
+
+    @pytest.mark.asyncio
+    async def test_defaults_leave_body_unchanged(self, monkeypatch):
+        """No kwargs → no ``temperature`` / ``response_format`` keys, so
+        the pre-existing agent chat caller sends the same body as before."""
+        from strata.notebook.llm import LlmConfig, chat_completion_stream
+
+        captured: list[dict] = []
+        self._patch_transport(monkeypatch, captured)
+
+        config = LlmConfig(base_url="https://api.openai.com/v1", api_key="k", model="m")
+        async for _event in chat_completion_stream(config, [{"role": "user", "content": "hi"}]):
+            pass
+
+        body = captured[0]
+        assert "temperature" not in body
+        assert "response_format" not in body
+        assert body["stream"] is True
