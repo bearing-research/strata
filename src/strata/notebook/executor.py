@@ -450,6 +450,10 @@ class CellExecutor:
         # by the WS handler so the frontend can update its progress badge
         # in real time; unset for non-streaming callers (REST, CLI).
         self.on_iteration_complete: Callable[[dict[str, Any]], Awaitable[None]] | None = None
+        # Optional callback fired per prompt-cell streaming event
+        # (CELL_OUTPUT_DELTA payload). Same wiring pattern: set by the
+        # WS handler, unset for REST / CLI callers (issue #110).
+        self.on_prompt_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -2324,6 +2328,7 @@ class CellExecutor:
             source,
             llm_config,
             use_cache=use_cache,
+            on_delta=self.on_prompt_delta,
         )
 
         if result_dict.get("success"):

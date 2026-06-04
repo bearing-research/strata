@@ -13,15 +13,20 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from strata.notebook.llm import (
+    LlmCompletionResult,
     LlmConfig,
     chat_completion,
+    chat_completion_stream,
     estimate_tokens,
+    infer_provider_name,
     render_prompt_template,
 )
 from strata.notebook.prompt_analyzer import analyze_prompt_cell
 from strata.notebook.provenance import derive_subkey
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from strata.notebook.session import NotebookSession
 
 logger = logging.getLogger(__name__)
@@ -123,12 +128,19 @@ async def execute_prompt_cell(
     llm_config: LlmConfig,
     *,
     use_cache: bool = True,
+    on_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Execute a prompt cell and return the result.
 
     Returns a dict compatible with CellExecutionResult fields:
         success, outputs, stdout, stderr, error, cache_hit,
         duration_ms, execution_method, artifact_uri, mutation_warnings
+
+    ``on_delta`` receives one ``CELL_OUTPUT_DELTA`` payload dict per
+    streaming event (``{cell_id, attempt, kind, text}``) so the WS
+    layer can surface the response as it generates (issue #110).
+    Cache hits return before any delta fires; callback failures are
+    logged and never fail the cell.
     """
     start_time = time.time()
     analysis = analyze_prompt_cell(source)
@@ -259,6 +271,14 @@ async def execute_prompt_cell(
     if output_schema is None:
         max_attempts = 1  # Nothing to validate against.
 
+    # Stream whenever the unary dispatcher would take the OpenAI-compat
+    # path. Anthropic + schema goes through native /v1/messages tool-use,
+    # which has no streaming equivalent yet (design doc Phase B) — that
+    # combination keeps today's unary behavior and emits no deltas.
+    use_streaming = on_delta is not None and not (
+        output_schema is not None and infer_provider_name(call_config.base_url) == "anthropic"
+    )
+
     result = None
     validation_errors: list[str] = []
     validation_retries = 0
@@ -267,13 +287,25 @@ async def execute_prompt_cell(
 
     for attempt in range(1, max_attempts + 1):
         try:
-            result = await chat_completion(
-                call_config,
-                messages,
-                temperature=temperature,
-                output_type=output_type,
-                output_schema=output_schema,
-            )
+            if use_streaming:
+                result = await _stream_completion(
+                    call_config,
+                    messages,
+                    cell_id=cell_id,
+                    attempt=attempt,
+                    temperature=temperature,
+                    output_type=output_type,
+                    output_schema=output_schema,
+                    on_delta=on_delta,
+                )
+            else:
+                result = await chat_completion(
+                    call_config,
+                    messages,
+                    temperature=temperature,
+                    output_type=output_type,
+                    output_schema=output_schema,
+                )
         except Exception as e:
             return _error_result(f"LLM call failed: {e}", start_time)
 
@@ -298,6 +330,19 @@ async def execute_prompt_cell(
 
         if attempt < max_attempts:
             validation_retries += 1
+            # Tell the frontend to clear its stream buffer — attempt
+            # N's invalid JSON must not fuse with attempt N+1's
+            # corrected output. ``text`` carries the first validator
+            # error as a human-readable retry notice.
+            await _emit_delta(
+                on_delta,
+                {
+                    "cell_id": cell_id,
+                    "attempt": attempt + 1,
+                    "kind": "retry",
+                    "text": validation_errors[0],
+                },
+            )
             # Seed the retry with the model's bad answer + the validator
             # diagnostics. Sending the previous response as an assistant
             # turn (instead of pasting it into the user turn) lets the
@@ -416,6 +461,81 @@ async def execute_prompt_cell(
         "mutation_warnings": [],
         "validation_retries": validation_retries,
     }
+
+
+async def _emit_delta(
+    on_delta: Callable[[dict[str, Any]], Awaitable[None]] | None,
+    payload: dict[str, Any],
+) -> None:
+    """Fire the streaming callback, swallowing failures.
+
+    Same policy as ``CellExecutor.on_iteration_complete``: a broken
+    WebSocket (client gone mid-stream) must not fail the cell — the
+    canonical result still lands in the artifact store and the final
+    ``cell_output`` frame.
+    """
+    if on_delta is None:
+        return
+    try:
+        await on_delta(payload)
+    except Exception:
+        logger.warning(
+            "on_delta callback failed for cell %s", payload.get("cell_id"), exc_info=True
+        )
+
+
+async def _stream_completion(
+    config: LlmConfig,
+    messages: list[dict[str, str]],
+    *,
+    cell_id: str,
+    attempt: int,
+    temperature: float | None,
+    output_type: str | None,
+    output_schema: dict[str, Any] | None,
+    on_delta: Callable[[dict[str, Any]], Awaitable[None]] | None,
+) -> LlmCompletionResult:
+    """Stream one completion attempt, forwarding deltas as they arrive.
+
+    Accumulates the streamed text into the same ``LlmCompletionResult``
+    shape the unary path returns, so the validate-and-retry loop is
+    agnostic to which transport produced the content. Usage comes from
+    the stream's final ``done`` event (``stream_options.include_usage``).
+    """
+    content_parts: list[str] = []
+    model = config.model
+    input_tokens = 0
+    output_tokens = 0
+
+    async for event in chat_completion_stream(
+        config,
+        messages,
+        temperature=temperature,
+        output_type=output_type,
+        output_schema=output_schema,
+    ):
+        if event["type"] == "delta":
+            content_parts.append(event["text"])
+            await _emit_delta(
+                on_delta,
+                {
+                    "cell_id": cell_id,
+                    "attempt": attempt,
+                    "kind": "delta",
+                    "text": event["text"],
+                },
+            )
+        elif event["type"] == "done":
+            model = event.get("model", model)
+            input_tokens = event.get("input_tokens", 0)
+            output_tokens = event.get("output_tokens", 0)
+
+    return LlmCompletionResult(
+        content="".join(content_parts),
+        model=model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
 
 
 def _load_upstream_variables(

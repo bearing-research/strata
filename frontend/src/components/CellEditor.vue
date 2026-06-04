@@ -920,6 +920,21 @@ function outputKey(output: CellOutput, index: number): string {
         "
       />
 
+      <!-- Live streamed partial output (prompt cells, #110). Ephemeral:
+           plain monospace text while running — no markdown rendering
+           mid-stream (avoids reflow churn) — replaced by the canonical
+           output when the final cell_output frame lands. -->
+      <div
+        v-if="!folded && cell.status === 'running' && cell.streamBuffer"
+        class="cell-stream"
+        data-testid="cell-stream"
+      >
+        <span v-if="(cell.streamAttempt ?? 1) > 1" class="stream-retry-badge">
+          &#x21BB; attempt {{ cell.streamAttempt }} — previous response failed schema validation
+        </span>
+        <pre>{{ cell.streamBuffer }}</pre>
+      </div>
+
       <!-- Console output (stdout/stderr) -->
       <div v-if="!folded && cellConsoleText(cell)" class="cell-console">
         <pre>{{
@@ -1788,6 +1803,26 @@ function outputKey(output: CellOutput, index: number): string {
 .version-change {
   color: var(--text-muted);
   font-size: 10px;
+}
+
+/* Live streamed partial output (prompt cells) */
+.cell-stream {
+  border-top: 1px solid var(--border-subtle);
+  padding: 6px 12px;
+  font-size: 12px;
+  background: var(--bg-base);
+}
+.cell-stream pre {
+  margin: 0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+.stream-retry-badge {
+  display: inline-block;
+  margin-bottom: 4px;
+  font-size: 10px;
+  color: var(--text-tertiary, var(--text-secondary));
 }
 
 /* Console output */

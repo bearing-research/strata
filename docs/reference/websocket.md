@@ -96,6 +96,7 @@ All messages are JSON with this shape:
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
 | `cell_status`             | `{ "cell_id": "...", "status": "running" }`                                                                              | Status changed                                   |
 | `cell_output`             | `{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false }`                        | Execution result, including rich visible outputs |
+| `cell_output_delta`       | `{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }`                                                     | Streamed partial output while the cell runs (today: prompt cells). `kind: "delta"` appends `text` to a per-cell buffer; `kind: "retry"` means schema validation failed — clear the buffer, `attempt` is the new attempt number, `text` is the first validator error. Ephemeral: never persisted or replayed; the final `cell_output` is canonical. Cache hits emit no deltas. |
 | `cell_console`            | `{ "cell_id": "...", "stream": "stdout", "text": "..." }`                                                                | Incremental output                               |
 | `cell_error`              | `{ "cell_id": "...", "error": "..." }`                                                                                   | Execution error                                  |
 | `cell_iteration_progress` | `{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "duration_ms": 128 }` | Per-iteration update from a `@loop` cell         |
@@ -170,7 +171,7 @@ Disconnects happen — proxy timeouts, network drops, server restarts, tab sleep
 3. **Client sends `notebook_sync`** as its first message after reconnecting. The server responds with `notebook_state` containing the full current state (cells, DAG, cell statuses, latest display outputs).
 4. **Client replaces local state** with the synced payload and resumes listening.
 
-There is **no replay** of missed messages — events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_iteration_progress` for a `@loop` cell, `cascade_progress`) are not.
+There is **no replay** of missed messages — events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_output_delta` for a streaming prompt cell, `cell_iteration_progress` for a `@loop` cell, `cascade_progress`) are not.
 
 ### Cancel-on-disconnect grace window
 

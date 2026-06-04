@@ -1676,3 +1676,104 @@ def test_variant_add_broadcasts_new_cell(client):
 # ``thread.join()`` on the portal thread blocks indefinitely while waiting
 # on lingering asyncio tasks from session-manager teardown. Tracked as a
 # follow-up to land WS-specific coverage via fake websocket objects.
+
+
+# ---------------------------------------------------------------------------
+# Prompt-cell streaming broadcast wiring (issue #110)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_make_executor_with_progress_wires_prompt_delta_broadcast(
+    notebook_session, monkeypatch
+):
+    """``_make_executor_with_progress`` must wire ``on_prompt_delta`` to a
+    ``cell_output_delta`` broadcast, mirroring the loop-progress wiring.
+    Tested through the callback directly (fake broadcast, no WS upgrade —
+    see the TestClient WS portal hang note in the test-suite memory)."""
+    from strata.notebook import ws as ws_module
+    from strata.notebook.ws import _make_executor_with_progress
+
+    _, session = notebook_session
+    broadcasts: list[tuple[str, dict]] = []
+
+    async def fake_broadcast(notebook_id, message):
+        broadcasts.append((notebook_id, message))
+
+    monkeypatch.setattr(ws_module, "_broadcast_message", fake_broadcast)
+
+    executor = _make_executor_with_progress(session, "nb-stream-test")
+    assert executor.on_prompt_delta is not None
+    assert executor.on_iteration_complete is not None
+
+    payload = {"cell_id": "p1", "attempt": 1, "kind": "delta", "text": "chunk"}
+    await executor.on_prompt_delta(payload)
+
+    assert len(broadcasts) == 1
+    notebook_id, message = broadcasts[0]
+    assert notebook_id == "nb-stream-test"
+    assert message["type"] == "cell_output_delta"
+    assert message["payload"] == payload
+    assert isinstance(message["seq"], int)
+
+
+@pytest.mark.asyncio
+async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, monkeypatch):
+    """Streaming frames draw from the same per-notebook counter as the
+    execution envelope; the canonical ``cell_output`` must carry a seq
+    LATER than every delta it supersedes, or seq-ordering clients treat
+    the final result as stale (PR #111 review finding)."""
+    from strata.notebook import ws as ws_module
+    from strata.notebook.executor import CellExecutionResult
+    from strata.notebook.ws import _ensure_execution_state, _execute_cell_directly
+
+    _, session = notebook_session
+    broadcasts: list[dict] = []
+
+    async def fake_broadcast(notebook_id, message):
+        broadcasts.append(message)
+
+    monkeypatch.setattr(ws_module, "_broadcast_message", fake_broadcast)
+
+    class _StreamingStubExecutor:
+        """Stands in for CellExecutor inside _make_executor_with_progress:
+        emits two prompt deltas mid-"execution", then returns success."""
+
+        def __init__(self, session, warm_pool=None):
+            self.on_iteration_complete = None
+            self.on_prompt_delta = None
+
+        async def execute_cell(self, cell_id, source):
+            assert self.on_prompt_delta is not None
+            for chunk in ("hel", "lo"):
+                await self.on_prompt_delta(
+                    {"cell_id": cell_id, "attempt": 1, "kind": "delta", "text": chunk}
+                )
+            return CellExecutionResult(cell_id=cell_id, success=True)
+
+    monkeypatch.setattr(ws_module, "CellExecutor", _StreamingStubExecutor)
+
+    # Use the registry-backed state — that's what the WS handler passes in
+    # production, and it's the same counter ``next_notebook_sequence``
+    # draws delta seqs from.
+    execution_state = _ensure_execution_state("nb-seq-test")
+    try:
+        await _execute_cell_directly(
+            cast(WebSocket, None),
+            session,
+            "root",
+            execution_state,
+            "nb-seq-test",
+        )
+    finally:
+        ws_module._notebook_execution_state.pop("nb-seq-test", None)
+
+    running = next(
+        m for m in broadcasts if m["type"] == "cell_status" and m["payload"]["status"] == "running"
+    )
+    deltas = [m for m in broadcasts if m["type"] == "cell_output_delta"]
+    output = next(m for m in broadcasts if m["type"] == "cell_output")
+
+    assert len(deltas) == 2
+    assert all(d["seq"] > running["seq"] for d in deltas)
+    assert output["seq"] > max(d["seq"] for d in deltas)
