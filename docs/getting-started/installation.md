@@ -89,6 +89,8 @@ and CLI binary are both named `strata`.
 | --- | --- |
 | `uv run strata-notebook` | Start the HTTP server (notebook UI + REST API). Same as `uv run python -m strata`. |
 | `uv run strata run <notebook-dir>` | Headless notebook execution for CI / scheduled runs. See [Headless Runner](../notebook/cli.md). |
+| `uv run strata validate <notebook-dir>` | Static checks (schema, annotations, DAG) without executing. See [Headless Runner](../notebook/cli.md#strata-validate). |
+| `uv run strata new <name>` | Scaffold a notebook directory. See [Headless Runner](../notebook/cli.md#strata-new). |
 | `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML. See [Export](../notebook/export.md). |
 | `uv run strata import <ipynb-file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory. See [Import from Jupyter](../notebook/import.md). |
 | `uv run strata-worker --port 9000` | Start a remote worker for `# @worker` cells. See [Distributed Workers](../notebook/workers.md). |

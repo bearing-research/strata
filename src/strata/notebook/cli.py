@@ -419,6 +419,209 @@ def run_main(argv: list[str] | None = None) -> int:
     return asyncio.run(_run_async(args))
 
 
+def add_validate_arguments(parser: argparse.ArgumentParser) -> None:
+    """Attach ``validate`` subcommand arguments to an existing parser."""
+    parser.add_argument(
+        "path",
+        help="Path to the notebook directory (containing notebook.toml)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format (default: human)",
+    )
+
+
+def validate_main(args: argparse.Namespace) -> int:
+    """Entry point for ``strata validate``.
+
+    Static checks only — nothing executes, no environment is synced:
+
+    * ``notebook.toml`` parses and the cell files load
+    * the DAG builds without cycles
+    * per-cell annotation diagnostics (the same validation the server
+      runs on open / reload)
+
+    Exit codes mirror ``strata run``: 0 valid (warnings allowed),
+    1 invalid (parse failure, DAG cycle, or any error-severity
+    diagnostic), 2 invocation error (bad path). Built for the
+    agent feedback loop (issue #114): write files → validate → fix →
+    run.
+    """
+    notebook_dir = Path(args.path).expanduser().resolve()
+
+    if not notebook_dir.is_dir():
+        print(f"error: {notebook_dir} is not a directory", file=sys.stderr)
+        return 2
+    if not (notebook_dir / "notebook.toml").is_file():
+        print(
+            f"error: {notebook_dir} is not a Strata notebook (no notebook.toml)",
+            file=sys.stderr,
+        )
+        return 2
+
+    from strata.notebook.annotation_validation import validate_cell_annotations
+    from strata.notebook.models import DiagnosticSeverity
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+
+    notebook_errors: list[dict[str, str]] = []
+    cells_payload: list[dict[str, Any]] = []
+    error_count = 0
+    warning_count = 0
+
+    session = None
+    try:
+        state = parse_notebook(notebook_dir)
+        session = NotebookSession(state, notebook_dir)
+    except Exception as exc:
+        notebook_errors.append(
+            {
+                "code": "parse_failed",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+        )
+
+    if session is not None and session.dag is None:
+        notebook_errors.append(
+            {
+                "code": "dag_cycle",
+                "message": (
+                    "notebook DAG has a cycle — two or more cells consume "
+                    "each other's variables; break the cycle by renaming or "
+                    "removing one of the circular references"
+                ),
+            }
+        )
+
+    if session is not None:
+        for cell in session.notebook_state.cells:
+            diagnostics = validate_cell_annotations(cell, session.notebook_state)
+            for diag in diagnostics:
+                if diag.severity == DiagnosticSeverity.ERROR:
+                    error_count += 1
+                elif diag.severity == DiagnosticSeverity.WARN:
+                    warning_count += 1
+            cells_payload.append(
+                {
+                    "id": cell.id,
+                    "language": str(cell.language),
+                    "defines": list(cell.defines),
+                    "references": list(cell.references),
+                    "diagnostics": [d.model_dump() for d in diagnostics],
+                }
+            )
+
+    valid = not notebook_errors and error_count == 0
+
+    if args.format == "json":
+        payload = {
+            "notebook": str(notebook_dir),
+            "valid": valid,
+            "errors": notebook_errors,
+            "cells": cells_payload,
+            "summary": {
+                "cells": len(cells_payload),
+                "errors": len(notebook_errors) + error_count,
+                "warnings": warning_count,
+            },
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"validating: {notebook_dir}")
+        for err in notebook_errors:
+            print(f"  {_red('✗')} {err['code']}: {err['message']}")
+        for cell_entry in cells_payload:
+            diags = cell_entry["diagnostics"]
+            if not diags:
+                continue
+            print(f"  cell {cell_entry['id'][:8]} [{cell_entry['language']}]")
+            for diag in diags:
+                marker = _red("error") if diag["severity"] == "error" else _yellow(diag["severity"])
+                line_part = f" (line {diag['line']})" if diag.get("line") else ""
+                print(f"    {marker} {diag['code']}: {diag['message']}{line_part}")
+        print()
+        total_errors = len(notebook_errors) + error_count
+        if valid:
+            suffix = f", {warning_count} warning(s)" if warning_count else ""
+            print(f"{_green('✓')} valid — {len(cells_payload)} cell(s){suffix}")
+        else:
+            print(f"{_red('✗')} invalid — {total_errors} error(s), {warning_count} warning(s)")
+
+    return 0 if valid else 1
+
+
+def add_new_arguments(parser: argparse.ArgumentParser) -> None:
+    """Attach ``new`` subcommand arguments to an existing parser."""
+    parser.add_argument(
+        "name",
+        help="Notebook name; the directory is the slugified name under --parent",
+    )
+    parser.add_argument(
+        "--parent",
+        default=".",
+        help="Parent directory for the notebook (default: current directory)",
+    )
+    parser.add_argument(
+        "--python",
+        dest="python_version",
+        default=None,
+        help="Python major.minor for the notebook venv (default: current interpreter)",
+    )
+    parser.add_argument(
+        "--no-env",
+        action="store_true",
+        help="Skip creating the uv venv now; `strata run` will sync it later",
+    )
+    parser.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format (default: human)",
+    )
+
+
+def new_main(args: argparse.Namespace) -> int:
+    """Entry point for ``strata new``.
+
+    Scaffolds a notebook directory (notebook.toml + pyproject.toml +
+    cells/) so external tools and coding agents don't hand-roll the
+    TOML (issue #114). Idempotent on an existing notebook directory:
+    the notebook ID and any existing cells are preserved.
+    """
+    from strata.notebook.writer import create_notebook
+
+    try:
+        notebook_dir = create_notebook(
+            Path(args.parent).expanduser().resolve(),
+            args.name,
+            args.python_version,
+            initialize_environment=not args.no_env,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        print(
+            json.dumps(
+                {
+                    "notebook_dir": str(notebook_dir),
+                    "name": args.name,
+                    "environment_initialized": not args.no_env,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(f"created: {notebook_dir}")
+        print(_dim("  add cells under cells/*.py and list them in notebook.toml"))
+        print(_dim(f"  validate: strata validate {notebook_dir}"))
+        print(_dim(f"  run:      strata run {notebook_dir}"))
+    return 0
+
+
 def add_export_arguments(parser: argparse.ArgumentParser) -> None:
     """Attach ``export`` subcommand arguments to an existing parser."""
     parser.add_argument(

@@ -1,9 +1,11 @@
 """Top-level ``strata`` command dispatcher.
 
 Subcommands:
-    run     Execute a notebook headlessly (see :mod:`strata.notebook.cli`)
-    export  Render a notebook to markdown or HTML for sharing
-    import  Convert a Jupyter .ipynb file into a Strata notebook directory
+    run       Execute a notebook headlessly (see :mod:`strata.notebook.cli`)
+    validate  Static checks (schema, annotations, DAG) without executing
+    new       Scaffold a notebook directory
+    export    Render a notebook to markdown or HTML for sharing
+    import    Convert a Jupyter .ipynb file into a Strata notebook directory
 
 The existing ``strata-notebook`` script and ``python -m strata`` entry
 points still start the server; they predate this CLI and stay as-is
@@ -18,9 +20,13 @@ import sys
 from strata.notebook.cli import (
     add_export_arguments,
     add_import_arguments,
+    add_new_arguments,
     add_run_arguments,
+    add_validate_arguments,
     export_main,
     import_main,
+    new_main,
+    validate_main,
 )
 from strata.notebook.cli import run_main as _run_main_direct
 
@@ -39,6 +45,33 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     add_run_arguments(run_parser)
     run_parser.set_defaults(func=_dispatch_run)
+
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="Validate a notebook directory without executing it",
+        description=(
+            "Static checks for a Strata notebook: notebook.toml parses, the "
+            "DAG builds without cycles, and per-cell annotations pass the "
+            "same validation the server runs on open. Nothing executes and "
+            "no environment is synced. Exit 0 valid (warnings allowed), "
+            "1 invalid, 2 invocation error."
+        ),
+    )
+    add_validate_arguments(validate_parser)
+    validate_parser.set_defaults(func=_dispatch_validate)
+
+    new_parser = subparsers.add_parser(
+        "new",
+        help="Scaffold a new notebook directory",
+        description=(
+            "Create a notebook directory (notebook.toml + pyproject.toml + "
+            "cells/) ready for `strata validate` and `strata run`. Idempotent "
+            "on an existing notebook directory: the notebook ID and existing "
+            "cells are preserved."
+        ),
+    )
+    add_new_arguments(new_parser)
+    new_parser.set_defaults(func=_dispatch_new)
 
     export_parser = subparsers.add_parser(
         "export",
@@ -77,6 +110,14 @@ def _dispatch_run(args: argparse.Namespace) -> int:
     from strata.notebook.cli import _run_async
 
     return asyncio.run(_run_async(args))
+
+
+def _dispatch_validate(args: argparse.Namespace) -> int:
+    return validate_main(args)
+
+
+def _dispatch_new(args: argparse.Namespace) -> int:
+    return new_main(args)
 
 
 def _dispatch_export(args: argparse.Namespace) -> int:

@@ -36,10 +36,12 @@ invocation opens its own `NotebookSession`, runs the cells, and exits.
 | `--format`    | `human` (default) or `json` — both write to stdout               |
 | `--quiet`     | Suppress per-cell status lines (human format only)               |
 
-`--format json` writes one JSON object per cell as it finishes, followed by a
-final summary record, all to **stdout**. Errors and pre-flight diagnostics go
-to stderr regardless of format. Pipe stdout to `jq` for filtering, or capture
-to a file (`strata run ... --format json > run.jsonl`) for later parsing.
+`--format json` writes a single JSON object to **stdout** when the run
+finishes: `{"notebook", "success", "duration_ms", "cells": [...]}` with one
+entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
+`cache_hit`, plus `error` / `reason` where applicable). Errors and pre-flight
+diagnostics go to stderr regardless of format. Pipe stdout to `jq`:
+`strata run ... --format json | jq '.cells[] | select(.status == "error")'`.
 
 ### Exit Codes
 
@@ -73,8 +75,8 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-`--format json` emits one JSON object per cell plus a summary record at the
-end, so downstream steps can grep/parse per-cell status without screen-scraping.
+`--format json` emits a single structured result object, so downstream steps
+can parse per-cell status without screen-scraping.
 
 ## What Gets Run
 
@@ -104,3 +106,45 @@ shell that invokes the command, they are never stored in the notebook.
 
 For notebooks that require env vars set only via the Runtime panel (never
 committed), export them before invoking `strata run`.
+
+## `strata validate`
+
+Static checks without executing anything — no environment sync, no
+subprocesses, no LLM calls:
+
+```bash
+strata validate <notebook_dir> [--format human|json]
+```
+
+- `notebook.toml` parses and the cell files load
+- the DAG builds without cycles
+- per-cell annotation diagnostics — the **same validation the server runs
+  on open / reload** (`worker_unknown`, `loop_missing_carry`,
+  `sql_missing_connection`, malformed `@output_schema`, …)
+
+Exit codes mirror `strata run`: `0` valid (warnings allowed), `1` invalid
+(parse failure, DAG cycle, or any error-severity diagnostic), `2`
+invocation error. `--format json` emits
+`{"notebook", "valid", "errors", "cells", "summary"}` where each cell
+carries its `defines` / `references` (so you can check the DAG wiring you
+intended) and its `diagnostics` with `severity` / `code` / `message` /
+`line`.
+
+The intended loop for scripts and coding agents: **write files → validate →
+fix → run**. Validation is cheap enough to call after every edit; `strata
+run` is the expensive step. See
+[Authoring Notebooks Programmatically](agent-authoring.md).
+
+## `strata new`
+
+Scaffold a notebook directory without the server:
+
+```bash
+strata new "My Analysis" [--parent DIR] [--python 3.12] [--no-env] [--format human|json]
+```
+
+Creates `<parent>/my_analysis/` with `notebook.toml`, `pyproject.toml`
+(pre-seeded with the notebook runtime packages), and an empty `cells/`
+directory, then syncs the venv (skip with `--no-env`; `strata run` syncs it
+later). Idempotent on an existing notebook directory: the `notebook_id` and
+any existing cells are preserved, so re-running it never orphans artifacts.
