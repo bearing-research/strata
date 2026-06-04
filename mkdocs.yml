@@ -74,6 +74,7 @@ nav:
     - Environment: notebook/environment.md
     - Secret Manager: notebook/secrets.md
     - Headless Runner: notebook/cli.md
+    - Authoring Programmatically: notebook/agent-authoring.md
     - Import from Jupyter: notebook/import.md
     - Export: notebook/export.md
     - Keyboard Shortcuts: notebook/keyboard.md

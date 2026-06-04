@@ -310,3 +310,213 @@ class TestSyncEnvironment:
         ok, err = asyncio.run(_sync_environment(session))
         assert ok is False
         assert "uv lock conflict" in (err or "")
+
+
+# ---------------------------------------------------------------------------
+# strata validate (issue #114 — agent feedback loop)
+# ---------------------------------------------------------------------------
+
+
+def _validate(path, fmt="human"):
+    import argparse
+
+    from strata.notebook.cli import validate_main
+
+    return validate_main(argparse.Namespace(path=str(path), format=fmt))
+
+
+class TestValidate:
+    def test_valid_notebook_exits_zero(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(
+            tmp_path, cells=[("c1", "x = 1", None), ("c2", "y = x + 1", "c1")]
+        )
+        assert _validate(notebook_dir) == 0
+        assert "valid" in capsys.readouterr().out
+
+    def test_json_payload_shape(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(
+            tmp_path, cells=[("c1", "x = 1", None), ("c2", "y = x + 1", "c1")]
+        )
+        assert _validate(notebook_dir, fmt="json") == 0
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["valid"] is True
+        assert payload["errors"] == []
+        assert payload["summary"] == {"cells": 2, "errors": 0, "warnings": 0}
+        by_id = {c["id"]: c for c in payload["cells"]}
+        assert by_id["c1"]["defines"] == ["x"]
+        assert "x" in by_id["c2"]["references"]
+        assert by_id["c2"]["diagnostics"] == []
+
+    def test_malformed_toml_reports_parse_failed(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(tmp_path, cells=[("c1", "x = 1", None)])
+        toml_path = notebook_dir / "notebook.toml"
+        toml_path.write_text(toml_path.read_text() + "\nname = 'duplicate'\n")
+
+        assert _validate(notebook_dir, fmt="json") == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["valid"] is False
+        assert payload["errors"][0]["code"] == "parse_failed"
+        # The message must carry the underlying TOML diagnostic so an
+        # agent can act on it without opening the UI.
+        assert "line" in payload["errors"][0]["message"]
+
+    def test_error_diagnostic_fails_validation(self, tmp_path, capsys):
+        """An error-severity annotation (loop without carry) → exit 1."""
+        notebook_dir = _build_notebook(
+            tmp_path, cells=[("c1", "# @loop max_iter=5\nstate = 1", None)]
+        )
+        assert _validate(notebook_dir, fmt="json") == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["valid"] is False
+        codes = [d["code"] for c in payload["cells"] for d in c["diagnostics"]]
+        assert "loop_missing_carry" in codes
+
+    def test_warning_only_still_valid(self, tmp_path, capsys):
+        """Warnings (unknown worker) surface but don't fail validation."""
+        notebook_dir = _build_notebook(
+            tmp_path, cells=[("c1", "# @worker nonexistent-worker\nx = 1", None)]
+        )
+        assert _validate(notebook_dir, fmt="json") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["valid"] is True
+        assert payload["summary"]["warnings"] >= 1
+        codes = [d["code"] for c in payload["cells"] for d in c["diagnostics"]]
+        assert "worker_unknown" in codes
+
+    def test_non_notebook_dir_is_usage_error(self, tmp_path):
+        assert _validate(tmp_path) == 2
+
+    def test_missing_dir_is_usage_error(self, tmp_path):
+        assert _validate(tmp_path / "nope") == 2
+
+
+# ---------------------------------------------------------------------------
+# strata new
+# ---------------------------------------------------------------------------
+
+
+def _new(name, parent, fmt="human", no_env=True):
+    import argparse
+
+    from strata.notebook.cli import new_main
+
+    return new_main(
+        argparse.Namespace(
+            name=name,
+            parent=str(parent),
+            python_version=None,
+            no_env=no_env,
+            format=fmt,
+        )
+    )
+
+
+class TestNew:
+    def test_scaffolds_notebook_dir(self, tmp_path, capsys):
+        assert _new("My Analysis", tmp_path) == 0
+        out = capsys.readouterr().out
+        notebook_dir = tmp_path / "my_analysis"
+        assert str(notebook_dir) in out
+        assert (notebook_dir / "notebook.toml").is_file()
+        assert (notebook_dir / "pyproject.toml").is_file()
+        assert (notebook_dir / "cells").is_dir()
+        # The scaffold must immediately pass its own validator.
+        assert _validate(notebook_dir) == 0
+
+    def test_json_payload(self, tmp_path, capsys):
+        assert _new("Agent NB", tmp_path, fmt="json") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["notebook_dir"].endswith("agent_nb")
+        assert payload["environment_initialized"] is False
+
+    def test_idempotent_preserves_notebook_id(self, tmp_path, capsys):
+        import tomllib
+
+        assert _new("Stable", tmp_path) == 0
+        toml_path = tmp_path / "stable" / "notebook.toml"
+        with open(toml_path, "rb") as f:
+            first_id = tomllib.load(f)["notebook_id"]
+
+        assert _new("Stable", tmp_path) == 0
+        with open(toml_path, "rb") as f:
+            second_id = tomllib.load(f)["notebook_id"]
+        assert first_id == second_id
+
+    def test_invalid_name_is_usage_error(self, tmp_path, capsys):
+        assert _new("../escape", tmp_path) == 2
+
+
+# ---------------------------------------------------------------------------
+# Round-trip contract (issue #114): a notebook hand-written from the docs
+# alone — no writer helpers, no server — parses, validates, and runs.
+# ---------------------------------------------------------------------------
+
+
+class TestHandWrittenNotebookContract:
+    """Pins the external-authoring contract: notebook.toml + cells/*.py
+    written byte-by-byte the way docs/reference/notebook-toml.md and
+    AGENTS.md describe must be a fully working notebook. If a writer
+    or parser change breaks this, agents building notebooks from the
+    docs break with it."""
+
+    @staticmethod
+    def _hand_write(tmp_path: Path) -> Path:
+        notebook_dir = tmp_path / "handwritten"
+        (notebook_dir / "cells").mkdir(parents=True)
+        (notebook_dir / "notebook.toml").write_text(
+            "\n".join(
+                [
+                    'notebook_id = "agent-handwritten-001"',
+                    'name = "Hand-written by an agent"',
+                    "cells = [",
+                    '  { id = "load", file = "load.py", language = "python", order = 0 },',
+                    '  { id = "doc", file = "doc.md", language = "markdown", order = 1 },',
+                    '  { id = "stats", file = "stats.py", language = "python", order = 2 },',
+                    "]",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (notebook_dir / "cells" / "load.py").write_text(
+            "# @name load\nnumbers = [1, 2, 3, 4]\n", encoding="utf-8"
+        )
+        (notebook_dir / "cells" / "doc.md").write_text(
+            "# Analysis\n\nplain prose cell\n", encoding="utf-8"
+        )
+        (notebook_dir / "cells" / "stats.py").write_text(
+            "total = sum(numbers)\nmean = total / len(numbers)\n", encoding="utf-8"
+        )
+        return notebook_dir
+
+    def test_hand_written_notebook_validates(self, tmp_path, capsys):
+        notebook_dir = self._hand_write(tmp_path)
+        assert _validate(notebook_dir, fmt="json") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["valid"] is True
+        by_id = {c["id"]: c for c in payload["cells"]}
+        # The DAG must connect the hand-written cells.
+        assert "numbers" in by_id["stats"]["references"]
+
+    def test_hand_written_notebook_runs(self, tmp_path, capsys):
+        """`strata run` executes the hand-written notebook end to end
+        (mocked executor — the real-venv path is covered by the examples
+        CI job)."""
+        notebook_dir = self._hand_write(tmp_path)
+        _mk_fake_venv(notebook_dir)
+
+        async def fake_execute(self, cell_id, source, **kwargs):
+            return _make_result(cell_id)
+
+        with patch(
+            "strata.notebook.executor.CellExecutor.execute_cell",
+            new=fake_execute,
+        ):
+            code = run_main([str(notebook_dir), "--no-sync", "--format", "json"])
+
+        assert code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["success"] is True
+        statuses = {c["id"]: c["status"] for c in payload["cells"]}
+        assert statuses == {"load": "ok", "doc": "ok", "stats": "ok"}
