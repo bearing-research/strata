@@ -5,6 +5,44 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
+## Unreleased
+
+### Added
+
+- **Prompt cells stream live** (#111): LLM output renders token-by-token
+  on the cell card as the model generates, instead of appearing all at
+  once on completion. Schema-validation retries surface as a badge on
+  the stream. New `cell_output_delta` WebSocket frame (ephemeral — not
+  persisted or replayed; external WS clients that ignore unknown frame
+  types are unaffected).
+- **Structured streams render as partial JSON** (#113): prompt cells
+  with an `@output_schema` show fields popping in as the model finishes
+  them — a lenient partial-JSON parser pretty-prints the valid prefix,
+  with a character ticker and raw-tail fallback while a field is still
+  in flight.
+- **`strata validate`** (#115): static notebook checks without executing
+  anything — TOML parse (with line numbers), DAG cycle detection, and
+  the same per-cell annotation diagnostics the server runs on open.
+  `--format json` carries per-cell defines/references. Exit codes mirror
+  `strata run`.
+- **`strata new`** (#115): scaffold a notebook directory from the CLI
+  without the server. Idempotent on existing notebooks — re-running
+  never orphans artifacts.
+- **Programmatic authoring guide** (#115): `docs/notebook/agent-authoring.md`
+  is the contract for scripts and coding agents writing notebooks as
+  plain files — the worked example is pinned by the test suite.
+- **Per-cell `stdout` / `stderr` in `strata run --format json`** (#116):
+  read computed values back from the run payload (truncated at 10k
+  chars) instead of screen-scraping.
+
+### Fixed
+
+- **Cross-process lock around renv mutations** (#109): concurrent
+  `strata run` invocations and the server no longer race on the same
+  notebook's R environment — renv init/install/restore now take a file
+  lock on `.strata/renv-process.lock`, and a held lock surfaces as a
+  structured failure instead of corrupted state.
+
 ## 0.2.0 — 2026-06-03
 
 Second release. Headline: **R cells** alongside Python in the same
