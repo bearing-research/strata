@@ -73,6 +73,19 @@ def _format_ms(duration_ms: float | int) -> str:
     return f"{d / 1000:.1f}s"
 
 
+# Per-cell stdout/stderr cap in the JSON payload. Generous enough for
+# verification output, bounded so a print-heavy cell can't balloon the
+# result document.
+_MAX_JSON_CONSOLE_CHARS = 10_000
+
+
+def _truncate_console(text: str) -> str:
+    if len(text) <= _MAX_JSON_CONSOLE_CHARS:
+        return text
+    omitted = len(text) - _MAX_JSON_CONSOLE_CHARS
+    return text[:_MAX_JSON_CONSOLE_CHARS] + f"… [+{omitted} chars truncated]"
+
+
 def _print_cell_line(entry: dict[str, Any]) -> None:
     """Print a single cell result line in the human format."""
     cell_id_short = entry["id"][:8]
@@ -350,6 +363,16 @@ async def _run_async(args: argparse.Namespace) -> int:
             "duration_ms": int(result.duration_ms or 0),
             "cache_hit": bool(result.cache_hit),
         }
+        # Carry console output so external authors (scripts, coding
+        # agents) can verify computed values from the JSON payload
+        # instead of reaching into .strata/ — which is documented as
+        # hands-off (issue #114 litmus finding). Cache hits replay the
+        # stored result without re-emitting console output, so these
+        # keys can be absent on warm runs.
+        if result.stdout:
+            entry["stdout"] = _truncate_console(result.stdout)
+        if result.stderr:
+            entry["stderr"] = _truncate_console(result.stderr)
         if not result.success:
             entry["error"] = result.error or "cell failed"
             failed_cells.add(cell_id)

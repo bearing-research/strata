@@ -39,8 +39,11 @@ invocation opens its own `NotebookSession`, runs the cells, and exits.
 `--format json` writes a single JSON object to **stdout** when the run
 finishes: `{"notebook", "success", "duration_ms", "cells": [...]}` with one
 entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
-`cache_hit`, plus `error` / `reason` where applicable). Errors and pre-flight
-diagnostics go to stderr regardless of format. Pipe stdout to `jq`:
+`cache_hit`, plus `stdout` / `stderr` — truncated at 10k chars — and
+`error` / `reason` where applicable). Cache hits replay the stored
+artifact without re-emitting console output, so `stdout` can be absent on
+warm runs (`--force` re-executes). Errors and pre-flight diagnostics go to
+stderr regardless of format. Pipe stdout to `jq`:
 `strata run ... --format json | jq '.cells[] | select(.status == "error")'`.
 
 ### Exit Codes

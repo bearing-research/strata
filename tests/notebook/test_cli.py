@@ -520,3 +520,58 @@ class TestHandWrittenNotebookContract:
         assert payload["success"] is True
         statuses = {c["id"]: c["status"] for c in payload["cells"]}
         assert statuses == {"load": "ok", "doc": "ok", "stats": "ok"}
+
+
+class TestRunJsonConsoleOutput:
+    """`run --format json` carries per-cell stdout/stderr so external
+    authors verify computed values from the payload instead of reaching
+    into .strata/ (#114 litmus finding)."""
+
+    def test_stdout_lands_in_json_payload(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(tmp_path, cells=[("c1", "print('total=42')", None)])
+        _mk_fake_venv(notebook_dir)
+
+        async def fake_execute(self, cell_id, source, **kwargs):
+            result = _make_result(cell_id)
+            result.stdout = "total=42\n"
+            return result
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute):
+            code = run_main([str(notebook_dir), "--no-sync", "--format", "json"])
+
+        assert code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["cells"][0]["stdout"] == "total=42\n"
+
+    def test_long_stdout_is_truncated(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(tmp_path, cells=[("c1", "print('x')", None)])
+        _mk_fake_venv(notebook_dir)
+
+        async def fake_execute(self, cell_id, source, **kwargs):
+            result = _make_result(cell_id)
+            result.stdout = "x" * 20_000
+            return result
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute):
+            code = run_main([str(notebook_dir), "--no-sync", "--format", "json"])
+
+        assert code == 0
+        payload = json.loads(capsys.readouterr().out)
+        stdout = payload["cells"][0]["stdout"]
+        assert len(stdout) < 20_000
+        assert "truncated" in stdout
+
+    def test_empty_console_keys_absent(self, tmp_path, capsys):
+        notebook_dir = _build_notebook(tmp_path, cells=[("c1", "x = 1", None)])
+        _mk_fake_venv(notebook_dir)
+
+        async def fake_execute(self, cell_id, source, **kwargs):
+            return _make_result(cell_id)
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute):
+            code = run_main([str(notebook_dir), "--no-sync", "--format", "json"])
+
+        assert code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert "stdout" not in payload["cells"][0]
+        assert "stderr" not in payload["cells"][0]

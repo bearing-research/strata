@@ -54,6 +54,14 @@ cells = [
 ]
 ```
 
+**What `strata new` actually writes is a superset of this.** The scaffold
+emits a UUID `notebook_id`, `created_at` / `updated_at` timestamps, and
+empty `workers = []` / `mounts = []` arrays. **Edit the generated file in
+place** — replace `cells = []` with your cell list and leave the other
+fields alone. Don't overwrite it with the minimal template above; the
+minimum is what *you* must provide when writing from scratch, not what
+the scaffold looks like.
+
 The full schema (env, workers, mounts, connections, AI config) is
 [notebook.toml Schema](../reference/notebook-toml.md). Rules that matter
 when writing it by hand:
@@ -133,11 +141,37 @@ and skips downstream cells when an upstream fails (`"reason": "upstream
 failed"`) — fix the first error and re-run; everything already correct is
 a cache hit.
 
+## Verifying computed values
+
+Per-cell `stdout` / `stderr` are included in the `run --format json`
+payload (truncated at 10k chars), so the way to check a result is to
+**print it** and read it back from the JSON:
+
+```python
+# cells/stats.py
+total = sum(s["revenue"] for s in sales)
+print(f"total={total}")
+```
+
+```bash
+strata run my_analysis --format json | jq -r '.cells[] | select(.id == "stats").stdout'
+# total=93900
+```
+
+One caveat: a **cache hit replays the stored artifact without re-running
+the cell**, so `stdout` can be absent on warm runs. Pass `--force` when
+you need fresh console output. Don't read `.strata/` directly — it's
+machine-managed runtime state with no stability guarantees.
+
 ## Don'ts
 
 - **Don't create or edit `.strata/`** — runtime state, machine-managed.
 - **Don't hand-edit `uv.lock`** — declare dependencies in
-  `pyproject.toml` and let `strata run` / `uv sync` resolve.
+  `pyproject.toml` and let `strata run` / `uv sync` resolve. The
+  scaffolded `pyproject.toml` is **not empty**: it pins the notebook's
+  Python version and pre-seeds the runtime packages the cell harness
+  needs (`pyarrow`, `orjson`, `cloudpickle`) — append your dependencies
+  to the existing list.
 - **Don't reuse cell IDs** or change `notebook_id` after artifacts exist.
 - **Don't encode per-cell config in `notebook.toml`** when an annotation
   exists — annotations are the single per-cell configuration surface.
