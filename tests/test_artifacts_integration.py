@@ -1310,3 +1310,150 @@ class TestUnifiedMaterializeAPI:
             # Check for cache hit indication
             hit_key = "cache_hit" if "cache_hit" in result2 else "would_hit"
             assert result2[hit_key] is True
+
+
+# =============================================================================
+# Regression tests for #121: multi-row-group scan artifact truncation
+# =============================================================================
+
+
+@pytest.fixture
+def multi_file_warehouse(tmp_path):
+    """Warehouse whose table spans multiple Parquet files (multi-task scans).
+
+    Three separate appends produce three data files, so a scan plan has
+    three tasks — the shape that exposed #121 (per-task IPC streams naively
+    concatenated; standard readers stopped at the first EOS marker).
+    """
+    import sys
+
+    if sys.platform == "win32":
+        pytest.skip("pyiceberg + pyarrow LocalFileSystem path handling broken on Windows")
+
+    from pyiceberg.catalog.sql import SqlCatalog
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import DoubleType, LongType, NestedField
+
+    warehouse_path = tmp_path / "warehouse"
+    warehouse_path.mkdir()
+
+    catalog = SqlCatalog(
+        "strata",
+        **{
+            "uri": f"sqlite:///{warehouse_path / 'catalog.db'}",
+            "warehouse": str(warehouse_path),
+        },
+    )
+    catalog.create_namespace("test_db")
+
+    schema = Schema(
+        NestedField(1, "id", LongType(), required=False),
+        NestedField(2, "value", DoubleType(), required=False),
+    )
+    table = catalog.create_table("test_db.chunked", schema)
+
+    rows_per_append = 400
+    appends = 3
+    for a in range(appends):
+        start = a * rows_per_append
+        table.append(
+            pa.table(
+                {
+                    "id": pa.array(range(start, start + rows_per_append), type=pa.int64()),
+                    "value": pa.array(
+                        [float(i) for i in range(start, start + rows_per_append)],
+                        type=pa.float64(),
+                    ),
+                }
+            )
+        )
+
+    return {
+        "warehouse_path": warehouse_path,
+        "table_uri": f"file://{warehouse_path}#test_db.chunked",
+        "total_rows": rows_per_append * appends,
+    }
+
+
+@pytest.fixture
+def multi_file_server(tmp_path, multi_file_warehouse):
+    """Personal-mode server over the multi-file warehouse."""
+    cache_dir = tmp_path / "cache"
+    artifact_dir = tmp_path / "artifacts"
+    cache_dir.mkdir()
+    artifact_dir.mkdir()
+
+    with run_server_with_context(cache_dir, artifact_dir, "personal") as ctx:
+        yield {**multi_file_warehouse, "base_url": ctx.base_url}
+
+
+class TestMultiTaskScanIntegrity:
+    """A scan spanning multiple files/row groups must never truncate (#121)."""
+
+    def test_stream_mode_returns_all_rows(self, multi_file_server):
+        """Stream-mode materialize delivers every task's rows on the wire."""
+        with StrataClient(base_url=multi_file_server["base_url"]) as client:
+            artifact = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+            )
+            table = artifact.to_table()
+            assert table.num_rows == multi_file_server["total_rows"]
+            ids = sorted(table.column("id").to_pylist())
+            assert ids == list(range(multi_file_server["total_rows"]))
+
+    def test_persisted_artifact_returns_all_rows(self, multi_file_server):
+        """The persisted blob reads back complete via the data endpoint."""
+        with StrataClient(base_url=multi_file_server["base_url"]) as client:
+            artifact = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+            )
+            # Consume the stream so the artifact finalizes.
+            artifact.to_table()
+
+            refetched = client.fetch(artifact.uri)
+            assert refetched.num_rows == multi_file_server["total_rows"]
+
+    def test_artifact_blob_is_exactly_one_ipc_stream(self, multi_file_server):
+        """Raw data endpoint bytes parse as ONE stream matching row_count."""
+        import io
+
+        base_url = multi_file_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+            )
+            artifact.to_table()
+            info = artifact.info()
+
+        url = f"{base_url}/v1/artifacts/{artifact.artifact_id}/v/{artifact.version}/data"
+        content = httpx.get(url, timeout=30.0).raise_for_status().content
+
+        f = io.BytesIO(content)
+        streams = 0
+        readable_rows = 0
+        while f.tell() < len(content):
+            try:
+                reader = ipc.open_stream(f)
+            except pa.ArrowInvalid:
+                break
+            readable_rows += reader.read_all().num_rows
+            streams += 1
+
+        assert streams == 1
+        assert readable_rows == multi_file_server["total_rows"]
+        assert readable_rows == info["row_count"]
+
+    def test_artifact_mode_build_returns_all_rows(self, multi_file_server):
+        """mode='artifact' background build persists a complete blob."""
+        with StrataClient(base_url=multi_file_server["base_url"]) as client:
+            artifact = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+                mode="artifact",
+                wait=True,
+            )
+            table = client.fetch(artifact.uri)
+            assert table.num_rows == multi_file_server["total_rows"]
