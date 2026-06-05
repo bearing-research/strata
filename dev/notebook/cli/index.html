@@ -1911,8 +1911,11 @@ invocation opens its own <code>NotebookSession</code>, runs the cells, and exits
 <p><code>--format json</code> writes a single JSON object to <strong>stdout</strong> when the run
 finishes: <code>{"notebook", "success", "duration_ms", "cells": [...]}</code> with one
 entry per cell (<code>id</code>, <code>status</code> ∈ <code>ok|error|skipped</code>, <code>duration_ms</code>,
-<code>cache_hit</code>, plus <code>error</code> / <code>reason</code> where applicable). Errors and pre-flight
-diagnostics go to stderr regardless of format. Pipe stdout to <code>jq</code>:
+<code>cache_hit</code>, plus <code>stdout</code> / <code>stderr</code> — truncated at 10k chars — and
+<code>error</code> / <code>reason</code> where applicable). Cache hits replay the stored
+artifact without re-emitting console output, so <code>stdout</code> can be absent on
+warm runs (<code>--force</code> re-executes). Errors and pre-flight diagnostics go to
+stderr regardless of format. Pipe stdout to <code>jq</code>:
 <code>strata run ... --format json | jq '.cells[] | select(.status == "error")'</code>.</p>
 <h3 id="exit-codes">Exit Codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
 <table>
