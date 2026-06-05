@@ -322,6 +322,9 @@ class StrataConfig(BaseSettings):
     ai_max_context_tokens: Annotated[int, Field(gt=0)] = 100_000
     ai_max_output_tokens: Annotated[int, Field(gt=0)] = 4096
     ai_timeout_seconds: Annotated[float, Field(gt=0)] = 60.0
+    # How long an agent destructive-tool confirmation waits for the user
+    # before being treated as a decline.
+    ai_approval_timeout_seconds: Annotated[float, Field(gt=0)] = 120.0
 
     # Artifact blob storage backend configuration
     artifact_blob_backend: Literal["local", "s3", "gcs", "azure"] = "local"

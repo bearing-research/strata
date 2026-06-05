@@ -10,9 +10,10 @@ Design notes (vs. the previous single-shot loop):
 
 * **Conversation memory.** ``CONVERSATION_HISTORY`` keeps the last few
   user/assistant text turns per notebook so a follow-up Agent press has
-  the model's prior turn as context. Tool-call traces are *not*
-  persisted — they bloat context fast and the surviving prose summary
-  carries the meaningful state.
+  the model's prior turn as context, and mirrors them to
+  ``.strata/agent_history.json`` so the context survives a server
+  restart. Tool-call traces are *not* persisted — they bloat context
+  fast and the surviving prose summary carries the meaningful state.
 
 * **Refreshed snapshot.** The system prompt is short and tool-focused.
   On the first iteration we inject a synthetic "tool result" containing
@@ -37,10 +38,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import tempfile
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -239,27 +243,83 @@ class AgentLoopResult:
 
 
 # Per-notebook persistent memory: only user / assistant text turns. Tool
-# traces are not kept across runs (they bloat context fast).
+# traces are not kept across runs (they bloat context fast). The in-process
+# dict is a cache over ``.strata/agent_history.json`` so the LLM panel's
+# context survives a server restart; pass ``notebook_dir`` to read through
+# to / write through to disk.
 CONVERSATION_HISTORY: dict[str, list[dict[str, str]]] = {}
 HISTORY_MAX_TURNS = 12  # 6 user/assistant pairs
 
+_HISTORY_FILENAME = "agent_history.json"
 
-def get_history(notebook_id: str) -> list[dict[str, str]]:
+
+def history_path(notebook_dir: Path) -> Path:
+    return Path(notebook_dir) / ".strata" / _HISTORY_FILENAME
+
+
+def _load_history_from_disk(notebook_dir: Path) -> list[dict[str, str]]:
+    """Return persisted turns, or empty.
+
+    A missing or unparseable file produces an empty history — like
+    ``runtime.json``, this is augmenting state, not authoritative, so a
+    corrupt file must not break the LLM panel.
+    """
+    path = history_path(notebook_dir)
+    if not path.exists():
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (ValueError, OSError):
+        return []
+    return data.get("turns", [])
+
+
+def _save_history_to_disk(notebook_dir: Path, turns: list[dict[str, str]]) -> None:
+    """Atomically persist conversation turns under ``.strata/``."""
+    path = history_path(notebook_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=path.name + ".",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"turns": turns}, f, indent=2)
+    os.replace(tmp_name, path)
+
+
+def _cached_history(notebook_id: str, notebook_dir: Path | None) -> list[dict[str, str]]:
+    """Return the live in-process history list, seeding from disk on miss."""
+    if notebook_id not in CONVERSATION_HISTORY and notebook_dir is not None:
+        CONVERSATION_HISTORY[notebook_id] = _load_history_from_disk(notebook_dir)
+    return CONVERSATION_HISTORY.setdefault(notebook_id, [])
+
+
+def get_history(notebook_id: str, notebook_dir: Path | None = None) -> list[dict[str, str]]:
     """Return a copy of the persistent conversation history for a notebook."""
-    return list(CONVERSATION_HISTORY.get(notebook_id, []))
+    return list(_cached_history(notebook_id, notebook_dir))
 
 
-def append_history(notebook_id: str, turns: list[dict[str, str]]) -> None:
-    """Append turns and trim to the configured window."""
-    history = CONVERSATION_HISTORY.setdefault(notebook_id, [])
+def append_history(
+    notebook_id: str,
+    turns: list[dict[str, str]],
+    notebook_dir: Path | None = None,
+) -> None:
+    """Append turns, trim to the configured window, and persist to disk."""
+    history = _cached_history(notebook_id, notebook_dir)
     history.extend(turns)
     if len(history) > HISTORY_MAX_TURNS:
         del history[: len(history) - HISTORY_MAX_TURNS]
+    if notebook_dir is not None:
+        _save_history_to_disk(notebook_dir, history)
 
 
-def reset_history(notebook_id: str) -> None:
-    """Clear stored conversation history for a notebook."""
+def reset_history(notebook_id: str, notebook_dir: Path | None = None) -> None:
+    """Clear stored conversation history for a notebook, on disk too."""
     CONVERSATION_HISTORY.pop(notebook_id, None)
+    if notebook_dir is not None:
+        history_path(notebook_dir).unlink(missing_ok=True)
 
 
 # Per-notebook approval futures, keyed by request id. The routes layer
@@ -755,7 +815,7 @@ async def run_agent_loop(
     ``notebook_id=None`` to run a one-off loop without memory (used by
     the legacy in-process test path).
     """
-    history = get_history(notebook_id) if notebook_id else []
+    history = get_history(notebook_id, session.path) if notebook_id else []
     snapshot_text = build_notebook_context(session, max_tokens=4000)
     snapshot_call_id = "snapshot_" + uuid.uuid4().hex[:8]
 
@@ -785,7 +845,10 @@ async def run_agent_loop(
 
     result = AgentLoopResult(content="", model=config.model)
     approval_callback = make_approval_callback(
-        notebook_id or "_anon", progress_callback, auto_approve=auto_approve
+        notebook_id or "_anon",
+        progress_callback,
+        auto_approve=auto_approve,
+        timeout_seconds=config.approval_timeout_seconds,
     )
 
     if progress_callback:
@@ -901,6 +964,7 @@ async def run_agent_loop(
                 {"role": "user", "content": user_message},
                 {"role": "assistant", "content": final_assistant_text},
             ],
+            session.path,
         )
 
     return result
@@ -915,6 +979,7 @@ __all__ = [
     "append_history",
     "execute_tool",
     "get_history",
+    "history_path",
     "make_approval_callback",
     "resolve_approval",
     "reset_history",

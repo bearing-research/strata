@@ -39,6 +39,7 @@ class LlmConfig:
     max_context_tokens: int = 100_000
     max_output_tokens: int = 4096
     timeout_seconds: float = 60.0
+    approval_timeout_seconds: float = 120.0
 
 
 @dataclass
@@ -76,6 +77,7 @@ def resolve_llm_config(
     max_context_tokens = 100_000
     max_output_tokens = 4096
     timeout_seconds = 60.0
+    approval_timeout_seconds = 120.0
 
     # Layer 1 (lowest): server config (explicit STRATA_AI_* at startup)
     if server_config is not None:
@@ -91,6 +93,8 @@ def resolve_llm_config(
             max_output_tokens = server_config.ai_max_output_tokens
         if getattr(server_config, "ai_timeout_seconds", None):
             timeout_seconds = server_config.ai_timeout_seconds
+        if getattr(server_config, "ai_approval_timeout_seconds", None):
+            approval_timeout_seconds = server_config.ai_approval_timeout_seconds
 
     # Layer 2: notebook-level env vars (from Runtime panel).
     # Setting a provider-specific key here picks up that provider's
@@ -121,6 +125,8 @@ def resolve_llm_config(
             max_output_tokens = int(notebook_config["max_output_tokens"])
         if notebook_config.get("timeout_seconds"):
             timeout_seconds = float(notebook_config["timeout_seconds"])
+        if notebook_config.get("approval_timeout_seconds"):
+            approval_timeout_seconds = float(notebook_config["approval_timeout_seconds"])
 
     if not api_key:
         return None
@@ -132,6 +138,7 @@ def resolve_llm_config(
         max_context_tokens=max_context_tokens,
         max_output_tokens=max_output_tokens,
         timeout_seconds=timeout_seconds,
+        approval_timeout_seconds=approval_timeout_seconds,
     )
 
 

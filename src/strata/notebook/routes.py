@@ -3411,5 +3411,5 @@ async def reset_agent(notebook_id: str, session: SessionDep) -> dict:
     """Clear the persistent conversation history for a notebook."""
     from strata.notebook.llm import reset_history
 
-    reset_history(notebook_id)
+    reset_history(notebook_id, session.path)
     return {"status": "ok"}

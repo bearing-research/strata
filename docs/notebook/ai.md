@@ -47,6 +47,7 @@ This is the intended escape hatch for advanced config. Fields the `[ai]` section
 - `max_context_tokens`
 - `max_output_tokens`
 - `timeout_seconds`
+- `approval_timeout_seconds`, how long an agent confirm prompt waits before being treated as a decline (default 120)
 
 ### Supported Providers
 
@@ -105,7 +106,7 @@ The agent works best for additive tasks (creating new cells, installing packages
 
 Before granting the assistant write access, understand what it can and can't do.
 
-**Approval-gated tools.** `delete_cell` and `add_package` always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after **120 s** and is treated as a decline so a closed tab doesn't leave the loop hanging. Approval can be skipped with the **Auto-approve** toggle in the AI panel footer — that suppresses the gate for the remainder of the session.
+**Approval-gated tools.** `delete_cell` and `add_package` always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after **120 s by default** and is treated as a decline so a closed tab doesn't leave the loop hanging; configure it with `STRATA_AI_APPROVAL_TIMEOUT_SECONDS` on the server or `approval_timeout_seconds` in the notebook's `[ai]` section. Approval can be skipped with the **Auto-approve** toggle in the AI panel footer — that suppresses the gate for the remainder of the session.
 
 **Non-gated mutating tools.** `create_cell`, `edit_cell`, and `run_cell` execute without prompting. `edit_cell` overwrites the cell source; `run_cell` executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to `cells/*.py`, so git is the practical undo for `edit_cell` and `delete_cell`. Side effects of `run_cell` — files written, packages mutated, API calls made — are not reversible.)
 
@@ -114,7 +115,7 @@ Before granting the assistant write access, understand what it can and can't do.
 | Bound | Default | Source |
 | --- | --- | --- |
 | Iterations (tool-use rounds) | **10** | `max_iterations` in `run_agent_loop` |
-| Approval timeout | **120 s** | `make_approval_callback` |
+| Approval timeout | **120 s** | `STRATA_AI_APPROVAL_TIMEOUT_SECONDS` / `[ai] approval_timeout_seconds` |
 | Conversation memory | **12 turns** (6 user/assistant pairs) | `HISTORY_MAX_TURNS` |
 | Per-call output tokens | `STRATA_AI_MAX_OUTPUT_TOKENS` (default 4096) | LLM config |
 | Per-call context tokens | `STRATA_AI_MAX_CONTEXT_TOKENS` (default 100000) | LLM config |
@@ -178,7 +179,7 @@ panel and notices the cell changes there too, but if you're prone
 to typing into a buffer while the agent works, save first
 (Ctrl+S in the editor, or Shift+Enter to run).
 
-**Conversation memory is per-notebook.** History is keyed on the notebook session and persists in memory while the server is running. Restarting `strata-notebook` clears it; explicitly clicking **Clear** in the panel also clears it.
+**Conversation memory is per-notebook.** Agent history (the last 12 user/assistant text turns — tool traces are never kept) is persisted to the notebook's `.strata/agent_history.json`, so it survives a `strata-notebook` restart. Clicking **Clear** in the panel removes it, in memory and on disk. Like everything under `.strata/`, it's gitignored runtime state.
 
 **Recommended posture.**
 
