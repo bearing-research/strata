@@ -1939,6 +1939,7 @@
 <li><code>max_context_tokens</code></li>
 <li><code>max_output_tokens</code></li>
 <li><code>timeout_seconds</code></li>
+<li><code>approval_timeout_seconds</code>, how long an agent confirm prompt waits before being treated as a decline (default 120)</li>
 </ul>
 <h3 id="supported-providers">Supported Providers<a class="headerlink" href="#supported-providers" title="Permanent link">&para;</a></h3>
 <p>Any service that implements the OpenAI <code>/v1/chat/completions</code> endpoint works, including:</p>
@@ -2009,7 +2010,7 @@
 <p>The agent works best for additive tasks (creating new cells, installing packages). For complex refactoring, use Chat mode to discuss the approach first.</p>
 <h3 id="safety-surface">Safety surface<a class="headerlink" href="#safety-surface" title="Permanent link">&para;</a></h3>
 <p>Before granting the assistant write access, understand what it can and can't do.</p>
-<p><strong>Approval-gated tools.</strong> <code>delete_cell</code> and <code>add_package</code> always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after <strong>120 s</strong> and is treated as a decline so a closed tab doesn't leave the loop hanging. Approval can be skipped with the <strong>Auto-approve</strong> toggle in the AI panel footer — that suppresses the gate for the remainder of the session.</p>
+<p><strong>Approval-gated tools.</strong> <code>delete_cell</code> and <code>add_package</code> always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after <strong>120 s by default</strong> and is treated as a decline so a closed tab doesn't leave the loop hanging; configure it with <code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code> on the server or <code>approval_timeout_seconds</code> in the notebook's <code>[ai]</code> section. Approval can be skipped with the <strong>Auto-approve</strong> toggle in the AI panel footer — that suppresses the gate for the remainder of the session.</p>
 <p><strong>Non-gated mutating tools.</strong> <code>create_cell</code>, <code>edit_cell</code>, and <code>run_cell</code> execute without prompting. <code>edit_cell</code> overwrites the cell source; <code>run_cell</code> executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to <code>cells/*.py</code>, so git is the practical undo for <code>edit_cell</code> and <code>delete_cell</code>. Side effects of <code>run_cell</code> — files written, packages mutated, API calls made — are not reversible.)</p>
 <p><strong>Loop bounds.</strong></p>
 <table>
@@ -2029,7 +2030,7 @@
 <tr>
 <td>Approval timeout</td>
 <td><strong>120 s</strong></td>
-<td><code>make_approval_callback</code></td>
+<td><code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code> / <code>[ai] approval_timeout_seconds</code></td>
 </tr>
 <tr>
 <td>Conversation memory</td>
@@ -2102,7 +2103,7 @@ into the system Python and cannot reach across to another notebook.</p>
 panel and notices the cell changes there too, but if you're prone
 to typing into a buffer while the agent works, save first
 (Ctrl+S in the editor, or Shift+Enter to run).</p>
-<p><strong>Conversation memory is per-notebook.</strong> History is keyed on the notebook session and persists in memory while the server is running. Restarting <code>strata-notebook</code> clears it; explicitly clicking <strong>Clear</strong> in the panel also clears it.</p>
+<p><strong>Conversation memory is per-notebook.</strong> Agent history (the last 12 user/assistant text turns — tool traces are never kept) is persisted to the notebook's <code>.strata/agent_history.json</code>, so it survives a <code>strata-notebook</code> restart. Clicking <strong>Clear</strong> in the panel removes it, in memory and on disk. Like everything under <code>.strata/</code>, it's gitignored runtime state.</p>
 <p><strong>Recommended posture.</strong></p>
 <ul>
 <li>For routine work, leave Auto-approve off so destructive actions surface a confirm.</li>

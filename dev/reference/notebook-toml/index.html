@@ -2000,8 +2000,14 @@
 <td>string</td>
 <td>Notebook-level default LLM model. Overridden by <code># @model &lt;id&gt;</code> in prompt cells. Cleared by the AI panel when the user picks "use server default".</td>
 </tr>
+<tr>
+<td><code>approval_timeout_seconds</code></td>
+<td>float</td>
+<td>How long an agent destructive-tool confirm prompt waits before being treated as a decline. Default 120.</td>
+</tr>
 </tbody>
 </table>
+<p>Advanced provider fields (<code>base_url</code>, <code>timeout_seconds</code>, token ceilings, …) are documented in <a href="../../notebook/ai/#custom-provider-configuration">AI Integration</a>.</p>
 <p>The API key and base URL come from the runtime environment (<code>ANTHROPIC_API_KEY</code> / <code>OPENAI_API_KEY</code> / <code>GEMINI_API_KEY</code> / <code>STRATA_AI_API_KEY</code> / <code>STRATA_AI_BASE_URL</code>) — they never live in this file.</p>
 <h2 id="secret_manager-external-secret-manager-wiring"><code>[secret_manager]</code> — External secret-manager wiring<a class="headerlink" href="#secret_manager-external-secret-manager-wiring" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[secret_manager]</span>

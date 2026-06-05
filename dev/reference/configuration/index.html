@@ -2514,6 +2514,11 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td>AI request timeout</td>
 </tr>
 <tr>
+<td><code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code></td>
+<td><code>120.0</code></td>
+<td>Agent confirm-prompt timeout; expiry counts as a decline</td>
+</tr>
+<tr>
 <td><code>ANTHROPIC_API_KEY</code></td>
 <td><code>None</code></td>
 <td>Anthropic API key (auto-sets base URL + model)</td>
@@ -2545,6 +2550,7 @@ config in <code>notebook.toml</code> overrides both.</p>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">max_context_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000</span>
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">approval_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">120.0</span>
 </code></pre></div>
 <p>All fields are optional, set only the ones you want to override.</p>
 <h2 id="timeouts">Timeouts<a class="headerlink" href="#timeouts" title="Permanent link">&para;</a></h2>
