@@ -15,6 +15,7 @@ so it's covered by integration tests, not here.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any
 from unittest.mock import patch
@@ -31,6 +32,7 @@ from strata.notebook.llm.agent import (
     _run_tool_calls_in_safe_groups,
     append_history,
     get_history,
+    history_path,
     make_approval_callback,
     reset_history,
     resolve_approval,
@@ -86,6 +88,72 @@ class TestConversationMemory:
         # The most recent turns should survive; the oldest should be evicted.
         assert history[-1]["content"] == f"u{HISTORY_MAX_TURNS * 2 - 1}"
         assert history[0]["content"] == f"u{HISTORY_MAX_TURNS}"
+
+
+class TestConversationMemoryPersistence:
+    """History writes through to ``.strata/agent_history.json`` and survives
+    a simulated server restart (the in-process cache being cleared)."""
+
+    def test_append_persists_to_disk(self, tmp_path):
+        append_history("nb1", [{"role": "user", "content": "hi"}], tmp_path)
+        path = history_path(tmp_path)
+        assert path.exists()
+        data = json.loads(path.read_text(encoding="utf-8"))
+        assert data["turns"] == [{"role": "user", "content": "hi"}]
+
+    def test_history_survives_restart(self, tmp_path):
+        append_history(
+            "nb1",
+            [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "hello"},
+            ],
+            tmp_path,
+        )
+        # Simulate a server restart: the in-process cache is gone (and the
+        # session id may differ), only the notebook dir survives.
+        CONVERSATION_HISTORY.clear()
+        assert get_history("nb1-new-session", tmp_path) == [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ]
+
+    def test_append_after_restart_merges_with_disk(self, tmp_path):
+        append_history("nb1", [{"role": "user", "content": "old"}], tmp_path)
+        CONVERSATION_HISTORY.clear()
+        append_history("nb1", [{"role": "user", "content": "new"}], tmp_path)
+        assert get_history("nb1", tmp_path) == [
+            {"role": "user", "content": "old"},
+            {"role": "user", "content": "new"},
+        ]
+
+    def test_reset_removes_disk_file(self, tmp_path):
+        append_history("nb1", [{"role": "user", "content": "hi"}], tmp_path)
+        reset_history("nb1", tmp_path)
+        assert not history_path(tmp_path).exists()
+        CONVERSATION_HISTORY.clear()
+        assert get_history("nb1", tmp_path) == []
+
+    def test_missing_file_is_empty_history(self, tmp_path):
+        assert get_history("nb1", tmp_path) == []
+
+    def test_corrupt_file_is_empty_history(self, tmp_path):
+        path = history_path(tmp_path)
+        path.parent.mkdir(parents=True)
+        path.write_text("not json{", encoding="utf-8")
+        assert get_history("nb1", tmp_path) == []
+
+    def test_trim_window_applies_on_disk(self, tmp_path):
+        turns = [{"role": "user", "content": f"u{i}"} for i in range(HISTORY_MAX_TURNS * 2)]
+        for t in turns:
+            append_history("nb1", [t], tmp_path)
+        data = json.loads(history_path(tmp_path).read_text(encoding="utf-8"))
+        assert len(data["turns"]) == HISTORY_MAX_TURNS
+        assert data["turns"][-1]["content"] == f"u{HISTORY_MAX_TURNS * 2 - 1}"
+
+    def test_no_dir_means_no_disk_io(self, tmp_path):
+        append_history("nb1", [{"role": "user", "content": "hi"}])
+        assert not history_path(tmp_path).exists()
 
 
 class TestApprovalResolution:

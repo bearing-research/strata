@@ -52,6 +52,9 @@ model = "claude-sonnet-4-6"
 | Key | Type | Description |
 | --- | --- | --- |
 | `model` | string | Notebook-level default LLM model. Overridden by `# @model <id>` in prompt cells. Cleared by the AI panel when the user picks "use server default". |
+| `approval_timeout_seconds` | float | How long an agent destructive-tool confirm prompt waits before being treated as a decline. Default 120. |
+
+Advanced provider fields (`base_url`, `timeout_seconds`, token ceilings, …) are documented in [AI Integration](../notebook/ai.md#custom-provider-configuration).
 
 The API key and base URL come from the runtime environment (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / `STRATA_AI_API_KEY` / `STRATA_AI_BASE_URL`) — they never live in this file.
 

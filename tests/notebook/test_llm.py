@@ -34,6 +34,7 @@ class _FakeServerConfig:
         self.ai_max_context_tokens = kwargs.get("ai_max_context_tokens")
         self.ai_max_output_tokens = kwargs.get("ai_max_output_tokens")
         self.ai_timeout_seconds = kwargs.get("ai_timeout_seconds")
+        self.ai_approval_timeout_seconds = kwargs.get("ai_approval_timeout_seconds")
 
 
 class TestResolveLlmConfig:
@@ -134,6 +135,35 @@ class TestResolveLlmConfig:
             assert config.base_url == "https://custom.api.com/v1"
             assert config.model == "custom-model"
             assert config.max_output_tokens == 2048
+
+    def test_approval_timeout_defaults_to_120(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = resolve_llm_config(notebook_env={"OPENAI_API_KEY": "sk-test"})
+            assert config is not None
+            assert config.approval_timeout_seconds == 120.0
+
+    def test_approval_timeout_server_layer(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = resolve_llm_config(
+                server_config=_FakeServerConfig(
+                    ai_api_key="sk-server",
+                    ai_approval_timeout_seconds=300.0,
+                )
+            )
+            assert config is not None
+            assert config.approval_timeout_seconds == 300.0
+
+    def test_approval_timeout_notebook_toml_overrides_server(self):
+        with patch.dict(os.environ, {}, clear=True):
+            config = resolve_llm_config(
+                notebook_config={"approval_timeout_seconds": "45"},
+                server_config=_FakeServerConfig(
+                    ai_api_key="sk-server",
+                    ai_approval_timeout_seconds=300.0,
+                ),
+            )
+            assert config is not None
+            assert config.approval_timeout_seconds == 45.0
 
 
 class TestInferProviderName:

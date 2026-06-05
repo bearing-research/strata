@@ -160,6 +160,7 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | `STRATA_AI_MAX_CONTEXT_TOKENS` | `100000` | Max context tokens sent to the model                         |
 | `STRATA_AI_MAX_OUTPUT_TOKENS`  | `4096`   | Max output tokens requested                                  |
 | `STRATA_AI_TIMEOUT_SECONDS`    | `60.0`   | AI request timeout                                           |
+| `STRATA_AI_APPROVAL_TIMEOUT_SECONDS` | `120.0` | Agent confirm-prompt timeout; expiry counts as a decline |
 | `ANTHROPIC_API_KEY`            | `None`   | Anthropic API key (auto-sets base URL + model)               |
 | `OPENAI_API_KEY`               | `None`   | OpenAI API key (auto-sets base URL + model)                  |
 | `GEMINI_API_KEY`               | `None`   | Google Gemini API key (auto-sets base URL + model)           |
@@ -177,6 +178,7 @@ model = "llama3"
 max_context_tokens = 100000
 max_output_tokens = 4096
 timeout_seconds = 60.0
+approval_timeout_seconds = 120.0
 ```
 
 All fields are optional, set only the ones you want to override.
