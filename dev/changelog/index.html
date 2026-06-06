@@ -2387,6 +2387,16 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Namespaced artifact names are no longer write-only</strong> (friction from the
+  ML dogfood): names containing <code>/</code> (<code>team/dataset/raw</code>) could be created
+  but every read route 404'd on them. The name routes now use path
+  converters, so slash-namespaced names — the natural registry convention —
+  resolve, report status, and delete normally.</li>
+<li><strong>Legacy <code>_default</code>-tenant artifacts stay nameable</strong>: artifacts written by
+  pre-fix <code>PUT /v1/artifacts</code> carry tenant <code>_default</code>; single-tenant name
+  requests (no tenant) may now point names at them instead of being
+  rejected with a tenant mismatch. Real cross-tenant mismatches are still
+  rejected.</li>
 <li><strong>Put-created artifacts can be named after the fact</strong>: <code>PUT /v1/artifacts</code>
   stamped artifacts with tenant <code>_default</code> while the name routes resolve
   no-header requests to no tenant — so <code>set_name</code> on an artifact you had
