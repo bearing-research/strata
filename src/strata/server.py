@@ -4157,7 +4157,7 @@ async def get_artifact_info(artifact_id: str, version: int):
     )
 
 
-@app.get("/v1/names/{name}", response_model=NameResolveResponse)
+@app.get("/v1/names/{name:path}", response_model=NameResolveResponse)
 async def resolve_name(name: str):
     """Resolve a name to its artifact.
 
@@ -4220,7 +4220,7 @@ async def set_name(request: NameSetRequest):
     )
 
 
-@app.delete("/v1/names/{name}")
+@app.delete("/v1/names/{name:path}")
 async def delete_name(name: str):
     """Delete a name pointer.
 
@@ -4272,7 +4272,7 @@ async def list_names():
     }
 
 
-@app.get("/v1/artifacts/names/{name}/status", response_model=NameStatusResponse)
+@app.get("/v1/artifacts/names/{name:path}/status", response_model=NameStatusResponse)
 async def get_name_status(name: str):
     """Get status of a named artifact including staleness info.
 

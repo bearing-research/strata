@@ -1523,3 +1523,45 @@ class TestRefreshSupersede:
             # Immutability: the old version's URI still serves its data
             old = client.fetch(first.uri)
             assert old.num_rows == multi_file_server["total_rows"]
+
+
+class TestNamespacedNames:
+    """Names containing '/' must be readable, not write-only (friction #6)."""
+
+    def test_slash_name_round_trip(self, multi_file_server):
+        base_url = multi_file_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+                name="team/dataset/raw",
+            )
+            artifact.to_table()
+
+            # Resolve via raw HTTP (slash flows through the :path converter)
+            resp = httpx.get(f"{base_url}/v1/names/team/dataset/raw", timeout=30.0)
+            assert resp.status_code == 200
+            assert resp.json()["artifact_uri"] == artifact.uri
+
+            # Status route with trailing /status segment
+            resp = httpx.get(f"{base_url}/v1/artifacts/names/team/dataset/raw/status", timeout=30.0)
+            assert resp.status_code == 200
+            assert resp.json()["name"] == "team/dataset/raw"
+
+            # SDK paths over the same name
+            status = client.get_name_status("team/dataset/raw")
+            assert status["is_stale"] is False
+            resolved = client.resolve_name("team/dataset/raw")
+            assert resolved["artifact_uri"] == artifact.uri
+
+            # Delete
+            resp = httpx.delete(f"{base_url}/v1/names/team/dataset/raw", timeout=30.0)
+            assert resp.status_code == 200
+            resp = httpx.get(f"{base_url}/v1/names/team/dataset/raw", timeout=30.0)
+            assert resp.status_code == 404
+
+    def test_list_names_route_still_works(self, multi_file_server):
+        """The greedy path converter must not swallow the list route."""
+        resp = httpx.get(f"{multi_file_server['base_url']}/v1/names", timeout=30.0)
+        assert resp.status_code == 200
+        assert "names" in resp.json()
