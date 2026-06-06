@@ -490,3 +490,29 @@ class TestPromptOutputSchemaDiagnostics:
         cell = _cell("# @output_schema {bad\nx = 1")
         codes = _codes(cell, _nb())
         assert "prompt_output_schema_invalid" not in codes
+
+
+class TestTableAnnotationValidation:
+    """Diagnostics for the lake table input annotation."""
+
+    def test_valid_table_uri_passes(self):
+        cell = _cell("# @table trips file:///data/warehouse#nyc.trips\nx = trips_snapshot")
+        assert "table_uri_malformed" not in _codes(cell, _nb())
+
+    def test_missing_fragment_flagged(self):
+        cell = _cell("# @table trips file:///data/warehouse\nx = trips_snapshot")
+        assert "table_uri_malformed" in _codes(cell, _nb())
+
+    def test_empty_fragment_flagged(self):
+        cell = _cell("# @table trips file:///data/warehouse#\nx = trips_snapshot")
+        assert "table_uri_malformed" in _codes(cell, _nb())
+
+    def test_shadowed_define_flagged(self):
+        cell = _cell("# @table trips file:///wh#db.t\ntrips = 'overwritten'")
+        cell.defines = ["trips"]
+        assert "table_shadows_define" in _codes(cell, _nb())
+
+    def test_no_shadow_when_only_referenced(self):
+        cell = _cell("# @table trips file:///wh#db.t\nx = trips")
+        cell.defines = ["x"]
+        assert "table_shadows_define" not in _codes(cell, _nb())

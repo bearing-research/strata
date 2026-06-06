@@ -100,6 +100,40 @@ def validate_cell_annotations(
                 )
             )
 
+    # --- table checks ---
+    for table in annotations.tables:
+        line = _find_annotation_line(cell.source, "table", table.name)
+
+        # table_uri_malformed: must be <warehouse>#<namespace>.<table>
+        if "#" not in table.uri or not table.uri.split("#", 1)[1]:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="table_uri_malformed",
+                    message=(
+                        f"`@table {table.name}` URI should be "
+                        "`<warehouse>#<namespace>.<table>` "
+                        "(e.g. file:///data/warehouse#nyc.trips)."
+                    ),
+                    line=line,
+                )
+            )
+
+        # table_shadows_define: the injected variable hides a real definition
+        if table.name in (cell.defines or []):
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="table_shadows_define",
+                    message=(
+                        f"`@table {table.name}` injects a variable that this "
+                        "cell also defines — the definition wins and the "
+                        "table URI is shadowed."
+                    ),
+                    line=line,
+                )
+            )
+
     # --- timeout_not_numeric / env_malformed ---
     # The parser silently swallows these, so we re-scan raw lines.
     for lineno, line_text in iter_annotation_block(cell.source):

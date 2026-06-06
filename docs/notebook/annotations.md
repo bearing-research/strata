@@ -200,6 +200,40 @@ Format: `# @mount <name> <uri> [ro|rw]`. Defaults to `ro` (read-only) if the mod
 
 ---
 
+## @table
+
+Declare an Iceberg table input. The table's current snapshot id becomes part
+of the cell's provenance: **when new data lands in the table, the cell goes
+stale and the normal cascade machinery re-runs it** — no manual data-version
+bookkeeping.
+
+```python
+# @table trips file:///data/warehouse#nyc.trips
+art = client.materialize(
+    inputs=[trips],
+    transform={"executor": "scan@v1", "params": {"snapshot_id": trips_snapshot}},
+)
+```
+
+**Two variables are injected into the cell's namespace**: `<name>` — the table
+URI string — and `<name>_snapshot` — the snapshot id resolved when the cell's
+provenance was computed. Passing `<name>_snapshot` to the scan makes the cell
+fully deterministic: it reads exactly the snapshot its provenance recorded.
+
+Format: `# @table <name> <uri> [snapshot=<id>]`. The URI is
+`<warehouse>#<namespace>.<table>` — the same format `client.materialize`
+accepts. The name must be a valid Python identifier.
+
+`snapshot=<id>` pins the table: the cell reads that snapshot forever and never
+goes stale on new data (the lake-side analog of a mount `pin`). Without a pin,
+the snapshot is re-resolved every time staleness is evaluated.
+
+If the catalog is unreachable when provenance is computed, the cell is
+conservatively treated as stale; if it is still unreachable at execution time,
+the run fails with a clear error.
+
+---
+
 ## Prompt Cell Annotations
 
 Prompt cells (language `prompt`) accept an additional set of annotations that

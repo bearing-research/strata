@@ -42,6 +42,12 @@ exhaustive commit history.
   (`STRATA_AI_APPROVAL_TIMEOUT_SECONDS` / `[ai] approval_timeout_seconds`,
   default 120s; expiry counts as a decline).
 
+- **Lake-aware cells: `@table` annotation**: declare an Iceberg table input
+  on a cell (`# @table trips file:///wh#nyc.trips`) and the table's snapshot
+  id joins the cell's provenance — new data landing in the lake makes the
+  cell stale and the normal cascade re-runs it, with `<name>` (URI) and
+  `<name>_snapshot` injected so the cell scans exactly the snapshot its
+  provenance recorded. `snapshot=<id>` pins a cell to one snapshot forever.
 - **Artifact store integrity hardening** (#123): artifacts are validated at
   finalize time (the blob must be exactly one readable Arrow IPC stream
   matching the recorded row count — a mismatch becomes a `failed` artifact,

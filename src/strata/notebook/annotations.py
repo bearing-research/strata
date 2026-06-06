@@ -10,6 +10,12 @@ Supported annotations::
     # @worker <name>              — Route to a named worker backend
     # @timeout <seconds>          — Override execution timeout (per iteration for loops)
     # @mount <name> <uri> [mode]  — Add/override a filesystem mount
+    # @table <name> <uri> [snapshot=<id>]
+                                  — Declare an Iceberg table input; the table's
+                                    snapshot id joins the cell's provenance so
+                                    new data makes the cell stale. <name> is
+                                    injected as the URI string and
+                                    <name>_snapshot as the resolved snapshot id.
     # @env <KEY>=<value>          — Set an environment variable for this cell
     # @variant <group> <name>     — Mark this cell as a variant in <group>; siblings
                                     in the same group share a defines contract and
@@ -30,7 +36,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
-from strata.notebook.models import MountMode, MountSpec
+from strata.notebook.models import MountMode, MountSpec, TableSpec
 
 
 class LoopWirePayload(TypedDict):
@@ -62,6 +68,7 @@ class AnnotationsWirePayload(TypedDict):
     timeout: float | None
     env: dict[str, str]
     mounts: list[dict[str, Any]]
+    tables: list[dict[str, Any]]
     loop: LoopWirePayload | None
     variant: VariantWirePayload | None
 
@@ -201,6 +208,7 @@ class CellAnnotations:
     worker: str | None = None
     timeout: float | None = None
     mounts: list[MountSpec] = field(default_factory=list)
+    tables: list[TableSpec] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
 
     # Prompt cell annotations
@@ -255,6 +263,7 @@ class CellAnnotations:
             "timeout": self.timeout,
             "env": self.env,
             "mounts": [mount.model_dump() for mount in self.mounts],
+            "tables": [table.model_dump() for table in self.tables],
             "loop": loop_payload,
             "variant": variant_payload,
         }
@@ -290,6 +299,11 @@ def parse_annotations(source: str) -> CellAnnotations:
             mount = _parse_mount_annotation(value)
             if mount is not None:
                 result.mounts.append(mount)
+
+        elif key == "table":
+            table = _parse_table_annotation(value)
+            if table is not None:
+                result.tables.append(table)
 
         elif key == "env":
             eq_idx = value.find("=")
@@ -470,6 +484,37 @@ def _parse_variant_annotation(value: str) -> VariantAnnotation | None:
     if not group.isidentifier() or not name.isidentifier():
         return None
     return VariantAnnotation(group=group, name=name)
+
+
+def _parse_table_annotation(value: str) -> TableSpec | None:
+    """Parse a ``@table`` annotation value.
+
+    Format: ``<name> <uri> [snapshot=<id>]``
+
+    Examples::
+
+        @table trips file:///data/warehouse#nyc.trips
+        @table events s3://bucket/wh#db.events snapshot=1292033279574548405
+    """
+    parts = value.split()
+    if len(parts) < 2:
+        return None
+
+    name = parts[0]
+    uri = parts[1]
+    snapshot_pin: int | None = None
+
+    for extra in parts[2:]:
+        if extra.startswith("snapshot="):
+            try:
+                snapshot_pin = int(extra[len("snapshot=") :])
+            except ValueError:
+                return None
+
+    if not name.isidentifier():
+        return None
+
+    return TableSpec(name=name, uri=uri, snapshot_pin=snapshot_pin)
 
 
 def _parse_mount_annotation(value: str) -> MountSpec | None:

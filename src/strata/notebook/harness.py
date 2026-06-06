@@ -140,6 +140,20 @@ def inject_mounts(manifest: dict, namespace: dict) -> None:
             )
 
 
+def inject_tables(manifest: dict, namespace: dict) -> None:
+    """Inject lake table inputs into the cell namespace.
+
+    Each ``@table`` declaration becomes two variables: ``<name>`` — the
+    table URI string — and ``<name>_snapshot`` — the snapshot id the
+    executor resolved at provenance time, so the cell can scan exactly the
+    snapshot its provenance recorded.
+    """
+    tables = manifest.get("tables", {})
+    for table_name, spec in tables.items():
+        namespace[table_name] = spec.get("uri", "")
+        namespace[f"{table_name}_snapshot"] = spec.get("snapshot_id")
+
+
 @contextmanager
 def apply_env_overrides(manifest: dict):
     """Apply manifest-scoped environment overrides for one execution."""
@@ -305,6 +319,7 @@ def _run_one_batched_cell(
     consumed_vars: list[str] = list(cell.get("consumed_vars") or [])
     cell_env: dict = cell.get("env") or {}
     mount_manifest: dict = cell.get("mount_manifest") or {}
+    table_manifest: dict = cell.get("table_manifest") or {}
     source_hash: str = cell.get("source_hash", "")
     env_hash: str = cell.get("env_hash", "")
 
@@ -317,10 +332,12 @@ def _run_one_batched_cell(
     # restore on exit — protects any pre-existing user variable with the
     # same name as a mount.
     mount_names = list(mount_manifest.keys())
+    table_names = [injected for name in table_manifest for injected in (name, f"{name}_snapshot")]
     previous_bindings: dict[str, Any] = {
-        name: namespace.get(name, _MISSING) for name in mount_names
+        name: namespace.get(name, _MISSING) for name in mount_names + table_names
     }
     inject_mounts({"mounts": mount_manifest}, namespace)
+    inject_tables({"tables": table_manifest}, namespace)
 
     try:
         with apply_env_overrides({"env": cell_env}):
@@ -648,6 +665,7 @@ def main():
 
         inputs = deserialize_inputs(manifest)
         inject_mounts(manifest, inputs)
+        inject_tables(manifest, inputs)
         loop_config = manifest.get("loop") or {}
         loop_until_expr = loop_config.get("until_expr") if isinstance(loop_config, dict) else None
         with apply_env_overrides(manifest):

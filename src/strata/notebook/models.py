@@ -54,6 +54,37 @@ class MountSpec(BaseModel):
     )
 
 
+class TableSpec(BaseModel):
+    """An Iceberg table input declaration.
+
+    Tables connect a cell to the lake with snapshot-level staleness: the
+    table's current snapshot id is folded into the cell's provenance, so
+    new data landing in the table makes the cell stale and the normal
+    cascade machinery re-runs it. The executor injects two variables into
+    the cell namespace: ``<name>`` (the table URI string) and
+    ``<name>_snapshot`` (the resolved snapshot id) so the cell can scan
+    deterministically at that snapshot.
+
+    URI format: ``<warehouse>#<namespace>.<table>`` — e.g.
+    ``file:///data/warehouse#nyc.trips`` or ``s3://bucket/wh#db.events``.
+    """
+
+    name: str = Field(
+        ...,
+        description="Variable name — injected as the table URI string; "
+        "<name>_snapshot carries the resolved snapshot id",
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+    )
+    uri: str = Field(
+        ...,
+        description="Table URI: <warehouse>#<namespace>.<table>",
+    )
+    snapshot_pin: int | None = Field(
+        default=None,
+        description="Pinned snapshot id — the cell never goes stale on new data when set",
+    )
+
+
 class ConnectionSpec(BaseModel):
     """A named database connection from ``[connections.<name>]``.
 
