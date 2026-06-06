@@ -2369,6 +2369,13 @@ exhaustive commit history.</p>
   cell stale and the normal cascade re-runs it, with <code>&lt;name&gt;</code> (URI) and
   <code>&lt;name&gt;_snapshot</code> injected so the cell scans exactly the snapshot its
   provenance recorded. <code>snapshot=&lt;id&gt;</code> pins a cell to one snapshot forever.</li>
+<li><strong>Artifact inspection CLI</strong>: <code>strata artifact list / show / lineage /
+  pull</code> work directly against a local store, no server needed. <code>lineage</code>
+  renders the provenance chain down to the lake — <code>model ← features ←
+  scan ← table @ snapshot</code> — answering "which snapshot trained this
+  model?" in one command. References accept a name, <code>id@v=N</code>, or a bare
+  artifact id; name resolution is tenant-agnostic so legacy stores
+  inspect cleanly.</li>
 <li><strong>Personal mode executes transforms</strong>: the embedded build runner now runs
   in personal mode, so <code>materialize</code> with <code>duckdb_sql@v1</code> executes
   server-side out of the box — previously the request was accepted and then
