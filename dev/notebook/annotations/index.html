@@ -772,6 +772,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        @table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prompt-cell-annotations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2068,6 +2079,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        @table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prompt-cell-annotations" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2537,30 +2559,55 @@ filesystem path for <code>file://</code> URIs). Use standard <code>Path</code> o
 joining, <code>.read_text()</code>, <code>.iterdir()</code>, etc.</p>
 <p>Format: <code># @mount &lt;name&gt; &lt;uri&gt; [ro|rw]</code>. Defaults to <code>ro</code> (read-only) if the mode is omitted. The mount name must be a valid Python identifier (it's an injected variable).</p>
 <hr />
+<h2 id="table">@table<a class="headerlink" href="#table" title="Permanent link">&para;</a></h2>
+<p>Declare an Iceberg table input. The table's current snapshot id becomes part
+of the cell's provenance: <strong>when new data lands in the table, the cell goes
+stale and the normal cascade machinery re-runs it</strong> — no manual data-version
+bookkeeping.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># @table trips file:///data/warehouse#nyc.trips</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">trips</span><span class="p">],</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;executor&quot;</span><span class="p">:</span> <span class="s2">&quot;scan@v1&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;snapshot_id&quot;</span><span class="p">:</span> <span class="n">trips_snapshot</span><span class="p">}},</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="p">)</span>
+</code></pre></div>
+<p><strong>Two variables are injected into the cell's namespace</strong>: <code>&lt;name&gt;</code> — the table
+URI string — and <code>&lt;name&gt;_snapshot</code> — the snapshot id resolved when the cell's
+provenance was computed. Passing <code>&lt;name&gt;_snapshot</code> to the scan makes the cell
+fully deterministic: it reads exactly the snapshot its provenance recorded.</p>
+<p>Format: <code># @table &lt;name&gt; &lt;uri&gt; [snapshot=&lt;id&gt;]</code>. The URI is
+<code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code> — the same format <code>client.materialize</code>
+accepts. The name must be a valid Python identifier.</p>
+<p><code>snapshot=&lt;id&gt;</code> pins the table: the cell reads that snapshot forever and never
+goes stale on new data (the lake-side analog of a mount <code>pin</code>). Without a pin,
+the snapshot is re-resolved every time staleness is evaluated.</p>
+<p>If the catalog is unreachable when provenance is computed, the cell is
+conservatively treated as stale; if it is still unreachable at execution time,
+the run fails with a clear error.</p>
+<hr />
 <h2 id="prompt-cell-annotations">Prompt Cell Annotations<a class="headerlink" href="#prompt-cell-annotations" title="Permanent link">&para;</a></h2>
 <p>Prompt cells (language <code>prompt</code>) accept an additional set of annotations that
 configure the AI call.</p>
 <h3 id="model"><code>@model</code><a class="headerlink" href="#model" title="Permanent link">&para;</a></h3>
 <p>Override the notebook-level AI model for this cell only.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a># @model claude-sonnet-4-6
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>Summarize {{ df }} in one paragraph.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a># @model claude-sonnet-4-6
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>Summarize {{ df }} in one paragraph.
 </code></pre></div>
 <h3 id="temperature"><code>@temperature</code><a class="headerlink" href="#temperature" title="Permanent link">&para;</a></h3>
 <p>Sampling temperature. Defaults to <code>0.0</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a># @temperature 0.3
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a># @temperature 0.3
 </code></pre></div>
 <h3 id="max_tokens"><code>@max_tokens</code><a class="headerlink" href="#max_tokens" title="Permanent link">&para;</a></h3>
 <p>Ceiling on output tokens for this call.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a># @max_tokens 1024
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a># @max_tokens 1024
 </code></pre></div>
 <h3 id="system"><code>@system</code><a class="headerlink" href="#system" title="Permanent link">&para;</a></h3>
 <p>System prompt prepended to the conversation.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a># @system You are a terse data analyst. Answer in bullet points.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a># @system You are a terse data analyst. Answer in bullet points.
 </code></pre></div>
 <p>Multiple <code>@system</code> lines are concatenated with newlines.</p>
 <h3 id="output"><code>@output</code><a class="headerlink" href="#output" title="Permanent link">&para;</a></h3>
 <p>Force the response format.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a># @output json
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a># @output json
 </code></pre></div>
 <p>Accepts <code>json</code> (the response is parsed/coerced as JSON) or <code>text</code>
 (free-form text — the default). Auto-set to <code>json</code> when
@@ -2573,7 +2620,7 @@ strict mode; Anthropic's native tool-use) so the response comes back as
 validated JSON rather than free-form text. Providers without schema support
 fall back to <code>json_object</code>, valid JSON, shape not enforced, and the
 <code>@validate_retries</code> loop catches shape violations.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a># @output_schema {&quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {&quot;themes&quot;: {&quot;type&quot;: &quot;array&quot;, &quot;items&quot;: {&quot;type&quot;: &quot;string&quot;}}}, &quot;required&quot;: [&quot;themes&quot;]}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a># @output_schema {&quot;type&quot;: &quot;object&quot;, &quot;properties&quot;: {&quot;themes&quot;: {&quot;type&quot;: &quot;array&quot;, &quot;items&quot;: {&quot;type&quot;: &quot;string&quot;}}}, &quot;required&quot;: [&quot;themes&quot;]}
 </code></pre></div>
 <p>Editing the schema invalidates the cell's cache, the schema is part of the
 provenance hash.</p>
@@ -2582,17 +2629,17 @@ provenance hash.</p>
 Defaults to 3. Only takes effect when <code>@output_schema</code> is set; each failed
 validation feeds the prior response and path-addressed errors back as a retry
 turn.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a># @validate_retries 5
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a># @validate_retries 5
 </code></pre></div>
 <hr />
 <h2 id="loop-cell-annotations">Loop Cell Annotations<a class="headerlink" href="#loop-cell-annotations" title="Permanent link">&para;</a></h2>
 <p>A Python cell carrying <code>@loop</code> is executed iteratively. The body runs once per
 iteration and the <code>carry</code> variable threads state between them.</p>
 <h3 id="loop"><code>@loop</code><a class="headerlink" href="#loop" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># @loop max_iter=50 carry=state</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="c1"># @loop_until state[&quot;converged&quot;]</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="n">state</span> <span class="o">=</span> <span class="n">state</span> <span class="k">if</span> <span class="s2">&quot;state&quot;</span> <span class="ow">in</span> <span class="nb">dir</span><span class="p">()</span> <span class="k">else</span> <span class="n">initial</span>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="n">state</span> <span class="o">=</span> <span class="n">step</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># @loop max_iter=50 carry=state</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="c1"># @loop_until state[&quot;converged&quot;]</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="n">state</span> <span class="o">=</span> <span class="n">state</span> <span class="k">if</span> <span class="s2">&quot;state&quot;</span> <span class="ow">in</span> <span class="nb">dir</span><span class="p">()</span> <span class="k">else</span> <span class="n">initial</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="n">state</span> <span class="o">=</span> <span class="n">step</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
 </code></pre></div>
 <p>Key/value parameters:</p>
 <ul>
@@ -2606,8 +2653,8 @@ iteration and the <code>carry</code> variable threads state between them.</p>
 <h3 id="loop_until"><code>@loop_until</code><a class="headerlink" href="#loop_until" title="Permanent link">&para;</a></h3>
 <p>Python expression evaluated after each iteration in the cell's namespace. When
 it returns truthy, the loop exits early.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># @loop max_iter=100 carry=acc</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="c1"># @loop_until acc[&quot;loss&quot;] &lt; 0.05</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># @loop max_iter=100 carry=acc</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="c1"># @loop_until acc[&quot;loss&quot;] &lt; 0.05</span>
 </code></pre></div>
 <p>Each iteration's carry state is stored as <code>…@iter=k</code> artifacts; the final
 iteration becomes the cell's canonical artifact. Progress is broadcast over
@@ -2619,8 +2666,8 @@ See <a href="../cells/#sql-cells">SQL Cells</a> for the full feature walkthrough
 section is the per-annotation reference.</p>
 <h3 id="sql"><code>@sql</code><a class="headerlink" href="#sql" title="Permanent link">&para;</a></h3>
 <p>Marks the cell as SQL and binds it to a named connection.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="p">:</span><span class="n">min_amount</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="p">:</span><span class="n">min_amount</span>
 </code></pre></div>
 <p>Key/value parameters:</p>
 <ul>
@@ -2635,10 +2682,10 @@ section is the per-annotation reference.</p>
   cell can run setup scripts (<code>CREATE TABLE</code>, <code>INSERT</code>, <code>DROP</code>). The flag
   is per-cell, read cells using the same connection stay read-only.</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span><span class="w"> </span><span class="k">write</span><span class="o">=</span><span class="k">true</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="k">DROP</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">events</span><span class="p">;</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="p">(</span><span class="n">id</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span><span class="w"> </span><span class="n">label</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">);</span>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;alpha&#39;</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;beta&#39;</span><span class="p">);</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span><span class="w"> </span><span class="k">write</span><span class="o">=</span><span class="k">true</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="k">DROP</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">events</span><span class="p">;</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="p">(</span><span class="n">id</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span><span class="w"> </span><span class="n">label</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">);</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;alpha&#39;</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;beta&#39;</span><span class="p">);</span>
 </code></pre></div>
 <p>Write cells split the body into individual statements via sqlglot, run each
 in sequence, and emit a per-statement status table (<code>stmt</code>, <code>kind</code>,
@@ -2677,9 +2724,9 @@ has no anchor when the cell mutates state.</p>
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">cache</span><span class="w"> </span><span class="n">forever</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">dim_country</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">cache</span><span class="w"> </span><span class="n">forever</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">dim_country</span>
 </code></pre></div>
 <p><code># @cache snapshot</code> requires <code>AdapterCapabilities.supports_snapshot = True</code>
 on the driver; otherwise the resolver fails fast before any connection is
@@ -2688,10 +2735,10 @@ opened. Per-driver freshness probe details are in
 <h3 id="name_1"><code>@name</code><a class="headerlink" href="#name_1" title="Permanent link">&para;</a></h3>
 <p>For SQL cells, <code>@name</code> sets the output variable name (default <code>result</code>),
 the same way it does for prompt cells.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="n">name</span><span class="w"> </span><span class="n">top_customers</span>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">customer</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">DESC</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">5</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="n">name</span><span class="w"> </span><span class="n">top_customers</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">customer</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">DESC</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">5</span>
 </code></pre></div>
 <p>A downstream Python cell can then reference <code>top_customers</code> directly as a
 pandas DataFrame.</p>
@@ -2702,13 +2749,13 @@ same DAG slot side by side and switch between them. The canonical use
 case is "we want to try three models for this experiment": three
 training cells all produce a <code>model</code> variable, and downstream cells
 reference <code>model</code> without caring which variant produced it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="c1"># @variant classifier logreg</span>
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogisticRegression</span>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="n">model</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">max_iter</span><span class="o">=</span><span class="mi">1000</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1"># @variant classifier logreg</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogisticRegression</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="n">model</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">max_iter</span><span class="o">=</span><span class="mi">1000</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1"># @variant classifier rf</span>
-<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.ensemble</span><span class="w"> </span><span class="kn">import</span> <span class="n">RandomForestClassifier</span>
-<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="n">model</span> <span class="o">=</span> <span class="n">RandomForestClassifier</span><span class="p">(</span><span class="n">n_estimators</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="c1"># @variant classifier rf</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.ensemble</span><span class="w"> </span><span class="kn">import</span> <span class="n">RandomForestClassifier</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="n">model</span> <span class="o">=</span> <span class="n">RandomForestClassifier</span><span class="p">(</span><span class="n">n_estimators</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
 </code></pre></div>
 <p>Both cells declare <code># @variant &lt;group&gt; &lt;name&gt;</code> with the same group
 (<code>classifier</code>) and different names (<code>logreg</code>, <code>rf</code>). At any given time
@@ -2718,9 +2765,9 @@ the group renders as a tab strip, clicking a tab switches the active
 variant, and the cell editor shows that variant's source.</p>
 <h3 id="switching-variants">Switching variants<a class="headerlink" href="#switching-variants" title="Permanent link">&para;</a></h3>
 <p>The active variant per group is persisted in <code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="k">[[variant_group]]</span>
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;classifier&quot;</span>
-<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="n">active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;rf&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="k">[[variant_group]]</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;classifier&quot;</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="n">active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;rf&quot;</span>
 </code></pre></div>
 <p>Switching is a one-line diff. Each variant carries its own provenance
 hash, so re-running a variant you've already trained is a cache hit:
@@ -2772,9 +2819,9 @@ exist.)</p>
 dependency is on a side effect, e.g. a SQL <code>seed</code> cell creates the database
 state that subsequent SQL cells query, and no Python variable flows
 between them.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
-<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
 </code></pre></div>
 <p>Multiple <code>@after</code> lines stack; each cell ID adds one edge. Whitespace-
 separated IDs on a single line work too: <code># @after seed migrate</code>. Self-
@@ -2852,9 +2899,9 @@ doesn't affect per-variable provenance hashes.</p>
 <p>Environment variables with names containing KEY, SECRET, TOKEN, PASSWORD, or CREDENTIAL have their values blanked from <code>notebook.toml</code> when saving. The key names are preserved as a "which vars are configured" reminder <em>only</em> when something real is configured alongside them. A notebook whose <code>[env]</code> would contain nothing but blanked sensitive slots is persisted without an <code>[env]</code> block at all, so typing an API key in the Runtime panel doesn't churn the committed notebook.</p>
 </div>
 <p>Notebook env vars are stored in the <code>[env]</code> section of <code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="k">[env]</span>
-<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="n">DATABASE_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;postgres://localhost/mydb&quot;</span>
-<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">  </span><span class="c1"># value blanked; name kept because DATABASE_URL above is real config</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="k">[env]</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="n">DATABASE_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;postgres://localhost/mydb&quot;</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">  </span><span class="c1"># value blanked; name kept because DATABASE_URL above is real config</span>
 </code></pre></div>
 
 
