@@ -153,9 +153,7 @@ class TestLineage:
 class TestPull:
     def test_pull_by_name_to_path(self, chain_store, tmp_path, capsys):
         out_file = tmp_path / "model.arrow"
-        rc = cmd_pull(
-            _args(ref="demo/model", artifact_dir=chain_store["dir"], to=str(out_file))
-        )
+        rc = cmd_pull(_args(ref="demo/model", artifact_dir=chain_store["dir"], to=str(out_file)))
         assert rc == 0
         table = ipc.open_stream(out_file.read_bytes()).read_all()
         assert table.num_rows == 1
