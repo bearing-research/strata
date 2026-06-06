@@ -112,21 +112,52 @@ class ArtifactClient:
         params: dict | None = None,
         name: str | None = None,
     ) -> str:
-        """Create a complete artifact (materialize -> upload -> finalize)."""
-        mat_resp = self.materialize(inputs, executor, params, name)
+        """Persist a specific result table via PUT /v1/artifacts.
 
-        if mat_resp["hit"]:
-            return mat_resp["artifact_uri"]
+        The personal-mode build-spec → upload → finalize protocol was
+        replaced by the embedded build runner; tests that need a SPECIFIC
+        result table persist it through the direct-put path, which shares
+        the same provenance/dedup/lineage substrate.
+        """
+        import json as json_module
+        import time as time_module
 
-        build_spec = mat_resp["build_spec"]
-        self.upload_and_finalize(
-            build_spec["artifact_id"],
-            build_spec["version"],
-            result_table,
-            name,
-        )
+        if name:
+            # Named artifacts go through the embedded runner so the name is
+            # set by the same flow users hit (and the SQL actually runs).
+            # Put-created names currently land in tenant "_default" while
+            # name reads resolve None — unification is Phase 1 item 4.
+            mat = self.materialize(inputs, executor, params, name)
+            if mat["hit"]:
+                return mat["artifact_uri"]
+            artifact_uri = mat["artifact_uri"]
+            artifact_id, version = artifact_uri.split("artifact/")[1].split("@v=")
+            deadline = time_module.time() + 30.0
+            while time_module.time() < deadline:
+                resp = self.client.get(f"/v1/artifacts/{artifact_id}/v/{version}")
+                state = resp.json().get("state")
+                if state == "ready":
+                    return artifact_uri
+                if state == "failed":
+                    raise AssertionError(f"build failed for {artifact_uri}")
+                time_module.sleep(0.2)
+            raise AssertionError(f"build did not finish for {artifact_uri}")
 
-        return mat_resp["artifact_uri"]
+        metadata: dict = {
+            "inputs": inputs,
+            "transform": {"executor": executor, "params": params or {"sql": "SELECT 1"}},
+        }
+        files = {
+            "metadata": ("metadata.json", json_module.dumps(metadata), "application/json"),
+            "data": (
+                "data.arrow",
+                table_to_ipc_bytes(result_table),
+                "application/vnd.apache.arrow.stream",
+            ),
+        }
+        resp = self.client.put("/v1/artifacts", files=files)
+        resp.raise_for_status()
+        return resp.json()["artifact_uri"]
 
     def get_lineage(self, artifact_id: str, version: int, max_depth: int = 10) -> dict:
         """Get artifact lineage."""
@@ -249,11 +280,12 @@ class TestChainedArtifacts:
         try:
             # Level 1: Base artifact from table
             base_table = pa.table({"id": [1, 2, 3], "value": [10, 20, 30]})
+            # Base persists via PUT (its declared table input is synthetic);
+            # the derived level below genuinely executes against it.
             base_uri = client.create_artifact(
                 inputs=["file:///warehouse#db.source"],
                 result_table=base_table,
                 params={"sql": "SELECT * FROM input0"},
-                name="base_artifact",
             )
 
             # Level 2: Derived artifact using base as input

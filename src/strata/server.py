@@ -1145,14 +1145,16 @@ async def lifespan(app: FastAPI):
         set_build_qos(build_qos)
 
     # Initialize build metrics collector for observability
-    if config.server_transforms_enabled:
+    if config.transforms_runtime_enabled:
         from strata.transforms.build_metrics import init_build_metrics
 
         init_build_metrics()
 
-    # Initialize build runner for server-mode transforms
+    # Initialize build runner. Service mode requires the explicit
+    # transforms config; personal mode always runs embedded transforms
+    # in-process so the artifact workflow works out of the box.
     build_runner = None
-    if config.server_transforms_enabled:
+    if config.transforms_runtime_enabled:
         from strata.artifact_store import get_artifact_store
         from strata.transforms.build_store import get_build_store
         from strata.transforms.registry import get_transform_registry
@@ -3414,9 +3416,25 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
 
     state = get_state()
 
-    # Personal mode: no validation needed
+    # Personal mode: the embedded runner executes builds in-process, so an
+    # executor the registry can't resolve would otherwise sit in 'building'
+    # forever. Fail fast instead (#123-adjacent: no silent dead-ends).
     if state.config.writes_enabled:
-        return None
+        registry = get_transform_registry()
+        defn = registry.get(executor_ref)
+        if defn is None:
+            available = sorted(d.ref for d in registry.definitions)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "transform_unknown",
+                    "message": f"Transform '{executor_ref}' is not registered on "
+                    "this server — nothing can execute it. "
+                    f"Available transforms: {available}.",
+                    "executor": executor_ref,
+                },
+            )
+        return defn
 
     # Server mode with transforms enabled: validate against registry
     if state.config.server_transforms_enabled:
@@ -3658,8 +3676,9 @@ async def materialize_artifact(request: MaterializeRequest):
     artifact_uri = f"strata://artifact/{artifact_id}@v={version}"
     state = get_state()
 
-    # Server mode: create build record for async execution
-    if state.config.server_transforms_enabled:
+    # Create build record for async execution by the build runner
+    # (service mode with transforms enabled, or personal mode embedded).
+    if state.config.transforms_runtime_enabled:
         from strata.transforms.build_qos import (
             BuildQoSError,
             get_build_qos,
@@ -3730,6 +3749,7 @@ async def materialize_artifact(request: MaterializeRequest):
                 executor_url=transform_defn.executor_url if transform_defn else None,
                 tenant_id=tenant_id,
                 principal_id=principal_id,
+                name=request.name,
             )
 
             # Build is now queued - release the admission slot
@@ -3989,7 +4009,14 @@ async def put_artifact(request: Request):
     params = transform_dict.get("params", {})
 
     store = _get_artifact_store()
-    tenant_id = get_tenant_id()
+
+    # Resolve tenant the same way materialize does (principal-based) —
+    # get_tenant_id() defaults to "_default", which stranded put-created
+    # artifacts in a tenant the name routes (None) could never address.
+    from strata.auth import get_principal as _get_principal
+
+    _principal = _get_principal()
+    tenant_id = _principal.tenant if _principal else None
 
     # Resolve input versions for provenance
     input_versions: dict[str, str] = {}

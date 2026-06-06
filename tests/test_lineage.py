@@ -25,44 +25,38 @@ def lineage_server(tmp_path):
 
 
 def create_artifact(base_url: str, inputs: list[str], executor: str = "test") -> dict:
-    """Create and finalize an artifact, returning artifact info."""
-    # Materialize
-    resp = httpx.post(
-        f"{base_url}/v1/artifacts/materialize",
-        json={
-            "inputs": inputs,
-            "transform": {"executor": executor, "params": {"sql": "SELECT 1"}},
-        },
-    )
+    """Persist an artifact via PUT /v1/artifacts, returning artifact info.
+
+    The personal-mode build-spec → upload → finalize protocol was replaced
+    by the embedded build runner; lineage fixtures persist their tables
+    through the direct-put path (same provenance/lineage substrate). Each
+    call salts params with the input list so distinct fixtures don't dedup.
+    """
+    import json as json_module
+    import re
+
+    table = pa.table({"x": [1, 2, 3]})
+    metadata = {
+        "inputs": inputs,
+        "transform": {"executor": executor, "params": {"sql": "SELECT 1", "salt": inputs}},
+    }
+    files = {
+        "metadata": ("metadata.json", json_module.dumps(metadata), "application/json"),
+        "data": (
+            "data.arrow",
+            table_to_ipc_bytes(table),
+            "application/vnd.apache.arrow.stream",
+        ),
+    }
+    resp = httpx.put(f"{base_url}/v1/artifacts", files=files, timeout=30.0)
     assert resp.status_code == 200
     data = resp.json()
-    build_spec = data["build_spec"]
-    artifact_id = build_spec["artifact_id"]
-    version = build_spec["version"]
-
-    # Upload
-    table = pa.table({"x": [1, 2, 3]})
-    httpx.post(
-        f"{base_url}/v1/artifacts/upload/{artifact_id}/v/{version}",
-        content=table_to_ipc_bytes(table),
-        headers={"Content-Type": "application/vnd.apache.arrow.stream"},
-    )
-
-    # Finalize
-    resp = httpx.post(
-        f"{base_url}/v1/artifacts/finalize",
-        json={
-            "artifact_id": artifact_id,
-            "version": version,
-            "arrow_schema": str(table.schema),
-            "row_count": 3,
-        },
-    )
-    assert resp.status_code == 200
+    match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", data["artifact_uri"])
+    assert match is not None
 
     return {
-        "artifact_id": artifact_id,
-        "version": version,
+        "artifact_id": match.group(1),
+        "version": int(match.group(2)),
         "artifact_uri": data["artifact_uri"],
     }
 

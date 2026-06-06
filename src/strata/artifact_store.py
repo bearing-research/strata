@@ -170,14 +170,16 @@ class TransformSpec:
     def to_json(self) -> str:
         """Serialize to JSON string.
 
-        Note: inputs are sorted for deterministic hashing since input order
-        doesn't affect computation semantics.
+        Inputs keep their caller order: positional executors bind them as
+        ``input0, input1, ...``, so order IS computation semantics — both
+        for the build runner (which executes from this stored spec) and
+        for provenance (``f(a, b)`` must not dedup against ``f(b, a)``).
         """
         return json.dumps(
             {
                 "executor": self.executor,
                 "params": self.params,
-                "inputs": sorted(self.inputs),  # Sort for deterministic hash
+                "inputs": list(self.inputs),
             },
             sort_keys=True,
         )
