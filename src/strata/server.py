@@ -4157,6 +4157,170 @@ async def get_artifact_info(artifact_id: str, version: int):
     )
 
 
+# ---------------------------------------------------------------------------
+# Registry: aliases, tags, audit (#129)
+# ---------------------------------------------------------------------------
+
+
+class AliasSetRequest(BaseModel):
+    artifact_id: str
+    version: int
+
+
+@app.put("/v1/names/{name:path}/aliases/{alias}")
+async def set_alias(name: str, alias: str, request: AliasSetRequest):
+    """Point ``name @ alias`` (e.g. champion) at an artifact version."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant_id = principal.tenant if principal else None
+    actor = principal.id if principal else None
+
+    try:
+        store.set_alias(
+            name, alias, request.artifact_id, request.version, tenant=tenant_id, actor=actor
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "name": name,
+        "alias": alias,
+        "artifact_uri": f"strata://artifact/{request.artifact_id}@v={request.version}",
+    }
+
+
+@app.get("/v1/names/{name:path}/aliases/{alias}")
+async def resolve_alias(name: str, alias: str):
+    """Resolve ``name @ alias`` to its artifact version."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant_id = principal.tenant if principal else None
+
+    artifact = store.resolve_alias(name, alias, tenant=tenant_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail=f"Alias '{name}@{alias}' not found")
+    return {
+        "name": name,
+        "alias": alias,
+        "artifact_uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
+        "artifact_id": artifact.id,
+        "version": artifact.version,
+        "state": artifact.state,
+    }
+
+
+@app.delete("/v1/names/{name:path}/aliases/{alias}")
+async def delete_alias(name: str, alias: str):
+    """Delete ``name @ alias``."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant_id = principal.tenant if principal else None
+    actor = principal.id if principal else None
+
+    if not store.delete_alias(name, alias, tenant=tenant_id, actor=actor):
+        raise HTTPException(status_code=404, detail=f"Alias '{name}@{alias}' not found")
+    return {"status": "deleted", "name": name, "alias": alias}
+
+
+@app.get("/v1/names/{name:path}/aliases")
+async def list_aliases(name: str):
+    """List the aliases held by a name."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant_id = principal.tenant if principal else None
+
+    aliases = store.list_aliases(name, tenant=tenant_id)
+    return {
+        "name": name,
+        "aliases": [
+            {
+                "alias": a.alias,
+                "artifact_id": a.artifact_id,
+                "version": a.version,
+                "updated_at": a.updated_at,
+            }
+            for a in aliases
+        ],
+    }
+
+
+class TagSetRequest(BaseModel):
+    key: str
+    value: str
+
+
+@app.put("/v1/artifacts/{artifact_id}/v/{version}/tags")
+async def set_tag(artifact_id: str, version: int, request: TagSetRequest):
+    """Set a key/value tag on an artifact version."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant_id = principal.tenant if principal else None
+    actor = principal.id if principal else None
+
+    try:
+        store.set_tag(
+            artifact_id, version, request.key, request.value, tenant=tenant_id, actor=actor
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"artifact_id": artifact_id, "version": version, request.key: request.value}
+
+
+@app.get("/v1/artifacts/{artifact_id}/v/{version}/tags")
+async def get_tags(artifact_id: str, version: int):
+    """Get the tags on an artifact version."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant_id = principal.tenant if principal else None
+
+    return {
+        "artifact_id": artifact_id,
+        "version": version,
+        "tags": store.get_tags(artifact_id, version, tenant=tenant_id),
+    }
+
+
+@app.delete("/v1/artifacts/{artifact_id}/v/{version}/tags/{key}")
+async def delete_tag(artifact_id: str, version: int, key: str):
+    """Delete one tag from an artifact version."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant_id = principal.tenant if principal else None
+    actor = principal.id if principal else None
+
+    if not store.delete_tag(artifact_id, version, key, tenant=tenant_id, actor=actor):
+        raise HTTPException(status_code=404, detail=f"Tag '{key}' not found")
+    return {"status": "deleted", "artifact_id": artifact_id, "version": version, "key": key}
+
+
+@app.get("/v1/registry/audit")
+async def registry_audit(
+    name: str | None = None,
+    artifact_id: str | None = None,
+    limit: int = 100,
+):
+    """Read the append-only registry audit, newest first."""
+    store = _get_artifact_store()
+    return {"entries": store.read_audit(name=name, artifact_id=artifact_id, limit=limit)}
+
+
+# NOTE: the routes below use a greedy {name:path} converter; the registry
+# routes above must stay registered FIRST or ".../aliases/x" URLs would be
+# swallowed as part of the name. The "/aliases" suffix is reserved.
 @app.get("/v1/names/{name:path}", response_model=NameResolveResponse)
 async def resolve_name(name: str):
     """Resolve a name to its artifact.

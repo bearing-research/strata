@@ -1565,3 +1565,89 @@ class TestNamespacedNames:
         resp = httpx.get(f"{multi_file_server['base_url']}/v1/names", timeout=30.0)
         assert resp.status_code == 200
         assert "names" in resp.json()
+
+
+class TestRegistry:
+    """Aliases, tags, and audit over HTTP + SDK (#129)."""
+
+    def _make_model(self, client, table_uri, refresh=False):
+        artifact = client.materialize(
+            inputs=[table_uri],
+            transform={"executor": "scan@v1", "params": {}},
+            name="team/model",
+            refresh=refresh,
+        )
+        artifact.to_table()
+        return artifact
+
+    def test_alias_round_trip(self, multi_file_server):
+        with StrataClient(base_url=multi_file_server["base_url"]) as client:
+            artifact = self._make_model(client, multi_file_server["table_uri"])
+
+            client.set_alias("team/model", "champion", artifact.artifact_id, artifact.version)
+            resolved = client.resolve_alias("team/model", "champion")
+            assert resolved["artifact_id"] == artifact.artifact_id
+            assert resolved["version"] == artifact.version
+
+            aliases = client.list_aliases("team/model")
+            assert [a["alias"] for a in aliases] == ["champion"]
+
+            client.delete_alias("team/model", "champion")
+            with pytest.raises(httpx.HTTPStatusError):
+                client.resolve_alias("team/model", "champion")
+
+    def test_promotion_with_history(self, multi_file_server):
+        """The friction-#9 flow: promote, promote again, recover the past."""
+        with StrataClient(base_url=multi_file_server["base_url"]) as client:
+            v1 = self._make_model(client, multi_file_server["table_uri"])
+            client.set_alias("team/model", "champion", v1.artifact_id, v1.version)
+
+            v2 = self._make_model(client, multi_file_server["table_uri"], refresh=True)
+            assert v2.version == v1.version + 1
+            client.set_alias("team/model", "champion", v2.artifact_id, v2.version)
+
+            # Current champion is v2; the audit recovers v1
+            assert client.resolve_alias("team/model", "champion")["version"] == v2.version
+            audit = client.get_registry_audit(name="team/model")
+            moves = [e for e in audit if e["action"] == "alias_set"]
+            assert moves[0]["from_version"] == v1.version
+            assert moves[0]["to_version"] == v2.version
+
+    def test_tags_round_trip(self, multi_file_server):
+        with StrataClient(base_url=multi_file_server["base_url"]) as client:
+            artifact = self._make_model(client, multi_file_server["table_uri"])
+
+            client.set_tag(artifact.artifact_id, artifact.version, "auc", "0.91")
+            client.set_tag(artifact.artifact_id, artifact.version, "validated_by", "ci")
+            tags = client.get_tags(artifact.artifact_id, artifact.version)
+            assert tags == {"auc": "0.91", "validated_by": "ci"}
+
+            client.delete_tag(artifact.artifact_id, artifact.version, "auc")
+            assert client.get_tags(artifact.artifact_id, artifact.version) == {"validated_by": "ci"}
+
+    def test_audit_covers_names_and_tags(self, multi_file_server):
+        with StrataClient(base_url=multi_file_server["base_url"]) as client:
+            artifact = self._make_model(client, multi_file_server["table_uri"])
+            client.set_tag(artifact.artifact_id, artifact.version, "k", "v")
+
+            entries = client.get_registry_audit(artifact_id=artifact.artifact_id)
+            actions = {e["action"] for e in entries}
+            assert "tag_set" in actions
+            by_name = client.get_registry_audit(name="team/model")
+            assert any(e["action"] == "name_set" for e in by_name)
+
+    def test_alias_on_slash_name_routes_correctly(self, multi_file_server):
+        """Greedy {name:path} routes must not swallow /aliases/ URLs."""
+        base_url = multi_file_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = self._make_model(client, multi_file_server["table_uri"])
+            client.set_alias("team/model", "champion", artifact.artifact_id, artifact.version)
+
+        # Raw HTTP: name contains '/', alias segment must still route
+        resp = httpx.get(f"{base_url}/v1/names/team/model/aliases/champion", timeout=30.0)
+        assert resp.status_code == 200
+        assert resp.json()["alias"] == "champion"
+
+        # And the plain name resolve still works alongside
+        resp = httpx.get(f"{base_url}/v1/names/team/model", timeout=30.0)
+        assert resp.status_code == 200

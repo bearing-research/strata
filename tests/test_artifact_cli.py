@@ -179,3 +179,46 @@ class TestTenantAgnosticResolution:
         assert rc == 0
         assert "legacy-1@v=1" in out
         reset_artifact_store()
+
+
+class TestAliasRefsAndAudit:
+    """CLI alias refs (name@alias) and the audit command (#129)."""
+
+    def test_show_resolves_alias_ref(self, chain_store, capsys):
+        store = chain_store["store"]
+        store.set_alias("demo/model", "champion", "model-1", 1)
+
+        rc = cmd_show(_args(ref="demo/model@champion", artifact_dir=chain_store["dir"]))
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "model-1@v=1" in out
+        assert "demo/model@champion" in out  # rendered in aliases line
+
+    def test_audit_renders_moves(self, chain_store, capsys):
+        from strata.artifact_cli import cmd_audit
+
+        store = chain_store["store"]
+        store.set_alias("demo/model", "champion", "feat-1", 1)
+        store.set_alias("demo/model", "champion", "model-1", 1)
+
+        rc = cmd_audit(
+            _args(ref=None, artifact_dir=chain_store["dir"], name="demo/model", limit=50)
+        )
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "alias_set" in out
+        assert "demo/model@champion" in out
+        # cross-artifact move shows both sides: feat-1@v1 -> model-1@v1
+        assert "feat-1@v1 -> model-1@v1" in out
+
+    def test_audit_json(self, chain_store, capsys):
+        from strata.artifact_cli import cmd_audit
+
+        store = chain_store["store"]
+        store.set_tag("model-1", 1, "auc", "0.9")
+        rc = cmd_audit(
+            _args(ref=None, artifact_dir=chain_store["dir"], name=None, limit=50, format="json")
+        )
+        assert rc == 0
+        entries = json.loads(capsys.readouterr().out)
+        assert any(e["action"] == "tag_set" and e["key"] == "auc" for e in entries)
