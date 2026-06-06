@@ -1346,6 +1346,36 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    def list_all_names(self) -> list[ArtifactName]:
+        """List name pointers across ALL tenants.
+
+        Maintenance/CLI surface: a store inspector must see names whatever
+        tenant spelling wrote them ('' for personal, '_default' for legacy
+        PUT uploads, real ids in multi-tenant mode). Request-serving code
+        should use :meth:`list_names` with the caller's tenant instead.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """
+                SELECT name, artifact_id, version, updated_at, tenant
+                FROM artifact_names
+                ORDER BY name
+                """
+            )
+            return [
+                ArtifactName(
+                    name=row["name"],
+                    artifact_id=row["artifact_id"],
+                    version=row["version"],
+                    updated_at=row["updated_at"],
+                    tenant=row["tenant"] if row["tenant"] else None,
+                )
+                for row in cursor.fetchall()
+            ]
+        finally:
+            conn.close()
+
     def list_names(self, tenant: str | None = None) -> list[ArtifactName]:
         """List all name pointers.
 

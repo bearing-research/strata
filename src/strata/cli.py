@@ -102,10 +102,76 @@ def _build_parser() -> argparse.ArgumentParser:
 
     artifact_parser = subparsers.add_parser(
         "artifact",
-        help="Artifact store maintenance",
-        description="Inspect and maintain a Strata artifact store.",
+        help="Artifact store inspection and maintenance",
+        description="Inspect and maintain a Strata artifact store (no server needed).",
     )
     artifact_sub = artifact_parser.add_subparsers(dest="artifact_command", metavar="<command>")
+
+    def _add_store_args(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument(
+            "artifact_dir",
+            nargs="?",
+            default=None,
+            help="Artifact store directory (default: ~/.strata/artifacts)",
+        )
+        sub.add_argument(
+            "--format",
+            choices=["human", "json"],
+            default="human",
+            help="Output format (default: human)",
+        )
+
+    list_parser = artifact_sub.add_parser(
+        "list",
+        help="List artifacts in the store",
+        description="List artifacts: id, version, state, rows, size, names.",
+    )
+    _add_store_args(list_parser)
+    list_parser.add_argument("--state", default=None, help="Filter by state (ready/failed/…)")
+    list_parser.add_argument("--limit", type=int, default=50, help="Max rows (default 50)")
+    list_parser.set_defaults(func=_dispatch_artifact("cmd_list"))
+
+    show_parser = artifact_sub.add_parser(
+        "show",
+        help="Show one artifact's metadata, names, and inputs",
+        description=(
+            "Show an artifact. <ref> is a name pointer, an id@v=N, or a "
+            "bare artifact id (latest version)."
+        ),
+    )
+    show_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
+    _add_store_args(show_parser)
+    show_parser.set_defaults(func=_dispatch_artifact("cmd_show"))
+
+    lineage_parser = artifact_sub.add_parser(
+        "lineage",
+        help="Walk an artifact's provenance upstream to tables/snapshots",
+        description=(
+            "Render the provenance chain, e.g. model <- features <- scan "
+            "<- table @ snapshot. <ref> as in `show`."
+        ),
+    )
+    lineage_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
+    _add_store_args(lineage_parser)
+    lineage_parser.add_argument(
+        "--max-depth", type=int, default=10, help="Recursion limit (default 10)"
+    )
+    lineage_parser.set_defaults(func=_dispatch_artifact("cmd_lineage"))
+
+    pull_parser = artifact_sub.add_parser(
+        "pull",
+        help="Write an artifact's blob to a local Arrow IPC file",
+        description="Pull an artifact's data. <ref> as in `show`.",
+    )
+    pull_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
+    pull_parser.add_argument(
+        "artifact_dir",
+        nargs="?",
+        default=None,
+        help="Artifact store directory (default: ~/.strata/artifacts)",
+    )
+    pull_parser.add_argument("--to", default=None, help="Output path (default <ref>.arrow)")
+    pull_parser.set_defaults(func=_dispatch_artifact("cmd_pull"))
 
     verify_parser = artifact_sub.add_parser(
         "verify",
@@ -117,22 +183,23 @@ def _build_parser() -> argparse.ArgumentParser:
             "2 invocation error."
         ),
     )
-    verify_parser.add_argument(
-        "artifact_dir",
-        nargs="?",
-        default=None,
-        help="Artifact store directory (default: ~/.strata/artifacts)",
-    )
-    verify_parser.add_argument(
-        "--format",
-        choices=["human", "json"],
-        default="human",
-        help="Output format (default: human)",
-    )
-    verify_parser.set_defaults(func=_dispatch_artifact_verify)
+    _add_store_args(verify_parser)
+    verify_parser.set_defaults(func=_dispatch_artifact("cmd_verify"))
+
     artifact_parser.set_defaults(func=lambda args: (artifact_parser.print_help(), 0)[1])
 
     return parser
+
+
+def _dispatch_artifact(command: str):
+    """Build a dispatcher that lazily imports the artifact CLI module."""
+
+    def _dispatch(args: argparse.Namespace) -> int:
+        from strata import artifact_cli
+
+        return getattr(artifact_cli, command)(args)
+
+    return _dispatch
 
 
 def _dispatch_run(args: argparse.Namespace) -> int:
@@ -159,36 +226,6 @@ def _dispatch_export(args: argparse.Namespace) -> int:
 
 def _dispatch_import(args: argparse.Namespace) -> int:
     return import_main(args)
-
-
-def _dispatch_artifact_verify(args: argparse.Namespace) -> int:
-    import json
-    from pathlib import Path
-
-    from strata.artifact_store import ArtifactStore
-
-    artifact_dir = (
-        Path(args.artifact_dir) if args.artifact_dir else Path.home() / ".strata" / "artifacts"
-    )
-    if not artifact_dir.exists():
-        print(f"artifact directory not found: {artifact_dir}", file=sys.stderr)
-        return 2
-
-    store = ArtifactStore(artifact_dir)
-    findings = store.verify_artifacts()
-
-    if args.format == "json":
-        print(json.dumps({"artifact_dir": str(artifact_dir), "findings": findings}, indent=2))
-    else:
-        print(f"verifying: {artifact_dir}")
-        if not findings:
-            print("\n✓ store is consistent")
-        else:
-            for f in findings:
-                print(f"  ✗ {f['artifact_id']}@v={f['version']} [{f['problem']}] {f['detail']}")
-            print(f"\n{len(findings)} problem(s) found")
-
-    return 1 if findings else 0
 
 
 def main(argv: list[str] | None = None) -> int:

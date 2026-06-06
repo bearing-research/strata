@@ -616,10 +616,10 @@ class TestArtifactVerifyCli:
     def _run(self, artifact_dir, fmt="human"):
         import argparse
 
-        from strata.cli import _dispatch_artifact_verify
+        from strata.artifact_cli import cmd_verify
 
         args = argparse.Namespace(artifact_dir=str(artifact_dir), format=fmt)
-        return _dispatch_artifact_verify(args)
+        return cmd_verify(args)
 
     def test_clean_store_exits_zero(self, store, artifact_dir, capsys):
         store.create_artifact("good", "prov-g")
