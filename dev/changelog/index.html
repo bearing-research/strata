@@ -2331,12 +2331,28 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Prompt cells stream live</strong> (#111): LLM output renders token-by-token
+<li>
+<p><strong>Registry layer: aliases, tags, and an append-only audit log</strong> (#129):
+  promotion is no longer a silent pointer swap. A registry name can hold
+  many <strong>aliases</strong> (<code>taxi/tip-model @ champion</code>, <code>@ candidate</code>) following
+  the post-stages industry model; artifact versions carry queryable
+  <strong>tags</strong> (<code>auc=0.91</code>, <code>validated_by=…</code>); and every name/alias/tag
+  mutation lands in an immutable <strong>audit</strong> written in the same transaction
+  (<code>who, what, from → to, when</code>) — including names set by <code>materialize</code>
+  itself. New SDK methods (<code>set_alias</code>, <code>resolve_alias</code>, <code>set_tag</code>,
+  <code>get_registry_audit</code>, …), REST routes under <code>/v1/names/{name}/aliases</code>
+  and <code>/v1/artifacts/{id}/v/{n}/tags</code>, and <code>strata artifact audit [name]</code>
+  which renders the history (<code>old-id@v1 -&gt; new-id@v1</code>). Alias refs
+  (<code>name@alias</code>) are accepted anywhere the artifact CLI takes a reference.</p>
+</li>
+<li>
+<p><strong>Prompt cells stream live</strong> (#111): LLM output renders token-by-token
   on the cell card as the model generates, instead of appearing all at
   once on completion. Schema-validation retries surface as a badge on
   the stream. New <code>cell_output_delta</code> WebSocket frame (ephemeral — not
   persisted or replayed; external WS clients that ignore unknown frame
-  types are unaffected).</li>
+  types are unaffected).</p>
+</li>
 <li><strong>Structured streams render as partial JSON</strong> (#113): prompt cells
   with an <code>@output_schema</code> show fields popping in as the model finishes
   them — a lenient partial-JSON parser pretty-prints the valid prefix,
