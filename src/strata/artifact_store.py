@@ -590,6 +590,22 @@ class ArtifactStore:
                 conn.commit()
                 return existing
 
+            if existing is not None and existing.version != version:
+                # Same artifact id, older ready version with the same provenance:
+                # this is a refresh rebuild. Supersede the old version so the
+                # rebuild becomes canonical — the partial unique index allows
+                # only ONE ready row per (tenant, provenance_hash). The old
+                # version stays fetchable by explicit (id, version); only
+                # provenance/dedup lookups stop returning it.
+                conn.execute(
+                    """
+                    UPDATE artifact_versions
+                    SET state = 'superseded'
+                    WHERE id = ? AND version = ? AND state = 'ready'
+                    """,
+                    (existing.id, existing.version),
+                )
+
             # Proceed with finalization
             try:
                 cursor = conn.execute(
@@ -772,6 +788,20 @@ class ArtifactStore:
                     self._set_name_in_connection(conn, name, existing.id, existing.version, tenant)
                 conn.commit()
                 return existing
+
+            if existing is not None and existing.version != version:
+                # Refresh rebuild: same artifact id, older ready version with
+                # the same provenance. Supersede the old version (still
+                # fetchable by explicit id+version; excluded from provenance
+                # lookups) so the rebuild becomes canonical (#123).
+                conn.execute(
+                    """
+                    UPDATE artifact_versions
+                    SET state = 'superseded'
+                    WHERE id = ? AND version = ? AND state = 'ready'
+                    """,
+                    (existing.id, existing.version),
+                )
 
             # Atomically finalize and set name
             try:
@@ -1654,7 +1684,8 @@ class ArtifactStore:
         """Delete unreferenced artifacts older than max_age.
 
         An artifact is "unreferenced" if no name pointer points to it.
-        Only deletes artifacts in "ready" or "failed" state older than max_age.
+        Only deletes artifacts in "ready", "superseded", or "failed" state
+        older than max_age.
 
         Args:
             max_age_days: Maximum age in days for unreferenced artifacts
@@ -1674,7 +1705,7 @@ class ArtifactStore:
                 FROM artifact_versions av
                 LEFT JOIN artifact_names an ON av.id = an.artifact_id AND av.version = an.version
                 WHERE an.name IS NULL
-                  AND av.state IN ('ready', 'failed')
+                  AND av.state IN ('ready', 'superseded', 'failed')
                   AND av.created_at < ?
             """
             params: list[float | str] = [cutoff]
@@ -1784,6 +1815,112 @@ class ArtifactStore:
     # -----------------------------------------------------------------------
     # Maintenance (Legacy - kept for backwards compatibility)
     # -----------------------------------------------------------------------
+
+    def sweep_zombie_builds(self, max_age_seconds: float = 3600) -> int:
+        """Mark stale ``building`` artifacts as failed.
+
+        A materialize that queued into a mode with no executor (or whose
+        builder crashed without cleanup) leaves an artifact in ``building``
+        forever — it can never serve data, but it sits in the store
+        indefinitely. Demoting to ``failed`` makes it visible as a failure
+        and eligible for ``cleanup_failed`` deletion.
+
+        Args:
+            max_age_seconds: Builds older than this are considered zombies.
+
+        Returns:
+            Number of artifacts demoted to failed.
+        """
+        conn = self._get_connection()
+        try:
+            cutoff = time.time() - max_age_seconds
+            cursor = conn.execute(
+                """
+                UPDATE artifact_versions
+                SET state = 'failed'
+                WHERE state = 'building' AND created_at < ?
+                """,
+                (cutoff,),
+            )
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    def verify_artifacts(self, tenant: str | None = None) -> list[dict]:
+        """Check every serveable artifact's blob against its metadata.
+
+        For each ``ready`` or ``superseded`` artifact: the blob must exist,
+        parse as exactly one Arrow IPC stream, and its readable row count
+        must equal the recorded ``row_count``. This is the after-the-fact
+        counterpart to finalize-time validation (#123) — it catches stores
+        written before validation existed or corrupted out-of-band.
+
+        Returns:
+            One finding dict per problem:
+            ``{"artifact_id", "version", "state", "problem", "detail"}``.
+            An empty list means the store is consistent.
+        """
+        import pyarrow as pa
+
+        from strata.fast_io import validate_ipc_stream
+
+        conn = self._get_connection()
+        try:
+            query = """
+                SELECT id, version, state, row_count
+                FROM artifact_versions
+                WHERE state IN ('ready', 'superseded')
+            """
+            params: list[str] = []
+            if tenant is not None:
+                query += " AND (tenant = ? OR tenant IS NULL)"
+                params.append(tenant)
+            rows = conn.execute(query, params).fetchall()
+        finally:
+            conn.close()
+
+        findings: list[dict] = []
+        for row in rows:
+            artifact_id, version = row["id"], row["version"]
+            data = self.blob_store.read_blob(artifact_id, version)
+            if data is None:
+                findings.append(
+                    {
+                        "artifact_id": artifact_id,
+                        "version": version,
+                        "state": row["state"],
+                        "problem": "missing_blob",
+                        "detail": "metadata row exists but blob is gone",
+                    }
+                )
+                continue
+
+            try:
+                readable_rows = validate_ipc_stream(data)
+            except (ValueError, pa.ArrowInvalid) as e:
+                findings.append(
+                    {
+                        "artifact_id": artifact_id,
+                        "version": version,
+                        "state": row["state"],
+                        "problem": "invalid_stream",
+                        "detail": str(e),
+                    }
+                )
+                continue
+
+            if row["row_count"] is not None and readable_rows != row["row_count"]:
+                findings.append(
+                    {
+                        "artifact_id": artifact_id,
+                        "version": version,
+                        "state": row["state"],
+                        "problem": "row_count_mismatch",
+                        "detail": f"metadata says {row['row_count']}, blob yields {readable_rows}",
+                    }
+                )
+        return findings
 
     def cleanup_failed(self, max_age_seconds: float = 3600) -> int:
         """Clean up failed artifacts older than max_age.

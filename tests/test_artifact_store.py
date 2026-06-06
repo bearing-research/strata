@@ -480,3 +480,163 @@ class TestStats:
         assert stats["total_bytes"] == 1000
         assert stats["total_rows"] == 100
         assert stats["name_count"] == 1
+
+
+def _ipc_bytes(num_rows: int) -> bytes:
+    """Build a single valid Arrow IPC stream with ``num_rows`` rows."""
+    import pyarrow as pa
+    import pyarrow.ipc as ipc
+
+    sink = pa.BufferOutputStream()
+    with ipc.new_stream(sink, pa.schema([("id", pa.int64())])) as writer:
+        writer.write_batch(pa.RecordBatch.from_pydict({"id": list(range(num_rows))}))
+    return sink.getvalue().to_pybytes()
+
+
+class TestRefreshSupersede:
+    """Refresh rebuilds become new versions of the same artifact (#123)."""
+
+    def test_finalize_supersedes_older_ready_version(self, store):
+        """Finalizing v2 with v1's provenance demotes v1 to superseded."""
+        store.create_artifact("art-1", "prov-x")
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+
+        version = store.create_artifact("art-1", "prov-x")
+        assert version == 2
+        finalized = store.finalize_artifact("art-1", 2, "{}", 12, 120)
+
+        assert finalized.version == 2
+        assert finalized.state == "ready"
+        assert store.get_artifact("art-1", 1).state == "superseded"
+
+    def test_provenance_lookup_returns_rebuild(self, store):
+        """After supersede, dedup lookups resolve the new version."""
+        store.create_artifact("art-1", "prov-x")
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+        store.create_artifact("art-1", "prov-x")
+        store.finalize_artifact("art-1", 2, "{}", 12, 120)
+
+        found = store.find_by_provenance("prov-x")
+        assert found is not None
+        assert (found.id, found.version) == ("art-1", 2)
+
+    def test_different_id_still_dedup_fails(self, store):
+        """The cross-id duplicate race keeps its existing semantics."""
+        store.create_artifact("art-1", "prov-x")
+        store.finalize_artifact("art-1", 1, "{}", 10, 100)
+
+        store.create_artifact("art-2", "prov-x")
+        result = store.finalize_artifact("art-2", 1, "{}", 10, 100)
+
+        # Returns the existing artifact; the duplicate is failed
+        assert (result.id, result.version) == ("art-1", 1)
+        assert store.get_artifact("art-2", 1).state == "failed"
+        assert store.get_artifact("art-1", 1).state == "ready"
+
+    def test_finalize_and_set_name_supersedes(self, store):
+        """The atomic finalize+name path supersedes the same way."""
+        store.create_artifact("art-1", "prov-x")
+        store.finalize_and_set_name("art-1", 1, "{}", 10, 100, name="model")
+        store.create_artifact("art-1", "prov-x")
+        finalized = store.finalize_and_set_name("art-1", 2, "{}", 12, 120, name="model")
+
+        assert finalized.version == 2
+        assert store.get_artifact("art-1", 1).state == "superseded"
+        resolved = store.resolve_name("model")
+        assert (resolved.id, resolved.version) == ("art-1", 2)
+
+
+class TestZombieSweep:
+    """Stale building artifacts are demoted to failed (#123)."""
+
+    def test_old_building_demoted(self, store):
+        store.create_artifact("zombie", "prov-z")
+        swept = store.sweep_zombie_builds(max_age_seconds=0)
+        assert swept == 1
+        assert store.get_artifact("zombie", 1).state == "failed"
+
+    def test_recent_building_kept(self, store):
+        store.create_artifact("fresh", "prov-f")
+        swept = store.sweep_zombie_builds(max_age_seconds=3600)
+        assert swept == 0
+        assert store.get_artifact("fresh", 1).state == "building"
+
+    def test_ready_untouched(self, store):
+        store.create_artifact("done", "prov-d")
+        store.finalize_artifact("done", 1, "{}", 1, 10)
+        swept = store.sweep_zombie_builds(max_age_seconds=0)
+        assert swept == 0
+        assert store.get_artifact("done", 1).state == "ready"
+
+
+class TestVerifyArtifacts:
+    """Store-wide blob/metadata consistency check (#123)."""
+
+    def _make_ready(self, store, artifact_id: str, provenance: str, rows: int) -> None:
+        store.create_artifact(artifact_id, provenance)
+        store.write_blob(artifact_id, 1, _ipc_bytes(rows))
+        store.finalize_artifact(artifact_id, 1, "{}", rows, 100)
+
+    def test_consistent_store_is_clean(self, store):
+        self._make_ready(store, "good", "prov-g", 5)
+        assert store.verify_artifacts() == []
+
+    def test_row_count_mismatch_detected(self, store):
+        store.create_artifact("short", "prov-s")
+        store.write_blob("short", 1, _ipc_bytes(3))
+        store.finalize_artifact("short", 1, "{}", 99, 100)  # lies about rows
+
+        findings = store.verify_artifacts()
+        assert len(findings) == 1
+        assert findings[0]["problem"] == "row_count_mismatch"
+        assert findings[0]["artifact_id"] == "short"
+
+    def test_concatenated_streams_detected(self, store):
+        """The #121 corruption shape is flagged as invalid_stream."""
+        store.create_artifact("concat", "prov-c")
+        store.write_blob("concat", 1, _ipc_bytes(3) + _ipc_bytes(3))
+        store.finalize_artifact("concat", 1, "{}", 6, 100)
+
+        findings = store.verify_artifacts()
+        assert len(findings) == 1
+        assert findings[0]["problem"] == "invalid_stream"
+
+    def test_missing_blob_detected(self, store):
+        store.create_artifact("ghost", "prov-gh")
+        store.finalize_artifact("ghost", 1, "{}", 1, 10)  # never wrote a blob
+
+        findings = store.verify_artifacts()
+        assert len(findings) == 1
+        assert findings[0]["problem"] == "missing_blob"
+
+
+class TestArtifactVerifyCli:
+    """`strata artifact verify` surfaces store inconsistencies (#123)."""
+
+    def _run(self, artifact_dir, fmt="human"):
+        import argparse
+
+        from strata.cli import _dispatch_artifact_verify
+
+        args = argparse.Namespace(artifact_dir=str(artifact_dir), format=fmt)
+        return _dispatch_artifact_verify(args)
+
+    def test_clean_store_exits_zero(self, store, artifact_dir, capsys):
+        store.create_artifact("good", "prov-g")
+        store.write_blob("good", 1, _ipc_bytes(5))
+        store.finalize_artifact("good", 1, "{}", 5, 100)
+
+        assert self._run(artifact_dir) == 0
+        assert "consistent" in capsys.readouterr().out
+
+    def test_problems_exit_one_with_json(self, store, artifact_dir, capsys):
+        store.create_artifact("bad", "prov-b")
+        store.write_blob("bad", 1, _ipc_bytes(3) + _ipc_bytes(3))
+        store.finalize_artifact("bad", 1, "{}", 6, 100)
+
+        assert self._run(artifact_dir, fmt="json") == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["findings"][0]["problem"] == "invalid_stream"
+
+    def test_missing_dir_exits_two(self, tmp_path):
+        assert self._run(tmp_path / "nope") == 2

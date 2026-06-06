@@ -99,7 +99,7 @@ class NotebookArtifactManager:
         """
         artifact_id = self.cell_artifact_id(cell_id, variable_name, iteration)
         latest = self.artifact_store.get_latest_version(artifact_id)
-        if latest is None or latest.state != "ready":
+        if latest is None or latest.state not in ("ready", "superseded"):
             return None
         return self.artifact_store.blob_store.read_blob(artifact_id, latest.version)
 
@@ -112,7 +112,7 @@ class NotebookArtifactManager:
         """Return the latest ArtifactVersion for a specific loop iteration."""
         artifact_id = self.cell_artifact_id(cell_id, variable_name, iteration)
         latest = self.artifact_store.get_latest_version(artifact_id)
-        if latest is None or latest.state != "ready":
+        if latest is None or latest.state not in ("ready", "superseded"):
             return None
         return latest
 
@@ -257,7 +257,7 @@ class NotebookArtifactManager:
             ValueError: If artifact not found or not ready
         """
         artifact = self.artifact_store.get_artifact(artifact_id, version)
-        if artifact is None or artifact.state != "ready":
+        if artifact is None or artifact.state not in ("ready", "superseded"):
             raise ValueError(f"Artifact {artifact_id}@v={version} not found or not ready")
 
         blob_data = self.artifact_store.blob_store.read_blob(artifact_id, version)

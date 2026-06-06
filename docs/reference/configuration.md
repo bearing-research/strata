@@ -87,6 +87,7 @@ ai_model = "claude-sonnet-4-6"
 | Variable                          | Default     | Description                      |
 | --------------------------------- | ----------- | -------------------------------- |
 | `STRATA_ARTIFACT_DIR`             | `None`      | Artifact store directory         |
+| `STRATA_ARTIFACT_ZOMBIE_BUILD_TIMEOUT_SECONDS` | `3600.0` | Builds stuck in `building` longer than this are demoted to `failed` at startup |
 | `STRATA_ARTIFACT_BLOB_BACKEND`    | `local`     | `local`, `s3`, `gcs`, or `azure` |
 | `STRATA_ARTIFACT_S3_BUCKET`       | `None`      | S3 bucket for artifacts          |
 | `STRATA_ARTIFACT_S3_PREFIX`       | `artifacts` | S3 key prefix                    |

@@ -1457,3 +1457,67 @@ class TestMultiTaskScanIntegrity:
             )
             table = client.fetch(artifact.uri)
             assert table.num_rows == multi_file_server["total_rows"]
+
+
+class TestRefreshSupersede:
+    """refresh=True rebuilds the same artifact identity (#123)."""
+
+    def test_refresh_bumps_version_of_same_artifact(self, multi_file_server):
+        with StrataClient(base_url=multi_file_server["base_url"]) as client:
+            first = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+            )
+            first.to_table()  # finalize
+
+            rebuilt = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+                refresh=True,
+            )
+            table = rebuilt.to_table()
+
+            # Same identity, new version, complete data
+            assert rebuilt.artifact_id == first.artifact_id
+            assert rebuilt.version == first.version + 1
+            assert table.num_rows == multi_file_server["total_rows"]
+
+    def test_provenance_cache_returns_rebuild(self, multi_file_server):
+        with StrataClient(base_url=multi_file_server["base_url"]) as client:
+            first = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+            )
+            first.to_table()
+            rebuilt = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+                refresh=True,
+            )
+            rebuilt.to_table()
+
+            # A plain materialize now cache-hits on the rebuild, not the original
+            hit = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+            )
+            assert hit.cache_hit is True
+            assert (hit.artifact_id, hit.version) == (rebuilt.artifact_id, rebuilt.version)
+
+    def test_superseded_version_stays_fetchable(self, multi_file_server):
+        with StrataClient(base_url=multi_file_server["base_url"]) as client:
+            first = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+            )
+            first.to_table()
+            rebuilt = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+                refresh=True,
+            )
+            rebuilt.to_table()
+
+            # Immutability: the old version's URI still serves its data
+            old = client.fetch(first.uri)
+            assert old.num_rows == multi_file_server["total_rows"]

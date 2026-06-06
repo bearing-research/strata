@@ -3352,7 +3352,7 @@ class CellExecutor:
                 loop.start_from_cell, loop.carry, loop.start_from_iter
             )
             artifact = artifact_mgr.artifact_store.get_latest_version(artifact_id)
-            if artifact is None or artifact.state != "ready":
+            if artifact is None or artifact.state not in ("ready", "superseded"):
                 raise ValueError(
                     f"Loop seed artifact not found for "
                     f"start_from={loop.start_from_cell}@iter={loop.start_from_iter}. "
@@ -3374,7 +3374,7 @@ class CellExecutor:
                 continue
             upstream_artifact_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{loop.carry}"
             artifact = artifact_mgr.artifact_store.get_latest_version(upstream_artifact_id)
-            if artifact is None or artifact.state != "ready":
+            if artifact is None or artifact.state not in ("ready", "superseded"):
                 continue
             blob = artifact_mgr.load_artifact_data(upstream_artifact_id, artifact.version)
             return blob, _artifact_content_type(artifact)

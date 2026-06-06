@@ -44,6 +44,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   (`STRATA_AI_APPROVAL_TIMEOUT_SECONDS` / `[ai] approval_timeout_seconds`,
   default 120s; expiry counts as a decline).
 
+- **Artifact store integrity hardening** (#123): artifacts are validated at
+  finalize time (the blob must be exactly one readable Arrow IPC stream
+  matching the recorded row count — a mismatch becomes a `failed` artifact,
+  never a serveable one); `refresh=True` now rebuilds the *same* artifact as
+  a new version and supersedes the old one instead of forking a parallel
+  identity the cache never returns; builds stuck in `building` are swept to
+  `failed` at startup; and `strata artifact verify` checks a whole store's
+  blobs against metadata after the fact.
+
 ### Fixed
 
 - **Multi-row-group scans no longer silently truncate** (#121): scanning
