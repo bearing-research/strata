@@ -787,6 +787,83 @@ class StrataClient:
         return response.json()
 
     # -------------------------------------------------------------------------
+    # Registry: aliases, tags, audit
+    # -------------------------------------------------------------------------
+
+    def set_alias(self, name: str, alias: str, artifact_id: str, version: int) -> dict:
+        """Point ``name @ alias`` (e.g. champion) at an artifact version.
+
+        Aliases are mutable intent pointers on a registry name — a name can
+        hold several (champion, candidate, baseline). Every move is recorded
+        in the append-only registry audit.
+        """
+        response = self._client.put(
+            f"/v1/names/{name}/aliases/{alias}",
+            json={"artifact_id": artifact_id, "version": version},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def resolve_alias(self, name: str, alias: str) -> dict:
+        """Resolve ``name @ alias`` to its artifact version info."""
+        response = self._client.get(f"/v1/names/{name}/aliases/{alias}")
+        response.raise_for_status()
+        return response.json()
+
+    def list_aliases(self, name: str) -> list[dict]:
+        """List the aliases held by a registry name."""
+        response = self._client.get(f"/v1/names/{name}/aliases")
+        response.raise_for_status()
+        return response.json()["aliases"]
+
+    def delete_alias(self, name: str, alias: str) -> dict:
+        """Delete ``name @ alias``."""
+        response = self._client.delete(f"/v1/names/{name}/aliases/{alias}")
+        response.raise_for_status()
+        return response.json()
+
+    def set_tag(self, artifact_id: str, version: int, key: str, value: str) -> dict:
+        """Set a key/value tag on an artifact version (e.g. auc=0.91)."""
+        response = self._client.put(
+            f"/v1/artifacts/{artifact_id}/v/{version}/tags",
+            json={"key": key, "value": str(value)},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_tags(self, artifact_id: str, version: int) -> dict[str, str]:
+        """Get the tags on an artifact version."""
+        response = self._client.get(f"/v1/artifacts/{artifact_id}/v/{version}/tags")
+        response.raise_for_status()
+        return response.json()["tags"]
+
+    def delete_tag(self, artifact_id: str, version: int, key: str) -> dict:
+        """Delete one tag from an artifact version."""
+        response = self._client.delete(f"/v1/artifacts/{artifact_id}/v/{version}/tags/{key}")
+        response.raise_for_status()
+        return response.json()
+
+    def get_registry_audit(
+        self,
+        name: str | None = None,
+        artifact_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Read the append-only registry audit (newest first).
+
+        Answers "what did this name point to before?" — every name, alias,
+        and tag mutation is recorded with actor, from/to versions, and time.
+        """
+        params: dict = {"limit": limit}
+        if name is not None:
+            params["name"] = name
+        if artifact_id is not None:
+            params["artifact_id"] = artifact_id
+        response = self._client.get("/v1/registry/audit", params=params)
+        response.raise_for_status()
+        return response.json()["entries"]
+
+    # -------------------------------------------------------------------------
     # Direct Artifact Upload (for local execution)
     # -------------------------------------------------------------------------
 

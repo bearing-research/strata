@@ -105,6 +105,23 @@ class ArtifactName:
 
 
 @dataclass(frozen=True)
+class ArtifactAlias:
+    """An intent pointer (champion, candidate, ...) on a registry name.
+
+    Aliases follow the post-stages registry model: a name can hold many
+    aliases, each a mutable pointer to one artifact version. Every move
+    is recorded in the append-only registry audit.
+    """
+
+    name: str
+    alias: str
+    artifact_id: str
+    version: int
+    updated_at: float
+    tenant: str | None = None
+
+
+@dataclass(frozen=True)
 class InputChange:
     """Describes a change in an input dependency.
 
@@ -283,6 +300,55 @@ CREATE TABLE IF NOT EXISTS artifact_names (
 CREATE INDEX IF NOT EXISTS idx_names_name ON artifact_names(name);
 """
 
+# Registry tables (aliases / tags / audit). Executed unconditionally at
+# init — CREATE IF NOT EXISTS makes it idempotent for both fresh and
+# existing databases (#129).
+_REGISTRY_SCHEMA_SQL = """
+-- Aliases: mutable intent pointers (champion, candidate, ...) on a name.
+-- A name can hold many aliases; each points at one artifact version.
+CREATE TABLE IF NOT EXISTS artifact_aliases (
+    name TEXT NOT NULL,
+    alias TEXT NOT NULL,
+    artifact_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    updated_at REAL NOT NULL,
+    tenant TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (tenant, name, alias)
+);
+CREATE INDEX IF NOT EXISTS idx_aliases_name ON artifact_aliases(name);
+
+-- Version tags: facts about a specific artifact version (auc=0.91, ...).
+CREATE TABLE IF NOT EXISTS artifact_tags (
+    artifact_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    tenant TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (tenant, artifact_id, version, key)
+);
+CREATE INDEX IF NOT EXISTS idx_tags_artifact ON artifact_tags(artifact_id, version);
+
+-- Append-only audit of every name/alias/tag mutation. Written in the
+-- same transaction as the mutation; never updated or deleted.
+CREATE TABLE IF NOT EXISTS registry_audit (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    at REAL NOT NULL,
+    actor TEXT,
+    action TEXT NOT NULL,
+    name TEXT,
+    alias TEXT,
+    artifact_id TEXT,
+    from_artifact_id TEXT,
+    from_version INTEGER,
+    to_version INTEGER,
+    key TEXT,
+    value TEXT,
+    tenant TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_audit_name ON registry_audit(name);
+"""
+
 # Migration SQL to add tenant columns to existing tables
 _MIGRATION_SQL = """
 -- Add tenant and principal columns to artifact_versions if they don't exist
@@ -445,6 +511,15 @@ class ArtifactStore:
                 # Fresh database: create schema
                 conn.executescript(_SCHEMA_SQL)
                 conn.commit()
+
+            # Registry tables (aliases/tags/audit) — idempotent, applies to
+            # fresh and existing databases alike (#129).
+            conn.executescript(_REGISTRY_SCHEMA_SQL)
+            cursor = conn.execute("PRAGMA table_info(registry_audit)")
+            audit_columns = {row["name"] for row in cursor.fetchall()}
+            if "from_artifact_id" not in audit_columns:
+                conn.execute("ALTER TABLE registry_audit ADD COLUMN from_artifact_id TEXT")
+            conn.commit()
         finally:
             conn.close()
 
@@ -855,6 +930,51 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    @staticmethod
+    def _audit_in_connection(
+        conn: sqlite3.Connection,
+        *,
+        action: str,
+        name: str | None = None,
+        alias: str | None = None,
+        artifact_id: str | None = None,
+        from_artifact_id: str | None = None,
+        from_version: int | None = None,
+        to_version: int | None = None,
+        key: str | None = None,
+        value: str | None = None,
+        actor: str | None = None,
+        tenant: str | None = None,
+    ) -> None:
+        """Append one registry audit row inside the caller's transaction.
+
+        The audit commits or rolls back with the mutation it records — a
+        mutation can never land unaudited, and a failed mutation leaves no
+        phantom audit row.
+        """
+        conn.execute(
+            """
+            INSERT INTO registry_audit
+                (at, actor, action, name, alias, artifact_id, from_artifact_id,
+                 from_version, to_version, key, value, tenant)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                time.time(),
+                actor,
+                action,
+                name,
+                alias,
+                artifact_id,
+                from_artifact_id,
+                from_version,
+                to_version,
+                key,
+                value,
+                tenant if tenant is not None else "",
+            ),
+        )
+
     def _set_name_in_connection(
         self,
         conn: sqlite3.Connection,
@@ -862,10 +982,30 @@ class ArtifactStore:
         artifact_id: str,
         version: int,
         tenant: str | None,
+        actor: str | None = None,
     ) -> None:
         """Set name within an existing connection (for use in transactions)."""
         # Use '' instead of NULL for personal mode (SQLite NULL != NULL in unique constraints)
         effective_tenant = tenant if tenant is not None else ""
+
+        # Audit: record what the name pointed at before this move.
+        cursor = conn.execute(
+            "SELECT artifact_id, version FROM artifact_names WHERE name = ? AND tenant = ?",
+            (name, effective_tenant),
+        )
+        previous = cursor.fetchone()
+        self._audit_in_connection(
+            conn,
+            action="name_set",
+            name=name,
+            artifact_id=artifact_id,
+            from_artifact_id=previous["artifact_id"] if previous else None,
+            from_version=previous["version"] if previous else None,
+            to_version=version,
+            actor=actor,
+            tenant=tenant,
+        )
+
         conn.execute(
             """
             INSERT INTO artifact_names (name, artifact_id, version, updated_at, tenant)
@@ -1186,6 +1326,7 @@ class ArtifactStore:
         artifact_id: str,
         version: int,
         tenant: str | None = None,
+        actor: str | None = None,
     ) -> None:
         """Create or update a name pointer.
 
@@ -1225,20 +1366,8 @@ class ArtifactStore:
                     f"{artifact_tenant}, cannot assign name in tenant {tenant}"
                 )
 
-            # Upsert name (tenant, name) is the unique key
-            # Use '' instead of NULL for personal mode (SQLite NULL != NULL in unique constraints)
-            effective_tenant = tenant if tenant is not None else ""
-            conn.execute(
-                """
-                INSERT INTO artifact_names (name, artifact_id, version, updated_at, tenant)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(tenant, name) DO UPDATE SET
-                    artifact_id = excluded.artifact_id,
-                    version = excluded.version,
-                    updated_at = excluded.updated_at
-                """,
-                (name, artifact_id, version, time.time(), effective_tenant),
-            )
+            # Upsert + audit in one transaction (shared with finalize paths)
+            self._set_name_in_connection(conn, name, artifact_id, version, tenant, actor=actor)
             conn.commit()
         finally:
             conn.close()
@@ -1338,9 +1467,22 @@ class ArtifactStore:
             # Use '' instead of NULL for personal mode
             effective_tenant = tenant if tenant is not None else ""
             cursor = conn.execute(
+                "SELECT version FROM artifact_names WHERE name = ? AND tenant = ?",
+                (name, effective_tenant),
+            )
+            previous = cursor.fetchone()
+            cursor = conn.execute(
                 "DELETE FROM artifact_names WHERE name = ? AND tenant = ?",
                 (name, effective_tenant),
             )
+            if cursor.rowcount > 0:
+                self._audit_in_connection(
+                    conn,
+                    action="name_delete",
+                    name=name,
+                    from_version=previous["version"] if previous else None,
+                    tenant=tenant,
+                )
             conn.commit()
             return cursor.rowcount > 0
         finally:
@@ -1373,6 +1515,325 @@ class ArtifactStore:
                 )
                 for row in cursor.fetchall()
             ]
+        finally:
+            conn.close()
+
+    # ------------------------------------------------------------------
+    # Registry: aliases, tags, audit (#129)
+    # ------------------------------------------------------------------
+
+    def set_alias(
+        self,
+        name: str,
+        alias: str,
+        artifact_id: str,
+        version: int,
+        tenant: str | None = None,
+        actor: str | None = None,
+    ) -> None:
+        """Point ``name @ alias`` at an artifact version (audited).
+
+        Raises:
+            ValueError: If the artifact doesn't exist, isn't readable, or
+                belongs to a different tenant.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                "SELECT state, tenant FROM artifact_versions WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            if row["state"] not in ("ready", "superseded"):
+                raise ValueError(
+                    f"Artifact {artifact_id}@v={version} is not readable (state={row['state']})"
+                )
+            artifact_tenant = row["tenant"] if row["tenant"] else None
+            if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
+                raise ValueError(
+                    f"Artifact {artifact_id}@v={version} belongs to tenant "
+                    f"{artifact_tenant}, cannot assign alias in tenant {tenant}"
+                )
+
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "SELECT artifact_id, version FROM artifact_aliases "
+                "WHERE name = ? AND alias = ? AND tenant = ?",
+                (name, alias, effective_tenant),
+            )
+            previous = cursor.fetchone()
+            self._audit_in_connection(
+                conn,
+                action="alias_set",
+                name=name,
+                alias=alias,
+                artifact_id=artifact_id,
+                from_artifact_id=previous["artifact_id"] if previous else None,
+                from_version=previous["version"] if previous else None,
+                to_version=version,
+                actor=actor,
+                tenant=tenant,
+            )
+            conn.execute(
+                """
+                INSERT INTO artifact_aliases
+                    (name, alias, artifact_id, version, updated_at, tenant)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tenant, name, alias) DO UPDATE SET
+                    artifact_id = excluded.artifact_id,
+                    version = excluded.version,
+                    updated_at = excluded.updated_at
+                """,
+                (name, alias, artifact_id, version, time.time(), effective_tenant),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def resolve_alias(
+        self,
+        name: str,
+        alias: str,
+        tenant: str | None = None,
+    ) -> ArtifactVersion | None:
+        """Resolve ``name @ alias`` to its artifact version."""
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "SELECT artifact_id, version FROM artifact_aliases "
+                "WHERE name = ? AND alias = ? AND tenant = ?",
+                (name, alias, effective_tenant),
+            )
+            row = cursor.fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        return self.get_artifact(row["artifact_id"], row["version"])
+
+    def list_aliases(
+        self,
+        name: str | None = None,
+        tenant: str | None = None,
+    ) -> list[ArtifactAlias]:
+        """List aliases — for one name, or the whole store when name is None."""
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            if name is not None:
+                cursor = conn.execute(
+                    "SELECT name, alias, artifact_id, version, updated_at, tenant "
+                    "FROM artifact_aliases WHERE name = ? AND tenant = ? ORDER BY alias",
+                    (name, effective_tenant),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT name, alias, artifact_id, version, updated_at, tenant "
+                    "FROM artifact_aliases WHERE tenant = ? ORDER BY name, alias",
+                    (effective_tenant,),
+                )
+            return [
+                ArtifactAlias(
+                    name=row["name"],
+                    alias=row["alias"],
+                    artifact_id=row["artifact_id"],
+                    version=row["version"],
+                    updated_at=row["updated_at"],
+                    tenant=row["tenant"] if row["tenant"] else None,
+                )
+                for row in cursor.fetchall()
+            ]
+        finally:
+            conn.close()
+
+    def list_all_aliases(self) -> list[ArtifactAlias]:
+        """List aliases across ALL tenants (maintenance/CLI use)."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                "SELECT name, alias, artifact_id, version, updated_at, tenant "
+                "FROM artifact_aliases ORDER BY name, alias"
+            )
+            return [
+                ArtifactAlias(
+                    name=row["name"],
+                    alias=row["alias"],
+                    artifact_id=row["artifact_id"],
+                    version=row["version"],
+                    updated_at=row["updated_at"],
+                    tenant=row["tenant"] if row["tenant"] else None,
+                )
+                for row in cursor.fetchall()
+            ]
+        finally:
+            conn.close()
+
+    def delete_alias(
+        self,
+        name: str,
+        alias: str,
+        tenant: str | None = None,
+        actor: str | None = None,
+    ) -> bool:
+        """Delete ``name @ alias`` (audited). Returns True if it existed."""
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "SELECT version FROM artifact_aliases WHERE name = ? AND alias = ? AND tenant = ?",
+                (name, alias, effective_tenant),
+            )
+            previous = cursor.fetchone()
+            cursor = conn.execute(
+                "DELETE FROM artifact_aliases WHERE name = ? AND alias = ? AND tenant = ?",
+                (name, alias, effective_tenant),
+            )
+            if cursor.rowcount > 0:
+                self._audit_in_connection(
+                    conn,
+                    action="alias_delete",
+                    name=name,
+                    alias=alias,
+                    from_version=previous["version"] if previous else None,
+                    actor=actor,
+                    tenant=tenant,
+                )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_tag(
+        self,
+        artifact_id: str,
+        version: int,
+        key: str,
+        value: str,
+        tenant: str | None = None,
+        actor: str | None = None,
+    ) -> None:
+        """Set a key/value tag on an artifact version (audited)."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                "SELECT state FROM artifact_versions WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            )
+            if cursor.fetchone() is None:
+                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+
+            effective_tenant = tenant if tenant is not None else ""
+            self._audit_in_connection(
+                conn,
+                action="tag_set",
+                artifact_id=artifact_id,
+                to_version=version,
+                key=key,
+                value=value,
+                actor=actor,
+                tenant=tenant,
+            )
+            conn.execute(
+                """
+                INSERT INTO artifact_tags
+                    (artifact_id, version, key, value, updated_at, tenant)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tenant, artifact_id, version, key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (artifact_id, version, key, str(value), time.time(), effective_tenant),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_tags(
+        self,
+        artifact_id: str,
+        version: int,
+        tenant: str | None = None,
+    ) -> dict[str, str]:
+        """Return the tags on an artifact version as a dict."""
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "SELECT key, value FROM artifact_tags "
+                "WHERE artifact_id = ? AND version = ? AND tenant = ? ORDER BY key",
+                (artifact_id, version, effective_tenant),
+            )
+            return {row["key"]: row["value"] for row in cursor.fetchall()}
+        finally:
+            conn.close()
+
+    def delete_tag(
+        self,
+        artifact_id: str,
+        version: int,
+        key: str,
+        tenant: str | None = None,
+        actor: str | None = None,
+    ) -> bool:
+        """Delete one tag (audited). Returns True if it existed."""
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "DELETE FROM artifact_tags "
+                "WHERE artifact_id = ? AND version = ? AND key = ? AND tenant = ?",
+                (artifact_id, version, key, effective_tenant),
+            )
+            if cursor.rowcount > 0:
+                self._audit_in_connection(
+                    conn,
+                    action="tag_delete",
+                    artifact_id=artifact_id,
+                    from_version=version,
+                    key=key,
+                    actor=actor,
+                    tenant=tenant,
+                )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def read_audit(
+        self,
+        name: str | None = None,
+        artifact_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Read registry audit entries, newest first.
+
+        Filters are ANDed when both given. Tenant-agnostic by design:
+        the audit is the compliance record for the whole store.
+        """
+        conn = self._get_connection()
+        try:
+            query = (
+                "SELECT seq, at, actor, action, name, alias, artifact_id, "
+                "from_artifact_id, from_version, to_version, key, value, tenant "
+                "FROM registry_audit"
+            )
+            clauses: list[str] = []
+            params: list = []
+            if name is not None:
+                clauses.append("name = ?")
+                params.append(name)
+            if artifact_id is not None:
+                clauses.append("artifact_id = ?")
+                params.append(artifact_id)
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            query += " ORDER BY seq DESC LIMIT ?"
+            params.append(limit)
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 

@@ -11,6 +11,19 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **Registry layer: aliases, tags, and an append-only audit log** (#129):
+  promotion is no longer a silent pointer swap. A registry name can hold
+  many **aliases** (`taxi/tip-model @ champion`, `@ candidate`) following
+  the post-stages industry model; artifact versions carry queryable
+  **tags** (`auc=0.91`, `validated_by=…`); and every name/alias/tag
+  mutation lands in an immutable **audit** written in the same transaction
+  (`who, what, from → to, when`) — including names set by `materialize`
+  itself. New SDK methods (`set_alias`, `resolve_alias`, `set_tag`,
+  `get_registry_audit`, …), REST routes under `/v1/names/{name}/aliases`
+  and `/v1/artifacts/{id}/v/{n}/tags`, and `strata artifact audit [name]`
+  which renders the history (`old-id@v1 -> new-id@v1`). Alias refs
+  (`name@alias`) are accepted anywhere the artifact CLI takes a reference.
+
 - **Prompt cells stream live** (#111): LLM output renders token-by-token
   on the cell card as the model generates, instead of appearing all at
   once on completion. Schema-validation retries surface as a badge on

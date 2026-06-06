@@ -49,6 +49,13 @@ def _resolve_ref(store: ArtifactStore, ref: str) -> ArtifactVersion | None:
         if pointer.name == ref:
             return store.get_artifact(pointer.artifact_id, pointer.version)
 
+    # name@alias (registry pointer): taxi/tip-model@champion
+    if "@" in ref and "@v=" not in ref:
+        name_part, _, alias_part = ref.rpartition("@")
+        for alias in store.list_all_aliases():
+            if alias.name == name_part and alias.alias == alias_part:
+                return store.get_artifact(alias.artifact_id, alias.version)
+
     if "@v=" in ref:
         artifact_id, _, version_str = ref.partition("@v=")
         try:
@@ -86,6 +93,11 @@ def _fmt_size(byte_size: int | None) -> str:
 
 def _artifact_payload(store: ArtifactStore, artifact: ArtifactVersion) -> dict:
     input_versions = json.loads(artifact.input_versions) if artifact.input_versions else {}
+    aliases = [
+        f"{a.name}@{a.alias}"
+        for a in store.list_all_aliases()
+        if a.artifact_id == artifact.id and a.version == artifact.version
+    ]
     return {
         "artifact_id": artifact.id,
         "version": artifact.version,
@@ -94,6 +106,8 @@ def _artifact_payload(store: ArtifactStore, artifact: ArtifactVersion) -> dict:
         "byte_size": artifact.byte_size,
         "created_at": artifact.created_at,
         "names": _names_for(store, artifact.id, artifact.version),
+        "aliases": aliases,
+        "tags": store.get_tags(artifact.id, artifact.version),
         "transform": json.loads(artifact.transform_spec) if artifact.transform_spec else None,
         "inputs": input_versions,
     }
@@ -160,6 +174,10 @@ def cmd_show(args: argparse.Namespace) -> int:
     print(f"created:   {_fmt_when(artifact.created_at)}")
     if payload["names"]:
         print(f"names:     {', '.join(payload['names'])}")
+    if payload["aliases"]:
+        print(f"aliases:   {', '.join(payload['aliases'])}")
+    if payload["tags"]:
+        print("tags:      " + ", ".join(f"{k}={v}" for k, v in payload["tags"].items()))
     transform = payload["transform"]
     if transform:
         print(f"transform: {transform.get('executor', '?')}")
@@ -316,3 +334,47 @@ def cmd_verify(args: argparse.Namespace) -> int:
             print(f"\n{len(findings)} problem(s) found")
 
     return 1 if findings else 0
+
+
+# ---------------------------------------------------------------------------
+# audit
+# ---------------------------------------------------------------------------
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    """Render the append-only registry audit, newest first."""
+    store = _open_store(args.artifact_dir)
+    if store is None:
+        return 2
+
+    entries = store.read_audit(name=args.name, limit=args.limit)
+    if args.format == "json":
+        print(json.dumps(entries, indent=2))
+        return 0
+
+    if not entries:
+        print("no audit entries")
+        return 0
+
+    for e in entries:
+        when = _fmt_when(e["at"])
+        actor = e["actor"] or "-"
+        target = e["name"] or e["artifact_id"] or "?"
+        if e["alias"]:
+            target += f"@{e['alias']}"
+        detail = ""
+        if e["action"] in ("name_set", "alias_set"):
+            to_ref = f"{(e['artifact_id'] or '?')[:8]}@v{e['to_version']}"
+            if e.get("from_artifact_id"):
+                from_ref = f"{e['from_artifact_id'][:8]}@v{e['from_version']}"
+                detail = f"{from_ref} -> {to_ref}"
+            elif e["from_version"] is not None:
+                detail = f"v{e['from_version']} -> {to_ref}"
+            else:
+                detail = f"-> {to_ref}"
+        elif e["action"] in ("name_delete", "alias_delete"):
+            detail = f"was v{e['from_version']}" if e["from_version"] is not None else ""
+        elif e["action"].startswith("tag_"):
+            detail = f"{e['key']}={e['value']}" if e["value"] is not None else e["key"] or ""
+        print(f"{when}  {e['action']:<12} {target:<40} {detail}  [{actor}]")
+    return 0

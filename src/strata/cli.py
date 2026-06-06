@@ -173,6 +173,35 @@ def _build_parser() -> argparse.ArgumentParser:
     pull_parser.add_argument("--to", default=None, help="Output path (default <ref>.arrow)")
     pull_parser.set_defaults(func=_dispatch_artifact("cmd_pull"))
 
+    audit_parser = artifact_sub.add_parser(
+        "audit",
+        help="Show the registry audit: every name/alias/tag mutation",
+        description=(
+            "Append-only history of name, alias, and tag mutations — "
+            'answers "what did this name point to before?". Newest first.'
+        ),
+    )
+    audit_parser.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="Filter to one registry name (optional)",
+    )
+    audit_parser.add_argument(
+        "--artifact-dir",
+        dest="artifact_dir",
+        default=None,
+        help="Artifact store directory (default: ~/.strata/artifacts)",
+    )
+    audit_parser.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format (default: human)",
+    )
+    audit_parser.add_argument("--limit", type=int, default=50, help="Max entries (default 50)")
+    audit_parser.set_defaults(func=_dispatch_artifact("cmd_audit"))
+
     verify_parser = artifact_sub.add_parser(
         "verify",
         help="Check every artifact blob against its metadata",

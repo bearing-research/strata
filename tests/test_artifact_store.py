@@ -662,3 +662,140 @@ class TestLegacyDefaultTenantNames:
 
         with pytest.raises(ValueError, match="cannot assign name"):
             store.set_name("steal", "owned", 1, tenant="globex")
+
+
+def _make_ready_artifact(store, artifact_id: str, provenance: str) -> None:
+    store.create_artifact(artifact_id, provenance)
+    store.write_blob(artifact_id, 1, _ipc_bytes(1))
+    store.finalize_artifact(artifact_id, 1, "{}", 1, 10)
+
+
+class TestAliases:
+    """Registry aliases: intent pointers on a name (#129)."""
+
+    def test_set_and_resolve(self, store):
+        _make_ready_artifact(store, "model-a", "prov-a")
+        store.set_alias("demo/model", "champion", "model-a", 1)
+        resolved = store.resolve_alias("demo/model", "champion")
+        assert (resolved.id, resolved.version) == ("model-a", 1)
+
+    def test_many_aliases_per_name(self, store):
+        _make_ready_artifact(store, "model-a", "prov-a")
+        _make_ready_artifact(store, "model-b", "prov-b")
+        store.set_alias("demo/model", "champion", "model-a", 1)
+        store.set_alias("demo/model", "candidate", "model-b", 1)
+
+        aliases = store.list_aliases("demo/model")
+        assert [(a.alias, a.artifact_id) for a in aliases] == [
+            ("candidate", "model-b"),
+            ("champion", "model-a"),
+        ]
+
+    def test_alias_move_keeps_old_version_reachable(self, store):
+        """The friction-#9 scenario: promotion must not lose the old champion."""
+        _make_ready_artifact(store, "model-a", "prov-a")
+        _make_ready_artifact(store, "model-b", "prov-b")
+        store.set_alias("demo/model", "champion", "model-a", 1)
+        store.set_alias("demo/model", "champion", "model-b", 1)  # promote
+
+        # Champion moved...
+        assert store.resolve_alias("demo/model", "champion").id == "model-b"
+        # ...and the audit answers "what was champion before?"
+        moves = [e for e in store.read_audit(name="demo/model") if e["action"] == "alias_set"]
+        assert len(moves) == 2
+        latest = moves[0]
+        assert latest["artifact_id"] == "model-b"
+        assert latest["from_version"] == 1  # pointed at model-a v1 before
+
+    def test_unknown_artifact_rejected(self, store):
+        with pytest.raises(ValueError, match="not found"):
+            store.set_alias("demo/model", "champion", "ghost", 1)
+
+    def test_superseded_artifact_allowed(self, store):
+        _make_ready_artifact(store, "model-a", "prov-x")
+        store.create_artifact("model-a", "prov-x")
+        store.write_blob("model-a", 2, _ipc_bytes(1))
+        store.finalize_artifact("model-a", 2, "{}", 1, 10)  # supersedes v1
+
+        # An alias may pin the superseded version (still immutable + readable)
+        store.set_alias("demo/model", "baseline", "model-a", 1)
+        assert store.resolve_alias("demo/model", "baseline").version == 1
+
+    def test_delete_alias(self, store):
+        _make_ready_artifact(store, "model-a", "prov-a")
+        store.set_alias("demo/model", "champion", "model-a", 1)
+        assert store.delete_alias("demo/model", "champion") is True
+        assert store.resolve_alias("demo/model", "champion") is None
+        assert store.delete_alias("demo/model", "champion") is False
+
+
+class TestTags:
+    """Version tags: facts about one artifact build (#129)."""
+
+    def test_set_get_tags(self, store):
+        _make_ready_artifact(store, "model-a", "prov-a")
+        store.set_tag("model-a", 1, "auc", "0.91")
+        store.set_tag("model-a", 1, "validated_by", "fangchen")
+        assert store.get_tags("model-a", 1) == {"auc": "0.91", "validated_by": "fangchen"}
+
+    def test_tag_overwrite(self, store):
+        _make_ready_artifact(store, "model-a", "prov-a")
+        store.set_tag("model-a", 1, "auc", "0.91")
+        store.set_tag("model-a", 1, "auc", "0.93")
+        assert store.get_tags("model-a", 1) == {"auc": "0.93"}
+
+    def test_tag_unknown_artifact_rejected(self, store):
+        with pytest.raises(ValueError, match="not found"):
+            store.set_tag("ghost", 1, "k", "v")
+
+    def test_delete_tag(self, store):
+        _make_ready_artifact(store, "model-a", "prov-a")
+        store.set_tag("model-a", 1, "auc", "0.91")
+        assert store.delete_tag("model-a", 1, "auc") is True
+        assert store.get_tags("model-a", 1) == {}
+
+
+class TestRegistryAudit:
+    """Append-only audit of name/alias/tag mutations (#129)."""
+
+    def test_name_moves_audited_with_history(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        _make_ready_artifact(store, "m2", "prov-2")
+        store.set_name("demo/model", "m1", 1)
+        store.set_name("demo/model", "m2", 1)  # the silent-swap, now recorded
+
+        entries = store.read_audit(name="demo/model")
+        assert [e["action"] for e in entries] == ["name_set", "name_set"]
+        assert entries[0]["artifact_id"] == "m2"
+        assert entries[0]["from_version"] == 1
+        assert entries[1]["from_version"] is None  # first set had no previous
+
+    def test_name_delete_audited(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        store.set_name("demo/model", "m1", 1)
+        store.delete_name("demo/model")
+        actions = [e["action"] for e in store.read_audit(name="demo/model")]
+        assert actions[0] == "name_delete"
+
+    def test_finalize_promotion_audited(self, store):
+        """Names set through finalize_and_set_name land in the audit too."""
+        store.create_artifact("m1", "prov-f")
+        store.write_blob("m1", 1, _ipc_bytes(1))
+        store.finalize_and_set_name("m1", 1, "{}", 1, 10, name="auto/model")
+        entries = store.read_audit(name="auto/model")
+        assert entries and entries[0]["action"] == "name_set"
+
+    def test_tag_audit_carries_key_value(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        store.set_tag("m1", 1, "auc", "0.91", actor="ci-bot")
+        entry = store.read_audit(artifact_id="m1")[0]
+        assert entry["action"] == "tag_set"
+        assert (entry["key"], entry["value"]) == ("auc", "0.91")
+        assert entry["actor"] == "ci-bot"
+
+    def test_audit_filters_and_limit(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        for i in range(5):
+            store.set_tag("m1", 1, f"k{i}", "v")
+        assert len(store.read_audit(artifact_id="m1", limit=3)) == 3
+        assert store.read_audit(name="unrelated") == []
