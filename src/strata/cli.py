@@ -6,6 +6,7 @@ Subcommands:
     new       Scaffold a notebook directory
     export    Render a notebook to markdown or HTML for sharing
     import    Convert a Jupyter .ipynb file into a Strata notebook directory
+    artifact  Artifact store maintenance (verify)
 
 The existing ``strata-notebook`` script and ``python -m strata`` entry
 points still start the server; they predate this CLI and stay as-is
@@ -99,6 +100,38 @@ def _build_parser() -> argparse.ArgumentParser:
     add_import_arguments(import_parser)
     import_parser.set_defaults(func=_dispatch_import)
 
+    artifact_parser = subparsers.add_parser(
+        "artifact",
+        help="Artifact store maintenance",
+        description="Inspect and maintain a Strata artifact store.",
+    )
+    artifact_sub = artifact_parser.add_subparsers(dest="artifact_command", metavar="<command>")
+
+    verify_parser = artifact_sub.add_parser(
+        "verify",
+        help="Check every artifact blob against its metadata",
+        description=(
+            "For each ready/superseded artifact: the blob must exist, parse "
+            "as exactly one Arrow IPC stream, and match the recorded row "
+            "count. Reports inconsistencies; exit 0 clean, 1 problems found, "
+            "2 invocation error."
+        ),
+    )
+    verify_parser.add_argument(
+        "artifact_dir",
+        nargs="?",
+        default=None,
+        help="Artifact store directory (default: ~/.strata/artifacts)",
+    )
+    verify_parser.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format (default: human)",
+    )
+    verify_parser.set_defaults(func=_dispatch_artifact_verify)
+    artifact_parser.set_defaults(func=lambda args: (artifact_parser.print_help(), 0)[1])
+
     return parser
 
 
@@ -126,6 +159,36 @@ def _dispatch_export(args: argparse.Namespace) -> int:
 
 def _dispatch_import(args: argparse.Namespace) -> int:
     return import_main(args)
+
+
+def _dispatch_artifact_verify(args: argparse.Namespace) -> int:
+    import json
+    from pathlib import Path
+
+    from strata.artifact_store import ArtifactStore
+
+    artifact_dir = (
+        Path(args.artifact_dir) if args.artifact_dir else Path.home() / ".strata" / "artifacts"
+    )
+    if not artifact_dir.exists():
+        print(f"artifact directory not found: {artifact_dir}", file=sys.stderr)
+        return 2
+
+    store = ArtifactStore(artifact_dir)
+    findings = store.verify_artifacts()
+
+    if args.format == "json":
+        print(json.dumps({"artifact_dir": str(artifact_dir), "findings": findings}, indent=2))
+    else:
+        print(f"verifying: {artifact_dir}")
+        if not findings:
+            print("\n✓ store is consistent")
+        else:
+            for f in findings:
+                print(f"  ✗ {f['artifact_id']}@v={f['version']} [{f['problem']}] {f['detail']}")
+            print(f"\n{len(findings)} problem(s) found")
+
+    return 1 if findings else 0
 
 
 def main(argv: list[str] | None = None) -> int:

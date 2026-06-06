@@ -310,6 +310,10 @@ class StrataConfig(BaseSettings):
     # for a developer running on localhost.
     personal_mode_user_header: str | None = None
     artifact_dir: Path | None = None
+    # Builds stuck in 'building' longer than this are demoted to failed at
+    # startup (zombie sweep) — they can never serve data and would otherwise
+    # linger in the store forever.
+    artifact_zombie_build_timeout_seconds: Annotated[float, Field(gt=0)] = 3600.0
     notebook_storage_dir: Path = Field(
         default_factory=lambda: Path.home() / ".strata" / "notebooks"
     )

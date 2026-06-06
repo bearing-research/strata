@@ -648,8 +648,13 @@ class TestClientFetch:
         finally:
             client.close()
 
-    def test_client_materialize_refresh_bypasses_cache(self, server_with_personal_mode):
-        """refresh=True should force a fresh artifact instead of reusing cache."""
+    def test_client_materialize_refresh_rebuilds_same_artifact(self, server_with_personal_mode):
+        """refresh=True rebuilds as a new version of the SAME artifact (#123).
+
+        Refresh used to fork a parallel artifact identity that provenance
+        lookups never returned; it now supersedes the old version so the
+        rebuild becomes canonical.
+        """
         from strata.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
@@ -662,15 +667,26 @@ class TestClientFetch:
                 inputs=[table_uri],
                 transform={"executor": "scan@v1", "params": {"columns": ["id"]}},
             )
+            artifact1.to_table()  # consume so the artifact finalizes
             artifact2 = client.materialize(
                 inputs=[table_uri],
                 transform={"executor": "scan@v1", "params": {"columns": ["id"]}},
                 refresh=True,
             )
+            artifact2.to_table()
 
             assert artifact1.cache_hit is False
             assert artifact2.cache_hit is False
-            assert artifact2.artifact_id != artifact1.artifact_id
+            assert artifact2.artifact_id == artifact1.artifact_id
+            assert artifact2.version == artifact1.version + 1
+
+            # Provenance cache now resolves the rebuild
+            artifact3 = client.materialize(
+                inputs=[table_uri],
+                transform={"executor": "scan@v1", "params": {"columns": ["id"]}},
+            )
+            assert artifact3.cache_hit is True
+            assert artifact3.version == artifact2.version
         finally:
             client.close()
 

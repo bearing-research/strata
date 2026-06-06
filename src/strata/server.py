@@ -39,7 +39,7 @@ from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
 from strata.cache_warmer import CacheWarmer
 from strata.config import StrataConfig
-from strata.fast_io import IncrementalIpcMerger, concat_stream_bytes
+from strata.fast_io import IncrementalIpcMerger, concat_stream_bytes, validate_ipc_stream
 from strata.gc_tracker import get_gc_stats, get_recent_gc_pauses, install_gc_tracker
 from strata.health import HealthStatus, run_health_checks
 from strata.json_types import JsonValue
@@ -449,13 +449,6 @@ def _input_version_to_artifact_ref(
         return None
 
     return (f"strata://artifact/{artifact_id}@v={version}", artifact_id, version)
-
-
-def _apply_refresh_provenance(provenance_hash: str, refresh: bool) -> str:
-    """Force a fresh artifact identity when refresh=True."""
-    if not refresh:
-        return provenance_hash
-    return f"refresh:{uuid.uuid4().hex}:{provenance_hash}"
 
 
 def _cancel_stream_cleanup(state: ServerState, stream_id: str) -> None:
@@ -1125,6 +1118,23 @@ async def lifespan(app: FastAPI):
         stale_removed = store.cleanup_stale_parquet_meta()
     except Exception:
         pass  # Don't fail startup if cleanup fails
+
+    # Sweep zombie builds (#123): artifacts stuck in 'building' — queued into
+    # a mode with no executor, or left by a crashed builder — are demoted to
+    # failed so they surface as failures instead of lingering forever.
+    if config.writes_enabled or config.server_transforms_enabled:
+        try:
+            from strata.artifact_store import get_artifact_store as _get_store_for_sweep
+
+            sweep_store = _get_store_for_sweep(config.artifact_dir)
+            if sweep_store is not None:
+                zombie_count = sweep_store.sweep_zombie_builds(
+                    config.artifact_zombie_build_timeout_seconds
+                )
+                if zombie_count:
+                    logger.warning("zombie_builds_swept", count=zombie_count)
+        except Exception:
+            pass  # Don't fail startup if sweep fails
 
     # Initialize build QoS for server-mode transforms (quotas + backpressure)
     build_qos = None
@@ -3611,11 +3621,10 @@ async def materialize_artifact(request: MaterializeRequest):
     input_hashes = [f"{uri}:{version}" for uri, version in sorted(input_versions.items())]
 
     provenance_hash = compute_provenance_hash(input_hashes, transform_spec)
-    provenance_hash = _apply_refresh_provenance(provenance_hash, request.refresh)
 
     # Check for existing artifact with same provenance (tenant-scoped)
     existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
-    if existing is not None:
+    if existing is not None and not request.refresh:
         artifact_uri = f"strata://artifact/{existing.id}@v={existing.version}"
 
         # Optionally set name (tenant-scoped)
@@ -3629,8 +3638,14 @@ async def materialize_artifact(request: MaterializeRequest):
             state="ready",
         )
 
-    # Cache miss - create new artifact in building state (tenant-scoped)
-    artifact_id = str(uuid.uuid4())
+    # Cache miss - create new artifact in building state (tenant-scoped).
+    # A refresh rebuild reuses the existing artifact id so it becomes a new
+    # version of the same artifact; finalize supersedes the old ready version
+    # and provenance lookups resolve to the rebuild (#123).
+    if request.refresh and existing is not None:
+        artifact_id = existing.id
+    else:
+        artifact_id = str(uuid.uuid4())
     version = store.create_artifact(
         artifact_id=artifact_id,
         provenance_hash=provenance_hash,
@@ -3914,10 +3929,23 @@ async def put_artifact(request: Request):
             )
         arrow_bytes = await data_file.read()
 
-        # Parse Arrow to get schema and row count
+        # Parse Arrow to get schema and row count. The buffer must be exactly
+        # one IPC stream — trailing bytes (concatenated streams) would be
+        # silently dropped by every standard reader downstream (#123).
         try:
-            reader = ipc.open_stream(pa.BufferReader(arrow_bytes))
+            buf = pa.BufferReader(arrow_bytes)
+            reader = ipc.open_stream(buf)
             table = reader.read_all()
+            if buf.tell() != len(arrow_bytes):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Invalid Arrow IPC data: {len(arrow_bytes) - buf.tell()} trailing "
+                        "bytes after stream end (concatenated streams?)"
+                    ),
+                )
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid Arrow IPC data: {e}")
 
@@ -4335,7 +4363,7 @@ async def get_artifact_lineage(
         tenant_filter,
     )
 
-    if artifact.state != "ready":
+    if artifact.state not in ("ready", "superseded"):
         raise HTTPException(
             status_code=400,
             detail=f"Artifact is not ready (state={artifact.state})",
@@ -4531,7 +4559,7 @@ async def get_artifact_dependents(
         tenant_filter,
     )
 
-    if artifact.state != "ready":
+    if artifact.state not in ("ready", "superseded"):
         raise HTTPException(
             status_code=400,
             detail=f"Artifact is not ready (state={artifact.state})",
@@ -4824,7 +4852,7 @@ async def download_artifact_signed(
     if artifact is None:
         raise HTTPException(status_code=404, detail="Artifact not found")
 
-    if artifact.state != "ready":
+    if artifact.state not in ("ready", "superseded"):
         raise HTTPException(
             status_code=400,
             detail=f"Artifact is not ready (state={artifact.state})",
@@ -5402,7 +5430,7 @@ async def get_artifact_data(artifact_id: str, version: int):
         store.get_artifact(artifact_id, version),
         tenant_filter,
     )
-    if artifact.state != "ready":
+    if artifact.state not in ("ready", "superseded"):
         raise HTTPException(
             status_code=400,
             detail=f"Artifact is not ready (state={artifact.state})",
@@ -5746,8 +5774,6 @@ async def _handle_identity_materialize(
         columns=identity_params.columns,
         filters=filters,
     )
-    provenance_hash = _apply_refresh_provenance(provenance_hash, request.refresh)
-
     # Get artifact store (allow writes for personal mode)
     store = get_artifact_store(state.config.artifact_dir)
 
@@ -5755,9 +5781,10 @@ async def _handle_identity_materialize(
     input_versions = {table_uri: str(plan.snapshot_id)}
 
     # Check for existing artifact with same provenance
+    existing = None
     if store is not None:
         existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
-        if existing is not None and existing.state == "ready":
+        if existing is not None and existing.state == "ready" and not request.refresh:
             artifact_uri = f"strata://artifact/{existing.id}@v={existing.version}"
 
             # Set name if requested
@@ -5782,9 +5809,18 @@ async def _handle_identity_materialize(
                 stream_url=stream_url if request.mode == "stream" else None,
             )
 
-    # Cache miss - need to build the artifact
-    artifact_id = str(uuid.uuid4())
-    stream_id = artifact_id  # Use same ID for simplicity
+    # Cache miss (or refresh rebuild) - need to build the artifact.
+    # A refresh rebuild reuses the existing artifact id so it becomes a new
+    # version of the same artifact; finalize supersedes the old ready version
+    # and provenance lookups resolve to the rebuild (#123). The stream id
+    # stays unique per request — older streams for the same artifact id may
+    # still be in the registry.
+    if request.refresh and existing is not None:
+        artifact_id = existing.id
+        stream_id = str(uuid.uuid4())
+    else:
+        artifact_id = str(uuid.uuid4())
+        stream_id = artifact_id  # Use same ID for simplicity
 
     # Create artifact in building state (if store is available)
     artifact_version = 1
@@ -6178,17 +6214,24 @@ async def _finalize_stream_artifact(stream_state: StreamState, data: bytes, row_
         return  # No artifact store in service mode
 
     try:
+        # Integrity gate (#123): the blob must be exactly one readable IPC
+        # stream whose row total matches what the plan's tasks reported.
+        # A mismatch marks the artifact failed (via the except below)
+        # instead of persisting silently truncated data as ready.
+        readable_rows = validate_ipc_stream(data)
+        if readable_rows != row_count:
+            raise ValueError(
+                f"Artifact blob integrity check failed: stream yields "
+                f"{readable_rows} rows, build reported {row_count}"
+            )
+
         # Write blob
         store.write_blob(stream_state.artifact_id, stream_state.artifact_version, data)
 
-        # Extract schema from Arrow IPC data
+        # Extract schema from Arrow IPC data (validated above, so this parses)
         schema_json = ""
         if data:
-            try:
-                reader = ipc.open_stream(data)
-                schema_json = reader.schema.to_string()
-            except Exception:
-                pass
+            schema_json = ipc.open_stream(data).schema.to_string()
 
         # Finalize artifact and atomically update the requested name pointer.
         finalized_artifact = store.finalize_and_set_name(

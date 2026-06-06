@@ -921,3 +921,32 @@ class TestIncrementalIpcMerger:
         """finish() before any feed yields nothing."""
         merger = fast_io.IncrementalIpcMerger()
         assert merger.finish() == b""
+
+
+class TestValidateIpcStream:
+    """Tests for the write-time integrity gate (#123)."""
+
+    def test_valid_single_stream(self):
+        batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
+        assert fast_io.validate_ipc_stream(create_stream_bytes(batch)) == 3
+
+    def test_multi_batch_stream(self):
+        sink = pa.BufferOutputStream()
+        writer = ipc.new_stream(sink, pa.schema([("id", pa.int64())]))
+        writer.write_batch(pa.RecordBatch.from_pydict({"id": [1, 2]}))
+        writer.write_batch(pa.RecordBatch.from_pydict({"id": [3]}))
+        writer.close()
+        assert fast_io.validate_ipc_stream(sink.getvalue().to_pybytes()) == 3
+
+    def test_concatenated_streams_rejected(self):
+        """The #121 corruption shape: complete streams butted together."""
+        segment = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1]}))
+        with pytest.raises(ValueError, match="Trailing bytes"):
+            fast_io.validate_ipc_stream(segment + segment)
+
+    def test_garbage_rejected(self):
+        with pytest.raises(pa.ArrowInvalid):
+            fast_io.validate_ipc_stream(b"not arrow data at all")
+
+    def test_empty_is_zero_rows(self):
+        assert fast_io.validate_ipc_stream(b"") == 0

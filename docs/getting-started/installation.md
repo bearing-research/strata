@@ -93,6 +93,7 @@ and CLI binary are both named `strata`.
 | `uv run strata new <name>` | Scaffold a notebook directory. See [Headless Runner](../notebook/cli.md#strata-new). |
 | `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML. See [Export](../notebook/export.md). |
 | `uv run strata import <ipynb-file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory. See [Import from Jupyter](../notebook/import.md). |
+| `uv run strata artifact verify [dir]` | Check every artifact blob against its metadata (single valid stream, row counts match). Exit 0 clean, 1 problems found. |
 | `uv run strata-worker --port 9000` | Start a remote worker for `# @worker` cells. See [Distributed Workers](../notebook/workers.md). |
 
 The `uv run` prefix ensures the command resolves to the binary

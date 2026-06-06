@@ -236,6 +236,31 @@ class _StreamingBuffer:
         return False
 
 
+def validate_ipc_stream(data: _BytesLike) -> int:
+    """Validate that ``data`` is exactly one Arrow IPC stream; return its row count.
+
+    Catches the #121 corruption class at write time: multiple complete IPC
+    streams butted together parse "successfully" with a standard reader but
+    silently drop every row after the first end-of-stream marker.
+
+    Raises:
+        ValueError: If bytes remain after the first stream's EOS marker.
+        pyarrow.lib.ArrowInvalid: If the data is not a parseable IPC stream.
+    """
+    if not data:
+        return 0
+
+    buf = pa.BufferReader(pa.py_buffer(data))
+    reader = ipc.open_stream(buf)
+    rows = sum(batch.num_rows for batch in reader)
+    if buf.tell() != len(data):
+        raise ValueError(
+            f"Trailing bytes after IPC stream end: {len(data) - buf.tell()} of "
+            f"{len(data)} bytes unread (concatenated streams?)"
+        )
+    return rows
+
+
 class IncrementalIpcMerger:
     """Merge complete IPC stream segments into one stream, one segment at a time.
 
