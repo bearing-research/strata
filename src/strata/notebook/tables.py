@@ -55,15 +55,11 @@ def resolve_table_snapshot(spec: TableSpec, config: StrataConfig) -> int:
         catalog = PyIcebergCatalog(config)
         table = catalog.load_table(spec.uri)
     except Exception as e:
-        raise ValueError(
-            f"@table {spec.name}: cannot load table {spec.uri!r}: {e}"
-        ) from e
+        raise ValueError(f"@table {spec.name}: cannot load table {spec.uri!r}: {e}") from e
 
     snapshot = table.current_snapshot()
     if snapshot is None:
-        raise ValueError(
-            f"@table {spec.name}: table {spec.uri!r} has no snapshots yet"
-        )
+        raise ValueError(f"@table {spec.name}: table {spec.uri!r} has no snapshots yet")
     return snapshot.snapshot_id
 
 
