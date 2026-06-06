@@ -799,3 +799,69 @@ class TestRegistryAudit:
             store.set_tag("m1", 1, f"k{i}", "v")
         assert len(store.read_audit(artifact_id="m1", limit=3)) == 3
         assert store.read_audit(name="unrelated") == []
+
+
+class TestPendingAliasChanges:
+    """Approval-gate mechanics: request / approve / reject (#129 follow-up)."""
+
+    def test_request_and_approve_set(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        store.request_alias_change(
+            "demo/model", "champion", "set", artifact_id="m1", version=1, actor="requester"
+        )
+
+        # Not applied yet
+        assert store.resolve_alias("demo/model", "champion") is None
+        pending = store.list_pending_changes()
+        assert len(pending) == 1 and pending[0]["action"] == "set"
+
+        applied = store.approve_alias_change("demo/model", "champion", actor="approver")
+        assert applied["artifact_id"] == "m1"
+        assert store.resolve_alias("demo/model", "champion").id == "m1"
+        assert store.list_pending_changes() == []
+
+        # Audit trail: request -> approved -> the applied alias_set
+        actions = [e["action"] for e in store.read_audit(name="demo/model")]
+        assert actions[:3] == ["alias_set", "alias_approved", "alias_request_set"]
+        approved = next(
+            e for e in store.read_audit(name="demo/model") if e["action"] == "alias_approved"
+        )
+        assert approved["actor"] == "approver"
+
+    def test_reject_discards(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        store.request_alias_change("demo/model", "champion", "set", artifact_id="m1", version=1)
+        rejected = store.reject_alias_change("demo/model", "champion", actor="reviewer")
+        assert rejected["artifact_id"] == "m1"
+        assert store.resolve_alias("demo/model", "champion") is None
+        assert store.list_pending_changes() == []
+        actions = [e["action"] for e in store.read_audit(name="demo/model")]
+        assert actions[0] == "alias_rejected"
+
+    def test_request_delete_then_approve(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        store.set_alias("demo/model", "champion", "m1", 1)
+        store.request_alias_change("demo/model", "champion", "delete")
+        # still resolvable until approved
+        assert store.resolve_alias("demo/model", "champion") is not None
+        store.approve_alias_change("demo/model", "champion")
+        assert store.resolve_alias("demo/model", "champion") is None
+
+    def test_new_request_replaces_previous(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        _make_ready_artifact(store, "m2", "prov-2")
+        store.request_alias_change("demo/model", "champion", "set", artifact_id="m1", version=1)
+        store.request_alias_change("demo/model", "champion", "set", artifact_id="m2", version=1)
+        pending = store.list_pending_changes()
+        assert len(pending) == 1
+        assert pending[0]["artifact_id"] == "m2"
+
+    def test_approve_without_pending_raises(self, store):
+        with pytest.raises(ValueError, match="No pending change"):
+            store.approve_alias_change("demo/model", "champion")
+
+    def test_request_set_validates_artifact(self, store):
+        with pytest.raises(ValueError, match="not found"):
+            store.request_alias_change(
+                "demo/model", "champion", "set", artifact_id="ghost", version=1
+            )

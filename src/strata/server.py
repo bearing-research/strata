@@ -4169,13 +4169,43 @@ class AliasSetRequest(BaseModel):
 
 @app.put("/v1/names/{name:path}/aliases/{alias}")
 async def set_alias(name: str, alias: str, request: AliasSetRequest):
-    """Point ``name @ alias`` (e.g. champion) at an artifact version."""
+    """Point ``name @ alias`` (e.g. champion) at an artifact version.
+
+    Protected aliases (``registry_protected_aliases`` config) do not apply
+    immediately: the change lands in the pending queue (202) and an
+    explicit approve applies it.
+    """
     from strata.auth import get_principal
 
+    state = get_state()
     store = _get_artifact_store()
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
+
+    if alias in state.config.registry_protected_aliases:
+        try:
+            store.request_alias_change(
+                name,
+                alias,
+                "set",
+                artifact_id=request.artifact_id,
+                version=request.version,
+                tenant=tenant_id,
+                actor=actor,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "pending",
+                "name": name,
+                "alias": alias,
+                "detail": f"Alias '{alias}' is protected — the change awaits approval "
+                "(POST /v1/registry/pending/approve).",
+            },
+        )
 
     try:
         store.set_alias(
@@ -4215,13 +4245,23 @@ async def resolve_alias(name: str, alias: str):
 
 @app.delete("/v1/names/{name:path}/aliases/{alias}")
 async def delete_alias(name: str, alias: str):
-    """Delete ``name @ alias``."""
+    """Delete ``name @ alias`` (pending queue for protected aliases)."""
     from strata.auth import get_principal
 
+    state = get_state()
     store = _get_artifact_store()
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
+
+    if alias in state.config.registry_protected_aliases:
+        if store.resolve_alias(name, alias, tenant=tenant_id) is None:
+            raise HTTPException(status_code=404, detail=f"Alias '{name}@{alias}' not found")
+        store.request_alias_change(name, alias, "delete", tenant=tenant_id, actor=actor)
+        return JSONResponse(
+            status_code=202,
+            content={"status": "pending", "name": name, "alias": alias},
+        )
 
     if not store.delete_alias(name, alias, tenant=tenant_id, actor=actor):
         raise HTTPException(status_code=404, detail=f"Alias '{name}@{alias}' not found")
@@ -4316,6 +4356,60 @@ async def registry_audit(
     """Read the append-only registry audit, newest first."""
     store = _get_artifact_store()
     return {"entries": store.read_audit(name=name, artifact_id=artifact_id, limit=limit)}
+
+
+class PendingDecisionRequest(BaseModel):
+    name: str
+    alias: str
+
+
+@app.get("/v1/registry/pending")
+async def registry_pending():
+    """List protected-alias changes awaiting approval."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant_id = principal.tenant if principal else None
+    return {"pending": store.list_pending_changes(tenant=tenant_id)}
+
+
+@app.post("/v1/registry/pending/approve")
+async def approve_pending(request: PendingDecisionRequest):
+    """Apply a pending alias change; the approver becomes the audit actor."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant_id = principal.tenant if principal else None
+    actor = principal.id if principal else None
+
+    try:
+        applied = store.approve_alias_change(
+            request.name, request.alias, tenant=tenant_id, actor=actor
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "approved", "applied": applied}
+
+
+@app.post("/v1/registry/pending/reject")
+async def reject_pending(request: PendingDecisionRequest):
+    """Discard a pending alias change (audited)."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant_id = principal.tenant if principal else None
+    actor = principal.id if principal else None
+
+    try:
+        rejected = store.reject_alias_change(
+            request.name, request.alias, tenant=tenant_id, actor=actor
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "rejected", "rejected": rejected}
 
 
 # NOTE: the routes below use a greedy {name:path} converter; the registry

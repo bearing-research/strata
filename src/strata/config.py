@@ -14,7 +14,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from strata.notebook.python_versions import (
     current_python_minor,
@@ -314,6 +314,10 @@ class StrataConfig(BaseSettings):
     # startup (zombie sweep) — they can never serve data and would otherwise
     # linger in the store forever.
     artifact_zombie_build_timeout_seconds: Annotated[float, Field(gt=0)] = 3600.0
+    # Registry aliases that require approval: moves/deletes of these aliases
+    # (e.g. "champion") land in a pending queue instead of applying, and an
+    # explicit approve applies them. Empty (the default) = no gating.
+    registry_protected_aliases: Annotated[list[str], NoDecode] = Field(default_factory=list)
     notebook_storage_dir: Path = Field(
         default_factory=lambda: Path.home() / ".strata" / "notebooks"
     )
@@ -409,6 +413,29 @@ class StrataConfig(BaseSettings):
         if isinstance(v, str):
             return CacheGranularity(v)
         return v
+
+    @field_validator("registry_protected_aliases", mode="before")
+    @classmethod
+    def normalize_registry_protected_aliases(cls, v: Any) -> list[str]:
+        """Accept list, JSON array, or comma-separated alias names."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                import json
+
+                parsed = json.loads(stripped)
+                if not isinstance(parsed, list):
+                    raise ValueError("registry_protected_aliases must be a list")
+                v = parsed
+            else:
+                v = [part.strip() for part in stripped.split(",") if part.strip()]
+        if not isinstance(v, list):
+            raise ValueError("registry_protected_aliases must be a list")
+        return [str(item) for item in v]
 
     @field_validator("notebook_python_versions", mode="before")
     @classmethod

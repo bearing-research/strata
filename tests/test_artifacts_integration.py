@@ -1651,3 +1651,99 @@ class TestRegistry:
         # And the plain name resolve still works alongside
         resp = httpx.get(f"{base_url}/v1/names/team/model", timeout=30.0)
         assert resp.status_code == 200
+
+
+@pytest.fixture
+def gated_server(tmp_path, multi_file_warehouse):
+    """Personal-mode server where the 'champion' alias requires approval."""
+    cache_dir = tmp_path / "cache"
+    artifact_dir = tmp_path / "artifacts"
+    cache_dir.mkdir()
+    artifact_dir.mkdir()
+
+    with run_server_with_context(
+        cache_dir,
+        artifact_dir,
+        "personal",
+        registry_protected_aliases=["champion"],
+    ) as ctx:
+        yield {**multi_file_warehouse, "base_url": ctx.base_url}
+
+
+class TestApprovalGates:
+    """Protected aliases queue for approval instead of applying (#129)."""
+
+    def _make_model(self, client, table_uri):
+        artifact = client.materialize(
+            inputs=[table_uri],
+            transform={"executor": "scan@v1", "params": {}},
+            name="team/model",
+        )
+        artifact.to_table()
+        return artifact
+
+    def test_protected_alias_goes_pending_then_approves(self, gated_server):
+        base_url = gated_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = self._make_model(client, gated_server["table_uri"])
+
+            # Protected: returns 202 pending, alias not applied
+            resp = httpx.put(
+                f"{base_url}/v1/names/team/model/aliases/champion",
+                json={"artifact_id": artifact.artifact_id, "version": artifact.version},
+                timeout=30.0,
+            )
+            assert resp.status_code == 202
+            assert resp.json()["status"] == "pending"
+            with pytest.raises(httpx.HTTPStatusError):
+                client.resolve_alias("team/model", "champion")
+
+            # Visible in the queue
+            pending = client.list_pending_changes()
+            assert [(p["name"], p["alias"]) for p in pending] == [("team/model", "champion")]
+
+            # Approve applies it
+            result = client.approve_alias_change("team/model", "champion")
+            assert result["status"] == "approved"
+            assert client.resolve_alias("team/model", "champion")["version"] == artifact.version
+            assert client.list_pending_changes() == []
+
+    def test_reject_discards_change(self, gated_server):
+        base_url = gated_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = self._make_model(client, gated_server["table_uri"])
+            httpx.put(
+                f"{base_url}/v1/names/team/model/aliases/champion",
+                json={"artifact_id": artifact.artifact_id, "version": artifact.version},
+                timeout=30.0,
+            )
+            result = client.reject_alias_change("team/model", "champion")
+            assert result["status"] == "rejected"
+            with pytest.raises(httpx.HTTPStatusError):
+                client.resolve_alias("team/model", "champion")
+
+    def test_unprotected_alias_applies_immediately(self, gated_server):
+        with StrataClient(base_url=gated_server["base_url"]) as client:
+            artifact = self._make_model(client, gated_server["table_uri"])
+            client.set_alias("team/model", "candidate", artifact.artifact_id, artifact.version)
+            assert client.resolve_alias("team/model", "candidate")["version"] == artifact.version
+
+    def test_protected_delete_goes_pending(self, gated_server):
+        base_url = gated_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = self._make_model(client, gated_server["table_uri"])
+            # Set up champion via the approval flow
+            httpx.put(
+                f"{base_url}/v1/names/team/model/aliases/champion",
+                json={"artifact_id": artifact.artifact_id, "version": artifact.version},
+                timeout=30.0,
+            )
+            client.approve_alias_change("team/model", "champion")
+
+            resp = httpx.delete(f"{base_url}/v1/names/team/model/aliases/champion", timeout=30.0)
+            assert resp.status_code == 202
+            # Still resolvable until approved
+            assert client.resolve_alias("team/model", "champion") is not None
+            client.approve_alias_change("team/model", "champion")
+            with pytest.raises(httpx.HTTPStatusError):
+                client.resolve_alias("team/model", "champion")

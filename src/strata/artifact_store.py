@@ -347,6 +347,21 @@ CREATE TABLE IF NOT EXISTS registry_audit (
     tenant TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_name ON registry_audit(name);
+
+-- Pending alias changes awaiting approval (one per alias). Created when a
+-- protected alias is moved/deleted; an approve applies it, a reject
+-- discards it. Both outcomes are audited.
+CREATE TABLE IF NOT EXISTS registry_pending (
+    name TEXT NOT NULL,
+    alias TEXT NOT NULL,
+    action TEXT NOT NULL,            -- 'set' or 'delete'
+    artifact_id TEXT,                -- target for 'set'
+    version INTEGER,
+    requested_by TEXT,
+    requested_at REAL NOT NULL,
+    tenant TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (tenant, name, alias)
+);
 """
 
 # Migration SQL to add tenant columns to existing tables
@@ -1834,6 +1849,188 @@ class ArtifactStore:
             params.append(limit)
             cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def request_alias_change(
+        self,
+        name: str,
+        alias: str,
+        action: str,
+        artifact_id: str | None = None,
+        version: int | None = None,
+        tenant: str | None = None,
+        actor: str | None = None,
+    ) -> None:
+        """Queue a protected-alias change for approval (audited).
+
+        ``action`` is ``"set"`` (requires artifact_id + version, validated
+        like set_alias) or ``"delete"``. One pending change per alias —
+        a new request replaces the previous one.
+        """
+        if action not in ("set", "delete"):
+            raise ValueError(f"Unknown alias change action: {action!r}")
+        conn = self._get_connection()
+        try:
+            if action == "set":
+                if artifact_id is None or version is None:
+                    raise ValueError("alias 'set' request requires artifact_id and version")
+                cursor = conn.execute(
+                    "SELECT state, tenant FROM artifact_versions WHERE id = ? AND version = ?",
+                    (artifact_id, version),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+                if row["state"] not in ("ready", "superseded"):
+                    raise ValueError(
+                        f"Artifact {artifact_id}@v={version} is not readable (state={row['state']})"
+                    )
+                artifact_tenant = row["tenant"] if row["tenant"] else None
+                if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
+                    raise ValueError(
+                        f"Artifact {artifact_id}@v={version} belongs to tenant "
+                        f"{artifact_tenant}, cannot assign alias in tenant {tenant}"
+                    )
+
+            effective_tenant = tenant if tenant is not None else ""
+            self._audit_in_connection(
+                conn,
+                action=f"alias_request_{action}",
+                name=name,
+                alias=alias,
+                artifact_id=artifact_id,
+                to_version=version,
+                actor=actor,
+                tenant=tenant,
+            )
+            conn.execute(
+                """
+                INSERT INTO registry_pending
+                    (name, alias, action, artifact_id, version,
+                     requested_by, requested_at, tenant)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tenant, name, alias) DO UPDATE SET
+                    action = excluded.action,
+                    artifact_id = excluded.artifact_id,
+                    version = excluded.version,
+                    requested_by = excluded.requested_by,
+                    requested_at = excluded.requested_at
+                """,
+                (name, alias, action, artifact_id, version, actor, time.time(), effective_tenant),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def list_pending_changes(self, tenant: str | None = None) -> list[dict]:
+        """List alias changes awaiting approval (oldest first)."""
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "SELECT name, alias, action, artifact_id, version, "
+                "requested_by, requested_at, tenant FROM registry_pending "
+                "WHERE tenant = ? ORDER BY requested_at",
+                (effective_tenant,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def approve_alias_change(
+        self,
+        name: str,
+        alias: str,
+        tenant: str | None = None,
+        actor: str | None = None,
+    ) -> dict:
+        """Apply a pending alias change (audited with the approver as actor).
+
+        Returns the applied pending entry.
+
+        Raises:
+            ValueError: If no pending change exists for ``name @ alias``.
+        """
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "SELECT name, alias, action, artifact_id, version, requested_by "
+                "FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
+                (name, alias, effective_tenant),
+            )
+            pending = cursor.fetchone()
+            if pending is None:
+                raise ValueError(f"No pending change for alias '{name}@{alias}'")
+            conn.execute(
+                "DELETE FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
+                (name, alias, effective_tenant),
+            )
+            self._audit_in_connection(
+                conn,
+                action="alias_approved",
+                name=name,
+                alias=alias,
+                artifact_id=pending["artifact_id"],
+                to_version=pending["version"],
+                actor=actor,
+                tenant=tenant,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Apply via the normal (audited) paths so the alias move itself is
+        # recorded identically to an ungated one.
+        entry = dict(pending)
+        if entry["action"] == "set":
+            self.set_alias(
+                name, alias, entry["artifact_id"], entry["version"], tenant=tenant, actor=actor
+            )
+        else:
+            self.delete_alias(name, alias, tenant=tenant, actor=actor)
+        return entry
+
+    def reject_alias_change(
+        self,
+        name: str,
+        alias: str,
+        tenant: str | None = None,
+        actor: str | None = None,
+    ) -> dict:
+        """Discard a pending alias change (audited).
+
+        Raises:
+            ValueError: If no pending change exists for ``name @ alias``.
+        """
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "SELECT name, alias, action, artifact_id, version, requested_by "
+                "FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
+                (name, alias, effective_tenant),
+            )
+            pending = cursor.fetchone()
+            if pending is None:
+                raise ValueError(f"No pending change for alias '{name}@{alias}'")
+            conn.execute(
+                "DELETE FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
+                (name, alias, effective_tenant),
+            )
+            self._audit_in_connection(
+                conn,
+                action="alias_rejected",
+                name=name,
+                alias=alias,
+                artifact_id=pending["artifact_id"],
+                to_version=pending["version"],
+                actor=actor,
+                tenant=tenant,
+            )
+            conn.commit()
+            return dict(pending)
         finally:
             conn.close()
 

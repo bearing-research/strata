@@ -843,6 +843,28 @@ class StrataClient:
         response.raise_for_status()
         return response.json()
 
+    def list_pending_changes(self) -> list[dict]:
+        """List protected-alias changes awaiting approval."""
+        response = self._client.get("/v1/registry/pending")
+        response.raise_for_status()
+        return response.json()["pending"]
+
+    def approve_alias_change(self, name: str, alias: str) -> dict:
+        """Apply a pending protected-alias change."""
+        response = self._client.post(
+            "/v1/registry/pending/approve", json={"name": name, "alias": alias}
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def reject_alias_change(self, name: str, alias: str) -> dict:
+        """Discard a pending protected-alias change."""
+        response = self._client.post(
+            "/v1/registry/pending/reject", json={"name": name, "alias": alias}
+        )
+        response.raise_for_status()
+        return response.json()
+
     def get_registry_audit(
         self,
         name: str | None = None,
