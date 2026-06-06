@@ -2356,23 +2356,26 @@ exhaustive commit history.</p>
 <li><strong>Per-cell <code>stdout</code> / <code>stderr</code> in <code>strata run --format json</code></strong> (#116):
   read computed values back from the run payload (truncated at 10k
   chars) instead of screen-scraping.</li>
-<li>
-<p><strong>Agent conversation memory survives restarts</strong> (#119): per-notebook
+<li><strong>Agent conversation memory survives restarts</strong> (#119): per-notebook
   agent history now persists to <code>.strata/agent_history.json</code> (atomic
   writes, 12-turn window, tool traces never persisted) so a server
   restart no longer wipes the conversation. Destructive-tool approval
   prompts also get a configurable timeout
   (<code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code> / <code>[ai] approval_timeout_seconds</code>,
-  default 120s; expiry counts as a decline).</p>
-</li>
-<li>
-<p><strong>Lake-aware cells: <code>@table</code> annotation</strong>: declare an Iceberg table input
+  default 120s; expiry counts as a decline).</li>
+<li><strong>Lake-aware cells: <code>@table</code> annotation</strong>: declare an Iceberg table input
   on a cell (<code># @table trips file:///wh#nyc.trips</code>) and the table's snapshot
   id joins the cell's provenance — new data landing in the lake makes the
   cell stale and the normal cascade re-runs it, with <code>&lt;name&gt;</code> (URI) and
   <code>&lt;name&gt;_snapshot</code> injected so the cell scans exactly the snapshot its
-  provenance recorded. <code>snapshot=&lt;id&gt;</code> pins a cell to one snapshot forever.</p>
-</li>
+  provenance recorded. <code>snapshot=&lt;id&gt;</code> pins a cell to one snapshot forever.</li>
+<li><strong>Personal mode executes transforms</strong>: the embedded build runner now runs
+  in personal mode, so <code>materialize</code> with <code>duckdb_sql@v1</code> executes
+  server-side out of the box — previously the request was accepted and then
+  sat in <code>building</code> forever (no mode could run the full
+  scan → transform → train → put workflow). Unknown transforms fail fast
+  with a 400 listing what's available, and a <code>name=</code> on an async
+  materialize is now set when the build completes.</li>
 <li><strong>Artifact store integrity hardening</strong> (#123): artifacts are validated at
   finalize time (the blob must be exactly one readable Arrow IPC stream
   matching the recorded row count — a mismatch becomes a <code>failed</code> artifact,
@@ -2384,6 +2387,19 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Put-created artifacts can be named after the fact</strong>: <code>PUT /v1/artifacts</code>
+  stamped artifacts with tenant <code>_default</code> while the name routes resolve
+  no-header requests to no tenant — so <code>set_name</code> on an artifact you had
+  just created was rejected with a tenant mismatch. The put route now
+  resolves the tenant the same way materialize does.</li>
+<li><strong>Multi-input transforms bind inputs in caller order</strong>: the stored
+  transform spec sorted its inputs "for deterministic hashing", so the
+  build runner bound <code>input0</code> / <code>input1</code> by lexicographic artifact id —
+  joins could silently swap their operands depending on generated UUIDs,
+  and <code>f(a, b)</code> deduplicated against <code>f(b, a)</code>. Input order is part of the
+  computation now (and of provenance). Existing caches of multi-input
+  transforms whose caller order differed from sorted order will rebuild
+  once.</li>
 <li><strong>Multi-row-group scans no longer silently truncate</strong> (#121): scanning
   a table whose plan spans multiple Parquet row groups or files produced
   an Arrow IPC body that standard readers stopped reading after the
