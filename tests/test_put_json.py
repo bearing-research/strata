@@ -8,62 +8,30 @@ These tests verify:
 5. JSON retrieval via get_json
 """
 
-import socket
-import threading
-import time
-
 import pytest
 import requests
-import uvicorn
 
 from strata.client import StrataClient
-from strata.config import StrataConfig
 
 
 @pytest.fixture
 def server_with_artifacts(tmp_path):
-    """Start a server in personal mode for artifact testing."""
-    # Reset global state
-    from strata.artifact_store import reset_artifact_store
+    """Start a server in personal mode for artifact testing.
 
-    reset_artifact_store()
+    Uses the shared run_server_with_context helper: health-polled startup
+    (a bare ``time.sleep(1)`` raced slow CI runners into connection-refused
+    flakes) and graceful shutdown (orphaned daemon servers each kept a live
+    build-runner poll loop running for the rest of the suite).
+    """
+    from tests.conftest import run_server_with_context
 
-    sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
+    cache_dir = tmp_path / "cache"
+    artifact_dir = tmp_path / "artifacts"
+    cache_dir.mkdir()
+    artifact_dir.mkdir()
 
-    config = StrataConfig(
-        host="127.0.0.1",
-        port=port,
-        cache_dir=tmp_path / "cache",
-        artifact_dir=tmp_path / "artifacts",
-        deployment_mode="personal",
-    )
-
-    import strata.server as server_module
-    from strata.server import ServerState, app
-
-    server_module._state = ServerState(config)
-
-    server_thread = threading.Thread(
-        target=uvicorn.run,
-        kwargs={
-            "app": app,
-            "host": config.host,
-            "port": config.port,
-            "log_level": "error",
-        },
-        daemon=True,
-    )
-    server_thread.start()
-    time.sleep(1)
-
-    base_url = f"http://127.0.0.1:{port}"
-    yield {"base_url": base_url, "config": config}
-
-    # Cleanup
-    reset_artifact_store()
+    with run_server_with_context(cache_dir, artifact_dir, "personal") as ctx:
+        yield {"base_url": ctx.base_url, "config": ctx.config}
 
 
 class TestPutJson:
