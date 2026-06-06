@@ -11,6 +11,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **Approval gates on protected aliases**: set
+  `STRATA_REGISTRY_PROTECTED_ALIASES=champion,production` and moves or
+  deletes of those aliases queue for approval (HTTP 202) instead of
+  applying — `POST /v1/registry/pending/approve` applies the change with
+  the approver as the audit actor, `…/reject` discards it, and every step
+  (request, approval/rejection, the applied move) lands in the registry
+  audit. Unprotected aliases are unaffected; the default is no gating.
+  SDK: `list_pending_changes` / `approve_alias_change` /
+  `reject_alias_change`; CLI: `strata artifact pending`.
+
 - **Registry layer: aliases, tags, and an append-only audit log** (#129):
   promotion is no longer a silent pointer swap. A registry name can hold
   many **aliases** (`taxi/tip-model @ champion`, `@ candidate`) following

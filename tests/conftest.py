@@ -226,6 +226,7 @@ def run_server_with_context(
     cache_dir,
     artifact_dir=None,
     deployment_mode: Literal["personal", "service"] = "personal",
+    **config_overrides,
 ) -> Iterator[ServerContext]:
     """Run a server with full context including graceful shutdown.
 
@@ -257,6 +258,7 @@ def run_server_with_context(
         cache_dir=cache_dir,
         deployment_mode=deployment_mode,
         artifact_dir=artifact_dir,
+        **config_overrides,
     )
     reset_artifact_store()
     _reset_transform_singletons()

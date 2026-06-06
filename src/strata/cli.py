@@ -202,6 +202,28 @@ def _build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--limit", type=int, default=50, help="Max entries (default 50)")
     audit_parser.set_defaults(func=_dispatch_artifact("cmd_audit"))
 
+    pending_parser = artifact_sub.add_parser(
+        "pending",
+        help="List protected-alias changes awaiting approval",
+        description=(
+            "Protected aliases (registry_protected_aliases config) queue "
+            "their changes for approval; this lists the queue."
+        ),
+    )
+    pending_parser.add_argument(
+        "artifact_dir",
+        nargs="?",
+        default=None,
+        help="Artifact store directory (default: ~/.strata/artifacts)",
+    )
+    pending_parser.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format (default: human)",
+    )
+    pending_parser.set_defaults(func=_dispatch_artifact("cmd_pending"))
+
     verify_parser = artifact_sub.add_parser(
         "verify",
         help="Check every artifact blob against its metadata",

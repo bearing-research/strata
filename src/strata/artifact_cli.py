@@ -378,3 +378,24 @@ def cmd_audit(args: argparse.Namespace) -> int:
             detail = f"{e['key']}={e['value']}" if e["value"] is not None else e["key"] or ""
         print(f"{when}  {e['action']:<12} {target:<40} {detail}  [{actor}]")
     return 0
+
+
+def cmd_pending(args: argparse.Namespace) -> int:
+    """List protected-alias changes awaiting approval."""
+    store = _open_store(args.artifact_dir)
+    if store is None:
+        return 2
+
+    entries = store.list_pending_changes()
+    if args.format == "json":
+        print(json.dumps(entries, indent=2))
+        return 0
+    if not entries:
+        print("no pending changes")
+        return 0
+    for e in entries:
+        target = f"{e['name']}@{e['alias']}"
+        change = f"set -> {e['artifact_id']}@v={e['version']}" if e["action"] == "set" else "delete"
+        requested_by = e["requested_by"] or "-"
+        print(f"{_fmt_when(e['requested_at'])}  {target:<40} {change}  [{requested_by}]")
+    return 0
