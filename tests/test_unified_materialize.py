@@ -1,7 +1,6 @@
 """Tests for the unified /v1/materialize endpoint."""
 
 import sys
-import threading
 import time
 from datetime import UTC, datetime
 
@@ -9,12 +8,10 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 import requests
-import uvicorn
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.schema import Schema
 from pyiceberg.types import DoubleType, LongType, NestedField, StringType
 
-from strata.config import StrataConfig
 from strata.transforms.build_qos import (
     BuildQoS,
     BuildQoSConfig,
@@ -77,49 +74,24 @@ def temp_warehouse(tmp_path):
 
 @pytest.fixture
 def server_with_personal_mode(temp_warehouse, tmp_path):
-    """Start a server in personal mode (writes enabled) and provide base URL."""
-    import socket
+    """Start a server in personal mode (writes enabled) and provide base URL.
 
-    sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
+    Uses the shared run_server_with_context helper — health-polled startup
+    and graceful shutdown (see server_with_artifacts in test_put_json.py).
+    """
+    from tests.conftest import run_server_with_context
 
-    config = StrataConfig(
-        host="127.0.0.1",
-        port=port,
-        cache_dir=tmp_path / "cache",
-        artifact_dir=tmp_path / "artifacts",
-        deployment_mode="personal",  # Enable writes for artifact store
-    )
+    cache_dir = tmp_path / "cache"
+    artifact_dir = tmp_path / "artifacts"
+    cache_dir.mkdir()
+    artifact_dir.mkdir()
 
-    import strata.server as server_module
-    from strata.server import ServerState, app
-
-    server_module._state = ServerState(config)
-
-    server_thread = threading.Thread(
-        target=uvicorn.run,
-        kwargs={
-            "app": app,
-            "host": config.host,
-            "port": config.port,
-            "log_level": "error",
-        },
-        daemon=True,
-    )
-    server_thread.start()
-
-    # Wait for server to start
-    time.sleep(1)
-
-    base_url = f"http://127.0.0.1:{port}"
-
-    yield {
-        "base_url": base_url,
-        "config": config,
-        "warehouse": temp_warehouse,
-    }
+    with run_server_with_context(cache_dir, artifact_dir, "personal") as ctx:
+        yield {
+            "base_url": ctx.base_url,
+            "config": ctx.config,
+            "warehouse": temp_warehouse,
+        }
 
 
 class TestUnifiedMaterialize:

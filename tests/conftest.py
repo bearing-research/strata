@@ -185,17 +185,20 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     # Initialize server state
     server_module._state = ServerState(config)
 
-    # Start server in background thread
-    server_thread = threading.Thread(
-        target=uvicorn.run,
-        kwargs={
-            "app": app,
-            "host": config.host,
-            "port": config.port,
-            "log_level": "error",
-        },
-        daemon=True,
+    # Start server in background thread. Use a uvicorn.Server handle (not
+    # uvicorn.run) so teardown can actually STOP it — orphaned daemon
+    # servers accumulate across the suite, each carrying a live build
+    # runner poll loop since personal mode gained the embedded runner,
+    # and that load made loaded CI runners (Windows 3.13/3.14) start
+    # refusing connections mid-suite.
+    server_config = uvicorn.Config(
+        app=app,
+        host=config.host,
+        port=config.port,
+        log_level="error",
     )
+    server_instance = uvicorn.Server(server_config)
+    server_thread = threading.Thread(target=server_instance.run, daemon=True)
     server_thread.start()
 
     # Wait for server to be ready
@@ -215,7 +218,8 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     try:
         yield base_url
     finally:
-        # Server thread is daemon, will be killed on exit
+        server_instance.should_exit = True
+        server_thread.join(timeout=2.0)
         server_module._state = None
         reset_artifact_store()
         _reset_transform_singletons()
@@ -396,16 +400,15 @@ def server_with_client(temp_warehouse, tmp_path):
     # Initialize state manually for testing
     server_module._state = ServerState(config)
 
-    server_thread = threading.Thread(
-        target=uvicorn.run,
-        kwargs={
-            "app": app,
-            "host": config.host,
-            "port": config.port,
-            "log_level": "error",
-        },
-        daemon=True,
+    # uvicorn.Server handle so teardown can stop it (see run_server).
+    server_config = uvicorn.Config(
+        app=app,
+        host=config.host,
+        port=config.port,
+        log_level="error",
     )
+    server_instance = uvicorn.Server(server_config)
+    server_thread = threading.Thread(target=server_instance.run, daemon=True)
     server_thread.start()
 
     # Wait for server to start
@@ -421,3 +424,5 @@ def server_with_client(temp_warehouse, tmp_path):
     }
 
     client.close()
+    server_instance.should_exit = True
+    server_thread.join(timeout=2.0)
