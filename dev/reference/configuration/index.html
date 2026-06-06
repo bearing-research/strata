@@ -2249,6 +2249,11 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td>Artifact store directory</td>
 </tr>
 <tr>
+<td><code>STRATA_ARTIFACT_ZOMBIE_BUILD_TIMEOUT_SECONDS</code></td>
+<td><code>3600.0</code></td>
+<td>Builds stuck in <code>building</code> longer than this are demoted to <code>failed</code> at startup</td>
+</tr>
+<tr>
 <td><code>STRATA_ARTIFACT_BLOB_BACKEND</code></td>
 <td><code>local</code></td>
 <td><code>local</code>, <code>s3</code>, <code>gcs</code>, or <code>azure</code></td>

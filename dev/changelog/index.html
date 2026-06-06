@@ -2356,13 +2356,25 @@ exhaustive commit history.</p>
 <li><strong>Per-cell <code>stdout</code> / <code>stderr</code> in <code>strata run --format json</code></strong> (#116):
   read computed values back from the run payload (truncated at 10k
   chars) instead of screen-scraping.</li>
-<li><strong>Agent conversation memory survives restarts</strong> (#119): per-notebook
+<li>
+<p><strong>Agent conversation memory survives restarts</strong> (#119): per-notebook
   agent history now persists to <code>.strata/agent_history.json</code> (atomic
   writes, 12-turn window, tool traces never persisted) so a server
   restart no longer wipes the conversation. Destructive-tool approval
   prompts also get a configurable timeout
   (<code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code> / <code>[ai] approval_timeout_seconds</code>,
-  default 120s; expiry counts as a decline).</li>
+  default 120s; expiry counts as a decline).</p>
+</li>
+<li>
+<p><strong>Artifact store integrity hardening</strong> (#123): artifacts are validated at
+  finalize time (the blob must be exactly one readable Arrow IPC stream
+  matching the recorded row count — a mismatch becomes a <code>failed</code> artifact,
+  never a serveable one); <code>refresh=True</code> now rebuilds the <em>same</em> artifact as
+  a new version and supersedes the old one instead of forking a parallel
+  identity the cache never returns; builds stuck in <code>building</code> are swept to
+  <code>failed</code> at startup; and <code>strata artifact verify</code> checks a whole store's
+  blobs against metadata after the fact.</p>
+</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
