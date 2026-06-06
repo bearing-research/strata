@@ -65,6 +65,16 @@ exhaustive commit history.
 
 ### Fixed
 
+- **Namespaced artifact names are no longer write-only** (friction from the
+  ML dogfood): names containing `/` (`team/dataset/raw`) could be created
+  but every read route 404'd on them. The name routes now use path
+  converters, so slash-namespaced names — the natural registry convention —
+  resolve, report status, and delete normally.
+- **Legacy `_default`-tenant artifacts stay nameable**: artifacts written by
+  pre-fix `PUT /v1/artifacts` carry tenant `_default`; single-tenant name
+  requests (no tenant) may now point names at them instead of being
+  rejected with a tenant mismatch. Real cross-tenant mismatches are still
+  rejected.
 - **Put-created artifacts can be named after the fact**: `PUT /v1/artifacts`
   stamped artifacts with tenant `_default` while the name routes resolve
   no-header requests to no tenant — so `set_name` on an artifact you had

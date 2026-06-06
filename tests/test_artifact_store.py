@@ -640,3 +640,25 @@ class TestArtifactVerifyCli:
 
     def test_missing_dir_exits_two(self, tmp_path):
         assert self._run(tmp_path / "nope") == 2
+
+
+class TestLegacyDefaultTenantNames:
+    """Artifacts stamped with legacy '_default' stay nameable (friction #7)."""
+
+    def test_tenantless_request_can_name_default_artifact(self, store):
+        store.create_artifact("legacy", "prov-l", tenant="_default")
+        store.finalize_artifact("legacy", 1, "{}", 1, 10)
+
+        # Pre-#126 PUT uploads stamped "_default"; the names routes resolve
+        # single-tenant requests to None. That combination must not strand
+        # the artifact as unnameable.
+        store.set_name("legacy-name", "legacy", 1, tenant=None)  # must not raise
+        resolved = store.resolve_name("legacy-name")
+        assert (resolved.id, resolved.version) == ("legacy", 1)
+
+    def test_real_tenant_mismatch_still_rejected(self, store):
+        store.create_artifact("owned", "prov-o", tenant="acme")
+        store.finalize_artifact("owned", 1, "{}", 1, 10)
+
+        with pytest.raises(ValueError, match="cannot assign name"):
+            store.set_name("steal", "owned", 1, tenant="globex")

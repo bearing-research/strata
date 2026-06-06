@@ -1167,9 +1167,16 @@ class ArtifactStore:
         """Return whether a name in requested_tenant may point at artifact_tenant.
 
         Tenantless artifacts remain assignable for backwards compatibility with
-        older personal-mode behavior and existing tests.
+        older personal-mode behavior and existing tests. Artifacts stamped with
+        the legacy "_default" tenant (pre-#126 PUT uploads) are assignable by
+        tenantless requests: that combination only occurs in single-tenant
+        deployments, where tenant isolation is not in play — in multi-tenant
+        mode un-headered requests resolve to "_default" themselves and pass
+        the equality check.
         """
         if artifact_tenant is None:
+            return True
+        if artifact_tenant == "_default" and not requested_tenant:
             return True
         return artifact_tenant == requested_tenant
 
