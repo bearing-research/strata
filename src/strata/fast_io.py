@@ -236,6 +236,51 @@ class _StreamingBuffer:
         return False
 
 
+class IncrementalIpcMerger:
+    """Merge complete IPC stream segments into one stream, one segment at a time.
+
+    Async producers (e.g. the scan streaming endpoint, which awaits each
+    row-group fetch) cannot drive the synchronous ``stream_concat_ipc_segments``
+    generator. This class exposes the same merge as push-style calls:
+    ``feed(segment)`` returns merged bytes ready to send, ``finish()`` returns
+    the EOS marker plus any remaining buffered data.
+
+    The output of ``feed``/``finish`` calls, concatenated in order, is a
+    single valid Arrow IPC stream (one schema header, all batches, one EOS).
+    """
+
+    def __init__(self) -> None:
+        self._buf = _StreamingBuffer()
+        self._writer: ipc.RecordBatchStreamWriter | None = None
+        self._schema: pa.Schema | None = None
+
+    def feed(self, segment: _BytesLike) -> bytes:
+        """Merge one complete IPC stream segment; return bytes ready to emit."""
+        if not segment:
+            return b""
+
+        reader = ipc.open_stream(pa.BufferReader(segment))
+        if self._writer is None:
+            self._schema = reader.schema
+            self._writer = ipc.new_stream(self._buf, self._schema)
+        elif not reader.schema.equals(self._schema):
+            raise ValueError(
+                f"Schema mismatch across segments: expected {self._schema}, got {reader.schema}"
+            )
+
+        for batch in reader:
+            self._writer.write_batch(batch)
+        return self._buf.read_new()
+
+    def finish(self) -> bytes:
+        """Close the output stream; return the EOS marker and any remainder."""
+        if self._writer is None:
+            return b""
+        self._writer.close()
+        self._writer = None
+        return self._buf.read_new()
+
+
 # Default minimum chunk size for streaming (256 KB)
 # Smaller chunks hurt throughput due to syscall overhead
 # Larger chunks increase memory but improve throughput

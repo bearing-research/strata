@@ -39,6 +39,7 @@ from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
 from strata.cache_warmer import CacheWarmer
 from strata.config import StrataConfig
+from strata.fast_io import IncrementalIpcMerger, concat_stream_bytes
 from strata.gc_tracker import get_gc_stats, get_recent_gc_pauses, install_gc_tracker
 from strata.health import HealthStatus, run_health_checks
 from strata.json_types import JsonValue
@@ -663,7 +664,6 @@ async def _build_identity_artifact(stream_state: StreamState) -> None:
 
         loop = asyncio.get_running_loop()
         all_chunks: list[bytes] = []
-        bytes_out = 0
         row_count = 0
 
         for task in plan.tasks:
@@ -676,11 +676,13 @@ async def _build_identity_artifact(stream_state: StreamState) -> None:
                 task,
             )
             all_chunks.append(chunk)
-            bytes_out += len(chunk)
             row_count += task.num_rows
 
-        await _finalize_stream_artifact(stream_state, b"".join(all_chunks), row_count)
-        stream_state.bytes_streamed = bytes_out
+        # Each chunk is a complete IPC stream (schema + batches + EOS);
+        # merge into ONE stream so standard readers see every row group.
+        combined = concat_stream_bytes(all_chunks)
+        await _finalize_stream_artifact(stream_state, combined, row_count)
+        stream_state.bytes_streamed = len(combined)
         stream_state.completed = True
     except asyncio.CancelledError:
         stream_state.error_message = "Build cancelled"
@@ -6028,6 +6030,12 @@ async def get_stream(stream_id: str, request: Request):
     # Create streaming generator that also persists to artifact store
     async def stream_and_persist():
         """Stream data to client while persisting to artifact store."""
+        # Each fetched chunk is a complete IPC stream (schema + batches +
+        # EOS). Multi-task scans must merge them into ONE stream — standard
+        # Arrow readers stop at the first EOS marker, so naive concatenation
+        # silently truncates to the first row group. Single-task scans keep
+        # the zero-parse passthrough.
+        merger = IncrementalIpcMerger() if len(plan.tasks) > 1 else None
         all_chunks: list[bytes] = []
         bytes_out = 0
         row_count = 0
@@ -6085,17 +6093,37 @@ async def get_stream(stream_id: str, request: Request):
                         _mark_stream_artifact_failed(stream_state)
                         raise
 
-                all_chunks.append(chunk)
-                bytes_out += len(chunk)
+                if merger is None:
+                    out = chunk
+                else:
+                    try:
+                        out = merger.feed(chunk)
+                    except (ValueError, pa.ArrowInvalid) as e:
+                        stream_state.error_message = str(e)
+                        logger.error("stream_merge_error", error=str(e), task=task.file_path)
+                        _mark_stream_artifact_failed(stream_state)
+                        raise
+
+                all_chunks.append(out)
+                bytes_out += len(out)
                 row_count += task.num_rows
 
-                yield chunk
+                if out:
+                    yield out
+
+            if merger is not None:
+                tail = merger.finish()
+                if tail:
+                    all_chunks.append(tail)
+                    bytes_out += len(tail)
+                    yield tail
 
             # Update stream state
             stream_state.bytes_streamed = bytes_out
             stream_state.completed = True
 
-            # Persist artifact (combine all chunks)
+            # Persist artifact: all_chunks now holds segments of a single
+            # valid IPC stream, so a plain byte join is correct.
             if all_chunks:
                 combined = b"".join(all_chunks)
                 await _finalize_stream_artifact(stream_state, combined, row_count)

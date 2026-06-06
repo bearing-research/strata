@@ -34,9 +34,23 @@ exhaustive commit history.
 - **Per-cell `stdout` / `stderr` in `strata run --format json`** (#116):
   read computed values back from the run payload (truncated at 10k
   chars) instead of screen-scraping.
+- **Agent conversation memory survives restarts** (#119): per-notebook
+  agent history now persists to `.strata/agent_history.json` (atomic
+  writes, 12-turn window, tool traces never persisted) so a server
+  restart no longer wipes the conversation. Destructive-tool approval
+  prompts also get a configurable timeout
+  (`STRATA_AI_APPROVAL_TIMEOUT_SECONDS` / `[ai] approval_timeout_seconds`,
+  default 120s; expiry counts as a decline).
 
 ### Fixed
 
+- **Multi-row-group scans no longer silently truncate** (#121): scanning
+  a table whose plan spans multiple Parquet row groups or files produced
+  an Arrow IPC body that standard readers stopped reading after the
+  first row group — `materialize` + `fetch` returned ~1M rows from a
+  2.9M-row table with no error. Both the streamed response and the
+  persisted artifact blob are now a single valid IPC stream, with
+  regression tests over a multi-file warehouse.
 - **Cross-process lock around renv mutations** (#109): concurrent
   `strata run` invocations and the server no longer race on the same
   notebook's R environment — renv init/install/restore now take a file

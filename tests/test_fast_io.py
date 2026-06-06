@@ -830,3 +830,94 @@ class TestStreamEnforcementHooks:
         reader = ipc.open_stream(pa.BufferReader(combined))
         batches = list(reader)
         assert batches[0].num_rows == 100000
+
+
+class TestIncrementalIpcMerger:
+    """Tests for the push-style IPC stream merger (regression for #121)."""
+
+    def test_feed_and_finish_produce_single_stream(self):
+        """Merging N complete streams yields ONE stream with all rows."""
+        merger = fast_io.IncrementalIpcMerger()
+        pieces = []
+        expected_ids = []
+        for i in range(3):
+            ids = [i * 10, i * 10 + 1, i * 10 + 2]
+            batch = pa.RecordBatch.from_pydict({"id": ids})
+            pieces.append(merger.feed(create_stream_bytes(batch)))
+            expected_ids.extend(ids)
+        pieces.append(merger.finish())
+
+        combined = b"".join(pieces)
+
+        # A single standard reader must see ALL rows — this is exactly what
+        # naive byte concatenation of complete streams gets wrong (the
+        # reader stops at the first EOS marker).
+        reader = ipc.open_stream(pa.BufferReader(combined))
+        table = reader.read_all()
+        assert table.column("id").to_pylist() == expected_ids
+
+    def test_merged_output_is_exactly_one_stream(self):
+        """No trailing concatenated streams hide after the first EOS."""
+        merger = fast_io.IncrementalIpcMerger()
+        pieces = []
+        for i in range(3):
+            batch = pa.RecordBatch.from_pydict({"id": [i]})
+            pieces.append(merger.feed(create_stream_bytes(batch)))
+        pieces.append(merger.finish())
+        combined = b"".join(pieces)
+
+        import io
+
+        f = io.BytesIO(combined)
+        streams = 0
+        total_rows = 0
+        while f.tell() < len(combined):
+            try:
+                reader = ipc.open_stream(f)
+            except pa.ArrowInvalid:
+                break
+            total_rows += reader.read_all().num_rows
+            streams += 1
+        assert streams == 1
+        assert total_rows == 3
+
+    def test_matches_concat_stream_bytes(self):
+        """Push-style merge reads back identically to the buffered concat."""
+        segments = []
+        for i in range(3):
+            batch = pa.RecordBatch.from_pydict({"id": [i, i + 100]})
+            segments.append(create_stream_bytes(batch))
+
+        merger = fast_io.IncrementalIpcMerger()
+        pieces = [merger.feed(s) for s in segments]
+        pieces.append(merger.finish())
+        incremental = b"".join(pieces)
+        buffered = fast_io.concat_stream_bytes(segments)
+
+        t1 = ipc.open_stream(pa.BufferReader(incremental)).read_all()
+        t2 = ipc.open_stream(pa.BufferReader(buffered)).read_all()
+        assert t1.equals(t2)
+
+    def test_schema_mismatch_raises(self):
+        """Segments with different schemas are rejected, not mangled."""
+        merger = fast_io.IncrementalIpcMerger()
+        merger.feed(create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1]})))
+        other = create_stream_bytes(pa.RecordBatch.from_pydict({"name": ["x"]}))
+        with pytest.raises(ValueError, match="Schema mismatch"):
+            merger.feed(other)
+
+    def test_empty_segment_is_skipped(self):
+        """Feeding b'' contributes nothing and does not break the stream."""
+        merger = fast_io.IncrementalIpcMerger()
+        pieces = [merger.feed(create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1]})))]
+        pieces.append(merger.feed(b""))
+        pieces.append(merger.feed(create_stream_bytes(pa.RecordBatch.from_pydict({"id": [2]}))))
+        pieces.append(merger.finish())
+
+        table = ipc.open_stream(pa.BufferReader(b"".join(pieces))).read_all()
+        assert table.column("id").to_pylist() == [1, 2]
+
+    def test_finish_without_feed_returns_empty(self):
+        """finish() before any feed yields nothing."""
+        merger = fast_io.IncrementalIpcMerger()
+        assert merger.finish() == b""
