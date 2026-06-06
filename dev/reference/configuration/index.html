@@ -2254,6 +2254,11 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td>Builds stuck in <code>building</code> longer than this are demoted to <code>failed</code> at startup</td>
 </tr>
 <tr>
+<td><code>STRATA_REGISTRY_PROTECTED_ALIASES</code></td>
+<td><em>(empty)</em></td>
+<td>Comma-separated alias names (e.g. <code>champion,production</code>) whose moves/deletes queue for approval instead of applying</td>
+</tr>
+<tr>
 <td><code>STRATA_ARTIFACT_BLOB_BACKEND</code></td>
 <td><code>local</code></td>
 <td><code>local</code>, <code>s3</code>, <code>gcs</code>, or <code>azure</code></td>
