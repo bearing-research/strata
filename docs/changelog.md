@@ -49,6 +49,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   cell stale and the normal cascade re-runs it, with `<name>` (URI) and
   `<name>_snapshot` injected so the cell scans exactly the snapshot its
   provenance recorded. `snapshot=<id>` pins a cell to one snapshot forever.
+- **Artifact inspection CLI**: `strata artifact list / show / lineage /
+  pull` work directly against a local store, no server needed. `lineage`
+  renders the provenance chain down to the lake — `model ← features ←
+  scan ← table @ snapshot` — answering "which snapshot trained this
+  model?" in one command. References accept a name, `id@v=N`, or a bare
+  artifact id; name resolution is tenant-agnostic so legacy stores
+  inspect cleanly.
 - **Personal mode executes transforms**: the embedded build runner now runs
   in personal mode, so `materialize` with `duckdb_sql@v1` executes
   server-side out of the box — previously the request was accepted and then
