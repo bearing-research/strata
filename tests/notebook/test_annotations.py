@@ -285,3 +285,46 @@ class TestAfterAnnotation:
     def test_after_empty_when_absent(self):
         result = parse_annotations("x = 1")
         assert result.after == []
+
+
+class TestTableAnnotation:
+    """Parsing of the table input annotation."""
+
+    def test_basic_table(self):
+        result = parse_annotations("# @table trips file:///data/warehouse#nyc.trips\nx = 1\n")
+        assert len(result.tables) == 1
+        table = result.tables[0]
+        assert table.name == "trips"
+        assert table.uri == "file:///data/warehouse#nyc.trips"
+        assert table.snapshot_pin is None
+
+    def test_snapshot_pin(self):
+        result = parse_annotations(
+            "# @table events s3://bucket/wh#db.events snapshot=1292033279574548405\nx = 1\n"
+        )
+        assert result.tables[0].snapshot_pin == 1292033279574548405
+
+    def test_invalid_name_ignored(self):
+        result = parse_annotations("# @table 2bad file:///wh#db.t\nx = 1\n")
+        assert result.tables == []
+
+    def test_missing_uri_ignored(self):
+        result = parse_annotations("# @table trips\nx = 1\n")
+        assert result.tables == []
+
+    def test_malformed_snapshot_ignored(self):
+        result = parse_annotations("# @table trips file:///wh#db.t snapshot=abc\nx = 1\n")
+        assert result.tables == []
+
+    def test_multiple_tables(self):
+        result = parse_annotations(
+            "# @table a file:///wh#db.a\n# @table b file:///wh#db.b\nx = 1\n"
+        )
+        assert [t.name for t in result.tables] == ["a", "b"]
+
+    def test_wire_payload_includes_tables(self):
+        result = parse_annotations("# @table trips file:///wh#db.t\nx = 1\n")
+        payload = result.to_wire_payload()
+        assert payload["tables"] == [
+            {"name": "trips", "uri": "file:///wh#db.t", "snapshot_pin": None}
+        ]

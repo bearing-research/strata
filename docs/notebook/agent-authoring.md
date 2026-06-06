@@ -111,6 +111,9 @@ surface is [Cell Annotations](annotations.md); the most common:
 # @worker gpu-box         ← run on a named worker
 # @env API_BASE=https://… ← per-cell env var
 # @mount data s3://bucket/path ro   ← injects `data` as a pathlib.Path
+# @table trips file:///wh#nyc.trips ← lake input: injects `trips` (URI) and
+#                                     `trips_snapshot`; new table data makes
+#                                     the cell stale
 ```
 
 Prompt cells (LLM calls) use the same mechanism:

@@ -2029,6 +2029,17 @@ async def _run_partition_batch(
                 for name, rm in resolved_mounts.items()
             }
 
+        # Resolve declared lake tables to concrete snapshots — the harness
+        # injects <name> / <name>_snapshot, exactly like single-cell does.
+        table_manifest: dict[str, dict[str, Any]] = {}
+        if annotations.tables:
+            _, table_snapshots = await executor._fingerprint_tables(annotations.tables)
+            try:
+                table_manifest = executor._manifest_tables(annotations.tables, table_snapshots)
+            except RuntimeError as exc:
+                mount_failed_cells.append((cell.id, exc))
+                continue
+
         cell_specs.append(
             {
                 "cell_id": cell.id,
@@ -2040,6 +2051,7 @@ async def _run_partition_batch(
                 ),
                 "env": effective_env,
                 "mount_manifest": mount_manifest,
+                "table_manifest": table_manifest,
                 "source_hash": "",
                 "env_hash": "",
             }

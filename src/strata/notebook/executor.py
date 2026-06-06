@@ -74,6 +74,7 @@ from strata.notebook.models import (
     CellLanguage,
     CellOutput,
     MountSpec,
+    TableSpec,
     WorkerBackendType,
 )
 from strata.notebook.module_export import build_module_export_plan
@@ -253,6 +254,8 @@ class _CellProvenance:
     mount_specs: list[MountSpec]
     mount_fingerprints: list[str]
     has_rw_mount: bool
+    table_fingerprints: list[str]
+    table_snapshots: dict[str, int]
     provenance_hash: str
 
 
@@ -775,8 +778,9 @@ class CellExecutor:
             runtime_identity=runtime_identity,
         )
         input_hashes = self._collect_input_hashes(cell_id)
+        table_fingerprints, table_snapshots = await self._fingerprint_tables(annotations.tables)
         provenance_hash = compute_provenance_hash(
-            input_hashes + mount_fingerprints,
+            input_hashes + mount_fingerprints + table_fingerprints,
             source_hash,
             env_hash,
         )
@@ -792,6 +796,8 @@ class CellExecutor:
             mount_specs=mount_specs,
             mount_fingerprints=mount_fingerprints,
             has_rw_mount=has_rw_mount,
+            table_fingerprints=table_fingerprints,
+            table_snapshots=table_snapshots,
             provenance_hash=provenance_hash,
         )
 
@@ -895,14 +901,29 @@ class CellExecutor:
 
             logger.info(
                 "execute_cell %s: source_hash=%s env_hash=%s "
-                "input_hashes=%s mount_fps=%s provenance=%s",
+                "input_hashes=%s mount_fps=%s table_fps=%s provenance=%s",
                 cell_id,
                 source_hash[:12],
                 env_hash[:12],
                 [h[:12] for h in input_hashes],
                 [fp[:20] for fp in mount_fingerprints],
+                [fp[:40] for fp in prov.table_fingerprints],
                 provenance_hash[:12],
             )
+
+            # Declared lake tables must resolve to concrete snapshots before
+            # the cell can run (the namespace injection needs them).
+            try:
+                manifest_tables = self._manifest_tables(
+                    prov.annotations.tables, prov.table_snapshots
+                )
+            except RuntimeError as e:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=str(e),
+                    execution_method="error",
+                )
 
             # ③ Cache check for THIS cell.
             artifact_mgr = self.session.get_artifact_manager()
@@ -1063,6 +1084,7 @@ class CellExecutor:
                     timeout_seconds,
                     remote_build_id=remote_build_id,
                     mutation_defines=list(getattr(cell, "mutation_defines", []) or []),
+                    tables=manifest_tables,
                 )
                 if remote_build_id and remote_metadata.get("remote_transport") == "signed":
                     remote_metadata["remote_build_state"] = "ready"
@@ -1480,6 +1502,7 @@ class CellExecutor:
         timeout_seconds: float,
         remote_build_id: str | None = None,
         mutation_defines: list[str] | None = None,
+        tables: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Dispatch one cell execution through the selected worker backend."""
         if worker_spec.backend == WorkerBackendType.LOCAL:
@@ -1492,6 +1515,7 @@ class CellExecutor:
                 runtime_env,
                 timeout_seconds,
                 mutation_defines=mutation_defines,
+                tables=tables,
             )
 
         if is_embedded_executor_worker(worker_spec):
@@ -1504,6 +1528,7 @@ class CellExecutor:
                 runtime_env,
                 timeout_seconds,
                 mutation_defines=mutation_defines,
+                tables=tables,
             )
 
         if is_http_executor_worker(worker_spec):
@@ -1530,6 +1555,7 @@ class CellExecutor:
         runtime_env: dict[str, str],
         timeout_seconds: float,
         mutation_defines: list[str] | None = None,
+        tables: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run the existing direct local execution path."""
         result = None
@@ -1542,6 +1568,7 @@ class CellExecutor:
             runtime_env,
             resolved_mounts,
             mutation_defines=mutation_defines,
+            tables=tables,
         )
 
         if self.pool is not None:
@@ -1580,6 +1607,7 @@ class CellExecutor:
         runtime_env: dict[str, str],
         timeout_seconds: float,
         mutation_defines: list[str] | None = None,
+        tables: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run the bundle-based executor path locally for supported executor workers."""
         resolved_mounts = await self._prepare_mounts(mount_specs)
@@ -1590,6 +1618,7 @@ class CellExecutor:
             runtime_env,
             resolved_mounts,
             mutation_defines=mutation_defines,
+            tables=tables,
         )
         result = await self._run_harness(manifest_path, venv_path, timeout_seconds)
 
@@ -2225,6 +2254,58 @@ class CellExecutor:
             return {}
         return await self._mount_resolver.prepare_mounts(mount_specs)
 
+    async def _fingerprint_tables(
+        self,
+        table_specs: list[TableSpec],
+    ) -> tuple[list[str], dict[str, int]]:
+        """Resolve table snapshots for provenance hashing (see tables.py).
+
+        Catalog I/O runs off the event loop; an unreachable catalog yields
+        a random fingerprint (cell shows stale, error surfaces at run time)
+        rather than raising — provenance is also computed on notebook open.
+        """
+        if not table_specs:
+            return [], {}
+        from strata.notebook.tables import fingerprint_tables
+
+        config = self._lake_config()
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, fingerprint_tables, table_specs, config)
+
+    def _lake_config(self):
+        """Server config when running inside the server, else loaded fresh."""
+        try:
+            from strata.server import get_state
+
+            return get_state().config
+        except RuntimeError:
+            from strata.config import StrataConfig
+
+            return StrataConfig.load()
+
+    def _manifest_tables(
+        self,
+        table_specs: list[TableSpec],
+        table_snapshots: dict[str, int],
+    ) -> dict[str, dict[str, Any]]:
+        """Build the manifest ``tables`` block from resolved snapshots.
+
+        Raises:
+            RuntimeError: If any declared table's snapshot could not be
+                resolved — the cell needs a concrete snapshot to run.
+        """
+        tables: dict[str, dict[str, Any]] = {}
+        for spec in table_specs:
+            snapshot_id = table_snapshots.get(spec.name)
+            if snapshot_id is None:
+                raise RuntimeError(
+                    f"@table {spec.name}: could not resolve a snapshot for "
+                    f"{spec.uri!r} — is the catalog reachable and does the "
+                    "table have at least one snapshot?"
+                )
+            tables[spec.name] = {"uri": spec.uri, "snapshot_id": snapshot_id}
+        return tables
+
     def _write_manifest(
         self,
         source: str,
@@ -2234,6 +2315,7 @@ class CellExecutor:
         resolved_mounts: dict[str, ResolvedMount],
         mutation_defines: list[str] | None = None,
         loop_config: dict[str, Any] | None = None,
+        tables: dict[str, dict[str, Any]] | None = None,
     ) -> Path:
         """Write the harness manifest for one local execution."""
         manifest_mounts = {
@@ -2249,6 +2331,7 @@ class CellExecutor:
             "inputs": input_specs,
             "output_dir": str(output_dir),
             "mounts": manifest_mounts,
+            "tables": tables or {},
             "env": runtime_env,
             "mutation_defines": list(mutation_defines or []),
         }
