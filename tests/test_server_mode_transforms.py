@@ -154,6 +154,11 @@ def personal_mode_app(personal_mode_config):
     # Initialize artifact store
     get_artifact_store(personal_mode_config.artifact_dir)
 
+    # Personal mode ships the embedded registry (real lifespan does this)
+    from strata.transforms.registry import TransformRegistry, set_transform_registry
+
+    set_transform_registry(TransformRegistry.create_embedded_registry())
+
     # Set up server state with mock planner
     from unittest.mock import MagicMock
 
@@ -851,8 +856,14 @@ class TestTransformValidation:
         data = response.json()
         assert data["build_id"] is not None
 
-    def test_personal_mode_allows_any_transform(self, personal_mode_app):
-        """Personal mode allows any transform (no validation)."""
+    def test_personal_mode_runs_embedded_and_rejects_unknown(self, personal_mode_app):
+        """Personal mode executes embedded transforms; unknown ones fail fast.
+
+        An executor the registry can't resolve used to be accepted and
+        parked in 'building' forever (no executor existed in personal
+        mode). The embedded runner now executes registered transforms,
+        and unknown refs are rejected with a 400.
+        """
         response = personal_mode_app.post(
             "/v1/artifacts/materialize",
             json={
@@ -863,12 +874,23 @@ class TestTransformValidation:
                 },
             },
         )
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"] == "transform_unknown"
 
+        response = personal_mode_app.post(
+            "/v1/artifacts/materialize",
+            json={
+                "inputs": [],
+                "transform": {
+                    "executor": "local://duckdb_sql@v1",
+                    "params": {"sql": "SELECT 1 as x"},
+                },
+            },
+        )
         assert response.status_code == 200
         data = response.json()
-        # In personal mode, build_spec is returned (client executes)
-        assert data["build_spec"] is not None
-        assert data["build_id"] is None
+        assert data["build_id"] is not None
+        assert data["state"] == "pending"
 
     def test_transform_requires_scope_without_scope_is_rejected(self, server_mode_auth_app):
         """Registered transforms can still require an explicit principal scope."""

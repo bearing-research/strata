@@ -40,6 +40,56 @@ def materialize_and_upload(
     return artifact.uri, artifact.to_table()
 
 
+def put_artifact(
+    base_url: str,
+    table: pa.Table,
+    *,
+    executor: str = "test_step@v1",
+    params: dict | None = None,
+    inputs: list[str] | None = None,
+    name: str | None = None,
+) -> dict:
+    """Persist a locally-computed table via PUT /v1/artifacts (multipart)."""
+    import json as json_module
+
+    metadata: dict = {
+        "inputs": inputs or [],
+        "transform": {"executor": executor, "params": params or {}},
+    }
+    if name:
+        metadata["name"] = name
+    files = {
+        "metadata": ("metadata.json", json_module.dumps(metadata), "application/json"),
+        "data": (
+            "data.arrow",
+            table_to_ipc_bytes(table),
+            "application/vnd.apache.arrow.stream",
+        ),
+    }
+    resp = httpx.put(f"{base_url}/v1/artifacts", files=files, timeout=30.0)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def wait_for_build(base_url: str, artifact_uri: str, timeout: float = 30.0) -> None:
+    """Poll an artifact created by the embedded build runner until ready."""
+    import re
+
+    match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", artifact_uri)
+    assert match is not None
+    artifact_id, version = match.group(1), match.group(2)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        resp = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}")
+        state = resp.json().get("state")
+        if state == "ready":
+            return
+        if state == "failed":
+            raise AssertionError(f"build failed for {artifact_uri}")
+        time.sleep(0.2)
+    raise AssertionError(f"build did not finish for {artifact_uri}")
+
+
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -75,12 +125,13 @@ def service_mode_server(tmp_path):
 class TestArtifactEndpoints:
     """Tests for artifact HTTP endpoints."""
 
-    def test_materialize_cache_miss(self, personal_mode_server):
-        """Materialize returns build spec on cache miss."""
+    def test_materialize_cache_miss_queues_embedded_build(self, personal_mode_server):
+        """Cache miss queues an embedded build that completes server-side."""
+        base_url = personal_mode_server["base_url"]
         response = httpx.post(
-            f"{personal_mode_server['base_url']}/v1/artifacts/materialize",
+            f"{base_url}/v1/artifacts/materialize",
             json={
-                "inputs": ["file:///warehouse#db.events"],
+                "inputs": [],
                 "transform": {
                     "executor": "local://duckdb_sql@v1",
                     "params": {"sql": "SELECT 1 as x"},
@@ -91,100 +142,54 @@ class TestArtifactEndpoints:
         data = response.json()
         assert data["hit"] is False
         assert data["artifact_uri"].startswith("strata://artifact/")
-        assert data["build_spec"]["executor"] == "local://duckdb_sql@v1"
+        assert data["build_id"]
+        assert data["state"] == "pending"
 
-    def test_upload_and_finalize(self, personal_mode_server):
-        """Upload blob and finalize artifact."""
+        # The embedded runner executes the SQL — no client-side build needed.
+        wait_for_build(base_url, data["artifact_uri"])
+
+    def test_materialize_unknown_transform_fails_fast(self, personal_mode_server):
+        """An executor nothing can run is rejected, not parked in building."""
+        response = httpx.post(
+            f"{personal_mode_server['base_url']}/v1/artifacts/materialize",
+            json={"inputs": [], "transform": {"executor": "nonexistent@v9", "params": {}}},
+        )
+        assert response.status_code == 400
+        detail = response.json()["detail"]
+        assert detail["error"] == "transform_unknown"
+        assert "duckdb_sql" in str(detail["message"])
+
+    def test_put_persists_local_result(self, personal_mode_server):
+        """PUT /v1/artifacts persists a locally-computed result."""
         base_url = personal_mode_server["base_url"]
-
-        # Create artifact
-        resp = httpx.post(
-            f"{base_url}/v1/artifacts/materialize",
-            json={"inputs": [], "transform": {"executor": "test", "params": {}}},
-        )
-        build_spec = resp.json()["build_spec"]
-        artifact_id, version = build_spec["artifact_id"], build_spec["version"]
-
-        # Upload and finalize
         table = pa.table({"x": [1, 2, 3]})
-        httpx.post(
-            f"{base_url}/v1/artifacts/upload/{artifact_id}/v/{version}",
-            content=table_to_ipc_bytes(table),
-            headers={"Content-Type": "application/vnd.apache.arrow.stream"},
-        )
-        resp = httpx.post(
-            f"{base_url}/v1/artifacts/finalize",
-            json={
-                "artifact_id": artifact_id,
-                "version": version,
-                "arrow_schema": str(table.schema),
-                "row_count": 3,
-            },
-        )
-        assert resp.status_code == 200
-        assert resp.json()["byte_size"] > 0
+        data = put_artifact(base_url, table)
+        assert data["artifact_uri"].startswith("strata://artifact/")
+        assert data["hit"] is False
 
     def test_materialize_cache_hit(self, personal_mode_server):
-        """Materialize returns hit after artifact is finalized."""
+        """Same provenance dedups: the second put is a cache hit."""
         base_url = personal_mode_server["base_url"]
-        request_body = {
-            "inputs": ["input1"],
-            "transform": {"executor": "test", "params": {"key": "value"}},
-        }
-
-        # First call - miss
-        resp = httpx.post(f"{base_url}/v1/artifacts/materialize", json=request_body)
-        build_spec = resp.json()["build_spec"]
-        artifact_id, version = build_spec["artifact_id"], build_spec["version"]
-
-        # Upload and finalize
         table = pa.table({"result": [42]})
-        httpx.post(
-            f"{base_url}/v1/artifacts/upload/{artifact_id}/v/{version}",
-            content=table_to_ipc_bytes(table),
-        )
-        httpx.post(
-            f"{base_url}/v1/artifacts/finalize",
-            json={
-                "artifact_id": artifact_id,
-                "version": version,
-                "arrow_schema": str(table.schema),
-                "row_count": 1,
-            },
-        )
 
-        # Second call - hit
-        resp = httpx.post(f"{base_url}/v1/artifacts/materialize", json=request_body)
-        data = resp.json()
-        assert data["hit"] is True
-        assert data["build_spec"] is None
+        first = put_artifact(base_url, table, params={"key": "value"})
+        assert first["hit"] is False
+
+        second = put_artifact(base_url, table, params={"key": "value"})
+        assert second["hit"] is True
+        assert second["artifact_uri"] == first["artifact_uri"]
 
     def test_artifact_data_streaming(self, personal_mode_server):
         """Fetch artifact data returns Arrow IPC stream."""
         base_url = personal_mode_server["base_url"]
 
-        # Create and finalize artifact
-        resp = httpx.post(
-            f"{base_url}/v1/artifacts/materialize",
-            json={"inputs": [], "transform": {"executor": "test", "params": {}}},
-        )
-        build_spec = resp.json()["build_spec"]
-        artifact_id, version = build_spec["artifact_id"], build_spec["version"]
+        # Create artifact via PUT
+        import re
 
         table = pa.table({"x": [1, 2, 3], "y": ["a", "b", "c"]})
-        httpx.post(
-            f"{base_url}/v1/artifacts/upload/{artifact_id}/v/{version}",
-            content=table_to_ipc_bytes(table),
-        )
-        httpx.post(
-            f"{base_url}/v1/artifacts/finalize",
-            json={
-                "artifact_id": artifact_id,
-                "version": version,
-                "arrow_schema": str(table.schema),
-                "row_count": 3,
-            },
-        )
+        data = put_artifact(base_url, table)
+        match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", data["artifact_uri"])
+        artifact_id, version = match.group(1), int(match.group(2))
 
         # Fetch and verify
         resp = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data")
@@ -199,28 +204,26 @@ class TestArtifactEndpoints:
         """Name pointer CRUD operations."""
         base_url = personal_mode_server["base_url"]
 
-        # Create artifact
+        # Create artifact via the embedded runner. (Deliberately NOT via
+        # PUT: put-created artifacts carry tenant "_default" while the
+        # names routes resolve no-header requests to tenant None — the
+        # tenant-spelling unification is tracked Phase 1 item 4.)
+        import re
+
         resp = httpx.post(
             f"{base_url}/v1/artifacts/materialize",
-            json={"inputs": [], "transform": {"executor": "test", "params": {}}},
-        )
-        build_spec = resp.json()["build_spec"]
-        artifact_id, version = build_spec["artifact_id"], build_spec["version"]
-
-        table = pa.table({"x": [1]})
-        httpx.post(
-            f"{base_url}/v1/artifacts/upload/{artifact_id}/v/{version}",
-            content=table_to_ipc_bytes(table),
-        )
-        httpx.post(
-            f"{base_url}/v1/artifacts/finalize",
             json={
-                "artifact_id": artifact_id,
-                "version": version,
-                "arrow_schema": str(table.schema),
-                "row_count": 1,
+                "inputs": [],
+                "transform": {
+                    "executor": "local://duckdb_sql@v1",
+                    "params": {"sql": "SELECT 1 as x"},
+                },
             },
         )
+        artifact_uri = resp.json()["artifact_uri"]
+        wait_for_build(base_url, artifact_uri)
+        match = re.match(r"strata://artifact/([^@]+)@v=(\d+)", artifact_uri)
+        artifact_id, version = match.group(1), int(match.group(2))
 
         # Set name
         resp = httpx.post(
@@ -962,7 +965,6 @@ def artifact_server_with_warehouse(tmp_path, iceberg_warehouse):
         }
 
 
-@pytest.mark.skip(reason="Requires client-side local execution for duckdb_sql@v1")
 class TestUnifiedMaterializeAPI:
     """Tests for the unified client.materialize() API with real tables."""
 

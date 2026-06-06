@@ -570,6 +570,18 @@ class StrataConfig(BaseSettings):
         return self.deployment_mode == "service" and self.transforms_config.get("enabled", False)
 
     @property
+    def transforms_runtime_enabled(self) -> bool:
+        """Whether this server executes transform builds itself.
+
+        Service mode requires the explicit transforms allowlist config.
+        Personal mode always runs the embedded transforms (duckdb_sql)
+        in-process — a single-user server that can't execute the flagship
+        artifact workflow would silently park materialize requests in
+        ``building`` forever.
+        """
+        return self.server_transforms_enabled or self.writes_enabled
+
+    @property
     def max_transform_output_bytes(self) -> int:
         """Get max transform output size in bytes."""
         return self.build_runner_default_max_output

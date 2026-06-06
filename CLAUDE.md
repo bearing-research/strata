@@ -79,6 +79,7 @@ enforced at startup by `validate_mode_coherence` in `config.py`.
 | Flag                    | personal              | service                        |
 | ----------------------- | --------------------- | ------------------------------ |
 | `writes_enabled`        | always `True`         | always `False`                 |
+| Transform build runner  | always on (embedded `duckdb_sql@v1`) | requires `[tool.strata.transforms] enabled` |
 | `auth_mode`             | must be `none`        | typically `trusted_proxy`      |
 | `multi_tenant_enabled`  | must be `False`       | `True` or `False`              |
 | `artifact_dir` default  | `~/.strata/artifacts` | none (must be explicit)        |

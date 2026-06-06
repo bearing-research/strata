@@ -46,6 +46,22 @@ from strata.config import StrataConfig
 # =============================================================================
 
 
+def _reset_transform_singletons() -> None:
+    """Reset build store + runner globals between test servers.
+
+    The personal-mode lifespan now starts an embedded build runner; the
+    build store singleton caches its first db_path forever, so without a
+    reset every later test server would create build records in the FIRST
+    server's database while its own runner polls a different one — builds
+    sit in pending until the wait times out.
+    """
+    from strata.transforms.build_store import reset_build_store
+    from strata.transforms.runner import reset_build_runner
+
+    reset_build_store()
+    reset_build_runner()
+
+
 def find_free_port() -> int:
     """Find an available port on localhost.
 
@@ -164,6 +180,7 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
 
     # Reset artifact store singleton for test isolation across server runs.
     reset_artifact_store()
+    _reset_transform_singletons()
 
     # Initialize server state
     server_module._state = ServerState(config)
@@ -201,6 +218,7 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
         # Server thread is daemon, will be killed on exit
         server_module._state = None
         reset_artifact_store()
+        _reset_transform_singletons()
 
 
 @contextmanager
@@ -241,6 +259,7 @@ def run_server_with_context(
         artifact_dir=artifact_dir,
     )
     reset_artifact_store()
+    _reset_transform_singletons()
     server._state = ServerState(config)
 
     server_config = uvicorn.Config(
@@ -269,6 +288,7 @@ def run_server_with_context(
         thread.join(timeout=2.0)
         server._state = None
         reset_artifact_store()
+        _reset_transform_singletons()
 
 
 # =============================================================================

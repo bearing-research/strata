@@ -490,9 +490,15 @@ class BuildRunner:
                         finalized_artifact.version,
                     )
 
-                # Set name if present in transform spec
-                # (Name is stored elsewhere, check artifact_names for pending name)
-                # For now, names are set by the materialize endpoint
+                # Set the requested name pointer now that the artifact is
+                # ready — the materialize endpoint can't (the build is async).
+                if build.name:
+                    self.artifact_store.set_name(
+                        build.name,
+                        finalized_artifact.id,
+                        finalized_artifact.version,
+                        tenant=build.tenant_id,
+                    )
 
                 # Mark build as complete (include executor logs for debugging)
                 self.build_store.complete_build(

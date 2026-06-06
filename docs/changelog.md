@@ -43,13 +43,19 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   prompts also get a configurable timeout
   (`STRATA_AI_APPROVAL_TIMEOUT_SECONDS` / `[ai] approval_timeout_seconds`,
   default 120s; expiry counts as a decline).
-
 - **Lake-aware cells: `@table` annotation**: declare an Iceberg table input
   on a cell (`# @table trips file:///wh#nyc.trips`) and the table's snapshot
   id joins the cell's provenance — new data landing in the lake makes the
   cell stale and the normal cascade re-runs it, with `<name>` (URI) and
   `<name>_snapshot` injected so the cell scans exactly the snapshot its
   provenance recorded. `snapshot=<id>` pins a cell to one snapshot forever.
+- **Personal mode executes transforms**: the embedded build runner now runs
+  in personal mode, so `materialize` with `duckdb_sql@v1` executes
+  server-side out of the box — previously the request was accepted and then
+  sat in `building` forever (no mode could run the full
+  scan → transform → train → put workflow). Unknown transforms fail fast
+  with a 400 listing what's available, and a `name=` on an async
+  materialize is now set when the build completes.
 - **Artifact store integrity hardening** (#123): artifacts are validated at
   finalize time (the blob must be exactly one readable Arrow IPC stream
   matching the recorded row count — a mismatch becomes a `failed` artifact,
@@ -61,6 +67,19 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **Put-created artifacts can be named after the fact**: `PUT /v1/artifacts`
+  stamped artifacts with tenant `_default` while the name routes resolve
+  no-header requests to no tenant — so `set_name` on an artifact you had
+  just created was rejected with a tenant mismatch. The put route now
+  resolves the tenant the same way materialize does.
+- **Multi-input transforms bind inputs in caller order**: the stored
+  transform spec sorted its inputs "for deterministic hashing", so the
+  build runner bound `input0` / `input1` by lexicographic artifact id —
+  joins could silently swap their operands depending on generated UUIDs,
+  and `f(a, b)` deduplicated against `f(b, a)`. Input order is part of the
+  computation now (and of provenance). Existing caches of multi-input
+  transforms whose caller order differed from sorted order will rebuild
+  once.
 - **Multi-row-group scans no longer silently truncate** (#121): scanning
   a table whose plan spans multiple Parquet row groups or files produced
   an Arrow IPC body that standard readers stopped reading after the
