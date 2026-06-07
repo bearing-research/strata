@@ -63,6 +63,44 @@ def _validation_errors(content: str, schema: dict[str, Any]) -> list[str]:
     return [_format_one_error(err) for err in errors]
 
 
+def _coerce_json_text(content: str) -> str:
+    """Best-effort extraction of a JSON document from model output.
+
+    Providers without server-side schema enforcement often wrap valid
+    JSON in code fences or prose. Returns the extracted JSON string when
+    one parses, else the original content (whose parse error then drives
+    the validation-retry feedback).
+    """
+    try:
+        json.loads(content)
+        return content
+    except json.JSONDecodeError:
+        pass
+
+    import re
+
+    fence = re.search(r"```(?:json)?\s*\n([\s\S]*?)\n```", content)
+    if fence:
+        candidate = fence.group(1).strip()
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start = content.find(opener)
+        end = content.rfind(closer)
+        if 0 <= start < end:
+            candidate = content[start : end + 1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                continue
+    return content
+
+
 def _format_one_error(err: Any) -> str:
     """Render a jsonschema ValidationError as 'path: message'.
 
@@ -316,8 +354,12 @@ async def execute_prompt_cell(
             validation_errors = []
             break
 
-        validation_errors = _validation_errors(result.content, output_schema)
+        # Lenient first pass: providers without enforcement often fence
+        # or preface their JSON — extract it instead of burning a retry.
+        coerced = _coerce_json_text(result.content)
+        validation_errors = _validation_errors(coerced, output_schema)
         if not validation_errors:
+            result.content = coerced
             break
 
         logger.info(
@@ -506,6 +548,7 @@ async def _stream_completion(
     model = config.model
     input_tokens = 0
     output_tokens = 0
+    degraded = False
 
     async for event in chat_completion_stream(
         config,
@@ -525,16 +568,32 @@ async def _stream_completion(
                     "text": event["text"],
                 },
             )
+        elif event["type"] == "notice":
+            # Provider degradation announcement (e.g. response_format
+            # rejected) — surface it on the stream without polluting the
+            # accumulated content.
+            logger.info("prompt_cell_notice %s: %s", cell_id, event["text"])
+            await _emit_delta(
+                on_delta,
+                {
+                    "cell_id": cell_id,
+                    "attempt": attempt,
+                    "kind": "notice",
+                    "text": event["text"],
+                },
+            )
         elif event["type"] == "done":
             model = event.get("model", model)
             input_tokens = event.get("input_tokens", 0)
             output_tokens = event.get("output_tokens", 0)
+            degraded = bool(event.get("degraded", False))
 
     return LlmCompletionResult(
         content="".join(content_parts),
         model=model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        degraded=degraded,
     )
 
 

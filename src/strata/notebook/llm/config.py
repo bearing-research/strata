@@ -44,12 +44,18 @@ class LlmConfig:
 
 @dataclass
 class LlmCompletionResult:
-    """Result from a chat completion request."""
+    """Result from a chat completion request.
+
+    ``degraded`` is True when the provider rejected the structured-output
+    request extensions and the call fell back to prompt-guided JSON —
+    schema conformance then rests entirely on client-side validation.
+    """
 
     content: str
     model: str
     input_tokens: int
     output_tokens: int
+    degraded: bool = False
 
 
 def resolve_llm_config(
@@ -155,6 +161,20 @@ def max_output_tokens_param(base_url: str) -> str:
     return "max_tokens"
 
 
+class LlmHttpError(RuntimeError):
+    """Provider HTTP error carrying the status code and response body.
+
+    Subclasses RuntimeError so existing broad handlers keep working;
+    the typed fields let callers make decisions (e.g. degrade a
+    structured-output request) without parsing the message string.
+    """
+
+    def __init__(self, status_code: int, body: str, model: str):
+        super().__init__(f"LLM provider returned HTTP {status_code} for model {model!r}: {body}")
+        self.status_code = status_code
+        self.body = body
+
+
 def raise_for_llm_status(resp: httpx.Response, model: str) -> None:
     """Like ``resp.raise_for_status()`` but surface the provider's error body.
 
@@ -165,7 +185,7 @@ def raise_for_llm_status(resp: httpx.Response, model: str) -> None:
     if resp.is_success:
         return
     body = resp.text[:1000] if resp.text else "(empty body)"
-    raise RuntimeError(f"LLM provider returned HTTP {resp.status_code} for model {model!r}: {body}")
+    raise LlmHttpError(resp.status_code, body, model)
 
 
 def infer_provider_name(base_url: str) -> str:

@@ -11,6 +11,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **Structured output degrades gracefully on minimal providers**: some
+  OpenAI-compatible servers reject `response_format` or `stream_options`
+  with a 400 — schema-constrained prompt cells used to die on the raw
+  provider error. Strata now retries once without the extensions,
+  steering the model with a schema-guidance system turn and marking the
+  result degraded; the client-side validate-and-retry loop carries full
+  enforcement. Validation is also lenient about packaging: JSON wrapped
+  in code fences or prose is extracted before validating instead of
+  burning a retry on the wrapper.
+
 - **Approval gates on protected aliases**: set
   `STRATA_REGISTRY_PROTECTED_ALIASES=champion,production` and moves or
   deletes of those aliases queue for approval (HTTP 202) instead of
