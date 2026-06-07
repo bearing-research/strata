@@ -3482,7 +3482,14 @@ once you've thrown away the intermediates.</p>
 <h3 id="plots">Plots<a class="headerlink" href="#plots" title="Permanent link">&para;</a></h3>
 <p>R cells display plots inline, like a Python cell's matplotlib figure. Base graphics (<code>plot()</code>, <code>hist()</code>, …) and grid-based plots (ggplot2, lattice) are captured to PNG and rendered in the cell output. A bare trailing plot object auto-renders — a last-line <code>p</code> where <code>p &lt;- ggplot(...)</code> shows the plot without an explicit <code>print(p)</code>, mirroring the R console. A cell that draws several plots produces an ordered list of image outputs.</p>
 <h3 id="whats-still-ahead">What's still ahead<a class="headerlink" href="#whats-still-ahead" title="Permanent link">&para;</a></h3>
-<p>R execution and display are complete; remaining R polish is tracked on GitHub: <a href="https://github.com/bearing-research/strata/issues/81">#81</a> (warm Rscript pool), <a href="https://github.com/bearing-research/strata/issues/83">#83</a> (R version matrix on CI), <a href="https://github.com/bearing-research/strata/issues/84">#84</a> (cross-language run-all batching).</p>
+<p><strong>Warm Rscript pool.</strong> Notebooks containing R cells keep a small pool of
+pre-spawned R workers (R startup, <code>.Rprofile</code>/renv activation, and
+<code>jsonlite</code>/<code>arrow</code> loads already paid), so an R cell run skips the ~1–2s
+interpreter cold-start. Workers are single-shot — one cell each, then
+replaced — preserving per-cell isolation; editing <code>renv.lock</code> drains and
+respawns the pool. Pure-Python notebooks and machines without <code>Rscript</code>
+never start one.</p>
+<p>R execution and display are complete; remaining R polish is tracked on GitHub: <a href="https://github.com/bearing-research/strata/issues/83">#83</a> (R version matrix on CI), <a href="https://github.com/bearing-research/strata/issues/84">#84</a> (cross-language run-all batching).</p>
 <h3 id="what-you-need-today">What you need today<a class="headerlink" href="#what-you-need-today" title="Permanent link">&para;</a></h3>
 <ul>
 <li>R <code>&gt;= 4.2</code> on <code>PATH</code> (Strata calls <code>Rscript</code>).</li>
