@@ -56,6 +56,8 @@ class WarmProcessPool:
         notebook_dir: Path,
         pool_size: int = 2,
         python_executable: str | Path = "python",
+        worker_command: list[str] | None = None,
+        ready_timeout_seconds: float = 10.0,
     ):
         """Initialize the warm process pool.
 
@@ -63,10 +65,20 @@ class WarmProcessPool:
             notebook_dir: Path to the notebook directory
             pool_size: Number of warm processes to maintain
             python_executable: Python interpreter used for warm workers
+                (ignored when ``worker_command`` is given)
+            worker_command: Full argv for the warm worker. Defaults to the
+                Python pool worker; the R pool passes
+                ``[Rscript, pool_worker.R, notebook_dir]`` here. The
+                stdin/stdout frame protocol is language-agnostic.
+            ready_timeout_seconds: How long to wait for the worker's
+                "ready" line. R workers pay renv activation at startup,
+                so their pools pass a larger value.
         """
         self.notebook_dir = Path(notebook_dir)
         self.pool_size = pool_size
         self.python_executable = str(python_executable)
+        self.worker_command = list(worker_command) if worker_command else None
+        self.ready_timeout_seconds = ready_timeout_seconds
         self._available: asyncio.Queue[WarmProcess] = asyncio.Queue()
         self._warming: int = 0  # Processes currently starting up
         self._started: bool = False
@@ -105,7 +117,15 @@ class WarmProcessPool:
         """
         self._warming += 1
         try:
-            worker_script = Path(__file__).parent / "pool_worker.py"
+            if self.worker_command is not None:
+                command = self.worker_command
+            else:
+                worker_script = Path(__file__).parent / "pool_worker.py"
+                command = [
+                    self.python_executable,
+                    str(worker_script),
+                    str(self.notebook_dir),
+                ]
 
             # Spawn the pool worker as a process-group leader so we can
             # kill the whole descendant tree on cancel / pool drain.
@@ -113,9 +133,7 @@ class WarmProcessPool:
             # multiprocessing children, fork servers, …) leaks when
             # we kill the worker.
             process = await asyncio.create_subprocess_exec(
-                self.python_executable,
-                str(worker_script),
-                str(self.notebook_dir),
+                *command,
                 stdout=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -126,7 +144,9 @@ class WarmProcessPool:
             # Wait for the 'ready' signal
             try:
                 assert process.stdout is not None
-                ready_line = await asyncio.wait_for(process.stdout.readline(), timeout=10.0)
+                ready_line = await asyncio.wait_for(
+                    process.stdout.readline(), timeout=self.ready_timeout_seconds
+                )
                 if ready_line and b"ready" in ready_line.lower():
                     warm_proc = WarmProcess(
                         process=process,

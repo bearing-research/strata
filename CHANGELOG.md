@@ -9,6 +9,16 @@ exhaustive commit history.
 
 ### Added
 
+- **Warm Rscript pool** (#81): notebooks with R cells pre-spawn R workers
+  that have already paid interpreter startup, renv activation, and
+  `jsonlite`/`arrow` loads — an R cell run skips the ~1–2s cold-start tax
+  and reports `execution_method: "warm"`. Single-shot workers preserve
+  per-cell isolation; `renv.lock` edits drain and respawn the pool;
+  pure-Python notebooks and machines without `Rscript` never start one.
+  The pool machinery is the existing Python warm pool with a
+  parameterized worker command — the stdin/stdout frame protocol is
+  language-agnostic.
+
 - **Live-provider LLM tests** (opt-in): `STRATA_TEST_LIVE_LLM=1` runs
   integration tests against the real Anthropic and OpenAI APIs — unary
   completions, schema enforcement (native tool-use / strict
