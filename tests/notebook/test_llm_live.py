@@ -43,9 +43,7 @@ _SCHEMA = {
     "additionalProperties": False,
 }
 
-_SCHEMA_PROMPT = (
-    "What is 2 + 2? Respond with your numeric answer and whether you are confident."
-)
+_SCHEMA_PROMPT = "What is 2 + 2? Respond with your numeric answer and whether you are confident."
 
 
 def _anthropic_config() -> LlmConfig:
