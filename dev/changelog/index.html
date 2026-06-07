@@ -494,6 +494,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#added" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -638,7 +649,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security" class="md-nav__link">
+  <a href="#security_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -771,7 +782,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_1" class="md-nav__link">
+  <a href="#security_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -2006,6 +2017,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#added" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2150,7 +2172,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security" class="md-nav__link">
+  <a href="#security_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -2283,7 +2305,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#security_1" class="md-nav__link">
+  <a href="#security_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Security
@@ -2357,6 +2379,18 @@
 exhaustive commit history.</p>
 <p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
+<h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Registry authorization hardening</strong> (pre-release security review): the
+  registry audit read is now tenant-scoped — a principal sees only its own
+  tenant's history (<code>admin:*</code> sees the whole store), matching every other
+  registry route. Deciding protected-alias changes (approve/reject)
+  requires the <code>admin:registry</code> scope under trusted-proxy auth, and
+  approval enforces separation of duty (the requester cannot self-approve
+  without <code>admin:*</code>). These close latent cross-tenant-disclosure and
+  self-approval gaps before the registry is exposed in multi-tenant
+  service mode; personal mode (single operator) is unaffected.</li>
+</ul>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
@@ -2735,7 +2769,7 @@ partition into per-language runs automatically.</p>
   one retry (<code>tests/conftest.py</code>); Iceberg <code>temp_warehouse</code> fixture
   disposes its catalog engine before yield to close the related flake.</li>
 </ul>
-<h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
+<h3 id="security_1">Security<a class="headerlink" href="#security_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Phase A scorecard hygiene</strong> — <code>SECURITY.md</code>, Dependabot config,
   least-privilege workflow permissions.</li>
@@ -2899,7 +2933,7 @@ startup guard. The notebook app boots via <code>strata-notebook</code> (or
   replaced with a structural correctness check (no more CI flakes from
   runner load)</li>
 </ul>
-<h3 id="security_1">Security<a class="headerlink" href="#security_1" title="Permanent link">&para;</a></h3>
+<h3 id="security_2">Security<a class="headerlink" href="#security_2" title="Permanent link">&para;</a></h3>
 <ul>
 <li>read-only enforcement for SQL cells is layered (file-handle flag +
   session-level guard) rather than SQL-text keyword filtering — a SQL

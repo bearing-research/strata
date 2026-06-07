@@ -1901,6 +1901,13 @@ a crash can never swallow an approval:</p>
 <p>If a pending change's target artifact disappears before approval, the
 approve fails cleanly and the pending entry stays for an explicit reject.
 Unprotected aliases apply immediately; the default is no gating.</p>
+<p><strong>Authorization (service mode).</strong> When exposed under trusted-proxy auth,
+approve and reject require the <code>admin:registry</code> scope, and approval
+enforces separation of duty — the requester cannot self-approve their own
+move unless they hold the <code>admin:*</code> break-glass scope. The audit log is
+tenant-scoped: a principal reads only its own tenant's history (<code>admin:*</code>
+sees the whole store). In personal mode (single operator, no auth) these
+gates are inert.</p>
 <h2 id="the-promotion-flow-end-to-end">The promotion flow, end to end<a class="headerlink" href="#the-promotion-flow-end-to-end" title="Permanent link">&para;</a></h2>
 <p>The shape this is designed for — a notebook training pipeline whose last
 cell promotes through the registry:</p>

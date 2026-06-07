@@ -1534,6 +1534,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="ACLs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope-gated-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope-gated endpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1843,6 +1860,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="ACLs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scope-gated-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scope-gated endpoints
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2102,6 +2136,32 @@ alphanumeric / <code>_</code> / <code>-</code> characters and hashed into:</p>
 <a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deny&quot;</span>
 </code></pre></div>
 <p>Evaluation: deny rules → allow rules → default. <a href="https://github.com/bearing-research/strata/tree/main/src/strata">Wildcard, principal, and scope matching semantics are documented in source</a> for anyone extending the ACL engine.</p>
+<h3 id="scope-gated-endpoints">Scope-gated endpoints<a class="headerlink" href="#scope-gated-endpoints" title="Permanent link">&para;</a></h3>
+<p>A few operations require a specific scope under trusted-proxy auth
+(<code>admin:*</code> satisfies any of them):</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Gates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>admin:cache</code></td>
+<td><code>POST /v1/cache/clear</code></td>
+</tr>
+<tr>
+<td><code>admin:registry</code></td>
+<td><code>POST /v1/registry/pending/approve</code> and <code>.../reject</code> — deciding protected-alias changes</td>
+</tr>
+</tbody>
+</table>
+<p>Registry <strong>approval</strong> additionally enforces separation of duty: the
+principal who requested a protected-alias move cannot approve it
+themselves unless they hold <code>admin:*</code>. The registry <strong>audit</strong> read
+(<code>GET /v1/registry/audit</code>) is tenant-scoped — a principal sees only its
+own tenant's history; <code>admin:*</code> sees the whole store.</p>
 <h2 id="migrating-from-personal-mode">Migrating from personal mode<a class="headerlink" href="#migrating-from-personal-mode" title="Permanent link">&para;</a></h2>
 <p>If you've been running personal mode and want to grow into service:</p>
 <ol>
