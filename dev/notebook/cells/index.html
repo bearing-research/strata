@@ -3039,9 +3039,16 @@
 <td><strong>Gemini / Mistral / Ollama / vLLM</strong></td>
 <td>Fallback to <code>response_format: {type: "json_object"}</code>, valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap.</td>
 </tr>
+<tr>
+<td><strong>Servers that reject the extensions</strong></td>
+<td>Some OpenAI-compatible servers 400 on <code>response_format</code> or <code>stream_options</code> outright. Strata retries once without them, appending a schema-guidance system turn; the result is marked degraded and the validate-and-retry loop carries full enforcement.</td>
+</tr>
 </tbody>
 </table>
 <p>Setting <code>@output_schema</code> implies <code>@output json</code>; you don't need both.</p>
+<p>Validation is lenient about packaging: when a provider wraps otherwise-valid
+JSON in code fences or prose, Strata extracts the JSON document before
+validating instead of burning a retry on the wrapper.</p>
 <p>Example, triage each review into a structured record:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a># @name triage
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a># @output_schema {&quot;type&quot;:&quot;object&quot;,&quot;properties&quot;:{&quot;items&quot;:{&quot;type&quot;:&quot;array&quot;,&quot;items&quot;:{&quot;type&quot;:&quot;object&quot;,&quot;properties&quot;:{&quot;sentiment&quot;:{&quot;type&quot;:&quot;string&quot;,&quot;enum&quot;:[&quot;positive&quot;,&quot;negative&quot;,&quot;neutral&quot;]},&quot;priority&quot;:{&quot;type&quot;:&quot;string&quot;,&quot;enum&quot;:[&quot;low&quot;,&quot;medium&quot;,&quot;high&quot;]},&quot;tags&quot;:{&quot;type&quot;:&quot;array&quot;,&quot;items&quot;:{&quot;type&quot;:&quot;string&quot;}}},&quot;required&quot;:[&quot;sentiment&quot;,&quot;priority&quot;,&quot;tags&quot;]}}},&quot;required&quot;:[&quot;items&quot;]}
