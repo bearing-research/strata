@@ -123,6 +123,19 @@ exhaustive commit history.
 
 ### Fixed
 
+- **Registry hardening (pre-release review)**: garbage collection and
+  `delete_artifact` now respect **alias** pointers — a champion alias
+  pinning an old (even superseded) version protects it from collection,
+  and deleting an artifact cleans its aliases (audited) and tags.
+  `approve_alias_change` is fully transactional: the pending-consumption,
+  approval audit, and the alias move itself commit together, and a
+  pending change whose target vanished fails cleanly with the entry
+  intact for an explicit reject. Concurrent refresh rebuilds of one
+  artifact no longer race version allocation. Alias writes targeting the
+  version already pointed at are idempotent no-ops (`status:
+  "unchanged"`) — re-running a promote cell doesn't refile approvals or
+  spam the audit.
+
 - **Namespaced artifact names are no longer write-only** (friction from the
   ML dogfood): names containing `/` (`team/dataset/raw`) could be created
   but every read route 404'd on them. The name routes now use path

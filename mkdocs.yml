@@ -80,6 +80,7 @@ nav:
     - Keyboard Shortcuts: notebook/keyboard.md
   - Core:
     - Quickstart: getting-started/core.md
+    - Artifacts & Registry: core/registry.md
   - API Reference:
     - Notebook Client Protocol: reference/notebook-protocol.md
     - REST API: reference/rest-api.md

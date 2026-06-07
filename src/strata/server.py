@@ -4185,7 +4185,7 @@ async def set_alias(name: str, alias: str, request: AliasSetRequest):
 
     if alias in state.config.registry_protected_aliases:
         try:
-            store.request_alias_change(
+            queued = store.request_alias_change(
                 name,
                 alias,
                 "set",
@@ -4196,6 +4196,15 @@ async def set_alias(name: str, alias: str, request: AliasSetRequest):
             )
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
+        if not queued:
+            # Alias already points at exactly this version — nothing to
+            # approve. Idempotent promote cells re-run without refiling.
+            return {
+                "status": "unchanged",
+                "name": name,
+                "alias": alias,
+                "artifact_uri": f"strata://artifact/{request.artifact_id}@v={request.version}",
+            }
         return JSONResponse(
             status_code=202,
             content={
@@ -4208,13 +4217,14 @@ async def set_alias(name: str, alias: str, request: AliasSetRequest):
         )
 
     try:
-        store.set_alias(
+        changed = store.set_alias(
             name, alias, request.artifact_id, request.version, tenant=tenant_id, actor=actor
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return {
+        "status": "applied" if changed else "unchanged",
         "name": name,
         "alias": alias,
         "artifact_uri": f"strata://artifact/{request.artifact_id}@v={request.version}",

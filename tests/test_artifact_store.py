@@ -865,3 +865,139 @@ class TestPendingAliasChanges:
             store.request_alias_change(
                 "demo/model", "champion", "set", artifact_id="ghost", version=1
             )
+
+
+class TestAliasedArtifactProtection:
+    """GC and delete respect alias pointers (review finding C1)."""
+
+    def test_gc_spares_aliased_artifact(self, store):
+        _make_ready_artifact(store, "pinned", "prov-p")
+        store.set_alias("demo/model", "champion", "pinned", 1)
+
+        result = store.garbage_collect(max_age_days=0)
+        assert store.get_artifact("pinned", 1) is not None, result
+        assert store.resolve_alias("demo/model", "champion") is not None
+
+    def test_gc_spares_aliased_superseded_version(self, store):
+        """The C1 failure sequence: champion pins a superseded version."""
+        _make_ready_artifact(store, "model", "prov-s")
+        store.create_artifact("model", "prov-s")
+        store.write_blob("model", 2, _ipc_bytes(1))
+        store.finalize_artifact("model", 2, "{}", 1, 10)  # supersedes v1
+        store.set_alias("demo/model", "champion", "model", 1)
+        store.set_name("demo/model", "model", 2)  # name guards v2
+
+        store.garbage_collect(max_age_days=0)
+
+        champion = store.resolve_alias("demo/model", "champion")
+        assert champion is not None and champion.version == 1
+
+    def test_gc_still_collects_unreferenced(self, store):
+        _make_ready_artifact(store, "loose", "prov-l")
+        result = store.garbage_collect(max_age_days=0)
+        assert result["deleted_count"] == 1
+        assert store.get_artifact("loose", 1) is None
+
+    def test_delete_artifact_cleans_aliases_and_tags(self, store):
+        _make_ready_artifact(store, "doomed", "prov-d")
+        store.set_alias("demo/model", "candidate", "doomed", 1)
+        store.set_tag("doomed", 1, "auc", "0.5")
+
+        assert store.delete_artifact("doomed", 1) is True
+        assert store.resolve_alias("demo/model", "candidate") is None
+        assert store.get_tags("doomed", 1) == {}
+        # The forced alias removal is auditable
+        entries = store.read_audit(name="demo/model")
+        assert entries[0]["action"] == "alias_delete"
+
+
+class TestApproveAtomicity:
+    """approve_alias_change is one transaction (review finding M1)."""
+
+    def test_dead_target_keeps_pending_intact(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        store.request_alias_change("demo/model", "champion", "set", artifact_id="m1", version=1)
+        store.delete_artifact("m1", 1)  # target dies between request and approve
+
+        with pytest.raises(ValueError, match="no longer available"):
+            store.approve_alias_change("demo/model", "champion")
+
+        # The pending entry survives for an explicit reject
+        assert len(store.list_pending_changes()) == 1
+        # And no phantom approval landed in the audit
+        actions = [e["action"] for e in store.read_audit(name="demo/model")]
+        assert "alias_approved" not in actions
+
+    def test_approve_applies_and_audits_in_order(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        store.request_alias_change(
+            "demo/model", "champion", "set", artifact_id="m1", version=1, actor="req"
+        )
+        store.approve_alias_change("demo/model", "champion", actor="approver")
+
+        assert store.resolve_alias("demo/model", "champion").id == "m1"
+        entries = store.read_audit(name="demo/model")
+        assert [e["action"] for e in entries] == [
+            "alias_set",
+            "alias_approved",
+            "alias_request_set",
+        ]
+        assert entries[0]["actor"] == "approver"
+
+
+class TestCreateArtifactVersionRace:
+    """Concurrent creates for one artifact id allocate distinct versions (M2)."""
+
+    def test_threaded_creates_never_collide(self, store):
+        import threading
+
+        _make_ready_artifact(store, "contended", "prov-base")
+        errors: list[Exception] = []
+        versions: list[int] = []
+        barrier = threading.Barrier(4)
+
+        def create(n):
+            try:
+                barrier.wait()
+                versions.append(store.create_artifact("contended", f"prov-{n}"))
+            except Exception as e:  # noqa: BLE001 — collecting for assertion
+                errors.append(e)
+
+        threads = [threading.Thread(target=create, args=(i,)) for i in range(4)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+
+        assert errors == []
+        assert sorted(versions) == [2, 3, 4, 5]
+
+
+class TestAliasIdempotence:
+    """Identical-target alias writes are no-ops (dogfood finding D4)."""
+
+    def test_set_alias_same_target_is_noop(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        assert store.set_alias("demo/model", "champion", "m1", 1) is True
+        before = len(store.read_audit(name="demo/model"))
+        assert store.set_alias("demo/model", "champion", "m1", 1) is False
+        assert len(store.read_audit(name="demo/model")) == before  # no audit spam
+
+    def test_request_for_live_pointer_is_noop(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        store.set_alias("demo/model", "champion", "m1", 1)
+        assert (
+            store.request_alias_change("demo/model", "champion", "set", artifact_id="m1", version=1)
+            is False
+        )
+        assert store.list_pending_changes() == []
+
+    def test_request_for_new_target_still_queues(self, store):
+        _make_ready_artifact(store, "m1", "prov-1")
+        _make_ready_artifact(store, "m2", "prov-2")
+        store.set_alias("demo/model", "champion", "m1", 1)
+        assert (
+            store.request_alias_change("demo/model", "champion", "set", artifact_id="m2", version=1)
+            is True
+        )
+        assert len(store.list_pending_changes()) == 1
