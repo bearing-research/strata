@@ -374,6 +374,12 @@ _MIGRATION_SQL = """
 """
 
 
+# Sentinel for read_audit's tenant param: distinguishes "no tenant filter at
+# all" (the direct-store CLI / admin view of the whole store) from an
+# explicit tenant filter of None — which normalizes to the '' default tenant.
+_AUDIT_ALL_TENANTS = object()
+
+
 class ArtifactStore:
     """SQLite-backed artifact store for personal mode.
 
@@ -1838,11 +1844,15 @@ class ArtifactStore:
         name: str | None = None,
         artifact_id: str | None = None,
         limit: int = 100,
+        tenant: object = _AUDIT_ALL_TENANTS,
     ) -> list[dict]:
         """Read registry audit entries, newest first.
 
-        Filters are ANDed when both given. Tenant-agnostic by design:
-        the audit is the compliance record for the whole store.
+        Filters are ANDed when given. ``tenant`` defaults to the
+        ALL_TENANTS sentinel — the direct-store CLI and admin views read
+        the whole store's compliance record. Request-serving routes MUST
+        pass the caller's tenant (a string, or ``None`` for the default
+        tenant) so a tenant cannot read another tenant's audit history.
         """
         conn = self._get_connection()
         try:
@@ -1859,6 +1869,9 @@ class ArtifactStore:
             if artifact_id is not None:
                 clauses.append("artifact_id = ?")
                 params.append(artifact_id)
+            if tenant is not _AUDIT_ALL_TENANTS:
+                clauses.append("tenant = ?")
+                params.append(tenant if tenant is not None else "")
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
             query += " ORDER BY seq DESC LIMIT ?"
@@ -1979,13 +1992,21 @@ class ArtifactStore:
         alias: str,
         tenant: str | None = None,
         actor: str | None = None,
+        require_distinct_approver: bool = False,
     ) -> dict:
         """Apply a pending alias change (audited with the approver as actor).
+
+        ``require_distinct_approver`` enforces separation of duty: the
+        approver may not be the principal who requested the change. The
+        route sets this for non-superadmin callers so a requester cannot
+        self-approve their own protected-alias move.
 
         Returns the applied pending entry.
 
         Raises:
-            ValueError: If no pending change exists for ``name @ alias``.
+            ValueError: If no pending change exists for ``name @ alias``,
+                the target artifact is no longer available, or the
+                approver is the requester under separation-of-duty.
         """
         conn = self._get_connection()
         try:
@@ -1999,6 +2020,14 @@ class ArtifactStore:
             if pending is None:
                 raise ValueError(f"No pending change for alias '{name}@{alias}'")
             entry = dict(pending)
+
+            if require_distinct_approver and actor is not None and entry["requested_by"] == actor:
+                conn.rollback()
+                raise ValueError(
+                    "Separation of duty: the approver must differ from the "
+                    f"requester ('{actor}' both requested and approved "
+                    f"'{name}@{alias}')"
+                )
 
             # Everything below shares ONE transaction: pending-delete, the
             # approval audit, the alias move itself, and its move audit. A

@@ -213,6 +213,22 @@ default = "deny"
 
 Evaluation: deny rules → allow rules → default. [Wildcard, principal, and scope matching semantics are documented in source](https://github.com/bearing-research/strata/tree/main/src/strata) for anyone extending the ACL engine.
 
+### Scope-gated endpoints
+
+A few operations require a specific scope under trusted-proxy auth
+(`admin:*` satisfies any of them):
+
+| Scope | Gates |
+|---|---|
+| `admin:cache` | `POST /v1/cache/clear` |
+| `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` — deciding protected-alias changes |
+
+Registry **approval** additionally enforces separation of duty: the
+principal who requested a protected-alias move cannot approve it
+themselves unless they hold `admin:*`. The registry **audit** read
+(`GET /v1/registry/audit`) is tenant-scoped — a principal sees only its
+own tenant's history; `admin:*` sees the whole store.
+
 ## Migrating from personal mode
 
 If you've been running personal mode and want to grow into service:
