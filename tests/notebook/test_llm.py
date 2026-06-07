@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from types import SimpleNamespace
 from typing import Any, cast
@@ -745,3 +746,183 @@ class TestChatCompletionStreamRequestShape:
         assert "temperature" not in body
         assert "response_format" not in body
         assert body["stream"] is True
+
+
+class TestStructuredOutputDegradation:
+    """Providers that reject response_format degrade to prompt-guided JSON."""
+
+    def _patch_transport(self, monkeypatch, handler):
+        import httpx
+
+        transport = httpx.MockTransport(handler)
+        original_client = httpx.AsyncClient
+
+        def patched_client(*args, **kwargs):
+            kwargs["transport"] = transport
+            return original_client(*args, **kwargs)
+
+        monkeypatch.setattr(httpx, "AsyncClient", patched_client)
+
+    def _config(self):
+        from strata.notebook.llm import LlmConfig
+
+        return LlmConfig(
+            base_url="http://localhost:11434/v1",  # OpenAI-compat local server
+            api_key="dummy",
+            model="local-model",
+        )
+
+    @pytest.mark.asyncio
+    async def test_unary_degrades_on_response_format_rejection(self, monkeypatch):
+        import httpx
+
+        bodies: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            bodies.append(body)
+            if "response_format" in body:
+                return httpx.Response(400, json={"error": "response_format is not supported"})
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": '{"answer": "42"}'}}],
+                    "usage": {"prompt_tokens": 2, "completion_tokens": 2},
+                    "model": "local-model",
+                },
+            )
+
+        self._patch_transport(monkeypatch, handler)
+
+        result = await chat_completion(
+            self._config(),
+            [{"role": "user", "content": "hi"}],
+            output_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
+        )
+
+        # First call carried response_format; the retry dropped it and
+        # appended a schema-guidance system turn.
+        assert "response_format" in bodies[0]
+        assert "response_format" not in bodies[1]
+        guidance = bodies[1]["messages"][-1]
+        assert guidance["role"] == "system"
+        assert "JSON Schema" in guidance["content"]
+        assert result.degraded is True
+        assert json.loads(result.content) == {"answer": "42"}
+
+    @pytest.mark.asyncio
+    async def test_unary_unrelated_400_still_raises(self, monkeypatch):
+        import httpx
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(400, json={"error": "model not found"})
+
+        self._patch_transport(monkeypatch, handler)
+
+        with pytest.raises(RuntimeError, match="model not found"):
+            await chat_completion(
+                self._config(),
+                [{"role": "user", "content": "hi"}],
+                output_schema={"type": "object"},
+            )
+
+    @pytest.mark.asyncio
+    async def test_stream_degrades_with_notice(self, monkeypatch):
+        import httpx
+
+        from strata.notebook.llm.client import chat_completion_stream
+
+        bodies: list[dict] = []
+        sse = (
+            'data: {"choices": [{"delta": {"content": "{\\"answer\\": \\"42\\"}"}}], '
+            '"model": "local-model"}\n\n'
+            "data: [DONE]\n\n"
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            bodies.append(body)
+            if "response_format" in body or "stream_options" in body:
+                return httpx.Response(400, json={"error": "stream_options unsupported"})
+            return httpx.Response(
+                200,
+                content=sse.encode(),
+                headers={"content-type": "text/event-stream"},
+            )
+
+        self._patch_transport(monkeypatch, handler)
+
+        events = [
+            e
+            async for e in chat_completion_stream(
+                self._config(),
+                [{"role": "user", "content": "hi"}],
+                output_schema={"type": "object", "properties": {"answer": {"type": "string"}}},
+            )
+        ]
+
+        kinds = [e["type"] for e in events]
+        assert kinds[0] == "notice"
+        assert "delta" in kinds and kinds[-1] == "done"
+        assert events[-1]["degraded"] is True
+        # degraded retry dropped both extensions
+        assert "response_format" not in bodies[1]
+        assert "stream_options" not in bodies[1]
+
+    @pytest.mark.asyncio
+    async def test_stream_happy_path_unchanged(self, monkeypatch):
+        import httpx
+
+        from strata.notebook.llm.client import chat_completion_stream
+
+        sse = (
+            'data: {"choices": [{"delta": {"content": "hello"}}], "model": "m"}\n\ndata: [DONE]\n\n'
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, content=sse.encode(), headers={"content-type": "text/event-stream"}
+            )
+
+        self._patch_transport(monkeypatch, handler)
+
+        events = [
+            e
+            async for e in chat_completion_stream(
+                self._config(), [{"role": "user", "content": "hi"}]
+            )
+        ]
+        assert [e["type"] for e in events] == ["delta", "done"]
+        assert events[-1].get("degraded", False) is False
+
+
+class TestCoerceJsonText:
+    """Lenient JSON extraction before schema validation."""
+
+    def test_clean_json_passthrough(self):
+        from strata.notebook.prompt_executor import _coerce_json_text
+
+        assert _coerce_json_text('{"a": 1}') == '{"a": 1}'
+
+    def test_fenced_json_extracted(self):
+        from strata.notebook.prompt_executor import _coerce_json_text
+
+        content = 'Here you go:\n```json\n{"a": 1}\n```\nHope that helps!'
+        assert _coerce_json_text(content) == '{"a": 1}'
+
+    def test_prose_wrapped_object_extracted(self):
+        from strata.notebook.prompt_executor import _coerce_json_text
+
+        content = 'Sure! The result is {"a": 1} as requested.'
+        assert _coerce_json_text(content) == '{"a": 1}'
+
+    def test_top_level_array_extracted(self):
+        from strata.notebook.prompt_executor import _coerce_json_text
+
+        content = "The list: [1, 2, 3]."
+        assert _coerce_json_text(content) == "[1, 2, 3]"
+
+    def test_unparseable_returned_verbatim(self):
+        from strata.notebook.prompt_executor import _coerce_json_text
+
+        assert _coerce_json_text("no json here {broken") == "no json here {broken"

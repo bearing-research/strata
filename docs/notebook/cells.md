@@ -244,8 +244,13 @@ Return a JSON object mapping paper ID to topic.
 | **OpenAI**                           | Native `response_format: {type: "json_schema"}`. `additionalProperties: false` is auto-injected at every `object` node; strict mode is used when the user's `required` list covers every property (otherwise relaxed to `strict: false`). |
 | **Anthropic**                        | Native `/v1/messages` with tool-use: the schema is sent as a tool's `input_schema` and `tool_choice` is forced to that tool. The returned `tool_use.input` is extracted verbatim.                                                         |
 | **Gemini / Mistral / Ollama / vLLM** | Fallback to `response_format: {type: "json_object"}`, valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap.                                                                           |
+| **Servers that reject the extensions** | Some OpenAI-compatible servers 400 on `response_format` or `stream_options` outright. Strata retries once without them, appending a schema-guidance system turn; the result is marked degraded and the validate-and-retry loop carries full enforcement. |
 
 Setting `@output_schema` implies `@output json`; you don't need both.
+
+Validation is lenient about packaging: when a provider wraps otherwise-valid
+JSON in code fences or prose, Strata extracts the JSON document before
+validating instead of burning a retry on the wrapper.
 
 Example, triage each review into a structured record:
 

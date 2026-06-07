@@ -9,6 +9,7 @@ and yields text deltas suitable for surfacing intermediate output.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -17,6 +18,7 @@ import httpx
 from strata.notebook.llm.config import (
     LlmCompletionResult,
     LlmConfig,
+    LlmHttpError,
     infer_provider_name,
     max_output_tokens_param,
     raise_for_llm_status,
@@ -27,6 +29,8 @@ from strata.notebook.llm.structured import (
     parse_anthropic_tool_use_response,
     response_format_for,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def _chat_completion_anthropic_native(
@@ -57,6 +61,49 @@ async def _chat_completion_anthropic_native(
         raise_for_llm_status(resp, config.model)
         data = resp.json()
     return parse_anthropic_tool_use_response(data, fallback_model=config.model)
+
+
+def _is_structured_output_rejection(status_code: int, body: str) -> bool:
+    """True when a 4xx names the optional request extensions we sent.
+
+    Some OpenAI-compatible servers (older Ollama, llama.cpp wrappers,
+    strict proxies) reject ``response_format`` or ``stream_options``
+    outright instead of ignoring them. Those calls are recoverable by
+    retrying without the extensions.
+    """
+    if status_code not in (400, 422):
+        return False
+    lowered = body.lower()
+    return any(
+        marker in lowered
+        for marker in ("response_format", "json_schema", "json_object", "stream_options")
+    )
+
+
+def _json_guidance_message(
+    output_schema: dict[str, Any] | None,
+    output_type: str | None,
+) -> dict[str, str] | None:
+    """System turn steering the model toward JSON when enforcement is gone.
+
+    Used on the degraded path: the provider refused ``response_format``,
+    so shape guidance must travel in the prompt and conformance rests on
+    the client-side validation loop.
+    """
+    if output_schema is not None:
+        return {
+            "role": "system",
+            "content": (
+                "Respond with ONLY a valid JSON object — no prose, no code "
+                "fences. The object must conform to this JSON Schema:\n" + json.dumps(output_schema)
+            ),
+        }
+    if output_type == "json":
+        return {
+            "role": "system",
+            "content": "Respond with ONLY a valid JSON object — no prose, no code fences.",
+        }
+    return None
 
 
 async def _chat_completion_openai_compat(
@@ -129,12 +176,35 @@ async def chat_completion(
         output_type=output_type,
         output_schema=output_schema,
     )
-    return await _chat_completion_openai_compat(
-        config,
-        messages,
-        temperature=temperature,
-        response_format=response_format,
-    )
+    try:
+        return await _chat_completion_openai_compat(
+            config,
+            messages,
+            temperature=temperature,
+            response_format=response_format,
+        )
+    except LlmHttpError as e:
+        if response_format is None or not _is_structured_output_rejection(e.status_code, e.body):
+            raise
+        # Provider refused the structured-output extension — degrade to
+        # prompt-guided JSON; the caller's validation loop enforces the
+        # schema client-side.
+        logger.warning(
+            "Provider rejected response_format (HTTP %d); degrading to "
+            "prompt-guided JSON for model %s",
+            e.status_code,
+            config.model,
+        )
+        guidance = _json_guidance_message(output_schema, output_type)
+        degraded_messages = messages + [guidance] if guidance else messages
+        result = await _chat_completion_openai_compat(
+            config,
+            degraded_messages,
+            temperature=temperature,
+            response_format=None,
+        )
+        result.degraded = True
+        return result
 
 
 async def chat_completion_stream(
@@ -149,23 +219,21 @@ async def chat_completion_stream(
 
     Yields dicts of the form ``{"type": "delta", "text": str}`` for content
     chunks and a final ``{"type": "done", "model": str, "input_tokens": int,
-    "output_tokens": int}`` event when the stream ends. The OpenAI-compatible
-    API returns ``data: ...`` SSE lines; we parse them and pull
-    ``choices[0].delta.content``.
+    "output_tokens": int}`` event when the stream ends.
 
     ``temperature`` / ``output_type`` / ``output_schema`` shape the request
-    body exactly like the unary ``_chat_completion_openai_compat`` path —
-    OpenAI supports ``response_format`` (including ``json_schema``) with
-    ``stream: true``; the deltas are simply the raw JSON text as it
-    generates. This function is OpenAI-compat only: the Anthropic native
-    tool-use path (Anthropic + schema) has no streaming equivalent here
-    yet, so callers that need it must fall back to ``chat_completion``
-    (see ``execute_prompt_cell``).
-    """
-    model = config.model
-    input_tokens = 0
-    output_tokens = 0
+    body exactly like the unary ``_chat_completion_openai_compat`` path.
+    This function is OpenAI-compat only: the Anthropic native tool-use path
+    (Anthropic + schema) has no streaming equivalent here yet, so callers
+    that need it must fall back to ``chat_completion``.
 
+    Degradation: providers that reject ``response_format`` /
+    ``stream_options`` with a 4xx get one retry without the extensions,
+    with a schema-guidance system turn appended. The retry is announced
+    with a ``{"type": "notice"}`` event and its ``done`` event carries
+    ``degraded: True`` — schema conformance then rests on the caller's
+    validation loop.
+    """
     request_body: dict[str, Any] = {
         "model": config.model,
         "messages": messages,
@@ -183,6 +251,63 @@ async def chat_completion_stream(
     if response_format is not None:
         request_body["response_format"] = response_format
 
+    events = _stream_openai_compat(config, request_body)
+    try:
+        first = await anext(events)
+    except StopAsyncIteration:
+        return
+    except LlmHttpError as e:
+        if not _is_structured_output_rejection(e.status_code, e.body):
+            raise
+        logger.warning(
+            "Provider rejected structured-output extensions (HTTP %d); "
+            "degrading to prompt-guided streaming for model %s",
+            e.status_code,
+            config.model,
+        )
+        yield {
+            "type": "notice",
+            "text": (
+                "Provider rejected structured-output request extensions; "
+                "falling back to prompt-guided JSON."
+            ),
+        }
+        degraded_body = {
+            "model": config.model,
+            "messages": messages,
+            max_output_tokens_param(config.base_url): config.max_output_tokens,
+            "stream": True,
+        }
+        if temperature is not None:
+            degraded_body["temperature"] = temperature
+        guidance = _json_guidance_message(output_schema, output_type)
+        if guidance is not None:
+            degraded_body["messages"] = messages + [guidance]
+        async for event in _stream_openai_compat(config, degraded_body):
+            if event["type"] == "done":
+                event["degraded"] = True
+            yield event
+        return
+
+    yield first
+    async for event in events:
+        yield event
+
+
+async def _stream_openai_compat(
+    config: LlmConfig,
+    request_body: dict[str, Any],
+) -> AsyncIterator[dict[str, Any]]:
+    """Open one SSE stream and yield delta events plus a final done event.
+
+    Raises ``LlmHttpError`` (status + body) before the first yield when
+    the provider refuses the request, so callers can decide whether the
+    failure is recoverable.
+    """
+    model = request_body.get("model", config.model)
+    input_tokens = 0
+    output_tokens = 0
+
     async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
         async with client.stream(
             "POST",
@@ -196,10 +321,7 @@ async def chat_completion_stream(
         ) as resp:
             if not resp.is_success:
                 body = (await resp.aread()).decode("utf-8", errors="replace")[:1000]
-                raise RuntimeError(
-                    f"LLM provider returned HTTP {resp.status_code} "
-                    f"for model {config.model!r}: {body}"
-                )
+                raise LlmHttpError(resp.status_code, body, str(request_body.get("model")))
             async for line in resp.aiter_lines():
                 if not line or not line.startswith("data:"):
                     continue
