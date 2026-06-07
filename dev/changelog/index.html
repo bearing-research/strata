@@ -2332,6 +2332,15 @@ exhaustive commit history.</p>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>Live-provider LLM tests</strong> (opt-in): <code>STRATA_TEST_LIVE_LLM=1</code> runs
+  integration tests against the real Anthropic and OpenAI APIs — unary
+  completions, schema enforcement (native tool-use / strict
+  <code>json_schema</code>), and streaming with usage accounting — catching
+  provider contract drift the mocked tests cannot. Each provider class
+  skips unless its API key is present; models are overridable via
+  <code>STRATA_TEST_LIVE_{ANTHROPIC,OPENAI}_MODEL</code>.</p>
+</li>
+<li>
 <p><strong>Structured output degrades gracefully on minimal providers</strong>: some
   OpenAI-compatible servers reject <code>response_format</code> or <code>stream_options</code>
   with a 400 — schema-constrained prompt cells used to die on the raw
