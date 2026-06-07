@@ -1384,10 +1384,29 @@ class CellExecutor:
                     resolved_mounts,
                 )
 
-                result = await self._run_r_harness(manifest_path, timeout_seconds)
+                # Warm R pool first (pre-paid Rscript startup + renv
+                # activation), cold harness as fallback — mirrors the
+                # Python pool dispatch in _dispatch_local.
+                result = None
+                execution_method = "cold"
+                r_pool = getattr(self.session, "r_warm_pool", None)
+                if r_pool is not None:
+                    from strata.notebook.pool import PooledCellExecutor
+
+                    pool_result = await PooledCellExecutor.execute_with_pool(
+                        r_pool,
+                        manifest_path,
+                        self.session.path,
+                        timeout_seconds,
+                    )
+                    if pool_result is not None:
+                        result = pool_result
+                        execution_method = "warm"
+                if result is None:
+                    result = await self._run_r_harness(manifest_path, timeout_seconds)
 
                 duration_ms = (time.time() - start_time) * 1000
-                exec_result = self._parse_result(cell_id, result, duration_ms, "cold")
+                exec_result = self._parse_result(cell_id, result, duration_ms, execution_method)
 
                 if exec_result.success:
                     self.session.record_successful_execution_provenance(

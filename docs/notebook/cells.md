@@ -698,7 +698,15 @@ R cells display plots inline, like a Python cell's matplotlib figure. Base graph
 
 ### What's still ahead
 
-R execution and display are complete; remaining R polish is tracked on GitHub: [#81](https://github.com/bearing-research/strata/issues/81) (warm Rscript pool), [#83](https://github.com/bearing-research/strata/issues/83) (R version matrix on CI), [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
+**Warm Rscript pool.** Notebooks containing R cells keep a small pool of
+pre-spawned R workers (R startup, `.Rprofile`/renv activation, and
+`jsonlite`/`arrow` loads already paid), so an R cell run skips the ~1–2s
+interpreter cold-start. Workers are single-shot — one cell each, then
+replaced — preserving per-cell isolation; editing `renv.lock` drains and
+respawns the pool. Pure-Python notebooks and machines without `Rscript`
+never start one.
+
+R execution and display are complete; remaining R polish is tracked on GitHub: [#83](https://github.com/bearing-research/strata/issues/83) (R version matrix on CI), [#84](https://github.com/bearing-research/strata/issues/84) (cross-language run-all batching).
 
 ### What you need today
 

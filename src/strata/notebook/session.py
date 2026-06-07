@@ -225,6 +225,7 @@ class NotebookSession:
 
         # M6: Initialize warm process pool (optional)
         self.warm_pool: WarmProcessPool | None = None
+        self.r_warm_pool: WarmProcessPool | None = None
 
         # Session TTL tracking
         self.last_accessed: float = _time.time()
@@ -2029,17 +2030,64 @@ class NotebookSession:
             self.warm_pool.track_background_task(task)
         except RuntimeError:
             pass  # No running loop; pool stays cold until first acquire
+        self.start_r_pool_background()
+
+    def _has_r_cells(self) -> bool:
+        """Whether any cell in the notebook is an R cell."""
+        from strata.notebook.models import CellLanguage
+
+        return any(cell.language == CellLanguage.R for cell in self.notebook_state.cells)
+
+    def start_r_pool_background(self) -> None:
+        """Create and start the warm R pool when the notebook needs one.
+
+        Mirrors the Python pool but is gated harder: only notebooks that
+        actually contain R cells (and machines with Rscript) pay for warm
+        R workers. Safe to call repeatedly — it no-ops once created.
+        """
+        if self.r_warm_pool is not None or not self._should_start_warm_pool():
+            return
+        if not self._has_r_cells():
+            return
+
+        import shutil as _shutil
+
+        rscript = _shutil.which("Rscript")
+        if rscript is None:
+            return
+
+        from strata.notebook.pool import WarmProcessPool
+
+        pool_worker = Path(__file__).parent / "languages" / "r" / "pool_worker.R"
+        self.r_warm_pool = WarmProcessPool(
+            notebook_dir=self.path,
+            pool_size=2,
+            worker_command=[rscript, str(pool_worker), str(self.path)],
+            # R startup + renv activation can take far longer than the
+            # Python worker's import warm-up.
+            ready_timeout_seconds=60.0,
+        )
+        try:
+            task = asyncio.get_running_loop().create_task(self.r_warm_pool.start())
+            self.r_warm_pool.track_background_task(task)
+        except RuntimeError:
+            pass  # No running loop; pool stays cold until first acquire
 
     async def _invalidate_warm_pool_for_environment_change(self) -> None:
-        """Invalidate the warm pool after the runtime environment changes."""
-        if self.warm_pool is None:
-            return
-        try:
-            self.warm_pool.python_executable = str(self.venv_python or Path("python"))
-            await self.warm_pool.invalidate()
-            logger.info("Warm pool invalidated after environment change")
-        except Exception:
-            logger.exception("Failed to invalidate warm pool")
+        """Invalidate the warm pools after the runtime environment changes."""
+        if self.warm_pool is not None:
+            try:
+                self.warm_pool.python_executable = str(self.venv_python or Path("python"))
+                await self.warm_pool.invalidate()
+                logger.info("Warm pool invalidated after environment change")
+            except Exception:
+                logger.exception("Failed to invalidate warm pool")
+        if self.r_warm_pool is not None:
+            try:
+                await self.r_warm_pool.invalidate()
+                logger.info("R warm pool invalidated after environment change")
+            except Exception:
+                logger.exception("Failed to invalidate R warm pool")
 
     async def sync_environment(self) -> dict[str, CellStaleness]:
         """Re-sync the notebook environment and refresh runtime metadata."""
@@ -2956,6 +3004,12 @@ class SessionManager:
         except Exception as e:
             logger.warning("Failed to initialize warm pool: %s", e)
 
+        # R warm pool: only for notebooks that actually contain R cells.
+        try:
+            session.start_r_pool_background()
+        except Exception as e:
+            logger.warning("Failed to initialize R warm pool: %s", e)
+
         if timing is None:
             session.compute_staleness()
         else:
@@ -3024,12 +3078,14 @@ class SessionManager:
         session = self._sessions.pop(session_id, None)
         if session is None:
             return
-        # Drain warm pool if present
-        if session.warm_pool is not None:
+        # Drain warm pools if present
+        for pool in (session.warm_pool, session.r_warm_pool):
+            if pool is None:
+                continue
             import asyncio
 
-            drain = getattr(session.warm_pool, "drain", None)
-            shutdown_nowait = getattr(session.warm_pool, "shutdown_nowait", None)
+            drain = getattr(pool, "drain", None)
+            shutdown_nowait = getattr(pool, "shutdown_nowait", None)
             try:
                 if callable(drain):
                     asyncio.get_running_loop().create_task(drain())

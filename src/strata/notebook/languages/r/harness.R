@@ -52,13 +52,22 @@ ensure_arrow <- function() {
 # Argv + manifest
 # ---------------------------------------------------------------------------
 
-args <- commandArgs(trailingOnly = TRUE)
-if (length(args) < 1) {
-  cat("Usage: Rscript harness.R <manifest_path>\n", file = stderr())
-  quit(status = 1, save = "no")
-}
+# Warm-pool mode: pool_worker.R sources this file with the manifest path
+# pre-set in the global env (a sourced script can't receive argv). The
+# override also suppresses the error-exit quit() below so the worker can
+# relay the result line before exiting.
+.strata_pool_mode <- exists(".strata_pool_manifest", envir = globalenv())
 
-manifest_path <- args[[1]]
+if (.strata_pool_mode) {
+  manifest_path <- get(".strata_pool_manifest", envir = globalenv())
+} else {
+  args <- commandArgs(trailingOnly = TRUE)
+  if (length(args) < 1) {
+    cat("Usage: Rscript harness.R <manifest_path>\n", file = stderr())
+    quit(status = 1, save = "no")
+  }
+  manifest_path <- args[[1]]
+}
 manifest <- jsonlite::read_json(manifest_path, simplifyVector = FALSE)
 source_text <- if (is.null(manifest$source)) "" else manifest$source
 output_dir <- if (is.null(manifest$output_dir)) "/tmp/strata_output" else manifest$output_dir
@@ -576,8 +585,10 @@ jsonlite::write_json(
   force = TRUE
 )
 
-if (!is.null(exec_error)) {
+if (!is.null(exec_error) && !.strata_pool_mode) {
   # Match the Python harness: exit non-zero on error so the parent
   # sees the failure shape even if it doesn't parse result.json.
+  # Pool mode skips this: the worker must still relay the result line
+  # (which carries success=false) over the stdout protocol.
   quit(status = 1, save = "no")
 }
