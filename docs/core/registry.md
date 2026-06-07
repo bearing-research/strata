@@ -101,6 +101,14 @@ If a pending change's target artifact disappears before approval, the
 approve fails cleanly and the pending entry stays for an explicit reject.
 Unprotected aliases apply immediately; the default is no gating.
 
+**Authorization (service mode).** When exposed under trusted-proxy auth,
+approve and reject require the `admin:registry` scope, and approval
+enforces separation of duty — the requester cannot self-approve their own
+move unless they hold the `admin:*` break-glass scope. The audit log is
+tenant-scoped: a principal reads only its own tenant's history (`admin:*`
+sees the whole store). In personal mode (single operator, no auth) these
+gates are inert.
+
 ## The promotion flow, end to end
 
 The shape this is designed for — a notebook training pipeline whose last

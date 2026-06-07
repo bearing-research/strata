@@ -1001,3 +1001,78 @@ class TestAliasIdempotence:
             is True
         )
         assert len(store.list_pending_changes()) == 1
+
+
+class TestAuditTenantScoping:
+    """read_audit isolates by tenant for request-serving callers (Vuln 1)."""
+
+    def _seed(self, store, tenant, name):
+        store.create_artifact(f"{tenant}-a", f"prov-{tenant}", tenant=tenant)
+        store.write_blob(f"{tenant}-a", 1, _ipc_bytes(1))
+        store.finalize_artifact(f"{tenant}-a", 1, "{}", 1, 10)
+        store.set_name(name, f"{tenant}-a", 1, tenant=tenant)
+
+    def test_tenant_filter_isolates_history(self, store):
+        self._seed(store, "acme", "acme/model")
+        self._seed(store, "globex", "globex/model")
+
+        acme = store.read_audit(tenant="acme")
+        assert acme, "expected acme audit rows"
+        assert all(e["tenant"] == "acme" for e in acme)
+        assert not any(e["name"] == "globex/model" for e in acme)
+
+        globex = store.read_audit(tenant="globex")
+        assert all(e["tenant"] == "globex" for e in globex)
+
+    def test_default_sentinel_returns_all_tenants(self, store):
+        """No tenant arg = whole-store view (CLI / admin)."""
+        self._seed(store, "acme", "acme/model")
+        self._seed(store, "globex", "globex/model")
+        tenants = {e["tenant"] for e in store.read_audit()}
+        assert {"acme", "globex"} <= tenants
+
+    def test_none_tenant_filters_to_default(self, store):
+        """Explicit tenant=None scopes to the '' default tenant, not all."""
+        _make_ready_artifact(store, "m1", "prov-1")  # tenant None -> ''
+        store.set_name("default/model", "m1", 1)
+        self._seed(store, "acme", "acme/model")
+
+        default_rows = store.read_audit(tenant=None)
+        assert default_rows
+        assert all(e["tenant"] in (None, "") for e in default_rows)
+        assert not any(e["name"] == "acme/model" for e in default_rows)
+
+
+class TestApproveSeparationOfDuty:
+    """approve_alias_change can forbid self-approval (Vuln 2)."""
+
+    def _pending(self, store, requester):
+        _make_ready_artifact(store, "m1", "prov-1")
+        store.request_alias_change(
+            "demo/model", "champion", "set", artifact_id="m1", version=1, actor=requester
+        )
+
+    def test_self_approve_blocked_when_required(self, store):
+        self._pending(store, "alice")
+        with pytest.raises(ValueError, match="Separation of duty"):
+            store.approve_alias_change(
+                "demo/model", "champion", actor="alice", require_distinct_approver=True
+            )
+        # Pending survives the rejected self-approval
+        assert len(store.list_pending_changes()) == 1
+        assert store.resolve_alias("demo/model", "champion") is None
+
+    def test_distinct_approver_allowed(self, store):
+        self._pending(store, "alice")
+        store.approve_alias_change(
+            "demo/model", "champion", actor="bob", require_distinct_approver=True
+        )
+        assert store.resolve_alias("demo/model", "champion").id == "m1"
+
+    def test_self_approve_allowed_when_not_required(self, store):
+        """Break-glass / personal mode: separation of duty off."""
+        self._pending(store, "alice")
+        store.approve_alias_change(
+            "demo/model", "champion", actor="alice", require_distinct_approver=False
+        )
+        assert store.resolve_alias("demo/model", "champion").id == "m1"

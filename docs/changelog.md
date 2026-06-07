@@ -9,6 +9,18 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ## Unreleased
 
+### Security
+
+- **Registry authorization hardening** (pre-release security review): the
+  registry audit read is now tenant-scoped — a principal sees only its own
+  tenant's history (`admin:*` sees the whole store), matching every other
+  registry route. Deciding protected-alias changes (approve/reject)
+  requires the `admin:registry` scope under trusted-proxy auth, and
+  approval enforces separation of duty (the requester cannot self-approve
+  without `admin:*`). These close latent cross-tenant-disclosure and
+  self-approval gaps before the registry is exposed in multi-tenant
+  service mode; personal mode (single operator) is unaffected.
+
 ### Added
 
 - **Warm Rscript pool** (#81): notebooks with R cells pre-spawn R workers

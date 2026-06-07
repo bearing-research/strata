@@ -4363,9 +4363,23 @@ async def registry_audit(
     artifact_id: str | None = None,
     limit: int = 100,
 ):
-    """Read the append-only registry audit, newest first."""
+    """Read the append-only registry audit, newest first.
+
+    Scoped to the caller's tenant: a principal sees only its own tenant's
+    history. ``admin:*`` (and personal mode, where there is no principal)
+    sees the whole store — every other registry route scopes the same way.
+    """
+    from strata.auth import get_principal
+
     store = _get_artifact_store()
-    return {"entries": store.read_audit(name=name, artifact_id=artifact_id, limit=limit)}
+    principal = get_principal()
+    if principal is None or principal.has_scope("admin:*"):
+        entries = store.read_audit(name=name, artifact_id=artifact_id, limit=limit)
+    else:
+        entries = store.read_audit(
+            name=name, artifact_id=artifact_id, limit=limit, tenant=principal.tenant
+        )
+    return {"entries": entries}
 
 
 class PendingDecisionRequest(BaseModel):
@@ -4384,32 +4398,68 @@ async def registry_pending():
     return {"pending": store.list_pending_changes(tenant=tenant_id)}
 
 
-@app.post("/v1/registry/pending/approve")
-async def approve_pending(request: PendingDecisionRequest):
-    """Apply a pending alias change; the approver becomes the audit actor."""
+def _require_registry_approver():
+    """Authorize a registry approval decision; return the principal.
+
+    Approving/rejecting a protected-alias change is a governance action.
+    Under trusted-proxy auth it requires the ``admin:registry`` scope
+    (``admin:*`` satisfies it). Personal mode (no principal) is the single
+    operator and is allowed.
+    """
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    state = get_state()
     principal = get_principal()
+    if state.config.auth_mode == "trusted_proxy":
+        if principal is None or not principal.has_scope("admin:registry"):
+            raise HTTPException(
+                status_code=403,
+                detail="Insufficient scope: admin:registry required to decide "
+                "protected-alias changes",
+            )
+    return principal
+
+
+@app.post("/v1/registry/pending/approve")
+async def approve_pending(request: PendingDecisionRequest):
+    """Apply a pending alias change; the approver becomes the audit actor.
+
+    Requires the ``admin:registry`` scope under trusted-proxy auth, and
+    enforces separation of duty — the requester cannot self-approve unless
+    they hold the ``admin:*`` break-glass scope.
+    """
+    principal = _require_registry_approver()
+
+    store = _get_artifact_store()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
+    is_superadmin = principal is not None and principal.has_scope("admin:*")
 
     try:
         applied = store.approve_alias_change(
-            request.name, request.alias, tenant=tenant_id, actor=actor
+            request.name,
+            request.alias,
+            tenant=tenant_id,
+            actor=actor,
+            require_distinct_approver=not is_superadmin,
         )
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        msg = str(e)
+        status = 403 if msg.startswith("Separation of duty") else 404
+        raise HTTPException(status_code=status, detail=msg)
     return {"status": "approved", "applied": applied}
 
 
 @app.post("/v1/registry/pending/reject")
 async def reject_pending(request: PendingDecisionRequest):
-    """Discard a pending alias change (audited)."""
-    from strata.auth import get_principal
+    """Discard a pending alias change (audited).
+
+    Requires the ``admin:registry`` scope under trusted-proxy auth so a
+    tenant member cannot quietly drop a colleague's pending promotion.
+    """
+    principal = _require_registry_approver()
 
     store = _get_artifact_store()
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 

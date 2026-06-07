@@ -1798,3 +1798,45 @@ class TestAliasIdempotenceOverHttp:
             )
             assert first["status"] == "applied"
             assert again["status"] == "unchanged"
+
+
+class TestRegistryAuthzPersonalMode:
+    """The registry surface is personal-mode-gated today; auth hardening
+    must not regress the single-user path (Vuln 1/2 fixes are forward-
+    looking for service-mode exposure).
+    """
+
+    def _make(self, client, table_uri):
+        artifact = client.materialize(
+            inputs=[table_uri],
+            transform={"executor": "scan@v1", "params": {}},
+            name="team/model",
+        )
+        artifact.to_table()
+        return artifact
+
+    def test_audit_route_unscoped_without_principal(self, multi_file_server):
+        base_url = multi_file_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = self._make(client, multi_file_server["table_uri"])
+            client.set_tag(artifact.artifact_id, artifact.version, "k", "v")
+
+        resp = httpx.get(f"{base_url}/v1/registry/audit?name=team/model", timeout=30.0)
+        assert resp.status_code == 200
+        actions = {e["action"] for e in resp.json()["entries"]}
+        assert "name_set" in actions
+
+    def test_approval_open_without_auth(self, gated_server):
+        """Personal mode (auth_mode=none) has a single operator — no scope
+        gate, self-approval allowed."""
+        base_url = gated_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = self._make(client, gated_server["table_uri"])
+            httpx.put(
+                f"{base_url}/v1/names/team/model/aliases/champion",
+                json={"artifact_id": artifact.artifact_id, "version": artifact.version},
+                timeout=30.0,
+            )
+            result = client.approve_alias_change("team/model", "champion")
+            assert result["status"] == "approved"
+            assert client.resolve_alias("team/model", "champion")["version"] == artifact.version
