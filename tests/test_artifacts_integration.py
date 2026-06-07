@@ -1747,3 +1747,54 @@ class TestApprovalGates:
             client.approve_alias_change("team/model", "champion")
             with pytest.raises(httpx.HTTPStatusError):
                 client.resolve_alias("team/model", "champion")
+
+
+class TestAliasIdempotenceOverHttp:
+    """Re-running an idempotent promote does not refile approvals (D4)."""
+
+    def test_rerequest_of_live_champion_is_unchanged(self, gated_server):
+        base_url = gated_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = client.materialize(
+                inputs=[gated_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+                name="team/model",
+            )
+            artifact.to_table()
+
+            # First request queues; approve applies it
+            httpx.put(
+                f"{base_url}/v1/names/team/model/aliases/champion",
+                json={"artifact_id": artifact.artifact_id, "version": artifact.version},
+                timeout=30.0,
+            )
+            client.approve_alias_change("team/model", "champion")
+
+            # Identical re-request (the re-run promote cell): unchanged, no queue
+            resp = httpx.put(
+                f"{base_url}/v1/names/team/model/aliases/champion",
+                json={"artifact_id": artifact.artifact_id, "version": artifact.version},
+                timeout=30.0,
+            )
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "unchanged"
+            assert client.list_pending_changes() == []
+
+    def test_unprotected_set_reports_applied_then_unchanged(self, multi_file_server):
+        base_url = multi_file_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+                name="team/model",
+            )
+            artifact.to_table()
+
+            first = client.set_alias(
+                "team/model", "candidate", artifact.artifact_id, artifact.version
+            )
+            again = client.set_alias(
+                "team/model", "candidate", artifact.artifact_id, artifact.version
+            )
+            assert first["status"] == "applied"
+            assert again["status"] == "unchanged"

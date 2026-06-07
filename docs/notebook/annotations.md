@@ -228,6 +228,11 @@ accepts. The name must be a valid Python identifier.
 goes stale on new data (the lake-side analog of a mount `pin`). Without a pin,
 the snapshot is re-resolved every time staleness is evaluated.
 
+Like mount variables, the injected names live only in the declaring cell's
+namespace — they are not cell *defines* and do not flow to downstream cells.
+To use the snapshot id downstream, export it as a real variable:
+`scanned_snapshot = trips_snapshot`.
+
 If the catalog is unreachable when provenance is computed, the cell is
 conservatively treated as stale; if it is still unreachable at execution time,
 the run fails with a clear error.

@@ -576,7 +576,11 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
-            # Get next version number
+            # BEGIN IMMEDIATE serializes writers so the MAX(version)+1 read
+            # can't race a concurrent create for the same artifact id (two
+            # refresh rebuilds used to both read MAX=N and collide on the
+            # (id, version) primary key with an uncaught IntegrityError).
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
                 "SELECT COALESCE(MAX(version), 0) + 1 FROM artifact_versions WHERE id = ?",
                 (artifact_id,),
@@ -1545,8 +1549,13 @@ class ArtifactStore:
         version: int,
         tenant: str | None = None,
         actor: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Point ``name @ alias`` at an artifact version (audited).
+
+        Returns:
+            True when the pointer changed; False when the alias already
+            pointed at exactly this version (no write, no audit entry —
+            re-running an idempotent promote cell must not spam history).
 
         Raises:
             ValueError: If the artifact doesn't exist, isn't readable, or
@@ -1579,6 +1588,12 @@ class ArtifactStore:
                 (name, alias, effective_tenant),
             )
             previous = cursor.fetchone()
+            if (
+                previous is not None
+                and previous["artifact_id"] == artifact_id
+                and previous["version"] == version
+            ):
+                return False  # Already points here — idempotent no-op
             self._audit_in_connection(
                 conn,
                 action="alias_set",
@@ -1604,6 +1619,7 @@ class ArtifactStore:
                 (name, alias, artifact_id, version, time.time(), effective_tenant),
             )
             conn.commit()
+            return True
         finally:
             conn.close()
 
@@ -1861,12 +1877,17 @@ class ArtifactStore:
         version: int | None = None,
         tenant: str | None = None,
         actor: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Queue a protected-alias change for approval (audited).
 
         ``action`` is ``"set"`` (requires artifact_id + version, validated
         like set_alias) or ``"delete"``. One pending change per alias —
         a new request replaces the previous one.
+
+        Returns:
+            True when a change was queued; False when the alias already
+            points at exactly the requested target (idempotent no-op — a
+            re-run promote cell must not refile an approved promotion).
         """
         if action not in ("set", "delete"):
             raise ValueError(f"Unknown alias change action: {action!r}")
@@ -1894,6 +1915,19 @@ class ArtifactStore:
                     )
 
             effective_tenant = tenant if tenant is not None else ""
+            if action == "set":
+                cursor = conn.execute(
+                    "SELECT artifact_id, version FROM artifact_aliases "
+                    "WHERE name = ? AND alias = ? AND tenant = ?",
+                    (name, alias, effective_tenant),
+                )
+                current = cursor.fetchone()
+                if (
+                    current is not None
+                    and current["artifact_id"] == artifact_id
+                    and current["version"] == version
+                ):
+                    return False  # Already the live pointer — nothing to approve
             self._audit_in_connection(
                 conn,
                 action=f"alias_request_{action}",
@@ -1920,6 +1954,7 @@ class ArtifactStore:
                 (name, alias, action, artifact_id, version, actor, time.time(), effective_tenant),
             )
             conn.commit()
+            return True
         finally:
             conn.close()
 
@@ -1963,6 +1998,28 @@ class ArtifactStore:
             pending = cursor.fetchone()
             if pending is None:
                 raise ValueError(f"No pending change for alias '{name}@{alias}'")
+            entry = dict(pending)
+
+            # Everything below shares ONE transaction: pending-delete, the
+            # approval audit, the alias move itself, and its move audit. A
+            # crash can't consume the approval without applying the move,
+            # and a failed validation leaves the pending entry intact for
+            # an explicit reject.
+            if entry["action"] == "set":
+                cursor = conn.execute(
+                    "SELECT state FROM artifact_versions WHERE id = ? AND version = ?",
+                    (entry["artifact_id"], entry["version"]),
+                )
+                target = cursor.fetchone()
+                if target is None or target["state"] not in ("ready", "superseded"):
+                    conn.rollback()
+                    state = target["state"] if target else "deleted"
+                    raise ValueError(
+                        f"Pending target {entry['artifact_id']}@v={entry['version']} is "
+                        f"no longer available (state={state}); reject the pending "
+                        "change or submit a new request"
+                    )
+
             conn.execute(
                 "DELETE FROM registry_pending WHERE name = ? AND alias = ? AND tenant = ?",
                 (name, alias, effective_tenant),
@@ -1972,25 +2029,71 @@ class ArtifactStore:
                 action="alias_approved",
                 name=name,
                 alias=alias,
-                artifact_id=pending["artifact_id"],
-                to_version=pending["version"],
+                artifact_id=entry["artifact_id"],
+                to_version=entry["version"],
                 actor=actor,
                 tenant=tenant,
             )
+
+            cursor = conn.execute(
+                "SELECT artifact_id, version FROM artifact_aliases "
+                "WHERE name = ? AND alias = ? AND tenant = ?",
+                (name, alias, effective_tenant),
+            )
+            previous = cursor.fetchone()
+            if entry["action"] == "set":
+                self._audit_in_connection(
+                    conn,
+                    action="alias_set",
+                    name=name,
+                    alias=alias,
+                    artifact_id=entry["artifact_id"],
+                    from_artifact_id=previous["artifact_id"] if previous else None,
+                    from_version=previous["version"] if previous else None,
+                    to_version=entry["version"],
+                    actor=actor,
+                    tenant=tenant,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO artifact_aliases
+                        (name, alias, artifact_id, version, updated_at, tenant)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(tenant, name, alias) DO UPDATE SET
+                        artifact_id = excluded.artifact_id,
+                        version = excluded.version,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        name,
+                        alias,
+                        entry["artifact_id"],
+                        entry["version"],
+                        time.time(),
+                        effective_tenant,
+                    ),
+                )
+            else:
+                if previous is not None:
+                    self._audit_in_connection(
+                        conn,
+                        action="alias_delete",
+                        name=name,
+                        alias=alias,
+                        from_artifact_id=previous["artifact_id"],
+                        from_version=previous["version"],
+                        actor=actor,
+                        tenant=tenant,
+                    )
+                conn.execute(
+                    "DELETE FROM artifact_aliases WHERE name = ? AND alias = ? AND tenant = ?",
+                    (name, alias, effective_tenant),
+                )
+
             conn.commit()
+            return entry
         finally:
             conn.close()
-
-        # Apply via the normal (audited) paths so the alias move itself is
-        # recorded identically to an ungated one.
-        entry = dict(pending)
-        if entry["action"] == "set":
-            self.set_alias(
-                name, alias, entry["artifact_id"], entry["version"], tenant=tenant, actor=actor
-            )
-        else:
-            self.delete_alias(name, alias, tenant=tenant, actor=actor)
-        return entry
 
     def reject_alias_change(
         self,
@@ -2359,6 +2462,32 @@ class ArtifactStore:
                 (artifact_id, version),
             )
 
+            # Delete alias pointers (audited — an alias disappearing because
+            # its target was deleted must be reconstructible) and tags.
+            cursor = conn.execute(
+                "SELECT name, alias, tenant FROM artifact_aliases "
+                "WHERE artifact_id = ? AND version = ?",
+                (artifact_id, version),
+            )
+            for row in cursor.fetchall():
+                self._audit_in_connection(
+                    conn,
+                    action="alias_delete",
+                    name=row["name"],
+                    alias=row["alias"],
+                    artifact_id=artifact_id,
+                    from_version=version,
+                    tenant=row["tenant"] if row["tenant"] else None,
+                )
+            conn.execute(
+                "DELETE FROM artifact_aliases WHERE artifact_id = ? AND version = ?",
+                (artifact_id, version),
+            )
+            conn.execute(
+                "DELETE FROM artifact_tags WHERE artifact_id = ? AND version = ?",
+                (artifact_id, version),
+            )
+
             # Delete metadata
             conn.execute(
                 "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
@@ -2396,12 +2525,18 @@ class ArtifactStore:
         try:
             cutoff = time.time() - (max_age_days * 86400)
 
-            # Find unreferenced artifacts older than cutoff
+            # Find unreferenced artifacts older than cutoff. "Referenced"
+            # means a NAME or an ALIAS points at the version — aliases pin
+            # registry entries (e.g. champion on a superseded version), and
+            # collecting an aliased artifact would leave a dangling pointer
+            # to a deleted model.
             query = """
                 SELECT av.id, av.version, av.byte_size
                 FROM artifact_versions av
                 LEFT JOIN artifact_names an ON av.id = an.artifact_id AND av.version = an.version
+                LEFT JOIN artifact_aliases aa ON av.id = aa.artifact_id AND av.version = aa.version
                 WHERE an.name IS NULL
+                  AND aa.alias IS NULL
                   AND av.state IN ('ready', 'superseded', 'failed')
                   AND av.created_at < ?
             """
@@ -2521,6 +2656,12 @@ class ArtifactStore:
         forever — it can never serve data, but it sits in the store
         indefinitely. Demoting to ``failed`` makes it visible as a failure
         and eligible for ``cleanup_failed`` deletion.
+
+        STARTUP-ONLY CONTRACT: this sweep demotes ANY sufficiently old
+        ``building`` row unconditionally, which is only safe when no build
+        can legitimately be in flight — i.e. during server startup, before
+        the build runner accepts work. Do not wire it to a periodic timer
+        without adding an is-this-build-actually-running check.
 
         Args:
             max_age_seconds: Builds older than this are considered zombies.
