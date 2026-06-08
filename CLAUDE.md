@@ -2,6 +2,30 @@
 
 Guidance for Claude Code working in this repo.
 
+## Working Guidelines
+
+Behavioral guidelines to reduce common LLM coding mistakes (adapted from
+[andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills/blob/main/CLAUDE.md)).
+These bias toward caution over speed; for trivial tasks, use judgment.
+
+1. **Think before coding.** Don't assume, don't hide confusion, surface
+   tradeoffs. State assumptions explicitly and ask when uncertain; if
+   multiple interpretations exist, present them rather than picking
+   silently; if a simpler approach exists, say so and push back when
+   warranted.
+2. **Simplicity first.** Minimum code that solves the problem, nothing
+   speculative — no unrequested features, abstractions for single-use
+   code, configurability, or error handling for impossible scenarios. If
+   200 lines could be 50, rewrite it.
+3. **Surgical changes.** Touch only what you must; match existing style
+   even if you'd do it differently; don't refactor what isn't broken.
+   Remove only the imports/variables your own changes orphaned — mention
+   pre-existing dead code, don't delete it. Every changed line should
+   trace directly to the request.
+4. **Goal-driven execution.** Turn tasks into verifiable goals ("fix the
+   bug" → "write a test that reproduces it, then make it pass"); state a
+   brief plan with a verify step per item; loop until verified.
+
 ## What is Strata?
 
 Strata is a **materialization and persistence layer** for long-running, iterative,
