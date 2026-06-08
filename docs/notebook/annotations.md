@@ -205,7 +205,9 @@ Format: `# @mount <name> <uri> [ro|rw]`. Defaults to `ro` (read-only) if the mod
 Declare an Iceberg table input. The table's current snapshot id becomes part
 of the cell's provenance: **when new data lands in the table, the cell goes
 stale and the normal cascade machinery re-runs it** — no manual data-version
-bookkeeping.
+bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
+retrain on new data, pin a snapshot), see
+[Lake-Aware Cells](lake-aware-cells.md).
 
 ```python
 # @table trips file:///data/warehouse#nyc.trips

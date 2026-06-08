@@ -167,6 +167,21 @@ def _inject_mounts(manifest: dict, namespace: dict[str, Any]) -> None:
             )
 
 
+def _inject_tables(manifest: dict, namespace: dict[str, Any]) -> None:
+    """Inject ``@table`` lake inputs into the warm worker namespace.
+
+    Mirrors ``harness.inject_tables``: each declaration becomes ``<name>``
+    (the table URI) and ``<name>_snapshot`` (the resolved snapshot id). The
+    standalone harness path injects both mounts and tables; the warm pool
+    worker must too, or an ``@table`` cell run through the pool fails with
+    ``NameError`` for the injected variable.
+    """
+    tables = manifest.get("tables", {})
+    for table_name, spec in tables.items():
+        namespace[table_name] = spec.get("uri", "")
+        namespace[f"{table_name}_snapshot"] = spec.get("snapshot_id")
+
+
 def execute_harness(manifest: dict) -> dict:
     """Execute a cell manifest and return the result dict."""
     source = manifest.get("source", "")
@@ -205,6 +220,7 @@ def execute_harness(manifest: dict) -> dict:
                 print(f"Error deserializing {var_name}: {exc}", file=sys.stderr)
 
         _inject_mounts(manifest, namespace)
+        _inject_tables(manifest, namespace)
         display_capture.install(namespace)
 
         namespace_before = set(namespace.keys())

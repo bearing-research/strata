@@ -765,8 +765,12 @@ class NotebookSession:
                 stale_cells.add(cell_id)
                 continue
 
+            table_fingerprints = self._collect_table_fingerprints(cell)
+
             provenance_hash = compute_provenance_hash(
-                input_hashes + mount_fingerprints, source_hash, env_hash
+                input_hashes + mount_fingerprints + table_fingerprints,
+                source_hash,
+                env_hash,
             )
 
             # Check if cached artifact exists.
@@ -1567,6 +1571,36 @@ class NotebookSession:
                 mount_fingerprints.append(f"{mount.name}:{fingerprint}")
 
         return mount_fingerprints, has_rw_mount
+
+    def _collect_table_fingerprints(self, cell: Any) -> list[str]:
+        """Return ``@table`` snapshot fingerprints for a cell's provenance.
+
+        Must mirror the executor's ``_compute_cell_provenance`` exactly: it
+        folds ``table_fingerprints`` into the provenance hash, so staleness
+        has to as well or an ``@table`` cell's stored artifacts are keyed
+        under a hash this check never reproduces — the cell (and everything
+        downstream) then resolves to idle forever. ``fingerprint_tables``
+        never raises (random fingerprint on an unreachable catalog), so a
+        lake outage shows the cell stale rather than crashing the recompute.
+        """
+        annotations = parse_annotations(cell.source)
+        if not annotations.tables:
+            return []
+        from strata.notebook.tables import fingerprint_tables
+
+        fingerprints, _ = fingerprint_tables(annotations.tables, self._lake_config())
+        return fingerprints
+
+    def _lake_config(self):
+        """Server config when running inside the server, else loaded fresh."""
+        try:
+            from strata.server import get_state
+
+            return get_state().config
+        except RuntimeError:
+            from strata.config import StrataConfig
+
+            return StrataConfig.load()
 
     def _collect_runtime_env(self, cell: Any) -> dict[str, str]:
         """Return the provenance-relevant runtime env for a cell.
