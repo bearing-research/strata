@@ -16,7 +16,7 @@
         <link rel="prev" href="../cells/">
       
       
-        <link rel="next" href="../workers/">
+        <link rel="next" href="../lake-aware-cells/">
       
       
         
@@ -1091,6 +1091,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lake-aware-cells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lake-Aware Cells
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2591,7 +2619,9 @@ joining, <code>.read_text()</code>, <code>.iterdir()</code>, etc.</p>
 <p>Declare an Iceberg table input. The table's current snapshot id becomes part
 of the cell's provenance: <strong>when new data lands in the table, the cell goes
 stale and the normal cascade machinery re-runs it</strong> — no manual data-version
-bookkeeping.</p>
+bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
+retrain on new data, pin a snapshot), see
+<a href="../lake-aware-cells/">Lake-Aware Cells</a>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># @table trips file:///data/warehouse#nyc.trips</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">trips</span><span class="p">],</span>
