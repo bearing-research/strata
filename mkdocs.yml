@@ -69,6 +69,7 @@ nav:
     - Examples: notebook/examples.md
     - Cell Types: notebook/cells.md
     - Cell Annotations: notebook/annotations.md
+    - Lake-Aware Cells: notebook/lake-aware-cells.md
     - Distributed Workers: notebook/workers.md
     - AI Integration: notebook/ai.md
     - Environment: notebook/environment.md

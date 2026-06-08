@@ -58,3 +58,35 @@ class TestExecuteHarnessRdsInput:
         # instead.
         assert "NameError" not in error
         assert "StrataRArtifactError" in error
+
+
+class TestExecuteHarnessTableInjection:
+    """``@table`` declarations must inject ``<name>`` and
+    ``<name>_snapshot`` into the warm-worker namespace.
+
+    The warm pool is the default WebSocket execution path. It injected
+    mounts but not tables, so an ``@table`` cell run through the pool
+    failed with ``NameError`` for the injected URI variable while the
+    cold ``harness.py`` path (which injects both) worked — the cell body
+    references ``trips`` before it is ever defined.
+    """
+
+    def test_table_vars_injected(self, tmp_path: Path) -> None:
+        manifest = {
+            # Would NameError on either variable if injection is skipped.
+            "source": "uri = trips\nsnap = trips_snapshot",
+            "inputs": {},
+            "output_dir": str(tmp_path),
+            "tables": {
+                "trips": {
+                    "uri": "file:///wh#nyc.trips",
+                    "snapshot_id": 2558063584752979421,
+                }
+            },
+        }
+
+        result = execute_harness(manifest)
+
+        assert result["success"] is True, result.get("error")
+        assert "uri" in result["variables"]
+        assert "snap" in result["variables"]

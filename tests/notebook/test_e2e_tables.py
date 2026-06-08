@@ -152,6 +152,42 @@ class TestTableStaleness:
                 again = execute_cell_and_wait(ws, "c1")
                 assert again["payload"]["cache_hit"] is True
 
+    def test_table_cell_stays_ready_after_downstream_runs(self, setup):
+        """An executed ``@table`` cell must stay READY across a staleness
+        recompute, including after a downstream cell runs.
+
+        ``compute_staleness`` omitted the ``@table`` snapshot fingerprint
+        from the provenance hash that execution *did* fold in, so the
+        cell's stored artifacts were keyed under a hash the staleness
+        lookup never reproduced. The cell (and everything downstream)
+        resolved to IDLE — in run-all this surfaced as every completed
+        cell flipping back to grey, leaving only the last cell green.
+        """
+        from strata.notebook.models import CellStatus
+
+        client, tmp = setup
+        table, uri = _build_warehouse(tmp)
+
+        nb = (
+            NotebookBuilder(tmp)
+            .add_cell(
+                "c1",
+                f"# @table events {uri}\nsnap = events_snapshot",
+            )
+            .add_cell("c2", "downstream = snap + 0", after="c1")
+        )
+
+        with open_notebook_session(client, nb.path) as (sid, session):
+            with ws_connect(client, sid) as ws:
+                execute_cell_and_wait(ws, "c1")
+                execute_cell_and_wait(ws, "c2")
+
+            # A fresh staleness recompute (what every post-execution
+            # broadcast triggers) must keep the @table cell green.
+            staleness = session.compute_staleness()
+            assert staleness["c1"].status == CellStatus.READY
+            assert staleness["c2"].status == CellStatus.READY
+
 
 class TestTableErrors:
     def test_unresolvable_table_fails_with_clear_error(self, setup):
