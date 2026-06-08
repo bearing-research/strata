@@ -107,13 +107,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     artifact_sub = artifact_parser.add_subparsers(dest="artifact_command", metavar="<command>")
 
-    def _add_store_args(sub: argparse.ArgumentParser) -> None:
+    def _add_artifact_dir_arg(sub: argparse.ArgumentParser) -> None:
         sub.add_argument(
-            "artifact_dir",
-            nargs="?",
+            "--artifact-dir",
+            dest="artifact_dir",
             default=None,
             help="Artifact store directory (default: ~/.strata/artifacts)",
         )
+
+    def _add_store_args(sub: argparse.ArgumentParser) -> None:
+        _add_artifact_dir_arg(sub)
         sub.add_argument(
             "--format",
             choices=["human", "json"],
@@ -164,12 +167,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Pull an artifact's data. <ref> as in `show`.",
     )
     pull_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
-    pull_parser.add_argument(
-        "artifact_dir",
-        nargs="?",
-        default=None,
-        help="Artifact store directory (default: ~/.strata/artifacts)",
-    )
+    _add_artifact_dir_arg(pull_parser)
     pull_parser.add_argument("--to", default=None, help="Output path (default <ref>.arrow)")
     pull_parser.set_defaults(func=_dispatch_artifact("cmd_pull"))
 
@@ -187,12 +185,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Filter to one registry name (optional)",
     )
-    audit_parser.add_argument(
-        "--artifact-dir",
-        dest="artifact_dir",
-        default=None,
-        help="Artifact store directory (default: ~/.strata/artifacts)",
-    )
+    _add_artifact_dir_arg(audit_parser)
     audit_parser.add_argument(
         "--format",
         choices=["human", "json"],
@@ -210,12 +203,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "their changes for approval; this lists the queue."
         ),
     )
-    pending_parser.add_argument(
-        "artifact_dir",
-        nargs="?",
-        default=None,
-        help="Artifact store directory (default: ~/.strata/artifacts)",
-    )
+    _add_artifact_dir_arg(pending_parser)
     pending_parser.add_argument(
         "--format",
         choices=["human", "json"],
