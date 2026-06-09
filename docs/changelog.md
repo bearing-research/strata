@@ -23,6 +23,29 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **Registry dashboard in the notebook** (#147–#150): the registry is now a
+  first-class UI surface, so promotion and approvals don't have to be code. A
+  cell that publishes with a name (`strata.put(model, name="taxi/tip-model")`)
+  is stamped with its cell and shows a **promote strip** right below it; the
+  bottom drawer gains a **Registry tab** with the pending-approval queue
+  (Approve / Reject — the human gate, in the UI), a names table (alias chips,
+  latest version, tags, and a `[Promote▾]` champion/candidate menu), and a
+  collapsible audit timeline; and a **lineage view** renders
+  `model ← features ← scan ← table @ snapshot`. Promote toasts the result
+  (`✓ applied` or `⏳ pending` for a protected alias). New reads:
+  `GET /v1/notebooks/{sid}/artifacts` and `GET /v1/registry/summary`.
+  Personal-mode only — the dashboard hides itself in service mode.
+
+- **Ambient `strata` client in notebook cells** (#146): every locally-executed
+  Python cell gets a ready `strata` client in its namespace — no
+  `from strata.client import StrataClient` / `StrataClient(base_url=…)` /
+  `close()`. It covers the common operations (`materialize`, `put`, `set_alias`,
+  `set_tag`, `resolve_alias`, …) over a lightweight stdlib client path-loaded
+  into the notebook venv (no new dependency), is created fresh per run and
+  closed automatically, and — like a mount or `@table` variable — is an injected
+  tool, not a cell input, so it never affects provenance. Local execution only;
+  remote-executor cells import a client explicitly.
+
 - **Warm Rscript pool** (#81): notebooks with R cells pre-spawn R workers
   that have already paid interpreter startup, renv activation, and
   `jsonlite`/`arrow` loads — an R cell run skips the ~1–2s cold-start tax
