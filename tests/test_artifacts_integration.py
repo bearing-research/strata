@@ -1840,3 +1840,29 @@ class TestRegistryAuthzPersonalMode:
             result = client.approve_alias_change("team/model", "champion")
             assert result["status"] == "approved"
             assert client.resolve_alias("team/model", "champion")["version"] == artifact.version
+
+
+class TestRegistrySummary:
+    """GET /v1/registry/summary assembles the names-table data (each name with
+    its aliases + the version's tags) — the dashboard's registry-state source."""
+
+    def test_summary_lists_names_with_aliases_and_tags(self, multi_file_server):
+        base_url = multi_file_server["base_url"]
+        with StrataClient(base_url=base_url) as client:
+            artifact = client.materialize(
+                inputs=[multi_file_server["table_uri"]],
+                transform={"executor": "scan@v1", "params": {}},
+                name="team/model",
+            )
+            artifact.to_table()
+            client.set_tag(artifact.artifact_id, artifact.version, "mae", "1.98")
+            client.set_alias("team/model", "candidate", artifact.artifact_id, artifact.version)
+
+        resp = httpx.get(f"{base_url}/v1/registry/summary", timeout=30.0)
+        assert resp.status_code == 200
+        names = {n["name"]: n for n in resp.json()["names"]}
+        assert "team/model" in names
+        row = names["team/model"]
+        assert row["version"] == artifact.version
+        assert row["aliases"] == {"candidate": artifact.version}
+        assert row["tags"]["mae"] == "1.98"
