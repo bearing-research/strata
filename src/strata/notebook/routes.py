@@ -2558,6 +2558,48 @@ async def get_notebook_dag(notebook_id: str, session: SessionDep) -> dict:
     return _format_dag(session)
 
 
+@router.get("/{notebook_id}/artifacts")
+async def list_notebook_published_artifacts(notebook_id: str, session: SessionDep) -> dict:
+    """Per cell, the registry artifacts the cell published via the ambient
+    ``strata`` client (``put``/``materialize`` with ``name=``, stamped
+    ``nb_cell=<id>``). Powers the per-cell registry strip.
+
+    Personal mode only: the published-tier store is unreachable in service mode
+    today (``_get_artifact_store`` 403s), so we return an empty map rather than
+    erroring — the strip simply shows nothing until the service-mode registry
+    refactor lands.
+    """
+    from fastapi import HTTPException
+
+    try:
+        from strata.server import _get_artifact_store
+
+        store = _get_artifact_store()
+    except HTTPException:
+        return {"cells": {}}
+
+    cells: dict[str, list[dict]] = {}
+    for cell in session.notebook_state.cells:
+        items: list[dict] = []
+        for artifact_id, version in store.list_artifacts_by_tag("nb_cell", cell.id):
+            artifact = store.get_artifact(artifact_id, version)
+            if artifact is None or artifact.state != "ready":
+                continue
+            tags = {k: v for k, v in store.get_tags(artifact_id, version).items() if k != "nb_cell"}
+            items.append(
+                {
+                    "artifact_id": artifact_id,
+                    "version": version,
+                    "uri": f"strata://artifact/{artifact_id}@v={version}",
+                    "names": store.names_for_artifact(artifact_id, version),
+                    "tags": tags,
+                }
+            )
+        if items:
+            cells[cell.id] = items
+    return {"cells": cells}
+
+
 @router.get("/{notebook_id}/cells/{cell_id}/iterations")
 async def get_cell_iterations(
     notebook_id: str,

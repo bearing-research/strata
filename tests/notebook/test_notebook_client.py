@@ -89,3 +89,19 @@ def test_artifact_uri_and_empty_stream(shim):
     assert art.cache_hit is True
     # Empty stream data yields an empty table, not a crash.
     assert shim.Artifact(c, "id", 1, stream_data=b"").to_arrow().num_rows == 0
+
+
+def test_client_accepts_cell_id(shim):
+    c = shim.StrataClient(base_url="http://x", cell_id="cell-42")
+    assert c._cell_id == "cell-42"
+
+
+def test_stamp_cell_is_noop_without_cell_or_name(shim):
+    # No cell_id, or no name → no stamp attempt, never raises.
+    c = shim.StrataClient(base_url="http://x")  # no cell_id
+    art = shim.Artifact(c, "id", 1)
+    c._stamp_cell(art, name="team/model")  # cell_id missing → no-op
+    c2 = shim.StrataClient(base_url="http://x", cell_id="c")
+    c2._stamp_cell(art, name=None)  # unnamed → no-op
+    # With both, set_tag is attempted over HTTP and the failure is swallowed.
+    c2._stamp_cell(art, name="team/model")  # no server → swallowed, no raise

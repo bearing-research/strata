@@ -133,9 +133,27 @@ class Artifact:
 class StrataClient:
     """Notebook-venv client over urllib (no httpx / no strata import)."""
 
-    def __init__(self, base_url: str, timeout: float = _DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = _DEFAULT_TIMEOUT,
+        cell_id: str | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self._cell_id = cell_id
+
+    def _stamp_cell(self, artifact: Artifact, name: str | None) -> None:
+        """Tag a *named* artifact with the originating notebook cell so the
+        per-cell registry strip can show "what this cell published". Only
+        named artifacts (registry-bound) are stamped; failures are swallowed
+        — the stamp is a convenience, not part of the publish."""
+        if not name or not self._cell_id:
+            return
+        try:
+            self.set_tag(artifact.artifact_id, artifact.version, "nb_cell", self._cell_id)
+        except Exception:
+            pass
 
     # -- HTTP primitives ---------------------------------------------------
 
@@ -222,7 +240,9 @@ class StrataClient:
         stream_data = None
         if stream_url and mode == "stream":
             stream_data = self._get_bytes(stream_url)
-        return Artifact(self, artifact_id, version, cache_hit=hit, stream_data=stream_data)
+        art = Artifact(self, artifact_id, version, cache_hit=hit, stream_data=stream_data)
+        self._stamp_cell(art, name)
+        return art
 
     def put(
         self,
@@ -246,7 +266,9 @@ class StrataClient:
             ],
         )
         artifact_id, version = _parse_artifact_uri(result["artifact_uri"])
-        return Artifact(self, artifact_id, version, cache_hit=bool(result.get("hit", False)))
+        art = Artifact(self, artifact_id, version, cache_hit=bool(result.get("hit", False)))
+        self._stamp_cell(art, name)
+        return art
 
     # -- Registry ops ------------------------------------------------------
 

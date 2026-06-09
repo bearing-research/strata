@@ -1076,3 +1076,30 @@ class TestApproveSeparationOfDuty:
             "demo/model", "champion", actor="alice", require_distinct_approver=False
         )
         assert store.resolve_alias("demo/model", "champion").id == "m1"
+
+
+class TestTagAndNameLookups:
+    """Reverse lookups used by the per-cell published-artifacts route:
+    find artifacts a cell published (``nb_cell`` tag) and the names that
+    point at a version."""
+
+    def test_list_artifacts_by_tag(self, store):
+        for aid, h in (("a1", "h1"), ("a2", "h2"), ("a3", "h3")):
+            store.create_artifact(aid, h)
+            store.finalize_artifact(aid, 1, "{}", 0, 0)
+        store.set_tag("a1", 1, "nb_cell", "cellX")
+        store.set_tag("a3", 1, "nb_cell", "cellX")
+        store.set_tag("a2", 1, "nb_cell", "cellY")
+
+        assert store.list_artifacts_by_tag("nb_cell", "cellX") == [("a1", 1), ("a3", 1)]
+        assert store.list_artifacts_by_tag("nb_cell", "cellY") == [("a2", 1)]
+        assert store.list_artifacts_by_tag("nb_cell", "absent") == []
+
+    def test_names_for_artifact(self, store):
+        store.create_artifact("a1", "h1")
+        store.finalize_artifact("a1", 1, "{}", 0, 0)
+        store.set_name("team/model", "a1", 1)
+
+        assert store.names_for_artifact("a1", 1) == ["team/model"]
+        assert store.names_for_artifact("a1", 2) == []
+        assert store.names_for_artifact("nope", 1) == []

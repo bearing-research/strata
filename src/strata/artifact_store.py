@@ -1397,6 +1397,25 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    def names_for_artifact(
+        self,
+        artifact_id: str,
+        version: int,
+        tenant: str | None = None,
+    ) -> list[str]:
+        """Reverse lookup: registry names currently pointing at this version."""
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "SELECT name FROM artifact_names "
+                "WHERE artifact_id = ? AND version = ? AND tenant = ? ORDER BY name",
+                (artifact_id, version, effective_tenant),
+            )
+            return [row["name"] for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
     def resolve_name(
         self,
         name: str,
@@ -1804,6 +1823,27 @@ class ArtifactStore:
                 (artifact_id, version, effective_tenant),
             )
             return {row["key"]: row["value"] for row in cursor.fetchall()}
+        finally:
+            conn.close()
+
+    def list_artifacts_by_tag(
+        self,
+        key: str,
+        value: str,
+        tenant: str | None = None,
+    ) -> list[tuple[str, int]]:
+        """Return ``(artifact_id, version)`` for every artifact carrying the
+        given ``key=value`` tag. Used to find artifacts a notebook cell
+        published (``nb_cell=<cell_id>``)."""
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "SELECT artifact_id, version FROM artifact_tags "
+                "WHERE key = ? AND value = ? AND tenant = ? ORDER BY artifact_id, version",
+                (key, value, effective_tenant),
+            )
+            return [(row["artifact_id"], row["version"]) for row in cursor.fetchall()]
         finally:
             conn.close()
 

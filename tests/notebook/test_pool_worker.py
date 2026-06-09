@@ -128,3 +128,21 @@ class TestExecuteHarnessClientInjection:
 
         assert result["success"] is False
         assert "NameError" in result["error"]
+
+
+class TestExecuteHarnessClientCellId:
+    """The injected ``strata`` client carries the originating cell id (from
+    the manifest) so its named put/materialize can stamp ``nb_cell`` — the
+    data behind the per-cell registry strip."""
+
+    def test_cell_id_reaches_injected_client(self, tmp_path: Path) -> None:
+        manifest = {
+            "source": "cid = strata._cell_id",
+            "inputs": {},
+            "output_dir": str(tmp_path),
+            "strata_url": "http://127.0.0.1:8765",
+            "strata_cell_id": "cell-xyz",
+        }
+        result = execute_harness(manifest)
+        assert result["success"] is True, result.get("error")
+        assert result["variables"]["cid"]["preview"] == "cell-xyz"
