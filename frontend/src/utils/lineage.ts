@@ -40,11 +40,8 @@ export function lineageToTree(graph: LineageGraph, rootUri: string): LineageTree
     seen.add(uri)
     const n = nodeByUri.get(uri)
     const type = n?.type ?? 'artifact'
-    const label =
-      type === 'table' ? tableLabel(uri) : (n?.transform_ref ?? 'artifact')
-    const children = (inputsOf.get(uri) ?? [])
-      .filter((u) => !seen.has(u))
-      .map((u) => build(u))
+    const label = type === 'table' ? tableLabel(uri) : (n?.transform_ref ?? 'artifact')
+    const children = (inputsOf.get(uri) ?? []).filter((u) => !seen.has(u)).map((u) => build(u))
     return { uri, label, type, version: n?.version ?? null, children }
   }
   return build(rootUri)
