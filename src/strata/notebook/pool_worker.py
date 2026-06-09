@@ -63,6 +63,7 @@ def _load_local_module(filename: str, module_name: str):
 _ser = _load_local_module("serializer.py", "_nb_serializer")
 _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
+_client_mod = _load_local_module("notebook_client.py", "_nb_client")
 
 
 # ---------------------------------------------------------------------------
@@ -193,9 +194,9 @@ def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
     url = manifest.get("strata_url")
     if not url:
         return None
-    from strata.client import StrataClient
-
-    client = StrataClient(base_url=url)
+    # Path-loaded, not ``import strata`` — the warm worker runs in the
+    # notebook venv (pyarrow + stdlib only); see notebook_client.py.
+    client = _client_mod.StrataClient(base_url=url)
     namespace["strata"] = client
     return client
 
