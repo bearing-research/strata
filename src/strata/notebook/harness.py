@@ -169,7 +169,8 @@ def inject_client(manifest: dict, namespace: dict) -> Any:
         return None
     # Path-loaded, not ``import strata`` — the notebook venv has only
     # pyarrow + stdlib (see module docstring / notebook_client.py).
-    client = _client_mod.StrataClient(base_url=url)
+    cell_id = manifest.get("strata_cell_id") or manifest.get("cell_id")
+    client = _client_mod.StrataClient(base_url=url, cell_id=cell_id)
     namespace["strata"] = client
     return client
 
