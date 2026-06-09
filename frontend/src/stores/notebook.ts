@@ -1096,6 +1096,8 @@ function parseBackendNotebookRuntimeConfig(raw: any): NotebookRuntimeConfig {
     defaultPythonVersion,
     pythonSelectionFixed:
       raw?.python_selection_fixed === true || availablePythonVersions.length <= 1,
+    // Fail closed: registry UI only shows when the backend explicitly enables it.
+    registryEnabled: raw?.registry_enabled === true,
   }
 }
 
@@ -1251,6 +1253,8 @@ function loadNotebookStateFromBackend(data: any) {
   notebook.worker = data.worker ?? null
   notebook.timeout = data.timeout ?? null
   notebook.env = parseEnvMap(data.env)
+  // Registry UI gate from the runtime config merged into the open response.
+  registryEnabled.value = data?.registry_enabled === true
   applyEnvSources(data)
   notebook.workers = Array.isArray(data.workers) ? data.workers.map(parseWorkerSpec) : []
   notebook.mounts = Array.isArray(data.mounts) ? data.mounts.map(parseMountSpec) : []
@@ -1579,6 +1583,10 @@ const workerCatalogLoaded = ref(false)
 // otherwise. Personal mode relaxes restrictions, so failing closed here
 // avoids the header briefly advertising the wrong mode on load.
 const workerDefinitionsEditable = ref(false)
+// Registry UI gate: true only when the backend reports the registry routes
+// are reachable (personal mode today). Fail closed so the dashboard stays
+// hidden until the open response confirms it.
+const registryEnabled = ref(false)
 const workerHealthLoading = ref(false)
 const workerHealthCheckedAt = ref<number | null>(null)
 const notebookWorkerError = ref<string | null>(null)
@@ -3557,6 +3565,7 @@ export function useNotebook() {
     environmentImportPreview,
     availableWorkers,
     workerDefinitionsEditable,
+    registryEnabled,
     workerHealthLoading,
     workerHealthCheckedAt,
     notebookWorkerError,

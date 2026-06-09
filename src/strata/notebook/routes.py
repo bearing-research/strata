@@ -465,6 +465,11 @@ def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
         "available_python_versions": available_python_versions,
         "default_python_version": available_python_versions[0],
         "python_selection_fixed": len(available_python_versions) <= 1,
+        # Registry UI gate: the registry routes go through
+        # ``_get_artifact_store()``, which only serves personal mode today.
+        # The frontend hides the Registry tab/strip when this is false so
+        # service mode shows no dead registry affordances.
+        "registry_enabled": deployment_mode == "personal",
     }
 
 

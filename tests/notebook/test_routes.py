@@ -2441,3 +2441,30 @@ def test_python_version_update_rejects_malformed_version(client, monkeypatch, tm
         json={"python_version": "3.13.5"},
     )
     assert resp.status_code == 422  # Pydantic validation error
+
+
+class TestRuntimeConfigRegistryFlag:
+    """``registry_enabled`` gates the registry UI: true in personal mode
+    (where the registry routes are reachable), false in service mode."""
+
+    def test_registry_enabled_in_personal_mode(self, monkeypatch):
+        from strata.notebook.routes import _serialize_notebook_runtime_config
+
+        monkeypatch.setattr(
+            "strata.server._state",
+            SimpleNamespace(config=SimpleNamespace(deployment_mode="personal")),
+        )
+        cfg = _serialize_notebook_runtime_config()
+        assert cfg["deployment_mode"] == "personal"
+        assert cfg["registry_enabled"] is True
+
+    def test_registry_disabled_in_service_mode(self, monkeypatch):
+        from strata.notebook.routes import _serialize_notebook_runtime_config
+
+        monkeypatch.setattr(
+            "strata.server._state",
+            SimpleNamespace(config=SimpleNamespace(deployment_mode="service")),
+        )
+        cfg = _serialize_notebook_runtime_config()
+        assert cfg["deployment_mode"] == "service"
+        assert cfg["registry_enabled"] is False

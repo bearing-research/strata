@@ -70,6 +70,7 @@ interface NotebookRuntimeConfigResponse {
   available_python_versions?: string[]
   default_python_version?: string
   python_selection_fixed?: boolean
+  registry_enabled?: boolean
 }
 
 interface CellUpdateResponse {
