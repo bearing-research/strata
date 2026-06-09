@@ -25,7 +25,12 @@ onMounted(() => {
   void fetchRegistryAuditAction()
 })
 
-async function promote(name: string, alias: 'champion' | 'candidate', artifactId: string, version: number) {
+async function promote(
+  name: string,
+  alias: 'champion' | 'candidate',
+  artifactId: string,
+  version: number,
+) {
   openMenu.value = null
   busy.value = `${name}:${alias}`
   try {
