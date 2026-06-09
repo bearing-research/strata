@@ -641,6 +641,7 @@ def test_get_notebook_runtime_config_endpoint(client, monkeypatch):
         "available_python_versions": ["3.12", "3.13"],
         "default_python_version": "3.12",
         "python_selection_fixed": False,
+        "registry_enabled": True,
     }
 
 
