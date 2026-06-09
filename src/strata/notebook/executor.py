@@ -2309,8 +2309,12 @@ class CellExecutor:
         (``state.config.server_url``); injected into every cell manifest so
         a cell can call ``strata.materialize(...)`` without constructing a
         client. Not part of provenance — an ambient tool, not an input.
+
+        Defensive: the ambient client is an optional convenience, so a config
+        that can't supply a URL yields ``""`` (the harness then injects no
+        ``strata``) rather than failing cell execution.
         """
-        return self._lake_config().server_url
+        return str(getattr(self._lake_config(), "server_url", "") or "")
 
     def _manifest_tables(
         self,
