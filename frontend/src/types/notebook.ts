@@ -511,6 +511,9 @@ export interface NotebookRuntimeConfig {
   availablePythonVersions: string[]
   defaultPythonVersion: string
   pythonSelectionFixed: boolean
+  /** Registry UI gate — true only when the registry routes are reachable
+   * (personal mode today). The dashboard hides itself when false. */
+  registryEnabled: boolean
 }
 
 // ``r_init`` and ``r_add`` reuse the same env-job UI surface as
