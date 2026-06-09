@@ -90,3 +90,41 @@ class TestExecuteHarnessTableInjection:
         assert result["success"] is True, result.get("error")
         assert "uri" in result["variables"]
         assert "snap" in result["variables"]
+
+
+class TestExecuteHarnessClientInjection:
+    """A ``strata_url`` in the manifest injects an ambient ``strata``
+    client into the warm-worker namespace — so a cell can call
+    ``strata.materialize(...)`` without constructing a client — and it is
+    closed after the cell (the warm process is reused; a leaked
+    ``httpx.Client`` would accumulate sockets) and excluded from outputs.
+    """
+
+    def test_client_injected_and_not_an_output(self, tmp_path: Path) -> None:
+        manifest = {
+            # NameError if strata is not injected; the derived var proves it.
+            "source": "client_type = type(strata).__name__",
+            "inputs": {},
+            "output_dir": str(tmp_path),
+            "strata_url": "http://127.0.0.1:8765",
+        }
+
+        result = execute_harness(manifest)
+
+        assert result["success"] is True, result.get("error")
+        assert "client_type" in result["variables"]
+        # The injected client is an input, not a cell output.
+        assert "strata" not in result["variables"]
+
+    def test_absent_without_strata_url(self, tmp_path: Path) -> None:
+        # No strata_url → no injection → referencing strata NameErrors.
+        manifest = {
+            "source": "x = strata",
+            "inputs": {},
+            "output_dir": str(tmp_path),
+        }
+
+        result = execute_harness(manifest)
+
+        assert result["success"] is False
+        assert "NameError" in result["error"]

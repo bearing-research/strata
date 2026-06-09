@@ -2302,6 +2302,16 @@ class CellExecutor:
 
             return StrataConfig.load()
 
+    def _ambient_strata_url(self) -> str:
+        """Server URL the harness binds the injected ``strata`` client to.
+
+        Same source the executor uses for its own dispatch base URL
+        (``state.config.server_url``); injected into every cell manifest so
+        a cell can call ``strata.materialize(...)`` without constructing a
+        client. Not part of provenance — an ambient tool, not an input.
+        """
+        return self._lake_config().server_url
+
     def _manifest_tables(
         self,
         table_specs: list[TableSpec],
@@ -2353,6 +2363,7 @@ class CellExecutor:
             "tables": tables or {},
             "env": runtime_env,
             "mutation_defines": list(mutation_defines or []),
+            "strata_url": self._ambient_strata_url(),
         }
         if loop_config is not None:
             manifest["loop"] = loop_config

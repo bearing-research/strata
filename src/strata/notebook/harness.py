@@ -154,6 +154,35 @@ def inject_tables(manifest: dict, namespace: dict) -> None:
         namespace[f"{table_name}_snapshot"] = spec.get("snapshot_id")
 
 
+def inject_client(manifest: dict, namespace: dict) -> Any:
+    """Inject an ambient ``strata`` client bound to the server URL.
+
+    Returns the client so the caller can close it after the cell runs —
+    the warm pool reuses the process, so a leaked ``httpx.Client`` would
+    accumulate sockets. Returns ``None`` when no ``strata_url`` is set.
+    Must be called before the namespace is snapshotted for output capture
+    so ``strata`` is treated as an injected input, not a cell output.
+    """
+    url = manifest.get("strata_url")
+    if not url:
+        return None
+    from strata.client import StrataClient
+
+    client = StrataClient(base_url=url)
+    namespace["strata"] = client
+    return client
+
+
+def close_client(client: Any) -> None:
+    """Close an injected ambient client, swallowing teardown errors."""
+    if client is None:
+        return
+    try:
+        client.close()
+    except Exception:
+        pass
+
+
 @contextmanager
 def apply_env_overrides(manifest: dict):
     """Apply manifest-scoped environment overrides for one execution."""
@@ -333,11 +362,13 @@ def _run_one_batched_cell(
     # same name as a mount.
     mount_names = list(mount_manifest.keys())
     table_names = [injected for name in table_manifest for injected in (name, f"{name}_snapshot")]
+    ambient_names = ["strata"] if cell.get("strata_url") else []
     previous_bindings: dict[str, Any] = {
-        name: namespace.get(name, _MISSING) for name in mount_names + table_names
+        name: namespace.get(name, _MISSING) for name in mount_names + table_names + ambient_names
     }
     inject_mounts({"mounts": mount_manifest}, namespace)
     inject_tables({"tables": table_manifest}, namespace)
+    ambient_client = inject_client(cell, namespace)
 
     try:
         with apply_env_overrides({"env": cell_env}):
@@ -472,8 +503,11 @@ def _run_one_batched_cell(
                 return ("persist_failed", "persist_failed")
             return ("ok", None)
     finally:
-        # Restore mount-name bindings — discard any cell-introduced ones,
-        # rebind whatever was there before.
+        # Close the ambient client (the batch process is reused across
+        # cells, so it must not leak sockets), then restore mount/table/
+        # client name bindings — discard any cell-introduced ones, rebind
+        # whatever was there before.
+        close_client(ambient_client)
         for name, previous in previous_bindings.items():
             if previous is _MISSING:
                 namespace.pop(name, None)
@@ -657,6 +691,7 @@ def main():
     manifest: dict = {}
     stdout_text = ""
     stderr_text = ""
+    ambient_client: Any = None
 
     try:
         manifest = load_manifest(manifest_path)
@@ -666,6 +701,7 @@ def main():
         inputs = deserialize_inputs(manifest)
         inject_mounts(manifest, inputs)
         inject_tables(manifest, inputs)
+        ambient_client = inject_client(manifest, inputs)
         loop_config = manifest.get("loop") or {}
         loop_until_expr = loop_config.get("until_expr") if isinstance(loop_config, dict) else None
         with apply_env_overrides(manifest):
@@ -733,6 +769,7 @@ def main():
         sys.exit(1)
 
     finally:
+        close_client(ambient_client)
         # Write the harness output to a *separate* filename so it
         # can't be confused with the input manifest the parent wrote.
         # The previous "manifest.json" overlap forced a fragile

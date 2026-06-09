@@ -2052,6 +2052,7 @@ async def _run_partition_batch(
                 "env": effective_env,
                 "mount_manifest": mount_manifest,
                 "table_manifest": table_manifest,
+                "strata_url": executor._ambient_strata_url(),
                 "source_hash": "",
                 "env_hash": "",
             }
