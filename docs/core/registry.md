@@ -134,6 +134,47 @@ strata artifact audit taxi/tip-model
 strata artifact verify    # store-wide blob/metadata consistency check
 ```
 
+## In the notebook (the registry dashboard)
+
+Everything above also has a UI — the registry is a first-class surface in the
+notebook, so promotion and approvals don't have to be code. Registry routes are
+**personal-mode only** today, so the dashboard hides itself in service mode.
+
+**Publishing.** Inside a cell, the [ambient `strata`
+client](../notebook/cells.md#the-ambient-strata-client) publishes with a name:
+
+```python
+art = strata.put(model, name="taxi/tip-model")   # or materialize(…, name=…)
+```
+
+The artifact lands in the registry and is **stamped with the cell that produced
+it**, so it shows up right under that cell.
+
+**Per-cell strip.** Below a cell that published, a compact strip shows what it
+put into the registry — `⬡ taxi/tip-model v3  ★champion  mae=1.98` — with a
+`[Promote▾]` menu (champion / candidate) and a `⎘` lineage button. Promote
+where you trained the model, without leaving the cell.
+
+**Registry tab.** The bottom drawer has a **Registry** tab:
+
+- a **pending-approval** banner with **Approve / Reject** — the human gate, in
+  the UI (a protected-alias move queues here);
+- a **names table** — each name with its alias chips (`★champ`, `cand`),
+  latest version, tags, and `[Promote▾]`;
+- a collapsible **audit** timeline.
+
+**Promote feedback.** Setting an alias toasts the result: `✓ taxi/tip-model →
+champion` when it applies, or `⏳ champion change pending approval` when the
+alias is protected — at which point the pending banner appears for someone to
+approve. Unprotected aliases (candidate) apply immediately.
+
+**Lineage.** The `⎘` button (strip or names table) opens the provenance chain —
+`model ← features ← scan ← table @ snapshot` — the same lineage the CLI prints,
+as an interactive view.
+
+So the same promote → gate → approve → audit loop the SDK/CLI drives is a few
+clicks in the notebook, backed by the identical audited routes.
+
 ## Storage & durability
 
 Registry state lives in the same `artifacts.sqlite` as artifact metadata

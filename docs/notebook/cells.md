@@ -69,6 +69,8 @@ It's a lightweight client with the same API surface for the common operations (`
 
 Cells routed to a **remote executor worker** (not local execution) don't get the ambient `strata` — import a client explicitly there.
 
+When a cell publishes with a name — `strata.put(model, name="taxi/tip-model")` — the artifact appears in the [registry dashboard](../core/registry.md#in-the-notebook-the-registry-dashboard): a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage — all in the UI).
+
 > Calls through `strata` are **side effects**. On a cache hit the cell body doesn't re-run, so a `strata.set_alias(...)` won't re-fire — fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.
 
 ### Library cells (cross-cell defs and classes)
