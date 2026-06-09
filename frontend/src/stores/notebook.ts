@@ -36,6 +36,7 @@ import type {
   AuditEntry,
   PendingChange,
   PublishedArtifact,
+  RegistryName,
 } from '../composables/useStrata'
 import { useWebSocket } from '../composables/useWebSocket'
 import { markNotebookPerf, measureNotebookPerf } from '../utils/perf'
@@ -1599,10 +1600,32 @@ const workerHealthCheckedAt = ref<number | null>(null)
 // Registry / dashboard state (P3). Populated lazily by the Registry tab and
 // the per-cell strip; reads/writes go through the SERVER registry routes.
 const registryArtifactsByCell = ref<Record<string, PublishedArtifact[]>>({})
+const registryNames = ref<RegistryName[]>([])
 const registryPending = ref<PendingChange[]>([])
 const registryAudit = ref<AuditEntry[]>([])
 const registryLoading = ref(false)
 const registryError = ref<string | null>(null)
+
+// Minimal toast feed for registry feedback (promoted / pending / approved).
+interface Toast {
+  id: number
+  kind: 'success' | 'error' | 'info'
+  message: string
+}
+const toasts = ref<Toast[]>([])
+let _toastSeq = 0
+function pushToast(message: string, kind: Toast['kind'] = 'success', durationMs = 3500) {
+  const id = ++_toastSeq
+  toasts.value.push({ id, kind, message })
+  if (durationMs > 0) {
+    setTimeout(() => {
+      toasts.value = toasts.value.filter((t) => t.id !== id)
+    }, durationMs)
+  }
+}
+function dismissToast(id: number) {
+  toasts.value = toasts.value.filter((t) => t.id !== id)
+}
 
 // Refresh the registry state shown in the tab + per-cell strip: a cell's
 // published artifacts and the pending-approval queue. Called on tab open,
@@ -1614,11 +1637,13 @@ async function refreshRegistryAction() {
   registryLoading.value = true
   registryError.value = null
   try {
-    const [arts, pending] = await Promise.all([
+    const [arts, summary, pending] = await Promise.all([
       strata.getNotebookArtifacts(sid),
+      strata.getRegistrySummary(),
       strata.getPendingChanges(),
     ])
     registryArtifactsByCell.value = arts.cells || {}
+    registryNames.value = summary.names || []
     registryPending.value = pending.pending || []
   } catch (err) {
     registryError.value = err instanceof Error ? err.message : 'Failed to load registry'
@@ -3577,10 +3602,14 @@ export function useNotebook() {
     openNotebook,
     // Registry / dashboard (P3)
     registryArtifactsByCell,
+    registryNames,
     registryPending,
     registryAudit,
     registryLoading,
     registryError,
+    toasts,
+    pushToast,
+    dismissToast,
     refreshRegistryAction,
     fetchRegistryAuditAction,
     setAliasAction,

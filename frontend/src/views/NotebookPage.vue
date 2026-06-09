@@ -18,6 +18,7 @@ const MountsPanel = defineAsyncComponent(() => import('../components/MountsPanel
 const ConnectionsPanel = defineAsyncComponent(() => import('../components/ConnectionsPanel.vue'))
 const SchemaPanel = defineAsyncComponent(() => import('../components/SchemaPanel.vue'))
 const RuntimePanel = defineAsyncComponent(() => import('../components/RuntimePanel.vue'))
+const RegistryPanel = defineAsyncComponent(() => import('../components/RegistryPanel.vue'))
 const WorkersPanel = defineAsyncComponent(() => import('../components/WorkersPanel.vue'))
 const ProfilingPanel = defineAsyncComponent(() => import('../components/ProfilingPanel.vue'))
 const LlmPanel = defineAsyncComponent(() => import('../components/LlmPanel.vue'))
@@ -53,7 +54,18 @@ const {
   executeNotebookRerunAllWebSocket,
   cleanupWebSocket,
   ensureWorkersLoaded,
+  registryEnabled,
+  toasts,
+  dismissToast,
 } = useNotebook()
+
+// Bottom drawer tab: the existing DAG/Notes/Profiling stack ('execution')
+// plus the new Registry dashboard ('registry', gated by registryEnabled).
+const bottomTab = ref<'execution' | 'registry'>('execution')
+function selectBottomTab(tab: 'execution' | 'registry') {
+  bottomTab.value = tab
+  if (dagDrawerCollapsed.value) toggleDagDrawer()
+}
 
 const editingName = ref(false)
 const nameInput = ref<HTMLInputElement | null>(null)
@@ -658,20 +670,39 @@ function goHome() {
         @pointerdown="startDagDrawerResize"
       ></div>
       <section class="dag-drawer" :class="{ collapsed: dagDrawerCollapsed }">
-        <header class="dag-drawer-header" @click="toggleDagDrawer">
-          <span class="dag-drawer-title">Execution</span>
-          <span class="dag-drawer-hint">
-            {{ dagDrawerCollapsed ? '▲ click to expand' : '▼ click to collapse' }}
+        <header class="dag-drawer-header">
+          <div class="dag-drawer-tabs">
+            <button
+              class="drawer-tab"
+              :class="{ active: bottomTab === 'execution' }"
+              @click="selectBottomTab('execution')"
+            >
+              Execution
+            </button>
+            <button
+              v-if="registryEnabled"
+              class="drawer-tab"
+              :class="{ active: bottomTab === 'registry' }"
+              @click="selectBottomTab('registry')"
+            >
+              Registry
+            </button>
+          </div>
+          <span class="dag-drawer-hint" @click="toggleDagDrawer">
+            {{ dagDrawerCollapsed ? '▲ expand' : '▼ collapse' }}
           </span>
         </header>
         <div v-if="!dagDrawerCollapsed" class="dag-drawer-body">
-          <div class="dag-drawer-graph">
-            <DagView />
-          </div>
-          <NotesPanel />
-          <div class="dag-drawer-profiling">
-            <ProfilingPanel />
-          </div>
+          <template v-if="bottomTab === 'execution'">
+            <div class="dag-drawer-graph">
+              <DagView />
+            </div>
+            <NotesPanel />
+            <div class="dag-drawer-profiling">
+              <ProfilingPanel />
+            </div>
+          </template>
+          <RegistryPanel v-else-if="bottomTab === 'registry'" />
         </div>
       </section>
     </div>
@@ -679,6 +710,19 @@ function goHome() {
     <!-- v1.1: Impact preview dialog -->
     <ImpactPreview />
     <KeyboardShortcutsModal :visible="showShortcuts" @close="showShortcuts = false" />
+
+    <!-- Registry feedback toasts -->
+    <div class="toast-stack">
+      <div
+        v-for="t in toasts"
+        :key="t.id"
+        class="toast"
+        :class="t.kind"
+        @click="dismissToast(t.id)"
+      >
+        {{ t.message }}
+      </div>
+    </div>
   </div>
 </template>
 
@@ -780,5 +824,62 @@ function goHome() {
   100% {
     box-shadow: none;
   }
+}
+
+/* Bottom-drawer tabs (Execution | Registry) */
+.dag-drawer-tabs {
+  display: flex;
+  gap: 2px;
+}
+.drawer-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.drawer-tab:hover {
+  color: var(--text);
+}
+.drawer-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent-primary, #3b82f6);
+}
+
+/* Registry feedback toasts */
+.toast-stack {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 2000;
+}
+.toast {
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 220px;
+  max-width: 360px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  background: var(--bg, #fff);
+  border: 1px solid var(--border-subtle);
+}
+.toast.success {
+  background: var(--tint-success, #e6f4ea);
+  color: var(--accent-success, #1e7e34);
+}
+.toast.error {
+  background: var(--tint-danger, #fdecea);
+  color: var(--accent-danger, #c0392b);
+}
+.toast.info {
+  background: var(--tint-primary, #e8f0fe);
+  color: var(--accent-primary, #1a56db);
 }
 </style>
