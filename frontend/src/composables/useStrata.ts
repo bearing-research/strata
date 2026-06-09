@@ -78,6 +78,67 @@ interface CellUpdateResponse {
   cells?: BackendCellPayload[]
 }
 
+// ---- Registry / dashboard (P3) ----
+
+/** One artifact a cell published into the registry (GET …/artifacts). */
+export interface PublishedArtifact {
+  artifact_id: string
+  version: number
+  uri: string
+  names: string[]
+  tags: Record<string, string>
+}
+
+/** GET /v1/notebooks/{sid}/artifacts — keyed by cell id. */
+interface NotebookArtifactsResponse {
+  cells: Record<string, PublishedArtifact[]>
+}
+
+/** A protected-alias change awaiting approval (GET /v1/registry/pending). */
+export interface PendingChange {
+  name: string
+  alias: string
+  action: string
+  artifact_id: string
+  version: number
+  requested_by: string | null
+  requested_at: number
+}
+
+interface PendingChangesResponse {
+  pending: PendingChange[]
+}
+
+/** One registry audit row (GET /v1/registry/audit). */
+export interface AuditEntry {
+  at: number
+  action: string
+  name: string | null
+  alias: string | null
+  artifact_id: string | null
+  version: number | null
+  actor: string | null
+}
+
+interface AuditResponse {
+  entries: AuditEntry[]
+}
+
+/** Result of PUT …/aliases/{alias}: applied | pending | unchanged. */
+export interface AliasMoveResult {
+  status: string
+  name?: string
+  alias?: string
+  detail?: string
+  artifact_uri?: string
+}
+
+/** Flat lineage graph (GET …/lineage): nodes + edges (see Layer 3 adapter). */
+export interface LineageGraph {
+  nodes: Array<Record<string, unknown>>
+  edges: Array<Record<string, unknown>>
+}
+
 interface NotebookMutationResponse {
   cell?: BackendCellPayload
   cells?: BackendCellPayload[]
@@ -521,6 +582,87 @@ async function getNotebookRuntimeConfig(): Promise<NotebookRuntimeConfigResponse
     await throwApiError(resp, 'Failed to load notebook config')
   }
   return readJson<NotebookRuntimeConfigResponse>(resp)
+}
+
+// ---- Registry / dashboard (P3) ----
+// Reads/writes go to the existing SERVER registry routes; only the per-cell
+// published list is notebook-scoped. Names are slash-namespaced and the route
+// converters expect raw slashes, so names go into the path unencoded.
+
+async function getNotebookArtifacts(sessionId: string): Promise<NotebookArtifactsResponse> {
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/notebooks/${sessionId}/artifacts`)
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to list published artifacts')
+  }
+  return readJson<NotebookArtifactsResponse>(resp)
+}
+
+async function setAlias(
+  name: string,
+  alias: string,
+  artifactId: string,
+  version: number,
+): Promise<AliasMoveResult> {
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/names/${name}/aliases/${alias}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ artifact_id: artifactId, version }),
+  })
+  if (!resp.ok) {
+    await throwApiError(resp, `Failed to set ${name}@${alias}`)
+  }
+  return readJson<AliasMoveResult>(resp)
+}
+
+async function getPendingChanges(): Promise<PendingChangesResponse> {
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/registry/pending`)
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to load pending changes')
+  }
+  return readJson<PendingChangesResponse>(resp)
+}
+
+async function approvePending(name: string, alias: string): Promise<void> {
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/registry/pending/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, alias }),
+  })
+  if (!resp.ok) {
+    await throwApiError(resp, `Failed to approve ${name}@${alias}`)
+  }
+}
+
+async function rejectPending(name: string, alias: string): Promise<void> {
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/registry/pending/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, alias }),
+  })
+  if (!resp.ok) {
+    await throwApiError(resp, `Failed to reject ${name}@${alias}`)
+  }
+}
+
+async function getRegistryAudit(name?: string): Promise<AuditResponse> {
+  const url = name
+    ? `${STRATA_BASE}/v1/registry/audit?name=${encodeURIComponent(name)}`
+    : `${STRATA_BASE}/v1/registry/audit`
+  const resp = await fetchWithTimeout(url)
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to load registry audit')
+  }
+  return readJson<AuditResponse>(resp)
+}
+
+async function getLineage(artifactId: string, version: number): Promise<LineageGraph> {
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/artifacts/${encodeURIComponent(artifactId)}/v/${version}/lineage`,
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to load lineage')
+  }
+  return readJson<LineageGraph>(resp)
 }
 
 export interface CellIterationInfo {
@@ -1413,6 +1555,13 @@ export function useStrata() {
     deleteNotebookByPath,
     validateRecentNotebooks,
     getNotebookRuntimeConfig,
+    getNotebookArtifacts,
+    setAlias,
+    getPendingChanges,
+    approvePending,
+    rejectPending,
+    getRegistryAudit,
+    getLineage,
     updateCellSource,
     addCell,
     removeCell,

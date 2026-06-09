@@ -31,6 +31,12 @@ import type {
   WorkerSpec,
 } from '../types/notebook'
 import { useStrata } from '../composables/useStrata'
+import type {
+  AliasMoveResult,
+  AuditEntry,
+  PendingChange,
+  PublishedArtifact,
+} from '../composables/useStrata'
 import { useWebSocket } from '../composables/useWebSocket'
 import { markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 import { consumePrefetchedNotebookSession } from '../utils/notebookSessionPrefetch'
@@ -1581,6 +1587,72 @@ const workerCatalogLoaded = ref(false)
 const workerDefinitionsEditable = ref(false)
 const workerHealthLoading = ref(false)
 const workerHealthCheckedAt = ref<number | null>(null)
+
+// Registry / dashboard state (P3). Populated lazily by the Registry tab and
+// the per-cell strip; reads/writes go through the SERVER registry routes.
+const registryArtifactsByCell = ref<Record<string, PublishedArtifact[]>>({})
+const registryPending = ref<PendingChange[]>([])
+const registryAudit = ref<AuditEntry[]>([])
+const registryLoading = ref(false)
+const registryError = ref<string | null>(null)
+
+// Refresh the registry state shown in the tab + per-cell strip: a cell's
+// published artifacts and the pending-approval queue. Called on tab open,
+// after a mutation, and after a cell finishes (it may have published).
+async function refreshRegistryAction() {
+  const sid = sessionId()
+  if (!sid) return
+  const strata = useStrata()
+  registryLoading.value = true
+  registryError.value = null
+  try {
+    const [arts, pending] = await Promise.all([
+      strata.getNotebookArtifacts(sid),
+      strata.getPendingChanges(),
+    ])
+    registryArtifactsByCell.value = arts.cells || {}
+    registryPending.value = pending.pending || []
+  } catch (err) {
+    registryError.value = err instanceof Error ? err.message : 'Failed to load registry'
+  } finally {
+    registryLoading.value = false
+  }
+}
+
+async function fetchRegistryAuditAction(name?: string) {
+  try {
+    registryAudit.value = (await useStrata().getRegistryAudit(name)).entries || []
+  } catch (err) {
+    registryError.value = err instanceof Error ? err.message : 'Failed to load audit'
+  }
+}
+
+// Mutations propagate errors so the component can toast; they refresh on
+// success. setAlias returns the move result (applied | pending | unchanged).
+async function setAliasAction(
+  name: string,
+  alias: string,
+  artifactId: string,
+  version: number,
+): Promise<AliasMoveResult> {
+  const result = await useStrata().setAlias(name, alias, artifactId, version)
+  await refreshRegistryAction()
+  return result
+}
+
+async function approvePendingAction(name: string, alias: string) {
+  await useStrata().approvePending(name, alias)
+  await refreshRegistryAction()
+}
+
+async function rejectPendingAction(name: string, alias: string) {
+  await useStrata().rejectPending(name, alias)
+  await refreshRegistryAction()
+}
+
+function fetchLineageAction(artifactId: string, version: number) {
+  return useStrata().getLineage(artifactId, version)
+}
 const notebookWorkerError = ref<string | null>(null)
 const workerRegistryError = ref<string | null>(null)
 const serverManagedWorkers = ref<ManagedWorkerSpec[]>([])
@@ -3495,6 +3567,18 @@ export function useNotebook() {
     // Lifecycle
     boot,
     openNotebook,
+    // Registry / dashboard (P3)
+    registryArtifactsByCell,
+    registryPending,
+    registryAudit,
+    registryLoading,
+    registryError,
+    refreshRegistryAction,
+    fetchRegistryAuditAction,
+    setAliasAction,
+    approvePendingAction,
+    rejectPendingAction,
+    fetchLineageAction,
     openBySessionId,
     updateNotebookNameAction,
     deleteNotebookAction,
