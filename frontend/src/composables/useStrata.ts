@@ -134,10 +134,24 @@ export interface AliasMoveResult {
   artifact_uri?: string
 }
 
-/** Flat lineage graph (GET …/lineage): nodes + edges (see Layer 3 adapter). */
+/** Flat lineage graph (GET …/lineage): nodes + edges (see lineageToTree). */
+export interface LineageNode {
+  uri: string
+  artifact_id?: string | null
+  version?: number | null
+  type: string // 'artifact' | 'table'
+  transform_ref?: string | null
+}
+export interface LineageEdge {
+  from_uri: string
+  to_uri: string
+  input_version?: string
+}
 export interface LineageGraph {
-  nodes: Array<Record<string, unknown>>
-  edges: Array<Record<string, unknown>>
+  artifact_uri: string
+  nodes: LineageNode[]
+  edges: LineageEdge[]
+  direct_inputs?: string[]
 }
 
 /** One row of the registry names table (GET /v1/registry/summary). */

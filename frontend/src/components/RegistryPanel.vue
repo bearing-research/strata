@@ -13,6 +13,7 @@ const {
   setAliasAction,
   approvePendingAction,
   rejectPendingAction,
+  openLineageAction,
   pushToast,
 } = useNotebook()
 
@@ -163,6 +164,13 @@ function tagList(tags: Record<string, string>): string {
                     Set as candidate
                   </button>
                 </div>
+                <button
+                  class="lineage-btn"
+                  title="View lineage"
+                  @click="openLineageAction(n.artifact_id, n.version, n.name)"
+                >
+                  ⎘
+                </button>
               </div>
             </td>
           </tr>
@@ -292,6 +300,22 @@ function tagList(tags: Record<string, string>): string {
 }
 .promote-menu button:hover {
   background: var(--bg-subtle);
+}
+.promote {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.lineage-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.lineage-btn:hover {
+  color: var(--accent-primary, #3b82f6);
 }
 .btn {
   border: 1px solid var(--border-subtle);

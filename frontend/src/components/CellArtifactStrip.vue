@@ -4,8 +4,14 @@ import { useNotebook } from '../stores/notebook'
 
 const props = defineProps<{ cellId: string }>()
 
-const { registryEnabled, registryArtifactsByCell, registryNames, setAliasAction, pushToast } =
-  useNotebook()
+const {
+  registryEnabled,
+  registryArtifactsByCell,
+  registryNames,
+  setAliasAction,
+  pushToast,
+  openLineageAction,
+} = useNotebook()
 
 interface StripRow {
   key: string
@@ -91,6 +97,13 @@ function tagList(tags: Record<string, string>): string {
           <button @click="promote(row, 'candidate')">Set as candidate</button>
         </div>
       </div>
+      <button
+        class="lineage-btn"
+        title="View lineage"
+        @click="openLineageAction(row.artifactId, row.version, row.name)"
+      >
+        ⎘
+      </button>
     </div>
   </div>
 </template>
@@ -172,5 +185,16 @@ function tagList(tags: Record<string, string>): string {
 }
 .promote-menu button:hover {
   background: var(--bg-subtle);
+}
+.lineage-btn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 0 2px;
+}
+.lineage-btn:hover {
+  color: var(--accent-primary, #3b82f6);
 }
 </style>
