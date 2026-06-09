@@ -52,6 +52,25 @@ The DAG builder links references back to the **last** cell that defined each nam
 
 Only variables that a downstream cell actually references get stored as artifacts. Intermediate scratch variables stay in the subprocess and are discarded when the cell finishes.
 
+### The ambient `strata` client
+
+Every **locally-executed** Python cell gets a ready `strata` client in its namespace, already bound to the running server — no import or construction needed:
+
+```python
+# no `from strata.client import StrataClient` / `StrataClient(base_url=...)`
+art = strata.materialize(
+    inputs=[trips],
+    transform={"executor": "scan@v1", "params": {"snapshot_id": trips_snapshot}},
+)
+strata.set_alias("taxi/tip-model", "champion", art.artifact_id, art.version)
+```
+
+It's a lightweight client with the same API surface for the common operations (`materialize`, `put`, `set_alias`, `set_tag`, `resolve_alias`, …); explicit `from strata.client import StrataClient` still works if you want the full client. The ambient `strata` is created fresh per cell run and closed automatically — you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a `@mount` path or an `@table` variable.
+
+Cells routed to a **remote executor worker** (not local execution) don't get the ambient `strata` — import a client explicitly there.
+
+> Calls through `strata` are **side effects**. On a cache hit the cell body doesn't re-run, so a `strata.set_alias(...)` won't re-fire — fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.
+
 ### Library cells (cross-cell defs and classes)
 
 Top-level `def` and `class` definitions are shared across cells via a synthetic Python module, write a helper once, call it anywhere.

@@ -63,6 +63,7 @@ def _load_local_module(filename: str, module_name: str):
 _ser = _load_local_module("serializer.py", "_nb_serializer")
 _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
+_client_mod = _load_local_module("notebook_client.py", "_nb_client")
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +183,34 @@ def _inject_tables(manifest: dict, namespace: dict[str, Any]) -> None:
         namespace[f"{table_name}_snapshot"] = spec.get("snapshot_id")
 
 
+def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
+    """Inject an ambient ``strata`` client into the warm worker namespace.
+
+    Mirrors ``harness.inject_client``. Returns the client so the caller
+    can close it — the warm worker process is reused across cells, so a
+    leaked ``httpx.Client`` would accumulate sockets. ``None`` if no
+    ``strata_url`` is set.
+    """
+    url = manifest.get("strata_url")
+    if not url:
+        return None
+    # Path-loaded, not ``import strata`` — the warm worker runs in the
+    # notebook venv (pyarrow + stdlib only); see notebook_client.py.
+    client = _client_mod.StrataClient(base_url=url)
+    namespace["strata"] = client
+    return client
+
+
+def _close_client(client: Any) -> None:
+    """Close an injected ambient client, swallowing teardown errors."""
+    if client is None:
+        return
+    try:
+        client.close()
+    except Exception:
+        pass
+
+
 def execute_harness(manifest: dict) -> dict:
     """Execute a cell manifest and return the result dict."""
     source = manifest.get("source", "")
@@ -196,6 +225,7 @@ def execute_harness(manifest: dict) -> dict:
     stderr_buf = io.StringIO()
 
     _skip = {"__builtins__", "__name__", "__doc__", "__package__"}
+    ambient_client: Any = None
 
     try:
         # Deserialize inputs. Done inside the try/except so a
@@ -221,6 +251,7 @@ def execute_harness(manifest: dict) -> dict:
 
         _inject_mounts(manifest, namespace)
         _inject_tables(manifest, namespace)
+        ambient_client = _inject_client(manifest, namespace)
         display_capture.install(namespace)
 
         namespace_before = set(namespace.keys())
@@ -290,6 +321,8 @@ def execute_harness(manifest: dict) -> dict:
             "error": f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
             "mutation_warnings": [],
         }
+    finally:
+        _close_client(ambient_client)
 
 
 # ---------------------------------------------------------------------------

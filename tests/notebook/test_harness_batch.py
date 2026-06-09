@@ -632,3 +632,55 @@ def test_batch_word_boundary_avoids_spurious_taint(batch_pipes):
     assert not cell_errors, f"taint matcher mis-fired on substring: {cell_errors}"
     end_frame = frames[-1]
     assert end_frame["payload"]["reason"] == "complete"
+
+
+def test_batch_injects_ambient_client(batch_pipes):
+    """A ``strata_url`` in a batched cell injects the ambient ``strata``
+    client into the shared namespace — the batch path is a SEPARATE
+    injection site from single-cell/warm-pool (the #145 trap), so it must
+    be wired too. The client is excluded from outputs and closed on exit.
+    """
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+
+    cells = [
+        {
+            "cell_id": "c1",
+            # NameError if strata is not injected in the batch path.
+            "source": "client_type = type(strata).__name__",
+            "consumed_vars": ["client_type"],
+            "env": {},
+            "mount_manifest": {},
+            "table_manifest": {},
+            "strata_url": "http://127.0.0.1:8765",
+            "source_hash": "src-c1",
+            "env_hash": "env",
+        },
+    ]
+
+    thread, errors = _run_in_thread(cells, {}, output_dir, frame_w, resp_r)
+
+    frames: list[dict] = []
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        frames.append(frame)
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "abc"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test/c1"})
+        elif frame["type"] == "batch_end":
+            break
+
+    thread.join(timeout=5)
+    assert not thread.is_alive(), "harness thread did not exit"
+    assert not errors, f"harness raised: {errors!r}"
+
+    cell_errors = [f for f in frames if f["type"] == "cell_error"]
+    assert not cell_errors, f"strata not injected in batch path: {cell_errors}"
+
+    persist = next(f["payload"] for f in frames if f["type"] == "persist")
+    assert "client_type" in persist["outputs"]
+    assert persist["outputs"]["client_type"]["preview"] == "StrataClient"
+    # The injected client is an input, not a cell output.
+    assert "strata" not in persist["outputs"]
