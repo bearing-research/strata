@@ -31,9 +31,7 @@ const rows = computed<StripRow[]>(() => {
         artifactId: art.artifact_id,
         version: art.version,
         aliases: aliasesByName[name] || {},
-        tags: Object.fromEntries(
-          Object.entries(art.tags).filter(([k]) => !k.startsWith('nb_')),
-        ),
+        tags: Object.fromEntries(Object.entries(art.tags).filter(([k]) => !k.startsWith('nb_'))),
       })
     }
   }
