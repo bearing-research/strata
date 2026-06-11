@@ -2557,7 +2557,7 @@ rename cell IDs via the cell's metadata panel.</p>
 <hr />
 <h2 id="timeout">@timeout<a class="headerlink" href="#timeout" title="Permanent link">&para;</a></h2>
 <p>Override the execution timeout for a single cell, in seconds. The default
-is 30 seconds; the value must satisfy <code>0 &lt; t ≤ 86400</code> (one day max).</p>
+is 300 seconds (5 minutes); the value must satisfy <code>0 &lt; t ≤ 86400</code> (one day max).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># @timeout 300</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="c1"># @worker my-gpu</span>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">embeddings</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">abstracts</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
@@ -2566,7 +2566,7 @@ is 30 seconds; the value must satisfy <code>0 &lt; t ≤ 86400</code> (one day m
 <div class="admonition warning">
 <p class="admonition-title">Prompt-cell timeout vs AI API timeout</p>
 <p>Prompt cells have two timeouts that can collide silently. The
-cell-level <code># @timeout</code> (default <strong>30 s</strong>) wraps the whole cell;
+cell-level <code># @timeout</code> (default <strong>300 s</strong>) wraps the whole cell;
 the AI API call inside has its own timeout from
 <code>STRATA_AI_TIMEOUT_SECONDS</code> / <code>[ai] timeout_seconds</code> in
 <code>notebook.toml</code> (default <strong>60 s</strong>).</p>
@@ -2918,7 +2918,7 @@ doesn't affect per-variable provenance hashes.</p>
 <td><strong>Timeout</strong></td>
 <td><code># @timeout N</code></td>
 <td><code>cell.timeout</code> field</td>
-<td>30 seconds</td>
+<td>300 seconds</td>
 </tr>
 <tr>
 <td><strong>Env vars</strong></td>

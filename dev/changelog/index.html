@@ -516,6 +516,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#fixed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -627,7 +638,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed" class="md-nav__link">
+  <a href="#changed_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -760,7 +771,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_1" class="md-nav__link">
+  <a href="#changed_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -2067,6 +2078,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#fixed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2178,7 +2200,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed" class="md-nav__link">
+  <a href="#changed_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -2311,7 +2333,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#changed_1" class="md-nav__link">
+  <a href="#changed_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Changed
@@ -2540,8 +2562,24 @@ exhaustive commit history.</p>
   <code>failed</code> at startup; and <code>strata artifact verify</code> checks a whole store's
   blobs against metadata after the fact.</li>
 </ul>
+<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Default cell timeout raised from 30 s to 300 s</strong>: the previous default
+  was an easy footgun for I/O-bound cells (network pulls, slow APIs), which
+  timed out at exactly 30 s unless a <code># @timeout</code> annotation was added. The
+  new default matches the core scan timeout; a genuinely hung cell is still
+  killed at the wall, and per-cell / per-notebook overrides are unchanged.</li>
+</ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li>
+<p><strong>Headless <code>strata run</code> no longer drops console output on cache hits</strong>
+  (ML dogfood): a re-run whose cells hit cache carried no fresh stdout, and
+  the empty-console write then <em>unlinked</em> the file the producing run had
+  persisted — so <code>.strata/console/</code> ended up holding only the cell that
+  actually re-executed. Cache hits now leave the persisted console
+  untouched, so <code>print()</code> output stays recoverable across runs.</p>
+</li>
 <li>
 <p><strong>Registry hardening (pre-release review)</strong>: garbage collection and
   <code>delete_artifact</code> now respect <strong>alias</strong> pointers — a champion alias
@@ -2741,7 +2779,7 @@ partition into per-language runs automatically.</p>
   release) or a pinned version (<code>0.2.0</code>, <code>0.1.0</code>, ...). Pre-release
   preview lives under <code>dev</code>.</li>
 </ul>
-<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<h3 id="changed_1">Changed<a class="headerlink" href="#changed_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Docs site builds + deploys via <code>mike</code> instead of <code>mkdocs gh-deploy</code>.
   PRs that touch <code>docs/</code> still validate <code>--strict</code> without touching
@@ -2923,7 +2961,7 @@ startup guard. The notebook app boots via <code>strata-notebook</code> (or
   matrix against Python 3.12 / 3.13 / 3.14 — packaging bugs fail
   the run before the artifact reaches the index</li>
 </ul>
-<h3 id="changed_1">Changed<a class="headerlink" href="#changed_1" title="Permanent link">&para;</a></h3>
+<h3 id="changed_2">Changed<a class="headerlink" href="#changed_2" title="Permanent link">&para;</a></h3>
 <ul>
 <li>markdown rendering uses <code>markdown-it</code> + <code>DOMPurify</code> rather than a
   hand-rolled renderer, with consistent output between in-place cell
