@@ -128,6 +128,8 @@ def _convert_to_arrow_ipc(data: PutData) -> bytes:
         if isinstance(data, pd.DataFrame):
             return _table_to_ipc(pa.Table.from_pandas(data))
     except ImportError:
+        # pandas is optional (not a strata-client dependency); if it's absent
+        # the value can't be a DataFrame — fall through to the next type.
         pass
 
     try:
@@ -136,6 +138,8 @@ def _convert_to_arrow_ipc(data: PutData) -> bytes:
         if isinstance(data, pl.DataFrame):
             return _table_to_ipc(data.to_arrow())
     except ImportError:
+        # polars is optional; absence means the value isn't a polars DataFrame —
+        # fall through to the final unsupported-type error.
         pass
 
     raise TypeError(
