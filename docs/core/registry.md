@@ -140,6 +140,11 @@ Everything above also has a UI — the registry is a first-class surface in the
 notebook, so promotion and approvals don't have to be code. Registry routes are
 **personal-mode only** today, so the dashboard hides itself in service mode.
 
+!!! tip "New to it? Start with the walkthrough"
+    For a click-by-click guide — publish from a cell → promote → approve →
+    lineage — see [**Registry Dashboard**](../notebook/registry-dashboard.md).
+    The rest of this section is the reference for what each piece does.
+
 **Publishing.** Inside a cell, the [ambient `strata`
 client](../notebook/cells.md#the-ambient-strata-client) publishes with a name:
 
