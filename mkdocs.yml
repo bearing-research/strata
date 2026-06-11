@@ -70,6 +70,7 @@ nav:
     - Cell Types: notebook/cells.md
     - Cell Annotations: notebook/annotations.md
     - Lake-Aware Cells: notebook/lake-aware-cells.md
+    - Registry Dashboard: notebook/registry-dashboard.md
     - Distributed Workers: notebook/workers.md
     - AI Integration: notebook/ai.md
     - Environment: notebook/environment.md
