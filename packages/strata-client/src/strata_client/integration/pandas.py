@@ -27,9 +27,9 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from strata.client import StrataClient
-from strata.config import StrataConfig
-from strata.types import Filter
+from strata_client._clientconfig import HasServerUrl
+from strata_client.client import StrataClient
+from strata_client.filters import Filter
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -58,7 +58,7 @@ def fetch_to_pandas(
     snapshot_id: int | None = None,
     columns: list[str] | None = None,
     filters: list[Filter] | None = None,
-    config: StrataConfig | None = None,
+    config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> "pd.DataFrame":
     """Fetch an Iceberg table via Strata and return a pandas DataFrame.
@@ -78,8 +78,8 @@ def fetch_to_pandas(
         pandas DataFrame with the fetch results
 
     Example:
-        from strata.integration.pandas import fetch_to_pandas
-        from strata.client import gt
+        from strata_client.integration.pandas import fetch_to_pandas
+        from strata_client.client import gt
 
         df = fetch_to_pandas(
             "file:///warehouse#db.events",
@@ -114,7 +114,7 @@ class StrataPandasScanner:
     Maintains a connection to the Strata server for multiple fetches.
 
     Example:
-        from strata.integration.pandas import StrataPandasScanner
+        from strata_client.integration.pandas import StrataPandasScanner
 
         with StrataPandasScanner() as scanner:
             events = scanner.fetch("file:///warehouse#db.events")
@@ -126,7 +126,7 @@ class StrataPandasScanner:
 
     def __init__(
         self,
-        config: StrataConfig | None = None,
+        config: HasServerUrl | None = None,
         base_url: str | None = None,
     ) -> None:
         self.client = StrataClient(config=config, base_url=base_url)

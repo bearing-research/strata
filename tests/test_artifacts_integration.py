@@ -14,8 +14,8 @@ import httpx
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
+from strata_client.client import StrataClient
 
-from strata.client import StrataClient
 from tests.conftest import run_server_with_context, table_to_ipc_bytes
 
 

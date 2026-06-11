@@ -3623,11 +3623,40 @@ dependencies = [
     { name = "pyarrow" },
 ]
 
+[package.optional-dependencies]
+all = [
+    { name = "datafusion" },
+    { name = "duckdb" },
+    { name = "pandas" },
+    { name = "polars" },
+]
+datafusion = [
+    { name = "datafusion" },
+]
+duckdb = [
+    { name = "duckdb" },
+]
+pandas = [
+    { name = "pandas" },
+]
+polars = [
+    { name = "polars" },
+]
+
 [package.metadata]
 requires-dist = [
+    { name = "datafusion", marker = "extra == 'all'", specifier = ">=50.1.0" },
+    { name = "datafusion", marker = "extra == 'datafusion'", specifier = ">=50.1.0" },
+    { name = "duckdb", marker = "extra == 'all'", specifier = ">=1.1.0" },
+    { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.1.0" },
     { name = "httpx", specifier = ">=0.28.0" },
+    { name = "pandas", marker = "extra == 'all'", specifier = ">=2.0.0" },
+    { name = "pandas", marker = "extra == 'pandas'", specifier = ">=2.0.0" },
+    { name = "polars", marker = "extra == 'all'", specifier = ">=1.36.1" },
+    { name = "polars", marker = "extra == 'polars'", specifier = ">=1.36.1" },
     { name = "pyarrow", specifier = ">=18.0.0" },
 ]
+provides-extras = ["duckdb", "pandas", "polars", "datafusion", "all"]
 
 [[package]]
 name = "strata-notebook"
@@ -3646,7 +3675,6 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyiceberg", extra = ["sql-postgres", "sql-sqlite"] },
     { name = "python-multipart" },
-    { name = "strata-client" },
     { name = "tomli-w" },
     { name = "uvicorn" },
     { name = "websockets" },
@@ -3753,7 +3781,6 @@ requires-dist = [
     { name = "pyiceberg", extras = ["sql-sqlite", "sql-postgres"], specifier = ">=0.8.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "sqlglot", marker = "extra == 'sql'", specifier = ">=25.0.0" },
-    { name = "strata-client", editable = "packages/strata-client" },
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "uvicorn", specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=13.0" },

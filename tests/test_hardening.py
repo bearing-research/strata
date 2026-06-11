@@ -21,9 +21,9 @@ import uvicorn
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.schema import Schema
 from pyiceberg.types import DoubleType, LongType, NestedField, StringType
+from strata_client.client import StrataClient
 
 from strata.cache import CACHE_FILE_EXTENSION, CACHE_VERSION, CachedFetcher, DiskCache
-from strata.client import StrataClient
 from strata.config import StrataConfig
 from strata.planner import ReadPlanner
 

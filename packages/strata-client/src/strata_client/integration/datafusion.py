@@ -5,7 +5,7 @@ query engine. DataFusion's execution model aligns well with Strata's
 "plan once, cache results" architecture.
 
 Example:
-    from strata.integration.datafusion import register_strata_table, strata_query
+    from strata_client.integration.datafusion import register_strata_table, strata_query
 
     # Register a Strata table with DataFusion
     ctx = register_strata_table(
@@ -29,9 +29,9 @@ pruning and DataFusion for fine-grained predicates.
 
 from typing import TYPE_CHECKING
 
-from strata.client import StrataClient
-from strata.config import StrataConfig
-from strata.types import Filter
+from strata_client._clientconfig import HasServerUrl
+from strata_client.client import StrataClient
+from strata_client.filters import Filter
 
 if TYPE_CHECKING:
     import datafusion
@@ -60,7 +60,7 @@ def register_strata_table(
     snapshot_id: int | None = None,
     columns: list[str] | None = None,
     filters: list[Filter] | None = None,
-    config: StrataConfig | None = None,
+    config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> "datafusion.SessionContext":
     """Register a Strata table with DataFusion.
@@ -82,8 +82,8 @@ def register_strata_table(
         SessionContext with the table registered
 
     Example:
-        from strata.integration.datafusion import register_strata_table
-        from strata.client import gt
+        from strata_client.integration.datafusion import register_strata_table
+        from strata_client.client import gt
 
         ctx = register_strata_table(
             "events",
@@ -123,7 +123,7 @@ def strata_query(
     snapshot_id: int | None = None,
     columns: dict[str, list[str]] | None = None,
     filters: dict[str, list[Filter]] | None = None,
-    config: StrataConfig | None = None,
+    config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> list["pa.RecordBatch"]:
     """Execute a SQL query over Strata tables using DataFusion.
@@ -143,8 +143,8 @@ def strata_query(
         List of Arrow RecordBatches containing query results
 
     Example:
-        from strata.integration.datafusion import strata_query
-        from strata.client import gt
+        from strata_client.integration.datafusion import strata_query
+        from strata_client.client import gt
 
         result = strata_query(
             "SELECT e.id, u.name FROM events e JOIN users u ON e.user_id = u.id",
@@ -186,7 +186,7 @@ class StrataDataFusionContext:
     and running queries.
 
     Example:
-        from strata.integration.datafusion import StrataDataFusionContext
+        from strata_client.integration.datafusion import StrataDataFusionContext
 
         with StrataDataFusionContext() as ctx:
             ctx.register("events", "file:///warehouse#db.events")
@@ -202,7 +202,7 @@ class StrataDataFusionContext:
 
     def __init__(
         self,
-        config: StrataConfig | None = None,
+        config: HasServerUrl | None = None,
         base_url: str | None = None,
     ) -> None:
         import datafusion

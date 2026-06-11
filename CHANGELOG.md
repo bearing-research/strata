@@ -21,18 +21,25 @@ exhaustive commit history.
 
 ### Added
 
-- **`strata-client`: a slim client distribution.** Using Strata as a library no
-  longer means installing the whole server. The new `strata-client` package
-  depends only on **httpx + pyarrow** (no pyiceberg / fastapi / duckdb /
+- **`strata-client`: a slim, independent client distribution.** Using Strata as
+  a library no longer means installing the whole server. The new `strata-client`
+  package depends only on **httpx + pyarrow** (no pyiceberg / fastapi / duckdb /
   pydantic, no Rust extension) and ships the full client —
   `materialize`/`put`/`fetch`/scan, the registry surface (aliases, tags, names,
-  audit), and the `Filter` helpers: `pip install strata-client`, then
-  `from strata_client import StrataClient`. The server (`strata-notebook`) now
-  depends on it and re-exports it as `strata.client` / `strata.filters`, so
-  existing `from strata.client import StrataClient` / `from strata import
-  StrataClient` imports are unchanged — there's a single implementation. The
-  client resolves its server URL from `STRATA_SERVER_URL` / `STRATA_HOST` /
-  `STRATA_PORT` / `pyproject.toml` with no pydantic.
+  audit), the `Filter` helpers, and the duckdb/pandas/polars/datafusion
+  integrations (as extras, e.g. `strata-client[duckdb]`): `pip install
+  strata-client`, then `from strata_client import StrataClient`. It resolves its
+  server URL from `STRATA_SERVER_URL` / `STRATA_HOST` / `STRATA_PORT` /
+  `pyproject.toml` with no pydantic. The client and the server (`strata-notebook`)
+  are **independent** — they share only the JSON wire protocol, neither depends
+  on the other.
+
+  **Breaking (import paths):** the client moved out of the `strata` namespace.
+  `from strata.client import StrataClient` → `from strata_client import
+  StrataClient`; the integrations moved from `strata.integration.*` /
+  `strata.duckdb_ext` / `strata.polars_ext` to `strata_client.integration.*`.
+  The server keeps `from strata.types import Filter` working (it owns its own
+  copy of the dependency-free `Filter` wire types).
 
 - **Registry dashboard in the notebook** (#147–#150): the registry is now a
   first-class UI surface, so promotion and approvals don't have to be code. A

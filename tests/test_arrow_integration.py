@@ -2,9 +2,8 @@
 
 import pyarrow as pa
 import pytest
-
-from strata.client import gt, lt
-from strata.integration.arrow import StrataDataset, dataset
+from strata_client.client import gt, lt
+from strata_client.integration.arrow import StrataDataset, dataset
 
 
 class TestStrataDataset:

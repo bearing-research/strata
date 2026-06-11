@@ -8,14 +8,24 @@ env. See docs/internal/design-strata-client.md.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 
 import httpx
 import pyarrow as pa
 import pyarrow.ipc as ipc
+import pytest
 from strata_client import Filter, FilterOp, RetryConfig, StrataClient, gt
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("strata") is not None,
+    reason=(
+        "the server (strata) is installed — the no-server-deps guard only applies in "
+        "the isolated client-only environment (the CI 'strata-client (no server deps)' "
+        "job), where other tests haven't already imported the server"
+    ),
+)
 def test_no_server_deps_imported() -> None:
     """Importing the client must not pull the server's heavy stack."""
     for heavy in ("strata", "pyiceberg", "fastapi", "uvicorn", "duckdb", "pydantic"):

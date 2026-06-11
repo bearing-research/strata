@@ -20,7 +20,6 @@ classifiers = [
     "Programming Language :: Rust",
 ]
 dependencies = [
-    "strata-client", # the slim client lives in its own distribution (packages/strata-client)
     "pyiceberg[sql-sqlite,sql-postgres]>=0.8.0",
     "pyarrow>=18.0.0",
     "fastapi>=0.115.0",
@@ -138,14 +137,12 @@ build-backend = "maturin"
 [tool.uv]
 python-preference = "only-managed"
 
-# The slim client is a workspace member built as its own distribution
-# (strata-client). In dev it's installed editable from packages/strata-client;
-# the published strata-notebook wheel depends on the published strata-client.
+# strata-client is an INDEPENDENT distribution — strata-notebook does NOT depend
+# on it (client and server share only the wire protocol). It's kept as a uv
+# workspace member purely for dev convenience: `uv sync` installs it editable so
+# the test suite can exercise the client and its integrations in one env.
 [tool.uv.workspace]
 members = ["packages/strata-client"]
-
-[tool.uv.sources]
-strata-client = { workspace = true }
 
 # Maturin configuration for building the Rust extension
 # Build with: maturin develop (dev) or maturin build (release)

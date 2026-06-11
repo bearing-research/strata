@@ -4,8 +4,8 @@ import pytest
 
 datafusion = pytest.importorskip("datafusion")
 
-from strata.client import gt, lt  # noqa: E402
-from strata.integration.datafusion import (  # noqa: E402
+from strata_client.client import gt, lt  # noqa: E402
+from strata_client.integration.datafusion import (  # noqa: E402
     StrataDataFusionContext,
     register_strata_table,
     strata_query,
