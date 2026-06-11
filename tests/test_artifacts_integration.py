@@ -204,10 +204,7 @@ class TestArtifactEndpoints:
         """Name pointer CRUD operations."""
         base_url = personal_mode_server["base_url"]
 
-        # Create artifact via the embedded runner. (Deliberately NOT via
-        # PUT: put-created artifacts carry tenant "_default" while the
-        # names routes resolve no-header requests to tenant None — the
-        # tenant-spelling unification is tracked Phase 1 item 4.)
+        # Create artifact via the embedded runner.
         import re
 
         resp = httpx.post(
@@ -245,6 +242,30 @@ class TestArtifactEndpoints:
         resp = httpx.get(f"{base_url}/v1/names/my-artifact")
         assert resp.status_code == 404
 
+    def test_put_then_name_after_the_fact(self, personal_mode_server):
+        """A put-created artifact is nameable after the fact in personal mode.
+
+        Friction #7 regression: PUT used to stamp tenant "_default" while the
+        names routes resolved no-header requests to tenant None, so naming a
+        put-created artifact in a separate call failed with
+        "belongs to tenant _default, cannot assign name in tenant None".
+        No tenant header anywhere here (personal mode) — it must just work.
+        """
+        with StrataClient(base_url=personal_mode_server["base_url"]) as client:
+            art = client.put(
+                inputs=[],
+                transform={"executor": "local-compute", "params": {}},
+                data={"x": [1, 2, 3], "y": ["a", "b", "c"]},
+            )
+
+            # Name it in a SEPARATE call (not at put time) — the friction case.
+            client.set_name("taxi/tip-model", art.artifact_id, art.version)
+
+            resolved = client.resolve_name("taxi/tip-model")
+            assert resolved["artifact_uri"] == (
+                f"strata://artifact/{art.artifact_id}@v={art.version}"
+            )
+
 
 class TestServiceModeBlocking:
     """Tests that service mode blocks artifact endpoints."""
@@ -278,7 +299,6 @@ class TestServiceModeBlocking:
 # =============================================================================
 
 
-@pytest.mark.skip(reason="Requires client-side local execution for duckdb_sql@v1")
 class TestArtifactContract:
     """Contract tests that verify the complete artifact workflow.
 
@@ -414,7 +434,12 @@ class TestArtifactContract:
                 assert resolved.uri == saved_uri
 
     def test_provenance_deduplication(self, personal_mode_server):
-        """Same inputs + transform deduplicate via provenance hash."""
+        """Same inputs (same order) + transform deduplicate via provenance hash.
+
+        Input order is significant: ``duckdb_sql`` binds inputs positionally
+        (``input0``/``input1``), so ``[b, a]`` is a different computation
+        from ``[a, b]`` and must NOT dedup to the same artifact.
+        """
         with StrataClient(base_url=personal_mode_server["base_url"]) as client:
             # Create real input artifacts
             input_a = client.materialize(
@@ -439,13 +464,23 @@ class TestArtifactContract:
             )
             assert artifact1.cache_hit is False
 
-            # Same inputs in different order - should hit (order independent)
+            # Identical call (same inputs, same order) - dedups to a cache hit.
+            artifact_same = client.materialize(
+                inputs=[input_a.uri, input_b.uri],
+                transform={"ref": "duckdb_sql@v1", "params": {"sql": sql}},
+            )
+            assert artifact_same.cache_hit is True
+            assert artifact_same.uri == artifact1.uri
+
+            # Reordered positional inputs are a DIFFERENT computation - cache
+            # miss, distinct artifact. (Inputs feed duckdb as input0/input1;
+            # order is part of the provenance via the transform spec.)
             artifact2 = client.materialize(
                 inputs=[input_b.uri, input_a.uri],
                 transform={"ref": "duckdb_sql@v1", "params": {"sql": sql}},
             )
-            assert artifact2.cache_hit is True
-            assert artifact2.uri == artifact1.uri
+            assert artifact2.cache_hit is False
+            assert artifact2.uri != artifact1.uri
 
             # Different inputs - should miss
             artifact3 = client.materialize(
@@ -479,7 +514,6 @@ class TestArtifactContract:
 # =============================================================================
 
 
-@pytest.mark.skip(reason="Requires client-side local execution for duckdb_sql@v1")
 class TestArtifactLifecycle:
     """Tests for artifact lifecycle management: list, delete, GC, usage."""
 
@@ -632,7 +666,6 @@ class TestArtifactLifecycle:
 # =============================================================================
 
 
-@pytest.mark.skip(reason="Requires client-side local execution for duckdb_sql@v1")
 class TestStalenessDetection:
     """Tests for artifact staleness detection endpoints.
 
