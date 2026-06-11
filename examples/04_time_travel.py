@@ -10,7 +10,7 @@ What you'll learn:
     - When to use time travel
 """
 
-from strata.client import StrataClient
+from strata_client import StrataClient
 
 client = StrataClient(base_url="http://127.0.0.1:8765")
 table_uri = "file:///path/to/warehouse#my_db.events"

@@ -12,7 +12,7 @@ What you'll learn:
 
 import httpx
 
-from strata.client import StrataClient
+from strata_client import StrataClient
 
 # Example 1: Handle connection errors
 try:

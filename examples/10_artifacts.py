@@ -14,7 +14,7 @@ What you'll learn:
     - How to check artifact staleness
 """
 
-from strata.client import StrataClient
+from strata_client import StrataClient
 
 # Source table URI
 SOURCE_URI = "file:///path/to/warehouse#analytics.events"

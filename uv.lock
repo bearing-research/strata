@@ -3739,6 +3739,7 @@ dev = [
     { name = "ruff" },
     { name = "s3fs" },
     { name = "sqlglot" },
+    { name = "strata-client" },
     { name = "testcontainers", extra = ["minio"] },
     { name = "ty" },
 ]
@@ -3807,6 +3808,7 @@ dev = [
     { name = "ruff", specifier = ">=0.8.0" },
     { name = "s3fs", specifier = ">=2026.3.0" },
     { name = "sqlglot", specifier = ">=25.0.0" },
+    { name = "strata-client", editable = "packages/strata-client" },
     { name = "testcontainers", extras = ["minio"], specifier = ">=4.0.0" },
     { name = "ty", specifier = ">=0.0.24" },
 ]
