@@ -123,6 +123,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Fallback per-cell execution timeout (seconds) when a cell sets no
+# ``# @timeout`` annotation and neither the cell nor the notebook overrides
+# it. Generous on purpose: I/O-bound cells (network pulls, API calls) are
+# common and a tight default is an easy footgun. A genuinely hung cell is
+# still killed at this wall, and the UI can interrupt sooner. Mirrors the
+# core scan timeout (``StrataConfig.scan_timeout_seconds``).
+DEFAULT_CELL_TIMEOUT_SECONDS = 300.0
+
 # Well-known module → PyPI package name mappings where they differ.
 _MODULE_TO_PACKAGE: dict[str, str] = {
     "cv2": "opencv-python",
@@ -466,7 +474,7 @@ class CellExecutor:
         self,
         cell_id: str,
         source: str,
-        timeout_seconds: float = 30,
+        timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS,
         *,
         skip_upstream_materialization: bool = False,
     ) -> CellExecutionResult:
@@ -496,7 +504,7 @@ class CellExecutor:
         )
 
     async def execute_cell_force(
-        self, cell_id: str, source: str, timeout_seconds: float = 30
+        self, cell_id: str, source: str, timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS
     ) -> CellExecutionResult:
         """Execute a cell using the currently available upstream artifacts only.
 
@@ -513,7 +521,7 @@ class CellExecutor:
         )
 
     async def execute_cell_rerun(
-        self, cell_id: str, source: str, timeout_seconds: float = 30
+        self, cell_id: str, source: str, timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS
     ) -> CellExecutionResult:
         """Force re-execution of a cell while still materializing upstreams.
 
@@ -535,7 +543,7 @@ class CellExecutor:
         *,
         use_cache: bool = True,
         batch_timeout_seconds: float = 600.0,
-        cell_timeout_seconds: float = 30.0,
+        cell_timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
     ) -> BatchExecutionResult:
         """Execute a sequence of cells in one harness subprocess.
@@ -3585,7 +3593,7 @@ class CellExecutor:
         *,
         use_cache: bool,
         batch_timeout_seconds: float,
-        cell_timeout_seconds: float = 30.0,
+        cell_timeout_seconds: float = DEFAULT_CELL_TIMEOUT_SECONDS,
         on_cell_event: Callable[[BatchCellResult], Awaitable[None]] | None = None,
     ) -> BatchExecutionResult:
         """Run a sequence of cells in one harness subprocess.

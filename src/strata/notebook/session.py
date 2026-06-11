@@ -912,7 +912,14 @@ class NotebookSession:
             return
 
         cell.execution_method = result.execution_method
-        if result.success:
+        # A cache hit replays display outputs from the artifact store but
+        # carries no fresh console — stdout/stderr aren't part of the cached
+        # artifact. Writing the empty cache-hit console here would make
+        # ``update_cell_console_output`` *unlink* the file the original
+        # execution wrote, so a re-run that hits cache (e.g. a second
+        # ``strata run``) would silently delete recoverable print() output.
+        # Leave the persisted console untouched on cache hits.
+        if result.success and not result.cache_hit:
             cell.console_stdout = result.stdout or ""
             cell.console_stderr = result.stderr or ""
             # Console output lives in .strata/console/, not notebook.toml —

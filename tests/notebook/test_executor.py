@@ -82,6 +82,40 @@ class TestCellExecutor:
         assert "y" in result.outputs
 
     @pytest.mark.asyncio
+    async def test_cache_hit_preserves_persisted_console(self, sample_notebook):
+        """A cache-hit re-run must not delete the original run's console file.
+
+        Regression: a cache hit carries no fresh stdout, and the empty
+        console write used to ``unlink`` the file the first run persisted —
+        so a second ``strata run`` silently dropped recoverable print()
+        output. The console from the producing execution must survive.
+        """
+        executor = CellExecutor(sample_notebook)
+        console_file = sample_notebook.path / ".strata" / "console" / "cell1.json"
+
+        # A leaf display output makes the cell cache-hittable on rerun; the
+        # print gives it console to persist.
+        source = (
+            'print("recoverable output")\n'
+            "class D:\n"
+            "    def _repr_markdown_(self):\n"
+            '        return "# done"\n'
+            "D()\n"
+        )
+        first = await executor.execute_cell("cell1", source)
+        assert first.success is True
+        assert first.cache_hit is False
+        assert console_file.is_file()
+        assert "recoverable output" in console_file.read_text()
+
+        second = await executor.execute_cell("cell1", source)
+        assert second.success is True
+        assert second.cache_hit is True
+        # The file from the first run is still there with its output.
+        assert console_file.is_file()
+        assert "recoverable output" in console_file.read_text()
+
+    @pytest.mark.asyncio
     async def test_execute_with_error(self, sample_notebook):
         """Test executing a cell that raises an error."""
         executor = CellExecutor(sample_notebook)
