@@ -53,14 +53,17 @@ import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TypedDict, cast
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import httpx
 import pyarrow as pa
 import pyarrow.ipc as ipc
 
-from strata.config import StrataConfig
-from strata.types import Filter, FilterOp, FilterValue
+from strata._clientconfig import resolve_server_url
+from strata.filters import Filter, FilterOp, FilterValue
+
+if TYPE_CHECKING:
+    from strata.config import StrataConfig
 
 type TransformSpec = Mapping[str, object]
 type JsonArtifactInput = Mapping[str, object]
@@ -332,19 +335,27 @@ class StrataClient:
 
     def __init__(
         self,
-        config: StrataConfig | None = None,
+        config: "StrataConfig | None" = None,
         base_url: str | None = None,
         retry_config: RetryConfig | None = None,
     ) -> None:
         """Initialize the client.
 
         Args:
-            config: Strata configuration (uses StrataConfig.load() if None)
+            config: Strata configuration. If omitted, the server URL is resolved
+                from ``STRATA_SERVER_URL`` / ``STRATA_HOST`` / ``STRATA_PORT`` /
+                ``pyproject.toml`` without loading the full ``StrataConfig`` (so
+                the client needs none of the server's config dependencies).
             base_url: Override the server URL from config
             retry_config: Retry configuration for 429 responses (uses defaults if None)
         """
-        self.config = config or StrataConfig.load()
-        self.base_url = base_url or self.config.server_url
+        self.config = config
+        if base_url is not None:
+            self.base_url = base_url
+        elif config is not None:
+            self.base_url = config.server_url
+        else:
+            self.base_url = resolve_server_url()
         self.retry_config = retry_config or RetryConfig()
         self._client = httpx.Client(base_url=self.base_url, timeout=300.0)
 
@@ -1259,19 +1270,26 @@ class AsyncStrataClient:
 
     def __init__(
         self,
-        config: StrataConfig | None = None,
+        config: "StrataConfig | None" = None,
         base_url: str | None = None,
         retry_config: RetryConfig | None = None,
     ) -> None:
         """Initialize the async client.
 
         Args:
-            config: Strata configuration (uses StrataConfig.load() if None)
+            config: Strata configuration. If omitted, the server URL is resolved
+                from ``STRATA_SERVER_URL`` / ``STRATA_HOST`` / ``STRATA_PORT`` /
+                ``pyproject.toml`` without loading the full ``StrataConfig``.
             base_url: Override the server URL from config
             retry_config: Retry configuration for 429 responses (uses defaults if None)
         """
-        self.config = config or StrataConfig.load()
-        self.base_url = base_url or self.config.server_url
+        self.config = config
+        if base_url is not None:
+            self.base_url = base_url
+        elif config is not None:
+            self.base_url = config.server_url
+        else:
+            self.base_url = resolve_server_url()
         self.retry_config = retry_config or RetryConfig()
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=300.0)
 
