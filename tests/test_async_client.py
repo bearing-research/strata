@@ -4,8 +4,7 @@ import asyncio
 
 import pyarrow as pa
 import pytest
-
-from strata.client import AsyncStrataClient, gt, lt
+from strata_client.client import AsyncStrataClient, gt, lt
 
 
 def build_scan_transform(columns: list[str] | None = None, filters=None) -> dict:

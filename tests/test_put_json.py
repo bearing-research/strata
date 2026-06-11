@@ -10,8 +10,7 @@ These tests verify:
 
 import pytest
 import requests
-
-from strata.client import StrataClient
+from strata_client.client import StrataClient
 
 
 @pytest.fixture
@@ -504,7 +503,7 @@ class TestAsyncPut:
     @pytest.fixture
     async def async_client(self, server_with_artifacts):
         """Create an async client for testing."""
-        from strata.client import AsyncStrataClient
+        from strata_client.client import AsyncStrataClient
 
         base_url = server_with_artifacts["base_url"]
         client = AsyncStrataClient(base_url=base_url)

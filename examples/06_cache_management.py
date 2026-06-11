@@ -11,7 +11,7 @@ What you'll learn:
     - How to interpret cache metrics
 """
 
-from strata.client import StrataClient
+from strata_client import StrataClient
 
 client = StrataClient(base_url="http://127.0.0.1:8765")
 

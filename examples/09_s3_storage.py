@@ -17,7 +17,7 @@ Prerequisites:
 
 import os
 
-from strata.client import StrataClient
+from strata_client import StrataClient
 from strata.config import StrataConfig
 
 # Method 1: Configure S3 via StrataConfig

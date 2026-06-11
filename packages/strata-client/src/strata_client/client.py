@@ -3,7 +3,7 @@
 Provides both sync and async clients for interacting with Strata:
 
     # Sync client (for scripts, notebooks, CLI tools)
-    from strata.client import StrataClient
+    from strata_client import StrataClient
 
     with StrataClient() as client:
         # Materialize creates/finds an artifact
@@ -15,7 +15,7 @@ Provides both sync and async clients for interacting with Strata:
         table = client.fetch(artifact.uri)
 
     # Async client (for FastAPI, asyncio applications)
-    from strata.client import AsyncStrataClient
+    from strata_client import AsyncStrataClient
 
     async with AsyncStrataClient() as client:
         artifact = await client.materialize(

@@ -24,9 +24,9 @@ from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
-from strata.client import StrataClient
-from strata.config import StrataConfig
-from strata.types import Filter
+from strata_client._clientconfig import HasServerUrl
+from strata_client.client import StrataClient
+from strata_client.filters import Filter
 
 if TYPE_CHECKING:
     import polars as pl
@@ -55,7 +55,7 @@ def fetch_to_polars(
     snapshot_id: int | None = None,
     columns: list[str] | None = None,
     filters: list[Filter] | None = None,
-    config: StrataConfig | None = None,
+    config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> "pl.DataFrame":
     """Fetch an Iceberg table via Strata and return a Polars DataFrame.
@@ -75,8 +75,8 @@ def fetch_to_polars(
         Polars DataFrame with the fetch results
 
     Example:
-        from strata.integration.polars import fetch_to_polars
-        from strata.client import gt
+        from strata_client.integration.polars import fetch_to_polars
+        from strata_client.client import gt
 
         df = fetch_to_polars(
             "file:///warehouse#db.events",
@@ -117,7 +117,7 @@ def fetch_to_lazy(
     snapshot_id: int | None = None,
     columns: list[str] | None = None,
     filters: list[Filter] | None = None,
-    config: StrataConfig | None = None,
+    config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> "pl.LazyFrame":
     """Fetch an Iceberg table via Strata and return a Polars LazyFrame.
@@ -139,7 +139,7 @@ def fetch_to_lazy(
         Polars LazyFrame wrapping eagerly-fetched data
 
     Example:
-        from strata.integration.polars import fetch_to_lazy
+        from strata_client.integration.polars import fetch_to_lazy
 
         # Data is fetched immediately, but downstream ops are lazy
         lf = fetch_to_lazy("file:///warehouse#db.events")
@@ -172,7 +172,7 @@ class StrataPolarsScanner:
     Maintains a connection to the Strata server for multiple fetches.
 
     Example:
-        from strata.integration.polars import StrataPolarsScanner
+        from strata_client.integration.polars import StrataPolarsScanner
 
         with StrataPolarsScanner() as scanner:
             events = scanner.fetch("file:///warehouse#db.events")
@@ -184,7 +184,7 @@ class StrataPolarsScanner:
 
     def __init__(
         self,
-        config: StrataConfig | None = None,
+        config: HasServerUrl | None = None,
         base_url: str | None = None,
     ) -> None:
         self.client = StrataClient(config=config, base_url=base_url)

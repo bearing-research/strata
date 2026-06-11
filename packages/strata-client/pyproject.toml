@@ -20,6 +20,16 @@ dependencies = [
     "pyarrow>=18.0.0",
 ]
 
+# Optional integrations: query Strata directly from duckdb / pandas / polars /
+# datafusion. Each pulls only its own engine; the base client stays slim.
+# (The arrow integration needs only pyarrow, already a base dependency.)
+[project.optional-dependencies]
+duckdb = ["duckdb>=1.1.0"]
+pandas = ["pandas>=2.0.0"]
+polars = ["polars>=1.36.1"]
+datafusion = ["datafusion>=50.1.0"]
+all = ["duckdb>=1.1.0", "pandas>=2.0.0", "polars>=1.36.1", "datafusion>=50.1.0"]
+
 [project.urls]
 Homepage = "https://github.com/bearing-research/strata"
 Repository = "https://github.com/bearing-research/strata"
