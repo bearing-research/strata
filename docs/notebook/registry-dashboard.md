@@ -60,6 +60,9 @@ A compact strip appears **right below the cell** that published:
 
 Promote where you trained the model, without scrolling anywhere.
 
+<!-- TODO(screenshot): the per-cell promote strip under a published cell, showing
+     the ⬡ name·version chip, the [Promote ▾] menu, and the ⎘ lineage button. -->
+
 ## 4. Promote to champion
 
 Click **`[Promote ▾]`** and choose **champion** (or **candidate**). A toast
@@ -87,6 +90,10 @@ top to bottom:
 3. **Audit timeline** (collapsible) — every name / alias / tag mutation, newest
    first, with who and from → to.
 
+<!-- TODO(screenshot): the Registry tab open in the bottom drawer — pending banner
+     (with a queued protected move), the names table with ★champ/cand chips +
+     tags + [Promote ▾], and the audit timeline. The hero shot for this page. -->
+
 ## 6. Approval gates (protected aliases)
 
 To require a human for sensitive promotions, mark aliases protected when you
@@ -112,6 +119,9 @@ model ← features ← scan ← table @ snapshot
 
 — the same chain `strata artifact lineage` prints on the CLI, as an interactive
 view. It answers "which snapshot trained this model?" in one click.
+
+<!-- TODO(screenshot): the lineage view/modal showing the model ← features ← scan
+     ← table @ snapshot chain. -->
 
 ---
 
