@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
 import { useCodemirror } from '../composables/useCodemirror'
 import { useNotebook } from '../stores/notebook'
+import CellArtifactStrip from './CellArtifactStrip.vue'
 import type { Cell, CellOutput } from '../types/notebook'
 import {
   resolveEffectiveWorkerEntry,
@@ -1156,6 +1157,9 @@ function outputKey(output: CellOutput, index: number): string {
           </div>
         </template>
       </div>
+
+      <!-- Registry: artifacts this cell published, with Promote (P3d) -->
+      <CellArtifactStrip :cell-id="cell.id" />
 
       <div v-if="installCompleted && installTargetPackage" class="install-complete-hint">
         Installed <code>{{ installTargetPackage }}</code

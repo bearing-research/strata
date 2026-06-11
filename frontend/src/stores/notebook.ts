@@ -1262,6 +1262,8 @@ function loadNotebookStateFromBackend(data: any) {
   notebook.env = parseEnvMap(data.env)
   // Registry UI gate from the runtime config merged into the open response.
   registryEnabled.value = data?.registry_enabled === true
+  // Populate the per-cell strips for already-published artifacts on open.
+  scheduleRegistryRefresh()
   applyEnvSources(data)
   notebook.workers = Array.isArray(data.workers) ? data.workers.map(parseWorkerSpec) : []
   notebook.mounts = Array.isArray(data.mounts) ? data.mounts.map(parseMountSpec) : []
@@ -1652,6 +1654,19 @@ async function refreshRegistryAction() {
   }
 }
 
+// Debounced refresh: the per-cell strip and tab need fresh data after a cell
+// finishes (it may have published) without per-output thrash. No-op when the
+// registry is unreachable (service mode).
+let _registryRefreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleRegistryRefresh() {
+  if (!registryEnabled.value) return
+  if (_registryRefreshTimer) clearTimeout(_registryRefreshTimer)
+  _registryRefreshTimer = setTimeout(() => {
+    _registryRefreshTimer = null
+    void refreshRegistryAction()
+  }, 600)
+}
+
 async function fetchRegistryAuditAction(name?: string) {
   try {
     registryAudit.value = (await useStrata().getRegistryAudit(name)).entries || []
@@ -1876,6 +1891,9 @@ function initializeWebSocket() {
       const p = msg.payload as Record<string, any>
       const cellId = p.cell_id as CellId
       const outputs = p.outputs as Record<string, any> | undefined
+      // A finished cell may have published to the registry — refresh the
+      // per-cell strip + Registry tab (debounced, registry-gated).
+      scheduleRegistryRefresh()
 
       const displayOutputs =
         parseDisplayOutputPayloads(
