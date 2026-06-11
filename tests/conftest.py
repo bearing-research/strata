@@ -46,6 +46,35 @@ from strata.config import StrataConfig
 # =============================================================================
 
 
+def start_container_or_skip(container, *, label: str, ready=None):
+    """Start a testcontainers container, skipping the module if startup fails.
+
+    The S3/GCS/Azure mount e2e tests spin up emulator containers (MinIO,
+    fake-gcs-server, Azurite). When the Docker image pull times out — a
+    common Docker Hub flake, and the norm on dependabot/fork CI that can't
+    reach the registry with the right secrets — testcontainers raises during
+    ``start()``, turning every test in the module into an ERROR. A pull/start
+    failure means the backend is simply unavailable, which is a skip, not a
+    failure. Only the startup phase is converted to a skip; anything raised
+    after the container is up (i.e. a real test failure) propagates normally.
+
+    ``ready`` is an optional callable run after start (e.g. a ``wait_for_logs``
+    readiness probe); a failure there is also treated as "backend unavailable".
+    Returns the started container — the caller owns ``stop()``.
+    """
+    try:
+        container.start()
+        if ready is not None:
+            ready(container)
+    except Exception as exc:
+        try:
+            container.stop()
+        except Exception:
+            pass
+        pytest.skip(f"{label} container unavailable (Docker image pull/start failed): {exc}")
+    return container
+
+
 def _reset_transform_singletons() -> None:
     """Reset build store + runner globals between test servers.
 
