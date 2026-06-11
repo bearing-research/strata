@@ -100,6 +100,18 @@ jobs:
               )
               sys.exit(1)
 
+          # strata-client ships from the same tag and must stay in lockstep.
+          with open("packages/strata-client/pyproject.toml", "rb") as f:
+              client_version = tomllib.load(f)["project"]["version"]
+          if client_version != version:
+              print(
+                  f"::error::strata-client version {client_version!r} doesn't match the "
+                  f"release version {version!r}. Keep packages/strata-client/pyproject.toml "
+                  "in lockstep with the root pyproject.toml.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
           changelog = open("CHANGELOG.md").read()
           if not re.search(rf"^##\s+{re.escape(version)}(?:\s|$)", changelog, re.MULTILINE):
               print(
@@ -275,6 +287,32 @@ jobs:
           path: dist
           if-no-files-found: error
 
+  # --- strata-client wheel (pure-Python, independent distribution) ---
+  # One py3-none-any wheel + sdist, built once. No frontend, no Rust. It
+  # uploads as a dist-* artifact so the publish jobs' `pattern: dist-*`
+  # picks it up and PyPI files it under the strata-client project by name.
+  client-wheel:
+    name: wheel · strata-client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          version: "latest"
+
+      - name: Build the strata-client wheel + sdist
+        run: uv build --package strata-client --out-dir dist
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+        with:
+          name: dist-client
+          path: dist
+          if-no-files-found: error
+
   # --- wheel smoke test ----------------------------------------------
   # Install the just-built Linux x86_64 wheel in a fresh uv-managed
   # venv, exercise the import surface, all three console scripts, and
@@ -388,7 +426,7 @@ jobs:
   testpypi:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
-    needs: [linux, macos, windows, wheel-test]
+    needs: [linux, macos, windows, client-wheel, wheel-test]
     environment:
       name: testpypi
       url: https://test.pypi.org/p/strata-notebook
