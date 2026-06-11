@@ -4382,6 +4382,39 @@ async def registry_audit(
     return {"entries": entries}
 
 
+@app.get("/v1/registry/summary")
+async def registry_summary():
+    """Registry state for the dashboard names table: each name with its
+    aliases (``alias -> version``), current version, and that version's tags.
+    One call instead of ``/v1/names`` + a per-name alias fetch. Tenant-scoped
+    like the other registry reads (personal mode / ``admin:*`` see all)."""
+    from strata.auth import get_principal
+
+    store = _get_artifact_store()
+    principal = get_principal()
+    tenant = None if (principal is None or principal.has_scope("admin:*")) else principal.tenant
+
+    aliases_by_name: dict[str, dict[str, int]] = {}
+    for a in store.list_aliases(None, tenant=tenant):
+        aliases_by_name.setdefault(a.name, {})[a.alias] = a.version
+
+    names = []
+    for n in store.list_names(tenant=tenant):
+        tags = store.get_tags(n.artifact_id, n.version, tenant=tenant)
+        names.append(
+            {
+                "name": n.name,
+                "artifact_id": n.artifact_id,
+                "version": n.version,
+                "uri": f"strata://artifact/{n.artifact_id}@v={n.version}",
+                "aliases": aliases_by_name.get(n.name, {}),
+                # Hide internal stamps (nb_cell) from the user-facing table.
+                "tags": {k: v for k, v in tags.items() if not k.startswith("nb_")},
+            }
+        )
+    return {"names": names}
+
+
 class PendingDecisionRequest(BaseModel):
     name: str
     alias: str

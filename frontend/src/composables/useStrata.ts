@@ -140,6 +140,20 @@ export interface LineageGraph {
   edges: Array<Record<string, unknown>>
 }
 
+/** One row of the registry names table (GET /v1/registry/summary). */
+export interface RegistryName {
+  name: string
+  artifact_id: string
+  version: number
+  uri: string
+  aliases: Record<string, number>
+  tags: Record<string, string>
+}
+
+interface RegistrySummaryResponse {
+  names: RegistryName[]
+}
+
 interface NotebookMutationResponse {
   cell?: BackendCellPayload
   cells?: BackendCellPayload[]
@@ -643,6 +657,14 @@ async function rejectPending(name: string, alias: string): Promise<void> {
   if (!resp.ok) {
     await throwApiError(resp, `Failed to reject ${name}@${alias}`)
   }
+}
+
+async function getRegistrySummary(): Promise<RegistrySummaryResponse> {
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/registry/summary`)
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to load registry summary')
+  }
+  return readJson<RegistrySummaryResponse>(resp)
 }
 
 async function getRegistryAudit(name?: string): Promise<AuditResponse> {
@@ -1557,6 +1579,7 @@ export function useStrata() {
     validateRecentNotebooks,
     getNotebookRuntimeConfig,
     getNotebookArtifacts,
+    getRegistrySummary,
     setAlias,
     getPendingChanges,
     approvePending,
