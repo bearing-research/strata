@@ -2444,6 +2444,31 @@ exhaustive commit history.</p>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>Registry dashboard in the notebook</strong> (#147–#150): the registry is now a
+  first-class UI surface, so promotion and approvals don't have to be code. A
+  cell that publishes with a name (<code>strata.put(model, name="taxi/tip-model")</code>)
+  is stamped with its cell and shows a <strong>promote strip</strong> right below it; the
+  bottom drawer gains a <strong>Registry tab</strong> with the pending-approval queue
+  (Approve / Reject — the human gate, in the UI), a names table (alias chips,
+  latest version, tags, and a <code>[Promote▾]</code> champion/candidate menu), and a
+  collapsible audit timeline; and a <strong>lineage view</strong> renders
+  <code>model ← features ← scan ← table @ snapshot</code>. Promote toasts the result
+  (<code>✓ applied</code> or <code>⏳ pending</code> for a protected alias). New reads:
+  <code>GET /v1/notebooks/{sid}/artifacts</code> and <code>GET /v1/registry/summary</code>.
+  Personal-mode only — the dashboard hides itself in service mode.</p>
+</li>
+<li>
+<p><strong>Ambient <code>strata</code> client in notebook cells</strong> (#146): every locally-executed
+  Python cell gets a ready <code>strata</code> client in its namespace — no
+  <code>from strata.client import StrataClient</code> / <code>StrataClient(base_url=…)</code> /
+  <code>close()</code>. It covers the common operations (<code>materialize</code>, <code>put</code>, <code>set_alias</code>,
+  <code>set_tag</code>, <code>resolve_alias</code>, …) over a lightweight stdlib client path-loaded
+  into the notebook venv (no new dependency), is created fresh per run and
+  closed automatically, and — like a mount or <code>@table</code> variable — is an injected
+  tool, not a cell input, so it never affects provenance. Local execution only;
+  remote-executor cells import a client explicitly.</p>
+</li>
+<li>
 <p><strong>Warm Rscript pool</strong> (#81): notebooks with R cells pre-spawn R workers
   that have already paid interpreter startup, renv activation, and
   <code>jsonlite</code>/<code>arrow</code> loads — an R cell run skips the ~1–2s cold-start tax

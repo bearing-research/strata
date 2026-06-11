@@ -2887,6 +2887,7 @@
 </code></pre></div>
 <p>It's a lightweight client with the same API surface for the common operations (<code>materialize</code>, <code>put</code>, <code>set_alias</code>, <code>set_tag</code>, <code>resolve_alias</code>, …); explicit <code>from strata.client import StrataClient</code> still works if you want the full client. The ambient <code>strata</code> is created fresh per cell run and closed automatically — you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a <code>@mount</code> path or an <code>@table</code> variable.</p>
 <p>Cells routed to a <strong>remote executor worker</strong> (not local execution) don't get the ambient <code>strata</code> — import a client explicitly there.</p>
+<p>When a cell publishes with a name — <code>strata.put(model, name="taxi/tip-model")</code> — the artifact appears in the <a href="../../core/registry/#in-the-notebook-the-registry-dashboard">registry dashboard</a>: a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage — all in the UI).</p>
 <blockquote>
 <p>Calls through <code>strata</code> are <strong>side effects</strong>. On a cache hit the cell body doesn't re-run, so a <code>strata.set_alias(...)</code> won't re-fire — fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.</p>
 </blockquote>

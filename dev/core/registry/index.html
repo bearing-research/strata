@@ -1169,6 +1169,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#in-the-notebook-the-registry-dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the notebook (the registry dashboard)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#storage-durability" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1830,6 +1841,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#in-the-notebook-the-registry-dashboard" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the notebook (the registry dashboard)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#storage-durability" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1954,6 +1976,37 @@ challenger → a human approves → and the whole history is reconstructible:</p
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>strata<span class="w"> </span>artifact<span class="w"> </span>audit<span class="w"> </span>taxi/tip-model
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>strata<span class="w"> </span>artifact<span class="w"> </span>verify<span class="w">    </span><span class="c1"># store-wide blob/metadata consistency check</span>
 </code></pre></div>
+<h2 id="in-the-notebook-the-registry-dashboard">In the notebook (the registry dashboard)<a class="headerlink" href="#in-the-notebook-the-registry-dashboard" title="Permanent link">&para;</a></h2>
+<p>Everything above also has a UI — the registry is a first-class surface in the
+notebook, so promotion and approvals don't have to be code. Registry routes are
+<strong>personal-mode only</strong> today, so the dashboard hides itself in service mode.</p>
+<p><strong>Publishing.</strong> Inside a cell, the <a href="../../notebook/cells/#the-ambient-strata-client">ambient <code>strata</code>
+client</a> publishes with a name:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">)</span>   <span class="c1"># or materialize(…, name=…)</span>
+</code></pre></div>
+<p>The artifact lands in the registry and is <strong>stamped with the cell that produced
+it</strong>, so it shows up right under that cell.</p>
+<p><strong>Per-cell strip.</strong> Below a cell that published, a compact strip shows what it
+put into the registry — <code>⬡ taxi/tip-model v3  ★champion  mae=1.98</code> — with a
+<code>[Promote▾]</code> menu (champion / candidate) and a <code>⎘</code> lineage button. Promote
+where you trained the model, without leaving the cell.</p>
+<p><strong>Registry tab.</strong> The bottom drawer has a <strong>Registry</strong> tab:</p>
+<ul>
+<li>a <strong>pending-approval</strong> banner with <strong>Approve / Reject</strong> — the human gate, in
+  the UI (a protected-alias move queues here);</li>
+<li>a <strong>names table</strong> — each name with its alias chips (<code>★champ</code>, <code>cand</code>),
+  latest version, tags, and <code>[Promote▾]</code>;</li>
+<li>a collapsible <strong>audit</strong> timeline.</li>
+</ul>
+<p><strong>Promote feedback.</strong> Setting an alias toasts the result: <code>✓ taxi/tip-model →
+champion</code> when it applies, or <code>⏳ champion change pending approval</code> when the
+alias is protected — at which point the pending banner appears for someone to
+approve. Unprotected aliases (candidate) apply immediately.</p>
+<p><strong>Lineage.</strong> The <code>⎘</code> button (strip or names table) opens the provenance chain —
+<code>model ← features ← scan ← table @ snapshot</code> — the same lineage the CLI prints,
+as an interactive view.</p>
+<p>So the same promote → gate → approve → audit loop the SDK/CLI drives is a few
+clicks in the notebook, backed by the identical audited routes.</p>
 <h2 id="storage-durability">Storage &amp; durability<a class="headerlink" href="#storage-durability" title="Permanent link">&para;</a></h2>
 <p>Registry state lives in the same <code>artifacts.sqlite</code> as artifact metadata
 (WAL mode, transaction-per-mutation). Everything commits before the API
