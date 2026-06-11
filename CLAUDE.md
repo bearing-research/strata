@@ -266,7 +266,7 @@ deliberately do not share the entry point — only the artifact-store substrate.
 | ----------------- | -------------------------------------- | ----------------------------------------- |
 | Entry point       | HTTP `POST /v1/materialize`            | In-process method call                    |
 | Unit of work      | One *transform* (e.g. `scan@v1`)       | One *cell* (ad-hoc Python source)         |
-| Provenance key    | `(table_identity, snapshot, columns, filters)` for scan; `transform_spec.to_json() + sorted_inputs` for others | `(sorted_inputs, source_hash, env_hash, mount_fingerprints)` |
+| Provenance key    | `(table_identity, snapshot, columns, filters)` for scan; `transform_spec.to_json() + sorted input hashes` for others — and `transform_spec` itself carries the inputs **in order**, so input order is significant (positional `input0`/`input1` transforms don't dedup under reordering) | `(sorted_inputs, source_hash, env_hash, mount_fingerprints)` |
 | Inputs            | List of table / artifact URIs          | Upstream cell variables (resolved via DAG) |
 | Outputs           | Single artifact (Arrow IPC stream)     | Multi-output fan-out — one artifact per consumed variable via `derive_subkey` |
 | Execution         | Server dispatches to registered HTTP executors (v1-push / v2-pull) or built-in scan planner | Local subprocess harness in notebook venv, or HTTP executor |
