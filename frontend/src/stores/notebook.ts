@@ -39,6 +39,7 @@ import type {
   RegistryName,
 } from '../composables/useStrata'
 import { useWebSocket } from '../composables/useWebSocket'
+import { flattenLineage, lineageToTree, type LineageTreeNode } from '../utils/lineage'
 import { markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 import { consumePrefetchedNotebookSession } from '../utils/notebookSessionPrefetch'
 import {
@@ -1700,6 +1701,34 @@ async function rejectPendingAction(name: string, alias: string) {
 
 function fetchLineageAction(artifactId: string, version: number) {
   return useStrata().getLineage(artifactId, version)
+}
+
+// Lineage modal (P3e): fetch the flat graph, adapt to a tree, flatten to
+// indented rows, and open the overlay.
+const lineageOpen = ref(false)
+const lineageTitle = ref('')
+const lineageRows = ref<Array<LineageTreeNode & { depth: number }>>([])
+const lineageLoading = ref(false)
+const lineageError = ref<string | null>(null)
+
+async function openLineageAction(artifactId: string, version: number, title: string) {
+  lineageOpen.value = true
+  lineageTitle.value = title
+  lineageRows.value = []
+  lineageError.value = null
+  lineageLoading.value = true
+  try {
+    const graph = await useStrata().getLineage(artifactId, version)
+    lineageRows.value = flattenLineage(lineageToTree(graph, graph.artifact_uri))
+  } catch (err) {
+    lineageError.value = err instanceof Error ? err.message : 'Failed to load lineage'
+  } finally {
+    lineageLoading.value = false
+  }
+}
+
+function closeLineage() {
+  lineageOpen.value = false
 }
 const notebookWorkerError = ref<string | null>(null)
 const workerRegistryError = ref<string | null>(null)
@@ -3634,6 +3663,13 @@ export function useNotebook() {
     approvePendingAction,
     rejectPendingAction,
     fetchLineageAction,
+    lineageOpen,
+    lineageTitle,
+    lineageRows,
+    lineageLoading,
+    lineageError,
+    openLineageAction,
+    closeLineage,
     openBySessionId,
     updateNotebookNameAction,
     deleteNotebookAction,

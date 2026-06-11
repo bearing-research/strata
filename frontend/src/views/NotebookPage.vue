@@ -19,6 +19,7 @@ const ConnectionsPanel = defineAsyncComponent(() => import('../components/Connec
 const SchemaPanel = defineAsyncComponent(() => import('../components/SchemaPanel.vue'))
 const RuntimePanel = defineAsyncComponent(() => import('../components/RuntimePanel.vue'))
 const RegistryPanel = defineAsyncComponent(() => import('../components/RegistryPanel.vue'))
+const LineageModal = defineAsyncComponent(() => import('../components/LineageModal.vue'))
 const WorkersPanel = defineAsyncComponent(() => import('../components/WorkersPanel.vue'))
 const ProfilingPanel = defineAsyncComponent(() => import('../components/ProfilingPanel.vue'))
 const LlmPanel = defineAsyncComponent(() => import('../components/LlmPanel.vue'))
@@ -710,6 +711,9 @@ function goHome() {
     <!-- v1.1: Impact preview dialog -->
     <ImpactPreview />
     <KeyboardShortcutsModal :visible="showShortcuts" @close="showShortcuts = false" />
+
+    <!-- Lineage modal (P3e) -->
+    <LineageModal />
 
     <!-- Registry feedback toasts -->
     <div class="toast-stack">
