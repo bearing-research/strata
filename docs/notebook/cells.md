@@ -165,7 +165,7 @@ Warnings surface as a pill on the cell and a structured entry in the execution l
 | ------------------ | ------------------------------------------------ |
 | `# @name X`        | Display name for the DAG view                    |
 | `# @worker X`      | Route execution to a named remote worker         |
-| `# @timeout 60`    | Override execution timeout (seconds, default 30) |
+| `# @timeout 60`    | Override execution timeout (seconds, default 300) |
 | `# @env KEY=value` | Set an env var for this cell only — non-sensitive values only; literal lands in committed source. For secrets use `notebook.toml [env]` or the Runtime panel. |
 | `# @mount …`       | Attach a filesystem mount (see [Annotations][a]) |
 | `# @loop …`        | Turn the cell into a [loop cell](#loop-cells)    |

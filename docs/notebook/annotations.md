@@ -124,7 +124,7 @@ If no `@worker` is set, the cell runs locally in the notebook's Python environme
 ## @timeout
 
 Override the execution timeout for a single cell, in seconds. The default
-is 30 seconds; the value must satisfy `0 < t ≤ 86400` (one day max).
+is 300 seconds (5 minutes); the value must satisfy `0 < t ≤ 86400` (one day max).
 
 ```python
 # @timeout 300
@@ -136,7 +136,7 @@ Useful for cells that download data, train models, or call slow external APIs. T
 
 !!! warning "Prompt-cell timeout vs AI API timeout"
     Prompt cells have two timeouts that can collide silently. The
-    cell-level `# @timeout` (default **30 s**) wraps the whole cell;
+    cell-level `# @timeout` (default **300 s**) wraps the whole cell;
     the AI API call inside has its own timeout from
     `STRATA_AI_TIMEOUT_SECONDS` / `[ai] timeout_seconds` in
     `notebook.toml` (default **60 s**).
@@ -574,7 +574,7 @@ When the same setting is configured at multiple levels, the most specific wins:
 | Setting | Annotation | Cell config (notebook.toml) | Notebook default |
 |---------|-----------|---------------------------|-----------------|
 | **Worker** | `# @worker X` | `cell.worker` field | `notebook.worker` field |
-| **Timeout** | `# @timeout N` | `cell.timeout` field | 30 seconds |
+| **Timeout** | `# @timeout N` | `cell.timeout` field | 300 seconds |
 | **Env vars** | `# @env K=V` | `cell.env` overrides | `notebook.env` defaults |
 | **Mounts** | `# @mount ...` | `cell.mounts` overrides | `notebook.mounts` defaults |
 | **SQL connection** | `# @sql connection=X` |, | none, required for SQL cells |

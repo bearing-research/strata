@@ -135,7 +135,22 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   `failed` at startup; and `strata artifact verify` checks a whole store's
   blobs against metadata after the fact.
 
+### Changed
+
+- **Default cell timeout raised from 30 s to 300 s**: the previous default
+  was an easy footgun for I/O-bound cells (network pulls, slow APIs), which
+  timed out at exactly 30 s unless a `# @timeout` annotation was added. The
+  new default matches the core scan timeout; a genuinely hung cell is still
+  killed at the wall, and per-cell / per-notebook overrides are unchanged.
+
 ### Fixed
+
+- **Headless `strata run` no longer drops console output on cache hits**
+  (ML dogfood): a re-run whose cells hit cache carried no fresh stdout, and
+  the empty-console write then *unlinked* the file the producing run had
+  persisted — so `.strata/console/` ended up holding only the cell that
+  actually re-executed. Cache hits now leave the persisted console
+  untouched, so `print()` output stays recoverable across runs.
 
 - **Registry hardening (pre-release review)**: garbage collection and
   `delete_artifact` now respect **alias** pointers — a champion alias
