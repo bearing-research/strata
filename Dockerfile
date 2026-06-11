@@ -60,6 +60,9 @@ WORKDIR /build
 COPY LICENSE README.md pyproject.toml uv.lock ./
 COPY src ./src
 COPY rust ./rust
+# Workspace member: the slim strata-client distribution that strata-notebook
+# depends on. Needed to build its wheel and so the dependency resolves.
+COPY packages ./packages
 
 # Export the exact runtime dependency set from uv.lock. The final image installs
 # these first, then installs the built wheel with --no-deps to avoid resolving
@@ -73,7 +76,7 @@ RUN mkdir -p dist && \
     uv export \
       --frozen \
       --no-dev \
-      --no-emit-project \
+      --no-emit-workspace \
       --no-editable \
       --no-header \
       --no-annotate \
@@ -81,14 +84,16 @@ RUN mkdir -p dist && \
       --format requirements.txt \
       --output-file dist/runtime-requirements.txt
 
-# Build the wheel using uv (with BuildKit cache mounts for faster rebuilds)
-# Pin the build interpreter so maturin emits a cp313 wheel that matches the
-# runtime image instead of whatever newest managed Python uv might download.
+# Build both workspace wheels (with BuildKit cache mounts for faster rebuilds):
+# the strata-notebook root (maturin/Rust → cp313) and the strata-client member
+# (hatchling → py3-none-any). Both land in dist/ and the runtime stage installs
+# them together with --no-deps. Pin the build interpreter so maturin emits a
+# cp313 wheel that matches the runtime image.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo-target \
-    uv build --wheel --python 3.13 --out-dir dist
+    uv build --wheel --all-packages --python 3.13 --out-dir dist
 
 # =============================================================================
 # Stage 2: Runtime

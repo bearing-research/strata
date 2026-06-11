@@ -7,6 +7,12 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
+[manifest]
+members = [
+    "strata-client",
+    "strata-notebook",
+]
+
 [[package]]
 name = "adbc-driver-bigquery"
 version = "1.11.0"
@@ -3609,6 +3615,21 @@ wheels = [
 ]
 
 [[package]]
+name = "strata-client"
+version = "0.2.0"
+source = { editable = "packages/strata-client" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pyarrow" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "pyarrow", specifier = ">=18.0.0" },
+]
+
+[[package]]
 name = "strata-notebook"
 version = "0.2.0"
 source = { editable = "." }
@@ -3625,6 +3646,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyiceberg", extra = ["sql-postgres", "sql-sqlite"] },
     { name = "python-multipart" },
+    { name = "strata-client" },
     { name = "tomli-w" },
     { name = "uvicorn" },
     { name = "websockets" },
@@ -3731,6 +3753,7 @@ requires-dist = [
     { name = "pyiceberg", extras = ["sql-sqlite", "sql-postgres"], specifier = ">=0.8.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "sqlglot", marker = "extra == 'sql'", specifier = ">=25.0.0" },
+    { name = "strata-client", editable = "packages/strata-client" },
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "uvicorn", specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=13.0" },
