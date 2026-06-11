@@ -1,0 +1,35 @@
+[project]
+name = "strata-client"
+version = "0.2.0"
+description = "Lightweight Python client for Strata — materialize, persist, and query artifacts over HTTP."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Fangchen Li", email = "fangchen.li@outlook.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+    "httpx>=0.28.0",
+    "pyarrow>=18.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/bearing-research/strata"
+Repository = "https://github.com/bearing-research/strata"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/strata_client"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/strata_client", "README.md"]
