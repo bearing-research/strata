@@ -1915,7 +1915,7 @@
 <li>The fragment after <code>#</code> names the Iceberg table inside the warehouse, as <code>&lt;namespace&gt;.&lt;table&gt;</code>.</li>
 </ul>
 <p>For the demo above, the warehouse lives at <code>/warehouse</code> and contains the <code>events</code> table in the <code>db</code> namespace, so the URI is <code>file:///warehouse#db.events</code>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata.client</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataClient</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataClient</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">client</span> <span class="o">=</span> <span class="n">StrataClient</span><span class="p">()</span>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
@@ -1953,17 +1953,17 @@
 <div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Pandas</label><label for="__tabbed_1_2">Polars</label><label for="__tabbed_1_3">DuckDB</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata.integration.pandas</span><span class="w"> </span><span class="kn">import</span> <span class="n">fetch_to_pandas</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client.integration.pandas</span><span class="w"> </span><span class="kn">import</span> <span class="n">fetch_to_pandas</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">fetch_to_pandas</span><span class="p">(</span><span class="s2">&quot;file:///warehouse#db.events&quot;</span><span class="p">)</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata.integration.polars</span><span class="w"> </span><span class="kn">import</span> <span class="n">fetch_to_polars</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client.integration.polars</span><span class="w"> </span><span class="kn">import</span> <span class="n">fetch_to_polars</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">fetch_to_polars</span><span class="p">(</span><span class="s2">&quot;file:///warehouse#db.events&quot;</span><span class="p">)</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata.integration.duckdb</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataScanner</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client.integration.duckdb</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataScanner</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">with</span> <span class="n">StrataScanner</span><span class="p">()</span> <span class="k">as</span> <span class="n">scanner</span><span class="p">:</span>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">scanner</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="s2">&quot;events&quot;</span><span class="p">,</span> <span class="s2">&quot;file:///warehouse#db.events&quot;</span><span class="p">)</span>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">scanner</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="s2">&quot;SELECT category, COUNT(*) FROM events GROUP BY category&quot;</span><span class="p">)</span>

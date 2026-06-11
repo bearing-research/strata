@@ -1984,7 +1984,7 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/artifacts/gc?max_age_days=7&#39;</span>
 </code></pre></div>
 <p>Or from Python:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataClient</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_client</span><span class="w"> </span><span class="kn">import</span> <span class="n">StrataClient</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">client</span> <span class="o">=</span> <span class="n">StrataClient</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8765&quot;</span><span class="p">)</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">client</span><span class="o">.</span><span class="n">garbage_collect</span><span class="p">(</span><span class="n">max_age_days</span><span class="o">=</span><span class="mf">7.0</span><span class="p">)</span>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># {&quot;deleted&quot;: 14, &quot;bytes_freed&quot;: 8429283, ...}</span>
