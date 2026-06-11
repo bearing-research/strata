@@ -2444,6 +2444,20 @@ exhaustive commit history.</p>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong><code>strata-client</code>: a slim client distribution.</strong> Using Strata as a library no
+  longer means installing the whole server. The new <code>strata-client</code> package
+  depends only on <strong>httpx + pyarrow</strong> (no pyiceberg / fastapi / duckdb /
+  pydantic, no Rust extension) and ships the full client —
+  <code>materialize</code>/<code>put</code>/<code>fetch</code>/scan, the registry surface (aliases, tags, names,
+  audit), and the <code>Filter</code> helpers: <code>pip install strata-client</code>, then
+  <code>from strata_client import StrataClient</code>. The server (<code>strata-notebook</code>) now
+  depends on it and re-exports it as <code>strata.client</code> / <code>strata.filters</code>, so
+  existing <code>from strata.client import StrataClient</code> / <code>from strata import
+  StrataClient</code> imports are unchanged — there's a single implementation. The
+  client resolves its server URL from <code>STRATA_SERVER_URL</code> / <code>STRATA_HOST</code> /
+  <code>STRATA_PORT</code> / <code>pyproject.toml</code> with no pydantic.</p>
+</li>
+<li>
 <p><strong>Registry dashboard in the notebook</strong> (#147–#150): the registry is now a
   first-class UI surface, so promotion and approvals don't have to be code. A
   cell that publishes with a name (<code>strata.put(model, name="taxi/tip-model")</code>)
