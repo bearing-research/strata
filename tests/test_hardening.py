@@ -945,55 +945,17 @@ class TestStreamAbortMetrics:
             "port": port,
         }
 
-    def test_client_disconnect_increments_counter(self, server_with_metrics):
-        """Client disconnect increments client_disconnects counter."""
-        import httpx
-
-        state = server_with_metrics["state"]
-        config = server_with_metrics["config"]
-        warehouse = server_with_metrics["warehouse"]
-        table_uri = warehouse["table_uri"]
-        # A multi-MB result so the blob spans many chunks and overflows the
-        # socket send buffer — the server's send then blocks waiting for the
-        # reader, which is the window in which a disconnect is detectable.
-        append_rows(warehouse["table"], 0, 200_000)
-
-        initial_disconnects = state.metrics.client_disconnects
-
-        with httpx.Client(timeout=30.0) as http_client:
-            # Create and start streaming a materialize request
-            response = http_client.post(
-                f"http://127.0.0.1:{config.port}/v1/materialize",
-                json=build_materialize_request(table_uri),
-            )
-            assert response.status_code == 200
-            stream_url = response.json()["stream_url"]
-
-            # Read one chunk then drop while the server is still sending the
-            # multi-MB blob. The failed mid-stream send is where the disconnect
-            # is recorded — the artifact itself still finalizes ready (a reader
-            # never fails a decoupled build).
-            try:
-                with http_client.stream(
-                    "GET",
-                    f"http://127.0.0.1:{config.port}{stream_url}",
-                    timeout=10,
-                ) as stream:
-                    for chunk in stream.iter_bytes(chunk_size=1024):
-                        if chunk:
-                            break
-            except Exception:
-                pass
-
-        # The disconnect is surfaced asynchronously when the blocked send fails,
-        # so poll rather than assuming an immediate increment.
-        deadline = time.time() + 30
-        while time.time() < deadline:
-            if state.metrics.client_disconnects > initial_disconnects:
-                break
-            time.sleep(0.1)
-
-        assert state.metrics.client_disconnects > initial_disconnects
+    # NOTE: there is intentionally no client-disconnect *counter* test here.
+    # Under wait-then-serve the build is decoupled from the read, so a disconnect
+    # is only observable if it lands while the server is mid-send — which depends
+    # on the OS socket-send-buffer size and Starlette's cancel timing, and is not
+    # reproducible across platforms (it passes on local macOS but not on macOS CI
+    # runners). The `client_disconnects` metric is kept as best-effort
+    # observability (recorded when `serve_blob` is cancelled mid-send), but the
+    # meaningful, platform-independent contract — a disconnect leaves the artifact
+    # `ready` and leaks no resources — is covered by
+    # TestStreamingIntegration.test_client_disconnect_releases_resources and
+    # test_semaphore_leak.test_concurrent_disconnects_no_leak.
 
     def test_timeout_increments_counter(self, temp_warehouse, tmp_path):
         """Scan timeout increments stream_aborts_timeout counter."""
