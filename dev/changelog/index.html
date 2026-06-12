@@ -2666,6 +2666,15 @@ exhaustive commit history.</p>
   and warm/cached scans were unaffected.</p>
 </li>
 <li>
+<p><strong>A client never poisons a scan artifact</strong> (server-side root fix for the
+  above): the <code>/v1/streams</code> GET no longer scans-and-persists inside the response
+  generator. The build now runs as a decoupled, bounded-memory background task
+  and finalizes the artifact on its own merits; the GET waits for it and then
+  streams the persisted blob. A slow or dropped reader can no longer abort the
+  build or mark the artifact <code>failed</code> — a mid-stream disconnect leaves it
+  <code>ready</code>. The QoS scan slot is released the moment the build completes.</p>
+</li>
+<li>
 <p><strong>Headless <code>strata run</code> no longer drops console output on cache hits</strong>
   (ML dogfood): a re-run whose cells hit cache carried no fresh stdout, and
   the empty-console write then <em>unlinked</em> the file the producing run had
