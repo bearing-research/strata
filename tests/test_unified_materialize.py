@@ -497,7 +497,7 @@ class TestClientFetch:
 
     def test_client_fetch_basic(self, server_with_personal_mode):
         """Test basic materialize() + fetch() usage."""
-        from strata.client import StrataClient
+        from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
@@ -518,7 +518,7 @@ class TestClientFetch:
 
     def test_client_fetch_with_projection(self, server_with_personal_mode):
         """Test materialize() + fetch() with column projection."""
-        from strata.client import StrataClient
+        from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
@@ -539,7 +539,7 @@ class TestClientFetch:
 
     def test_client_fetch_with_filters(self, server_with_personal_mode):
         """Test materialize() + fetch() with row filters."""
-        from strata.client import StrataClient
+        from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
@@ -564,7 +564,7 @@ class TestClientFetch:
 
     def test_client_materialize_returns_artifact(self, server_with_personal_mode):
         """Test that materialize() returns an Artifact with metadata."""
-        from strata.client import StrataClient
+        from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
@@ -590,7 +590,7 @@ class TestClientFetch:
 
     def test_client_materialize_cache_hit(self, server_with_personal_mode):
         """Test that repeated materialize() calls return cache hits."""
-        from strata.client import StrataClient
+        from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
@@ -627,7 +627,7 @@ class TestClientFetch:
         lookups never returned; it now supersedes the old version so the
         rebuild becomes canonical.
         """
-        from strata.client import StrataClient
+        from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]
@@ -664,7 +664,7 @@ class TestClientFetch:
 
     def test_client_materialize_artifact_mode(self, server_with_personal_mode):
         """The sync client can wait for scan@v1 artifact-mode builds."""
-        from strata.client import StrataClient
+        from strata_client.client import StrataClient
 
         base_url = server_with_personal_mode["base_url"]
         table_uri = server_with_personal_mode["warehouse"]["table_uri"]

@@ -25,7 +25,7 @@ What you'll learn:
     - How to structure opaque transform specs for provenance
 """
 
-from strata.client import StrataClient
+from strata_client import StrataClient
 
 
 def delibera_transform(operation: str, step_id: str, role: str, code_hash: str, **kwargs) -> dict:

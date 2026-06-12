@@ -105,7 +105,7 @@ def run_benchmark(server_url: str, table_uri: str) -> dict:
     """Run the benchmark and return timing results."""
     # Import here to allow script to show helpful error if strata not installed
     try:
-        from strata.client import StrataClient
+        from strata_client import StrataClient
     except ImportError:
         print("Strata not installed. Install with:")
         print("  pip install -e .")

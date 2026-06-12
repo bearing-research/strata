@@ -60,6 +60,10 @@ WORKDIR /build
 COPY LICENSE README.md pyproject.toml uv.lock ./
 COPY src ./src
 COPY rust ./rust
+# strata-client is a workspace member (dev convenience) but NOT a runtime
+# dependency of the server, so the image never installs it. Copied only so the
+# workspace resolves during `uv export` / `uv build`.
+COPY packages ./packages
 
 # Export the exact runtime dependency set from uv.lock. The final image installs
 # these first, then installs the built wheel with --no-deps to avoid resolving
@@ -73,7 +77,7 @@ RUN mkdir -p dist && \
     uv export \
       --frozen \
       --no-dev \
-      --no-emit-project \
+      --no-emit-workspace \
       --no-editable \
       --no-header \
       --no-annotate \
@@ -81,9 +85,9 @@ RUN mkdir -p dist && \
       --format requirements.txt \
       --output-file dist/runtime-requirements.txt
 
-# Build the wheel using uv (with BuildKit cache mounts for faster rebuilds)
-# Pin the build interpreter so maturin emits a cp313 wheel that matches the
-# runtime image instead of whatever newest managed Python uv might download.
+# Build the server wheel (maturin/Rust → cp313). Only the root package — the
+# server image doesn't include strata-client. Pin the build interpreter so
+# maturin emits a cp313 wheel that matches the runtime image.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \

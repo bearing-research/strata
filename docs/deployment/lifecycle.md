@@ -86,7 +86,7 @@ curl -X POST 'http://localhost:8765/v1/artifacts/gc?max_age_days=7'
 Or from Python:
 
 ```python
-from strata import StrataClient
+from strata_client import StrataClient
 client = StrataClient(base_url="http://localhost:8765")
 client.garbage_collect(max_age_days=7.0)
 # {"deleted": 14, "bytes_freed": 8429283, ...}

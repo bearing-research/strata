@@ -17,8 +17,8 @@ fetched from Strata. For Strata-side pruning, pass filters to register().
 
 import duckdb
 
-from strata.client import gt
-from strata.integration.duckdb import StrataScanner, register_strata_scan, strata_query
+from strata_client import gt
+from strata_client.integration.duckdb import StrataScanner, register_strata_scan, strata_query
 
 # Define your table URI
 table_uri = "file:///path/to/warehouse#my_db.events"

@@ -114,7 +114,7 @@ uv run python examples/01_basic_usage.py
 ## SDK quick start
 
 ```python
-from strata.client import StrataClient, gt
+from strata_client import StrataClient, gt
 
 client = StrataClient(base_url="http://127.0.0.1:8765")
 
@@ -135,7 +135,7 @@ client.close()
 
 ```python
 import asyncio
-from strata.client import AsyncStrataClient, gt
+from strata_client import AsyncStrataClient, gt
 
 async def main():
     async with AsyncStrataClient() as client:
@@ -152,7 +152,7 @@ asyncio.run(main())
 ### Artifact workflow
 
 ```python
-from strata.client import StrataClient
+from strata_client import StrataClient
 
 with StrataClient(base_url="http://127.0.0.1:8765") as client:
     artifact = client.materialize(
