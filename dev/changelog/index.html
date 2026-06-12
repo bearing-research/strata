@@ -2646,6 +2646,16 @@ exhaustive commit history.</p>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>Ambient cell <code>strata</code> client survives large materialize streams</strong> (ML
+  dogfood): a cell scanning a big lake table via the injected <code>strata</code> client
+  could fail with <code>IncompleteRead</code> — and leave the artifact <code>failed</code> — on a
+  <em>fresh</em> multi-row-group scan. The client read the stream in one blocking
+  <code>resp.read()</code>, which let the server's send buffer fill and tripped its
+  <code>is_disconnected()</code> check, aborting the stream. The client now drains the
+  response in chunks (as httpx does), so large scans complete. Cell execution
+  and warm/cached scans were unaffected.</p>
+</li>
+<li>
 <p><strong>Headless <code>strata run</code> no longer drops console output on cache hits</strong>
   (ML dogfood): a re-run whose cells hit cache carried no fresh stdout, and
   the empty-console write then <em>unlinked</em> the file the producing run had
