@@ -180,6 +180,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Changed
 
+- **Artifact-mode scan builds are bounded-memory**: the background build for
+  `materialize(mode="artifact")` now writes each row-group chunk straight to the
+  blob store (write-through) instead of accumulating the whole result in memory
+  before persisting. A multi-GB scan no longer holds the full result resident on
+  the server. (Groundwork for decoupling the streaming path's build from the
+  client — see the next release.)
+
 - **Default cell timeout raised from 30 s to 300 s**: the previous default
   was an easy footgun for I/O-bound cells (network pulls, slow APIs), which
   timed out at exactly 30 s unless a `# @timeout` annotation was added. The
