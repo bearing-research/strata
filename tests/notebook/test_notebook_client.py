@@ -105,3 +105,38 @@ def test_stamp_cell_is_noop_without_cell_or_name(shim):
     c2._stamp_cell(art, name=None)  # unnamed → no-op
     # With both, set_tag is attempted over HTTP and the failure is swallowed.
     c2._stamp_cell(art, name="team/model")  # no server → swallowed, no raise
+
+
+def test_get_bytes_drains_large_response_in_chunks(shim, monkeypatch):
+    """``_get_bytes`` reads a streamed response in bounded chunks, intact.
+
+    Regression: a single ``resp.read()`` of a large *live* materialize stream
+    let the server's send buffer fill, tripped its ``is_disconnected()`` check,
+    and aborted the stream (``IncompleteRead`` + a poisoned ``failed`` artifact).
+    The client now drains in chunks (like httpx). The fake response rejects an
+    all-at-once read, so reverting to ``resp.read()`` fails this test.
+    """
+    import urllib.request
+
+    payload = b"\xa5" * (5 * (1 << 20) + 123)  # >5 MiB, not a chunk multiple
+
+    class _FakeResp:
+        def __init__(self, data: bytes) -> None:
+            self._buf = data
+            self._pos = 0
+
+        def read(self, size: int = -1) -> bytes:
+            assert size is not None and size > 0, "client must read bounded chunks, not all-at-once"
+            chunk = self._buf[self._pos : self._pos + size]
+            self._pos += len(chunk)
+            return chunk
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: _FakeResp(payload))
+    c = shim.StrataClient(base_url="http://test")
+    assert c._get_bytes("/v1/streams/abc") == payload

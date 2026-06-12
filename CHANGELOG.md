@@ -186,6 +186,15 @@ exhaustive commit history.
 
 ### Fixed
 
+- **Ambient cell `strata` client survives large materialize streams** (ML
+  dogfood): a cell scanning a big lake table via the injected `strata` client
+  could fail with `IncompleteRead` — and leave the artifact `failed` — on a
+  *fresh* multi-row-group scan. The client read the stream in one blocking
+  `resp.read()`, which let the server's send buffer fill and tripped its
+  `is_disconnected()` check, aborting the stream. The client now drains the
+  response in chunks (as httpx does), so large scans complete. Cell execution
+  and warm/cached scans were unaffected.
+
 - **Headless `strata run` no longer drops console output on cache hits**
   (ML dogfood): a re-run whose cells hit cache carried no fresh stdout, and
   the empty-console write then *unlinked* the file the producing run had

@@ -181,7 +181,20 @@ class StrataClient:
         req = urllib.request.Request(self._url(path), method="GET")
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                return resp.read()
+                # Drain incrementally rather than a single ``resp.read()``. On a
+                # large live materialize stream (a fresh multi-row-group scan over
+                # ``/v1/streams``), one big blocking read lets the server's send
+                # buffer fill; the server's ``is_disconnected()`` check then trips
+                # and aborts the stream — the client sees an ``IncompleteRead`` and
+                # the artifact is finalized as ``failed``. A chunked drain keeps the
+                # socket flowing (as httpx does), so the stream completes.
+                chunks: list[bytes] = []
+                while True:
+                    chunk = resp.read(1 << 20)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                return b"".join(chunks)
         except urllib.error.HTTPError as e:
             raise RuntimeError(f"strata GET {path} -> {e.code}") from None
 
