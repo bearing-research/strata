@@ -38,6 +38,7 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
+from tests.conftest import start_container_or_skip
 
 
 def _docker_daemon_reachable() -> bool:
@@ -71,8 +72,13 @@ def minio_container():
     Pinned image: matches ``tests/test_s3_integration.py`` so both modules
     can hit the registry cache.
     """
-    with MinioContainer("minio/minio:RELEASE.2024-11-07T00-52-20Z") as minio:
-        yield minio
+    container = start_container_or_skip(
+        MinioContainer("minio/minio:RELEASE.2024-11-07T00-52-20Z"), label="MinIO"
+    )
+    try:
+        yield container
+    finally:
+        container.stop()
 
 
 def _s3_endpoint(minio_container) -> str:

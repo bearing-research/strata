@@ -10,8 +10,8 @@ import uvicorn
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.schema import Schema
 from pyiceberg.types import DoubleType, LongType, NestedField
+from strata_client.client import StrataClient
 
-from strata.client import StrataClient
 from strata.config import StrataConfig
 
 

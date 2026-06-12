@@ -3,8 +3,8 @@
 import duckdb
 import pyarrow as pa
 import pytest
+from strata_client.integration.duckdb import StrataScanner, StrataTableParams, register_strata_scan
 
-from strata.duckdb_ext import StrataScanner, StrataTableParams, register_strata_scan
 from strata.types import Filter, FilterOp
 
 

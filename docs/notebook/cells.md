@@ -57,7 +57,7 @@ Only variables that a downstream cell actually references get stored as artifact
 Every **locally-executed** Python cell gets a ready `strata` client in its namespace, already bound to the running server — no import or construction needed:
 
 ```python
-# no `from strata.client import StrataClient` / `StrataClient(base_url=...)`
+# no `from strata_client import StrataClient` / `StrataClient(base_url=...)`
 art = strata.materialize(
     inputs=[trips],
     transform={"executor": "scan@v1", "params": {"snapshot_id": trips_snapshot}},
@@ -65,7 +65,7 @@ art = strata.materialize(
 strata.set_alias("taxi/tip-model", "champion", art.artifact_id, art.version)
 ```
 
-It's a lightweight client with the same API surface for the common operations (`materialize`, `put`, `set_alias`, `set_tag`, `resolve_alias`, …); explicit `from strata.client import StrataClient` still works if you want the full client. The ambient `strata` is created fresh per cell run and closed automatically — you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a `@mount` path or an `@table` variable.
+It's a lightweight client with the same API surface for the common operations (`materialize`, `put`, `set_alias`, `set_tag`, `resolve_alias`, …); explicit `from strata_client import StrataClient` still works if you want the full client. The ambient `strata` is created fresh per cell run and closed automatically — you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a `@mount` path or an `@table` variable.
 
 Cells routed to a **remote executor worker** (not local execution) don't get the ambient `strata` — import a client explicitly there.
 

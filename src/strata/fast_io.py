@@ -261,6 +261,34 @@ def validate_ipc_stream(data: _BytesLike) -> int:
     return rows
 
 
+def validate_ipc_stream_reader(source) -> tuple[int, str]:
+    """Bounded-memory variant of :func:`validate_ipc_stream` over a file-like.
+
+    Reads ``source`` (any object with ``read``) incrementally — one record batch
+    at a time — so a multi-GB artifact never has to be held whole in memory. Used
+    to validate a write-through-persisted scan blob by re-reading it from the blob
+    store. Same guarantees as ``validate_ipc_stream``: exactly one IPC stream, no
+    trailing bytes after EOS (the #121 concatenation class).
+
+    Returns ``(row_count, schema_json)``.
+
+    Raises:
+        ValueError: If bytes remain after the first stream's EOS marker.
+        pyarrow.lib.ArrowInvalid: If the data is not a parseable IPC stream.
+    """
+    reader = ipc.open_stream(source)
+    schema_json = reader.schema.to_string()
+    rows = sum(batch.num_rows for batch in reader)
+    # The reader stops at the first EOS; any remaining bytes mean concatenated
+    # streams (the #121 corruption that standard readers silently truncate).
+    trailing = source.read()
+    if trailing:
+        raise ValueError(
+            f"Trailing bytes after IPC stream end: {len(trailing)} bytes (concatenated streams?)"
+        )
+    return rows, schema_json
+
+
 class IncrementalIpcMerger:
     """Merge complete IPC stream segments into one stream, one segment at a time.
 

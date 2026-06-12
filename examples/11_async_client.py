@@ -16,7 +16,7 @@ What you'll learn:
 
 import asyncio
 
-from strata.client import AsyncStrataClient
+from strata_client import AsyncStrataClient
 
 
 # Helper to build filter specs for the transform params

@@ -55,6 +55,38 @@ jobs:
         run: npm run format:check
         working-directory: frontend
 
+  # strata-client must install and pass its tests with ONLY its own deps
+  # (httpx + pyarrow) — no server stack. Guards the slim-install promise.
+  client-only:
+    name: strata-client (no server deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
+        with:
+          version: "latest"
+
+      - name: Create an isolated venv with ONLY the client
+        run: |
+          uv venv --python 3.12 .venv-client
+          # strata-client pulls httpx + pyarrow; pytest for the runner.
+          # The server (strata-notebook) is deliberately NOT installed.
+          uv pip install --python .venv-client ./packages/strata-client pytest
+
+      - name: Assert the server stack is absent
+        run: |
+          .venv-client/bin/python - <<'PY'
+          import importlib.util
+          for mod in ("strata", "pyiceberg", "fastapi", "uvicorn", "duckdb", "pydantic"):
+              assert importlib.util.find_spec(mod) is None, f"{mod} unexpectedly installed"
+          print("server stack absent — client install is slim")
+          PY
+
+      - name: Run client tests
+        run: .venv-client/bin/python -m pytest packages/strata-client/tests/ -v
+
   # Fast unit tests - run on all platforms and Python versions.
   # Windows skips the notebook subsystem (subprocess/venv/fork-style
   # warm pool semantics diverge from POSIX). Core Strata — scanner,

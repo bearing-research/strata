@@ -7,6 +7,12 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
+[manifest]
+members = [
+    "strata-client",
+    "strata-notebook",
+]
+
 [[package]]
 name = "adbc-driver-bigquery"
 version = "1.11.0"
@@ -3609,6 +3615,50 @@ wheels = [
 ]
 
 [[package]]
+name = "strata-client"
+version = "0.2.0"
+source = { editable = "packages/strata-client" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pyarrow" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "datafusion" },
+    { name = "duckdb" },
+    { name = "pandas" },
+    { name = "polars" },
+]
+datafusion = [
+    { name = "datafusion" },
+]
+duckdb = [
+    { name = "duckdb" },
+]
+pandas = [
+    { name = "pandas" },
+]
+polars = [
+    { name = "polars" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "datafusion", marker = "extra == 'all'", specifier = ">=50.1.0" },
+    { name = "datafusion", marker = "extra == 'datafusion'", specifier = ">=50.1.0" },
+    { name = "duckdb", marker = "extra == 'all'", specifier = ">=1.1.0" },
+    { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.1.0" },
+    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "pandas", marker = "extra == 'all'", specifier = ">=2.0.0" },
+    { name = "pandas", marker = "extra == 'pandas'", specifier = ">=2.0.0" },
+    { name = "polars", marker = "extra == 'all'", specifier = ">=1.36.1" },
+    { name = "polars", marker = "extra == 'polars'", specifier = ">=1.36.1" },
+    { name = "pyarrow", specifier = ">=18.0.0" },
+]
+provides-extras = ["duckdb", "pandas", "polars", "datafusion", "all"]
+
+[[package]]
 name = "strata-notebook"
 version = "0.2.0"
 source = { editable = "." }
@@ -3689,6 +3739,7 @@ dev = [
     { name = "ruff" },
     { name = "s3fs" },
     { name = "sqlglot" },
+    { name = "strata-client" },
     { name = "testcontainers", extra = ["minio"] },
     { name = "ty" },
 ]
@@ -3757,6 +3808,7 @@ dev = [
     { name = "ruff", specifier = ">=0.8.0" },
     { name = "s3fs", specifier = ">=2026.3.0" },
     { name = "sqlglot", specifier = ">=25.0.0" },
+    { name = "strata-client", editable = "packages/strata-client" },
     { name = "testcontainers", extras = ["minio"], specifier = ">=4.0.0" },
     { name = "ty", specifier = ">=0.0.24" },
 ]

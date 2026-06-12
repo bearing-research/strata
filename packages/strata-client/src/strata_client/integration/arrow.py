@@ -4,7 +4,7 @@ Provides a PyArrow-native interface that serves as the foundation for
 other integrations (DuckDB, Polars, pandas, etc.).
 
 Example:
-    from strata.integration.arrow import StrataDataset
+    from strata_client.integration.arrow import StrataDataset
 
     # Create a dataset bound to a table
     dataset = StrataDataset("file:///warehouse#db.events")
@@ -31,9 +31,9 @@ from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
-from strata.client import StrataClient
-from strata.config import StrataConfig
-from strata.types import Filter
+from strata_client._clientconfig import HasServerUrl
+from strata_client.client import StrataClient
+from strata_client.filters import Filter
 
 if TYPE_CHECKING:
     pass
@@ -183,8 +183,8 @@ class StrataDataset:
     building integrations with other data processing libraries.
 
     Example:
-        from strata.integration.arrow import StrataDataset
-        from strata.client import gt
+        from strata_client.integration.arrow import StrataDataset
+        from strata_client.client import gt
 
         # Bind to a table (optionally pin to a snapshot)
         dataset = StrataDataset(
@@ -210,7 +210,7 @@ class StrataDataset:
         self,
         table_uri: str,
         snapshot_id: int | None = None,
-        config: StrataConfig | None = None,
+        config: HasServerUrl | None = None,
         base_url: str | None = None,
     ) -> None:
         """Create a dataset bound to a Strata table.
@@ -358,7 +358,7 @@ class StrataDataset:
 def dataset(
     table_uri: str,
     snapshot_id: int | None = None,
-    config: StrataConfig | None = None,
+    config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> StrataDataset:
     """Create a StrataDataset for the given table.
@@ -375,8 +375,8 @@ def dataset(
         StrataDataset bound to the table
 
     Example:
-        from strata.integration.arrow import dataset
-        from strata.client import gt
+        from strata_client.integration.arrow import dataset
+        from strata_client.client import gt
 
         ds = dataset("file:///warehouse#db.events")
         table = ds.scanner(filter=gt("value", 100)).to_table()

@@ -91,6 +91,10 @@ sql-duckdb = [
 
 [dependency-groups]
 dev = [
+    # The independent client, installed editable from the workspace so the
+    # combined test suite (client unit tests + integrations + conftest) can
+    # import it. NOT a runtime dependency of strata-notebook — dev-only.
+    "strata-client",
     "pre-commit>=3.7.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -136,6 +140,17 @@ build-backend = "maturin"
 
 [tool.uv]
 python-preference = "only-managed"
+
+# strata-client is an INDEPENDENT distribution — strata-notebook does NOT depend
+# on it (client and server share only the wire protocol). It's a dev-only
+# dependency (above), resolved from the workspace, so `uv sync` installs it
+# editable for the combined test suite while the published server wheel never
+# depends on it.
+[tool.uv.workspace]
+members = ["packages/strata-client"]
+
+[tool.uv.sources]
+strata-client = { workspace = true }
 
 # Maturin configuration for building the Rust extension
 # Build with: maturin develop (dev) or maturin build (release)

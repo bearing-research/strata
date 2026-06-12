@@ -2,8 +2,7 @@
 
 import pyarrow as pa
 import pytest
-
-from strata.polars_ext import StrataPolarsScanner, scan_to_lazy, scan_to_polars
+from strata_client.integration.polars import StrataPolarsScanner, scan_to_lazy, scan_to_polars
 
 
 class TestScanToPolars:
