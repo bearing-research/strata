@@ -39,7 +39,11 @@ from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
 from strata.cache_warmer import CacheWarmer
 from strata.config import StrataConfig
-from strata.fast_io import IncrementalIpcMerger, concat_stream_bytes, validate_ipc_stream
+from strata.fast_io import (
+    IncrementalIpcMerger,
+    validate_ipc_stream,
+    validate_ipc_stream_reader,
+)
 from strata.gc_tracker import get_gc_stats, get_recent_gc_pauses, install_gc_tracker
 from strata.health import HealthStatus, run_health_checks
 from strata.json_types import JsonValue
@@ -641,6 +645,12 @@ async def _build_identity_artifact(stream_state: StreamState) -> None:
     stream_state.started_at = time.time()
 
     try:
+        from strata.artifact_store import get_artifact_store
+
+        store = get_artifact_store(state.config.artifact_dir)
+        if store is None:
+            return  # No artifact store in service mode
+
         if not plan.tasks:
             if plan.schema is not None:
                 sink = pa.BufferOutputStream()
@@ -650,32 +660,47 @@ async def _build_identity_artifact(stream_state: StreamState) -> None:
             else:
                 empty_stream = b""
 
-            await _finalize_stream_artifact(stream_state, empty_stream, 0)
+            store.write_blob(stream_state.artifact_id, stream_state.artifact_version, empty_stream)
+            await _finalize_written_blob(stream_state, 0, len(empty_stream))
             stream_state.bytes_streamed = len(empty_stream)
             stream_state.completed = True
             return
 
         loop = asyncio.get_running_loop()
-        all_chunks: list[bytes] = []
         row_count = 0
+        byte_size = 0
 
-        for task in plan.tasks:
-            if state._draining:
-                raise RuntimeError("Server is shutting down")
+        # Write each merged row-group chunk straight to the blob (write-through,
+        # bounded memory — no full-result buffer). The IncrementalIpcMerger emits
+        # one valid IPC stream across the row groups so standard readers see every
+        # row. The blob commits atomically when the writer context exits.
+        merger = IncrementalIpcMerger() if len(plan.tasks) > 1 else None
+        with store.open_blob_writer(
+            stream_state.artifact_id, stream_state.artifact_version
+        ) as blob:
+            for task in plan.tasks:
+                if state._draining:
+                    raise RuntimeError("Server is shutting down")
 
-            chunk = await loop.run_in_executor(
-                state._fetch_executor,
-                state.fetcher.fetch_as_stream_bytes,
-                task,
-            )
-            all_chunks.append(chunk)
-            row_count += task.num_rows
+                chunk = await loop.run_in_executor(
+                    state._fetch_executor,
+                    state.fetcher.fetch_as_stream_bytes,
+                    task,
+                )
+                out = merger.feed(chunk) if merger is not None else chunk
+                if out:
+                    blob.write(out)
+                    byte_size += len(out)
+                row_count += task.num_rows
 
-        # Each chunk is a complete IPC stream (schema + batches + EOS);
-        # merge into ONE stream so standard readers see every row group.
-        combined = concat_stream_bytes(all_chunks)
-        await _finalize_stream_artifact(stream_state, combined, row_count)
-        stream_state.bytes_streamed = len(combined)
+            if merger is not None:
+                tail = merger.finish()
+                if tail:
+                    blob.write(tail)
+                    byte_size += len(tail)
+
+        await _finalize_written_blob(stream_state, row_count, byte_size)
+        stream_state.bytes_streamed = byte_size
         stream_state.completed = True
     except asyncio.CancelledError:
         stream_state.error_message = "Build cancelled"
@@ -6639,6 +6664,78 @@ async def _finalize_stream_artifact(stream_state: StreamState, data: bytes, row_
             error=str(e),
         )
         # Mark artifact as failed
+        try:
+            store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
+        except Exception:
+            pass
+
+
+async def _finalize_written_blob(stream_state: StreamState, row_count: int, byte_size: int) -> None:
+    """Finalize a scan artifact whose blob was already **written through** to the
+    blob store (bounded memory) — no full-result buffer.
+
+    The blob is on disk by the time this runs; re-read it in bounded memory (one
+    record batch at a time, in a worker thread) for the integrity gate, then flip
+    state to ``ready``. Companion to ``_finalize_stream_artifact`` (which still
+    takes the full bytes for the inline streaming path); this one is for
+    write-through builds. See docs/internal/design-streaming-decouple.md.
+    """
+    from strata.artifact_store import get_artifact_store
+
+    state = get_state()
+    store = get_artifact_store(state.config.artifact_dir)
+
+    if store is None:
+        return  # No artifact store in service mode
+
+    try:
+        # Integrity gate (#124): bounded re-read confirms the persisted blob is
+        # exactly one readable IPC stream whose row total matches the plan.
+        if byte_size == 0:
+            readable_rows, schema_json = 0, ""
+        else:
+
+            def _read_and_validate() -> tuple[int, str]:
+                with store.open_blob_reader(
+                    stream_state.artifact_id, stream_state.artifact_version
+                ) as blob:
+                    return validate_ipc_stream_reader(blob)
+
+            readable_rows, schema_json = await asyncio.to_thread(_read_and_validate)
+        if readable_rows != row_count:
+            raise ValueError(
+                f"Artifact blob integrity check failed: stream yields "
+                f"{readable_rows} rows, build reported {row_count}"
+            )
+
+        # The blob is already persisted; finalize_and_set_name flips state to
+        # ready and records metadata + the requested name pointer atomically.
+        finalized_artifact = store.finalize_and_set_name(
+            artifact_id=stream_state.artifact_id,
+            version=stream_state.artifact_version,
+            schema_json=schema_json,
+            row_count=row_count,
+            byte_size=byte_size,
+            name=stream_state.name,
+            tenant=stream_state.tenant,
+        )
+        if finalized_artifact is not None:
+            stream_state.artifact_id = finalized_artifact.id
+            stream_state.artifact_version = finalized_artifact.version
+
+        logger.info(
+            "stream_artifact_finalized",
+            artifact_id=stream_state.artifact_id,
+            version=stream_state.artifact_version,
+            byte_size=byte_size,
+            row_count=row_count,
+        )
+    except Exception as e:
+        logger.error(
+            "stream_artifact_finalize_error",
+            artifact_id=stream_state.artifact_id,
+            error=str(e),
+        )
         try:
             store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
         except Exception:
