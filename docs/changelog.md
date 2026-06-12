@@ -204,6 +204,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   response in chunks (as httpx does), so large scans complete. Cell execution
   and warm/cached scans were unaffected.
 
+- **A client never poisons a scan artifact** (server-side root fix for the
+  above): the `/v1/streams` GET no longer scans-and-persists inside the response
+  generator. The build now runs as a decoupled, bounded-memory background task
+  and finalizes the artifact on its own merits; the GET waits for it and then
+  streams the persisted blob. A slow or dropped reader can no longer abort the
+  build or mark the artifact `failed` — a mid-stream disconnect leaves it
+  `ready`. The QoS scan slot is released the moment the build completes.
+
 - **Headless `strata run` no longer drops console output on cache hits**
   (ML dogfood): a re-run whose cells hit cache carried no fresh stdout, and
   the empty-console write then *unlinked* the file the producing run had

@@ -702,7 +702,8 @@ class TestStreamingIntegration:
         """Client disconnect during streaming releases semaphore.
 
         This test verifies that when a client disconnects mid-stream:
-        1. The server detects the disconnect
+        1. The artifact build is decoupled from the read — a dropped client
+           does NOT fail the artifact; the background build finalizes it ready.
         2. Resources (semaphore) are released in the finally block
         3. Subsequent scans can proceed normally
 
@@ -753,15 +754,24 @@ class TestStreamingIntegration:
             except Exception:
                 pass  # Connection errors expected
 
-        # Give server time to detect disconnect and cleanup
-        time.sleep(0.5)
-
+        # The build is decoupled from the client: a mid-stream disconnect must
+        # NOT poison the artifact. The background build finalizes it ready
+        # regardless of who is (or isn't) reading.
         with httpx.Client(timeout=30.0) as http_client:
-            artifact_info = http_client.get(
-                f"http://127.0.0.1:{config.port}/v1/artifacts/{artifact_id}/v/{version}"
+            deadline = time.time() + 10
+            final_state = None
+            while time.time() < deadline:
+                artifact_info = http_client.get(
+                    f"http://127.0.0.1:{config.port}/v1/artifacts/{artifact_id}/v/{version}"
+                )
+                assert artifact_info.status_code == 200
+                final_state = artifact_info.json()["state"]
+                if final_state == "ready":
+                    break
+                time.sleep(0.1)
+            assert final_state == "ready", (
+                f"client disconnect must not fail the build; got state={final_state}"
             )
-            assert artifact_info.status_code == 200
-            assert artifact_info.json()["state"] == "failed"
 
         # Now verify we can still do scans (resources were released)
         # If semaphore wasn't released, this would hang or timeout
@@ -943,16 +953,12 @@ class TestStreamAbortMetrics:
         config = server_with_metrics["config"]
         warehouse = server_with_metrics["warehouse"]
         table_uri = warehouse["table_uri"]
-        append_rows(warehouse["table"], 1000, 25)
+        # A multi-MB result so the blob spans many chunks and overflows the
+        # socket send buffer — the server's send then blocks waiting for the
+        # reader, which is the window in which a disconnect is detectable.
+        append_rows(warehouse["table"], 0, 200_000)
 
         initial_disconnects = state.metrics.client_disconnects
-        original_fetch = state.fetcher.fetch_as_stream_bytes
-
-        def slow_fetch(task):
-            time.sleep(0.05)
-            return original_fetch(task)
-
-        state.fetcher.fetch_as_stream_bytes = slow_fetch
 
         with httpx.Client(timeout=30.0) as http_client:
             # Create and start streaming a materialize request
@@ -963,25 +969,31 @@ class TestStreamAbortMetrics:
             assert response.status_code == 200
             stream_url = response.json()["stream_url"]
 
-            # Start streaming but close connection immediately
+            # Read one chunk then drop while the server is still sending the
+            # multi-MB blob. The failed mid-stream send is where the disconnect
+            # is recorded — the artifact itself still finalizes ready (a reader
+            # never fails a decoupled build).
             try:
                 with http_client.stream(
                     "GET",
                     f"http://127.0.0.1:{config.port}{stream_url}",
-                    timeout=5,
+                    timeout=10,
                 ) as stream:
-                    # Read first chunk then close
                     for chunk in stream.iter_bytes(chunk_size=1024):
                         if chunk:
-                            break  # Simulate disconnect
+                            break
             except Exception:
                 pass
 
-        # Give server time to detect disconnect
-        time.sleep(0.5)
+        # The disconnect is surfaced asynchronously when the blocked send fails,
+        # so poll rather than assuming an immediate increment.
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            if state.metrics.client_disconnects > initial_disconnects:
+                break
+            time.sleep(0.1)
 
-        final_disconnects = state.metrics.client_disconnects
-        assert final_disconnects > initial_disconnects
+        assert state.metrics.client_disconnects > initial_disconnects
 
     def test_timeout_increments_counter(self, temp_warehouse, tmp_path):
         """Scan timeout increments stream_aborts_timeout counter."""

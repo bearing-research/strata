@@ -41,7 +41,6 @@ from strata.cache_warmer import CacheWarmer
 from strata.config import StrataConfig
 from strata.fast_io import (
     IncrementalIpcMerger,
-    validate_ipc_stream,
     validate_ipc_stream_reader,
 )
 from strata.gc_tracker import get_gc_stats, get_recent_gc_pauses, install_gc_tracker
@@ -667,8 +666,10 @@ async def _build_identity_artifact(stream_state: StreamState) -> None:
             return
 
         loop = asyncio.get_running_loop()
+        scan_id = plan.scan_id
         row_count = 0
         byte_size = 0
+        start_time = time.perf_counter()
 
         # Write each merged row-group chunk straight to the blob (write-through,
         # bounded memory — no full-result buffer). The IncrementalIpcMerger emits
@@ -678,15 +679,44 @@ async def _build_identity_artifact(stream_state: StreamState) -> None:
         with store.open_blob_writer(
             stream_state.artifact_id, stream_state.artifact_version
         ) as blob:
-            for task in plan.tasks:
+            for index, task in enumerate(plan.tasks):
                 if state._draining:
                     raise RuntimeError("Server is shutting down")
 
-                chunk = await loop.run_in_executor(
-                    state._fetch_executor,
-                    state.fetcher.fetch_as_stream_bytes,
-                    task,
-                )
+                # Bound the build's wall-clock the same way the old streaming
+                # generator did — a runaway scan marks the artifact failed
+                # rather than holding resources indefinitely.
+                if time.perf_counter() - start_time > state.config.scan_timeout_seconds:
+                    state.metrics.record_stream_abort_timeout()
+                    raise RuntimeError(f"Scan timed out after {state.config.scan_timeout_seconds}s")
+
+                # Consume the eagerly-prefetched first row group when stream mode
+                # warmed one (no-op in artifact mode, which never prefetches).
+                chunk: bytes | None = None
+                if index == 0 and plan.prefetched_first is not None:
+                    chunk = plan.prefetched_first
+                    plan.prefetched_first = None
+                    state._prefetch_used += 1
+                elif index == 0:
+                    prefetch_task = state._prefetch_futures.get(scan_id)
+                    if prefetch_task is not None:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(prefetch_task), timeout=0.05)
+                        except TimeoutError:
+                            pass
+                        if plan.prefetched_first is not None:
+                            chunk = plan.prefetched_first
+                            plan.prefetched_first = None
+                            state._prefetch_used += 1
+                        else:
+                            _discard_prefetch(state, scan_id, count_wasted=True)
+
+                if chunk is None:
+                    chunk = await loop.run_in_executor(
+                        state._fetch_executor,
+                        state.fetcher.fetch_as_stream_bytes,
+                        task,
+                    )
                 out = merger.feed(chunk) if merger is not None else chunk
                 if out:
                     blob.write(out)
@@ -6428,8 +6458,10 @@ async def get_stream(stream_id: str, request: Request):
     else:
         state._active_bulk += 1
 
-    # Empty scan handling
-    if not plan.tasks:
+    # Release the QoS resources acquired above. Called exactly once per request,
+    # in whichever exit path runs (build cancelled, build failed, or after the
+    # blob has finished streaming).
+    async def _release_qos() -> None:
         await limiter.release()
         state._scan_tier.pop(scan_id, None)
         scan_client = state._scan_client.pop(scan_id, None)
@@ -6443,231 +6475,131 @@ async def get_stream(stream_id: str, request: Request):
             state._active_interactive -= 1
         else:
             state._active_bulk -= 1
+        state._active_scans -= 1
 
-        # Mark stream as completed
-        stream_state.completed = True
-        stream_state.completed_at = time.time()
-        _schedule_stream_cleanup(state, stream_id, scan_id)
+    from strata.artifact_store import get_artifact_store
 
-        # Return valid empty Arrow IPC stream
-        # Handle case where schema is None (empty table with no Parquet files)
-        if plan.schema is not None:
-            sink = pa.BufferOutputStream()
-            writer = ipc.new_stream(sink, plan.schema)
-            writer.close()
-            empty_stream = sink.getvalue().to_pybytes()
-        else:
-            # No schema available - return empty bytes
-            # This happens for tables with no data files
-            empty_stream = b""
+    store = get_artifact_store(state.config.artifact_dir)
+    state._active_scans += 1
 
-        # Finalize artifact with empty data
-        await _finalize_stream_artifact(stream_state, empty_stream, 0)
+    # Service mode (no artifact store): there's nothing to persist, so stream a
+    # bounded pass-through straight from the fetcher. With no artifact to
+    # finalize, none of the decoupling smells apply — a client disconnect simply
+    # ends the generator (the next ``yield`` raises), nothing to poison.
+    if store is None:
 
-        return Response(content=empty_stream, media_type="application/vnd.apache.arrow.stream")
-
-    # Create streaming generator that also persists to artifact store
-    async def stream_and_persist():
-        """Stream data to client while persisting to artifact store."""
-        # Each fetched chunk is a complete IPC stream (schema + batches +
-        # EOS). Multi-task scans must merge them into ONE stream — standard
-        # Arrow readers stop at the first EOS marker, so naive concatenation
-        # silently truncates to the first row group. Single-task scans keep
-        # the zero-parse passthrough.
-        merger = IncrementalIpcMerger() if len(plan.tasks) > 1 else None
-        all_chunks: list[bytes] = []
-        bytes_out = 0
-        row_count = 0
-        start_time = time.perf_counter()
-
-        try:
-            state._active_scans += 1
-
-            for index, task in enumerate(plan.tasks):
-                # Check for client disconnect
-                if await request.is_disconnected():
-                    stream_state.error_message = "Client disconnected during streaming"
-                    state.metrics.record_client_disconnect()
-                    _mark_stream_artifact_failed(stream_state)
-                    return
-
-                # Check timeout
-                elapsed = time.perf_counter() - start_time
-                if elapsed > state.config.scan_timeout_seconds:
-                    stream_state.error_message = (
-                        f"Scan timed out after {state.config.scan_timeout_seconds}s"
-                    )
-                    state.metrics.record_stream_abort_timeout()
-                    _mark_stream_artifact_failed(stream_state)
-                    raise RuntimeError(stream_state.error_message)
-
-                chunk: bytes | None = None
-                if index == 0:
-                    prefetch_task = state._prefetch_futures.get(scan_id)
-                    if prefetch_task is not None and plan.prefetched_first is None:
-                        try:
-                            await asyncio.wait_for(asyncio.shield(prefetch_task), timeout=0.05)
-                        except TimeoutError:
-                            pass
-                        except asyncio.CancelledError:
-                            raise
-
-                    if plan.prefetched_first is not None:
-                        chunk = plan.prefetched_first
-                        plan.prefetched_first = None
-                        state._prefetch_used += 1
-                    else:
-                        _discard_prefetch(state, scan_id, count_wasted=True)
-
-                if chunk is None:
-                    try:
+        async def serve_passthrough():
+            start_time = time.perf_counter()
+            try:
+                if not plan.tasks:
+                    if plan.schema is not None:
+                        sink = pa.BufferOutputStream()
+                        writer = ipc.new_stream(sink, plan.schema)
+                        writer.close()
+                        yield sink.getvalue().to_pybytes()
+                else:
+                    merger = IncrementalIpcMerger() if len(plan.tasks) > 1 else None
+                    for task in plan.tasks:
+                        if time.perf_counter() - start_time > state.config.scan_timeout_seconds:
+                            state.metrics.record_stream_abort_timeout()
+                            raise RuntimeError(
+                                f"Scan timed out after {state.config.scan_timeout_seconds}s"
+                            )
                         chunk = await asyncio.get_running_loop().run_in_executor(
                             state._fetch_executor,
                             state.fetcher.fetch_as_stream_bytes,
                             task,
                         )
-                    except Exception as e:
-                        stream_state.error_message = str(e)
-                        logger.error("stream_fetch_error", error=str(e), task=task.file_path)
-                        _mark_stream_artifact_failed(stream_state)
-                        raise
+                        out = merger.feed(chunk) if merger is not None else chunk
+                        if out:
+                            yield out
+                    if merger is not None:
+                        tail = merger.finish()
+                        if tail:
+                            yield tail
+                stream_state.completed = True
+            finally:
+                await _release_qos()
+                stream_state.completed_at = time.time()
+                _schedule_stream_cleanup(state, stream_id, scan_id)
 
-                if merger is None:
-                    out = chunk
-                else:
-                    try:
-                        out = merger.feed(chunk)
-                    except (ValueError, pa.ArrowInvalid) as e:
-                        stream_state.error_message = str(e)
-                        logger.error("stream_merge_error", error=str(e), task=task.file_path)
-                        _mark_stream_artifact_failed(stream_state)
-                        raise
+        return StreamingResponse(
+            serve_passthrough(),
+            media_type="application/vnd.apache.arrow.stream",
+        )
 
-                all_chunks.append(out)
-                bytes_out += len(out)
-                row_count += task.num_rows
+    # Personal mode: decouple the artifact build from this client's read. The
+    # background build (bounded write-through, PR #165) scans row-group-by-row-
+    # group straight to the blob and finalizes ready/failed on its own merits —
+    # empty plans included. A slow or dropped reader can no longer poison the
+    # cache entry (the #164 IncompleteRead bug): we wait for the build, then
+    # serve the persisted blob over the same reliable path as GET .../data.
+    if stream_state.background_task is None:
+        stream_state.background_task = asyncio.create_task(_build_identity_artifact(stream_state))
+    build_task = stream_state.background_task
 
-                if out:
-                    yield out
+    # Wait for the build. It runs as a decoupled background task, shielded so a
+    # client disconnect never cancels it — the artifact finalizes regardless of
+    # who is (or isn't) reading. (A handler-level cancel, e.g. shutdown, frees
+    # the slot but leaves the build running.)
+    try:
+        await asyncio.shield(build_task)
+    except asyncio.CancelledError:
+        await _release_qos()
+        stream_state.completed_at = time.time()
+        _schedule_stream_cleanup(state, stream_id, scan_id)
+        raise
 
-            if merger is not None:
-                tail = merger.finish()
-                if tail:
-                    all_chunks.append(tail)
-                    bytes_out += len(tail)
-                    yield tail
+    # The build is done — the scan is what the QoS slot gated, so release it now,
+    # deterministically, in the handler. Serving the already-persisted blob is
+    # cheap bounded I/O that needs no scan slot, and releasing here (rather than
+    # in the response generator's finally) means a client that vanished before
+    # iteration can never strand the slot.
+    artifact = store.get_artifact(stream_state.artifact_id, stream_state.artifact_version)
+    await _release_qos()
+    stream_state.completed = True
+    stream_state.completed_at = time.time()
 
-            # Update stream state
+    if artifact is None or artifact.state not in ("ready", "superseded"):
+        _schedule_stream_cleanup(state, stream_id, scan_id)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "scan_build_failed",
+                "detail": stream_state.error_message or "scan build failed",
+            },
+        )
+
+    # Serve the persisted blob in bounded chunks (no merger, no accumulation, no
+    # is_disconnected coupling). A reader that drops mid-send surfaces here as a
+    # cancel/close — the artifact is already finalized, so we only count it.
+    reader_cm = await asyncio.to_thread(
+        store.open_blob_reader, stream_state.artifact_id, stream_state.artifact_version
+    )
+
+    async def serve_blob():
+        bytes_out = 0
+        try:
+            if reader_cm is not None:
+                with reader_cm as blob:
+                    while True:
+                        chunk = await asyncio.to_thread(blob.read, BLOB_STREAM_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        bytes_out += len(chunk)
+                        yield chunk
             stream_state.bytes_streamed = bytes_out
-            stream_state.completed = True
-
-            # Persist artifact: all_chunks now holds segments of a single
-            # valid IPC stream, so a plain byte join is correct.
-            if all_chunks:
-                combined = b"".join(all_chunks)
-                await _finalize_stream_artifact(stream_state, combined, row_count)
-
-        except asyncio.CancelledError:
-            if not stream_state.completed and stream_state.error_message is None:
-                stream_state.error_message = "Client disconnected during streaming"
-                state.metrics.record_client_disconnect()
-                _mark_stream_artifact_failed(stream_state)
+        except (asyncio.CancelledError, GeneratorExit):
+            state.metrics.record_client_disconnect()
             raise
         finally:
-            state._active_scans -= 1
-
-            # Release QoS resources
-            await limiter.release()
-            state._scan_tier.pop(scan_id, None)
-            scan_client = state._scan_client.pop(scan_id, None)
-            if scan_client is not None:
-                client_id_cleanup, client_sem_acquired = scan_client
-                if client_sem_acquired:
-                    client_sem = _get_client_semaphore(state, client_id_cleanup, tier)
-                    if client_sem is not None:
-                        client_sem.release()
-            if tier == "interactive":
-                state._active_interactive -= 1
-            else:
-                state._active_bulk -= 1
-
-            # Clean up stream state after TTL
-            # (leave it for a while so client can retry on failure)
-            stream_state.completed_at = time.time()
             _schedule_stream_cleanup(state, stream_id, scan_id)
 
     return StreamingResponse(
-        stream_and_persist(),
+        serve_blob(),
         media_type="application/vnd.apache.arrow.stream",
+        headers={"X-Arrow-Row-Count": str(artifact.row_count or 0)},
     )
-
-
-async def _finalize_stream_artifact(stream_state: StreamState, data: bytes, row_count: int) -> None:
-    """Finalize artifact after streaming completes.
-
-    Writes the combined Arrow IPC data to the artifact store
-    and transitions the artifact to ready state.
-    """
-    from strata.artifact_store import get_artifact_store
-
-    state = get_state()
-    store = get_artifact_store(state.config.artifact_dir)
-
-    if store is None:
-        return  # No artifact store in service mode
-
-    try:
-        # Integrity gate (#123): the blob must be exactly one readable IPC
-        # stream whose row total matches what the plan's tasks reported.
-        # A mismatch marks the artifact failed (via the except below)
-        # instead of persisting silently truncated data as ready.
-        readable_rows = validate_ipc_stream(data)
-        if readable_rows != row_count:
-            raise ValueError(
-                f"Artifact blob integrity check failed: stream yields "
-                f"{readable_rows} rows, build reported {row_count}"
-            )
-
-        # Write blob
-        store.write_blob(stream_state.artifact_id, stream_state.artifact_version, data)
-
-        # Extract schema from Arrow IPC data (validated above, so this parses)
-        schema_json = ""
-        if data:
-            schema_json = ipc.open_stream(data).schema.to_string()
-
-        # Finalize artifact and atomically update the requested name pointer.
-        finalized_artifact = store.finalize_and_set_name(
-            artifact_id=stream_state.artifact_id,
-            version=stream_state.artifact_version,
-            schema_json=schema_json,
-            row_count=row_count,
-            byte_size=len(data),
-            name=stream_state.name,
-            tenant=stream_state.tenant,
-        )
-        if finalized_artifact is not None:
-            stream_state.artifact_id = finalized_artifact.id
-            stream_state.artifact_version = finalized_artifact.version
-
-        logger.info(
-            "stream_artifact_finalized",
-            artifact_id=stream_state.artifact_id,
-            version=stream_state.artifact_version,
-            byte_size=len(data),
-            row_count=row_count,
-        )
-    except Exception as e:
-        logger.error(
-            "stream_artifact_finalize_error",
-            artifact_id=stream_state.artifact_id,
-            error=str(e),
-        )
-        # Mark artifact as failed
-        try:
-            store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
-        except Exception:
-            pass
 
 
 async def _finalize_written_blob(stream_state: StreamState, row_count: int, byte_size: int) -> None:
@@ -6676,9 +6608,9 @@ async def _finalize_written_blob(stream_state: StreamState, row_count: int, byte
 
     The blob is on disk by the time this runs; re-read it in bounded memory (one
     record batch at a time, in a worker thread) for the integrity gate, then flip
-    state to ``ready``. Companion to ``_finalize_stream_artifact`` (which still
-    takes the full bytes for the inline streaming path); this one is for
-    write-through builds. See docs/internal/design-streaming-decouple.md.
+    state to ``ready``. The sole finalizer for scan builds — both the stream and
+    artifact materialize paths route through the write-through build
+    (``_build_identity_artifact``). See docs/internal/design-streaming-decouple.md.
     """
     from strata.artifact_store import get_artifact_store
 
