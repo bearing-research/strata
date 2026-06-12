@@ -22,9 +22,9 @@ from typing import Any, TypedDict
 import duckdb
 import pyarrow as pa
 
-from strata.client import StrataClient
-from strata.config import StrataConfig
-from strata.types import Filter
+from strata_client._clientconfig import HasServerUrl
+from strata_client.client import StrataClient
+from strata_client.filters import Filter
 
 
 class StrataTableParams(TypedDict, total=False):
@@ -70,7 +70,7 @@ def register_strata_scan(
     snapshot_id: int | None = None,
     columns: list[str] | None = None,
     filters: list[Filter] | None = None,
-    config: StrataConfig | None = None,
+    config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> pa.Table:
     """Register a Strata scan as a DuckDB view.
@@ -96,8 +96,8 @@ def register_strata_scan(
 
     Example:
         import duckdb
-        from strata.integration.duckdb import register_strata_scan
-        from strata.client import gt
+        from strata_client.integration.duckdb import register_strata_scan
+        from strata_client.client import gt
 
         conn = duckdb.connect()
 
@@ -134,7 +134,7 @@ def register_strata_scan(
 def strata_query(
     sql: str,
     tables: dict[str, StrataTableParams],
-    config: StrataConfig | None = None,
+    config: HasServerUrl | None = None,
     base_url: str | None = None,
 ) -> pa.Table:
     """Execute a SQL query over Strata tables.
@@ -155,8 +155,8 @@ def strata_query(
         Arrow Table with query results
 
     Example:
-        from strata.integration.duckdb import strata_query
-        from strata.client import gt
+        from strata_client.integration.duckdb import strata_query
+        from strata_client.client import gt
 
         # Strata-side filter via params, DuckDB-side via SQL
         result = strata_query(
@@ -229,7 +229,7 @@ class StrataScanner:
 
     def __init__(
         self,
-        config: StrataConfig | None = None,
+        config: HasServerUrl | None = None,
         base_url: str | None = None,
     ) -> None:
         self.config = config

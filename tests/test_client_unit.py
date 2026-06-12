@@ -14,8 +14,7 @@ import httpx
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
-
-from strata.client import (
+from strata_client.client import (
     Artifact,
     RetryConfig,
     StrataClient,

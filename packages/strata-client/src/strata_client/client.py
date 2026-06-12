@@ -3,7 +3,7 @@
 Provides both sync and async clients for interacting with Strata:
 
     # Sync client (for scripts, notebooks, CLI tools)
-    from strata.client import StrataClient
+    from strata_client import StrataClient
 
     with StrataClient() as client:
         # Materialize creates/finds an artifact
@@ -15,7 +15,7 @@ Provides both sync and async clients for interacting with Strata:
         table = client.fetch(artifact.uri)
 
     # Async client (for FastAPI, asyncio applications)
-    from strata.client import AsyncStrataClient
+    from strata_client import AsyncStrataClient
 
     async with AsyncStrataClient() as client:
         artifact = await client.materialize(
@@ -59,8 +59,8 @@ import httpx
 import pyarrow as pa
 import pyarrow.ipc as ipc
 
-from strata.config import StrataConfig
-from strata.types import Filter, FilterOp, FilterValue
+from strata_client._clientconfig import HasServerUrl, resolve_server_url
+from strata_client.filters import Filter, FilterOp, FilterValue
 
 type TransformSpec = Mapping[str, object]
 type JsonArtifactInput = Mapping[str, object]
@@ -128,6 +128,8 @@ def _convert_to_arrow_ipc(data: PutData) -> bytes:
         if isinstance(data, pd.DataFrame):
             return _table_to_ipc(pa.Table.from_pandas(data))
     except ImportError:
+        # pandas is optional (not a strata-client dependency); if it's absent
+        # the value can't be a DataFrame — fall through to the next type.
         pass
 
     try:
@@ -136,6 +138,8 @@ def _convert_to_arrow_ipc(data: PutData) -> bytes:
         if isinstance(data, pl.DataFrame):
             return _table_to_ipc(data.to_arrow())
     except ImportError:
+        # polars is optional; absence means the value isn't a polars DataFrame —
+        # fall through to the final unsupported-type error.
         pass
 
     raise TypeError(
@@ -332,19 +336,27 @@ class StrataClient:
 
     def __init__(
         self,
-        config: StrataConfig | None = None,
+        config: "HasServerUrl | None" = None,
         base_url: str | None = None,
         retry_config: RetryConfig | None = None,
     ) -> None:
         """Initialize the client.
 
         Args:
-            config: Strata configuration (uses StrataConfig.load() if None)
+            config: Strata configuration. If omitted, the server URL is resolved
+                from ``STRATA_SERVER_URL`` / ``STRATA_HOST`` / ``STRATA_PORT`` /
+                ``pyproject.toml`` without loading the full ``StrataConfig`` (so
+                the client needs none of the server's config dependencies).
             base_url: Override the server URL from config
             retry_config: Retry configuration for 429 responses (uses defaults if None)
         """
-        self.config = config or StrataConfig.load()
-        self.base_url = base_url or self.config.server_url
+        self.config = config
+        if base_url is not None:
+            self.base_url = base_url
+        elif config is not None:
+            self.base_url = config.server_url
+        else:
+            self.base_url = resolve_server_url()
         self.retry_config = retry_config or RetryConfig()
         self._client = httpx.Client(base_url=self.base_url, timeout=300.0)
 
@@ -1259,19 +1271,26 @@ class AsyncStrataClient:
 
     def __init__(
         self,
-        config: StrataConfig | None = None,
+        config: "HasServerUrl | None" = None,
         base_url: str | None = None,
         retry_config: RetryConfig | None = None,
     ) -> None:
         """Initialize the async client.
 
         Args:
-            config: Strata configuration (uses StrataConfig.load() if None)
+            config: Strata configuration. If omitted, the server URL is resolved
+                from ``STRATA_SERVER_URL`` / ``STRATA_HOST`` / ``STRATA_PORT`` /
+                ``pyproject.toml`` without loading the full ``StrataConfig``.
             base_url: Override the server URL from config
             retry_config: Retry configuration for 429 responses (uses defaults if None)
         """
-        self.config = config or StrataConfig.load()
-        self.base_url = base_url or self.config.server_url
+        self.config = config
+        if base_url is not None:
+            self.base_url = base_url
+        elif config is not None:
+            self.base_url = config.server_url
+        else:
+            self.base_url = resolve_server_url()
         self.retry_config = retry_config or RetryConfig()
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=300.0)
 

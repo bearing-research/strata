@@ -47,6 +47,7 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
+from tests.conftest import start_container_or_skip
 
 
 def _docker_daemon_reachable() -> bool:
@@ -87,9 +88,15 @@ def fake_gcs_container():
         f"-scheme http -port {_FAKE_GCS_PORT} -public-host localhost:{_FAKE_GCS_PORT}"
     )
     container.with_exposed_ports(_FAKE_GCS_PORT)
-    with container as gcs:
-        wait_for_logs(gcs, "server started at")
-        yield gcs
+    start_container_or_skip(
+        container,
+        label="fake-gcs-server",
+        ready=lambda c: wait_for_logs(c, "server started at"),
+    )
+    try:
+        yield container
+    finally:
+        container.stop()
 
 
 def _endpoint(fake_gcs_container: DockerContainer) -> str:

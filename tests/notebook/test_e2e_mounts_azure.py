@@ -42,6 +42,7 @@ from strata.notebook.writer import (
     update_notebook_mounts,
     write_cell,
 )
+from tests.conftest import start_container_or_skip
 
 
 def _docker_daemon_reachable() -> bool:
@@ -76,8 +77,13 @@ def azurite_container():
     (occasional CI breakage if Microsoft ships a regression) is
     smaller than the SDK/emulator drift problem with a fixed pin.
     """
-    with AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest") as az:
-        yield az
+    container = start_container_or_skip(
+        AzuriteContainer("mcr.microsoft.com/azure-storage/azurite:latest"), label="Azurite"
+    )
+    try:
+        yield container
+    finally:
+        container.stop()
 
 
 def _adlfs_options(azurite_container: AzuriteContainer) -> dict[str, object]:

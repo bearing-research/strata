@@ -4,8 +4,8 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from strata.client import gt, lt  # noqa: E402
-from strata.integration.pandas import StrataPandasScanner, scan_to_pandas  # noqa: E402
+from strata_client.client import gt, lt  # noqa: E402
+from strata_client.integration.pandas import StrataPandasScanner, scan_to_pandas  # noqa: E402
 
 
 class TestScanToPandas:

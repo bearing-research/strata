@@ -23,6 +23,26 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **`strata-client`: a slim, independent client distribution.** Using Strata as
+  a library no longer means installing the whole server. The new `strata-client`
+  package depends only on **httpx + pyarrow** (no pyiceberg / fastapi / duckdb /
+  pydantic, no Rust extension) and ships the full client —
+  `materialize`/`put`/`fetch`/scan, the registry surface (aliases, tags, names,
+  audit), the `Filter` helpers, and the duckdb/pandas/polars/datafusion
+  integrations (as extras, e.g. `strata-client[duckdb]`): `pip install
+  strata-client`, then `from strata_client import StrataClient`. It resolves its
+  server URL from `STRATA_SERVER_URL` / `STRATA_HOST` / `STRATA_PORT` /
+  `pyproject.toml` with no pydantic. The client and the server (`strata-notebook`)
+  are **independent** — they share only the JSON wire protocol, neither depends
+  on the other.
+
+  **Breaking (import paths):** the client moved out of the `strata` namespace.
+  `from strata.client import StrataClient` → `from strata_client import
+  StrataClient`; the integrations moved from `strata.integration.*` /
+  `strata.duckdb_ext` / `strata.polars_ext` to `strata_client.integration.*`.
+  The server keeps `from strata.types import Filter` working (it owns its own
+  copy of the dependency-free `Filter` wire types).
+
 - **Registry dashboard in the notebook** (#147–#150): the registry is now a
   first-class UI surface, so promotion and approvals don't have to be code. A
   cell that publishes with a name (`strata.put(model, name="taxi/tip-model")`)
@@ -160,6 +180,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Changed
 
+- **Artifact-mode scan builds are bounded-memory**: the background build for
+  `materialize(mode="artifact")` now writes each row-group chunk straight to the
+  blob store (write-through) instead of accumulating the whole result in memory
+  before persisting. A multi-GB scan no longer holds the full result resident on
+  the server. (Groundwork for decoupling the streaming path's build from the
+  client — see the next release.)
+
 - **Default cell timeout raised from 30 s to 300 s**: the previous default
   was an easy footgun for I/O-bound cells (network pulls, slow APIs), which
   timed out at exactly 30 s unless a `# @timeout` annotation was added. The
@@ -167,6 +194,23 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   killed at the wall, and per-cell / per-notebook overrides are unchanged.
 
 ### Fixed
+
+- **Ambient cell `strata` client survives large materialize streams** (ML
+  dogfood): a cell scanning a big lake table via the injected `strata` client
+  could fail with `IncompleteRead` — and leave the artifact `failed` — on a
+  *fresh* multi-row-group scan. The client read the stream in one blocking
+  `resp.read()`, which let the server's send buffer fill and tripped its
+  `is_disconnected()` check, aborting the stream. The client now drains the
+  response in chunks (as httpx does), so large scans complete. Cell execution
+  and warm/cached scans were unaffected.
+
+- **A client never poisons a scan artifact** (server-side root fix for the
+  above): the `/v1/streams` GET no longer scans-and-persists inside the response
+  generator. The build now runs as a decoupled, bounded-memory background task
+  and finalizes the artifact on its own merits; the GET waits for it and then
+  streams the persisted blob. A slow or dropped reader can no longer abort the
+  build or mark the artifact `failed` — a mid-stream disconnect leaves it
+  `ready`. The QoS scan slot is released the moment the build completes.
 
 - **Headless `strata run` no longer drops console output on cache hits**
   (ML dogfood): a re-run whose cells hit cache carried no fresh stdout, and

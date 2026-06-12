@@ -1,5 +1,7 @@
 """Tests for fast_io module."""
 
+import io
+
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
@@ -950,3 +952,36 @@ class TestValidateIpcStream:
 
     def test_empty_is_zero_rows(self):
         assert fast_io.validate_ipc_stream(b"") == 0
+
+
+class TestValidateIpcStreamReader:
+    """The bounded (file-like) variant used for write-through-persisted blobs."""
+
+    def test_valid_single_stream_returns_rows_and_schema(self):
+        batch = pa.RecordBatch.from_pydict({"id": [1, 2, 3]})
+        rows, schema_json = fast_io.validate_ipc_stream_reader(
+            io.BytesIO(create_stream_bytes(batch))
+        )
+        assert rows == 3
+        assert "id" in schema_json
+
+    def test_multi_batch_stream(self):
+        sink = pa.BufferOutputStream()
+        writer = ipc.new_stream(sink, pa.schema([("id", pa.int64())]))
+        writer.write_batch(pa.RecordBatch.from_pydict({"id": [1, 2]}))
+        writer.write_batch(pa.RecordBatch.from_pydict({"id": [3]}))
+        writer.close()
+        rows, _ = fast_io.validate_ipc_stream_reader(io.BytesIO(sink.getvalue().to_pybytes()))
+        assert rows == 3
+
+    def test_concatenated_streams_rejected(self):
+        """Same #121 guard as the bytes variant, from a file-like source."""
+        segment = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1]}))
+        with pytest.raises(ValueError, match="Trailing bytes"):
+            fast_io.validate_ipc_stream_reader(io.BytesIO(segment + segment))
+
+    def test_matches_bytes_variant(self):
+        batch = pa.RecordBatch.from_pydict({"a": [1, 2, 3, 4], "b": ["w", "x", "y", "z"]})
+        data = create_stream_bytes(batch)
+        rows, _ = fast_io.validate_ipc_stream_reader(io.BytesIO(data))
+        assert rows == fast_io.validate_ipc_stream(data)

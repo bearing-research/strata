@@ -50,7 +50,7 @@ Table URIs use the form `<scheme>://<warehouse-path>#<namespace>.<table>`:
 For the demo above, the warehouse lives at `/warehouse` and contains the `events` table in the `db` namespace, so the URI is `file:///warehouse#db.events`.
 
 ```python
-from strata.client import StrataClient
+from strata_client import StrataClient
 
 client = StrataClient()
 
@@ -98,21 +98,21 @@ print(df.head())
 === "Pandas"
 
     ```python
-    from strata.integration.pandas import fetch_to_pandas
+    from strata_client.integration.pandas import fetch_to_pandas
     df = fetch_to_pandas("file:///warehouse#db.events")
     ```
 
 === "Polars"
 
     ```python
-    from strata.integration.polars import fetch_to_polars
+    from strata_client.integration.polars import fetch_to_polars
     df = fetch_to_polars("file:///warehouse#db.events")
     ```
 
 === "DuckDB"
 
     ```python
-    from strata.integration.duckdb import StrataScanner
+    from strata_client.integration.duckdb import StrataScanner
     with StrataScanner() as scanner:
         scanner.register("events", "file:///warehouse#db.events")
         result = scanner.query("SELECT category, COUNT(*) FROM events GROUP BY category")

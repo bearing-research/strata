@@ -191,10 +191,13 @@ function tagList(tags: Record<string, string>): string {
   background: none;
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 13px;
-  padding: 0 2px;
+  font-size: 18px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 4px;
 }
 .lineage-btn:hover {
   color: var(--accent-primary, #3b82f6);
+  background: var(--bg-subtle);
 }
 </style>

@@ -16,11 +16,11 @@ from pyiceberg.types import (
     NestedField,
     StringType,
 )
+from strata_client.client import StrataClient
+from strata_client.integration.duckdb import StrataScanner
 
 from strata.cache import CachedFetcher, DiskCache
-from strata.client import StrataClient
 from strata.config import StrataConfig
-from strata.duckdb_ext import StrataScanner
 from strata.planner import ReadPlanner
 from strata.types import CacheKey, Filter, FilterOp, TableIdentity
 

@@ -388,8 +388,9 @@ def run_single_benchmark(
 
     Returns list of [cold, warm, restart] BenchmarkResult.
     """
+    from strata_client import StrataClient
+
     from strata.cache import CACHE_FILE_EXTENSION
-    from strata.client import StrataClient
 
     # Find a free port if not specified
     if port is None:

@@ -18,8 +18,8 @@ filters to the scan functions.
 
 import polars as pl
 
-from strata.client import gt
-from strata.integration.polars import StrataPolarsScanner, scan_to_lazy, scan_to_polars
+from strata_client import gt
+from strata_client.integration.polars import StrataPolarsScanner, scan_to_lazy, scan_to_polars
 
 table_uri = "file:///path/to/warehouse#my_db.events"
 
