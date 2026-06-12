@@ -699,6 +699,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../notebook/registry-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Registry Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../notebook/workers/" class="md-nav__link">
         
   
@@ -1980,6 +2008,12 @@ challenger → a human approves → and the whole history is reconstructible:</p
 <p>Everything above also has a UI — the registry is a first-class surface in the
 notebook, so promotion and approvals don't have to be code. Registry routes are
 <strong>personal-mode only</strong> today, so the dashboard hides itself in service mode.</p>
+<div class="admonition tip">
+<p class="admonition-title">New to it? Start with the walkthrough</p>
+<p>For a click-by-click guide — publish from a cell → promote → approve →
+lineage — see <a href="../../notebook/registry-dashboard/"><strong>Registry Dashboard</strong></a>.
+The rest of this section is the reference for what each piece does.</p>
+</div>
 <p><strong>Publishing.</strong> Inside a cell, the <a href="../../notebook/cells/#the-ambient-strata-client">ambient <code>strata</code>
 client</a> publishes with a name:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">)</span>   <span class="c1"># or materialize(…, name=…)</span>

@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://bearing-research.github.io/strata/dev/reference/configuration/">
+        <link rel="canonical" href="https://bearing-research.github.io/strata/dev/notebook/registry-dashboard/">
       
       
-        <link rel="prev" href="../../getting-started/installation/">
+        <link rel="prev" href="../lake-aware-cells/">
       
       
-        <link rel="next" href="../../deployment/modes/">
+        <link rel="next" href="../workers/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Configuration - Strata</title>
+        <title>Registry Dashboard - Strata</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#configuration-reference" class="md-skip">
+        <a href="#registry-dashboard" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Configuration
+              Registry Dashboard
             
           </span>
         </div>
@@ -265,10 +265,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../../getting-started/notebook/" class="md-tabs__link">
           
   
@@ -309,7 +311,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../notebook-protocol/" class="md-tabs__link">
+        <a href="../../reference/notebook-protocol/" class="md-tabs__link">
           
   
   
@@ -325,12 +327,10 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../../getting-started/installation/" class="md-tabs__link">
           
   
@@ -446,28 +446,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
-        
-          
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -485,7 +488,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -531,7 +534,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/concepts/" class="md-nav__link">
+      <a href="../concepts/" class="md-nav__link">
         
   
   
@@ -559,7 +562,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/comparison/" class="md-nav__link">
+      <a href="../comparison/" class="md-nav__link">
         
   
   
@@ -587,7 +590,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/examples/" class="md-nav__link">
+      <a href="../examples/" class="md-nav__link">
         
   
   
@@ -615,7 +618,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/cells/" class="md-nav__link">
+      <a href="../cells/" class="md-nav__link">
         
   
   
@@ -643,7 +646,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/annotations/" class="md-nav__link">
+      <a href="../annotations/" class="md-nav__link">
         
   
   
@@ -671,7 +674,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/lake-aware-cells/" class="md-nav__link">
+      <a href="../lake-aware-cells/" class="md-nav__link">
         
   
   
@@ -696,10 +699,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../notebook/registry-dashboard/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Registry Dashboard
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -715,6 +745,136 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-youll-build" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you'll build
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-open-the-notebook-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Open the notebook UI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-publish-a-model-from-a-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Publish a model from a cell
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-the-per-cell-promote-strip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. The per-cell promote strip
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-promote-to-champion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Promote to champion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-registry-tab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. The Registry tab
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-approval-gates-protected-aliases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Approval gates (protected aliases)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-view-lineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. View lineage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -727,7 +887,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/workers/" class="md-nav__link">
+      <a href="../workers/" class="md-nav__link">
         
   
   
@@ -755,7 +915,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/ai/" class="md-nav__link">
+      <a href="../ai/" class="md-nav__link">
         
   
   
@@ -783,7 +943,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/environment/" class="md-nav__link">
+      <a href="../environment/" class="md-nav__link">
         
   
   
@@ -811,7 +971,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/secrets/" class="md-nav__link">
+      <a href="../secrets/" class="md-nav__link">
         
   
   
@@ -839,7 +999,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/cli/" class="md-nav__link">
+      <a href="../cli/" class="md-nav__link">
         
   
   
@@ -867,7 +1027,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/agent-authoring/" class="md-nav__link">
+      <a href="../agent-authoring/" class="md-nav__link">
         
   
   
@@ -895,7 +1055,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/import/" class="md-nav__link">
+      <a href="../import/" class="md-nav__link">
         
   
   
@@ -923,7 +1083,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/export/" class="md-nav__link">
+      <a href="../export/" class="md-nav__link">
         
   
   
@@ -951,7 +1111,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/keyboard/" class="md-nav__link">
+      <a href="../keyboard/" class="md-nav__link">
         
   
   
@@ -1157,7 +1317,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../notebook-protocol/" class="md-nav__link">
+      <a href="../../reference/notebook-protocol/" class="md-nav__link">
         
   
   
@@ -1185,7 +1345,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../rest-api/" class="md-nav__link">
+      <a href="../../reference/rest-api/" class="md-nav__link">
         
   
   
@@ -1213,7 +1373,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../websocket/" class="md-nav__link">
+      <a href="../../reference/websocket/" class="md-nav__link">
         
   
   
@@ -1241,7 +1401,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../executor-protocol/" class="md-nav__link">
+      <a href="../../reference/executor-protocol/" class="md-nav__link">
         
   
   
@@ -1269,7 +1429,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../notebook-toml/" class="md-nav__link">
+      <a href="../../reference/notebook-toml/" class="md-nav__link">
         
   
   
@@ -1301,31 +1461,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
             
   
   
@@ -1343,7 +1500,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1386,37 +1543,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Configuration
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
         
   
   
@@ -1432,202 +1562,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#server" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Server
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cache" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cache
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#fetcher" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Fetcher
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#resource-limits" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Resource Limits
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#qos-two-tier-admission" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        QoS (Two-Tier Admission)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#metadata" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Metadata
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#s3-storage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        S3 Storage
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#artifact-storage" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Artifact Storage
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#authentication" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authentication
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#multi-tenancy" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Multi-Tenancy
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notebook" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notebook
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#worker" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Worker
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#rate-limiting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Rate Limiting
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#observability" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Observability
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#ai-assistant" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AI Assistant
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#timeouts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Timeouts
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1891,10 +1825,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#server" class="md-nav__link">
+  <a href="#what-youll-build" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Server
+        What you'll build
       
     </span>
   </a>
@@ -1902,10 +1836,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cache" class="md-nav__link">
+  <a href="#1-open-the-notebook-ui" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cache
+        1. Open the notebook UI
       
     </span>
   </a>
@@ -1913,10 +1847,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#fetcher" class="md-nav__link">
+  <a href="#2-publish-a-model-from-a-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Fetcher
+        2. Publish a model from a cell
       
     </span>
   </a>
@@ -1924,10 +1858,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#resource-limits" class="md-nav__link">
+  <a href="#3-the-per-cell-promote-strip" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Resource Limits
+        3. The per-cell promote strip
       
     </span>
   </a>
@@ -1935,10 +1869,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#qos-two-tier-admission" class="md-nav__link">
+  <a href="#4-promote-to-champion" class="md-nav__link">
     <span class="md-ellipsis">
       
-        QoS (Two-Tier Admission)
+        4. Promote to champion
       
     </span>
   </a>
@@ -1946,10 +1880,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#metadata" class="md-nav__link">
+  <a href="#5-the-registry-tab" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Metadata
+        5. The Registry tab
       
     </span>
   </a>
@@ -1957,10 +1891,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#s3-storage" class="md-nav__link">
+  <a href="#6-approval-gates-protected-aliases" class="md-nav__link">
     <span class="md-ellipsis">
       
-        S3 Storage
+        6. Approval gates (protected aliases)
       
     </span>
   </a>
@@ -1968,10 +1902,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#artifact-storage" class="md-nav__link">
+  <a href="#7-view-lineage" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Artifact Storage
+        7. View lineage
       
     </span>
   </a>
@@ -1979,10 +1913,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#authentication" class="md-nav__link">
+  <a href="#troubleshooting" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Authentication
+        Troubleshooting
       
     </span>
   </a>
@@ -1990,76 +1924,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#multi-tenancy" class="md-nav__link">
+  <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Multi-Tenancy
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#notebook" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notebook
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#worker" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Worker
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#rate-limiting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Rate Limiting
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#observability" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Observability
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#ai-assistant" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AI Assistant
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#timeouts" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Timeouts
+        See also
       
     </span>
   </a>
@@ -2086,604 +1954,140 @@
   
 
 
-<h1 id="configuration-reference">Configuration Reference<a class="headerlink" href="#configuration-reference" title="Permanent link">&para;</a></h1>
-<p>Strata is configured via environment variables (prefixed with <code>STRATA_</code>) or a <code>[tool.strata]</code> section in <code>pyproject.toml</code>.</p>
-<p><strong>Precedence</strong>: defaults &lt; pyproject.toml &lt; environment variables &lt; programmatic overrides</p>
-<p>The <code>[tool.strata]</code> block accepts every env var listed below with the
-<code>STRATA_</code> prefix dropped and the name lowercased (e.g. <code>STRATA_HOST</code> →
-<code>host</code>, <code>STRATA_CACHE_DIR</code> → <code>cache_dir</code>, <code>STRATA_S3_REGION</code> →
-<code>s3_region</code>). Values are typed by <code>StrataConfig</code> in <code>src/strata/config.py</code>;
-strings, numbers, booleans, and TOML arrays all work as expected.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># pyproject.toml</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">[tool.strata]</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;0.0.0.0&quot;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8765</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">deployment_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;service&quot;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">cache_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;/var/cache/strata&quot;</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">multi_tenant_enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">ai_model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;claude-sonnet-4-6&quot;</span>
+<h1 id="registry-dashboard">Registry Dashboard<a class="headerlink" href="#registry-dashboard" title="Permanent link">&para;</a></h1>
+<p>The registry dashboard is the <strong>UI for promoting models and approving changes</strong>
+right inside the notebook — so promotion doesn't have to be code. It surfaces
+the same names / aliases / tags / audit / lineage that the
+<a href="../../core/registry/">SDK and CLI</a> drive, backed by the identical audited routes.</p>
+<div class="admonition note">
+<p class="admonition-title">Personal mode only (today)</p>
+<p>The registry routes are personal-mode only right now, so the dashboard
+<strong>shows up automatically in personal mode</strong> (the default <code>python -m strata</code>)
+and <strong>hides itself in service mode</strong>. If you don't see it, check your
+deployment mode.</p>
+</div>
+<p>This page is a step-by-step walkthrough. For the concepts (what a name, alias,
+tag, or approval gate <em>is</em>), see <a href="../../core/registry/">Artifacts &amp; Model Registry</a>.</p>
+<h2 id="what-youll-build">What you'll build<a class="headerlink" href="#what-youll-build" title="Permanent link">&para;</a></h2>
+<p>Publish a model from a cell, promote it to <strong>champion</strong>, watch the move land in
+the registry with full audit + lineage — without leaving the notebook.</p>
+<hr />
+<h2 id="1-open-the-notebook-ui">1. Open the notebook UI<a class="headerlink" href="#1-open-the-notebook-ui" title="Permanent link">&para;</a></h2>
+<p>Start the server and open it in a browser:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>strata<span class="w">          </span><span class="c1"># serves the bundled UI on http://localhost:8765</span>
 </code></pre></div>
-<h2 id="server">Server<a class="headerlink" href="#server" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_HOST</code></td>
-<td><code>127.0.0.1</code></td>
-<td>Server bind address</td>
-</tr>
-<tr>
-<td><code>STRATA_PORT</code></td>
-<td><code>8765</code></td>
-<td>Server port</td>
-</tr>
-<tr>
-<td><code>STRATA_DEPLOYMENT_MODE</code></td>
-<td><code>personal</code></td>
-<td><code>personal</code> or <code>service</code></td>
-</tr>
-<tr>
-<td><code>STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL</code></td>
-<td><code>false</code></td>
-<td>Allow non-localhost clients in personal mode</td>
-</tr>
-</tbody>
-</table>
-<h2 id="cache">Cache<a class="headerlink" href="#cache" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_CACHE_DIR</code></td>
-<td><code>~/.strata/cache</code></td>
-<td>Disk cache location</td>
-</tr>
-<tr>
-<td><code>STRATA_MAX_CACHE_SIZE_BYTES</code></td>
-<td><code>10737418240</code> (10 GB)</td>
-<td>Max cache size</td>
-</tr>
-<tr>
-<td><code>STRATA_CACHE_GRANULARITY</code></td>
-<td><code>row_group_projection</code></td>
-<td><code>row_group_projection</code> or <code>row_group</code></td>
-</tr>
-</tbody>
-</table>
-<h2 id="fetcher">Fetcher<a class="headerlink" href="#fetcher" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_BATCH_SIZE</code></td>
-<td><code>65536</code></td>
-<td>Rows per batch</td>
-</tr>
-<tr>
-<td><code>STRATA_FETCH_PARALLELISM</code></td>
-<td><code>4</code></td>
-<td>Max concurrent fetches per scan</td>
-</tr>
-<tr>
-<td><code>STRATA_MAX_FETCH_WORKERS</code></td>
-<td><code>32</code></td>
-<td>Max threads in fetch pool</td>
-</tr>
-<tr>
-<td><code>STRATA_FETCH_TIMEOUT_SECONDS</code></td>
-<td><code>60.0</code></td>
-<td>Per-fetch timeout</td>
-</tr>
-</tbody>
-</table>
-<h2 id="resource-limits">Resource Limits<a class="headerlink" href="#resource-limits" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_MAX_CONCURRENT_SCANS</code></td>
-<td><code>100</code></td>
-<td>Max concurrent scans</td>
-</tr>
-<tr>
-<td><code>STRATA_MAX_TASKS_PER_SCAN</code></td>
-<td><code>1000</code></td>
-<td>Max row groups per scan</td>
-</tr>
-<tr>
-<td><code>STRATA_PLAN_TIMEOUT_SECONDS</code></td>
-<td><code>30.0</code></td>
-<td>Planning timeout</td>
-</tr>
-<tr>
-<td><code>STRATA_SCAN_TIMEOUT_SECONDS</code></td>
-<td><code>300.0</code></td>
-<td>Scan streaming timeout</td>
-</tr>
-<tr>
-<td><code>STRATA_MAX_RESPONSE_BYTES</code></td>
-<td><code>536870912</code> (512 MB)</td>
-<td>Max response size (413 if exceeded)</td>
-</tr>
-</tbody>
-</table>
-<h2 id="qos-two-tier-admission">QoS (Two-Tier Admission)<a class="headerlink" href="#qos-two-tier-admission" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_INTERACTIVE_SLOTS</code></td>
-<td><code>32</code></td>
-<td>Interactive tier concurrency</td>
-</tr>
-<tr>
-<td><code>STRATA_BULK_SLOTS</code></td>
-<td><code>8</code></td>
-<td>Bulk tier concurrency</td>
-</tr>
-<tr>
-<td><code>STRATA_INTERACTIVE_MAX_BYTES</code></td>
-<td><code>10485760</code> (10 MB)</td>
-<td>Max bytes for interactive classification</td>
-</tr>
-<tr>
-<td><code>STRATA_INTERACTIVE_MAX_COLUMNS</code></td>
-<td><code>10</code></td>
-<td>Max columns for interactive classification</td>
-</tr>
-</tbody>
-</table>
-<h2 id="metadata">Metadata<a class="headerlink" href="#metadata" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_METADATA_DB</code></td>
-<td><code>None</code></td>
-<td>SQLite path for metadata persistence</td>
-</tr>
-</tbody>
-</table>
-<h2 id="s3-storage">S3 Storage<a class="headerlink" href="#s3-storage" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_S3_REGION</code></td>
-<td><code>None</code></td>
-<td>AWS region</td>
-</tr>
-<tr>
-<td><code>STRATA_S3_ENDPOINT_URL</code></td>
-<td><code>None</code></td>
-<td>Custom endpoint (MinIO, LocalStack)</td>
-</tr>
-<tr>
-<td><code>STRATA_S3_ACCESS_KEY</code></td>
-<td><code>None</code></td>
-<td>Access key (falls back to AWS_ACCESS_KEY_ID)</td>
-</tr>
-<tr>
-<td><code>STRATA_S3_SECRET_KEY</code></td>
-<td><code>None</code></td>
-<td>Secret key (falls back to AWS_SECRET_ACCESS_KEY)</td>
-</tr>
-<tr>
-<td><code>STRATA_S3_ANONYMOUS</code></td>
-<td><code>false</code></td>
-<td>Use anonymous access</td>
-</tr>
-</tbody>
-</table>
-<h2 id="artifact-storage">Artifact Storage<a class="headerlink" href="#artifact-storage" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_ARTIFACT_DIR</code></td>
-<td><code>None</code></td>
-<td>Artifact store directory</td>
-</tr>
-<tr>
-<td><code>STRATA_ARTIFACT_ZOMBIE_BUILD_TIMEOUT_SECONDS</code></td>
-<td><code>3600.0</code></td>
-<td>Builds stuck in <code>building</code> longer than this are demoted to <code>failed</code> at startup</td>
-</tr>
-<tr>
-<td><code>STRATA_REGISTRY_PROTECTED_ALIASES</code></td>
-<td><em>(empty)</em></td>
-<td>Comma-separated alias names (e.g. <code>champion,production</code>) whose moves/deletes queue for approval instead of applying</td>
-</tr>
-<tr>
-<td><code>STRATA_ARTIFACT_BLOB_BACKEND</code></td>
-<td><code>local</code></td>
-<td><code>local</code>, <code>s3</code>, <code>gcs</code>, or <code>azure</code></td>
-</tr>
-<tr>
-<td><code>STRATA_ARTIFACT_S3_BUCKET</code></td>
-<td><code>None</code></td>
-<td>S3 bucket for artifacts</td>
-</tr>
-<tr>
-<td><code>STRATA_ARTIFACT_S3_PREFIX</code></td>
-<td><code>artifacts</code></td>
-<td>S3 key prefix</td>
-</tr>
-<tr>
-<td><code>STRATA_ARTIFACT_GCS_BUCKET</code></td>
-<td><code>None</code></td>
-<td>GCS bucket for artifacts</td>
-</tr>
-<tr>
-<td><code>STRATA_ARTIFACT_GCS_PREFIX</code></td>
-<td><code>artifacts</code></td>
-<td>GCS prefix</td>
-</tr>
-<tr>
-<td><code>STRATA_ARTIFACT_AZURE_CONTAINER</code></td>
-<td><code>None</code></td>
-<td>Azure container</td>
-</tr>
-<tr>
-<td><code>STRATA_ARTIFACT_AZURE_PREFIX</code></td>
-<td><code>artifacts</code></td>
-<td>Azure prefix</td>
-</tr>
-</tbody>
-</table>
-<h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_AUTH_MODE</code></td>
-<td><code>none</code></td>
-<td><code>none</code> or <code>trusted_proxy</code></td>
-</tr>
-<tr>
-<td><code>STRATA_PROXY_TOKEN</code></td>
-<td><code>None</code></td>
-<td>Shared secret for proxy verification</td>
-</tr>
-<tr>
-<td><code>STRATA_PRINCIPAL_HEADER</code></td>
-<td><code>X-Strata-Principal</code></td>
-<td>Header for user identity</td>
-</tr>
-<tr>
-<td><code>STRATA_SCOPES_HEADER</code></td>
-<td><code>X-Strata-Scopes</code></td>
-<td>Header for permission scopes</td>
-</tr>
-<tr>
-<td><code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND</code></td>
-<td><code>true</code></td>
-<td>Return 404 instead of 403</td>
-</tr>
-</tbody>
-</table>
-<h2 id="multi-tenancy">Multi-Tenancy<a class="headerlink" href="#multi-tenancy" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_MULTI_TENANT_ENABLED</code></td>
-<td><code>false</code></td>
-<td>Enable multi-tenant mode</td>
-</tr>
-<tr>
-<td><code>STRATA_TENANT_HEADER</code></td>
-<td><code>X-Tenant-ID</code></td>
-<td>Header for tenant identification</td>
-</tr>
-<tr>
-<td><code>STRATA_REQUIRE_TENANT_HEADER</code></td>
-<td><code>false</code></td>
-<td>Require tenant header on all requests</td>
-</tr>
-</tbody>
-</table>
-<h2 id="notebook">Notebook<a class="headerlink" href="#notebook" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_NOTEBOOK_STORAGE_DIR</code></td>
-<td><code>~/.strata/notebooks</code></td>
-<td>Default notebook storage directory. (Pre-2026-05 default was <code>/tmp/strata-notebooks</code>; see <a href="../../deployment/lifecycle/#notebook-storage-location">Operations &amp; Lifecycle</a> for the migration note.)</td>
-</tr>
-<tr>
-<td><code>STRATA_NOTEBOOK_PYTHON_VERSIONS</code></td>
-<td>current server Python minor</td>
-<td>Available Python versions (JSON array or comma-separated list)</td>
-</tr>
-<tr>
-<td><code>STRATA_PERSONAL_MODE_USER_HEADER</code></td>
-<td><code>None</code></td>
-<td>Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and <code>discover</code>/<code>delete</code> scope to it. Intended for proxy-fronted personal deployments.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="worker">Worker<a class="headerlink" href="#worker" title="Permanent link">&para;</a></h2>
-<p>These are read by <code>strata-worker</code>, not the main server. They have no effect on a <code>strata-notebook</code> process.</p>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_WORKER_TOKEN</code></td>
-<td><code>None</code></td>
-<td>Optional bearer token. When set, the worker's <code>/v1/*</code> execution endpoints require <code>Authorization: Bearer &lt;token&gt;</code>. <code>/health</code> stays open. See <a href="../../notebook/workers/#authentication">Workers § Authentication</a>.</td>
-</tr>
-<tr>
-<td><code>STRATA_WORKER_MAX_INPUT_BYTES</code></td>
-<td><code>268435456</code> (256 MB)</td>
-<td>Per-input download cap for the pull-model (<code>/v1/execute-manifest</code>). Reject inputs larger than this with 413.</td>
-</tr>
-<tr>
-<td><code>STRATA_WORKER_ALLOW_LOCAL_HOSTS</code></td>
-<td><code>false</code></td>
-<td>Bypass the SSRF defense that rejects manifest URLs resolving to private / loopback IPs. Only set for tests or local dev with 127.0.0.1 build servers; production deployments leave it unset.</td>
-</tr>
-</tbody>
-</table>
-<h2 id="rate-limiting">Rate Limiting<a class="headerlink" href="#rate-limiting" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_RATE_LIMIT_ENABLED</code></td>
-<td><code>true</code></td>
-<td>Enable rate limiting</td>
-</tr>
-<tr>
-<td><code>STRATA_RATE_LIMIT_GLOBAL_RPS</code></td>
-<td><code>1000.0</code></td>
-<td>Global requests per second</td>
-</tr>
-<tr>
-<td><code>STRATA_RATE_LIMIT_CLIENT_RPS</code></td>
-<td><code>100.0</code></td>
-<td>Per-client requests per second</td>
-</tr>
-<tr>
-<td><code>STRATA_RATE_LIMIT_SCAN_RPS</code></td>
-<td><code>50.0</code></td>
-<td>Scan endpoint rate limit</td>
-</tr>
-</tbody>
-</table>
-<h2 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_LOG_LEVEL</code></td>
-<td><code>INFO</code></td>
-<td>Log level</td>
-</tr>
-<tr>
-<td><code>STRATA_LOG_FORMAT</code></td>
-<td><code>json</code></td>
-<td><code>json</code> or <code>text</code></td>
-</tr>
-<tr>
-<td><code>STRATA_TRACING_ENABLED</code></td>
-<td><code>false</code></td>
-<td>Enable OpenTelemetry</td>
-</tr>
-<tr>
-<td><code>OTEL_EXPORTER_OTLP_ENDPOINT</code></td>
-<td><code>None</code></td>
-<td>OTLP collector endpoint</td>
-</tr>
-<tr>
-<td><code>OTEL_SERVICE_NAME</code></td>
-<td><code>strata</code></td>
-<td>Service name for traces</td>
-</tr>
-</tbody>
-</table>
-<h2 id="ai-assistant">AI Assistant<a class="headerlink" href="#ai-assistant" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>STRATA_AI_BASE_URL</code></td>
-<td><code>None</code></td>
-<td>OpenAI-compatible API base URL</td>
-</tr>
-<tr>
-<td><code>STRATA_AI_MODEL</code></td>
-<td><code>None</code></td>
-<td>Model identifier (e.g. <code>claude-sonnet-4-6</code>, <code>gpt-5.4</code>)</td>
-</tr>
-<tr>
-<td><code>STRATA_AI_API_KEY</code></td>
-<td><code>None</code></td>
-<td>API key (generic, works with any provider)</td>
-</tr>
-<tr>
-<td><code>STRATA_AI_MAX_CONTEXT_TOKENS</code></td>
-<td><code>100000</code></td>
-<td>Max context tokens sent to the model</td>
-</tr>
-<tr>
-<td><code>STRATA_AI_MAX_OUTPUT_TOKENS</code></td>
-<td><code>4096</code></td>
-<td>Max output tokens requested</td>
-</tr>
-<tr>
-<td><code>STRATA_AI_TIMEOUT_SECONDS</code></td>
-<td><code>60.0</code></td>
-<td>AI request timeout</td>
-</tr>
-<tr>
-<td><code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code></td>
-<td><code>120.0</code></td>
-<td>Agent confirm-prompt timeout; expiry counts as a decline</td>
-</tr>
-<tr>
-<td><code>ANTHROPIC_API_KEY</code></td>
-<td><code>None</code></td>
-<td>Anthropic API key (auto-sets base URL + model)</td>
-</tr>
-<tr>
-<td><code>OPENAI_API_KEY</code></td>
-<td><code>None</code></td>
-<td>OpenAI API key (auto-sets base URL + model)</td>
-</tr>
-<tr>
-<td><code>GEMINI_API_KEY</code></td>
-<td><code>None</code></td>
-<td>Google Gemini API key (auto-sets base URL + model)</td>
-</tr>
-<tr>
-<td><code>MISTRAL_API_KEY</code></td>
-<td><code>None</code></td>
-<td>Mistral API key (auto-sets base URL + model)</td>
-</tr>
-</tbody>
-</table>
-<p>Provider-specific keys auto-configure <code>base_url</code> and <code>model</code> defaults.
-<code>STRATA_AI_*</code> variables override provider defaults. Notebook-level <code>[ai]</code>
-config in <code>notebook.toml</code> overrides both.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">[ai]</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434/v1&quot;</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;llama3&quot;</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">max_context_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">approval_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">120.0</span>
+<p>Open <strong>http://localhost:8765</strong> and open (or create) a notebook.</p>
+<h2 id="2-publish-a-model-from-a-cell">2. Publish a model from a cell<a class="headerlink" href="#2-publish-a-model-from-a-cell" title="Permanent link">&para;</a></h2>
+<p>The dashboard surfaces what your <strong>cells publish</strong> to the registry. Inside any
+Python cell, use the <a href="../cells/#the-ambient-strata-client">ambient <code>strata</code> client</a>
+— it's already in the namespace, no import or setup:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># ... you&#39;ve trained `model` in this or an upstream cell ...</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">)</span>
 </code></pre></div>
-<p>All fields are optional, set only the ones you want to override.</p>
-<h2 id="timeouts">Timeouts<a class="headerlink" href="#timeouts" title="Permanent link">&para;</a></h2>
+<p>Run the cell (Shift+Enter). <code>strata.materialize(..., name="taxi/tip-model")</code>
+works the same way. The artifact lands in the registry and is <strong>stamped with the
+cell that produced it</strong>.</p>
+<h2 id="3-the-per-cell-promote-strip">3. The per-cell promote strip<a class="headerlink" href="#3-the-per-cell-promote-strip" title="Permanent link">&para;</a></h2>
+<p>A compact strip appears <strong>right below the cell</strong> that published:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>⬡ taxi/tip-model  v1   [Promote ▾]   ⎘
+</code></pre></div>
+<ul>
+<li><code>⬡ taxi/tip-model v1</code> — the name and version your cell put.</li>
+<li><code>[Promote ▾]</code> — promote this artifact (next step).</li>
+<li><code>⎘</code> — open its lineage.</li>
+</ul>
+<p>Promote where you trained the model, without scrolling anywhere.</p>
+<!-- TODO(screenshot): the per-cell promote strip under a published cell, showing
+     the ⬡ name·version chip, the [Promote ▾] menu, and the ⎘ lineage button. -->
+
+<h2 id="4-promote-to-champion">4. Promote to champion<a class="headerlink" href="#4-promote-to-champion" title="Permanent link">&para;</a></h2>
+<p>Click <strong><code>[Promote ▾]</code></strong> and choose <strong>champion</strong> (or <strong>candidate</strong>). A toast
+confirms the result:</p>
+<ul>
+<li><strong><code>✓ taxi/tip-model → champion</code></strong> — applied immediately (the normal case).</li>
+<li><strong><code>⏳ champion change pending approval</code></strong> — the alias is <em>protected</em> (see
+  step 6); the move is queued instead of applied.</li>
+</ul>
+<p><code>champion</code> / <code>candidate</code> are intent pointers — the post-stages model, not
+<code>Staging</code>/<code>Production</code> enums. A name can hold both at once (champion <em>and</em> a
+challenger candidate).</p>
+<h2 id="5-the-registry-tab">5. The Registry tab<a class="headerlink" href="#5-the-registry-tab" title="Permanent link">&para;</a></h2>
+<p>Open the <strong>bottom drawer</strong> and click the <strong>Registry</strong> tab. It has three parts,
+top to bottom:</p>
+<ol>
+<li><strong>Pending-approval banner</strong> — appears only when a protected-alias move is
+   queued, with <strong>Approve / Reject</strong> buttons (the human gate, in the UI).</li>
+<li><strong>Names table</strong> — every registry name, each row showing its <strong>alias chips</strong>
+   (<code>★champ</code>, <code>cand</code>), latest version, <strong>tags</strong>, a <strong><code>[Promote ▾]</code></strong> menu, and a
+   <strong><code>⎘</code></strong> lineage button. This is the same data on the per-cell strip, but for
+   <em>all</em> names — not just what the current notebook published.</li>
+<li><strong>Audit timeline</strong> (collapsible) — every name / alias / tag mutation, newest
+   first, with who and from → to.</li>
+</ol>
+<!-- TODO(screenshot): the Registry tab open in the bottom drawer — pending banner
+     (with a queued protected move), the names table with ★champ/cand chips +
+     tags + [Promote ▾], and the audit timeline. The hero shot for this page. -->
+
+<h2 id="6-approval-gates-protected-aliases">6. Approval gates (protected aliases)<a class="headerlink" href="#6-approval-gates-protected-aliases" title="Permanent link">&para;</a></h2>
+<p>To require a human for sensitive promotions, mark aliases protected when you
+start the server:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">STRATA_REGISTRY_PROTECTED_ALIASES</span><span class="o">=</span>champion,production<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata
+</code></pre></div>
+<p>Now a promote to <code>champion</code> (step 4) returns <strong><code>⏳ pending</code></strong> instead of applying.
+The <strong>pending banner</strong> appears at the top of the Registry tab; click <strong>Approve</strong>
+to apply it (the approver becomes the audit actor) or <strong>Reject</strong> to discard it.
+Unprotected aliases (<code>candidate</code>) still apply immediately.</p>
+<h2 id="7-view-lineage">7. View lineage<a class="headerlink" href="#7-view-lineage" title="Permanent link">&para;</a></h2>
+<p>Click the <strong><code>⎘</code></strong> button on the strip or any names-table row. The <strong>lineage
+view</strong> renders the provenance chain:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>model ← features ← scan ← table @ snapshot
+</code></pre></div>
+<p>— the same chain <code>strata artifact lineage</code> prints on the CLI, as an interactive
+view. It answers "which snapshot trained this model?" in one click.</p>
+<!-- TODO(screenshot): the lineage view/modal showing the model ← features ← scan
+     ← table @ snapshot chain. -->
+
+<hr />
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Variable</th>
-<th>Default</th>
-<th>Description</th>
+<th>Symptom</th>
+<th>Why</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>STRATA_S3_CONNECT_TIMEOUT_SECONDS</code></td>
-<td><code>10.0</code></td>
-<td>S3 connection timeout</td>
+<td><strong>No Registry tab / no strip at all</strong></td>
+<td>You're in <strong>service mode</strong>. The dashboard is personal-mode only today.</td>
 </tr>
 <tr>
-<td><code>STRATA_S3_REQUEST_TIMEOUT_SECONDS</code></td>
-<td><code>30.0</code></td>
-<td>S3 request timeout</td>
+<td><strong>Registry tab is empty</strong></td>
+<td>Nothing's been published with a name yet. Run a cell with <code>strata.put(value, name="…")</code>.</td>
 </tr>
 <tr>
-<td><code>STRATA_PLAN_TIMEOUT_SECONDS</code></td>
-<td><code>30.0</code></td>
-<td>Planning phase timeout</td>
+<td><strong>A cell ran but no per-cell strip</strong></td>
+<td>The strip only shows artifacts a cell published via the ambient <code>strata</code> client (a <em>named</em> <code>put</code> / <code>materialize</code>). Artifacts created another way still appear in the <strong>names table</strong>, just not as a per-cell strip.</td>
 </tr>
 <tr>
-<td><code>STRATA_SCAN_TIMEOUT_SECONDS</code></td>
-<td><code>300.0</code></td>
-<td>Scan streaming timeout</td>
+<td><strong>Promote said "pending" unexpectedly</strong></td>
+<td>That alias is in <code>STRATA_REGISTRY_PROTECTED_ALIASES</code> — approve it from the pending banner.</td>
 </tr>
 <tr>
-<td><code>STRATA_FETCH_TIMEOUT_SECONDS</code></td>
-<td><code>60.0</code></td>
-<td>Per-fetch timeout</td>
+<td><strong>Promote did nothing</strong></td>
+<td>Setting an alias to the version it already points at is an idempotent <strong>no-op</strong> (the toast says <code>unchanged</code>).</td>
 </tr>
 </tbody>
 </table>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../../core/registry/">Artifacts &amp; Model Registry</a> — the concepts and the
+  SDK/CLI that drive the same registry.</li>
+<li><a href="../cells/#the-ambient-strata-client">The ambient <code>strata</code> client</a> — how cells
+  publish.</li>
+<li><a href="../lake-aware-cells/">Lake-Aware Cells</a> — the <code>@table</code> flow that makes a
+  training cell stale so you <em>re-promote</em> when new data lands.</li>
+</ul>
 
 
 
