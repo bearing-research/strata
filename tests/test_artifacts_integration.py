@@ -279,12 +279,15 @@ class TestServiceModeBlocking:
         assert response.status_code == 403
         assert "writes_disabled" in response.json()["detail"]["error"]
 
-    def test_names_blocked_in_service_mode(self, service_mode_server):
-        """Name endpoints return 403 in service mode."""
+    def test_name_writes_blocked_resolution_reachable_in_service_mode(self, service_mode_server):
+        """Name *writes* and the *listing* stay blocked in service mode; name
+        *resolution* is a read and is reachable (W2). This gateway has no
+        artifact_dir, so resolution returns 404 (no store) rather than a
+        mode-gated 403."""
         base_url = service_mode_server["base_url"]
 
+        # Listing all names + writing a name stay blocked (403).
         assert httpx.get(f"{base_url}/v1/names").status_code == 403
-        assert httpx.get(f"{base_url}/v1/names/test").status_code == 403
         assert (
             httpx.post(
                 f"{base_url}/v1/names",
@@ -292,6 +295,8 @@ class TestServiceModeBlocking:
             ).status_code
             == 403
         )
+        # Resolving a name is a read — reachable, not mode-gated.
+        assert httpx.get(f"{base_url}/v1/names/test").status_code == 404
 
 
 # =============================================================================

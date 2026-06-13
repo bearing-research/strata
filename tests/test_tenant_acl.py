@@ -766,3 +766,51 @@ class TestServiceModeArtifactReads:
             )
             assert resp.status_code == 200
             assert resp.content == b"arrow-bytes"
+
+
+class TestServiceModeRegistryReads:
+    """Resolving a published dataset by name works in service mode (W2).
+
+    Registry resolution used to 403 in service mode (gated as a write). For the
+    shared-research-store use case, resolving 'the always-available dataset' by
+    name is the core read — so it's enabled, tenant-scoped (team = tenant).
+    Registry *writes* (set_name/set_alias) stay gated; those are W1.
+    """
+
+    def test_resolve_name_in_service_mode_tenant_scoped(self, artifact_dir):
+        with _service_read_app(artifact_dir, auth=True) as (client, store):
+            v = _create_ready_artifact_for_tenant(store, "art-1", tenant="team-a")
+            store.set_name("team/cleaned", "art-1", v, tenant="team-a")
+
+            resp = client.get("/v1/names/team/cleaned", headers=_auth_headers("team-a"))
+            assert resp.status_code == 200
+            assert resp.json()["version"] == v
+
+    def test_resolve_name_cross_tenant_not_found(self, artifact_dir):
+        with _service_read_app(artifact_dir, auth=True) as (client, store):
+            v = _create_ready_artifact_for_tenant(store, "art-1", tenant="team-a")
+            store.set_name("team/cleaned", "art-1", v, tenant="team-a")
+
+            # A different team cannot resolve team-a's name.
+            resp = client.get("/v1/names/team/cleaned", headers=_auth_headers("team-b"))
+            assert resp.status_code == 404
+
+    def test_resolve_name_no_auth_service_mode(self, artifact_dir):
+        with _service_read_app(artifact_dir, auth=False) as (client, store):
+            v = _create_ready_artifact_for_tenant(store, "art-1", tenant=None)
+            store.set_name("public/data", "art-1", v, tenant=None)
+
+            resp = client.get("/v1/names/public/data")
+            assert resp.status_code == 200
+            assert resp.json()["version"] == v
+
+    def test_set_name_still_blocked_in_service_mode(self, artifact_dir):
+        # Writes are W1 — publishing a name must still be rejected in service mode.
+        with _service_read_app(artifact_dir, auth=True) as (client, store):
+            v = _create_ready_artifact_for_tenant(store, "art-1", tenant="team-a")
+            resp = client.post(
+                "/v1/names",
+                json={"name": "team/x", "artifact_id": "art-1", "version": v},
+                headers=_auth_headers("team-a"),
+            )
+            assert resp.status_code == 403
