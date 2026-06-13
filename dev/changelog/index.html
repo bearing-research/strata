@@ -2559,6 +2559,15 @@ exhaustive commit history.</p>
   burning a retry on the wrapper.</p>
 </li>
 <li>
+<p><strong>Configurable pull-model signing secret</strong> (<code>STRATA_TRANSFORM_SIGNING_SECRET</code>):
+  the HMAC secret that signs v2-pull build URLs can now be pinned via config
+  instead of being a random per-process value. Without it, the secret was
+  regenerated on every restart — so in-flight signed download/upload/finalize
+  URLs broke on restart and never matched across replicas. Set a stable value for
+  any multi-replica or restart-surviving deployment; if <code>pull_model_enabled</code> is on
+  without it, the server logs a warning at startup.</p>
+</li>
+<li>
 <p><strong>Approval gates on protected aliases</strong>: set
   <code>STRATA_REGISTRY_PROTECTED_ALIASES=champion,production</code> and moves or
   deletes of those aliases queue for approval (HTTP 202) instead of
