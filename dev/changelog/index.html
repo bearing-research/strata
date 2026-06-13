@@ -2649,6 +2649,16 @@ exhaustive commit history.</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>Service-mode config coherence is checked at startup</strong> (hardening): three
+  misconfigurations now fail fast instead of silently misbehaving at runtime —
+  <code>multi_tenant_enabled</code> with <code>auth_mode='none'</code> (the tenant header would be
+  unauthenticated and spoofable, and reads aren't tenant-filtered without auth, so
+  multi-tenancy now requires <code>auth_mode='trusted_proxy'</code>), ACL rules with
+  <code>auth_mode='none'</code> (ACL is only enforced under trusted-proxy auth, so the rules
+  would never run), and transforms enabled without an <code>artifact_dir</code> (builds
+  persist artifacts and need a store).</p>
+</li>
+<li>
 <p><strong>Artifact-mode scan builds are bounded-memory</strong>: the background build for
   <code>materialize(mode="artifact")</code> now writes each row-group chunk straight to the
   blob store (write-through) instead of accumulating the whole result in memory
