@@ -525,16 +525,50 @@ class StrataConfig(BaseSettings):
         always means the operator pulled flags from a service-mode config by
         mistake. Failing fast at startup beats a confusing runtime.
         """
-        # Service mode rejects personal_mode_user_header — service mode uses
-        # `X-Strata-Principal` via the trusted-proxy auth pipeline; the
-        # personal-mode header is a thinner shim for proxy-fronted personal
-        # deployments and doesn't belong in a multi-tenant config.
-        if self.deployment_mode == "service" and self.personal_mode_user_header:
-            raise ValueError(
-                "Deployment mode coherence error: deployment_mode='service' is "
-                "incompatible with personal_mode_user_header. Use auth_mode="
-                "'trusted_proxy' with X-Strata-Principal instead."
+        # Service mode: reject configs whose security/build intent is silently
+        # inert. (Note: multi_tenant_enabled with auth_mode='none' is allowed by
+        # design — it partitions cache/QoS by the tenant header without access
+        # control; it is not an isolation boundary.)
+        if self.deployment_mode == "service":
+            conflicts: list[str] = []
+
+            # personal_mode_user_header is a personal-mode proxy shim; service
+            # mode uses `X-Strata-Principal` via the trusted-proxy pipeline.
+            if self.personal_mode_user_header:
+                conflicts.append(
+                    "personal_mode_user_header (a personal-mode proxy shim; service "
+                    "mode uses auth_mode='trusted_proxy' with X-Strata-Principal)"
+                )
+
+            # ACL rules are only evaluated under trusted-proxy auth. Configured
+            # rules with auth_mode='none' would be silently ignored — an operator
+            # who wrote a deny rule would believe they were protected.
+            acl_configured = (
+                self.acl_config.default != "allow"
+                or bool(self.acl_config.deny_rules)
+                or bool(self.acl_config.allow_rules)
             )
+            if acl_configured and self.auth_mode != "trusted_proxy":
+                conflicts.append(
+                    "acl_config rules with auth_mode='none' (ACL is only enforced "
+                    "under trusted-proxy auth; set auth_mode='trusted_proxy')"
+                )
+
+            # Transform builds persist artifacts, which require an artifact store
+            # (its metadata DB lives under artifact_dir). Without it, every build
+            # would fail at runtime — reject at startup instead.
+            if self.server_transforms_enabled and self.artifact_dir is None:
+                conflicts.append(
+                    "transforms enabled without artifact_dir (builds persist "
+                    "artifacts and require an artifact store; set artifact_dir)"
+                )
+
+            if conflicts:
+                raise ValueError(
+                    "Deployment mode coherence error: deployment_mode='service' "
+                    "is incompatible with:\n  - " + "\n  - ".join(conflicts)
+                )
+            return self
 
         if self.deployment_mode != "personal":
             return self

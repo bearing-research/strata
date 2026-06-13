@@ -302,3 +302,67 @@ class TestModeCoherence:
             personal_mode_user_header="Cf-Access-Authenticated-User-Email",
         )
         assert config.personal_mode_user_header == "Cf-Access-Authenticated-User-Email"
+
+    def test_service_acl_without_auth_rejected(self, tmp_path):
+        """ACL rules with auth_mode='none' are silently inert — reject them."""
+        from strata.config import AclConfig
+
+        with pytest.raises(ValueError) as exc_info:
+            StrataConfig(
+                cache_dir=tmp_path / "cache",
+                deployment_mode="service",
+                acl_config=AclConfig(default="deny"),
+            )
+        assert "acl_config" in str(exc_info.value)
+
+    def test_service_acl_with_trusted_proxy_allowed(self, tmp_path):
+        """ACL rules are coherent once trusted-proxy auth is on."""
+        from strata.config import AclConfig
+
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            acl_config=AclConfig(default="deny"),
+        )
+        assert config.acl_config.default == "deny"
+
+    def test_service_default_acl_without_auth_allowed(self, tmp_path):
+        """The default (allow-all, no rules) ACL is not 'configured' — allowed."""
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            deployment_mode="service",
+        )
+        assert config.auth_mode == "none"
+
+    def test_service_transforms_without_artifact_dir_rejected(self, tmp_path):
+        """Transform builds persist artifacts; reject if no artifact store."""
+        with pytest.raises(ValueError) as exc_info:
+            StrataConfig(
+                cache_dir=tmp_path / "cache",
+                deployment_mode="service",
+                transforms_config={"enabled": True},
+            )
+        assert "artifact_dir" in str(exc_info.value)
+
+    def test_service_transforms_with_artifact_dir_allowed(self, tmp_path):
+        """Transforms + an artifact store is the build-service configuration."""
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            deployment_mode="service",
+            artifact_dir=tmp_path / "artifacts",
+            transforms_config={"enabled": True},
+        )
+        assert config.server_transforms_enabled is True
+
+    def test_service_multi_tenant_without_auth_still_allowed(self, tmp_path):
+        """Regression guard: multi_tenant + auth='none' is allowed by design
+        (cache/QoS partitioning by the tenant header, not an isolation boundary).
+        Hardening must not turn this into a hard error."""
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            deployment_mode="service",
+            multi_tenant_enabled=True,
+        )
+        assert config.multi_tenant_enabled is True
+        assert config.auth_mode == "none"

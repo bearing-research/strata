@@ -1208,10 +1208,11 @@ class TestProvenanceDeduplication:
 class TestServerModeConfig:
     """Tests for server-mode configuration."""
 
-    def test_server_transforms_enabled_property(self):
+    def test_server_transforms_enabled_property(self, tmp_path):
         """server_transforms_enabled returns True with proper config."""
         config = StrataConfig(
             deployment_mode="service",
+            artifact_dir=tmp_path / "artifacts",  # transforms persist; store required
             transforms_config={"enabled": True},
         )
         assert config.server_transforms_enabled is True
