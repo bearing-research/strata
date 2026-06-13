@@ -1110,6 +1110,25 @@ async def lifespan(app: FastAPI):
     transform_registry = TransformRegistry.from_config(config.transforms_config)
     set_transform_registry(transform_registry)
 
+    # Pin the pull-model signing secret from config so signed build URLs survive
+    # restarts and match across replicas. Without it the secret is a random
+    # per-process value (set lazily on first use) — in-flight signed URLs die on
+    # restart. Warn only when the pull model is actually in use.
+    from strata.transforms.signed_urls import set_signing_secret
+
+    if config.transform_signing_secret:
+        set_signing_secret(config.transform_signing_secret.encode("utf-8"))
+    elif config.pull_model_enabled:
+        logger.warning(
+            "pull_model_signing_secret_unset",
+            detail=(
+                "pull_model_enabled but transform_signing_secret is not set; using "
+                "a random per-process secret. Signed build URLs will break on "
+                "restart and differ across replicas. Set "
+                "STRATA_TRANSFORM_SIGNING_SECRET for a stable deployment."
+            ),
+        )
+
     # Configure structured logging first
     configure_logging()
 
