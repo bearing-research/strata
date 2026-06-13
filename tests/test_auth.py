@@ -331,3 +331,86 @@ class TestAclConfigParsing:
         assert acl_config.deny_rules[0].tables == ("file:pii.*",)
         assert len(acl_config.allow_rules) == 1
         assert acl_config.allow_rules[0].principal == "admin"
+
+
+class TestTransformInputAclParity:
+    """Regression: a table used as a *transform input* is gated by the same ACL
+    as the direct scan path.
+
+    Previously ``AclEvaluator.authorize`` ran only on the ``scan@v1`` path, so a
+    principal denied a table could still read it by passing it as a transform
+    input (``_resolve_input_version`` resolved the table snapshot with no ACL
+    check). Both paths now share ``_authorize_table_access``.
+    """
+
+    @staticmethod
+    def _patch_state(monkeypatch, *, namespace, hide_as_404=False):
+        from unittest.mock import MagicMock
+
+        import strata.server as server_module
+
+        identity = TableIdentity(catalog="file", namespace=namespace, table="events")
+        plan = MagicMock()
+        plan.snapshot_id = 4242
+        plan.table_identity = identity
+
+        state = MagicMock()
+        state.config.auth_mode = "trusted_proxy"
+        state.config.hide_forbidden_as_not_found = hide_as_404
+        state.config.acl_config = AclConfig(
+            default="deny",
+            deny_rules=[],
+            allow_rules=[AclRule(principal="analyst", tables=("file:public.*",))],
+        )
+        state.planner.plan.return_value = plan
+        monkeypatch.setattr(server_module, "_state", state)
+        # The table branch is reached only past the artifact-store gate; stub it
+        # so the test exercises the ACL, not store wiring.
+        monkeypatch.setattr(server_module, "_get_artifact_store", lambda **k: MagicMock())
+        return server_module
+
+    def test_denied_table_input_is_rejected_403(self, monkeypatch):
+        from fastapi import HTTPException
+
+        server_module = self._patch_state(monkeypatch, namespace="secret")
+        set_principal(Principal(id="intruder"))
+        try:
+            with pytest.raises(HTTPException) as exc:
+                server_module._resolve_input_version("file:///wh#secret.events")
+            assert exc.value.status_code == 403
+        finally:
+            set_principal(None)
+
+    def test_denied_table_input_hidden_as_404(self, monkeypatch):
+        from fastapi import HTTPException
+
+        server_module = self._patch_state(monkeypatch, namespace="secret", hide_as_404=True)
+        set_principal(Principal(id="intruder"))
+        try:
+            with pytest.raises(HTTPException) as exc:
+                server_module._resolve_input_version("file:///wh#secret.events")
+            assert exc.value.status_code == 404
+        finally:
+            set_principal(None)
+
+    def test_allowed_table_input_resolves(self, monkeypatch):
+        server_module = self._patch_state(monkeypatch, namespace="public")
+        set_principal(Principal(id="analyst"))
+        try:
+            assert server_module._resolve_input_version("file:///wh#public.events") == "4242"
+        finally:
+            set_principal(None)
+
+    def test_scan_and_transform_share_one_gate(self, monkeypatch):
+        # Both the scan path and the transform-input path call this one helper.
+        from fastapi import HTTPException
+
+        server_module = self._patch_state(monkeypatch, namespace="secret")
+        identity = TableIdentity(catalog="file", namespace="secret", table="events")
+        set_principal(Principal(id="intruder"))
+        try:
+            with pytest.raises(HTTPException) as exc:
+                server_module._authorize_table_access("file:///wh#secret.events", identity)
+            assert exc.value.status_code == 403
+        finally:
+            set_principal(None)

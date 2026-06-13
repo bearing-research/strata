@@ -3574,6 +3574,35 @@ def _resolve_to_artifact_version(
     return None
 
 
+def _authorize_table_access(table_uri: str, table_identity) -> None:
+    """Enforce table-level ACL under trusted-proxy auth; no-op otherwise.
+
+    The direct scan path (``scan@v1``) and every path that resolves a *table*
+    URI as a transform input share this one gate, so a table input can't be used
+    to read a table the caller is denied on the direct scan path (the ACL was
+    previously only checked on ``scan@v1``, letting transforms bypass it).
+
+    Raises:
+        HTTPException: 401 if no principal; 403/404 (per
+        ``hide_forbidden_as_not_found``) if the ACL denies the table.
+    """
+    state = get_state()
+    if state.config.auth_mode != "trusted_proxy":
+        return
+
+    from strata.auth import AclEvaluator
+
+    principal = get_principal()
+    if principal is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    table_ref = TableRef.from_table_identity(table_identity, table_uri=table_uri)
+    if not AclEvaluator(state.config.acl_config).authorize(principal, table_ref):
+        if state.config.hide_forbidden_as_not_found:
+            raise HTTPException(status_code=404, detail="Table not found")
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
 def _resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
     """Resolve an input URI to its current version string.
 
@@ -3622,12 +3651,16 @@ def _resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
                 columns=None,
                 filters=None,
             )
-            return str(plan.snapshot_id)
         except Exception as e:
             raise HTTPException(
                 status_code=400,
                 detail=f"Could not resolve table {input_uri}: {str(e)}",
-            )
+            ) from e
+        # Gate table inputs through the same ACL as the direct scan path — a
+        # transform input must not bypass it. Raised outside the try so a
+        # 403/404 isn't rewritten into a 400.
+        _authorize_table_access(input_uri, plan.table_identity)
+        return str(plan.snapshot_id)
 
     # Unknown URI type
     raise HTTPException(status_code=400, detail=f"Unknown input URI type: {input_uri}")
@@ -6188,14 +6221,7 @@ async def _handle_identity_materialize(
         if principal is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        table_ref = TableRef.from_table_identity(plan.table_identity, table_uri=table_uri)
-        from strata.auth import AclEvaluator
-
-        acl = AclEvaluator(state.config.acl_config)
-        if not acl.authorize(principal, table_ref):
-            if state.config.hide_forbidden_as_not_found:
-                raise HTTPException(status_code=404, detail="Table not found")
-            raise HTTPException(status_code=403, detail="Access denied")
+        _authorize_table_access(table_uri, plan.table_identity)
 
         plan.owner_principal = principal.id
         plan.owner_tenant = principal.tenant
