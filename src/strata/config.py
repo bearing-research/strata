@@ -377,6 +377,11 @@ class StrataConfig(BaseSettings):
     # Pull model configuration
     pull_model_enabled: bool = False
     signed_url_expiry_seconds: Annotated[float, Field(gt=0)] = 600.0
+    # HMAC secret for signing pull-model build URLs (env STRATA_TRANSFORM_SIGNING_SECRET).
+    # If unset, a random per-process secret is used — fine for single-instance dev,
+    # but signed URLs then become invalid on restart and differ across replicas.
+    # Set a stable value for any multi-replica or restart-surviving deployment.
+    transform_signing_secret: str | None = None
 
     # Build QoS configuration
     build_qos_interactive_slots: Annotated[int, Field(ge=1)] = 16

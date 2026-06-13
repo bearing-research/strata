@@ -59,6 +59,63 @@ class TestSigningSecret:
         new_secret = get_signing_secret()
         assert new_secret is not None
 
+    def test_signed_url_survives_restart_when_secret_pinned(self):
+        """A signed URL stays valid across a 'restart' iff the secret is re-pinned
+        from config (the point of transform_signing_secret) — with a random
+        per-process secret it would not."""
+        from urllib.parse import parse_qs, urlparse
+
+        secret = b"stable-deployment-secret-000001"
+        set_signing_secret(secret)
+        url = generate_download_url(
+            base_url="http://localhost:8765",
+            artifact_id="art",
+            version=1,
+            build_id="build-1",
+            expiry_seconds=300.0,
+        )
+        params = parse_qs(urlparse(url.url).query)
+
+        def _verify() -> bool:
+            return verify_download_signature(
+                artifact_id=params["artifact_id"][0],
+                version=int(params["version"][0]),
+                build_id=params["build_id"][0],
+                expires_at=float(params["expires_at"][0]),
+                signature=params["signature"][0],
+            )
+
+        # "Restart" loses the in-memory secret; a fresh random one would reject it.
+        reset_signing_secret()
+        set_signing_secret(b"a-different-random-process-secret")
+        assert _verify() is False
+
+        # Re-pinning the same configured secret keeps the URL valid.
+        reset_signing_secret()
+        set_signing_secret(secret)
+        assert _verify() is True
+
+
+class TestSigningSecretConfig:
+    """The signing secret is configurable (so it can be pinned across restarts)."""
+
+    def test_field_default_is_none(self):
+        from strata.config import StrataConfig
+
+        assert StrataConfig().transform_signing_secret is None
+
+    def test_field_set_explicitly(self):
+        from strata.config import StrataConfig
+
+        config = StrataConfig(transform_signing_secret="s3cr3t")
+        assert config.transform_signing_secret == "s3cr3t"
+
+    def test_field_from_env(self, monkeypatch):
+        from strata.config import StrataConfig
+
+        monkeypatch.setenv("STRATA_TRANSFORM_SIGNING_SECRET", "from-env")
+        assert StrataConfig.load().transform_signing_secret == "from-env"
+
 
 class TestDownloadURL:
     """Tests for download URL generation and verification."""

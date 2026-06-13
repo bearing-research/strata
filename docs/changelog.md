@@ -102,6 +102,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   in code fences or prose is extracted before validating instead of
   burning a retry on the wrapper.
 
+- **Configurable pull-model signing secret** (`STRATA_TRANSFORM_SIGNING_SECRET`):
+  the HMAC secret that signs v2-pull build URLs can now be pinned via config
+  instead of being a random per-process value. Without it, the secret was
+  regenerated on every restart — so in-flight signed download/upload/finalize
+  URLs broke on restart and never matched across replicas. Set a stable value for
+  any multi-replica or restart-surviving deployment; if `pull_model_enabled` is on
+  without it, the server logs a warning at startup.
+
 - **Approval gates on protected aliases**: set
   `STRATA_REGISTRY_PROTECTED_ALIASES=champion,production` and moves or
   deletes of those aliases queue for approval (HTTP 202) instead of
