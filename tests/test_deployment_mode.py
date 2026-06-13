@@ -261,10 +261,12 @@ class TestModeCoherence:
         assert config.auth_mode == "trusted_proxy"
 
     def test_service_with_multi_tenant_allowed(self, tmp_path):
-        """Service mode + multi_tenant_enabled is the normal hosted configuration."""
+        """Service mode + multi_tenant + trusted-proxy auth is the normal hosted
+        configuration (multi-tenancy requires auth to be a real boundary)."""
         config = StrataConfig(
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
+            auth_mode="trusted_proxy",
             multi_tenant_enabled=True,
             require_tenant_header=True,
         )
@@ -355,14 +357,14 @@ class TestModeCoherence:
         )
         assert config.server_transforms_enabled is True
 
-    def test_service_multi_tenant_without_auth_still_allowed(self, tmp_path):
-        """Regression guard: multi_tenant + auth='none' is allowed by design
-        (cache/QoS partitioning by the tenant header, not an isolation boundary).
-        Hardening must not turn this into a hard error."""
-        config = StrataConfig(
-            cache_dir=tmp_path / "cache",
-            deployment_mode="service",
-            multi_tenant_enabled=True,
-        )
-        assert config.multi_tenant_enabled is True
-        assert config.auth_mode == "none"
+    def test_service_multi_tenant_without_auth_rejected(self, tmp_path):
+        """Multi-tenancy is an access-control boundary: without trusted-proxy
+        auth the tenant header is spoofable and reads aren't tenant-filtered, so
+        multi_tenant + auth='none' is rejected at startup."""
+        with pytest.raises(ValueError) as exc_info:
+            StrataConfig(
+                cache_dir=tmp_path / "cache",
+                deployment_mode="service",
+                multi_tenant_enabled=True,
+            )
+        assert "multi_tenant_enabled" in str(exc_info.value)

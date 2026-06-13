@@ -526,11 +526,20 @@ class StrataConfig(BaseSettings):
         mistake. Failing fast at startup beats a confusing runtime.
         """
         # Service mode: reject configs whose security/build intent is silently
-        # inert. (Note: multi_tenant_enabled with auth_mode='none' is allowed by
-        # design — it partitions cache/QoS by the tenant header without access
-        # control; it is not an isolation boundary.)
+        # inert.
         if self.deployment_mode == "service":
             conflicts: list[str] = []
+
+            # Multi-tenancy is an access-control boundary. Without auth the tenant
+            # header is unauthenticated and spoofable, and direct artifact reads
+            # aren't tenant-filtered — so multi-tenancy requires trusted-proxy auth
+            # to mean anything.
+            if self.multi_tenant_enabled and self.auth_mode != "trusted_proxy":
+                conflicts.append(
+                    "multi_tenant_enabled=True with auth_mode='none' (the tenant "
+                    "header is unauthenticated and spoofable, and reads aren't "
+                    "tenant-filtered without auth; set auth_mode='trusted_proxy')"
+                )
 
             # personal_mode_user_header is a personal-mode proxy shim; service
             # mode uses `X-Strata-Principal` via the trusted-proxy pipeline.

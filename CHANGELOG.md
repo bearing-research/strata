@@ -178,13 +178,14 @@ exhaustive commit history.
 
 ### Changed
 
-- **Service-mode config coherence is checked at startup** (hardening): two
-  silently-inert misconfigurations now fail fast instead of at runtime — ACL
-  rules with `auth_mode='none'` (ACL is only enforced under trusted-proxy auth,
-  so the rules would never run) and transforms enabled without an `artifact_dir`
-  (builds persist artifacts and need a store). `multi_tenant_enabled` with
-  `auth_mode='none'` remains allowed by design (cache/QoS partitioning by the
-  tenant header, not an access-control boundary).
+- **Service-mode config coherence is checked at startup** (hardening): three
+  misconfigurations now fail fast instead of silently misbehaving at runtime —
+  `multi_tenant_enabled` with `auth_mode='none'` (the tenant header would be
+  unauthenticated and spoofable, and reads aren't tenant-filtered without auth, so
+  multi-tenancy now requires `auth_mode='trusted_proxy'`), ACL rules with
+  `auth_mode='none'` (ACL is only enforced under trusted-proxy auth, so the rules
+  would never run), and transforms enabled without an `artifact_dir` (builds
+  persist artifacts and need a store).
 
 - **Artifact-mode scan builds are bounded-memory**: the background build for
   `materialize(mode="artifact")` now writes each row-group chunk straight to the
