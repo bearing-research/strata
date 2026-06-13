@@ -2459,7 +2459,17 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Registry authorization hardening</strong> (pre-release security review): the
+<li>
+<p><strong>Table ACL is enforced on transform inputs</strong> (service-mode hardening): under
+  trusted-proxy auth, <code>AclEvaluator</code> previously gated only the direct <code>scan@v1</code>
+  path, so a principal denied a table could still read it by passing it as an
+  input to a transform (<code>/v1/artifacts/materialize</code>, <code>explain-materialize</code>,
+  name-status). The scan path and every table-input resolution now share one
+  <code>_authorize_table_access</code> gate, so a transform input can't bypass the ACL.
+  Personal mode (no auth) is unaffected.</p>
+</li>
+<li>
+<p><strong>Registry authorization hardening</strong> (pre-release security review): the
   registry audit read is now tenant-scoped — a principal sees only its own
   tenant's history (<code>admin:*</code> sees the whole store), matching every other
   registry route. Deciding protected-alias changes (approve/reject)
@@ -2467,7 +2477,8 @@ exhaustive commit history.</p>
   approval enforces separation of duty (the requester cannot self-approve
   without <code>admin:*</code>). These close latent cross-tenant-disclosure and
   self-approval gaps before the registry is exposed in multi-tenant
-  service mode; personal mode (single operator) is unaffected.</li>
+  service mode; personal mode (single operator) is unaffected.</p>
+</li>
 </ul>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
