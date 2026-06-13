@@ -11,6 +11,14 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Security
 
+- **Table ACL is enforced on transform inputs** (service-mode hardening): under
+  trusted-proxy auth, `AclEvaluator` previously gated only the direct `scan@v1`
+  path, so a principal denied a table could still read it by passing it as an
+  input to a transform (`/v1/artifacts/materialize`, `explain-materialize`,
+  name-status). The scan path and every table-input resolution now share one
+  `_authorize_table_access` gate, so a transform input can't bypass the ACL.
+  Personal mode (no auth) is unaffected.
+
 - **Registry authorization hardening** (pre-release security review): the
   registry audit read is now tenant-scoped — a principal sees only its own
   tenant's history (`admin:*` sees the whole store), matching every other
