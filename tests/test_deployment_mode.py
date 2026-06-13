@@ -368,3 +368,24 @@ class TestModeCoherence:
                 multi_tenant_enabled=True,
             )
         assert "multi_tenant_enabled" in str(exc_info.value)
+
+    def test_service_writes_without_auth_rejected(self, tmp_path):
+        """Authenticated write-back must be attributable — reject without auth."""
+        with pytest.raises(ValueError) as exc_info:
+            StrataConfig(
+                cache_dir=tmp_path / "cache",
+                deployment_mode="service",
+                service_writes_enabled=True,
+            )
+        assert "service_writes_enabled" in str(exc_info.value)
+
+    def test_service_writes_with_trusted_proxy_allowed(self, tmp_path):
+        """service_writes_enabled is coherent with trusted-proxy auth."""
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            deployment_mode="service",
+            auth_mode="trusted_proxy",
+            proxy_token="t",
+            service_writes_enabled=True,
+        )
+        assert config.service_writes_enabled is True

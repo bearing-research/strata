@@ -667,8 +667,8 @@ def _create_scan_artifact(store, artifact_id, tenant, table_uri, blob=b"arrow-by
 
 
 @contextmanager
-def _service_read_app(artifact_dir, *, auth, acl=None, hide_as_404=False):
-    """A genuine service-mode TestClient (NOT mutated to personal) for read tests."""
+def _service_read_app(artifact_dir, *, auth, acl=None, hide_as_404=False, writes=False):
+    """A genuine service-mode TestClient (NOT mutated to personal) for read/write tests."""
     from strata.config import StrataConfig
     from strata.server import app
 
@@ -684,6 +684,8 @@ def _service_read_app(artifact_dir, *, auth, acl=None, hide_as_404=False):
         kwargs.update(auth_mode="trusted_proxy", proxy_token="test-token")
     if acl is not None:
         kwargs["acl_config"] = acl
+    if writes:
+        kwargs["service_writes_enabled"] = True  # requires auth (coherence)
     config = StrataConfig(**kwargs)
 
     reset_artifact_store()
@@ -814,3 +816,56 @@ class TestServiceModeRegistryReads:
                 headers=_auth_headers("team-a"),
             )
             assert resp.status_code == 403
+
+
+class TestServiceModeAuthenticatedWrites:
+    """Authenticated write-back in service mode (W1): an opt-in capability for the
+    shared research store. Publishing requires `service_writes_enabled` + trusted
+    -proxy auth + the `artifacts:write` scope, lands in the caller's tenant, and is
+    attributed. Default service mode stays no-write.
+    """
+
+    def test_publish_name_with_scope(self, artifact_dir):
+        with _service_read_app(artifact_dir, auth=True, writes=True) as (client, store):
+            v = _create_ready_artifact_for_tenant(store, "art-1", tenant="team-a")
+            resp = client.post(
+                "/v1/names",
+                json={"name": "team/cleaned", "artifact_id": "art-1", "version": v},
+                headers=_auth_headers("team-a", principal="alice", scopes="artifacts:write"),
+            )
+            assert resp.status_code == 200
+            # Published into team-a's namespace, attributable.
+            assert store.get_name("team/cleaned", tenant="team-a") is not None
+            assert store.get_name("team/cleaned", tenant="team-b") is None
+
+    def test_publish_without_scope_rejected(self, artifact_dir):
+        with _service_read_app(artifact_dir, auth=True, writes=True) as (client, store):
+            v = _create_ready_artifact_for_tenant(store, "art-1", tenant="team-a")
+            resp = client.post(
+                "/v1/names",
+                json={"name": "team/cleaned", "artifact_id": "art-1", "version": v},
+                headers=_auth_headers("team-a", principal="alice"),  # no artifacts:write
+            )
+            assert resp.status_code == 403
+
+    def test_publish_blocked_without_service_writes_enabled(self, artifact_dir):
+        # Default service mode (writes opt-in OFF): even with the scope, blocked.
+        with _service_read_app(artifact_dir, auth=True, writes=False) as (client, store):
+            v = _create_ready_artifact_for_tenant(store, "art-1", tenant="team-a")
+            resp = client.post(
+                "/v1/names",
+                json={"name": "team/cleaned", "artifact_id": "art-1", "version": v},
+                headers=_auth_headers("team-a", principal="alice", scopes="artifacts:write"),
+            )
+            assert resp.status_code == 403
+
+    def test_admin_scope_can_publish(self, artifact_dir):
+        # admin:* grants all scopes, including artifacts:write.
+        with _service_read_app(artifact_dir, auth=True, writes=True) as (client, store):
+            v = _create_ready_artifact_for_tenant(store, "art-1", tenant="team-a")
+            resp = client.post(
+                "/v1/names",
+                json={"name": "team/cleaned", "artifact_id": "art-1", "version": v},
+                headers=_auth_headers("team-a", principal="root", scopes="admin:*"),
+            )
+            assert resp.status_code == 200

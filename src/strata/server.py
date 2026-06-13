@@ -3392,7 +3392,11 @@ async def cancel_warm_job_v1(job_id: str):
 # ---------------------------------------------------------------------------
 
 
-def _get_artifact_store(allow_server_mode: bool = False, allow_read: bool = False):
+def _get_artifact_store(
+    allow_server_mode: bool = False,
+    allow_read: bool = False,
+    allow_write: bool = False,
+):
     """Get the artifact store, raising 403 if not in appropriate mode.
 
     Args:
@@ -3403,6 +3407,10 @@ def _get_artifact_store(allow_server_mode: bool = False, allow_read: bool = Fals
             (``_ensure_artifact_access``) and table ACL
             (``_authorize_artifact_read``) — reads are shared-cache results, and
             "result retrieval is ACL-gated" (not blanket-blocked by mode).
+        allow_write: If True, permit access in service mode for write endpoints
+            when ``service_writes_enabled`` (authenticated write-back). The caller
+            MUST then gate by ``_authorize_artifact_write`` (trusted-proxy auth +
+            ``artifacts:write`` scope); writes stamp the caller's tenant/principal.
     """
     from strata.artifact_store import get_artifact_store
 
@@ -3411,8 +3419,9 @@ def _get_artifact_store(allow_server_mode: bool = False, allow_read: bool = Fals
     # Check if access is allowed
     writes_ok = state.config.writes_enabled  # personal mode
     server_transforms_ok = allow_server_mode and state.config.server_transforms_enabled
+    service_write_ok = allow_write and state.config.service_writes_enabled
 
-    if not (writes_ok or server_transforms_ok or allow_read):
+    if not (writes_ok or server_transforms_ok or allow_read or service_write_ok):
         raise HTTPException(
             status_code=403,
             detail={
@@ -3666,6 +3675,36 @@ def _authorize_artifact_read(artifact) -> None:
         except ValueError:
             continue
         _authorize_table_access(input_uri, identity)
+
+
+def _authorize_artifact_write() -> None:
+    """Gate a write endpoint (put / set_name / set_alias / tags).
+
+    Personal mode: unrestricted (existing behavior). Service mode (only reachable
+    with ``service_writes_enabled``, enforced by ``_get_artifact_store(allow_write
+    =True)``): require trusted-proxy auth and the ``artifacts:write`` scope. The
+    endpoint stamps the caller's tenant + principal, so the write lands in the
+    caller's team namespace and can't target another tenant.
+    """
+    state = get_state()
+    if state.config.writes_enabled:
+        return  # personal mode — unrestricted
+
+    # Service-mode authenticated write-back.
+    if state.config.auth_mode != "trusted_proxy":
+        # Also prevented by validate_mode_coherence; belt and suspenders.
+        raise HTTPException(status_code=403, detail="Writes require trusted-proxy auth")
+    principal = get_principal()
+    if principal is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not principal.has_scope("artifacts:write"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "missing_scope",
+                "message": "Publishing to the store requires the 'artifacts:write' scope.",
+            },
+        )
 
 
 def _resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
@@ -4161,7 +4200,8 @@ async def put_artifact(request: Request):
         raise HTTPException(status_code=400, detail="Missing 'executor' in transform")
     params = transform_dict.get("params", {})
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_write=True)
+    _authorize_artifact_write()
 
     # Resolve tenant the same way materialize does (principal-based) —
     # get_tenant_id() defaults to "_default", which stranded put-created
@@ -4335,7 +4375,8 @@ async def set_alias(name: str, alias: str, request: AliasSetRequest):
     from strata.auth import get_principal
 
     state = get_state()
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_write=True)
+    _authorize_artifact_write()
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
@@ -4469,7 +4510,8 @@ async def set_tag(artifact_id: str, version: int, request: TagSetRequest):
     """Set a key/value tag on an artifact version."""
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_write=True)
+    _authorize_artifact_write()
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
@@ -4504,7 +4546,8 @@ async def delete_tag(artifact_id: str, version: int, key: str):
     """Delete one tag from an artifact version."""
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_write=True)
+    _authorize_artifact_write()
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
@@ -4708,14 +4751,23 @@ async def set_name(request: NameSetRequest):
     """
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_write=True)
+    _authorize_artifact_write()
 
-    # Get tenant from auth context for name isolation
+    # Get tenant + actor from auth context for name isolation and audit
+    # attribution (who published this name).
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
+    actor = principal.id if principal else None
 
     try:
-        store.set_name(request.name, request.artifact_id, request.version, tenant=tenant_id)
+        store.set_name(
+            request.name,
+            request.artifact_id,
+            request.version,
+            tenant=tenant_id,
+            actor=actor,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

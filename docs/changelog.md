@@ -102,6 +102,18 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   in code fences or prose is extracted before validating instead of
   burning a retry on the wrapper.
 
+- **Authenticated write-back in service mode** (`service_writes_enabled`, shared
+  research store): an opt-in capability letting authenticated clients *publish*
+  to a service-mode store — `put`, `set_name`, `set_alias`, tags — so a team can
+  share processed datasets through one central deployment. Each write requires
+  trusted-proxy auth and the `artifacts:write` scope, lands in the caller's
+  tenant (team = tenant; can't target another team), and is attributed to the
+  publishing principal in the registry audit. Default is **off** — service mode
+  stays read-only unless you enable it, and it requires `auth_mode='trusted_proxy'`
+  (enforced at startup) so every write is attributable. Pairs with the
+  now-resolvable registry names (above) to make a published dataset "always
+  available to the team."
+
 - **Configurable pull-model signing secret** (`STRATA_TRANSFORM_SIGNING_SECRET`):
   the HMAC secret that signs v2-pull build URLs can now be pinned via config
   instead of being a random per-process value. Without it, the secret was
