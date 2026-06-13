@@ -2677,6 +2677,14 @@ exhaustive commit history.</p>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong><code>materialize(mode="artifact")</code> without a store fails fast</strong> (service-mode
+  hardening): requesting artifact (persisted) mode in a deployment with no
+  <code>artifact_dir</code> used to return a <code>build_id</code> that never resolved — the background
+  build silently no-ops with no store to write to, so the client polled forever.
+  It now returns <code>400</code> up front, pointing at <code>mode="stream"</code> (scan without
+  persistence) or configuring <code>artifact_dir</code>.</p>
+</li>
+<li>
 <p><strong>Materialized results are readable in service mode</strong> (service-mode
   hardening): <code>GET /v1/artifacts/{id}/v/{n}/data</code> and the artifact metadata GET
   were gated as writes, so they returned 403 in service mode — an identity-scan
