@@ -2658,6 +2658,15 @@ exhaustive commit history.</p>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>Registry name resolution works in service mode</strong> (shared-store groundwork):
+  resolving a published dataset by name — <code>GET /v1/names/{name}</code>, alias
+  resolution, name-status, and tag reads — used to 403 in service mode (gated as
+  a write). These are reads, so they're now enabled and tenant-scoped (a team
+  resolves its own namespace; cross-team is not found). Registry <em>writes</em>
+  (<code>set_name</code>/<code>set_alias</code>/tags) and <em>listing</em> all names stay blocked — those are
+  the next step (authenticated write-back).</p>
+</li>
+<li>
 <p><strong>Service-mode config coherence is checked at startup</strong> (hardening): three
   misconfigurations now fail fast instead of silently misbehaving at runtime —
   <code>multi_tenant_enabled</code> with <code>auth_mode='none'</code> (the tenant header would be
