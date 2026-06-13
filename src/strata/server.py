@@ -4393,7 +4393,7 @@ async def resolve_alias(name: str, alias: str):
     """Resolve ``name @ alias`` to its artifact version."""
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
@@ -4440,7 +4440,7 @@ async def list_aliases(name: str):
     """List the aliases held by a name."""
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
@@ -4488,7 +4488,7 @@ async def get_tags(artifact_id: str, version: int):
     """Get the tags on an artifact version."""
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
@@ -4677,7 +4677,7 @@ async def resolve_name(name: str):
     """
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
 
     # Get tenant from auth context for name isolation
     principal = get_principal()
@@ -4798,7 +4798,7 @@ async def get_name_status(name: str):
     """
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
 
     # Get tenant from auth context for name isolation
     principal = get_principal()

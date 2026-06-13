@@ -194,6 +194,14 @@ exhaustive commit history.
 
 ### Changed
 
+- **Registry name resolution works in service mode** (shared-store groundwork):
+  resolving a published dataset by name — `GET /v1/names/{name}`, alias
+  resolution, name-status, and tag reads — used to 403 in service mode (gated as
+  a write). These are reads, so they're now enabled and tenant-scoped (a team
+  resolves its own namespace; cross-team is not found). Registry *writes*
+  (`set_name`/`set_alias`/tags) and *listing* all names stay blocked — those are
+  the next step (authenticated write-back).
+
 - **Service-mode config coherence is checked at startup** (hardening): three
   misconfigurations now fail fast instead of silently misbehaving at runtime —
   `multi_tenant_enabled` with `auth_mode='none'` (the tenant header would be
