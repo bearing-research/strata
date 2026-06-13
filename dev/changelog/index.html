@@ -2677,6 +2677,17 @@ exhaustive commit history.</p>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
+<p><strong>Materialized results are readable in service mode</strong> (service-mode
+  hardening): <code>GET /v1/artifacts/{id}/v/{n}/data</code> and the artifact metadata GET
+  were gated as writes, so they returned 403 in service mode — an identity-scan
+  <strong>cache hit returned a <code>/data</code> URL the client couldn't fetch</strong>, and a build
+  service couldn't serve its results. Reads are now allowed in service mode,
+  gated by tenant (<code>_ensure_artifact_access</code>) and the table ACL of the
+  artifact's inputs (so a principal denied a table can't read it back via a
+  cached scan result — "result retrieval is ACL-gated"). Personal mode is
+  unchanged.</p>
+</li>
+<li>
 <p><strong>Ambient cell <code>strata</code> client survives large materialize streams</strong> (ML
   dogfood): a cell scanning a big lake table via the injected <code>strata</code> client
   could fail with <code>IncompleteRead</code> — and leave the artifact <code>failed</code> — on a
