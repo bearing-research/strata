@@ -414,3 +414,91 @@ class TestTransformInputAclParity:
             assert exc.value.status_code == 403
         finally:
             set_principal(None)
+
+
+class TestArtifactReadAcl:
+    """Reading a cached result is ACL-gated (service-mode read path, 0.1/A.1).
+
+    The artifact cache is shared across principals; "result retrieval is
+    ACL-gated", so a principal denied a table must not read it back via a cached
+    scan result. `_authorize_artifact_read` re-checks the table ACL of the
+    artifact's inputs — parsed straight from the stored transform_spec.
+    """
+
+    @staticmethod
+    def _artifact(table_uri):
+        from unittest.mock import MagicMock
+
+        from strata.artifact_store import TransformSpec
+
+        art = MagicMock()
+        art.transform_spec = TransformSpec(
+            executor="scan@v1", params={}, inputs=[table_uri]
+        ).to_json()
+        return art
+
+    @staticmethod
+    def _patch_state(monkeypatch, *, auth, hide_as_404=False):
+        from unittest.mock import MagicMock
+
+        import strata.server as server_module
+
+        state = MagicMock()
+        state.config.auth_mode = auth
+        state.config.hide_forbidden_as_not_found = hide_as_404
+        state.config.acl_config = AclConfig(
+            default="deny",
+            deny_rules=[],
+            allow_rules=[AclRule(principal="analyst", tables=("file:public.*",))],
+        )
+        monkeypatch.setattr(server_module, "_state", state)
+        return server_module
+
+    def test_denied_table_read_rejected(self, monkeypatch):
+        from fastapi import HTTPException
+
+        server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
+        art = self._artifact("file:///wh#secret.events")
+        set_principal(Principal(id="intruder"))
+        try:
+            with pytest.raises(HTTPException) as exc:
+                server_module._authorize_artifact_read(art)
+            assert exc.value.status_code == 403
+        finally:
+            set_principal(None)
+
+    def test_allowed_table_read_passes(self, monkeypatch):
+        server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
+        art = self._artifact("file:///wh#public.events")
+        set_principal(Principal(id="analyst"))
+        try:
+            server_module._authorize_artifact_read(art)  # no raise
+        finally:
+            set_principal(None)
+
+    def test_no_auth_is_noop(self, monkeypatch):
+        # Without trusted-proxy auth there is no principal/ACL — read is allowed
+        # (tenant scoping is enforced separately by _ensure_artifact_access).
+        server_module = self._patch_state(monkeypatch, auth="none")
+        art = self._artifact("file:///wh#secret.events")
+        server_module._authorize_artifact_read(art)  # no raise
+
+    def test_artifact_without_table_inputs_is_noop(self, monkeypatch):
+        # An artifact whose inputs are all artifacts (no tables) has no table ACL
+        # to check — tenant scoping is the gate.
+        from unittest.mock import MagicMock
+
+        from strata.artifact_store import TransformSpec
+
+        server_module = self._patch_state(monkeypatch, auth="trusted_proxy")
+        art = MagicMock()
+        art.transform_spec = TransformSpec(
+            executor="duckdb_sql@v1",
+            params={},
+            inputs=["strata://artifact/abc@v=1"],
+        ).to_json()
+        set_principal(Principal(id="intruder"))
+        try:
+            server_module._authorize_artifact_read(art)  # no raise
+        finally:
+            set_principal(None)

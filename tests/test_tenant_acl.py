@@ -8,6 +8,7 @@ These tests verify:
 5. Error handling - hide forbidden as not found when configured
 """
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
@@ -648,3 +649,120 @@ class TestDirectArtifactEndpointIsolation:
 
         assert artifact_store.get_artifact("team-a-art", version_a) is None
         assert artifact_store.get_artifact("team-b-art", version_b) is not None
+
+
+def _create_scan_artifact(store, artifact_id, tenant, table_uri, blob=b"arrow-bytes"):
+    """A ready scan@v1 artifact whose single input is a table URI."""
+    from strata.artifact_store import TransformSpec
+
+    version = store.create_artifact(
+        artifact_id=artifact_id,
+        provenance_hash=f"hash-{artifact_id}",
+        transform_spec=TransformSpec(executor="scan@v1", params={}, inputs=[table_uri]),
+        tenant=tenant,
+    )
+    store.write_blob(artifact_id, version, blob)
+    store.finalize_artifact(artifact_id, version, "{}", 1, len(blob))
+    return version
+
+
+@contextmanager
+def _service_read_app(artifact_dir, *, auth, acl=None, hide_as_404=False):
+    """A genuine service-mode TestClient (NOT mutated to personal) for read tests."""
+    from strata.config import StrataConfig
+    from strata.server import app
+
+    cache_dir = artifact_dir.parent / "cache"
+    cache_dir.mkdir(exist_ok=True)
+    kwargs = dict(
+        deployment_mode="service",
+        artifact_dir=artifact_dir,
+        cache_dir=cache_dir,
+        hide_forbidden_as_not_found=hide_as_404,
+    )
+    if auth:
+        kwargs.update(auth_mode="trusted_proxy", proxy_token="test-token")
+    if acl is not None:
+        kwargs["acl_config"] = acl
+    config = StrataConfig(**kwargs)
+
+    reset_artifact_store()
+    store = get_artifact_store(artifact_dir)
+
+    mock_state = MagicMock()
+    mock_state.config = config
+    mock_state.planner = MagicMock()
+    mock_state.fetcher = MagicMock()
+    mock_state.scans = {}
+    mock_state.metrics = MagicMock()
+
+    original = server_module._state
+    server_module._state = mock_state
+    try:
+        yield TestClient(app), store
+    finally:
+        server_module._state = original
+        reset_artifact_store()
+
+
+class TestServiceModeArtifactReads:
+    """Reads work in genuine service mode (writes_enabled=False), gated by tenant
+    + the table ACL of the artifact's inputs.
+
+    Regression: ``/data`` and artifact metadata used to 403 in service mode
+    (gated as writes), so a materialized result — including an identity-scan
+    cache hit — was unreadable. The existing tenant-acl coverage had to mutate
+    the config to personal mode to exercise these endpoints; these run in real
+    service mode.
+    """
+
+    def test_data_readable_in_service_mode_no_auth(self, artifact_dir):
+        with _service_read_app(artifact_dir, auth=False) as (client, store):
+            v = _create_scan_artifact(store, "art-1", tenant=None, table_uri="file:///wh#db.t")
+            resp = client.get(f"/v1/artifacts/art-1/v/{v}/data")
+            assert resp.status_code == 200
+            assert resp.content == b"arrow-bytes"
+
+    def test_metadata_readable_in_service_mode_no_auth(self, artifact_dir):
+        with _service_read_app(artifact_dir, auth=False) as (client, store):
+            v = _create_scan_artifact(store, "art-1", tenant=None, table_uri="file:///wh#db.t")
+            resp = client.get(f"/v1/artifacts/art-1/v/{v}")
+            assert resp.status_code == 200
+            assert resp.json()["state"] == "ready"
+
+    def test_data_denied_table_rejected_with_auth(self, artifact_dir):
+        from strata.config import AclConfig, AclRule
+
+        acl = AclConfig(
+            default="deny",
+            deny_rules=[],
+            allow_rules=[AclRule(principal="analyst", tables=("file:public.*",))],
+        )
+        with _service_read_app(artifact_dir, auth=True, acl=acl) as (client, store):
+            v = _create_scan_artifact(
+                store, "art-1", tenant="team-a", table_uri="file:///wh#secret.events"
+            )
+            resp = client.get(
+                f"/v1/artifacts/art-1/v/{v}/data",
+                headers=_auth_headers("team-a", principal="intruder"),
+            )
+            assert resp.status_code == 403
+
+    def test_data_allowed_table_passes_with_auth(self, artifact_dir):
+        from strata.config import AclConfig, AclRule
+
+        acl = AclConfig(
+            default="deny",
+            deny_rules=[],
+            allow_rules=[AclRule(principal="analyst", tables=("file:public.*",))],
+        )
+        with _service_read_app(artifact_dir, auth=True, acl=acl) as (client, store):
+            v = _create_scan_artifact(
+                store, "art-1", tenant="team-a", table_uri="file:///wh#public.events"
+            )
+            resp = client.get(
+                f"/v1/artifacts/art-1/v/{v}/data",
+                headers=_auth_headers("team-a", principal="analyst"),
+            )
+            assert resp.status_code == 200
+            assert resp.content == b"arrow-bytes"
