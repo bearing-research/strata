@@ -210,6 +210,13 @@ exhaustive commit history.
 
 ### Fixed
 
+- **`materialize(mode="artifact")` without a store fails fast** (service-mode
+  hardening): requesting artifact (persisted) mode in a deployment with no
+  `artifact_dir` used to return a `build_id` that never resolved — the background
+  build silently no-ops with no store to write to, so the client polled forever.
+  It now returns `400` up front, pointing at `mode="stream"` (scan without
+  persistence) or configuring `artifact_dir`.
+
 - **Materialized results are readable in service mode** (service-mode
   hardening): `GET /v1/artifacts/{id}/v/{n}/data` and the artifact metadata GET
   were gated as writes, so they returned 403 in service mode — an identity-scan

@@ -6390,6 +6390,19 @@ async def _handle_identity_materialize(
             stream_url=f"/v1/streams/{stream_id}",
         )
     else:
+        # Artifact mode persists the result, which requires an artifact store.
+        # Without one the background build would no-op and the returned build_id
+        # would never resolve — reject up front instead of hanging the client.
+        if store is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "mode='artifact' requires an artifact store, but this deployment "
+                    "has no artifact_dir configured. Use mode='stream' to scan "
+                    "without persistence, or set artifact_dir."
+                ),
+            )
+
         # Artifact mode - admit through build QoS, then build in the background.
         from strata.transforms.build_qos import (
             BuildQoSError,
