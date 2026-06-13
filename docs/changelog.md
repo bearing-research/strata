@@ -212,6 +212,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Fixed
 
+- **Materialized results are readable in service mode** (service-mode
+  hardening): `GET /v1/artifacts/{id}/v/{n}/data` and the artifact metadata GET
+  were gated as writes, so they returned 403 in service mode — an identity-scan
+  **cache hit returned a `/data` URL the client couldn't fetch**, and a build
+  service couldn't serve its results. Reads are now allowed in service mode,
+  gated by tenant (`_ensure_artifact_access`) and the table ACL of the
+  artifact's inputs (so a principal denied a table can't read it back via a
+  cached scan result — "result retrieval is ACL-gated"). Personal mode is
+  unchanged.
+
 - **Ambient cell `strata` client survives large materialize streams** (ML
   dogfood): a cell scanning a big lake table via the injected `strata` client
   could fail with `IncompleteRead` — and leave the artifact `failed` — on a

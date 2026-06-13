@@ -3373,12 +3373,17 @@ async def cancel_warm_job_v1(job_id: str):
 # ---------------------------------------------------------------------------
 
 
-def _get_artifact_store(allow_server_mode: bool = False):
+def _get_artifact_store(allow_server_mode: bool = False, allow_read: bool = False):
     """Get the artifact store, raising 403 if not in appropriate mode.
 
     Args:
         allow_server_mode: If True, also allow access when server-mode
             transforms are enabled (for materialize endpoint).
+        allow_read: If True, permit access in service mode for read-only
+            endpoints. The caller MUST then gate by tenant
+            (``_ensure_artifact_access``) and table ACL
+            (``_authorize_artifact_read``) — reads are shared-cache results, and
+            "result retrieval is ACL-gated" (not blanket-blocked by mode).
     """
     from strata.artifact_store import get_artifact_store
 
@@ -3388,7 +3393,7 @@ def _get_artifact_store(allow_server_mode: bool = False):
     writes_ok = state.config.writes_enabled  # personal mode
     server_transforms_ok = allow_server_mode and state.config.server_transforms_enabled
 
-    if not (writes_ok or server_transforms_ok):
+    if not (writes_ok or server_transforms_ok or allow_read):
         raise HTTPException(
             status_code=403,
             detail={
@@ -3403,9 +3408,11 @@ def _get_artifact_store(allow_server_mode: bool = False):
 
     store = get_artifact_store(state.config.artifact_dir)
     if store is None:
+        # A service-mode read gateway without an artifact_dir simply has no
+        # persisted artifacts to read.
         raise HTTPException(
-            status_code=500,
-            detail="Artifact store not initialized",
+            status_code=404 if allow_read else 500,
+            detail="Artifact store not available in this deployment",
         )
     return store
 
@@ -3601,6 +3608,45 @@ def _authorize_table_access(table_uri: str, table_identity) -> None:
         if state.config.hide_forbidden_as_not_found:
             raise HTTPException(status_code=404, detail="Table not found")
         raise HTTPException(status_code=403, detail="Access denied")
+
+
+def _authorize_artifact_read(artifact) -> None:
+    """ACL-gate reading an artifact's bytes/metadata under trusted-proxy auth.
+
+    The artifact cache is shared across principals, and "result retrieval is
+    ACL-gated": a principal denied a table must not read it back via a cached
+    scan result. Re-checks the table ACL for each *table* input in the
+    artifact's provenance — the table identity is parsed straight from the
+    stored transform_spec (no Iceberg I/O), mirroring the table-input check the
+    build path applies in `_resolve_input_version`. No-op without trusted-proxy
+    auth (tenant scoping via `_ensure_artifact_access` still applies).
+    """
+    state = get_state()
+    if state.config.auth_mode != "trusted_proxy":
+        return
+    if not getattr(artifact, "transform_spec", None):
+        return
+
+    from strata.artifact_store import TransformSpec
+    from strata.iceberg import PyIcebergCatalog
+    from strata.types import TableIdentity
+
+    try:
+        spec = TransformSpec.from_json(artifact.transform_spec)
+    except Exception:
+        return  # unparseable spec → no table inputs to gate
+
+    for input_uri in spec.inputs:
+        if not (input_uri.startswith("file://") or input_uri.startswith("s3://")):
+            continue
+        if "#" not in input_uri:
+            continue  # not a `…#namespace.table` reference
+        _, table_id = PyIcebergCatalog.parse_table_uri(input_uri)
+        try:
+            identity = TableIdentity.from_table_id(table_id)
+        except ValueError:
+            continue
+        _authorize_table_access(input_uri, identity)
 
 
 def _resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
@@ -4217,7 +4263,10 @@ async def put_artifact(request: Request):
 
 @app.get("/v1/artifacts/{artifact_id}/v/{version}", response_model=ArtifactInfoResponse)
 async def get_artifact_info(artifact_id: str, version: int):
-    """Get artifact metadata (personal mode only).
+    """Get artifact metadata.
+
+    Available in service mode (a client needs to poll state/schema of a result),
+    gated by tenant + the table ACL of the artifact's inputs.
 
     Args:
         artifact_id: Artifact ID
@@ -4226,13 +4275,14 @@ async def get_artifact_info(artifact_id: str, version: int):
     Returns:
         ArtifactInfoResponse with artifact metadata
     """
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     tenant_filter = _get_artifact_request_tenant()
 
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
         tenant_filter,
     )
+    _authorize_artifact_read(artifact)
 
     return ArtifactInfoResponse(
         artifact_id=artifact.id,
@@ -5876,10 +5926,11 @@ async def garbage_collect_artifacts(max_age_days: float = 7.0):
 
 @app.get("/v1/artifacts/{artifact_id}/v/{version}/data")
 async def get_artifact_data(artifact_id: str, version: int):
-    """Stream artifact data as Arrow IPC (personal mode only).
+    """Stream artifact data as Arrow IPC.
 
-    Returns the raw Arrow IPC stream bytes for the artifact.
-    This can be consumed directly by Arrow clients.
+    Returns the raw Arrow IPC stream bytes for the artifact, so an identity-scan
+    cache hit (or any materialized result) can be read back. Available in service
+    mode, gated by tenant + the table ACL of the artifact's inputs.
 
     Args:
         artifact_id: Artifact ID
@@ -5888,14 +5939,16 @@ async def get_artifact_data(artifact_id: str, version: int):
     Returns:
         StreamingResponse with Arrow IPC data
     """
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     tenant_filter = _get_artifact_request_tenant()
 
-    # Verify artifact exists and is ready
+    # Verify artifact exists and is ready (tenant scoping)
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
         tenant_filter,
     )
+    # Result retrieval is ACL-gated: re-check the table ACL of the inputs.
+    _authorize_artifact_read(artifact)
     if artifact.state not in ("ready", "superseded"):
         raise HTTPException(
             status_code=400,
