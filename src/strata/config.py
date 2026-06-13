@@ -288,6 +288,13 @@ class StrataConfig(BaseSettings):
     scopes_header: str = "X-Strata-Scopes"
     hide_forbidden_as_not_found: bool = True
 
+    # Opt-in: let authenticated clients WRITE in service mode (put / set_name /
+    # set_alias / tags), scoped to the caller's tenant and gated by the
+    # `artifacts:write` scope. Default off — service mode is read-only unless this
+    # is set. Requires trusted-proxy auth (writes must be attributable). For the
+    # shared-research-store deployment (team = tenant, principal = author).
+    service_writes_enabled: bool = False
+
     # Access control list configuration
     acl_config: AclConfig = Field(default_factory=AclConfig)
 
@@ -544,6 +551,15 @@ class StrataConfig(BaseSettings):
                     "multi_tenant_enabled=True with auth_mode='none' (the tenant "
                     "header is unauthenticated and spoofable, and reads aren't "
                     "tenant-filtered without auth; set auth_mode='trusted_proxy')"
+                )
+
+            # Authenticated write-back must be attributable: writes are stamped
+            # with the caller's principal/tenant, which only exist under auth.
+            if self.service_writes_enabled and self.auth_mode != "trusted_proxy":
+                conflicts.append(
+                    "service_writes_enabled=True with auth_mode='none' (writes are "
+                    "attributed to and scoped by the caller's principal/tenant, "
+                    "which require trusted-proxy auth; set auth_mode='trusted_proxy')"
                 )
 
             # personal_mode_user_header is a personal-mode proxy shim; service
