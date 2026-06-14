@@ -8,8 +8,10 @@ through a network. It's the right mode when:
 - The server is reachable beyond a loopback interface.
 - Multi-tenancy matters, separate caches, separate QoS, separate
   metrics per tenant.
-- You want the platform to control which transforms get to run
-  (writes go through server-side transforms, not raw write endpoints).
+- You want the platform to mediate writes — either routing them
+  through server-side transforms, or letting authenticated clients
+  publish directly to a shared store with `service_writes_enabled`
+  (the [shared research store](#authenticated-write-back-the-shared-research-store)).
 
 For a single developer running on a laptop, use
 [personal mode](modes.md#personal-mode). Personal-mode-behind-a-proxy
@@ -161,10 +163,17 @@ Compared to personal mode:
   explicitly (or configure a blob backend via
   `STRATA_ARTIFACT_BLOB_BACKEND=s3` etc.). Service mode refuses to
   start without a persistent target.
-- **Writes go through server-side transforms.** Direct write
-  endpoints are disabled at the surface, the platform decides what
-  gets materialized, not the client. See `transforms_config` in
-  `pyproject.toml` and `[tool.strata.transforms]`.
+- **Reads work; direct writes are off by default.** Clients can read
+  results — scan/stream a table, fetch an artifact's data
+  (`GET /v1/artifacts/{id}/v/{n}/data`), and resolve a dataset by name
+  (`GET /v1/names/{name}`) — all tenant-scoped and ACL-gated. Direct
+  *write* endpoints (`put`, `set_name`, …) are disabled at the surface
+  by default; the platform decides what gets materialized via
+  server-side transforms (`transforms_config` /
+  `[tool.strata.transforms]`). To let authenticated clients publish
+  directly — the shared-research-store pattern — opt in with
+  `service_writes_enabled` (see
+  [below](#authenticated-write-back-the-shared-research-store)).
 - **ACLs apply.** `acl_config` deny / allow rules gate
   `POST /v1/materialize`, `GET /v1/streams/{id}`, and admin endpoints
   like `POST /v1/cache/clear`. Deny rules cannot be bypassed by
@@ -222,12 +231,75 @@ A few operations require a specific scope under trusted-proxy auth
 |---|---|
 | `admin:cache` | `POST /v1/cache/clear` |
 | `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` — deciding protected-alias changes |
+| `artifacts:write` | Publishing in service mode (`put` / `set_name` / `set_alias` / tags) when `service_writes_enabled=true`. See [below](#authenticated-write-back-the-shared-research-store). |
 
 Registry **approval** additionally enforces separation of duty: the
 principal who requested a protected-alias move cannot approve it
 themselves unless they hold `admin:*`. The registry **audit** read
 (`GET /v1/registry/audit`) is tenant-scoped — a principal sees only its
 own tenant's history; `admin:*` sees the whole store.
+
+## Authenticated write-back: the shared research store
+
+By default service mode is read-only to clients, computation goes through
+server-side transforms. But a common deployment wants the inverse: a team of
+researchers, each driving their own notebook, who **publish** processed datasets
+to one central store so a dataset computed once is available to the whole team.
+
+`service_writes_enabled` opts into that. It lets authenticated clients write
+directly — `put`, `set_name`, `set_alias`, tags — under a strict contract:
+
+- **Opt-in and auth-required.** Off by default; setting it requires
+  `auth_mode=trusted_proxy` (enforced at startup), so every write is
+  attributable.
+- **Scope-gated.** Publishing requires the `artifacts:write` scope in the
+  proxy-issued token (`admin:*` also satisfies it). Members without it stay
+  read-only.
+- **Tenant-scoped (team = tenant).** A write lands in the caller's tenant and
+  can't target another, so teammates share a namespace and other teams are
+  isolated. The publishing principal is recorded in the registry audit.
+
+```bash
+STRATA_DEPLOYMENT_MODE=service
+STRATA_AUTH_MODE=trusted_proxy
+STRATA_PROXY_TOKEN=<shared-secret-with-proxy>
+STRATA_ARTIFACT_DIR=/path/to/persistent/dir   # or a blob backend
+STRATA_MULTI_TENANT_ENABLED=true              # team = tenant
+STRATA_SERVICE_WRITES_ENABLED=true            # the opt-in
+```
+
+The proxy injects `X-Strata-Scopes: artifacts:write` for principals allowed to
+publish. The publish → consume loop then looks like:
+
+```python
+# Researcher A (team-a, artifacts:write) publishes a processed dataset:
+strata.put(inputs=[], transform={"ref": "clean@v1"}, data=cleaned,
+           name="team/cleaned-events")
+
+# Any teammate (team-a) resolves the name to its current artifact and reads it:
+info = strata.resolve_name("team/cleaned-events")   # {artifact_uri, version, …}
+
+# Other-team principals (team-b) cannot resolve team-a's name — tenant isolation.
+```
+
+### Connecting a notebook to the shared store
+
+Each researcher runs their own notebook, which **computes locally** but points
+its ambient `strata` client at the central store via
+`STRATA_NOTEBOOK_REMOTE_STORE_URL`. The notebook's own cell outputs and
+provenance stay local; only what a cell explicitly publishes
+(`strata.put(name=…)`) goes to the shared store.
+
+```bash
+# On each researcher's notebook server:
+STRATA_NOTEBOOK_REMOTE_STORE_URL=https://store.team.example
+# Auth the remote store needs (set via env, not committed config):
+STRATA_NOTEBOOK_REMOTE_STORE_HEADERS='{"X-Strata-Proxy-Token":"…","X-Strata-Principal":"alice@team","X-Tenant-ID":"team-a","X-Strata-Scopes":"artifacts:write"}'
+```
+
+In a fully proxy-fronted setup the notebook's requests instead flow through the
+same auth proxy, which injects identity, and `notebook_remote_store_headers`
+can be omitted.
 
 ## Migrating from personal mode
 
