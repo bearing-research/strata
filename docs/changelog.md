@@ -111,7 +111,7 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
   config. Unset → the ambient client targets the local server as before.
 
 - **Authenticated write-back in service mode** (`service_writes_enabled`, shared
-  research store): an opt-in capability letting authenticated clients *publish*
+  research store) — **preview**: an opt-in capability letting authenticated clients *publish*
   to a service-mode store — `put`, `set_name`, `set_alias`, tags — so a team can
   share processed datasets through one central deployment. Each write requires
   trusted-proxy auth and the `artifacts:write` scope, lands in the caller's

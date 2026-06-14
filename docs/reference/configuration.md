@@ -106,7 +106,7 @@ ai_model = "claude-sonnet-4-6"
 | `STRATA_PRINCIPAL_HEADER`            | `X-Strata-Principal` | Header for user identity             |
 | `STRATA_SCOPES_HEADER`               | `X-Strata-Scopes`    | Header for permission scopes         |
 | `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND` | `true`               | Return 404 instead of 403            |
-| `STRATA_SERVICE_WRITES_ENABLED`      | `false`              | Opt-in: let authenticated clients write/publish in service mode (`put`, `set_name`, `set_alias`, tags), scoped to the caller's tenant and gated by the `artifacts:write` scope. Requires `trusted_proxy` auth (enforced at startup). Default keeps service mode read-only. See [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
+| `STRATA_SERVICE_WRITES_ENABLED`      | `false`              | **Preview.** Opt-in: let authenticated clients write/publish in service mode (`put`, `set_name`, `set_alias`, tags), scoped to the caller's tenant and gated by the `artifacts:write` scope. Requires `trusted_proxy` auth (enforced at startup). Default keeps service mode read-only. See [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
 
 ## Multi-Tenancy
 

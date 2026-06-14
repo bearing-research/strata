@@ -1129,6 +1129,20 @@ async def lifespan(app: FastAPI):
             ),
         )
 
+    # Authenticated write-back is a preview feature in this release — re-opening
+    # writes in service mode is security-sensitive. Surface it at startup so an
+    # operator knows the surface is new and may change.
+    if config.service_writes_enabled:
+        logger.warning(
+            "service_writes_enabled_preview",
+            detail=(
+                "service_writes_enabled is a PREVIEW feature: authenticated clients "
+                "can write to this service-mode store (scope: artifacts:write, "
+                "tenant-scoped). The surface is new and may change; evaluate before "
+                "relying on it in production."
+            ),
+        )
+
     # Configure structured logging first
     configure_logging()
 
