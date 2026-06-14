@@ -41,8 +41,10 @@ shared?). The flags that follow are the consequences.
   See [Fly.io deployment](fly.md) for the deployment recipe.
 - **Service**: hosting Strata for users you can't fully trust, or
   with sensitive data, or with multi-tenant isolation requirements.
-  Writes go through server-side transforms so the platform controls
-  what gets materialized and by whom. See [Service Mode](service-mode.md).
+  Reads are tenant-scoped and ACL-gated; writes are off by default
+  (routed through server-side transforms), or authenticated clients
+  can publish directly to a shared store with `service_writes_enabled`.
+  See [Service Mode](service-mode.md).
 
 ## Setting the mode
 
