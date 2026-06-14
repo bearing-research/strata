@@ -140,3 +140,74 @@ def test_get_bytes_drains_large_response_in_chunks(shim, monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: _FakeResp(payload))
     c = shim.StrataClient(base_url="http://test")
     assert c._get_bytes("/v1/streams/abc") == payload
+
+
+def test_remote_store_headers_attached_to_requests(shim, monkeypatch):
+    """When pointed at a remote store, the ambient client attaches its auth
+    headers (e.g. trusted-proxy identity/token) to every request — JSON, GET
+    bytes, and multipart put — so a notebook can publish/consume against a
+    central shared store (W3)."""
+    import urllib.request
+
+    captured = []
+
+    class _Resp:
+        def __init__(self, body=b"{}"):
+            self._body = body
+
+        def read(self, size=-1):
+            if size and size > 0:
+                b, self._body = self._body[:size], self._body[size:]
+                return b
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _fake_urlopen(req, timeout=None):
+        captured.append(req)
+        return _Resp(b'{"ok": true}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    headers = {"X-Strata-Principal": "alice", "X-Tenant-ID": "team-a"}
+    c = shim.StrataClient(base_url="http://remote-store", headers=headers)
+
+    # JSON request
+    c._request("GET", "/v1/names/team/x")
+    # GET-bytes request
+    c._get_bytes("/v1/artifacts/a/v/1/data")
+    # multipart put
+    c._put_multipart("/v1/artifacts", [("data", "d.arrow", "application/octet-stream", b"x")])
+
+    assert len(captured) == 3
+    for req in captured:
+        assert req.get_header("X-strata-principal") == "alice"
+        assert req.get_header("X-tenant-id") == "team-a"
+
+
+def test_no_headers_by_default(shim, monkeypatch):
+    """Local (no remote store) → no extra headers, unchanged behavior."""
+    import urllib.request
+
+    captured = []
+
+    class _Resp:
+        def read(self, size=-1):
+            return b"{}"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda req, timeout=None: captured.append(req) or _Resp()
+    )
+    c = shim.StrataClient(base_url="http://local")
+    c._request("GET", "/v1/names/x")
+    assert captured[0].get_header("X-strata-principal") is None

@@ -2321,16 +2321,29 @@ class CellExecutor:
     def _ambient_strata_url(self) -> str:
         """Server URL the harness binds the injected ``strata`` client to.
 
-        Same source the executor uses for its own dispatch base URL
-        (``state.config.server_url``); injected into every cell manifest so
-        a cell can call ``strata.materialize(...)`` without constructing a
-        client. Not part of provenance — an ambient tool, not an input.
+        Defaults to this server's own dispatch base URL
+        (``state.config.server_url``), but a ``notebook_remote_store_url`` points
+        the ambient client at a REMOTE shared store instead — so a team can
+        publish/consume against one central deployment. Injected into every cell
+        manifest; not part of provenance (an ambient tool, not an input).
 
         Defensive: the ambient client is an optional convenience, so a config
         that can't supply a URL yields ``""`` (the harness then injects no
         ``strata``) rather than failing cell execution.
         """
-        return str(getattr(self._lake_config(), "server_url", "") or "")
+        config = self._lake_config()
+        remote = getattr(config, "notebook_remote_store_url", None)
+        if remote:
+            return str(remote)
+        return str(getattr(config, "server_url", "") or "")
+
+    def _ambient_strata_headers(self) -> dict[str, str]:
+        """Auth headers the ambient client attaches when pointed at a remote
+        store (e.g. trusted-proxy identity/token). Empty for the local server."""
+        config = self._lake_config()
+        if not getattr(config, "notebook_remote_store_url", None):
+            return {}
+        return dict(getattr(config, "notebook_remote_store_headers", {}) or {})
 
     def _manifest_tables(
         self,
@@ -2385,6 +2398,7 @@ class CellExecutor:
             "env": runtime_env,
             "mutation_defines": list(mutation_defines or []),
             "strata_url": self._ambient_strata_url(),
+            "strata_headers": self._ambient_strata_headers(),
             "strata_cell_id": cell_id,
         }
         if loop_config is not None:

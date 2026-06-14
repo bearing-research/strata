@@ -138,10 +138,15 @@ class StrataClient:
         base_url: str,
         timeout: float = _DEFAULT_TIMEOUT,
         cell_id: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._cell_id = cell_id
+        # Extra headers attached to every request — auth for a remote shared
+        # store (trusted-proxy identity/token). Empty when targeting the local
+        # server.
+        self._headers = dict(headers or {})
 
     def _stamp_cell(self, artifact: Artifact, name: str | None) -> None:
         """Tag a *named* artifact with the originating notebook cell so the
@@ -164,7 +169,7 @@ class StrataClient:
 
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
         data = None
-        headers = {"Accept": "application/json"}
+        headers = {**self._headers, "Accept": "application/json"}
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -178,7 +183,7 @@ class StrataClient:
         return json.loads(raw) if raw else {}
 
     def _get_bytes(self, path: str) -> bytes:
-        req = urllib.request.Request(self._url(path), method="GET")
+        req = urllib.request.Request(self._url(path), method="GET", headers=dict(self._headers))
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 # Drain incrementally rather than a single ``resp.read()``. On a
@@ -214,7 +219,10 @@ class StrataClient:
             self._url(path),
             data=buf.getvalue(),
             method="PUT",
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            headers={
+                **self._headers,
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+            },
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
