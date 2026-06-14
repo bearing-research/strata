@@ -241,6 +241,13 @@ own tenant's history; `admin:*` sees the whole store.
 
 ## Authenticated write-back: the shared research store
 
+!!! warning "Preview"
+    Authenticated write-back is a **preview** feature — it deliberately re-opens
+    writes in service mode, which is security-sensitive. It's off by default,
+    auth-required, scope-gated, tenant-scoped, and audited, but the surface is
+    new and may change. Evaluate it before relying on it in production. The
+    server logs a notice at startup when it's enabled.
+
 By default service mode is read-only to clients, computation goes through
 server-side transforms. But a common deployment wants the inverse: a team of
 researchers, each driving their own notebook, who **publish** processed datasets
