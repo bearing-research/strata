@@ -101,7 +101,7 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def wait_for_server(port: int, timeout: float = 5.0) -> bool:
+def wait_for_server(port: int, timeout: float = 20.0) -> bool:
     """Wait for server to be ready by polling /health endpoint.
 
     Args:
@@ -230,9 +230,12 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     server_thread = threading.Thread(target=server_instance.run, daemon=True)
     server_thread.start()
 
-    # Wait for server to be ready
+    # Wait for server to be ready. The window is generous because every
+    # personal-mode server also spins up the embedded build-runner poll loop, and
+    # under CI load (notably the new Windows 3.14 runner) startup can lag well past
+    # a few seconds — a too-tight timeout turns that into a spurious failure.
     base_url = f"http://{config.host}:{config.port}"
-    for _ in range(50):  # 5 second timeout
+    for _ in range(200):  # 20 second timeout
         try:
             with httpx.Client() as client:
                 resp = client.get(f"{base_url}/health", timeout=1.0)
@@ -247,8 +250,11 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
     try:
         yield base_url
     finally:
+        # Join generously so the lifespan shutdown (which stops the build runner)
+        # actually completes — a 2s join abandoned slow-stopping threads, and the
+        # orphaned runners accumulated and starved later servers' startup.
         server_instance.should_exit = True
-        server_thread.join(timeout=2.0)
+        server_thread.join(timeout=15.0)
         server_module._state = None
         reset_artifact_store()
         _reset_transform_singletons()
@@ -307,7 +313,7 @@ def run_server_with_context(
     thread = threading.Thread(target=server_instance.run, daemon=True)
     thread.start()
 
-    if not wait_for_server(port):
+    if not wait_for_server(port, timeout=20.0):
         raise RuntimeError(f"Server failed to start on port {port}")
 
     try:
@@ -319,8 +325,10 @@ def run_server_with_context(
             thread=thread,
         )
     finally:
+        # Join generously so the lifespan shutdown (stopping the build runner)
+        # completes instead of orphaning the thread (see run_server).
         server_instance.should_exit = True
-        thread.join(timeout=2.0)
+        thread.join(timeout=15.0)
         server._state = None
         reset_artifact_store()
         _reset_transform_singletons()
