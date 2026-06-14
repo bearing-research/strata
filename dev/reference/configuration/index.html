@@ -2414,6 +2414,11 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td><code>true</code></td>
 <td>Return 404 instead of 403</td>
 </tr>
+<tr>
+<td><code>STRATA_SERVICE_WRITES_ENABLED</code></td>
+<td><code>false</code></td>
+<td>Opt-in: let authenticated clients write/publish in service mode (<code>put</code>, <code>set_name</code>, <code>set_alias</code>, tags), scoped to the caller's tenant and gated by the <code>artifacts:write</code> scope. Requires <code>trusted_proxy</code> auth (enforced at startup). Default keeps service mode read-only. See <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode → shared research store</a>.</td>
+</tr>
 </tbody>
 </table>
 <h2 id="multi-tenancy">Multi-Tenancy<a class="headerlink" href="#multi-tenancy" title="Permanent link">&para;</a></h2>
@@ -2467,6 +2472,16 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td><code>STRATA_PERSONAL_MODE_USER_HEADER</code></td>
 <td><code>None</code></td>
 <td>Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and <code>discover</code>/<code>delete</code> scope to it. Intended for proxy-fronted personal deployments.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code></td>
+<td><code>None</code></td>
+<td>Point the ambient <code>strata</code> client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Unset → the ambient client targets the local server. See <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode → shared research store</a>.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</code></td>
+<td><code>{}</code></td>
+<td>Auth headers the ambient client attaches when pointed at a remote store (e.g. the trusted-proxy identity/token). JSON object; set via env so secrets stay out of committed config.</td>
 </tr>
 </tbody>
 </table>

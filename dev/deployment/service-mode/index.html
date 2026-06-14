@@ -1610,6 +1610,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#authenticated-write-back-the-shared-research-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authenticated write-back: the shared research store
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Authenticated write-back: the shared research store">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connecting-a-notebook-to-the-shared-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connecting a notebook to the shared store
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#migrating-from-personal-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1936,6 +1964,34 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#authenticated-write-back-the-shared-research-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authenticated write-back: the shared research store
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Authenticated write-back: the shared research store">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connecting-a-notebook-to-the-shared-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connecting a notebook to the shared store
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#migrating-from-personal-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1975,8 +2031,10 @@ through a network. It's the right mode when:</p>
 <li>The server is reachable beyond a loopback interface.</li>
 <li>Multi-tenancy matters, separate caches, separate QoS, separate
   metrics per tenant.</li>
-<li>You want the platform to control which transforms get to run
-  (writes go through server-side transforms, not raw write endpoints).</li>
+<li>You want the platform to mediate writes — either routing them
+  through server-side transforms, or letting authenticated clients
+  publish directly to a shared store with <code>service_writes_enabled</code>
+  (the <a href="#authenticated-write-back-the-shared-research-store">shared research store</a>).</li>
 </ul>
 <p>For a single developer running on a laptop, use
 <a href="../modes/#personal-mode">personal mode</a>. Personal-mode-behind-a-proxy
@@ -2147,10 +2205,17 @@ on dedicated nodes or remote backends like Modal / Fly Machines.</p>
   explicitly (or configure a blob backend via
   <code>STRATA_ARTIFACT_BLOB_BACKEND=s3</code> etc.). Service mode refuses to
   start without a persistent target.</li>
-<li><strong>Writes go through server-side transforms.</strong> Direct write
-  endpoints are disabled at the surface, the platform decides what
-  gets materialized, not the client. See <code>transforms_config</code> in
-  <code>pyproject.toml</code> and <code>[tool.strata.transforms]</code>.</li>
+<li><strong>Reads work; direct writes are off by default.</strong> Clients can read
+  results — scan/stream a table, fetch an artifact's data
+  (<code>GET /v1/artifacts/{id}/v/{n}/data</code>), and resolve a dataset by name
+  (<code>GET /v1/names/{name}</code>) — all tenant-scoped and ACL-gated. Direct
+  <em>write</em> endpoints (<code>put</code>, <code>set_name</code>, …) are disabled at the surface
+  by default; the platform decides what gets materialized via
+  server-side transforms (<code>transforms_config</code> /
+  <code>[tool.strata.transforms]</code>). To let authenticated clients publish
+  directly — the shared-research-store pattern — opt in with
+  <code>service_writes_enabled</code> (see
+  <a href="#authenticated-write-back-the-shared-research-store">below</a>).</li>
 <li><strong>ACLs apply.</strong> <code>acl_config</code> deny / allow rules gate
   <code>POST /v1/materialize</code>, <code>GET /v1/streams/{id}</code>, and admin endpoints
   like <code>POST /v1/cache/clear</code>. Deny rules cannot be bypassed by
@@ -2211,6 +2276,10 @@ alphanumeric / <code>_</code> / <code>-</code> characters and hashed into:</p>
 <td><code>admin:registry</code></td>
 <td><code>POST /v1/registry/pending/approve</code> and <code>.../reject</code> — deciding protected-alias changes</td>
 </tr>
+<tr>
+<td><code>artifacts:write</code></td>
+<td>Publishing in service mode (<code>put</code> / <code>set_name</code> / <code>set_alias</code> / tags) when <code>service_writes_enabled=true</code>. See <a href="#authenticated-write-back-the-shared-research-store">below</a>.</td>
+</tr>
 </tbody>
 </table>
 <p>Registry <strong>approval</strong> additionally enforces separation of duty: the
@@ -2218,6 +2287,56 @@ principal who requested a protected-alias move cannot approve it
 themselves unless they hold <code>admin:*</code>. The registry <strong>audit</strong> read
 (<code>GET /v1/registry/audit</code>) is tenant-scoped — a principal sees only its
 own tenant's history; <code>admin:*</code> sees the whole store.</p>
+<h2 id="authenticated-write-back-the-shared-research-store">Authenticated write-back: the shared research store<a class="headerlink" href="#authenticated-write-back-the-shared-research-store" title="Permanent link">&para;</a></h2>
+<p>By default service mode is read-only to clients, computation goes through
+server-side transforms. But a common deployment wants the inverse: a team of
+researchers, each driving their own notebook, who <strong>publish</strong> processed datasets
+to one central store so a dataset computed once is available to the whole team.</p>
+<p><code>service_writes_enabled</code> opts into that. It lets authenticated clients write
+directly — <code>put</code>, <code>set_name</code>, <code>set_alias</code>, tags — under a strict contract:</p>
+<ul>
+<li><strong>Opt-in and auth-required.</strong> Off by default; setting it requires
+  <code>auth_mode=trusted_proxy</code> (enforced at startup), so every write is
+  attributable.</li>
+<li><strong>Scope-gated.</strong> Publishing requires the <code>artifacts:write</code> scope in the
+  proxy-issued token (<code>admin:*</code> also satisfies it). Members without it stay
+  read-only.</li>
+<li><strong>Tenant-scoped (team = tenant).</strong> A write lands in the caller's tenant and
+  can't target another, so teammates share a namespace and other teams are
+  isolated. The publishing principal is recorded in the registry audit.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;shared-secret-with-proxy&gt;
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nv">STRATA_ARTIFACT_DIR</span><span class="o">=</span>/path/to/persistent/dir<span class="w">   </span><span class="c1"># or a blob backend</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="nv">STRATA_MULTI_TENANT_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">              </span><span class="c1"># team = tenant</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="nv">STRATA_SERVICE_WRITES_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w">            </span><span class="c1"># the opt-in</span>
+</code></pre></div>
+<p>The proxy injects <code>X-Strata-Scopes: artifacts:write</code> for principals allowed to
+publish. The publish → consume loop then looks like:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Researcher A (team-a, artifacts:write) publishes a processed dataset:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[],</span> <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;ref&quot;</span><span class="p">:</span> <span class="s2">&quot;clean@v1&quot;</span><span class="p">},</span> <span class="n">data</span><span class="o">=</span><span class="n">cleaned</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>           <span class="n">name</span><span class="o">=</span><span class="s2">&quot;team/cleaned-events&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># Any teammate (team-a) resolves the name to its current artifact and reads it:</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">info</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">resolve_name</span><span class="p">(</span><span class="s2">&quot;team/cleaned-events&quot;</span><span class="p">)</span>   <span class="c1"># {artifact_uri, version, …}</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># Other-team principals (team-b) cannot resolve team-a&#39;s name — tenant isolation.</span>
+</code></pre></div>
+<h3 id="connecting-a-notebook-to-the-shared-store">Connecting a notebook to the shared store<a class="headerlink" href="#connecting-a-notebook-to-the-shared-store" title="Permanent link">&para;</a></h3>
+<p>Each researcher runs their own notebook, which <strong>computes locally</strong> but points
+its ambient <code>strata</code> client at the central store via
+<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>. The notebook's own cell outputs and
+provenance stay local; only what a cell explicitly publishes
+(<code>strata.put(name=…)</code>) goes to the shared store.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># On each researcher&#39;s notebook server:</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_URL</span><span class="o">=</span>https://store.team.example
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># Auth the remote store needs (set via env, not committed config):</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="nv">STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</span><span class="o">=</span><span class="s1">&#39;{&quot;X-Strata-Proxy-Token&quot;:&quot;…&quot;,&quot;X-Strata-Principal&quot;:&quot;alice@team&quot;,&quot;X-Tenant-ID&quot;:&quot;team-a&quot;,&quot;X-Strata-Scopes&quot;:&quot;artifacts:write&quot;}&#39;</span>
+</code></pre></div>
+<p>In a fully proxy-fronted setup the notebook's requests instead flow through the
+same auth proxy, which injects identity, and <code>notebook_remote_store_headers</code>
+can be omitted.</p>
 <h2 id="migrating-from-personal-mode">Migrating from personal mode<a class="headerlink" href="#migrating-from-personal-mode" title="Permanent link">&para;</a></h2>
 <p>If you've been running personal mode and want to grow into service:</p>
 <ol>
@@ -2236,9 +2355,9 @@ own tenant's history; <code>admin:*</code> sees the whole store.</p>
 </li>
 <li>
 <p><strong>Flip the mode</strong> in env or <code>pyproject.toml</code>:
-   <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;your-shared-secret&gt;
+   <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;your-shared-secret&gt;
 </code></pre></div>
    Boot will fail with a clear error if anything's missing, that's
    the fail-closed property at work.</p>

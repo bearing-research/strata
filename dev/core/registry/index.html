@@ -1985,7 +1985,10 @@ enforces separation of duty — the requester cannot self-approve their own
 move unless they hold the <code>admin:*</code> break-glass scope. The audit log is
 tenant-scoped: a principal reads only its own tenant's history (<code>admin:*</code>
 sees the whole store). In personal mode (single operator, no auth) these
-gates are inert.</p>
+gates are inert. Resolving names/aliases is a tenant-scoped read in service
+mode; <em>publishing</em> them (<code>set_name</code> / <code>set_alias</code>) requires opting into
+<code>service_writes_enabled</code> and holding the <code>artifacts:write</code> scope — see
+<a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode → shared research store</a>.</p>
 <h2 id="the-promotion-flow-end-to-end">The promotion flow, end to end<a class="headerlink" href="#the-promotion-flow-end-to-end" title="Permanent link">&para;</a></h2>
 <p>The shape this is designed for — a notebook training pipeline whose last
 cell promotes through the registry:</p>
