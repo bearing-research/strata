@@ -33,7 +33,7 @@ Authentication depends on `deployment_mode`:
 
 In service mode, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret. Two further restrictions narrow what each endpoint accepts:
 
-**Personal-mode-only endpoints.** These return `400 Bad Request` outside personal mode (write surface that service-mode deployments route through the artifact build pipeline instead):
+**Personal-mode-only endpoints.** These notebook-session-lifecycle operations return `400 Bad Request` outside personal mode (long-lived sessions and filesystem notebook management don't fit a multi-tenant service deployment). Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope — see [Service Mode](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
 
 | Endpoint | Why personal-mode-only |
 | --- | --- |

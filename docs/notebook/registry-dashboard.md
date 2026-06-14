@@ -5,11 +5,14 @@ right inside the notebook — so promotion doesn't have to be code. It surfaces
 the same names / aliases / tags / audit / lineage that the
 [SDK and CLI](../core/registry.md) drive, backed by the identical audited routes.
 
-!!! note "Personal mode only (today)"
-    The registry routes are personal-mode only right now, so the dashboard
-    **shows up automatically in personal mode** (the default `python -m strata`)
-    and **hides itself in service mode**. If you don't see it, check your
-    deployment mode.
+!!! note "Dashboard UI is personal-mode only"
+    The dashboard **shows up automatically in personal mode** (the default
+    `python -m strata`) and **hides itself in service mode**. If you don't see it,
+    check your deployment mode. The registry itself is *not* personal-only — in
+    service mode the same names/aliases/tags resolve via SDK and REST (tenant-
+    scoped reads), and publishing them works with `service_writes_enabled` + the
+    `artifacts:write` scope (see
+    [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store)).
 
 This page is a step-by-step walkthrough. For the concepts (what a name, alias,
 tag, or approval gate *is*), see [Artifacts & Model Registry](../core/registry.md).
