@@ -10,7 +10,7 @@ between three shapes.
 | | **Personal** | **Personal + auth proxy** | **Service** |
 | --- | --- | --- | --- |
 | **Best for** | One developer, laptop, single notebook open | 5–20 trusted users behind Cloudflare Access / Pomerium / etc. | Multi-tenant team or customer-facing |
-| **Writes** | Enabled | Enabled (per-user filter on discover/delete) | Server-side transforms only |
+| **Writes** | Enabled | Enabled (per-user filter on discover/delete) | Off by default (server-side transforms); opt-in client write-back via `service_writes_enabled` |
 | **Auth** | None | Identity from `STRATA_PERSONAL_MODE_USER_HEADER` (proxy injects) | `X-Strata-Principal` + `X-Strata-Proxy-Token` from a trusted proxy |
 | **Identity scoping** | No scoping (single user) | Per-user filter on `discover` / `delete`; shared artifact store | Per-tenant cache keys, storage dirs, QoS pools |
 | **Multi-tenancy** | n/a | n/a | Optional (`multi_tenant_enabled=true`) |

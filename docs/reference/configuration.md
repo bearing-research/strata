@@ -116,6 +116,35 @@ ai_model = "claude-sonnet-4-6"
 | `STRATA_TENANT_HEADER`         | `X-Tenant-ID` | Header for tenant identification      |
 | `STRATA_REQUIRE_TENANT_HEADER` | `false`       | Require tenant header on all requests |
 
+## Transforms & Builds
+
+Server-side transform execution and the async build runner (service mode / the
+artifact build pipeline). Transforms are also configured via the
+`[tool.strata.transforms]` block in `pyproject.toml`; `STRATA_TRANSFORMS_ENABLED`
+toggles `enabled` there.
+
+| Variable                                | Default | Description                                                                                     |
+| --------------------------------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `STRATA_TRANSFORM_MODE`                 | `embedded` | `embedded` (common transforms like `duckdb_sql@v1` run in-process) or `registry` (only transforms configured in `transforms_config`, via external executors). |
+| `STRATA_PULL_MODEL_ENABLED`             | `false` | Enable the v2-pull executor protocol (executors fetch inputs / upload outputs via signed URLs). |
+| `STRATA_SIGNED_URL_EXPIRY_SECONDS`      | `600`   | Validity window for pull-model signed build URLs.                                               |
+| `STRATA_TRANSFORM_SIGNING_SECRET`       | `None`  | HMAC secret signing pull-model build URLs. Unset → a random per-process secret (signed URLs break on restart and differ across replicas); set a stable value for multi-replica / restart-surviving deployments. |
+| `STRATA_BUILD_RUNNER_POLL_INTERVAL_MS`  | `500`   | How often the embedded build runner polls for pending builds.                                   |
+| `STRATA_BUILD_RUNNER_MAX_CONCURRENT`    | `10`    | Max concurrent builds across the runner.                                                        |
+| `STRATA_BUILD_RUNNER_MAX_PER_TENANT`    | `3`     | Max concurrent builds per tenant.                                                               |
+| `STRATA_BUILD_RUNNER_DEFAULT_TIMEOUT`   | `300`   | Default per-build timeout (seconds).                                                            |
+| `STRATA_BUILD_RUNNER_DEFAULT_MAX_OUTPUT`| `1 GiB` | Default per-build output-size cap (bytes).                                                       |
+| `STRATA_BUILD_QOS_INTERACTIVE_SLOTS`    | `16`    | Global interactive build slots.                                                                 |
+| `STRATA_BUILD_QOS_BULK_SLOTS`           | `8`     | Global bulk build slots.                                                                         |
+| `STRATA_BUILD_QOS_PER_TENANT_INTERACTIVE` | `4`   | Per-tenant interactive build slots.                                                             |
+| `STRATA_BUILD_QOS_PER_TENANT_BULK`      | `2`     | Per-tenant bulk build slots.                                                                     |
+| `STRATA_BUILD_QOS_INTERACTIVE_TIMEOUT`  | `5`     | Queue wait for an interactive build slot (seconds).                                              |
+| `STRATA_BUILD_QOS_BULK_TIMEOUT`         | `15`    | Queue wait for a bulk build slot (seconds).                                                      |
+| `STRATA_BUILD_QOS_PER_TENANT_TIMEOUT`   | `1`     | Queue wait for a per-tenant slot (seconds).                                                      |
+| `STRATA_BUILD_QOS_BYTES_PER_DAY`        | `None`  | Per-tenant daily output-bytes quota (unset = unlimited).                                         |
+| `STRATA_BUILD_QOS_BULK_BYTES_THRESHOLD` | `100 MiB` | Estimated output above this classifies a build as bulk.                                        |
+| `STRATA_BUILD_QOS_BULK_INPUTS_THRESHOLD`| `5`     | Input count above this classifies a build as bulk.                                              |
+
 ## Notebook
 
 | Variable                            | Default                     | Description                                                    |
