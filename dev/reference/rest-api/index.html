@@ -3536,7 +3536,7 @@
 </tbody>
 </table>
 <p>In service mode, <strong>every</strong> <code>/v1/*</code> endpoint requires <code>X-Strata-Principal</code> (the proxy-asserted user identity) and the <code>X-Strata-Proxy-Token</code> shared secret. Two further restrictions narrow what each endpoint accepts:</p>
-<p><strong>Personal-mode-only endpoints.</strong> These return <code>400 Bad Request</code> outside personal mode (write surface that service-mode deployments route through the artifact build pipeline instead):</p>
+<p><strong>Personal-mode-only endpoints.</strong> These notebook-session-lifecycle operations return <code>400 Bad Request</code> outside personal mode (long-lived sessions and filesystem notebook management don't fit a multi-tenant service deployment). Artifact and registry <em>writes</em>, by contrast, are available in service mode when <code>service_writes_enabled</code> is on, with the <code>artifacts:write</code> scope — see <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode</a>.</p>
 <table>
 <thead>
 <tr>

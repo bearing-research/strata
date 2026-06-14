@@ -1960,11 +1960,14 @@ right inside the notebook — so promotion doesn't have to be code. It surfaces
 the same names / aliases / tags / audit / lineage that the
 <a href="../../core/registry/">SDK and CLI</a> drive, backed by the identical audited routes.</p>
 <div class="admonition note">
-<p class="admonition-title">Personal mode only (today)</p>
-<p>The registry routes are personal-mode only right now, so the dashboard
-<strong>shows up automatically in personal mode</strong> (the default <code>python -m strata</code>)
-and <strong>hides itself in service mode</strong>. If you don't see it, check your
-deployment mode.</p>
+<p class="admonition-title">Dashboard UI is personal-mode only</p>
+<p>The dashboard <strong>shows up automatically in personal mode</strong> (the default
+<code>python -m strata</code>) and <strong>hides itself in service mode</strong>. If you don't see it,
+check your deployment mode. The registry itself is <em>not</em> personal-only — in
+service mode the same names/aliases/tags resolve via SDK and REST (tenant-
+scoped reads), and publishing them works with <code>service_writes_enabled</code> + the
+<code>artifacts:write</code> scope (see
+<a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode → shared research store</a>).</p>
 </div>
 <p>This page is a step-by-step walkthrough. For the concepts (what a name, alias,
 tag, or approval gate <em>is</em>), see <a href="../../core/registry/">Artifacts &amp; Model Registry</a>.</p>

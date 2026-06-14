@@ -2074,18 +2074,13 @@ proxy that:</p>
 </tr>
 <tr>
 <td><code>X-Tenant-ID</code></td>
-<td>Tenant the user belongs to, when multi-tenant is on</td>
+<td>Tenant the user belongs to, when multi-tenant is on. Header name is configurable via <code>tenant_header</code>.</td>
 <td>When <code>multi_tenant_enabled=true</code></td>
 </tr>
 <tr>
 <td><code>X-Strata-Scopes</code></td>
-<td>Space-separated capability set (e.g. <code>notebook:read notebook:write admin:cache</code>)</td>
+<td>Space-separated capability set (e.g. <code>notebook:read notebook:write artifacts:write admin:cache</code>)</td>
 <td>For scope-gated endpoints</td>
-</tr>
-<tr>
-<td><code>X-Tenant-ID</code></td>
-<td>Tenant header, same role as <code>X-Strata-Tenant</code>, alternate name (configurable via <code>tenant_header</code>)</td>
-<td>Either, depending on which header you configured</td>
 </tr>
 <tr>
 <td><code>X-Strata-Proxy-Token</code></td>

@@ -1559,6 +1559,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#transforms-builds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transforms &amp; Builds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#notebook" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1994,6 +2005,17 @@
     <span class="md-ellipsis">
       
         Multi-Tenancy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#transforms-builds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transforms &amp; Builds
       
     </span>
   </a>
@@ -2445,6 +2467,117 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td><code>STRATA_REQUIRE_TENANT_HEADER</code></td>
 <td><code>false</code></td>
 <td>Require tenant header on all requests</td>
+</tr>
+</tbody>
+</table>
+<h2 id="transforms-builds">Transforms &amp; Builds<a class="headerlink" href="#transforms-builds" title="Permanent link">&para;</a></h2>
+<p>Server-side transform execution and the async build runner (service mode / the
+artifact build pipeline). Transforms are also configured via the
+<code>[tool.strata.transforms]</code> block in <code>pyproject.toml</code>; <code>STRATA_TRANSFORMS_ENABLED</code>
+toggles <code>enabled</code> there.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STRATA_TRANSFORM_MODE</code></td>
+<td><code>embedded</code></td>
+<td><code>embedded</code> (common transforms like <code>duckdb_sql@v1</code> run in-process) or <code>registry</code> (only transforms configured in <code>transforms_config</code>, via external executors).</td>
+</tr>
+<tr>
+<td><code>STRATA_PULL_MODEL_ENABLED</code></td>
+<td><code>false</code></td>
+<td>Enable the v2-pull executor protocol (executors fetch inputs / upload outputs via signed URLs).</td>
+</tr>
+<tr>
+<td><code>STRATA_SIGNED_URL_EXPIRY_SECONDS</code></td>
+<td><code>600</code></td>
+<td>Validity window for pull-model signed build URLs.</td>
+</tr>
+<tr>
+<td><code>STRATA_TRANSFORM_SIGNING_SECRET</code></td>
+<td><code>None</code></td>
+<td>HMAC secret signing pull-model build URLs. Unset → a random per-process secret (signed URLs break on restart and differ across replicas); set a stable value for multi-replica / restart-surviving deployments.</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_RUNNER_POLL_INTERVAL_MS</code></td>
+<td><code>500</code></td>
+<td>How often the embedded build runner polls for pending builds.</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_RUNNER_MAX_CONCURRENT</code></td>
+<td><code>10</code></td>
+<td>Max concurrent builds across the runner.</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_RUNNER_MAX_PER_TENANT</code></td>
+<td><code>3</code></td>
+<td>Max concurrent builds per tenant.</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_RUNNER_DEFAULT_TIMEOUT</code></td>
+<td><code>300</code></td>
+<td>Default per-build timeout (seconds).</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_RUNNER_DEFAULT_MAX_OUTPUT</code></td>
+<td><code>1 GiB</code></td>
+<td>Default per-build output-size cap (bytes).</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_QOS_INTERACTIVE_SLOTS</code></td>
+<td><code>16</code></td>
+<td>Global interactive build slots.</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_QOS_BULK_SLOTS</code></td>
+<td><code>8</code></td>
+<td>Global bulk build slots.</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_QOS_PER_TENANT_INTERACTIVE</code></td>
+<td><code>4</code></td>
+<td>Per-tenant interactive build slots.</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_QOS_PER_TENANT_BULK</code></td>
+<td><code>2</code></td>
+<td>Per-tenant bulk build slots.</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_QOS_INTERACTIVE_TIMEOUT</code></td>
+<td><code>5</code></td>
+<td>Queue wait for an interactive build slot (seconds).</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_QOS_BULK_TIMEOUT</code></td>
+<td><code>15</code></td>
+<td>Queue wait for a bulk build slot (seconds).</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_QOS_PER_TENANT_TIMEOUT</code></td>
+<td><code>1</code></td>
+<td>Queue wait for a per-tenant slot (seconds).</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_QOS_BYTES_PER_DAY</code></td>
+<td><code>None</code></td>
+<td>Per-tenant daily output-bytes quota (unset = unlimited).</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_QOS_BULK_BYTES_THRESHOLD</code></td>
+<td><code>100 MiB</code></td>
+<td>Estimated output above this classifies a build as bulk.</td>
+</tr>
+<tr>
+<td><code>STRATA_BUILD_QOS_BULK_INPUTS_THRESHOLD</code></td>
+<td><code>5</code></td>
+<td>Input count above this classifies a build as bulk.</td>
 </tr>
 </tbody>
 </table>
