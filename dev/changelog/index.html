@@ -2559,6 +2559,15 @@ exhaustive commit history.</p>
   burning a retry on the wrapper.</p>
 </li>
 <li>
+<p><strong>Notebook cells can target a remote shared store</strong> (<code>notebook_remote_store_url</code>,
+  shared research store): the ambient <code>strata</code> client injected into cells can now
+  point at a central deployment instead of the local notebook server, so a team
+  of researchers publishes/consumes datasets against one store.
+  <code>notebook_remote_store_headers</code> carries the auth the remote store needs (e.g.
+  trusted-proxy identity/token) — set via env so secrets stay out of committed
+  config. Unset → the ambient client targets the local server as before.</p>
+</li>
+<li>
 <p><strong>Authenticated write-back in service mode</strong> (<code>service_writes_enabled</code>, shared
   research store): an opt-in capability letting authenticated clients <em>publish</em>
   to a service-mode store — <code>put</code>, <code>set_name</code>, <code>set_alias</code>, tags — so a team can
