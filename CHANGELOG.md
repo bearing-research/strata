@@ -100,6 +100,14 @@ exhaustive commit history.
   in code fences or prose is extracted before validating instead of
   burning a retry on the wrapper.
 
+- **Notebook cells can target a remote shared store** (`notebook_remote_store_url`,
+  shared research store): the ambient `strata` client injected into cells can now
+  point at a central deployment instead of the local notebook server, so a team
+  of researchers publishes/consumes datasets against one store.
+  `notebook_remote_store_headers` carries the auth the remote store needs (e.g.
+  trusted-proxy identity/token) — set via env so secrets stay out of committed
+  config. Unset → the ambient client targets the local server as before.
+
 - **Authenticated write-back in service mode** (`service_writes_enabled`, shared
   research store): an opt-in capability letting authenticated clients *publish*
   to a service-mode store — `put`, `set_name`, `set_alias`, tags — so a team can

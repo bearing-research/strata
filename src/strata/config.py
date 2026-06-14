@@ -330,6 +330,16 @@ class StrataConfig(BaseSettings):
     )
     notebook_python_versions: list[str] = Field(default_factory=discover_installed_python_minors)
 
+    # Point the ambient `strata` client injected into notebook cells at a REMOTE
+    # shared store instead of this local notebook server. Lets a team of
+    # researchers publish/consume datasets against one central deployment (the
+    # shared research store). `notebook_remote_store_headers` carries the auth the
+    # remote store needs (e.g. the trusted-proxy identity/token, or a bearer
+    # token) — set via env so secrets stay out of committed config. Unset → the
+    # ambient client targets the local server as before.
+    notebook_remote_store_url: str | None = None
+    notebook_remote_store_headers: dict[str, str] = Field(default_factory=dict)
+
     # AI/LLM assistant settings (OpenAI-compatible API)
     ai_base_url: str | None = None
     ai_model: str | None = None

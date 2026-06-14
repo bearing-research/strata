@@ -2223,3 +2223,39 @@ class TestMountCredentialsPassthrough:
         }
         executor = CellExecutor(sample_notebook, mount_credentials=creds)
         assert executor._mount_resolver.credentials == creds
+
+
+class TestAmbientRemoteStore:
+    """W3: the ambient `strata` client can target a remote shared store."""
+
+    def test_ambient_url_and_headers_default_local(self):
+        from unittest.mock import MagicMock
+
+        from strata.notebook.executor import CellExecutor
+
+        ex = MagicMock()
+        cfg = MagicMock(server_url="http://local:8765")
+        cfg.notebook_remote_store_url = None
+        ex._lake_config.return_value = cfg
+
+        assert CellExecutor._ambient_strata_url(ex) == "http://local:8765"
+        assert CellExecutor._ambient_strata_headers(ex) == {}
+
+    def test_ambient_url_and_headers_remote(self):
+        from unittest.mock import MagicMock
+
+        from strata.notebook.executor import CellExecutor
+
+        ex = MagicMock()
+        cfg = MagicMock(
+            server_url="http://local:8765",
+            notebook_remote_store_url="https://store.team.example",
+            notebook_remote_store_headers={"X-Tenant-ID": "team-a", "X-Strata-Principal": "alice"},
+        )
+        ex._lake_config.return_value = cfg
+
+        assert CellExecutor._ambient_strata_url(ex) == "https://store.team.example"
+        assert CellExecutor._ambient_strata_headers(ex) == {
+            "X-Tenant-ID": "team-a",
+            "X-Strata-Principal": "alice",
+        }
