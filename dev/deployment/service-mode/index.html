@@ -2288,6 +2288,14 @@ themselves unless they hold <code>admin:*</code>. The registry <strong>audit</st
 (<code>GET /v1/registry/audit</code>) is tenant-scoped — a principal sees only its
 own tenant's history; <code>admin:*</code> sees the whole store.</p>
 <h2 id="authenticated-write-back-the-shared-research-store">Authenticated write-back: the shared research store<a class="headerlink" href="#authenticated-write-back-the-shared-research-store" title="Permanent link">&para;</a></h2>
+<div class="admonition warning">
+<p class="admonition-title">Preview</p>
+<p>Authenticated write-back is a <strong>preview</strong> feature — it deliberately re-opens
+writes in service mode, which is security-sensitive. It's off by default,
+auth-required, scope-gated, tenant-scoped, and audited, but the surface is
+new and may change. Evaluate it before relying on it in production. The
+server logs a notice at startup when it's enabled.</p>
+</div>
 <p>By default service mode is read-only to clients, computation goes through
 server-side transforms. But a common deployment wants the inverse: a team of
 researchers, each driving their own notebook, who <strong>publish</strong> processed datasets
