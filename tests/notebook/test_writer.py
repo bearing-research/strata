@@ -394,7 +394,7 @@ def test_update_notebook_workers():
         ]
         assert notebook_state.workers[1].backend == WorkerBackendType.EXECUTOR
         assert notebook_state.workers[1].runtime_id == "cuda-12.4"
-        assert notebook_state.workers[1].config == {"url": "https://executor.internal/gpu-a100"}
+        assert notebook_state.workers[1].config.url == "https://executor.internal/gpu-a100"
 
 
 def test_update_notebook_timeout_and_env():
@@ -915,3 +915,36 @@ class TestUpdateRequiresPython:
             old = update_requires_python(nb, "3.13")
             assert old == ">=3.12,<3.13"
             assert 'requires-python = "==3.13.*"' in pyproject.read_text()
+
+
+def test_worker_config_model_round_trips_through_toml(tmp_path):
+    """WorkerConfig (typed known keys + extra='allow') survives a TOML write/read,
+    extras included; an empty config is omitted from the serialized worker."""
+    from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.writer import update_notebook_workers
+
+    nb = tmp_path / "nb"
+    nb.mkdir()
+    (nb / "notebook.toml").write_text('id = "x"\nname = "x"\n')
+
+    update_notebook_workers(
+        nb,
+        [
+            WorkerSpec(name="local", backend=WorkerBackendType.LOCAL),  # empty config
+            WorkerSpec(
+                name="gpu",
+                backend=WorkerBackendType.EXECUTOR,
+                config=WorkerConfig(url="http://exec", transport="direct", region="us"),
+            ),
+        ],
+    )
+
+    state = parse_notebook(nb)
+    by_name = {w.name: w for w in state.workers}
+    assert isinstance(by_name["gpu"].config, WorkerConfig)
+    assert by_name["gpu"].config.url == "http://exec"
+    assert by_name["gpu"].config.transport == "direct"
+    assert by_name["gpu"].config.model_extra.get("region") == "us"  # extra preserved
+    # empty config serializes to nothing meaningful
+    assert by_name["local"].config.url is None

@@ -161,13 +161,15 @@ def _resolve_worker_token(worker_spec: Any) -> str | None:
     Returns ``None`` if neither is set (worker is reached without auth,
     backward-compatible with deployments that don't enforce a token).
     """
-    config = getattr(worker_spec, "config", None) or {}
-    token_env = str(config.get("token_env") or "").strip()
+    config = getattr(worker_spec, "config", None)
+    if config is None:
+        return None
+    token_env = str(getattr(config, "token_env", None) or "").strip()
     if token_env:
         value = os.environ.get(token_env, "").strip()
         if value:
             return value
-    literal = str(config.get("token") or "").strip()
+    literal = str(getattr(config, "token", None) or "").strip()
     if literal:
         return literal
     return None
@@ -1682,12 +1684,12 @@ class CellExecutor:
                     f"Remote executor workers do not support file:// mounts: '{mount.name}'"
                 )
 
-        executor_url = str(worker_spec.config.get("url", "")).strip()
+        executor_url = str(worker_spec.config.url or "").strip()
         if not executor_url:
             raise RuntimeError(f"Executor worker '{worker_spec.name}' is missing config.url")
 
         worker_token = _resolve_worker_token(worker_spec)
-        transport = str(worker_spec.config.get("transport", "direct")).strip().lower()
+        transport = str(worker_spec.config.transport or "direct").strip().lower()
         if transport in {"signed", "manifest", "build"}:
             return await self._dispatch_http_executor_with_manifest(
                 worker_spec,
@@ -1862,11 +1864,11 @@ class CellExecutor:
         if artifact_store is None or build_store is None:
             raise RuntimeError("Build store is not initialized")
 
-        executor_url = str(worker_spec.config.get("url", "")).strip()
+        executor_url = str(worker_spec.config.url or "").strip()
         if not executor_url:
             raise RuntimeError(f"Executor worker '{worker_spec.name}' is missing config.url")
 
-        base_url = str(worker_spec.config.get("strata_url", "")).strip() or state.config.server_url
+        base_url = str(worker_spec.config.strata_url or "").strip() or state.config.server_url
         principal = get_principal()
         tenant_id = principal.tenant if principal is not None else None
         principal_id = principal.id if principal is not None else None

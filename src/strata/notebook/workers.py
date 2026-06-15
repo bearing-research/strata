@@ -343,8 +343,11 @@ def worker_runtime_identity(
     if worker.runtime_id:
         return f"{worker.backend.value}:{worker.runtime_id}"
 
-    if worker.config:
-        config_json = json.dumps(worker.config, sort_keys=True, separators=(",", ":"))
+    # exclude_none reproduces the old raw-dict shape (only set keys + extras), so
+    # the provenance hash is unchanged for existing configs.
+    config_dict = worker.config.model_dump(mode="json", exclude_none=True)
+    if config_dict:
+        config_json = json.dumps(config_dict, sort_keys=True, separators=(",", ":"))
         config_hash = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
         return f"{worker.backend.value}:{worker.name}:{config_hash}"
 
@@ -355,7 +358,7 @@ def is_embedded_executor_worker(worker: WorkerSpec | None) -> bool:
     """Return True when the worker uses the local embedded executor path."""
     if worker is None or worker.backend != WorkerBackendType.EXECUTOR:
         return False
-    url = str(worker.config.get("url", "")).strip()
+    url = str(worker.config.url or "").strip()
     return url in {"embedded://local", "embedded://notebook"}
 
 
@@ -363,7 +366,7 @@ def is_http_executor_worker(worker: WorkerSpec | None) -> bool:
     """Return True when the worker points at an HTTP notebook executor."""
     if worker is None or worker.backend != WorkerBackendType.EXECUTOR:
         return False
-    url = str(worker.config.get("url", "")).strip()
+    url = str(worker.config.url or "").strip()
     scheme = urlparse(url).scheme.lower()
     return scheme in {"http", "https"}
 
@@ -382,8 +385,8 @@ def worker_transport(worker: WorkerSpec) -> str:
     if worker.backend == WorkerBackendType.LOCAL:
         return "local"
 
-    url = str(worker.config.get("url", "")).strip()
-    transport = str(worker.config.get("transport", "direct")).strip().lower()
+    url = str(worker.config.url or "").strip()
+    transport = str(worker.config.transport or "direct").strip().lower()
 
     if url.startswith("embedded://"):
         return "embedded"
@@ -421,7 +424,7 @@ def build_worker_catalog(notebook_state: NotebookState) -> list[dict[str, Any]]:
                 "name": worker.name,
                 "backend": worker.backend.value,
                 "runtime_id": worker.runtime_id,
-                "config": worker.config,
+                "config": worker.config.model_dump(mode="json", exclude_none=True),
                 "source": source,
                 "health": health,
                 "allowed": allowed,
@@ -506,7 +509,7 @@ def _health_url_for_worker(worker: WorkerSpec) -> str | None:
     if not is_http_executor_worker(worker):
         return None
 
-    raw_url = str(worker.config.get("url", "")).strip()
+    raw_url = str(worker.config.url or "").strip()
     if not raw_url:
         return None
 
@@ -846,7 +849,7 @@ async def build_server_worker_catalog_with_health(
                 "name": worker.name,
                 "backend": worker.backend.value,
                 "runtime_id": worker.runtime_id,
-                "config": worker.config,
+                "config": worker.config.model_dump(mode="json", exclude_none=True),
                 "source": "server",
                 "health": snapshot.health,
                 "allowed": record.enabled,

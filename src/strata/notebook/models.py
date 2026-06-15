@@ -150,6 +150,24 @@ class WorkerBackendType(StrEnum):
     EXECUTOR = "executor"
 
 
+class WorkerConfig(BaseModel):
+    """Backend-specific worker configuration.
+
+    The known keys are typed for validation + discoverability; backend-specific
+    extras pass through (``extra='allow'``) so a new backend can carry its own
+    settings without a schema change. The ``executor`` backend uses ``url`` /
+    ``transport`` / ``strata_url``; ``local`` carries none.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    url: str | None = None  # executor endpoint (executor backend)
+    transport: str | None = None  # "direct" | … (executor backend)
+    strata_url: str | None = None  # store URL the executor's cells point at
+    token_env: str | None = None  # env var holding the executor's shared-secret token
+    token: str | None = None  # literal executor token (dev only; don't commit)
+
+
 class WorkerSpec(BaseModel):
     """A named worker declaration."""
 
@@ -166,8 +184,8 @@ class WorkerSpec(BaseModel):
         default=None,
         description="Stable runtime fingerprint override for provenance",
     )
-    config: dict[str, Any] = Field(
-        default_factory=dict,
+    config: WorkerConfig = Field(
+        default_factory=WorkerConfig,
         description="Backend-specific worker configuration",
     )
 

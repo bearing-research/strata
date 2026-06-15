@@ -253,7 +253,7 @@ def test_parse_notebook_preserves_worker_registry():
         ]
         assert notebook_state.workers[1].backend == WorkerBackendType.EXECUTOR
         assert notebook_state.workers[1].runtime_id == "cuda-12.4"
-        assert notebook_state.workers[1].config == {"url": "https://executor.internal/gpu-a100"}
+        assert notebook_state.workers[1].config.url == "https://executor.internal/gpu-a100"
 
 
 def test_parse_notebook_resolves_notebook_and_cell_runtime_settings():
