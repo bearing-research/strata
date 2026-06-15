@@ -223,6 +223,10 @@ class StrataConfig(BaseSettings):
     plan_timeout_seconds: Annotated[float, Field(gt=0)] = 30.0
     scan_timeout_seconds: Annotated[float, Field(gt=0)] = 300.0
     max_response_bytes: Annotated[int, Field(gt=0)] = 512 * 1024 * 1024  # 512 MB
+    # How long a completed/abandoned stream's state lingers before cleanup (a
+    # memory/resource knob; also lets tests use a short TTL via config instead of
+    # mutating server state).
+    stream_state_ttl_seconds: Annotated[float, Field(gt=0)] = 300.0
 
     # QoS: Two-tier admission control
     interactive_slots: Annotated[int, Field(ge=1)] = 32
