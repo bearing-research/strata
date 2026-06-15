@@ -1116,9 +1116,46 @@ class TestStreamAbortMetrics:
 class TestActiveScanCount:
     """Tests for active scan counting and limiter management."""
 
-    def test_get_active_scan_count_matches_limiter(self, temp_warehouse, tmp_path):
-        """_get_active_scan_count returns correct count based on QoS tier limiters."""
+    def test_saturation_tracks_registry_limiters(self, tmp_path):
+        """Saturation is measured on the per-tenant admission limiters, not the
+        never-acquired global ones; a server with no live limiters is idle, not
+        saturated (finding 2)."""
+        from strata.server import ServerState, _update_saturation_tracking
+        from strata.tenant_registry import get_tenant_registry, reset_tenant_registry
 
+        reset_tenant_registry()
+        config = StrataConfig(cache_dir=tmp_path / "cache", interactive_slots=2, bulk_slots=2)
+        state = ServerState(config)
+
+        # Fresh registry: no live limiters -> idle, not saturated.
+        _update_saturation_tracking(state)
+        assert state._interactive_saturated_since is None
+
+        registry = get_tenant_registry()
+        interactive, _bulk = registry.get_or_create_limiters("team-a")
+
+        async def drive():
+            # Exhaust the interactive tier on the real admission limiter.
+            for _ in range(interactive.available):
+                await interactive.acquire()
+            _update_saturation_tracking(state)
+            assert state._interactive_saturated_since is not None
+
+            # Free one slot -> no longer saturated.
+            await interactive.release()
+            _update_saturation_tracking(state)
+            assert state._interactive_saturated_since is None
+
+        asyncio.run(drive())
+        reset_tenant_registry()
+
+    def test_get_active_scan_count_matches_limiter(self, temp_warehouse, tmp_path):
+        """_get_active_scan_count counts the per-tenant admission limiters.
+
+        Stream admission acquires the tenant-registry limiters, not the global
+        ServerState ones, so the count must track the registry (otherwise
+        graceful shutdown drains past live streams — finding 2).
+        """
         cache_dir = tmp_path / "cache"
         config = StrataConfig(
             cache_dir=cache_dir,
@@ -1127,41 +1164,45 @@ class TestActiveScanCount:
         )
 
         from strata.server import ServerState, _get_active_scan_count
+        from strata.tenant_registry import get_tenant_registry, reset_tenant_registry
 
-        state = ServerState(config)
+        reset_tenant_registry()
+        ServerState(config)
+        registry = get_tenant_registry()
+        interactive, bulk = registry.get_or_create_limiters("team-a")
 
         # Initially no active scans
-        assert _get_active_scan_count(state) == 0
+        assert _get_active_scan_count() == 0
 
-        # Acquire limiter slots manually from both tiers
         async def test_counting():
-            assert _get_active_scan_count(state) == 0
+            assert _get_active_scan_count() == 0
 
             # Acquire from interactive tier
-            await state._interactive_limiter.acquire()
-            assert _get_active_scan_count(state) == 1
+            await interactive.acquire()
+            assert _get_active_scan_count() == 1
 
             # Acquire from bulk tier
-            await state._bulk_limiter.acquire()
-            assert _get_active_scan_count(state) == 2
+            await bulk.acquire()
+            assert _get_active_scan_count() == 2
 
             # Acquire another from interactive
-            await state._interactive_limiter.acquire()
-            assert _get_active_scan_count(state) == 3
+            await interactive.acquire()
+            assert _get_active_scan_count() == 3
 
             # Release from interactive
-            await state._interactive_limiter.release()
-            assert _get_active_scan_count(state) == 2
+            await interactive.release()
+            assert _get_active_scan_count() == 2
 
             # Release from bulk
-            await state._bulk_limiter.release()
-            assert _get_active_scan_count(state) == 1
+            await bulk.release()
+            assert _get_active_scan_count() == 1
 
             # Release remaining interactive
-            await state._interactive_limiter.release()
-            assert _get_active_scan_count(state) == 0
+            await interactive.release()
+            assert _get_active_scan_count() == 0
 
         asyncio.run(test_counting())
+        reset_tenant_registry()
 
     def test_active_scans_released_on_completion(self, temp_warehouse, tmp_path):
         """Active scan count returns to zero after scan completes."""
@@ -1205,7 +1246,7 @@ class TestActiveScanCount:
         table_uri = temp_warehouse["table_uri"]
 
         # Check initial state
-        assert _get_active_scan_count(state) == 0
+        assert _get_active_scan_count() == 0
 
         with httpx.Client(timeout=30.0) as http_client:
             # Create and complete a materialize request
@@ -1224,7 +1265,7 @@ class TestActiveScanCount:
         time.sleep(0.2)
 
         # Should be back to zero
-        assert _get_active_scan_count(state) == 0
+        assert _get_active_scan_count() == 0
 
 
 class TestConcurrentScans:

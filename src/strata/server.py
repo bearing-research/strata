@@ -787,14 +787,17 @@ def require_writes_enabled() -> None:
         )
 
 
-def _get_active_scan_count(state: ServerState) -> int:
-    """Get authoritative active scan count from semaphores.
+def _get_active_scan_count() -> int:
+    """Get authoritative active scan count from the admission limiters.
 
-    With two-tier QoS, active scans = interactive_active + bulk_active.
+    Stream admission acquires the per-tenant limiters from the tenant registry
+    — the global ServerState limiters are never acquired — so the registry is
+    the source of truth for in-flight scans (single-tenant deployments have
+    exactly one, the ``_default`` tenant). Counting the global limiters here
+    would always report 0 and let graceful shutdown drain past live streams.
     """
-    interactive_active = state._interactive_limiter.in_use
-    bulk_active = state._bulk_limiter.in_use
-    return interactive_active + bulk_active
+    i_in_use, _, b_in_use, _ = get_tenant_registry().aggregate_limiter_usage()
+    return i_in_use + b_in_use
 
 
 def _classify_query(plan) -> str:
@@ -950,17 +953,21 @@ def _update_saturation_tracking(state: ServerState) -> None:
     """
     now = time.time()
 
+    # Saturation is measured on the per-tenant admission limiters (what stream
+    # admission actually acquires), not the never-acquired global limiters. A
+    # server with no live limiters yet — no requests served — is idle, not
+    # saturated, so require some in-use slots before flagging it.
+    i_in_use, i_avail, b_in_use, b_avail = get_tenant_registry().aggregate_limiter_usage()
+
     # Check interactive tier saturation
-    interactive_available = state._interactive_limiter.available
-    if interactive_available == 0:
+    if i_in_use > 0 and i_avail == 0:
         if state._interactive_saturated_since is None:
             state._interactive_saturated_since = now
     else:
         state._interactive_saturated_since = None
 
     # Check bulk tier saturation
-    bulk_available = state._bulk_limiter.available
-    if bulk_available == 0:
+    if b_in_use > 0 and b_avail == 0:
         if state._bulk_saturated_since is None:
             state._bulk_saturated_since = now
     else:
@@ -1052,7 +1059,7 @@ async def _graceful_shutdown(state: ServerState) -> None:
     state._draining = True
     state._shutdown_event.set()
 
-    active = _get_active_scan_count(state)
+    active = _get_active_scan_count()
     if active > 0:
         state.metrics.log_event(
             "shutdown_draining",
@@ -1062,17 +1069,17 @@ async def _graceful_shutdown(state: ServerState) -> None:
 
         # Wait for active scans to complete (with timeout)
         start = time.perf_counter()
-        while _get_active_scan_count(state) > 0:
+        while _get_active_scan_count() > 0:
             elapsed = time.perf_counter() - start
             if elapsed > DRAIN_TIMEOUT_SECONDS:
                 state.metrics.log_event(
                     "shutdown_timeout",
-                    remaining_scans=_get_active_scan_count(state),
+                    remaining_scans=_get_active_scan_count(),
                 )
                 break
             await asyncio.sleep(0.1)
 
-        if _get_active_scan_count(state) == 0:
+        if _get_active_scan_count() == 0:
             state.metrics.log_event("shutdown_drained")
 
     for cleanup_task in list(state._stream_cleanup_tasks.values()):
@@ -1677,7 +1684,7 @@ async def health_ready():
     qos = _get_qos_metrics(state)
     checks["interactive_available"] = qos["interactive_available"]
     checks["bulk_available"] = qos["bulk_available"]
-    checks["active_scans"] = _get_active_scan_count(state)
+    checks["active_scans"] = _get_active_scan_count()
 
     status = "ready" if is_ready else "not_ready"
     status_code = 200 if is_ready else 503
