@@ -1304,3 +1304,127 @@ class TestMixedModeScenarios:
             reset_artifact_store()
             reset_transform_registry()
             reset_build_store()
+
+
+class TestServiceModeReviewFindings:
+    """Regressions for the service-mode review findings (authz + manifest)."""
+
+    def test_materialize_propagates_denied_input_authz(self, server_mode_app, monkeypatch):
+        """A 403 from input resolution (e.g. a table-ACL deny) must propagate.
+
+        Regression: ``materialize_artifact`` caught every ``HTTPException`` from
+        ``_resolve_input_version`` and fell back to the raw URI, so a denied
+        table input still created a build.
+        """
+        from fastapi import HTTPException
+
+        import strata.server as server_module
+
+        def deny(*_args, **_kwargs):
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        monkeypatch.setattr(server_module, "_resolve_input_version", deny)
+
+        response = server_mode_app.post(
+            "/v1/artifacts/materialize",
+            json={
+                "inputs": ["file:///denied/table"],
+                "transform": {
+                    "executor": "duckdb_sql@v1",
+                    "params": {"sql": "SELECT 1"},
+                },
+            },
+        )
+        assert response.status_code == 403
+
+    def test_materialize_falls_back_on_unresolvable_input(self, server_mode_app, monkeypatch):
+        """A 400 (unresolvable / legacy fake URI) still falls back to the raw
+        URI so the build proceeds — only authz / not-found short-circuit."""
+        from fastapi import HTTPException
+
+        import strata.server as server_module
+
+        def unresolvable(*_args, **_kwargs):
+            raise HTTPException(status_code=400, detail="Unknown input URI type")
+
+        monkeypatch.setattr(server_module, "_resolve_input_version", unresolvable)
+
+        response = server_mode_app.post(
+            "/v1/artifacts/materialize",
+            json={
+                "inputs": ["weird://thing"],
+                "transform": {
+                    "executor": "duckdb_sql@v1",
+                    "params": {"sql": "SELECT 1"},
+                },
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["build_id"] is not None
+
+    def test_materialize_build_carries_inputs_and_params_into_manifest(self, server_mode_app):
+        """The build created by the materialize route must carry input_uris and
+        params, so the pull-model manifest isn't empty.
+
+        Regression: ``create_build`` was called without ``input_uris`` / ``params``,
+        producing an empty-input, empty-param manifest.
+        """
+        from strata.transforms.signed_urls import reset_signing_secret, set_signing_secret
+
+        set_signing_secret(b"test-secret-key-12345678901234")
+        try:
+            create = server_mode_app.post(
+                "/v1/artifacts/materialize",
+                json={
+                    "inputs": ["strata://artifact/seed@v=1"],
+                    "transform": {
+                        "executor": "duckdb_sql@v1",
+                        "params": {"sql": "SELECT * FROM input"},
+                    },
+                },
+            )
+            assert create.status_code == 200, create.text
+            build_id = create.json()["build_id"]
+            assert build_id is not None
+
+            manifest = server_mode_app.get(f"/v1/builds/{build_id}/manifest")
+            assert manifest.status_code == 200, manifest.text
+            data = manifest.json()
+
+            # Inputs flow through (was empty before the fix).
+            assert len(data["inputs"]) == 1
+            assert data["inputs"][0]["artifact_id"] == "seed"
+            assert data["inputs"][0]["version"] == 1
+            # Params flow through.
+            assert data["metadata"]["params"] == {"sql": "SELECT * FROM input"}
+        finally:
+            reset_signing_secret()
+
+    def test_registry_reads_work_in_service_mode(self, server_mode_app):
+        """Registry read routes must serve in service mode (allow_read=True),
+        not 403 like the neighboring write routes."""
+        for path in ("/v1/names", "/v1/registry/summary", "/v1/registry/audit"):
+            response = server_mode_app.get(path)
+            assert response.status_code == 200, (path, response.status_code, response.text)
+
+    def test_admin_tenants_requires_admin_scope(self, server_mode_auth_app):
+        """The cross-tenant admin observability routes require an admin scope
+        under trusted-proxy auth (regression: they were ungated)."""
+        # No admin scope -> 403.
+        denied = server_mode_auth_app.get("/v1/admin/tenants", headers=_auth_headers())
+        assert denied.status_code == 403
+        denied_one = server_mode_auth_app.get("/v1/admin/tenants/team-a", headers=_auth_headers())
+        assert denied_one.status_code == 403
+
+        # admin:tenants grants access.
+        ok = server_mode_auth_app.get(
+            "/v1/admin/tenants", headers=_auth_headers(scopes="admin:tenants")
+        )
+        assert ok.status_code == 200
+        assert "tenants" in ok.json()
+
+        # admin:* also grants access (wildcard).
+        ok_wild = server_mode_auth_app.get(
+            "/v1/admin/tenants", headers=_auth_headers(scopes="admin:*")
+        )
+        assert ok_wild.status_code == 200

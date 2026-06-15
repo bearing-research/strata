@@ -1976,6 +1976,21 @@ async def refresh_admin_notebook_worker(worker_name: str):
     return await _serialize_admin_notebook_workers(force_refresh=True)
 
 
+def _require_tenant_admin_access() -> None:
+    """Authorize the cross-tenant admin observability endpoints.
+
+    These return metrics/config for *every* tenant, so in an authenticated
+    deployment they require the ``admin:tenants`` scope (``admin:*`` also
+    grants it). In personal / no-auth mode there is no principal and the
+    endpoints stay open, matching the other routes.
+    """
+    state = get_state()
+    if state.config.auth_mode == "trusted_proxy":
+        principal = get_principal()
+        if principal is None or not principal.has_scope("admin:tenants"):
+            raise HTTPException(status_code=403, detail="Insufficient scope")
+
+
 @app.get("/v1/admin/tenants")
 async def list_tenants():
     """List all tracked tenants with their metrics.
@@ -1983,6 +1998,7 @@ async def list_tenants():
     Admin endpoint for multi-tenant observability.
     Returns metrics for all tenants that have made requests.
     """
+    _require_tenant_admin_access()
     registry = get_tenant_registry()
     return {"tenants": registry.get_all_tenant_metrics()}
 
@@ -1994,6 +2010,7 @@ async def get_tenant_info(tenant_id: str):
     Path params:
     - tenant_id: The tenant identifier
     """
+    _require_tenant_admin_access()
     registry = get_tenant_registry()
     config = registry.get_config(tenant_id)
     metrics = registry.get_tenant_metrics(tenant_id)
@@ -3837,8 +3854,13 @@ async def materialize_artifact(request: MaterializeRequest):
     for input_uri in request.inputs:
         try:
             input_versions[input_uri] = _resolve_input_version(input_uri, tenant=tenant_id)
-        except HTTPException:
-            # Can't resolve - use URI as version (for tests with fake URIs)
+        except HTTPException as e:
+            # Authz / not-found failures must propagate: a denied table input
+            # (403 from the table ACL) or a missing name (404) must never fall
+            # back to building anyway. Only the "unresolvable URI" 400 — fake or
+            # legacy URIs used in tests — uses the raw URI as its version.
+            if e.status_code in (401, 403, 404):
+                raise
             input_versions[input_uri] = input_uri
 
     # Use resolved versions as hashes for provenance calculation
@@ -3955,6 +3977,8 @@ async def materialize_artifact(request: MaterializeRequest):
                 executor_url=transform_defn.executor_url if transform_defn else None,
                 tenant_id=tenant_id,
                 principal_id=principal_id,
+                input_uris=request.inputs,
+                params=transform.params,
                 name=request.name,
             )
 
@@ -4585,7 +4609,7 @@ async def registry_audit(
     """
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     principal = get_principal()
     if principal is None or principal.has_scope("admin:*"):
         entries = store.read_audit(name=name, artifact_id=artifact_id, limit=limit)
@@ -4604,7 +4628,7 @@ async def registry_summary():
     like the other registry reads (personal mode / ``admin:*`` see all)."""
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     principal = get_principal()
     tenant = None if (principal is None or principal.has_scope("admin:*")) else principal.tenant
 
@@ -4827,7 +4851,7 @@ async def list_names():
     """
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
 
     # Get tenant from auth context for name isolation
     principal = get_principal()
@@ -4955,7 +4979,7 @@ async def get_artifact_lineage(
 
     from strata.artifact_store import TransformSpec
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     tenant_filter = _get_artifact_request_tenant()
 
     # Get the root artifact
@@ -5151,7 +5175,7 @@ async def get_artifact_dependents(
 
     from strata.artifact_store import TransformSpec
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     tenant_filter = _get_artifact_request_tenant()
 
     # Verify the artifact exists
@@ -5794,7 +5818,7 @@ async def explain_materialize(request: ExplainMaterializeRequest):
     from strata.artifact_store import TransformSpec, compute_provenance_hash
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
 
     # Get tenant from auth context for artifact isolation
     principal = get_principal()
