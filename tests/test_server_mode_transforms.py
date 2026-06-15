@@ -1318,12 +1318,10 @@ class TestServiceModeReviewFindings:
         """
         from fastapi import HTTPException
 
-        import strata.server as server_module
-
         def deny(*_args, **_kwargs):
             raise HTTPException(status_code=403, detail="Access denied")
 
-        monkeypatch.setattr(server_module, "_resolve_input_version", deny)
+        monkeypatch.setattr("strata.server._resolve_input_version", deny)
 
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
@@ -1342,12 +1340,10 @@ class TestServiceModeReviewFindings:
         URI so the build proceeds — only authz / not-found short-circuit."""
         from fastapi import HTTPException
 
-        import strata.server as server_module
-
         def unresolvable(*_args, **_kwargs):
             raise HTTPException(status_code=400, detail="Unknown input URI type")
 
-        monkeypatch.setattr(server_module, "_resolve_input_version", unresolvable)
+        monkeypatch.setattr("strata.server._resolve_input_version", unresolvable)
 
         response = server_mode_app.post(
             "/v1/artifacts/materialize",
