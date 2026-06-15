@@ -345,8 +345,8 @@ class ServerState:
         # Maps stream_id -> StreamState for active streams
         self._streams: dict[str, StreamState] = {}
         self._stream_cleanup_tasks: dict[str, asyncio.Task[None]] = {}
-        # TTL for stream entries (5 minutes after creation, stream is cleaned up)
-        self._stream_ttl_seconds = 300
+        # TTL for stream entries (default 5 minutes after creation, then cleaned up)
+        self._stream_ttl_seconds = config.stream_state_ttl_seconds
 
 
 @dataclass

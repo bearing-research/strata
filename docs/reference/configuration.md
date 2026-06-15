@@ -56,6 +56,7 @@ ai_model = "claude-sonnet-4-6"
 | `STRATA_PLAN_TIMEOUT_SECONDS` | `30.0`               | Planning timeout                    |
 | `STRATA_SCAN_TIMEOUT_SECONDS` | `300.0`              | Scan streaming timeout              |
 | `STRATA_MAX_RESPONSE_BYTES`   | `536870912` (512 MB) | Max response size (413 if exceeded) |
+| `STRATA_STREAM_STATE_TTL_SECONDS` | `300.0`          | How long a completed/abandoned stream's state lingers before cleanup |
 
 ## QoS (Two-Tier Admission)
 

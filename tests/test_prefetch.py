@@ -161,12 +161,12 @@ class TestPrefetchBasics:
             port=port,
             cache_dir=tmp_path / "cache",
             deployment_mode="personal",
+            stream_state_ttl_seconds=0.1,  # short TTL so cleanup fires within the test
         )
 
         with run_server(config) as base_url:
             table_uri = prefetch_warehouse["table_uri"]
             assert server_module._state is not None
-            server_module._state._stream_ttl_seconds = 0.1
 
             with httpx.Client(timeout=10.0) as client:
                 # Create materialize request but don't stream it
