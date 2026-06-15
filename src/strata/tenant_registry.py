@@ -152,6 +152,35 @@ class TenantRegistry:
                 raise RuntimeError(msg)
             return interactive, bulk
 
+    def aggregate_limiter_usage(self) -> tuple[int, int, int, int]:
+        """Aggregate live admission-limiter usage across all tracked tenants.
+
+        Stream admission acquires the per-tenant limiters returned by
+        ``get_or_create_limiters`` — not the global ServerState limiters, which
+        are never acquired — so these are the real source of truth for active
+        scans and saturation. Sums in-use / available across every tenant that
+        has live limiters. Single-tenant deployments have exactly one (the
+        ``_default`` tenant), so this reduces to that tenant's limiter.
+
+        Returns:
+            ``(interactive_in_use, interactive_available, bulk_in_use,
+            bulk_available)`` summed over live limiters.
+        """
+        from strata.adaptive_concurrency import ResizableLimiter
+
+        i_in_use = i_avail = b_in_use = b_avail = 0
+        with self._lock:
+            for quotas in self._quotas.values():
+                interactive = quotas.interactive_limiter
+                bulk = quotas.bulk_limiter
+                if isinstance(interactive, ResizableLimiter):
+                    i_in_use += interactive.in_use
+                    i_avail += interactive.available
+                if isinstance(bulk, ResizableLimiter):
+                    b_in_use += bulk.in_use
+                    b_avail += bulk.available
+        return i_in_use, i_avail, b_in_use, b_avail
+
     def is_tenant_enabled(self, tenant_id: str) -> bool:
         """Check if tenant is enabled (exists and not disabled).
 

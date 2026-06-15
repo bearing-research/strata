@@ -787,14 +787,17 @@ def require_writes_enabled() -> None:
         )
 
 
-def _get_active_scan_count(state: ServerState) -> int:
-    """Get authoritative active scan count from semaphores.
+def _get_active_scan_count() -> int:
+    """Get authoritative active scan count from the admission limiters.
 
-    With two-tier QoS, active scans = interactive_active + bulk_active.
+    Stream admission acquires the per-tenant limiters from the tenant registry
+    — the global ServerState limiters are never acquired — so the registry is
+    the source of truth for in-flight scans (single-tenant deployments have
+    exactly one, the ``_default`` tenant). Counting the global limiters here
+    would always report 0 and let graceful shutdown drain past live streams.
     """
-    interactive_active = state._interactive_limiter.in_use
-    bulk_active = state._bulk_limiter.in_use
-    return interactive_active + bulk_active
+    i_in_use, _, b_in_use, _ = get_tenant_registry().aggregate_limiter_usage()
+    return i_in_use + b_in_use
 
 
 def _classify_query(plan) -> str:
@@ -950,17 +953,21 @@ def _update_saturation_tracking(state: ServerState) -> None:
     """
     now = time.time()
 
+    # Saturation is measured on the per-tenant admission limiters (what stream
+    # admission actually acquires), not the never-acquired global limiters. A
+    # server with no live limiters yet — no requests served — is idle, not
+    # saturated, so require some in-use slots before flagging it.
+    i_in_use, i_avail, b_in_use, b_avail = get_tenant_registry().aggregate_limiter_usage()
+
     # Check interactive tier saturation
-    interactive_available = state._interactive_limiter.available
-    if interactive_available == 0:
+    if i_in_use > 0 and i_avail == 0:
         if state._interactive_saturated_since is None:
             state._interactive_saturated_since = now
     else:
         state._interactive_saturated_since = None
 
     # Check bulk tier saturation
-    bulk_available = state._bulk_limiter.available
-    if bulk_available == 0:
+    if b_in_use > 0 and b_avail == 0:
         if state._bulk_saturated_since is None:
             state._bulk_saturated_since = now
     else:
@@ -1052,7 +1059,7 @@ async def _graceful_shutdown(state: ServerState) -> None:
     state._draining = True
     state._shutdown_event.set()
 
-    active = _get_active_scan_count(state)
+    active = _get_active_scan_count()
     if active > 0:
         state.metrics.log_event(
             "shutdown_draining",
@@ -1062,17 +1069,17 @@ async def _graceful_shutdown(state: ServerState) -> None:
 
         # Wait for active scans to complete (with timeout)
         start = time.perf_counter()
-        while _get_active_scan_count(state) > 0:
+        while _get_active_scan_count() > 0:
             elapsed = time.perf_counter() - start
             if elapsed > DRAIN_TIMEOUT_SECONDS:
                 state.metrics.log_event(
                     "shutdown_timeout",
-                    remaining_scans=_get_active_scan_count(state),
+                    remaining_scans=_get_active_scan_count(),
                 )
                 break
             await asyncio.sleep(0.1)
 
-        if _get_active_scan_count(state) == 0:
+        if _get_active_scan_count() == 0:
             state.metrics.log_event("shutdown_drained")
 
     for cleanup_task in list(state._stream_cleanup_tasks.values()):
@@ -1677,7 +1684,7 @@ async def health_ready():
     qos = _get_qos_metrics(state)
     checks["interactive_available"] = qos["interactive_available"]
     checks["bulk_available"] = qos["bulk_available"]
-    checks["active_scans"] = _get_active_scan_count(state)
+    checks["active_scans"] = _get_active_scan_count()
 
     status = "ready" if is_ready else "not_ready"
     status_code = 200 if is_ready else 503
@@ -1976,6 +1983,21 @@ async def refresh_admin_notebook_worker(worker_name: str):
     return await _serialize_admin_notebook_workers(force_refresh=True)
 
 
+def _require_tenant_admin_access() -> None:
+    """Authorize the cross-tenant admin observability endpoints.
+
+    These return metrics/config for *every* tenant, so in an authenticated
+    deployment they require the ``admin:tenants`` scope (``admin:*`` also
+    grants it). In personal / no-auth mode there is no principal and the
+    endpoints stay open, matching the other routes.
+    """
+    state = get_state()
+    if state.config.auth_mode == "trusted_proxy":
+        principal = get_principal()
+        if principal is None or not principal.has_scope("admin:tenants"):
+            raise HTTPException(status_code=403, detail="Insufficient scope")
+
+
 @app.get("/v1/admin/tenants")
 async def list_tenants():
     """List all tracked tenants with their metrics.
@@ -1983,6 +2005,7 @@ async def list_tenants():
     Admin endpoint for multi-tenant observability.
     Returns metrics for all tenants that have made requests.
     """
+    _require_tenant_admin_access()
     registry = get_tenant_registry()
     return {"tenants": registry.get_all_tenant_metrics()}
 
@@ -1994,6 +2017,7 @@ async def get_tenant_info(tenant_id: str):
     Path params:
     - tenant_id: The tenant identifier
     """
+    _require_tenant_admin_access()
     registry = get_tenant_registry()
     config = registry.get_config(tenant_id)
     metrics = registry.get_tenant_metrics(tenant_id)
@@ -3837,8 +3861,13 @@ async def materialize_artifact(request: MaterializeRequest):
     for input_uri in request.inputs:
         try:
             input_versions[input_uri] = _resolve_input_version(input_uri, tenant=tenant_id)
-        except HTTPException:
-            # Can't resolve - use URI as version (for tests with fake URIs)
+        except HTTPException as e:
+            # Authz / not-found failures must propagate: a denied table input
+            # (403 from the table ACL) or a missing name (404) must never fall
+            # back to building anyway. Only the "unresolvable URI" 400 — fake or
+            # legacy URIs used in tests — uses the raw URI as its version.
+            if e.status_code in (401, 403, 404):
+                raise
             input_versions[input_uri] = input_uri
 
     # Use resolved versions as hashes for provenance calculation
@@ -3955,6 +3984,8 @@ async def materialize_artifact(request: MaterializeRequest):
                 executor_url=transform_defn.executor_url if transform_defn else None,
                 tenant_id=tenant_id,
                 principal_id=principal_id,
+                input_uris=request.inputs,
+                params=transform.params,
                 name=request.name,
             )
 
@@ -4585,7 +4616,7 @@ async def registry_audit(
     """
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     principal = get_principal()
     if principal is None or principal.has_scope("admin:*"):
         entries = store.read_audit(name=name, artifact_id=artifact_id, limit=limit)
@@ -4604,7 +4635,7 @@ async def registry_summary():
     like the other registry reads (personal mode / ``admin:*`` see all)."""
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     principal = get_principal()
     tenant = None if (principal is None or principal.has_scope("admin:*")) else principal.tenant
 
@@ -4827,7 +4858,7 @@ async def list_names():
     """
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
 
     # Get tenant from auth context for name isolation
     principal = get_principal()
@@ -4955,7 +4986,7 @@ async def get_artifact_lineage(
 
     from strata.artifact_store import TransformSpec
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     tenant_filter = _get_artifact_request_tenant()
 
     # Get the root artifact
@@ -5151,7 +5182,7 @@ async def get_artifact_dependents(
 
     from strata.artifact_store import TransformSpec
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     tenant_filter = _get_artifact_request_tenant()
 
     # Verify the artifact exists
@@ -5794,7 +5825,7 @@ async def explain_materialize(request: ExplainMaterializeRequest):
     from strata.artifact_store import TransformSpec, compute_provenance_hash
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
 
     # Get tenant from auth context for artifact isolation
     principal = get_principal()
