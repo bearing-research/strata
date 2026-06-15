@@ -11,7 +11,7 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, cast
 
 if TYPE_CHECKING:
     from strata.adaptive_concurrency import AdaptiveConcurrencyController
@@ -53,7 +53,7 @@ from strata.logging import (
 )
 from strata.memory_profiler import get_detailed_memory_report, get_memory_snapshot
 from strata.metrics import MetricsCollector
-from strata.notebook.models import WorkerBackendType, WorkerSpec
+from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
 from strata.notebook.workers import (
     ManagedWorkerRecord,
     build_server_worker_catalog_with_health,
@@ -130,7 +130,7 @@ class AdminNotebookWorkerEntryRequest(BaseModel):
     name: str = Field(..., pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
     backend: WorkerBackendType = Field(default=WorkerBackendType.LOCAL)
     runtime_id: str | None = Field(default=None)
-    config: dict[str, Any] = Field(default_factory=dict)
+    config: WorkerConfig = Field(default_factory=WorkerConfig)
     enabled: bool = True
 
     def to_worker_spec(self) -> WorkerSpec:

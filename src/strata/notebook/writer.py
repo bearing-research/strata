@@ -206,7 +206,14 @@ def _serialize_workers(workers: list[WorkerSpec]) -> list[dict[str, object]]:
             "name": worker.name,
             "backend": worker.backend.value,
             **({"runtime_id": worker.runtime_id} if worker.runtime_id else {}),
-            **({"config": worker.config} if worker.config else {}),
+            # WorkerConfig → a plain dict for TOML; drop unset known keys, and
+            # omit the block entirely when nothing's set (an empty model is still
+            # truthy, unlike the old empty dict).
+            **(
+                {"config": cfg}
+                if (cfg := worker.config.model_dump(mode="json", exclude_none=True))
+                else {}
+            ),
         }
         for worker in workers
     ]
