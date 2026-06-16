@@ -567,6 +567,18 @@ class StrataConfig(BaseSettings):
                     "tenant-filtered without auth; set auth_mode='trusted_proxy')"
                 )
 
+            # Trusted-proxy auth without a shared token is no auth at all:
+            # verify_proxy_token() returns True when no token is configured, so
+            # any client that can reach Strata can spoof the principal/scope
+            # headers. Require the token (it's free even for network-isolated
+            # deployments) rather than silently trusting every caller.
+            if self.auth_mode == "trusted_proxy" and not self.proxy_token:
+                conflicts.append(
+                    "auth_mode='trusted_proxy' without proxy_token (the token is "
+                    "unset, so every request is accepted and principal/scope "
+                    "headers can be spoofed; set proxy_token)"
+                )
+
             # Authenticated write-back must be attributable: writes are stamped
             # with the caller's principal/tenant, which only exist under auth.
             if self.service_writes_enabled and self.auth_mode != "trusted_proxy":
@@ -778,16 +790,48 @@ class StrataConfig(BaseSettings):
         file_config = _load_from_pyproject()
         env_config = _get_env_overrides()
 
+        # Documented precedence is pyproject < env, but file_config is passed to
+        # the model as init kwargs, which pydantic-settings ranks ABOVE its env
+        # source — so a key written in pyproject would otherwise shadow STRATA_*
+        # (e.g. STRATA_AUTH_MODE silently ignored). Drop any pyproject key that a
+        # STRATA_* env var overrides, letting the env source win.
+        env_var_names = {name.upper() for name in os.environ}
+        for key in list(file_config):
+            if f"STRATA_{key.upper()}" in env_var_names:
+                del file_config[key]
+
+        # Deep-merge nested dict configs so an env override of one key (e.g.
+        # STRATA_CATALOG_URI → catalog_properties.uri) doesn't wipe sibling keys
+        # set in pyproject (type, warehouse, …).
+        for nested_key in ("catalog_properties",):
+            file_nested = file_config.get(nested_key)
+            env_nested = env_config.get(nested_key)
+            if isinstance(file_nested, dict) and isinstance(env_nested, dict):
+                env_config[nested_key] = {**file_nested, **env_nested}
+
         # Merge: defaults < pyproject.toml < env vars < overrides
         merged = {**file_config, **env_config, **overrides}
 
-        # Parse ACL configuration from [tool.strata.acl] section
-        if "acl" in merged:
-            merged["acl_config"] = _parse_acl_config(merged.pop("acl"))
+        # Parse ACL config. Accept both [tool.strata.acl] and the documented
+        # [tool.strata.acl_config]; both use the deny/allow shape and must go
+        # through _parse_acl_config (the model fields are deny_rules/allow_rules,
+        # so a raw acl_config dict would silently drop its rules).
+        acl_raw = merged.pop("acl", None)
+        if acl_raw is None and isinstance(merged.get("acl_config"), dict):
+            acl_raw = merged.pop("acl_config")
+        if acl_raw is not None:
+            merged["acl_config"] = _parse_acl_config(acl_raw)
 
-        # Store transforms configuration from [tool.strata.transforms] section
+        # Store transforms config from [tool.strata.transforms]. Merge with any
+        # env-derived transforms_config (e.g. STRATA_TRANSFORMS_ENABLED=true) so
+        # the env toggle isn't lost when a pyproject block exists; env keys win.
         if "transforms" in merged:
-            merged["transforms_config"] = merged.pop("transforms")
+            pyproject_transforms = merged.pop("transforms")
+            env_transforms = merged.get("transforms_config")
+            if isinstance(env_transforms, dict):
+                merged["transforms_config"] = {**pyproject_transforms, **env_transforms}
+            else:
+                merged["transforms_config"] = pyproject_transforms
 
         return cls(**merged)
 
