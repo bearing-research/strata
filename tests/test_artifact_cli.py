@@ -180,6 +180,45 @@ class TestTenantAgnosticResolution:
         assert "legacy-1@v=1" in out
         reset_artifact_store()
 
+    def _two_tenant_store(self, tmp_path):
+        """A store where two tenants publish the same name 'shared/model'."""
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir()
+        store = ArtifactStore(artifact_dir)
+        for tenant, aid in (("team-a", "a-1"), ("team-b", "b-1")):
+            store.create_artifact(aid, f"prov-{aid}", tenant=tenant)
+            store.finalize_artifact(aid, 1, "{}", 1, 10)
+            store.set_name("shared/model", aid, 1, tenant=tenant)
+        return str(artifact_dir)
+
+    def test_ambiguous_name_without_tenant_errors(self, tmp_path, capsys):
+        artifact_dir = self._two_tenant_store(tmp_path)
+        rc = cmd_show(_args(ref="shared/model", artifact_dir=artifact_dir))
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert "multiple tenants" in err
+        reset_artifact_store()
+
+    def test_tenant_flag_disambiguates(self, tmp_path, capsys):
+        artifact_dir = self._two_tenant_store(tmp_path)
+        rc = cmd_show(_args(ref="shared/model", artifact_dir=artifact_dir, tenant="team-a"))
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "a-1@v=1" in out
+        assert "tenant:    team-a" in out
+        reset_artifact_store()
+
+    def test_json_payload_includes_tenant(self, tmp_path, capsys):
+        artifact_dir = self._two_tenant_store(tmp_path)
+        rc = cmd_show(
+            _args(ref="shared/model", artifact_dir=artifact_dir, tenant="team-b", format="json")
+        )
+        payload = json.loads(capsys.readouterr().out)
+        assert rc == 0
+        assert payload["tenant"] == "team-b"
+        assert "principal" in payload
+        reset_artifact_store()
+
 
 class TestAliasRefsAndAudit:
     """CLI alias refs (name@alias) and the audit command (#129)."""
