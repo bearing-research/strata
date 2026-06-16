@@ -60,7 +60,9 @@ class TestPrincipalParsing:
         """Missing principal header raises AuthError."""
         from strata.auth import AuthError
 
-        config = StrataConfig.load(deployment_mode="service", auth_mode="trusted_proxy")
+        config = StrataConfig.load(
+            deployment_mode="service", auth_mode="trusted_proxy", proxy_token="t"
+        )
         headers = {}
 
         with pytest.raises(AuthError) as exc_info:
@@ -71,7 +73,9 @@ class TestPrincipalParsing:
 
     def test_principal_parsed_from_header(self):
         """Principal is correctly parsed from headers."""
-        config = StrataConfig.load(deployment_mode="service", auth_mode="trusted_proxy")
+        config = StrataConfig.load(
+            deployment_mode="service", auth_mode="trusted_proxy", proxy_token="t"
+        )
         headers = {
             config.principal_header: "test-user",
             config.tenant_header: "test-tenant",
@@ -86,7 +90,9 @@ class TestPrincipalParsing:
 
     def test_principal_parsed_from_lowercase_headers(self):
         """Header parsing should remain case-insensitive through ASGI request dicts."""
-        config = StrataConfig.load(deployment_mode="service", auth_mode="trusted_proxy")
+        config = StrataConfig.load(
+            deployment_mode="service", auth_mode="trusted_proxy", proxy_token="t"
+        )
         headers = {
             config.principal_header.lower(): "test-user",
             config.tenant_header.lower(): "test-tenant",
@@ -101,7 +107,9 @@ class TestPrincipalParsing:
 
     def test_empty_scopes_ok(self):
         """Principal with no scopes is valid."""
-        config = StrataConfig.load(deployment_mode="service", auth_mode="trusted_proxy")
+        config = StrataConfig.load(
+            deployment_mode="service", auth_mode="trusted_proxy", proxy_token="t"
+        )
         headers = {config.principal_header: "test-user"}
 
         principal = parse_principal(headers, config)

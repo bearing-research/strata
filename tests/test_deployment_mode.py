@@ -267,6 +267,7 @@ class TestModeCoherence:
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
             auth_mode="trusted_proxy",
+            proxy_token="test-token",
             multi_tenant_enabled=True,
             require_tenant_header=True,
         )
@@ -325,6 +326,7 @@ class TestModeCoherence:
             cache_dir=tmp_path / "cache",
             deployment_mode="service",
             auth_mode="trusted_proxy",
+            proxy_token="test-token",
             acl_config=AclConfig(default="deny"),
         )
         assert config.acl_config.default == "deny"
