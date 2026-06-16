@@ -89,15 +89,25 @@ container so dashboards and the Prometheus datasource are
 provisioned on container start, no clicking through the UI to
 import them.
 
-One dashboard ships out of the box (`Strata Overview`), with panels for:
+One dashboard ships out of the box
+(`Strata — Iceberg Serving + Observability`), covering the serving
+layer end to end:
 
-- **Server Status**: up / down probe
-- **Cache Hit Rate**: rolling hit ratio
-- **Active Scans**: concurrent scans currently running
-- **Scan Rate**: completions per second
-- **Throughput (Bytes/sec)**: egress to clients
-- **QoS Slot Usage**: interactive vs bulk semaphores
-- **Rate Limit Rejections**: count of requests turned away
+- **Serving**: scan rate, active scans, throughput, row-group pruning,
+  prefetch usage
+- **Caches**: data / parquet-metadata / manifest hit rates and sizes,
+  eviction rate & pressure
+- **Admission & QoS**: interactive vs bulk slot usage, queue-wait
+  times, rejections
+- **Resilience**: rate limiter (allowed vs rejected, active clients),
+  circuit-breaker state and failures
+- **Multi-tenant**: per-tenant scan rate and cache hit rate
+- **Server**: status / draining, stream aborts, client disconnects
+
+A test (`tests/test_observability_dashboard.py`) fails CI if a panel
+references a metric the server no longer exposes, so the dashboard
+can't silently drift out of sync with `/metrics/prometheus` again
+(it had — the QoS metrics were renamed and the panels went dark).
 
 To add more dashboards, drop the JSON into
 `observability/grafana/provisioning/dashboards/` and restart the
