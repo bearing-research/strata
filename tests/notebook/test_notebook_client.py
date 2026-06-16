@@ -96,6 +96,15 @@ def test_client_accepts_cell_id(shim):
     assert c._cell_id == "cell-42"
 
 
+def test_materialize_rejects_non_stream_mode(shim):
+    """Only synchronous stream materialization is supported here. mode='artifact'
+    starts an async server build the slim client can't poll, so to_arrow() would
+    hit /data on a pending build and 400 — fail fast before any request."""
+    c = shim.StrataClient(base_url="http://x")
+    with pytest.raises(ValueError, match="mode='stream'"):
+        c.materialize([], {"executor": "scan@v1", "params": {}}, mode="artifact")
+
+
 def test_stamp_cell_is_noop_without_cell_or_name(shim):
     # No cell_id, or no name → no stamp attempt, never raises.
     c = shim.StrataClient(base_url="http://x")  # no cell_id

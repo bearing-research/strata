@@ -245,6 +245,17 @@ class StrataClient:
         mode: str = "stream",
         refresh: bool = False,
     ) -> Artifact:
+        # This ambient client only does synchronous stream materialization.
+        # mode="artifact" kicks off an async server build (returns build_id +
+        # state="pending"); reading it needs build-status polling, which lives in
+        # the standalone strata-client. Without it, Artifact.to_arrow() would hit
+        # /data on a pending build and get rejected — fail fast with guidance.
+        if mode != "stream":
+            raise ValueError(
+                f"strata.materialize supports only mode='stream' here; got {mode!r}. "
+                "For async artifact builds use the standalone client "
+                "(`pip install strata-client`)."
+            )
         server_transform = dict(transform)
         if "ref" in server_transform:
             server_transform["executor"] = server_transform.pop("ref")

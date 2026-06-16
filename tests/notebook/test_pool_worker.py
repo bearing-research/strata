@@ -146,3 +146,17 @@ class TestExecuteHarnessClientCellId:
         result = execute_harness(manifest)
         assert result["success"] is True, result.get("error")
         assert result["variables"]["cid"]["preview"] == "cell-xyz"
+
+    def test_remote_store_headers_reach_injected_client(self, tmp_path: Path) -> None:
+        """strata_headers (remote shared-store auth/tenant) must reach the warm
+        worker's client — the default WS path used to drop them."""
+        manifest = {
+            "source": "principal = strata._headers.get('X-Strata-Principal', '')",
+            "inputs": {},
+            "output_dir": str(tmp_path),
+            "strata_url": "http://remote-store:8765",
+            "strata_headers": {"X-Strata-Principal": "alice", "X-Tenant-ID": "team-a"},
+        }
+        result = execute_harness(manifest)
+        assert result["success"] is True, result.get("error")
+        assert result["variables"]["principal"]["preview"] == "alice"

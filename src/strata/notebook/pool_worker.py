@@ -197,7 +197,11 @@ def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
     # Path-loaded, not ``import strata`` — the warm worker runs in the
     # notebook venv (pyarrow + stdlib only); see notebook_client.py.
     cell_id = manifest.get("strata_cell_id") or manifest.get("cell_id")
-    client = _client_mod.StrataClient(base_url=url, cell_id=cell_id)
+    # Auth headers when the client targets a remote shared store (empty locally).
+    # The warm pool is the default WS path, so dropping these broke auth / tenant
+    # scoping for shared-store cells. Mirror harness.inject_client.
+    headers = manifest.get("strata_headers") or None
+    client = _client_mod.StrataClient(base_url=url, cell_id=cell_id, headers=headers)
     namespace["strata"] = client
     return client
 
