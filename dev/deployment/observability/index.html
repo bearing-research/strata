@@ -2038,16 +2038,25 @@ output.</p>
 container so dashboards and the Prometheus datasource are
 provisioned on container start, no clicking through the UI to
 import them.</p>
-<p>One dashboard ships out of the box (<code>Strata Overview</code>), with panels for:</p>
+<p>One dashboard ships out of the box
+(<code>Strata — Iceberg Serving + Observability</code>), covering the serving
+layer end to end:</p>
 <ul>
-<li><strong>Server Status</strong>: up / down probe</li>
-<li><strong>Cache Hit Rate</strong>: rolling hit ratio</li>
-<li><strong>Active Scans</strong>: concurrent scans currently running</li>
-<li><strong>Scan Rate</strong>: completions per second</li>
-<li><strong>Throughput (Bytes/sec)</strong>: egress to clients</li>
-<li><strong>QoS Slot Usage</strong>: interactive vs bulk semaphores</li>
-<li><strong>Rate Limit Rejections</strong>: count of requests turned away</li>
+<li><strong>Serving</strong>: scan rate, active scans, throughput, row-group pruning,
+  prefetch usage</li>
+<li><strong>Caches</strong>: data / parquet-metadata / manifest hit rates and sizes,
+  eviction rate &amp; pressure</li>
+<li><strong>Admission &amp; QoS</strong>: interactive vs bulk slot usage, queue-wait
+  times, rejections</li>
+<li><strong>Resilience</strong>: rate limiter (allowed vs rejected, active clients),
+  circuit-breaker state and failures</li>
+<li><strong>Multi-tenant</strong>: per-tenant scan rate and cache hit rate</li>
+<li><strong>Server</strong>: status / draining, stream aborts, client disconnects</li>
 </ul>
+<p>A test (<code>tests/test_observability_dashboard.py</code>) fails CI if a panel
+references a metric the server no longer exposes, so the dashboard
+can't silently drift out of sync with <code>/metrics/prometheus</code> again
+(it had — the QoS metrics were renamed and the panels went dark).</p>
 <p>To add more dashboards, drop the JSON into
 <code>observability/grafana/provisioning/dashboards/</code> and restart the
 Grafana container.</p>
