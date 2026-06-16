@@ -549,7 +549,10 @@ class FilterSpec(BaseModel):
     """
 
     column: str
-    op: str  # "=", "!=", "<", "<=", ">", ">="
+    # Typed as the enum so an invalid operator fails inside ``model_validate``
+    # (→ 400) instead of escaping as an uncaught ``ValueError`` from
+    # ``FilterOp(f.op)`` later in ``to_strata_filters``.
+    op: FilterOp
     value: FilterValue
 
 
@@ -580,7 +583,7 @@ class IdentityParams(BaseModel):
             result.append(
                 Filter(
                     column=f.column,
-                    op=FilterOp(f.op),
+                    op=f.op,  # already a FilterOp (validated by the model)
                     value=f.value,
                 )
             )
