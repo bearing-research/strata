@@ -262,7 +262,7 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
     created_at REAL NOT NULL,
     transform_spec TEXT,
     input_versions TEXT,  -- JSON: {"uri": "version_string", ...} for staleness detection
-    tenant TEXT,  -- Tenant ID for multi-tenant isolation
+    tenant TEXT NOT NULL DEFAULT '',  -- Tenant ID ('' = tenantless, matches names/aliases/tags)
     principal TEXT,  -- Principal ID that created this artifact
     PRIMARY KEY (id, version)
 );
@@ -270,8 +270,10 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
 -- Index for provenance lookup (deduplication)
 CREATE INDEX IF NOT EXISTS idx_provenance ON artifact_versions(provenance_hash);
 
--- Unique constraint for idempotent finalize: (tenant, provenance_hash) for ready artifacts
--- This prevents duplicate artifacts for the same computation within a tenant
+-- Unique constraint for idempotent finalize: (tenant, provenance_hash) for ready artifacts.
+-- Prevents duplicate ready artifacts for the same computation within a tenant. Relies on
+-- tenant being '' (never NULL) for tenantless rows — SQLite treats NULLs as distinct, which
+-- would let duplicate tenantless ready rows slip through (see _init_schema normalization).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_provenance_unique
 ON artifact_versions(tenant, provenance_hash)
 WHERE state = 'ready';
@@ -479,13 +481,43 @@ class ArtifactStore:
                     )
                     conn.commit()
 
-                # Add unique index on (tenant, provenance_hash) if not exists
-                # This enables idempotent finalize
-                cursor = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='index' "
-                    "AND name='idx_tenant_provenance_unique'"
+                # Normalize tenant storage and (re)build the uniqueness index.
+                # Tenantless rows must use '' (not NULL) so the (tenant,
+                # provenance_hash) uniqueness actually holds — SQLite treats
+                # NULLs as distinct, which let duplicate tenantless ready rows
+                # slip through. Drop the index, normalize NULL -> '', collapse
+                # any pre-existing duplicate ready rows, then rebuild. Idempotent:
+                # once there are no NULL tenants and the index exists, it skips.
+                has_null_tenant = (
+                    conn.execute(
+                        "SELECT 1 FROM artifact_versions WHERE tenant IS NULL LIMIT 1"
+                    ).fetchone()
+                    is not None
                 )
-                if cursor.fetchone() is None:
+                index_exists = (
+                    conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index' "
+                        "AND name='idx_tenant_provenance_unique'"
+                    ).fetchone()
+                    is not None
+                )
+                if has_null_tenant or not index_exists:
+                    conn.execute("DROP INDEX IF EXISTS idx_tenant_provenance_unique")
+                    conn.execute("UPDATE artifact_versions SET tenant = '' WHERE tenant IS NULL")
+                    # Collapse pre-existing duplicate ready rows (the bug this
+                    # closes): keep the newest per (tenant, provenance_hash),
+                    # supersede the rest so the unique index can be built. The
+                    # superseded rows stay fetchable by explicit id+version.
+                    conn.execute(
+                        """
+                        UPDATE artifact_versions SET state = 'superseded'
+                        WHERE state = 'ready' AND rowid NOT IN (
+                            SELECT MAX(rowid) FROM artifact_versions
+                            WHERE state = 'ready'
+                            GROUP BY tenant, provenance_hash
+                        )
+                        """
+                    )
                     conn.execute(
                         """
                         CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_provenance_unique
@@ -611,7 +643,9 @@ class ArtifactStore:
                     time.time(),
                     transform_spec.to_json() if transform_spec else None,
                     input_versions_json,
-                    tenant,
+                    # Tenantless rows store '' (never NULL) so the uniqueness
+                    # index treats them as equal — matches names/aliases/tags.
+                    tenant if tenant is not None else "",
                     principal,
                 ),
             )
@@ -768,19 +802,41 @@ class ArtifactStore:
         unable to find the artifact under that id, even though an
         equivalent artifact exists under a different id. This method
         flips the canonical version back to ready so it's reachable
-        by id without disturbing the prior ready row.
+        by id.
 
-        The partial unique index on
-        ``(tenant, provenance_hash) WHERE state='ready'`` is satisfied
-        because two rows can share provenance in ready state only via
-        this targeted promotion — ``finalize_artifact`` still refuses
-        normally.
+        The partial unique index on ``(tenant, provenance_hash) WHERE
+        state='ready'`` permits only one ready row per (tenant,
+        provenance). So before promoting, any *other* ready row sharing
+        this provenance is superseded — it stays fetchable by explicit
+        id+version, just excluded from provenance lookups — and the
+        canonical row becomes the single ready one. (Earlier this relied
+        on SQLite treating NULL tenants as distinct, which is exactly the
+        duplicate-row bug the tenant normalization closed.)
 
         Returns the canonical ``ArtifactVersion`` after promotion, or
         ``None`` if it can't be found post-update.
         """
         conn = self._get_connection()
         try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT provenance_hash, tenant FROM artifact_versions "
+                "WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            ).fetchone()
+            if row is not None:
+                # Supersede any other ready row with the same provenance in the
+                # same tenant so the canonical row can be promoted without
+                # violating the uniqueness index.
+                conn.execute(
+                    """
+                    UPDATE artifact_versions SET state = 'superseded'
+                    WHERE provenance_hash = ? AND state = 'ready'
+                      AND COALESCE(tenant, '') = COALESCE(?, '')
+                      AND NOT (id = ? AND version = ?)
+                    """,
+                    (row["provenance_hash"], row["tenant"], artifact_id, version),
+                )
             conn.execute(
                 """
                 UPDATE artifact_versions
@@ -1194,15 +1250,18 @@ class ArtifactStore:
 
         Args:
             provenance_hash: Provenance hash to look up
-            tenant: Optional tenant filter for multi-tenant isolation.
-                If provided, only returns artifacts owned by this tenant.
+            tenant: Tenant scope. A tenant id returns only that tenant's
+                artifacts; ``None`` or ``""`` scopes to the *tenantless*
+                namespace (``''`` going forward, ``NULL`` for not-yet-migrated
+                rows) — never "any tenant", so a tenantless build cannot dedup
+                against, and then point a name at, another tenant's artifact.
 
         Returns:
             Matching ArtifactVersion with state="ready", or None if not found
         """
         conn = self._get_connection()
         try:
-            if tenant is not None:
+            if tenant:
                 cursor = conn.execute(
                     """
                     SELECT id, version, state, provenance_hash, schema_json,
@@ -1223,6 +1282,7 @@ class ArtifactStore:
                            input_versions, tenant, principal
                     FROM artifact_versions
                     WHERE provenance_hash = ? AND state = 'ready'
+                      AND (tenant = '' OR tenant IS NULL)
                     ORDER BY created_at DESC
                     LIMIT 1
                     """,
@@ -1771,15 +1831,33 @@ class ArtifactStore:
         tenant: str | None = None,
         actor: str | None = None,
     ) -> None:
-        """Set a key/value tag on an artifact version (audited)."""
+        """Set a key/value tag on an artifact version (audited).
+
+        Raises:
+            ValueError: If the artifact doesn't exist, isn't readable, or
+                belongs to a different tenant — mirrors ``set_alias`` so a
+                tenant can't attach metadata to another tenant's artifact by
+                guessing its id/version.
+        """
         conn = self._get_connection()
         try:
             cursor = conn.execute(
-                "SELECT state FROM artifact_versions WHERE id = ? AND version = ?",
+                "SELECT state, tenant FROM artifact_versions WHERE id = ? AND version = ?",
                 (artifact_id, version),
             )
-            if cursor.fetchone() is None:
+            row = cursor.fetchone()
+            if row is None:
                 raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            if row["state"] not in ("ready", "superseded"):
+                raise ValueError(
+                    f"Artifact {artifact_id}@v={version} is not readable (state={row['state']})"
+                )
+            artifact_tenant = row["tenant"] if row["tenant"] else None
+            if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
+                raise ValueError(
+                    f"Artifact {artifact_id}@v={version} belongs to tenant "
+                    f"{artifact_tenant}, cannot tag in tenant {tenant}"
+                )
 
             effective_tenant = tenant if tenant is not None else ""
             self._audit_in_connection(
@@ -2503,27 +2581,38 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    def delete_artifact(self, artifact_id: str, version: int) -> bool:
+    def delete_artifact(self, artifact_id: str, version: int, tenant: str | None = None) -> bool:
         """Delete an artifact version and its blob.
 
-        Also removes any name pointers to this version.
+        Also removes all name/alias/tag pointers to this version (the version is
+        gone, so leaving pointers would dangle).
 
         Args:
             artifact_id: Artifact ID
             version: Version number
+            tenant: When provided, the artifact must belong to this tenant (or be
+                tenantless) — refuses to delete another tenant's artifact, so the
+                metadata cascade can't be driven cross-tenant. Defense in depth
+                mirroring the route's ownership check.
 
         Returns:
-            True if artifact was deleted, False if it didn't exist
+            True if artifact was deleted, False if it didn't exist or is owned
+            by a different tenant
         """
         conn = self._get_connection()
         try:
-            # Check if artifact exists
+            # Check existence + ownership
             cursor = conn.execute(
-                "SELECT 1 FROM artifact_versions WHERE id = ? AND version = ?",
+                "SELECT tenant FROM artifact_versions WHERE id = ? AND version = ?",
                 (artifact_id, version),
             )
-            if cursor.fetchone() is None:
+            row = cursor.fetchone()
+            if row is None:
                 return False
+            if tenant is not None:
+                artifact_tenant = row["tenant"] if row["tenant"] else None
+                if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
+                    return False
 
             # Delete name pointers to this version
             conn.execute(

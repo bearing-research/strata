@@ -6003,7 +6003,7 @@ async def delete_artifact(artifact_id: str, version: int):
         tenant_filter,
     )
 
-    deleted = store.delete_artifact(artifact_id, version)
+    deleted = store.delete_artifact(artifact_id, version, tenant=tenant_filter)
     if not deleted:
         raise HTTPException(status_code=404, detail="Artifact not found")
 

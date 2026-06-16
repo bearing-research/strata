@@ -365,9 +365,18 @@ class TestArtifactStoreTenantIsolation:
         assert result_b.id == "art-b"
         assert result_b.tenant == "team-b"
 
-        # Non-scoped lookup returns any matching artifact
-        result_any = artifact_store.find_by_provenance("same-hash")
-        assert result_any is not None
+        # A tenantless (None) lookup is scoped to the tenantless namespace, NOT
+        # "any tenant" — it must not return another tenant's artifact (finding:
+        # cross-tenant dedup). With only team-scoped rows, it returns nothing.
+        assert artifact_store.find_by_provenance("same-hash") is None
+
+        # A genuinely tenantless artifact with that provenance is found.
+        artifact_store.create_artifact(artifact_id="art-none", provenance_hash="same-hash")
+        artifact_store.finalize_artifact("art-none", 1, "{}", 10, 100)
+        result_none = artifact_store.find_by_provenance("same-hash")
+        assert result_none is not None
+        assert result_none.id == "art-none"
+        assert result_none.tenant in (None, "")
 
     def test_names_tenant_scoped(self, artifact_store):
         """Names should be scoped by tenant."""

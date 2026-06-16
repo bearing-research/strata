@@ -1103,3 +1103,145 @@ class TestTagAndNameLookups:
         assert store.names_for_artifact("a1", 1) == ["team/model"]
         assert store.names_for_artifact("a1", 2) == []
         assert store.names_for_artifact("nope", 1) == []
+
+
+class TestTenantNormalization:
+    """Tenant stored as '' (never NULL) for tenantless rows, plus the isolation
+    and uniqueness guarantees that depend on it (artifact_store review findings)."""
+
+    def test_tenantless_provenance_uniqueness_enforced(self, store):
+        """Two tenantless artifacts with the same provenance can't both be ready;
+        the second dedups to the first (finding #2 — NULL-distinctness gap)."""
+        store.create_artifact("art-1", "dup-prov")
+        store.finalize_artifact("art-1", 1, "{}", 1, 10)
+        store.create_artifact("art-2", "dup-prov")
+        result = store.finalize_artifact("art-2", 1, "{}", 1, 10)
+        assert result.id == "art-1"  # deduped to the first
+
+        import sqlite3
+
+        conn = sqlite3.connect(str(store.db_path))
+        ready = conn.execute(
+            "SELECT COUNT(*) FROM artifact_versions "
+            "WHERE provenance_hash = 'dup-prov' AND state = 'ready'"
+        ).fetchone()[0]
+        conn.close()
+        assert ready == 1
+
+    def test_tenantless_finalize_does_not_dedup_cross_tenant(self, store):
+        """A tenantless finalize must not dedup against a tenant's artifact and
+        point a default-tenant name at it (finding #1)."""
+        store.create_artifact("team-art", "shared-prov", tenant="team-a")
+        store.finalize_artifact("team-art", 1, "{}", 1, 10)
+
+        store.create_artifact("none-art", "shared-prov")  # tenantless
+        result = store.finalize_and_set_name(
+            "none-art", 1, "{}", 1, 10, name="my-name", tenant=None
+        )
+        # It finalizes as its own tenantless artifact, NOT team-a's.
+        assert result.id == "none-art"
+        resolved = store.resolve_name("my-name")
+        assert resolved.id == "none-art"
+
+    def test_force_finalize_canonical_supersedes_conflicting_ready_row(self, store):
+        """Promoting a dedup-failed canonical row supersedes the equivalent ready
+        row so only one ready row per (tenant, provenance) survives (finding #3),
+        and it works for tenant-scoped rows, not just tenantless."""
+        store.create_artifact("equiv", "canon-prov", tenant="team-a")
+        store.finalize_artifact("equiv", 1, "{}", 1, 10)
+        # Canonical row dedups to 'equiv' and is marked failed.
+        store.create_artifact("canonical", "canon-prov", tenant="team-a")
+        store.finalize_artifact("canonical", 1, "{}", 1, 10)
+
+        promoted = store.force_finalize_canonical("canonical", 1, "{}", 1, 10)
+        assert promoted is not None and promoted.state == "ready"
+
+        import sqlite3
+
+        conn = sqlite3.connect(str(store.db_path))
+        ready_ids = [
+            r[0]
+            for r in conn.execute(
+                "SELECT id FROM artifact_versions "
+                "WHERE provenance_hash = 'canon-prov' AND state = 'ready'"
+            ).fetchall()
+        ]
+        conn.close()
+        assert ready_ids == ["canonical"]  # exactly one ready, the canonical
+        # The equivalent is still fetchable by id+version.
+        assert store.get_artifact("equiv", 1).state == "superseded"
+
+    def test_set_tag_rejects_cross_tenant(self, store):
+        """set_tag enforces ownership like set_alias (finding #4)."""
+        store.create_artifact("owned", "p", tenant="acme")
+        store.finalize_artifact("owned", 1, "{}", 1, 10)
+        with pytest.raises(ValueError, match="cannot tag in tenant"):
+            store.set_tag("owned", 1, "k", "v", tenant="globex")
+
+    def test_set_tag_rejects_non_readable(self, store):
+        """Tags are only allowed on readable (ready/superseded) artifacts."""
+        store.create_artifact("building", "p")  # still 'building'
+        with pytest.raises(ValueError, match="not readable"):
+            store.set_tag("building", 1, "k", "v")
+
+    def test_delete_artifact_refuses_other_tenant(self, store):
+        """delete_artifact's tenant guard refuses to delete another tenant's
+        artifact (finding #5)."""
+        store.create_artifact("owned", "p", tenant="acme")
+        store.finalize_artifact("owned", 1, "{}", 1, 10)
+        assert store.delete_artifact("owned", 1, tenant="globex") is False
+        assert store.get_artifact("owned", 1) is not None  # not deleted
+        assert store.delete_artifact("owned", 1, tenant="acme") is True
+
+    def test_migration_normalizes_null_tenant_and_dedups(self, artifact_dir):
+        """Opening a legacy store with NULL tenants + a duplicate ready row
+        (allowed by the old NULL-distinct index) normalizes to '' and collapses
+        the duplicate so the uniqueness index holds."""
+        import sqlite3
+
+        store = ArtifactStore(artifact_dir)
+        store.create_artifact("a1", "h")
+        store.finalize_artifact("a1", 1, "{}", 1, 10)
+
+        # Rebuild artifact_versions as the legacy nullable-tenant table (the
+        # current fresh schema is NOT NULL), then plant NULL tenants + a second
+        # ready row with the same provenance — the duplicate the old
+        # NULL-distinctness index permitted.
+        conn = sqlite3.connect(str(store.db_path))
+        conn.executescript(
+            """
+            DROP INDEX IF EXISTS idx_tenant_provenance_unique;
+            ALTER TABLE artifact_versions RENAME TO _av_old;
+            CREATE TABLE artifact_versions (
+                id TEXT NOT NULL, version INTEGER NOT NULL,
+                state TEXT NOT NULL DEFAULT 'building', provenance_hash TEXT NOT NULL,
+                schema_json TEXT, row_count INTEGER, byte_size INTEGER,
+                created_at REAL NOT NULL, transform_spec TEXT, input_versions TEXT,
+                tenant TEXT, principal TEXT, PRIMARY KEY (id, version)
+            );
+            INSERT INTO artifact_versions SELECT * FROM _av_old;
+            DROP TABLE _av_old;
+            """
+        )
+        conn.execute("UPDATE artifact_versions SET tenant = NULL")
+        conn.execute(
+            "INSERT INTO artifact_versions "
+            "(id, version, state, provenance_hash, created_at, tenant) "
+            "VALUES ('a2', 1, 'ready', 'h', 1.0, NULL)"
+        )
+        conn.commit()
+        conn.close()
+
+        # Reopen -> _init_schema migration runs.
+        ArtifactStore(artifact_dir)
+
+        conn = sqlite3.connect(str(store.db_path))
+        n_null = conn.execute(
+            "SELECT COUNT(*) FROM artifact_versions WHERE tenant IS NULL"
+        ).fetchone()[0]
+        n_ready = conn.execute(
+            "SELECT COUNT(*) FROM artifact_versions WHERE provenance_hash = 'h' AND state = 'ready'"
+        ).fetchone()[0]
+        conn.close()
+        assert n_null == 0  # all normalized to ''
+        assert n_ready == 1  # duplicate collapsed
