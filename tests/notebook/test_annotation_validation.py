@@ -516,3 +516,9 @@ class TestTableAnnotationValidation:
         cell = _cell("# @table trips file:///wh#db.t\nx = trips")
         cell.defines = ["x"]
         assert "table_shadows_define" not in _codes(cell, _nb())
+
+    def test_duplicate_table_name_flagged(self):
+        cell = _cell(
+            "# @table trips file:///wh#a.trips\n# @table trips file:///wh#b.trips\nx = trips"
+        )
+        assert "table_duplicate_name" in _codes(cell, _nb())

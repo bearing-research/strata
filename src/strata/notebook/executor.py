@@ -2355,9 +2355,26 @@ class CellExecutor:
         """Build the manifest ``tables`` block from resolved snapshots.
 
         Raises:
-            RuntimeError: If any declared table's snapshot could not be
-                resolved — the cell needs a concrete snapshot to run.
+            RuntimeError: If two ``@table`` declarations share a name, or if any
+                declared table's snapshot could not be resolved — the cell needs
+                one concrete snapshot per name to run.
         """
+        # Snapshots are keyed by name, so duplicate names collapse: one wins
+        # namespace injection while both feed provenance, and an unresolved
+        # duplicate can borrow a resolved one's snapshot. Reject before that.
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for spec in table_specs:
+            if spec.name in seen:
+                duplicates.add(spec.name)
+            seen.add(spec.name)
+        if duplicates:
+            raise RuntimeError(
+                "duplicate @table name(s): "
+                + ", ".join(sorted(duplicates))
+                + " — each @table must have a unique name within the cell"
+            )
+
         tables: dict[str, dict[str, Any]] = {}
         for spec in table_specs:
             snapshot_id = table_snapshots.get(spec.name)
