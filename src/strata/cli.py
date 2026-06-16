@@ -124,6 +124,17 @@ def _build_parser() -> argparse.ArgumentParser:
             help="Output format (default: human)",
         )
 
+    def _add_tenant_arg(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument(
+            "--tenant",
+            default=None,
+            help=(
+                "Scope name/alias resolution to this tenant. Without it, a name "
+                "shared by multiple tenants is reported as ambiguous (service-mode "
+                "stores)."
+            ),
+        )
+
     list_parser = artifact_sub.add_parser(
         "list",
         help="List artifacts in the store",
@@ -144,6 +155,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     show_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
     _add_store_args(show_parser)
+    _add_tenant_arg(show_parser)
     show_parser.set_defaults(func=_dispatch_artifact("cmd_show"))
 
     lineage_parser = artifact_sub.add_parser(
@@ -159,6 +171,7 @@ def _build_parser() -> argparse.ArgumentParser:
     lineage_parser.add_argument(
         "--max-depth", type=int, default=10, help="Recursion limit (default 10)"
     )
+    _add_tenant_arg(lineage_parser)
     lineage_parser.set_defaults(func=_dispatch_artifact("cmd_lineage"))
 
     pull_parser = artifact_sub.add_parser(
@@ -169,6 +182,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pull_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
     _add_artifact_dir_arg(pull_parser)
     pull_parser.add_argument("--to", default=None, help="Output path (default <ref>.arrow)")
+    _add_tenant_arg(pull_parser)
     pull_parser.set_defaults(func=_dispatch_artifact("cmd_pull"))
 
     audit_parser = artifact_sub.add_parser(

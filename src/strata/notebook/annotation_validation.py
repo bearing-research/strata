@@ -134,6 +134,24 @@ def validate_cell_annotations(
                 )
             )
 
+    # table_duplicate_name: snapshots are keyed by table name, so a duplicate
+    # makes one @table win namespace injection while both feed provenance (and an
+    # unresolved duplicate can borrow a resolved one's snapshot). Execution
+    # rejects this — flag it early.
+    table_names = [t.name for t in annotations.tables]
+    for dup in sorted({n for n in table_names if table_names.count(n) > 1}):
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.ERROR,
+                code="table_duplicate_name",
+                message=(
+                    f"`@table {dup}` is declared more than once — each @table must "
+                    "have a unique name; the cell will fail to run."
+                ),
+                line=_find_annotation_line(cell.source, "table", dup),
+            )
+        )
+
     # --- timeout_not_numeric / env_malformed ---
     # The parser silently swallows these, so we re-scan raw lines.
     for lineno, line_text in iter_annotation_block(cell.source):

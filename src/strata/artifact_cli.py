@@ -19,6 +19,7 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from strata.artifact_store import ArtifactStore, ArtifactVersion
 
@@ -33,29 +34,47 @@ def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
     return ArtifactStore(artifact_dir)
 
 
-def _resolve_ref(store: ArtifactStore, ref: str) -> ArtifactVersion | None:
+class AmbiguousRefError(ValueError):
+    """A name/alias resolves in more than one tenant — ``--tenant`` is required."""
+
+
+def _tenant_matches(stored: str | None, requested: str) -> bool:
+    return (stored or "") == requested
+
+
+def _single_hit(ref: str, hits: list[Any]) -> Any | None:
+    """Collapse name/alias hits to the single match, or ``None`` if none.
+
+    Raises ``AmbiguousRefError`` when the hits span more than one tenant — there
+    is at most one pointer per (tenant, name), so >1 hit means >1 tenant.
+    """
+    if not hits:
+        return None
+    tenants = {h.tenant or "" for h in hits}
+    if len(tenants) > 1:
+        listed = ", ".join(sorted(t or "<tenantless>" for t in tenants))
+        raise AmbiguousRefError(
+            f"{ref!r} exists in multiple tenants ({listed}); disambiguate with --tenant"
+        )
+    return hits[0]
+
+
+def _resolve_ref(
+    store: ArtifactStore, ref: str, tenant: str | None = None
+) -> ArtifactVersion | None:
     """Resolve a CLI artifact reference.
 
-    Accepted forms, tried in order: a name pointer, ``<id>@v=<N>``, and a
-    bare artifact id (resolves to the latest version).
+    Accepted forms, tried in order: ``<id>@v=<N>``, a name pointer, ``name@alias``,
+    and a bare artifact id (latest version). Name/alias lookups span tenants (a
+    store inspector must find names whatever tenant wrote them, legacy "_default"
+    included); pass ``tenant`` to scope to one.
+
+    Raises:
+        AmbiguousRefError: a name/alias matches in more than one tenant and no
+            ``tenant`` was given — so the CLI can't silently inspect/pull the
+            wrong tenant's artifact.
     """
-    named = store.resolve_name(ref)
-    if named is not None:
-        return named
-
-    # Tenant-agnostic name lookup: a store inspector must find names
-    # whatever tenant spelling wrote them (legacy "_default" included).
-    for pointer in store.list_all_names():
-        if pointer.name == ref:
-            return store.get_artifact(pointer.artifact_id, pointer.version)
-
-    # name@alias (registry pointer): taxi/tip-model@champion
-    if "@" in ref and "@v=" not in ref:
-        name_part, _, alias_part = ref.rpartition("@")
-        for alias in store.list_all_aliases():
-            if alias.name == name_part and alias.alias == alias_part:
-                return store.get_artifact(alias.artifact_id, alias.version)
-
+    # id@v=N is tenant-independent.
     if "@v=" in ref:
         artifact_id, _, version_str = ref.partition("@v=")
         try:
@@ -63,7 +82,45 @@ def _resolve_ref(store: ArtifactStore, ref: str) -> ArtifactVersion | None:
         except ValueError:
             return None
 
+    # Name pointer.
+    name_hits = [
+        p
+        for p in store.list_all_names()
+        if p.name == ref and (tenant is None or _tenant_matches(p.tenant, tenant))
+    ]
+    hit = _single_hit(ref, name_hits)
+    if hit is not None:
+        return store.get_artifact(hit.artifact_id, hit.version)
+
+    # name@alias (registry pointer): taxi/tip-model@champion
+    if "@" in ref:
+        name_part, _, alias_part = ref.rpartition("@")
+        alias_hits = [
+            a
+            for a in store.list_all_aliases()
+            if a.name == name_part
+            and a.alias == alias_part
+            and (tenant is None or _tenant_matches(a.tenant, tenant))
+        ]
+        hit = _single_hit(ref, alias_hits)
+        if hit is not None:
+            return store.get_artifact(hit.artifact_id, hit.version)
+
+    # Bare artifact id → latest version.
     return store.get_latest_version(ref)
+
+
+def _resolve_for_cmd(store: ArtifactStore, args: argparse.Namespace) -> ArtifactVersion | None:
+    """Resolve ``args.ref`` honoring an optional ``--tenant``; print a message and
+    return ``None`` on not-found or cross-tenant ambiguity."""
+    try:
+        artifact = _resolve_ref(store, args.ref, tenant=getattr(args, "tenant", None))
+    except AmbiguousRefError as e:
+        print(str(e), file=sys.stderr)
+        return None
+    if artifact is None:
+        print(f"artifact not found: {args.ref}", file=sys.stderr)
+    return artifact
 
 
 def _names_for(store: ArtifactStore, artifact_id: str, version: int) -> list[str]:
@@ -101,6 +158,8 @@ def _artifact_payload(store: ArtifactStore, artifact: ArtifactVersion) -> dict:
     return {
         "artifact_id": artifact.id,
         "version": artifact.version,
+        "tenant": artifact.tenant or None,
+        "principal": artifact.principal,
         "state": artifact.state,
         "row_count": artifact.row_count,
         "byte_size": artifact.byte_size,
@@ -157,9 +216,8 @@ def cmd_show(args: argparse.Namespace) -> int:
     store = _open_store(args.artifact_dir)
     if store is None:
         return 2
-    artifact = _resolve_ref(store, args.ref)
+    artifact = _resolve_for_cmd(store, args)
     if artifact is None:
-        print(f"artifact not found: {args.ref}", file=sys.stderr)
         return 1
 
     payload = _artifact_payload(store, artifact)
@@ -168,6 +226,7 @@ def cmd_show(args: argparse.Namespace) -> int:
         return 0
 
     print(f"artifact:  {artifact.id}@v={artifact.version}")
+    print(f"tenant:    {artifact.tenant or '-'}")
     print(f"state:     {artifact.state}")
     print(f"rows:      {artifact.row_count if artifact.row_count is not None else '-'}")
     print(f"size:      {_fmt_size(artifact.byte_size)}")
@@ -261,9 +320,8 @@ def cmd_lineage(args: argparse.Namespace) -> int:
     store = _open_store(args.artifact_dir)
     if store is None:
         return 2
-    artifact = _resolve_ref(store, args.ref)
+    artifact = _resolve_for_cmd(store, args)
     if artifact is None:
-        print(f"artifact not found: {args.ref}", file=sys.stderr)
         return 1
 
     tree = _walk_lineage(store, artifact, max_depth=args.max_depth)
@@ -283,9 +341,8 @@ def cmd_pull(args: argparse.Namespace) -> int:
     store = _open_store(args.artifact_dir)
     if store is None:
         return 2
-    artifact = _resolve_ref(store, args.ref)
+    artifact = _resolve_for_cmd(store, args)
     if artifact is None:
-        print(f"artifact not found: {args.ref}", file=sys.stderr)
         return 1
     if artifact.state not in ("ready", "superseded"):
         print(f"artifact is not readable (state={artifact.state})", file=sys.stderr)

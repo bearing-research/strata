@@ -51,6 +51,23 @@ def sample_notebook(tmp_path):
     return session
 
 
+class TestManifestTablesDuplicates:
+    """Duplicate @table names must be rejected before manifest/provenance — the
+    name-keyed snapshot map otherwise collapses them (one wins namespace
+    injection; an unresolved duplicate can borrow a resolved one's snapshot)."""
+
+    def test_duplicate_table_name_rejected(self, sample_notebook):
+        from strata.notebook.models import TableSpec
+
+        executor = CellExecutor(sample_notebook)
+        specs = [
+            TableSpec(name="trips", uri="file:///wh#a.trips"),
+            TableSpec(name="trips", uri="file:///wh#b.trips"),
+        ]
+        with pytest.raises(RuntimeError, match="duplicate @table"):
+            executor._manifest_tables(specs, {"trips": 123})
+
+
 class TestCellExecutor:
     """Test basic cell execution."""
 
