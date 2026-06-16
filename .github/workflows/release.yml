@@ -307,6 +307,23 @@ jobs:
       - name: Build the strata-client wheel + sdist
         run: uv build --package strata-client --out-dir dist
 
+      - name: Smoke-test the strata-client wheel
+        # The published client wheel was never import-tested in the pipeline.
+        # Install it standalone (no server deps) and exercise its public surface
+        # so a broken client wheel fails here, not on a user's machine.
+        run: |
+          set -euo pipefail
+          CLIENT_WHEEL=$(ls dist/strata_client-*-py3-none-any.whl | head -1)
+          echo "::notice::Testing client wheel ${CLIENT_WHEEL}"
+          uv venv /tmp/client-smoke
+          VIRTUAL_ENV=/tmp/client-smoke uv pip install \
+            --index https://pypi.org/simple/ "${CLIENT_WHEEL}"
+          /tmp/client-smoke/bin/python -c "
+          from strata_client import StrataClient, AsyncStrataClient
+          from strata_client.filters import Filter, FilterOp
+          print('strata_client imports ok')
+          "
+
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
         with:
           name: dist-client
@@ -368,10 +385,15 @@ jobs:
             "${WHEEL}"
 
           echo "--- import smoke ---"
+          # The HTTP client is a separate distribution now (strata-client →
+          # ``from strata_client import StrataClient``); the server package only
+          # exposes the wire/config surface. Smoke-test what this wheel actually
+          # ships — importing the moved-out client here would wrongly fail the
+          # release.
           /tmp/strata-smoke/bin/python -c "
           import strata
-          from strata import StrataClient, AsyncStrataClient
-          print('strata module + clients import ok')
+          from strata import Filter, FilterOp, FilterValue, StrataConfig
+          print('strata server package imports ok')
           "
 
           echo "--- console scripts ---"
