@@ -1,0 +1,3748 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A content-addressed computation graph with an interactive notebook UI">
+      
+      
+      
+        <link rel="canonical" href="https://bearing-research.github.io/strata/0.3.0/notebook/cells/">
+      
+      
+        <link rel="prev" href="../examples/">
+      
+      
+        <link rel="next" href="../annotations/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Cell Types - Strata</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cell-types" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Strata" class="md-header__button md-logo" aria-label="Strata" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Strata
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Cell Types
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/bearing-research/strata" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    bearing-research/strata
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../getting-started/notebook/" class="md-tabs__link">
+          
+  
+  
+  Notebook
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/core/" class="md-tabs__link">
+          
+  
+  
+  Core
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/notebook-protocol/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/installation/" class="md-tabs__link">
+          
+  
+  
+  Deployment
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Strata" class="md-nav__button md-logo" aria-label="Strata" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Strata
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/bearing-research/strata" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    bearing-research/strata
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/notebook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    vs Jupyter, Marimo, Pluto
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Types
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#python-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python Cells
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Python Cells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#writing-a-python-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing a Python cell
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#variable-flow-and-the-dag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variable flow and the DAG
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-ambient-strata-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The ambient strata client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#library-cells-cross-cell-defs-and-classes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Library cells (cross-cell defs and classes)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Library cells (cross-cell defs and classes)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-sharing-works-slicing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How sharing works (slicing)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-the-slice-isnt-self-contained" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the slice isn't self-contained
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-cell-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-cell scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mutation-warnings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutation warnings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python-cell-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python-cell annotations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Cells
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prompt Cells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic syntax
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#template-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Template syntax
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prompt-cell-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt-cell annotations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schema-constrained-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema-constrained output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validate-and-retry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validate-and-retry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caching
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sql-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQL Cells
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SQL Cells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connections
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schema-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bind-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bind parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cache-policies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache policies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-driver-freshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-driver freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#read-only-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read-only by default
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#write-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#name-and-downstream-consumption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        # @name and downstream consumption
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#after-for-setup-then-query-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        # @after for setup-then-query pipelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worked-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sql-cell-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQL-cell annotations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#markdown-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Markdown Cells
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#artifact-uris" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifact URIs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loop-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loop Cells
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loop Cells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#minimal-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#required-directives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required directives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-directives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional directives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-iteration-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-iteration artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#forking-a-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forking a loop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-not-to-use-a-loop-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When not to use a loop cell
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#r-cells-020" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R Cells (0.2.0)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="R Cells (0.2.0)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#r-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#plots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#whats-still-ahead" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's still ahead
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-you-need-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you need today
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#r-cell-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R-cell annotations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-if-rscript-isnt-installed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What if Rscript isn't installed?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-between-kinds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing between kinds
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Annotations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lake-aware-cells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lake-Aware Cells
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../registry-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Registry Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Workers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ai/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secret Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Headless Runner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authoring Programmatically
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import from Jupyter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../keyboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core/registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts & Registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/notebook-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebook Client Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/rest-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSocket Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/executor-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Executor Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/notebook-toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    notebook.toml Schema
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deployment
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/service-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations & Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy & Sharing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/fly/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fly.io
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/codespaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Codespaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#python-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python Cells
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Python Cells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#writing-a-python-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing a Python cell
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#variable-flow-and-the-dag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variable flow and the DAG
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-ambient-strata-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The ambient strata client
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#library-cells-cross-cell-defs-and-classes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Library cells (cross-cell defs and classes)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Library cells (cross-cell defs and classes)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-sharing-works-slicing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How sharing works (slicing)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-the-slice-isnt-self-contained" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the slice isn't self-contained
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-cell-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-cell scope
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mutation-warnings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mutation warnings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#python-cell-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python-cell annotations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Cells
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Prompt Cells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Basic syntax
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#template-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Template syntax
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prompt-cell-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt-cell annotations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schema-constrained-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema-constrained output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validate-and-retry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validate-and-retry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caching
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sql-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQL Cells
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SQL Cells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connections
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#schema-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bind-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bind parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cache-policies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cache policies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-driver-freshness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-driver freshness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#read-only-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read-only by default
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#write-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Write cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#name-and-downstream-consumption" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        # @name and downstream consumption
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#after-for-setup-then-query-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        # @after for setup-then-query pipelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worked-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sql-cell-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQL-cell annotations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#markdown-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Markdown Cells
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#artifact-uris" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Artifact URIs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loop-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Loop Cells
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Loop Cells">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#minimal-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#required-directives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required directives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-directives" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional directives
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-iteration-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-iteration artifacts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#forking-a-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forking a loop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-not-to-use-a-loop-cell" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When not to use a loop cell
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#r-cells-020" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R Cells (0.2.0)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="R Cells (0.2.0)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#r-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#plots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plots
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#whats-still-ahead" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What's still ahead
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-you-need-today" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you need today
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#r-cell-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R-cell annotations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-if-rscript-isnt-installed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What if Rscript isn't installed?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-between-kinds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing between kinds
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="cell-types">Cell Types<a class="headerlink" href="#cell-types" title="Permanent link">&para;</a></h1>
+<p>Strata Notebook has five cell kinds:</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>What it runs</th>
+<th>Created by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Python</strong></td>
+<td>Python source in the notebook's venv</td>
+<td>The default, pick <strong>Python</strong> from the <strong>+ Add cell</strong> menu</td>
+</tr>
+<tr>
+<td><strong>Prompt</strong></td>
+<td>A text template sent to an AI model</td>
+<td>Pick <strong>Prompt</strong> from the <strong>+ Add cell</strong> menu</td>
+</tr>
+<tr>
+<td><strong>SQL</strong></td>
+<td>A query against a connected database</td>
+<td>Pick <strong>SQL</strong> from the <strong>+ Add cell</strong> menu</td>
+</tr>
+<tr>
+<td><strong>Loop</strong></td>
+<td>A Python cell executed N times in a row</td>
+<td>Add a Python cell, then put a <code># @loop</code> annotation at the top</td>
+</tr>
+<tr>
+<td><strong>R</strong></td>
+<td>R source via the system <code>Rscript</code></td>
+<td>Pick <strong>R</strong> from the <strong>+ Add cell</strong> menu</td>
+</tr>
+</tbody>
+</table>
+<p>All five participate in the DAG, cache by provenance hash, and can be routed to remote workers. Pick the kind that matches the shape of the computation, this page walks through each.</p>
+<p>See <a href="../concepts/">Concepts</a> for the execution model; see <a href="../annotations/">Cell Annotations</a> for the full per-annotation reference.</p>
+<hr />
+<h2 id="python-cells">Python Cells<a class="headerlink" href="#python-cells" title="Permanent link">&para;</a></h2>
+<p>The default. A Python cell is just Python source, assignments at module scope become the cell's outputs, and free variables become inputs pulled from upstream cells.</p>
+<h3 id="writing-a-python-cell">Writing a Python cell<a class="headerlink" href="#writing-a-python-cell" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">sales</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">&quot;https://example.com/sales.parquet&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">by_region</span> <span class="o">=</span> <span class="n">sales</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;region&quot;</span><span class="p">)[</span><span class="s2">&quot;total&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+</code></pre></div>
+<p>This cell <em>defines</em> <code>sales</code> and <code>by_region</code>. A downstream cell that references either name will automatically depend on this one.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># downstream cell, reads by_region from upstream</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">top_region</span> <span class="o">=</span> <span class="n">by_region</span><span class="o">.</span><span class="n">idxmax</span><span class="p">()</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Top region: </span><span class="si">{</span><span class="n">top_region</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Top region: West
+</code></pre></div>
+<h3 id="variable-flow-and-the-dag">Variable flow and the DAG<a class="headerlink" href="#variable-flow-and-the-dag" title="Permanent link">&para;</a></h3>
+<p>Strata analyzes each cell's AST to extract:</p>
+<ul>
+<li><strong>Defines</strong>: top-level assignments (<code>x = 1</code>, <code>df = pd.read_csv(...)</code>)</li>
+<li><strong>References</strong>: free variables used but not defined locally</li>
+</ul>
+<p>The DAG builder links references back to the <strong>last</strong> cell that defined each name (shadowing is handled by order). Edges flow producer → consumer. When you edit an upstream cell, every downstream cell that depends on it becomes stale automatically.</p>
+<p>Only variables that a downstream cell actually references get stored as artifacts. Intermediate scratch variables stay in the subprocess and are discarded when the cell finishes.</p>
+<h3 id="the-ambient-strata-client">The ambient <code>strata</code> client<a class="headerlink" href="#the-ambient-strata-client" title="Permanent link">&para;</a></h3>
+<p>Every <strong>locally-executed</strong> Python cell gets a ready <code>strata</code> client in its namespace, already bound to the running server — no import or construction needed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># no `from strata_client import StrataClient` / `StrataClient(base_url=...)`</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">trips</span><span class="p">],</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;executor&quot;</span><span class="p">:</span> <span class="s2">&quot;scan@v1&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;snapshot_id&quot;</span><span class="p">:</span> <span class="n">trips_snapshot</span><span class="p">}},</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">)</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">strata</span><span class="o">.</span><span class="n">set_alias</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;champion&quot;</span><span class="p">,</span> <span class="n">art</span><span class="o">.</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">art</span><span class="o">.</span><span class="n">version</span><span class="p">)</span>
+</code></pre></div>
+<p>It's a lightweight client with the same API surface for the common operations (<code>materialize</code>, <code>put</code>, <code>set_alias</code>, <code>set_tag</code>, <code>resolve_alias</code>, …); explicit <code>from strata_client import StrataClient</code> still works if you want the full client. The ambient <code>strata</code> is created fresh per cell run and closed automatically — you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a <code>@mount</code> path or an <code>@table</code> variable.</p>
+<p>Cells routed to a <strong>remote executor worker</strong> (not local execution) don't get the ambient <code>strata</code> — import a client explicitly there.</p>
+<p>When a cell publishes with a name — <code>strata.put(model, name="taxi/tip-model")</code> — the artifact appears in the <a href="../../core/registry/#in-the-notebook-the-registry-dashboard">registry dashboard</a>: a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage — all in the UI).</p>
+<blockquote>
+<p>Calls through <code>strata</code> are <strong>side effects</strong>. On a cache hit the cell body doesn't re-run, so a <code>strata.set_alias(...)</code> won't re-fire — fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.</p>
+</blockquote>
+<h3 id="library-cells-cross-cell-defs-and-classes">Library cells (cross-cell defs and classes)<a class="headerlink" href="#library-cells-cross-cell-defs-and-classes" title="Permanent link">&para;</a></h3>
+<p>Top-level <code>def</code> and <code>class</code> definitions are shared across cells via a synthetic Python module, write a helper once, call it anywhere.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">CIRCLE_PRECISION</span> <span class="o">=</span> <span class="mi">4</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">area</span><span class="p">(</span><span class="n">r</span><span class="p">):</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="k">return</span> <span class="nb">round</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">r</span> <span class="o">*</span> <span class="n">r</span><span class="p">,</span> <span class="n">CIRCLE_PRECISION</span><span class="p">)</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="k">def</span><span class="w"> </span><span class="nf">perimeter</span><span class="p">(</span><span class="n">r</span><span class="p">):</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="k">return</span> <span class="nb">round</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">math</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">r</span><span class="p">,</span> <span class="n">CIRCLE_PRECISION</span><span class="p">)</span>
+</code></pre></div>
+<p>Downstream cells reference <code>area(7.5)</code>, <code>perimeter(7.5)</code>, and <code>CIRCLE_PRECISION</code> directly.</p>
+<h4 id="how-sharing-works-slicing">How sharing works (slicing)<a class="headerlink" href="#how-sharing-works-slicing" title="Permanent link">&para;</a></h4>
+<p>Defs and classes don't pickle reliably across the subprocess boundary, so they round-trip via <strong>source reconstitution</strong>: Strata writes a slice of the cell's source to disk, re-executes it in a fresh module on the consumer side, and hands the downstream cell the resulting attribute. The slice must be side-effect-free.</p>
+<p>The slice keeps the module docstring, <code>import</code> / <code>from import</code> (no <code>from X import *</code>), <code>def</code> / <code>async def</code>, <code>class</code>, and assignments whose RHS is a <strong>literal constant</strong>: numbers, strings, bools, <code>None</code>, bytes, negations of literals, and nested tuples/lists/sets/dicts of literals. Everything else (non-literal assignments, augmented assigns, expression statements, control flow, bare annotations) is dropped from the slice but stays in the cell's runtime execution.</p>
+<p>A single cell can therefore mix runtime work and library code:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Runtime, dropped from the slice; flows through the artifact path.</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">raw_min</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="o">-</span><span class="n">math</span><span class="o">.</span><span class="n">tau</span> <span class="o">*</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">raw_max</span> <span class="o">=</span> <span class="nb">round</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">tau</span> <span class="o">*</span> <span class="mi">16</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;loaded raw bounds: [</span><span class="si">{</span><span class="n">raw_min</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">raw_max</span><span class="si">}</span><span class="s2">]&quot;</span><span class="p">)</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># Library, kept in the slice, exported as a synthetic module.</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">CLAMP_MIN</span> <span class="o">=</span> <span class="mf">0.0</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">CLAMP_MAX</span> <span class="o">=</span> <span class="mf">100.0</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="k">def</span><span class="w"> </span><span class="nf">clamp</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="n">CLAMP_MIN</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="n">CLAMP_MAX</span><span class="p">,</span> <span class="n">value</span><span class="p">))</span>
+</code></pre></div>
+<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>loaded raw bounds: [-43.98, 100.53]
+</code></pre></div>
+<p>A downstream cell can call <code>clamp(raw_max)</code>, <code>clamp</code> and <code>CLAMP_MIN/MAX</code> come from the synthetic module, <code>raw_max</code> from the artifact path.</p>
+<h4 id="when-the-slice-isnt-self-contained">When the slice isn't self-contained<a class="headerlink" href="#when-the-slice-isnt-self-contained" title="Permanent link">&para;</a></h4>
+<p>Every name a kept def or class references must be bound by something else in the slice (or a Python builtin). When it isn't, Strata blocks the export with a <code>module_export_blocked</code> diagnostic, surfaced pre-flight, not just at run time.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">runtime_threshold</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">9</span><span class="p">)</span>   <span class="c1"># dropped, non-literal RHS</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">is_outlier</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="k">return</span> <span class="n">value</span> <span class="o">&gt;</span> <span class="n">runtime_threshold</span>
+</code></pre></div>
+<blockquote>
+<p><code>is_outlier</code> references names not defined or imported in this cell: runtime_threshold</p>
+</blockquote>
+<p>Other shapes that block on the same principle:</p>
+<ul>
+<li><strong>Decorators / default values / base classes</strong> evaluated at module load: <code>@my_decorator</code> where <code>my_decorator</code> isn't imported in the same cell, or <code>class Child(Parent)</code> where <code>Parent</code> is computed at runtime.</li>
+<li><strong>Divergence</strong>: a name kept by the slice is also reassigned by dropped runtime code, so the synthetic module's value would differ from the cell's final state. <code>def f(): ...; f = wrap(f)</code> exports the unwrapped <code>f</code>.</li>
+<li><strong>Lambda assignments</strong>: <code>add = lambda x: x + 1</code>, even though <code>cloudpickle</code> could serialize the value, the synthetic-module path is reserved for source-backed library code.</li>
+</ul>
+<p>The fix is usually one of: move the runtime line into its own cell, add the missing import to the same cell as the def, or take the dependency as a function argument.</p>
+<h4 id="single-cell-scope">Single-cell scope<a class="headerlink" href="#single-cell-scope" title="Permanent link">&para;</a></h4>
+<p>The synthetic module is built from one cell's source only, no transitive composition across cells. A def can't reach a name imported or defined in a different cell; each cell that hosts library code carries its own imports.</p>
+<p>One concession: annotations that reference names outside the slice would normally block, but adding <code>from __future__ import annotations</code> relaxes this. PEP 563 stringifies annotations and the free-variable check drops them, so cross-cell type hints "just work" with the future import.</p>
+<p>Walked through end-to-end in the <a href="../../examples/library_cells/"><code>library_cells</code></a> example notebook.</p>
+<h3 id="mutation-warnings">Mutation warnings<a class="headerlink" href="#mutation-warnings" title="Permanent link">&para;</a></h3>
+<p>If a cell mutates a value it received from an upstream cell (e.g. <code>df.drop(columns=[...], inplace=True)</code>), Strata raises a <strong>mutation warning</strong>: the upstream artifact was supposed to be immutable, and subsequent cells that reuse the cached artifact will see the mutated version.</p>
+<p>The fix is to copy before mutating:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">upstream_df</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>    <span class="c1"># make a private copy</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">df</span><span class="o">.</span><span class="n">drop</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="o">...</span><span class="p">],</span> <span class="n">inplace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p>Warnings surface as a pill on the cell and a structured entry in the execution log.</p>
+<h3 id="python-cell-annotations">Python-cell annotations<a class="headerlink" href="#python-cell-annotations" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Annotation</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code># @name X</code></td>
+<td>Display name for the DAG view</td>
+</tr>
+<tr>
+<td><code># @worker X</code></td>
+<td>Route execution to a named remote worker</td>
+</tr>
+<tr>
+<td><code># @timeout 60</code></td>
+<td>Override execution timeout (seconds, default 300)</td>
+</tr>
+<tr>
+<td><code># @env KEY=value</code></td>
+<td>Set an env var for this cell only — non-sensitive values only; literal lands in committed source. For secrets use <code>notebook.toml [env]</code> or the Runtime panel.</td>
+</tr>
+<tr>
+<td><code># @mount …</code></td>
+<td>Attach a filesystem mount (see <a href="../annotations/">Annotations</a>)</td>
+</tr>
+<tr>
+<td><code># @loop …</code></td>
+<td>Turn the cell into a <a href="#loop-cells">loop cell</a></td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../annotations/">Cell Annotations</a> for the full reference.</p>
+<hr />
+<h2 id="prompt-cells">Prompt Cells<a class="headerlink" href="#prompt-cells" title="Permanent link">&para;</a></h2>
+<p>A prompt cell is a text template that gets rendered with upstream variable values, sent to an AI model, and the response stored as an artifact. Prompt cells participate in the DAG and cache by provenance exactly like Python cells, same inputs + same template + same model config = cache hit, no API call.</p>
+<p>Create a prompt cell with the <strong>"Add Prompt Cell"</strong> button in the UI, the same toolbar that adds a Python cell. You never need to touch <code>notebook.toml</code> directly; editing the cell's source, wiring it into the DAG, and persisting the result all happen through the UI.</p>
+<h3 id="basic-syntax">Basic syntax<a class="headerlink" href="#basic-syntax" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a># @name summary
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>Summarize this dataset and return the top 3 findings as a numbered list:
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>{{ df }}
+</code></pre></div>
+<div class="highlight"><span class="filename">Output (illustrative model response)</span><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>1. Setosa is linearly separable from versicolor and virginica based on petal dimensions alone.
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>2. Versicolor and virginica overlap moderately on sepal width but separate well by petal length.
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>3. The dataset is balanced, 50 samples per species, no missing values.
+</code></pre></div>
+<ul>
+<li><code>{{ df }}</code> is replaced with a text representation of the upstream variable <code>df</code> before sending to the model.</li>
+<li>The model's response is stored as an artifact named <code>summary</code> (from <code># @name</code>).</li>
+<li>Downstream cells can read <code>summary</code> like any other upstream variable.</li>
+</ul>
+<h3 id="template-syntax">Template syntax<a class="headerlink" href="#template-syntax" title="Permanent link">&para;</a></h3>
+<p>Variables are injected with <code>{{ expression }}</code>. The expression is resolved against upstream cell outputs and converted to text using type-specific rules:</p>
+<table>
+<thead>
+<tr>
+<th>Upstream type</th>
+<th>Text representation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>pandas DataFrame</td>
+<td>Markdown table (first 20 rows)</td>
+</tr>
+<tr>
+<td>pandas Series</td>
+<td>String representation (first 20 values)</td>
+</tr>
+<tr>
+<td>numpy ndarray</td>
+<td>Shape + dtype + first 10 elements</td>
+</tr>
+<tr>
+<td>dict / list</td>
+<td>JSON, indented</td>
+</tr>
+<tr>
+<td>str / int / float</td>
+<td>Direct string conversion</td>
+</tr>
+</tbody>
+</table>
+<p>Each variable has a 2,000-token budget per template render. Oversized values are truncated with a <code>... (truncated)</code> marker.</p>
+<p><strong>Attribute access</strong> is supported for safe read-only operations:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>{{ df.describe() }}     # OK, pandas describe() is allow-listed
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>{{ df.head() }}         # OK
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>{{ obj.attr }}          # OK, attribute access (non-callable)
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>{{ obj.mutate() }}      # blocked, unknown method, left as-is in the template
+</code></pre></div>
+<p>Only a small set of methods is permitted (<code>describe</code>, <code>head</code>, <code>tail</code> on pandas objects). Arbitrary method calls are blocked to keep template rendering side-effect-free.</p>
+<h3 id="prompt-cell-annotations">Prompt-cell annotations<a class="headerlink" href="#prompt-cell-annotations" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Annotation</th>
+<th>What it does</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code># @name &lt;identifier&gt;</code></td>
+<td>Output variable name; must be a Python identifier</td>
+<td><code>result</code></td>
+</tr>
+<tr>
+<td><code># @model &lt;model_id&gt;</code></td>
+<td>Override the notebook-level AI model</td>
+<td>From provider config</td>
+</tr>
+<tr>
+<td><code># @temperature &lt;float&gt;</code></td>
+<td>Sampling temperature (0.0 = deterministic; see <a href="#caching">Caching</a> below)</td>
+<td><code>0.0</code></td>
+</tr>
+<tr>
+<td><code># @max_tokens &lt;int&gt;</code></td>
+<td>Response token ceiling</td>
+<td><code>4096</code></td>
+</tr>
+<tr>
+<td><code># @system &lt;text&gt;</code></td>
+<td>System prompt prepended to the request</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code># @output json\|text</code></td>
+<td>Coerce the response to JSON (or keep as free-form text)</td>
+<td><code>text</code></td>
+</tr>
+<tr>
+<td><code># @output_schema {…}</code></td>
+<td>Inline JSON Schema pinning the response shape</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code># @validate_retries N</code></td>
+<td>Total attempts for the validate-and-retry loop (1 initial + N−1 retries)</td>
+<td><code>3</code></td>
+</tr>
+</tbody>
+</table>
+<p>Example using several at once:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a># @name classification
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a># @model gpt-5.4
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a># @temperature 0.0
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a># @max_tokens 1000
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a># @system You are a data scientist. Return only valid JSON.
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>Classify each paper by topic:
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>{{ sampled_papers }}
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>Return a JSON object mapping paper ID to topic.
+</code></pre></div>
+<h3 id="schema-constrained-output">Schema-constrained output<a class="headerlink" href="#schema-constrained-output" title="Permanent link">&para;</a></h3>
+<p><code># @output_schema {...}</code> pins the shape of the model response to an inline JSON Schema. Strata picks the best provider-native path:</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Enforcement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>OpenAI</strong></td>
+<td>Native <code>response_format: {type: "json_schema"}</code>. <code>additionalProperties: false</code> is auto-injected at every <code>object</code> node; strict mode is used when the user's <code>required</code> list covers every property (otherwise relaxed to <code>strict: false</code>).</td>
+</tr>
+<tr>
+<td><strong>Anthropic</strong></td>
+<td>Native <code>/v1/messages</code> with tool-use: the schema is sent as a tool's <code>input_schema</code> and <code>tool_choice</code> is forced to that tool. The returned <code>tool_use.input</code> is extracted verbatim.</td>
+</tr>
+<tr>
+<td><strong>Gemini / Mistral / Ollama / vLLM</strong></td>
+<td>Fallback to <code>response_format: {type: "json_object"}</code>, valid JSON guaranteed, shape not enforced server-side. Client-side validation (see below) fills the gap.</td>
+</tr>
+<tr>
+<td><strong>Servers that reject the extensions</strong></td>
+<td>Some OpenAI-compatible servers 400 on <code>response_format</code> or <code>stream_options</code> outright. Strata retries once without them, appending a schema-guidance system turn; the result is marked degraded and the validate-and-retry loop carries full enforcement.</td>
+</tr>
+</tbody>
+</table>
+<p>Setting <code>@output_schema</code> implies <code>@output json</code>; you don't need both.</p>
+<p>Validation is lenient about packaging: when a provider wraps otherwise-valid
+JSON in code fences or prose, Strata extracts the JSON document before
+validating instead of burning a retry on the wrapper.</p>
+<p>Example, triage each review into a structured record:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a># @name triage
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a># @output_schema {&quot;type&quot;:&quot;object&quot;,&quot;properties&quot;:{&quot;items&quot;:{&quot;type&quot;:&quot;array&quot;,&quot;items&quot;:{&quot;type&quot;:&quot;object&quot;,&quot;properties&quot;:{&quot;sentiment&quot;:{&quot;type&quot;:&quot;string&quot;,&quot;enum&quot;:[&quot;positive&quot;,&quot;negative&quot;,&quot;neutral&quot;]},&quot;priority&quot;:{&quot;type&quot;:&quot;string&quot;,&quot;enum&quot;:[&quot;low&quot;,&quot;medium&quot;,&quot;high&quot;]},&quot;tags&quot;:{&quot;type&quot;:&quot;array&quot;,&quot;items&quot;:{&quot;type&quot;:&quot;string&quot;}}},&quot;required&quot;:[&quot;sentiment&quot;,&quot;priority&quot;,&quot;tags&quot;]}}},&quot;required&quot;:[&quot;items&quot;]}
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>Triage these customer reviews:
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>{{ reviews }}
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>For each review return sentiment, priority, and 1–3 short tags.
+</code></pre></div>
+<p>A downstream cell can then destructure without regex-wrangling:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">triage</span><span class="p">[</span><span class="s2">&quot;items&quot;</span><span class="p">])</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;priority&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">value_counts</span><span class="p">())</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Long schemas don't have an escape hatch yet</p>
+<p><code># @output_schema</code> is parsed as a single JSON value from a single
+annotation line (<code>prompt_analyzer.py:143-154</code>). For real-world
+schemas this gets long fast and the resulting cell source isn't
+pretty.</p>
+<p>Two pragmatic workarounds while a multi-line / file-reference
+syntax is on the backlog:</p>
+<ul>
+<li><strong>Generate the schema in an upstream Python cell</strong> and write
+  the schema-driven prompt cell by hand. The Python cell's
+  <code>json.dumps(...)</code> keeps the schema readable in source; the
+  prompt cell pastes the result inline.</li>
+<li><strong>Keep the schema in a <code>schemas/</code>-style sibling file</strong> inside
+  the notebook directory, and have a setup cell load + cache it
+  as a string. Downstream prompt cells can use a shorter inline
+  schema for caching while documenting the rich version
+  elsewhere.</li>
+</ul>
+<p>Track the multi-line annotation feature in the issue tracker if
+this is blocking you.</p>
+</div>
+<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>priority
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>high      4
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>medium    2
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>low       1
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>Name: count, dtype: int64
+</code></pre></div>
+<h3 id="validate-and-retry">Validate-and-retry<a class="headerlink" href="#validate-and-retry" title="Permanent link">&para;</a></h3>
+<p>When <code>@output_schema</code> is set, Strata runs a <strong>validate-and-retry loop</strong> after every model call:</p>
+<ol>
+<li>Parse the response as JSON and run it through <code>jsonschema</code>.</li>
+<li>On success → store the artifact and return.</li>
+<li>On failure → append the bad response as an <code>assistant</code> turn, feed the validator's path-addressed errors back as a <code>user</code> turn, and retry.</li>
+<li>On retry exhaustion → surface a cell error with the last validator messages.</li>
+</ol>
+<p>The default is 3 total attempts (1 initial + 2 retries). Override with <code># @validate_retries N</code>. Cumulative input/output tokens across all attempts are recorded on the artifact so cost accounting is accurate. The retry count is surfaced on the cell result (<code>validation_retries</code>) the UI shows "validated after N retries" when non-zero.</p>
+<p>Retries are mostly invisible on OpenAI-strict and Anthropic-native paths because the provider enforces the schema at decode time. They earn their keep on the <code>json_object</code> fallback path (Gemini, Mistral, Ollama) where the provider only guarantees <em>syntactic</em> JSON.</p>
+<h3 id="caching">Caching<a class="headerlink" href="#caching" title="Permanent link">&para;</a></h3>
+<p>A prompt cell's provenance hash mixes together:</p>
+<ul>
+<li>The rendered template text (after <code>{{ var }}</code> injection)</li>
+<li>Model name</li>
+<li>Temperature</li>
+<li>System prompt</li>
+<li>Output type (<code>json</code> / <code>text</code>)</li>
+<li>Output schema fingerprint (when set)</li>
+</ul>
+<p>Editing any of these invalidates the cache. In particular, tweaking <code>@output_schema</code> on a cached cell forces a fresh call, exactly what you want when iterating on the response shape.</p>
+<div class="admonition tip">
+<p class="admonition-title">Keep temperature at 0.0 for prompt cells</p>
+</div>
+<p>With <code>temperature=0.0</code> the model is deterministic: same inputs → same output, and cache behavior is intuitive. Bumping temperature makes the first response "sticky" in the cache, future runs return the stored stochastic sample rather than re-sampling.</p>
+<p>See <a href="../ai/">AI Integration</a> for provider configuration and the conversational AI assistant.</p>
+<hr />
+<h2 id="sql-cells">SQL Cells<a class="headerlink" href="#sql-cells" title="Permanent link">&para;</a></h2>
+<p>A SQL cell sends a query to a connected database via ADBC and stores the result as an Arrow Table artifact. Like Python and prompt cells, SQL cells participate in the DAG, cache by provenance hash, and surface their output to downstream cells.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">customer</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="k">WHERE</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="p">:</span><span class="n">min_amount</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">DESC</span>
+</code></pre></div>
+<div class="highlight"><span class="filename">Output (illustrative result rows)</span><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>       customer     total
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>0      acme_inc  18420.50
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>1   north_winds   9112.75
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>2  bright_solar   6033.10
+</code></pre></div>
+<p>The cell above pulls <code>min_amount</code> from an upstream Python cell, sends a parameterized query through the <code>warehouse</code> connection, and stores the resulting rows as an Arrow Table that any downstream cell can consume as a pandas DataFrame.</p>
+<h3 id="connections">Connections<a class="headerlink" href="#connections" title="Permanent link">&para;</a></h3>
+<p>A SQL cell references a <strong>named connection</strong>. Connections live in <code>notebook.toml</code> under <code>[connections.&lt;name&gt;]</code>, but you don't need to edit that file by hand. Open the <strong>Connections panel</strong> in the right sidebar, click <code>+ Add connection</code>, and fill in the form. The driver dropdown switches the field layout per backend (path for SQLite; URI + auth + role + search path for PostgreSQL; account / warehouse / database / schema for Snowflake; project / dataset / credentials for BigQuery).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="k">[connections.warehouse]</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">driver</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;sqlite&quot;</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;analytics.db&quot;</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="k">[connections.prod]</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="n">driver</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;postgresql&quot;</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="n">uri</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;postgresql://localhost:5432/prod&quot;</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="k">[connections.prod.auth]</span>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="n">user</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;${PGUSER}&quot;</span>
+<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="n">password</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;${PGPASS}&quot;</span>
+</code></pre></div>
+<p>Notes:</p>
+<ul>
+<li><strong>Driver-specific extras</strong> (e.g. <code>options.search_path</code>, <code>options.warehouse</code> for Snowflake, future driver-specific keys) round-trip through the editor unchanged. The form editorializes the keys it knows; everything else is preserved.</li>
+<li><strong>Auth values use <code>${VAR}</code> indirection.</strong> Literal credentials get blanked when <code>notebook.toml</code> is saved, so committing the file never leaks secrets. The form shows a warning border on a literal value so you know to switch it to a variable reference.</li>
+<li><strong>Relative <code>path</code> values are notebook-local.</strong> <code>path = "analytics.db"</code> resolves against the notebook directory at execution time. The on-disk value stays relative so a notebook moves cleanly between machines.</li>
+<li><strong>Currently shipped drivers</strong>: DuckDB, SQLite, PostgreSQL, Snowflake, and BigQuery. DuckDB uses the native DuckDB DBAPI; the other four are ADBC-backed (<code>adbc-driver-sqlite</code>, <code>adbc-driver-postgresql</code>, <code>adbc-driver-snowflake</code>, <code>adbc-driver-bigquery</code>). For Snowflake, read cells use <code>role</code>; <code>write=true</code> cells switch to <code>write_role</code> when configured, otherwise they reuse <code>role</code>. For BigQuery, read cells use <code>credentials_path</code>; <code>write=true</code> cells switch to <code>write_credentials_path</code> when configured, otherwise they reuse <code>credentials_path</code>. Snowflake and BigQuery do not have a session-level read-only flag like PostgreSQL's <code>SET default_transaction_read_only = on</code>, so the safety boundary is the grants on the configured role or service account.</li>
+</ul>
+<h3 id="schema-discovery">Schema discovery<a class="headerlink" href="#schema-discovery" title="Permanent link">&para;</a></h3>
+<p>The <strong>Schema panel</strong> in the sidebar shows the tables and columns visible through each declared connection. Click a connection to lazy-load its schema; click a table to expand its columns. The <code>↻</code> button re-fetches when the underlying database has changed externally. No SQL cell needs to run for this, the panel talks directly to each driver's catalog query surface (<code>sqlite_master</code> for SQLite, <code>information_schema.tables JOIN columns</code> for PostgreSQL, and the driver-specific catalog queries for Snowflake and BigQuery).</p>
+<h3 id="bind-parameters">Bind parameters<a class="headerlink" href="#bind-parameters" title="Permanent link">&para;</a></h3>
+<p><code>:name</code> placeholders resolve against upstream cell variables. Strata coerces a strict allowlist of Python types (<code>int</code>, <code>float</code>, <code>str</code>, <code>bytes</code>, <code>bool</code>, <code>None</code>, <code>Decimal</code>, <code>UUID</code>, <code>datetime</code>/<code>date</code>/<code>time</code>) into ADBC bind values; anything else (a list, a numpy scalar, a custom object) is rejected with a clear error. <strong>No string substitution ever</strong>: values flow through ADBC's prepared-statement layer, so adversarial strings (<code>'; DROP TABLE …</code>) round-trip as data, not SQL.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># upstream Python cell</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">min_amount</span> <span class="o">=</span> <span class="mi">100</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">WHERE</span><span class="w"> </span><span class="n">amount</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="p">:</span><span class="n">min_amount</span>
+</code></pre></div>
+<div class="highlight"><span class="filename">Output (illustrative result rows)</span><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>   order_id  customer_id  amount       placed_at
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>0      1042            7   245.99  2026-04-12
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>1      1093           14   180.50  2026-04-13
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>2      1117            3   299.00  2026-04-14
+</code></pre></div>
+<p>The DAG links the SQL cell to the Python cell automatically, same edge logic Strata uses for Python free variables.</p>
+<h3 id="cache-policies">Cache policies<a class="headerlink" href="#cache-policies" title="Permanent link">&para;</a></h3>
+<p>A SQL cell's <strong>provenance hash</strong> folds together:</p>
+<ul>
+<li>The query text (sqlglot-normalized so whitespace and comment edits don't churn the cache).</li>
+<li>The bind parameters (type-tagged: <code>True</code> ≠ <code>1</code>).</li>
+<li>The connection's identity (host / DB / user / role / search_path, never the password).</li>
+<li>The hashes of every upstream artifact referenced via <code>:name</code>.</li>
+<li>The driver's <strong>freshness probe</strong> result for the touched tables.</li>
+<li>The driver's <strong>schema fingerprint</strong> for the touched tables.</li>
+<li>A salt derived from the <code># @cache</code> policy below.</li>
+</ul>
+<p><code># @cache</code> controls how DB-side state factors in. Default is <code>fingerprint</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Policy</th>
+<th>Behavior</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fingerprint</code></td>
+<td>Default. Probe-derived freshness token + schema fingerprint folded in.</td>
+<td>Most queries.</td>
+</tr>
+<tr>
+<td><code>forever</code></td>
+<td>Static salt; never invalidates from DB-side state.</td>
+<td>True reference data. User asserts.</td>
+</tr>
+<tr>
+<td><code>session</code></td>
+<td>Session-unique salt; invalidates across sessions.</td>
+<td>Always-fresh queries / dashboards.</td>
+</tr>
+<tr>
+<td><code>ttl=&lt;seconds&gt;</code></td>
+<td><code>floor(now / ttl)</code> in the salt; bucketed time-based invalidation.</td>
+<td>Stale-tolerant aggregations.</td>
+</tr>
+<tr>
+<td><code>snapshot</code></td>
+<td>Probe MUST return a durable snapshot ID. Errors at execute time if the driver can't (SQLite/Postgres can't; Iceberg can).</td>
+<td>Reproducibility-critical reads.</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">cache</span><span class="w"> </span><span class="n">forever</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">dim_country</span>
+</code></pre></div>
+<h3 id="per-driver-freshness">Per-driver freshness<a class="headerlink" href="#per-driver-freshness" title="Permanent link">&para;</a></h3>
+<p><code>fingerprint</code> correctness depends on what the driver can probe.</p>
+<table>
+<thead>
+<tr>
+<th>Driver</th>
+<th>Probe</th>
+<th>Granularity</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PostgreSQL</td>
+<td><code>pg_stat_user_tables</code> + <code>pg_class.relfilenode</code></td>
+<td>per-table</td>
+<td>Up to ~500 ms stats-collector lag.</td>
+</tr>
+<tr>
+<td>SQLite</td>
+<td><code>PRAGMA data_version</code> + <code>PRAGMA schema_version</code></td>
+<td><strong>DB-wide</strong></td>
+<td>DML cross-process needs the probe connection open across the write, <code>data_version</code> resets on a fresh connection. DDL (schema change) invalidates cleanly.</td>
+</tr>
+<tr>
+<td>Snowflake</td>
+<td><code>INFORMATION_SCHEMA.TABLES.LAST_ALTERED</code></td>
+<td>per-table</td>
+<td>Per-database scoping (one query per touched database). Bills cloud-services credits but each query is small. <code>LAST_ALTERED</code> updates even on 0-row DML, safe direction (over-invalidates, never under).</td>
+</tr>
+<tr>
+<td>BigQuery</td>
+<td><code>__TABLES__.last_modified_time</code></td>
+<td>per-table</td>
+<td>Per-dataset scoping. <code>__TABLES__</code> is the legacy-but-stable view; <code>INFORMATION_SCHEMA.TABLES</code> doesn't expose <code>last_modified_time</code>. <strong>Streaming-buffer caveat</strong>: tables receiving streaming inserts have <code>last_modified_time</code> lag by minutes-to-90-min until the buffer flushes, pin <code># @cache session</code> on those queries. Permissions: <code>bigquery.tables.get</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The schema fingerprint catches metadata-only changes (<code>ADD COLUMN</code>, type changes, nullability flips) that the freshness token would miss.</p>
+<h3 id="read-only-by-default">Read-only by default<a class="headerlink" href="#read-only-by-default" title="Permanent link">&para;</a></h3>
+<p>SQL cells are <strong>read-only by default</strong>, but the enforcement mechanism depends on the backend:</p>
+<ul>
+<li><strong>SQLite</strong>: <code>mode=ro</code> plus <code>PRAGMA query_only=ON</code></li>
+<li><strong>PostgreSQL</strong>: <code>SET default_transaction_read_only = on</code></li>
+<li><strong>Snowflake</strong>: the configured <code>role</code> must be read-only</li>
+<li><strong>BigQuery</strong>: the configured <code>credentials_path</code> must point at a read-only service account</li>
+</ul>
+<p>For SQLite and PostgreSQL, Strata enforces read-only at the connection/session level. For Snowflake and BigQuery, Strata selects the read-scoped role or credentials, and the cloud platform's grants are the actual boundary. In all cases, the default path is “read unless you explicitly opt into <code>write=true</code>.”</p>
+<h3 id="write-cells">Write cells<a class="headerlink" href="#write-cells" title="Permanent link">&para;</a></h3>
+<p>Setup, seeding, and migration scripts opt into writable execution per cell:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span><span class="w"> </span><span class="k">write</span><span class="o">=</span><span class="k">true</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="k">DROP</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="k">IF</span><span class="w"> </span><span class="k">EXISTS</span><span class="w"> </span><span class="n">orders</span><span class="p">;</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="nb">INTEGER</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="w">    </span><span class="n">customer</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="w">    </span><span class="n">amount</span><span class="w"> </span><span class="nb">REAL</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="p">);</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;alice&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">25</span><span class="p">.</span><span class="mi">50</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;bob&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">199</span><span class="p">.</span><span class="mi">99</span><span class="p">);</span>
+</code></pre></div>
+<ul>
+<li>The body is split into individual statements via sqlglot (ADBC's cursor runs only the first statement otherwise).</li>
+<li><code>:name</code> bind placeholders work the same as in read cells.</li>
+<li>The default cache policy is <code>session</code> (one execution per session; same body in the same session is a cache hit).</li>
+<li><code># @cache fingerprint</code> and <code># @cache snapshot</code> error early on write cells, probe-based invalidation has no anchor when the cell mutates state.</li>
+<li>The cell still produces an Arrow artifact: a per-statement status table with <code>stmt</code>, <code>kind</code> (<code>CREATE TABLE</code>, <code>INSERT</code>, …), and <code>rows_affected</code> (nullable; <code>null</code> for DDL).</li>
+<li>Read cells using the same connection stay on the read path, the override is per-cell.</li>
+</ul>
+<h3 id="name-and-downstream-consumption"><code># @name</code> and downstream consumption<a class="headerlink" href="#name-and-downstream-consumption" title="Permanent link">&para;</a></h3>
+<p>A SQL cell's output variable name defaults to <code>result</code>; override with <code># @name &lt;identifier&gt;</code>. Downstream cells access the result as a pandas DataFrame (Arrow IPC artifacts deserialize through the standard notebook serializer):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="n">name</span><span class="w"> </span><span class="n">top_customers</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">customer</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">DESC</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">5</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1"># downstream Python cell</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="nb">print</span><span class="p">(</span><span class="n">top_customers</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>            <span class="c1"># (5, 2)</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">top_customers</span><span class="p">[</span><span class="s2">&quot;total&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>   <span class="c1"># ndarray sum, etc</span>
+</code></pre></div>
+<h3 id="after-for-setup-then-query-pipelines"><code># @after</code> for setup-then-query pipelines<a class="headerlink" href="#after-for-setup-then-query-pipelines" title="Permanent link">&para;</a></h3>
+<p>A read SQL cell that depends on a write SQL cell's side effects (the underlying database state) can declare an explicit ordering edge:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span><span class="w"> </span><span class="k">write</span><span class="o">=</span><span class="k">true</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="p">(</span><span class="n">sku</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span><span class="w"> </span><span class="n">category</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">);</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="k">INSERT</span><span class="w"> </span><span class="k">INTO</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">VALUES</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;A&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;widgets&#39;</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="s1">&#39;B&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;gadgets&#39;</span><span class="p">);</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
+</code></pre></div>
+<p><code># @after seed</code> adds a DAG edge from the <code>seed</code> cell to this one even though no Python variable flows between them, the dependency is on a side effect (the SQLite file). This is what cascade execution and staleness recompute use to ensure the right ordering.</p>
+<h3 id="worked-example">Worked example<a class="headerlink" href="#worked-example" title="Permanent link">&para;</a></h3>
+<p>The <a href="../../examples/sql_orders_report/"><code>sql_orders_report</code></a> example notebook walks through all of this end-to-end: a SQL <code>seed</code> cell, a Python <code>threshold</code> cell, two parameterized SQL queries, and a Python report cell, five cells, two languages, with both <code>fingerprint</code> and <code>forever</code> cache policies side by side.</p>
+<h3 id="sql-cell-annotations">SQL-cell annotations<a class="headerlink" href="#sql-cell-annotations" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Annotation</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code># @sql connection=&lt;name&gt; [write=true]</code></td>
+<td>Mark the cell as SQL; reference a declared connection</td>
+</tr>
+<tr>
+<td><code># @cache &lt;policy&gt;</code></td>
+<td>Override the default <code>fingerprint</code> cache policy</td>
+</tr>
+<tr>
+<td><code># @name &lt;identifier&gt;</code></td>
+<td>Name the output variable (default: <code>result</code>)</td>
+</tr>
+<tr>
+<td><code># @after &lt;cell-id&gt;</code></td>
+<td>Add an ordering-only DAG edge to an upstream cell</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../annotations/">Cell Annotations</a> for the full reference.</p>
+<hr />
+<h2 id="markdown-cells">Markdown Cells<a class="headerlink" href="#markdown-cells" title="Permanent link">&para;</a></h2>
+<p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG — they don't produce artifacts, don't participate in cascade execution, and don't have an <code>id</code> / variable that downstream cells can reference. They survive saves and exports verbatim.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="gu">## Stage 1: Load + Clean</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>The next two cells pull last quarter&#39;s events and drop rows with
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>missing timestamps. The clean DataFrame <span class="sb">`events_clean`</span> is what
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a>everything downstream reads.
+</code></pre></div>
+<p>Create a markdown cell via the <strong>+ Add cell</strong> menu (pick "Markdown") or by setting <code>language = "markdown"</code> on a cell entry in <code>notebook.toml</code>. The cell source lives in <code>cells/&lt;id&gt;.md</code> rather than <code>.py</code>.</p>
+<p>See <a href="../../examples/markdown_showcase/">Markdown showcase</a> for what the supported renderers handle (headings, lists, tables, code fences, fenced HTML attributes) and what's stripped by the security guard.</p>
+<hr />
+<h2 id="artifact-uris">Artifact URIs<a class="headerlink" href="#artifact-uris" title="Permanent link">&para;</a></h2>
+<p>Cells expose their outputs as artifacts under a stable URI scheme:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;
+</code></pre></div>
+<p>For loop cells, each iteration gets a suffix:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;@iter=&lt;k&gt;
+</code></pre></div>
+<p>The <code>&lt;artifact_id&gt;</code> is content-addressed (derived from the provenance hash); same code + same inputs + same env = same artifact ID across machines and runs. The <code>@v=N</code> version increments only when the same name pointer is re-bound to a new content hash — see <a href="../../getting-started/core/">Library usage</a> for how named artifacts work in the Core SDK.</p>
+<p>Notebook cell outputs follow the pattern <code>nb_&lt;notebook_id&gt;_cell_&lt;cell_id&gt;_var_&lt;variable&gt;@v=N</code> for the variable-level artifacts a cell produces. You don't usually need to construct these by hand; the inspect panel surfaces them and <code># @loop start_from=&lt;cell-id&gt;@iter=k</code> references them by cell ID + iteration index, not the full URI.</p>
+<hr />
+<h2 id="loop-cells">Loop Cells<a class="headerlink" href="#loop-cells" title="Permanent link">&para;</a></h2>
+<p>A loop cell is a regular Python cell with a <code># @loop</code> annotation. The body runs N times, with a <strong>carry variable</strong> threaded between iterations. Each iteration's state is stored as its own artifact, so you can inspect any intermediate step.</p>
+<p>Use loop cells for iterative refinement (hill climbing, MCMC, training loops with checkpoints), simulations, and anything where you'd want to pause and inspect intermediate states, or fork a new run from a promising one.</p>
+<h3 id="minimal-example">Minimal example<a class="headerlink" href="#minimal-example" title="Permanent link">&para;</a></h3>
+<p>Two cells: a seed and a loop.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="c1"># seed cell, initial carry state</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span> <span class="s2">&quot;best_score&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">),</span> <span class="s2">&quot;iter&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="c1"># loop cell</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="c1"># @loop max_iter=40 carry=state</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="c1"># @loop_until state[&quot;best_score&quot;] &lt; 1e-3</span>
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
+<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a>
+<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="c1"># Each iteration: read `state`, compute the next step, rebind `state`.</span>
+<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a><span class="n">candidate</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)</span>
+<a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a><span class="n">score</span> <span class="o">=</span> <span class="n">candidate</span> <span class="o">**</span> <span class="mi">2</span>   <span class="c1"># some objective</span>
+<a id="__codelineno-32-9" name="__codelineno-32-9" href="#__codelineno-32-9"></a><span class="k">if</span> <span class="n">score</span> <span class="o">&lt;</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;best_score&quot;</span><span class="p">]:</span>
+<a id="__codelineno-32-10" name="__codelineno-32-10" href="#__codelineno-32-10"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="n">candidate</span><span class="p">,</span> <span class="s2">&quot;best_score&quot;</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span> <span class="s2">&quot;iter&quot;</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;iter&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
+<a id="__codelineno-32-11" name="__codelineno-32-11" href="#__codelineno-32-11"></a><span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-32-12" name="__codelineno-32-12" href="#__codelineno-32-12"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">&quot;iter&quot;</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;iter&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
+</code></pre></div>
+<p>After execution, <code>state</code> holds the final iteration's value and every intermediate iteration is queryable.</p>
+<h3 id="required-directives">Required directives<a class="headerlink" href="#required-directives" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Directive</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code># @loop max_iter=N</code></td>
+<td>Hard cap on iterations. Required, the safety bound on the loop.</td>
+</tr>
+<tr>
+<td><code># @loop carry=VAR</code></td>
+<td>The variable threaded between iterations. Required. Must be re-bound by the cell body each iteration, and seeded by an upstream cell on iteration 0.</td>
+</tr>
+</tbody>
+</table>
+<p>These can be on the same line: <code># @loop max_iter=40 carry=state</code>.</p>
+<h3 id="optional-directives">Optional directives<a class="headerlink" href="#optional-directives" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Directive</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code># @loop_until &lt;expr&gt;</code></td>
+<td>Early termination when <code>&lt;expr&gt;</code> is truthy (evaluated against the current <code>state</code>)</td>
+</tr>
+<tr>
+<td><code># @loop start_from=&lt;cell&gt;@iter=k</code></td>
+<td>Seed iteration 0 from a specific prior iteration's artifact, used for forking runs</td>
+</tr>
+</tbody>
+</table>
+<h3 id="per-iteration-artifacts">Per-iteration artifacts<a class="headerlink" href="#per-iteration-artifacts" title="Permanent link">&para;</a></h3>
+<p>Every iteration's carry value becomes its own artifact with an <code>@iter=k</code> suffix:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@v=1@iter=0
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@v=1@iter=1
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a>...
+</code></pre></div>
+<p>The inspect panel shows an iteration picker so you can scrub through the intermediate states. The <strong>final</strong> iteration's artifact is also the cell's canonical output (no <code>@iter</code> suffix) downstream cells read it via the normal DAG path.</p>
+<h3 id="forking-a-loop">Forking a loop<a class="headerlink" href="#forking-a-loop" title="Permanent link">&para;</a></h3>
+<p>Intermediate iterations are first-class artifacts, so you can branch a new
+run from any step of an old one without re-running the expensive prefix.</p>
+<p><strong>Scenario.</strong> You ran a hill-climbing search for 50 iterations. Glancing at
+the inspect panel, iteration 17 looked like it was about to find a better
+local optimum before the sampler drifted away. You want to explore what
+happens if you push harder from that exact state with a different step size.</p>
+<ol>
+<li>Open the loop cell's <strong>Inspect</strong> panel, scrub to iteration 17, copy its
+   artifact URI. It'll look like
+   <code>strata://artifact/nb_..._cell_hill_climb_var_state@v=1@iter=17</code>.</li>
+<li>Add a new loop cell below. Reference the original cell's ID (not the full
+   URI) in <code>start_from</code>:</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="c1"># new loop cell, continues from iteration 17 of the previous run</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="c1"># @loop max_iter=20 carry=state start_from=hill_climb@iter=17</span>
+<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="n">state</span><span class="p">[</span><span class="s2">&quot;step_size&quot;</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">0.5</span>  <span class="c1"># smaller steps from here on</span>
+<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="n">state</span> <span class="o">=</span> <span class="n">sample_and_score</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
+</code></pre></div>
+<ol>
+<li>Run the new cell. It reads iteration 17's carry value as its seed, runs up
+   to 20 more iterations under the modified strategy, and stores those
+   iterations as its own artifact chain, the original run stays untouched.</li>
+</ol>
+<p>You now have two parallel forks materialized in the artifact store. Either
+one can be forked further, and the inspect panel shows both chains.</p>
+<p>This is the escape hatch for "that intermediate state looked promising, let
+me explore from there", the thing that's hard to do in a plain for-loop
+once you've thrown away the intermediates.</p>
+<h3 id="when-not-to-use-a-loop-cell">When not to use a loop cell<a class="headerlink" href="#when-not-to-use-a-loop-cell" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Tight <code>for</code> loops over short collections, a regular Python cell with a <code>for</code> loop is simpler and the extra per-iteration artifact overhead isn't worth it.</li>
+<li>Loops where intermediate state is genuinely disposable, store only the final answer in a regular Python cell.</li>
+<li>Anything that needs to branch out into multiple parallel runs, loop cells are sequential by design. Use separate cells, or model the fan-out in Python.</li>
+</ul>
+<p>Reach for loop cells when <strong>being able to inspect or fork from iteration k matters</strong>. That's the feature you're paying for.</p>
+<hr />
+<h2 id="r-cells-020">R Cells <em>(0.2.0)</em><a class="headerlink" href="#r-cells-020" title="Permanent link">&para;</a></h2>
+<p>R is a first-class notebook language alongside Python. R cells run R source via the system <code>Rscript</code>, with the same provenance + caching + Arrow-IPC artifact pipeline as Python cells. Data crosses the language boundary as <code>arrow/ipc</code>: a <code>pandas.DataFrame</code> produced by a Python cell becomes a <code>data.frame</code> in the next R cell; an R <code>data.frame</code> (or <code>tibble</code>) becomes a <code>pandas.DataFrame</code> in the next Python cell. Non-tabular R values (S3 objects, lists with classes, environments) are stored as RDS and tagged <code>r_only=true</code> — a downstream Python cell that consumes one fails with a structured <code>StrataRArtifactError</code> rather than a confusing <code>NameError</code>.</p>
+<h3 id="r-environments">R environments<a class="headerlink" href="#r-environments" title="Permanent link">&para;</a></h3>
+<p>R environments are managed from the <strong>Environment</strong> panel, at parity with Python's uv-backed venv:</p>
+<ul>
+<li><strong>System R by default.</strong> A notebook with no <code>renv.lock</code> runs R cells against your system R library. The R card reads <strong>System R</strong> and shows the detected R version — cells work immediately as long as <code>arrow</code> + <code>jsonlite</code> are available system-wide.</li>
+<li><strong>One-click renv bootstrap.</strong> <strong>Initialize renv</strong> creates a project-scoped, reproducible environment: it installs <code>renv</code> if missing, inits a bare project library, installs <code>jsonlite</code> + <code>arrow</code>, and snapshots to <code>renv.lock</code>. Progress streams live on the card (the first run compiles <code>arrow</code> from source, which takes a few minutes). When it finishes the card flips to <strong>In sync</strong>.</li>
+<li><strong>Per-package install.</strong> A missing-package error in an R cell surfaces a structured hint with an <strong>Install</strong> button that runs <code>renv::install()</code> + <code>renv::snapshot()</code> for the named package.</li>
+<li><strong>Automatic restore on open.</strong> Opening a notebook that has an <code>renv.lock</code> restores the project library automatically — the <code>uv sync</code> analogue for R. Editing <code>renv.lock</code> invalidates R cells' cache the same way editing <code>uv.lock</code> invalidates Python cells'.</li>
+</ul>
+<p><code>renv.lock</code> is committed config (like <code>uv.lock</code>); the built <code>renv/library/</code> is gitignored.</p>
+<h3 id="plots">Plots<a class="headerlink" href="#plots" title="Permanent link">&para;</a></h3>
+<p>R cells display plots inline, like a Python cell's matplotlib figure. Base graphics (<code>plot()</code>, <code>hist()</code>, …) and grid-based plots (ggplot2, lattice) are captured to PNG and rendered in the cell output. A bare trailing plot object auto-renders — a last-line <code>p</code> where <code>p &lt;- ggplot(...)</code> shows the plot without an explicit <code>print(p)</code>, mirroring the R console. A cell that draws several plots produces an ordered list of image outputs.</p>
+<h3 id="whats-still-ahead">What's still ahead<a class="headerlink" href="#whats-still-ahead" title="Permanent link">&para;</a></h3>
+<p><strong>Warm Rscript pool.</strong> Notebooks containing R cells keep a small pool of
+pre-spawned R workers (R startup, <code>.Rprofile</code>/renv activation, and
+<code>jsonlite</code>/<code>arrow</code> loads already paid), so an R cell run skips the ~1–2s
+interpreter cold-start. Workers are single-shot — one cell each, then
+replaced — preserving per-cell isolation; editing <code>renv.lock</code> drains and
+respawns the pool. Pure-Python notebooks and machines without <code>Rscript</code>
+never start one.</p>
+<p>R execution and display are complete; remaining R polish is tracked on GitHub: <a href="https://github.com/bearing-research/strata/issues/83">#83</a> (R version matrix on CI), <a href="https://github.com/bearing-research/strata/issues/84">#84</a> (cross-language run-all batching).</p>
+<h3 id="what-you-need-today">What you need today<a class="headerlink" href="#what-you-need-today" title="Permanent link">&para;</a></h3>
+<ul>
+<li>R <code>&gt;= 4.2</code> on <code>PATH</code> (Strata calls <code>Rscript</code>).</li>
+<li>The <code>arrow</code> and <code>jsonlite</code> R packages — either available in the system R library, or installed into a project library via <strong>Initialize renv</strong> in the Environment panel (which installs both for you).</li>
+</ul>
+<h3 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h3>
+<p>See <a href="https://github.com/bearing-research/strata/tree/main/examples/r_lm_vs_sklearn"><code>examples/r_lm_vs_sklearn/</code></a> for a working notebook: a Python cell synthesises a housing dataset, an R cell fits <code>lm(price ~ sqft + bedrooms + age + location, data = housing_train)</code> and returns tidy coefficient + model-stats + prediction <code>data.frame</code>s, a Python cell fits the same model with <code>LinearRegression</code> and prints a side-by-side comparison. The R formula's auto-factor-encoding of <code>location</code> is the one-line stats-edge moment.</p>
+<h3 id="r-cell-annotations">R-cell annotations<a class="headerlink" href="#r-cell-annotations" title="Permanent link">&para;</a></h3>
+<p>The same annotation parser handles both Python and R cells (<code>#</code>-prefixed comments at the top of the source). Supported on R cells:</p>
+<table>
+<thead>
+<tr>
+<th>Annotation</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code># @name &lt;text&gt;</code></td>
+<td>Cell display name in the UI.</td>
+</tr>
+<tr>
+<td><code># @env KEY=value</code></td>
+<td>Sets <code>Sys.getenv("KEY")</code> for the cell's process.</td>
+</tr>
+<tr>
+<td><code># @mount data file:///x</code></td>
+<td>Binds <code>data</code> inside the R cell to the mount's local path (a character string — R has no <code>pathlib.Path</code>).</td>
+</tr>
+<tr>
+<td><code># @timeout 60</code></td>
+<td>Per-cell execution timeout in seconds.</td>
+</tr>
+</tbody>
+</table>
+<p>Loop annotations (<code>@loop</code>, <code>@loop_until</code>) and prompt-cell annotations (<code>@output_schema</code> etc.) do not apply to R cells.</p>
+<h3 id="what-if-rscript-isnt-installed">What if Rscript isn't installed?<a class="headerlink" href="#what-if-rscript-isnt-installed" title="Permanent link">&para;</a></h3>
+<p>An R cell whose harness can't find <code>Rscript</code> on <code>PATH</code> returns a clean cell-level failure with the message <code>Rscript not found on PATH. Install R (https://cran.r-project.org/) and reopen the notebook.</code> No server crash, no other cells affected.</p>
+<hr />
+<h2 id="choosing-between-kinds">Choosing between kinds<a class="headerlink" href="#choosing-between-kinds" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Reach for a…</th>
+<th>When you want…</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Python cell</td>
+<td>Ordinary computation. Default.</td>
+</tr>
+<tr>
+<td>Prompt cell</td>
+<td>An AI response as a first-class, cached, DAG-participating artifact.</td>
+</tr>
+<tr>
+<td>SQL cell</td>
+<td>A query against a connected database, with bind parameters, schema discovery, and probe-based caching.</td>
+</tr>
+<tr>
+<td>Loop cell</td>
+<td>Iterative refinement where pausing or forking from an intermediate state matters.</td>
+</tr>
+<tr>
+<td>R cell</td>
+<td>A computation where R's stats / formula syntax / domain packages are the right tool, while keeping the rest of the pipeline in Python.</td>
+</tr>
+</tbody>
+</table>
+<p>Mixing is encouraged, a typical pipeline might be a SQL cell for extraction → Python cells for transformation → an R cell for the linear model → a prompt cell for narrative summarisation.</p>
+<p>Any kind of cell can also live inside a <a href="../annotations/#variant-cells">variant group</a> a tabbed slot where multiple cells share one place in the DAG and you switch between them without forking the notebook.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.tabs", "navigation.top", "content.code.copy", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

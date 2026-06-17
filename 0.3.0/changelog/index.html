@@ -1,0 +1,3324 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A content-addressed computation graph with an interactive notebook UI">
+      
+      
+      
+        <link rel="canonical" href="https://bearing-research.github.io/strata/0.3.0/changelog/">
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../getting-started/notebook/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Changelog - Strata</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Strata" class="md-header__button md-logo" aria-label="Strata" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Strata
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/bearing-research/strata" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    bearing-research/strata
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../getting-started/notebook/" class="md-tabs__link">
+          
+  
+  
+  Notebook
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../getting-started/core/" class="md-tabs__link">
+          
+  
+  
+  Core
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../reference/notebook-protocol/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../getting-started/installation/" class="md-tabs__link">
+          
+  
+  
+  Deployment
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Strata" class="md-nav__button md-logo" aria-label="Strata" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Strata
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/bearing-research/strata" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    bearing-research/strata
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#030-2026-06-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.3.0 — 2026-06-17
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.3.0 — 2026-06-17">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020-2026-06-03" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.2.0 — 2026-06-03
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.2.0 — 2026-06-03">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Added">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#r-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-all-batching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run-all batching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reconnect-resilience" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reconnect resilience
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mount-integration-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount integration tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rerun-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rerun cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#versioned-docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioned docs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010-2026-05-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0 — 2026-05-20
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.0 — 2026-05-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Added">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#notebook-ui-and-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notebook UI and lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sql-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQL cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#module-export-and-cross-cell-library-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module export and cross-cell library code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release-infrastructure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release infrastructure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010a2-2026-05-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0a2 — 2026-05-20
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010a1-2026-05-19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0a1 — 2026-05-19
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010a0-2026-05-19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0a0 — 2026-05-19
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/notebook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    vs Jupyter, Marimo, Pluto
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/cells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/annotations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Annotations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/lake-aware-cells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lake-Aware Cells
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/registry-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Registry Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/workers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Workers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/ai/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secret Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Headless Runner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/agent-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authoring Programmatically
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/import/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import from Jupyter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/keyboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core/registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts & Registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/notebook-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebook Client Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/rest-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSocket Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/executor-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Executor Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/notebook-toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    notebook.toml Schema
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deployment
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/service-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations & Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy & Sharing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/fly/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fly.io
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/codespaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Codespaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deployment/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#030-2026-06-17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.3.0 — 2026-06-17
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.3.0 — 2026-06-17">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#020-2026-06-03" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.2.0 — 2026-06-03
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.2.0 — 2026-06-03">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Added">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#r-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        R cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-all-batching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run-all batching
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reconnect-resilience" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reconnect resilience
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mount-integration-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mount integration tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rerun-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rerun cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#versioned-docs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioned docs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010-2026-05-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0 — 2026-05-20
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="0.1.0 — 2026-05-20">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Added">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#notebook-ui-and-lifecycle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notebook UI and lifecycle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sql-cells" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQL cells
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#module-export-and-cross-cell-library-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Module export and cross-cell library code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#release-infrastructure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Release infrastructure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixed_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#security_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Security
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010a2-2026-05-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0a2 — 2026-05-20
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010a1-2026-05-19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0a1 — 2026-05-19
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#010a0-2026-05-19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0.1.0a0 — 2026-05-19
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h1>
+<p>All notable changes to Strata will be documented in this file.</p>
+<p>Entries focus on user-visible changes and release framing rather than
+exhaustive commit history.</p>
+<p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
+<h2 id="030-2026-06-17">0.3.0 — 2026-06-17<a class="headerlink" href="#030-2026-06-17" title="Permanent link">&para;</a></h2>
+<h3 id="security">Security<a class="headerlink" href="#security" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong>Table ACL is enforced on transform inputs</strong> (service-mode hardening): under
+  trusted-proxy auth, <code>AclEvaluator</code> previously gated only the direct <code>scan@v1</code>
+  path, so a principal denied a table could still read it by passing it as an
+  input to a transform (<code>/v1/artifacts/materialize</code>, <code>explain-materialize</code>,
+  name-status). The scan path and every table-input resolution now share one
+  <code>_authorize_table_access</code> gate, so a transform input can't bypass the ACL.
+  Personal mode (no auth) is unaffected.</p>
+</li>
+<li>
+<p><strong>Registry authorization hardening</strong> (pre-release security review): the
+  registry audit read is now tenant-scoped — a principal sees only its own
+  tenant's history (<code>admin:*</code> sees the whole store), matching every other
+  registry route. Deciding protected-alias changes (approve/reject)
+  requires the <code>admin:registry</code> scope under trusted-proxy auth, and
+  approval enforces separation of duty (the requester cannot self-approve
+  without <code>admin:*</code>). These close latent cross-tenant-disclosure and
+  self-approval gaps before the registry is exposed in multi-tenant
+  service mode; personal mode (single operator) is unaffected.</p>
+</li>
+</ul>
+<h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>strata-client</code>: a slim, independent client distribution.</strong> Using Strata as
+  a library no longer means installing the whole server. The new <code>strata-client</code>
+  package depends only on <strong>httpx + pyarrow</strong> (no pyiceberg / fastapi / duckdb /
+  pydantic, no Rust extension) and ships the full client —
+  <code>materialize</code>/<code>put</code>/<code>fetch</code>/scan, the registry surface (aliases, tags, names,
+  audit), the <code>Filter</code> helpers, and the duckdb/pandas/polars/datafusion
+  integrations (as extras, e.g. <code>strata-client[duckdb]</code>): <code>pip install
+  strata-client</code>, then <code>from strata_client import StrataClient</code>. It resolves its
+  server URL from <code>STRATA_SERVER_URL</code> / <code>STRATA_HOST</code> / <code>STRATA_PORT</code> /
+  <code>pyproject.toml</code> with no pydantic. The client and the server (<code>strata-notebook</code>)
+  are <strong>independent</strong> — they share only the JSON wire protocol, neither depends
+  on the other.</li>
+</ul>
+<p><strong>Breaking (import paths):</strong> the client moved out of the <code>strata</code> namespace.
+  <code>from strata.client import StrataClient</code> → <code>from strata_client import
+  StrataClient</code>; the integrations moved from <code>strata.integration.*</code> /
+  <code>strata.duckdb_ext</code> / <code>strata.polars_ext</code> to <code>strata_client.integration.*</code>.
+  The server keeps <code>from strata.types import Filter</code> working (it owns its own
+  copy of the dependency-free <code>Filter</code> wire types).</p>
+<ul>
+<li>
+<p><strong>Registry dashboard in the notebook</strong> (#147–#150): the registry is now a
+  first-class UI surface, so promotion and approvals don't have to be code. A
+  cell that publishes with a name (<code>strata.put(model, name="taxi/tip-model")</code>)
+  is stamped with its cell and shows a <strong>promote strip</strong> right below it; the
+  bottom drawer gains a <strong>Registry tab</strong> with the pending-approval queue
+  (Approve / Reject — the human gate, in the UI), a names table (alias chips,
+  latest version, tags, and a <code>[Promote▾]</code> champion/candidate menu), and a
+  collapsible audit timeline; and a <strong>lineage view</strong> renders
+  <code>model ← features ← scan ← table @ snapshot</code>. Promote toasts the result
+  (<code>✓ applied</code> or <code>⏳ pending</code> for a protected alias). New reads:
+  <code>GET /v1/notebooks/{sid}/artifacts</code> and <code>GET /v1/registry/summary</code>.
+  Personal-mode only — the dashboard hides itself in service mode.</p>
+</li>
+<li>
+<p><strong>Ambient <code>strata</code> client in notebook cells</strong> (#146): every locally-executed
+  Python cell gets a ready <code>strata</code> client in its namespace — no
+  <code>from strata.client import StrataClient</code> / <code>StrataClient(base_url=…)</code> /
+  <code>close()</code>. It covers the common operations (<code>materialize</code>, <code>put</code>, <code>set_alias</code>,
+  <code>set_tag</code>, <code>resolve_alias</code>, …) over a lightweight stdlib client path-loaded
+  into the notebook venv (no new dependency), is created fresh per run and
+  closed automatically, and — like a mount or <code>@table</code> variable — is an injected
+  tool, not a cell input, so it never affects provenance. Local execution only;
+  remote-executor cells import a client explicitly.</p>
+</li>
+<li>
+<p><strong>Warm Rscript pool</strong> (#81): notebooks with R cells pre-spawn R workers
+  that have already paid interpreter startup, renv activation, and
+  <code>jsonlite</code>/<code>arrow</code> loads — an R cell run skips the ~1–2s cold-start tax
+  and reports <code>execution_method: "warm"</code>. Single-shot workers preserve
+  per-cell isolation; <code>renv.lock</code> edits drain and respawn the pool;
+  pure-Python notebooks and machines without <code>Rscript</code> never start one.
+  The pool machinery is the existing Python warm pool with a
+  parameterized worker command — the stdin/stdout frame protocol is
+  language-agnostic.</p>
+</li>
+<li>
+<p><strong>Live-provider LLM tests</strong> (opt-in): <code>STRATA_TEST_LIVE_LLM=1</code> runs
+  integration tests against the real Anthropic and OpenAI APIs — unary
+  completions, schema enforcement (native tool-use / strict
+  <code>json_schema</code>), and streaming with usage accounting — catching
+  provider contract drift the mocked tests cannot. Each provider class
+  skips unless its API key is present; models are overridable via
+  <code>STRATA_TEST_LIVE_{ANTHROPIC,OPENAI}_MODEL</code>.</p>
+</li>
+<li>
+<p><strong>Structured output degrades gracefully on minimal providers</strong>: some
+  OpenAI-compatible servers reject <code>response_format</code> or <code>stream_options</code>
+  with a 400 — schema-constrained prompt cells used to die on the raw
+  provider error. Strata now retries once without the extensions,
+  steering the model with a schema-guidance system turn and marking the
+  result degraded; the client-side validate-and-retry loop carries full
+  enforcement. Validation is also lenient about packaging: JSON wrapped
+  in code fences or prose is extracted before validating instead of
+  burning a retry on the wrapper.</p>
+</li>
+<li>
+<p><strong>Notebook cells can target a remote shared store</strong> (<code>notebook_remote_store_url</code>,
+  shared research store): the ambient <code>strata</code> client injected into cells can now
+  point at a central deployment instead of the local notebook server, so a team
+  of researchers publishes/consumes datasets against one store.
+  <code>notebook_remote_store_headers</code> carries the auth the remote store needs (e.g.
+  trusted-proxy identity/token) — set via env so secrets stay out of committed
+  config. Unset → the ambient client targets the local server as before.</p>
+</li>
+<li>
+<p><strong>Authenticated write-back in service mode</strong> (<code>service_writes_enabled</code>, shared
+  research store) — <strong>preview</strong>: an opt-in capability letting authenticated clients <em>publish</em>
+  to a service-mode store — <code>put</code>, <code>set_name</code>, <code>set_alias</code>, tags — so a team can
+  share processed datasets through one central deployment. Each write requires
+  trusted-proxy auth and the <code>artifacts:write</code> scope, lands in the caller's
+  tenant (team = tenant; can't target another team), and is attributed to the
+  publishing principal in the registry audit. Default is <strong>off</strong> — service mode
+  stays read-only unless you enable it, and it requires <code>auth_mode='trusted_proxy'</code>
+  (enforced at startup) so every write is attributable. Pairs with the
+  now-resolvable registry names (above) to make a published dataset "always
+  available to the team."</p>
+</li>
+<li>
+<p><strong>Configurable pull-model signing secret</strong> (<code>STRATA_TRANSFORM_SIGNING_SECRET</code>):
+  the HMAC secret that signs v2-pull build URLs can now be pinned via config
+  instead of being a random per-process value. Without it, the secret was
+  regenerated on every restart — so in-flight signed download/upload/finalize
+  URLs broke on restart and never matched across replicas. Set a stable value for
+  any multi-replica or restart-surviving deployment; if <code>pull_model_enabled</code> is on
+  without it, the server logs a warning at startup.</p>
+</li>
+<li>
+<p><strong>Approval gates on protected aliases</strong>: set
+  <code>STRATA_REGISTRY_PROTECTED_ALIASES=champion,production</code> and moves or
+  deletes of those aliases queue for approval (HTTP 202) instead of
+  applying — <code>POST /v1/registry/pending/approve</code> applies the change with
+  the approver as the audit actor, <code>…/reject</code> discards it, and every step
+  (request, approval/rejection, the applied move) lands in the registry
+  audit. Unprotected aliases are unaffected; the default is no gating.
+  SDK: <code>list_pending_changes</code> / <code>approve_alias_change</code> /
+  <code>reject_alias_change</code>; CLI: <code>strata artifact pending</code>.</p>
+</li>
+<li>
+<p><strong>Registry layer: aliases, tags, and an append-only audit log</strong> (#129):
+  promotion is no longer a silent pointer swap. A registry name can hold
+  many <strong>aliases</strong> (<code>taxi/tip-model @ champion</code>, <code>@ candidate</code>) following
+  the post-stages industry model; artifact versions carry queryable
+  <strong>tags</strong> (<code>auc=0.91</code>, <code>validated_by=…</code>); and every name/alias/tag
+  mutation lands in an immutable <strong>audit</strong> written in the same transaction
+  (<code>who, what, from → to, when</code>) — including names set by <code>materialize</code>
+  itself. New SDK methods (<code>set_alias</code>, <code>resolve_alias</code>, <code>set_tag</code>,
+  <code>get_registry_audit</code>, …), REST routes under <code>/v1/names/{name}/aliases</code>
+  and <code>/v1/artifacts/{id}/v/{n}/tags</code>, and <code>strata artifact audit [name]</code>
+  which renders the history (<code>old-id@v1 -&gt; new-id@v1</code>). Alias refs
+  (<code>name@alias</code>) are accepted anywhere the artifact CLI takes a reference.</p>
+</li>
+<li>
+<p><strong>Prompt cells stream live</strong> (#111): LLM output renders token-by-token
+  on the cell card as the model generates, instead of appearing all at
+  once on completion. Schema-validation retries surface as a badge on
+  the stream. New <code>cell_output_delta</code> WebSocket frame (ephemeral — not
+  persisted or replayed; external WS clients that ignore unknown frame
+  types are unaffected).</p>
+</li>
+<li><strong>Structured streams render as partial JSON</strong> (#113): prompt cells
+  with an <code>@output_schema</code> show fields popping in as the model finishes
+  them — a lenient partial-JSON parser pretty-prints the valid prefix,
+  with a character ticker and raw-tail fallback while a field is still
+  in flight.</li>
+<li><strong><code>strata validate</code></strong> (#115): static notebook checks without executing
+  anything — TOML parse (with line numbers), DAG cycle detection, and
+  the same per-cell annotation diagnostics the server runs on open.
+  <code>--format json</code> carries per-cell defines/references. Exit codes mirror
+  <code>strata run</code>.</li>
+<li><strong><code>strata new</code></strong> (#115): scaffold a notebook directory from the CLI
+  without the server. Idempotent on existing notebooks — re-running
+  never orphans artifacts.</li>
+<li><strong>Programmatic authoring guide</strong> (#115): <code>docs/notebook/agent-authoring.md</code>
+  is the contract for scripts and coding agents writing notebooks as
+  plain files — the worked example is pinned by the test suite.</li>
+<li><strong>Per-cell <code>stdout</code> / <code>stderr</code> in <code>strata run --format json</code></strong> (#116):
+  read computed values back from the run payload (truncated at 10k
+  chars) instead of screen-scraping.</li>
+<li><strong>Agent conversation memory survives restarts</strong> (#119): per-notebook
+  agent history now persists to <code>.strata/agent_history.json</code> (atomic
+  writes, 12-turn window, tool traces never persisted) so a server
+  restart no longer wipes the conversation. Destructive-tool approval
+  prompts also get a configurable timeout
+  (<code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code> / <code>[ai] approval_timeout_seconds</code>,
+  default 120s; expiry counts as a decline).</li>
+<li><strong>Lake-aware cells: <code>@table</code> annotation</strong>: declare an Iceberg table input
+  on a cell (<code># @table trips file:///wh#nyc.trips</code>) and the table's snapshot
+  id joins the cell's provenance — new data landing in the lake makes the
+  cell stale and the normal cascade re-runs it, with <code>&lt;name&gt;</code> (URI) and
+  <code>&lt;name&gt;_snapshot</code> injected so the cell scans exactly the snapshot its
+  provenance recorded. <code>snapshot=&lt;id&gt;</code> pins a cell to one snapshot forever.</li>
+<li><strong>Artifact inspection CLI</strong>: <code>strata artifact list / show / lineage /
+  pull</code> work directly against a local store, no server needed. <code>lineage</code>
+  renders the provenance chain down to the lake — <code>model ← features ←
+  scan ← table @ snapshot</code> — answering "which snapshot trained this
+  model?" in one command. References accept a name, <code>id@v=N</code>, or a bare
+  artifact id; name resolution is tenant-agnostic so legacy stores
+  inspect cleanly.</li>
+<li><strong>Personal mode executes transforms</strong>: the embedded build runner now runs
+  in personal mode, so <code>materialize</code> with <code>duckdb_sql@v1</code> executes
+  server-side out of the box — previously the request was accepted and then
+  sat in <code>building</code> forever (no mode could run the full
+  scan → transform → train → put workflow). Unknown transforms fail fast
+  with a 400 listing what's available, and a <code>name=</code> on an async
+  materialize is now set when the build completes.</li>
+<li>
+<p><strong>Artifact store integrity hardening</strong> (#123): artifacts are validated at
+  finalize time (the blob must be exactly one readable Arrow IPC stream
+  matching the recorded row count — a mismatch becomes a <code>failed</code> artifact,
+  never a serveable one); <code>refresh=True</code> now rebuilds the <em>same</em> artifact as
+  a new version and supersedes the old one instead of forking a parallel
+  identity the cache never returns; builds stuck in <code>building</code> are swept to
+  <code>failed</code> at startup; and <code>strata artifact verify</code> checks a whole store's
+  blobs against metadata after the fact.</p>
+</li>
+<li>
+<p><strong><code>strata-notebook --notebook-dir</code></strong>: control where new notebooks are
+  created. They default to <code>~/.strata/notebooks</code> — not the directory you
+  launched from — so pass <code>--notebook-dir .</code> to use the current directory, or
+  any path (equivalently, set <code>STRATA_NOTEBOOK_STORAGE_DIR</code>). The server now
+  also prints the active notebook location on startup.</p>
+</li>
+</ul>
+<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong>Registry name resolution works in service mode</strong> (shared-store groundwork):
+  resolving a published dataset by name — <code>GET /v1/names/{name}</code>, alias
+  resolution, name-status, and tag reads — used to 403 in service mode (gated as
+  a write). These are reads, so they're now enabled and tenant-scoped (a team
+  resolves its own namespace; cross-team is not found). Registry <em>writes</em>
+  (<code>set_name</code>/<code>set_alias</code>/tags) and <em>listing</em> all names stay blocked — those are
+  the next step (authenticated write-back).</p>
+</li>
+<li>
+<p><strong>Service-mode config coherence is checked at startup</strong> (hardening): three
+  misconfigurations now fail fast instead of silently misbehaving at runtime —
+  <code>multi_tenant_enabled</code> with <code>auth_mode='none'</code> (the tenant header would be
+  unauthenticated and spoofable, and reads aren't tenant-filtered without auth, so
+  multi-tenancy now requires <code>auth_mode='trusted_proxy'</code>), ACL rules with
+  <code>auth_mode='none'</code> (ACL is only enforced under trusted-proxy auth, so the rules
+  would never run), and transforms enabled without an <code>artifact_dir</code> (builds
+  persist artifacts and need a store).</p>
+</li>
+<li>
+<p><strong>Artifact-mode scan builds are bounded-memory</strong>: the background build for
+  <code>materialize(mode="artifact")</code> now writes each row-group chunk straight to the
+  blob store (write-through) instead of accumulating the whole result in memory
+  before persisting. A multi-GB scan no longer holds the full result resident on
+  the server. (Part of decoupling the scan build from the client — see <em>A client
+  never poisons a scan artifact</em> under Fixed.)</p>
+</li>
+<li>
+<p><strong>Default cell timeout raised from 30 s to 300 s</strong>: the previous default
+  was an easy footgun for I/O-bound cells (network pulls, slow APIs), which
+  timed out at exactly 30 s unless a <code># @timeout</code> annotation was added. The
+  new default matches the core scan timeout; a genuinely hung cell is still
+  killed at the wall, and per-cell / per-notebook overrides are unchanged.</p>
+</li>
+</ul>
+<h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p><strong><code>materialize(mode="artifact")</code> without a store fails fast</strong> (service-mode
+  hardening): requesting artifact (persisted) mode in a deployment with no
+  <code>artifact_dir</code> used to return a <code>build_id</code> that never resolved — the background
+  build silently no-ops with no store to write to, so the client polled forever.
+  It now returns <code>400</code> up front, pointing at <code>mode="stream"</code> (scan without
+  persistence) or configuring <code>artifact_dir</code>.</p>
+</li>
+<li>
+<p><strong>Materialized results are readable in service mode</strong> (service-mode
+  hardening): <code>GET /v1/artifacts/{id}/v/{n}/data</code> and the artifact metadata GET
+  were gated as writes, so they returned 403 in service mode — an identity-scan
+  <strong>cache hit returned a <code>/data</code> URL the client couldn't fetch</strong>, and a build
+  service couldn't serve its results. Reads are now allowed in service mode,
+  gated by tenant (<code>_ensure_artifact_access</code>) and the table ACL of the
+  artifact's inputs (so a principal denied a table can't read it back via a
+  cached scan result — "result retrieval is ACL-gated"). Personal mode is
+  unchanged.</p>
+</li>
+<li>
+<p><strong>Ambient cell <code>strata</code> client survives large materialize streams</strong> (ML
+  dogfood): a cell scanning a big lake table via the injected <code>strata</code> client
+  could fail with <code>IncompleteRead</code> — and leave the artifact <code>failed</code> — on a
+  <em>fresh</em> multi-row-group scan. The client read the stream in one blocking
+  <code>resp.read()</code>, which let the server's send buffer fill and tripped its
+  <code>is_disconnected()</code> check, aborting the stream. The client now drains the
+  response in chunks (as httpx does), so large scans complete. Cell execution
+  and warm/cached scans were unaffected.</p>
+</li>
+<li>
+<p><strong>A client never poisons a scan artifact</strong> (server-side root fix for the
+  above): the <code>/v1/streams</code> GET no longer scans-and-persists inside the response
+  generator. The build now runs as a decoupled, bounded-memory background task
+  and finalizes the artifact on its own merits; the GET waits for it and then
+  streams the persisted blob. A slow or dropped reader can no longer abort the
+  build or mark the artifact <code>failed</code> — a mid-stream disconnect leaves it
+  <code>ready</code>. The QoS scan slot is released the moment the build completes.</p>
+</li>
+<li>
+<p><strong>Headless <code>strata run</code> no longer drops console output on cache hits</strong>
+  (ML dogfood): a re-run whose cells hit cache carried no fresh stdout, and
+  the empty-console write then <em>unlinked</em> the file the producing run had
+  persisted — so <code>.strata/console/</code> ended up holding only the cell that
+  actually re-executed. Cache hits now leave the persisted console
+  untouched, so <code>print()</code> output stays recoverable across runs.</p>
+</li>
+<li>
+<p><strong>Registry hardening (pre-release review)</strong>: garbage collection and
+  <code>delete_artifact</code> now respect <strong>alias</strong> pointers — a champion alias
+  pinning an old (even superseded) version protects it from collection,
+  and deleting an artifact cleans its aliases (audited) and tags.
+  <code>approve_alias_change</code> is fully transactional: the pending-consumption,
+  approval audit, and the alias move itself commit together, and a
+  pending change whose target vanished fails cleanly with the entry
+  intact for an explicit reject. Concurrent refresh rebuilds of one
+  artifact no longer race version allocation. Alias writes targeting the
+  version already pointed at are idempotent no-ops (<code>status:
+  "unchanged"</code>) — re-running a promote cell doesn't refile approvals or
+  spam the audit.</p>
+</li>
+<li>
+<p><strong>Namespaced artifact names are no longer write-only</strong> (friction from the
+  ML dogfood): names containing <code>/</code> (<code>team/dataset/raw</code>) could be created
+  but every read route 404'd on them. The name routes now use path
+  converters, so slash-namespaced names — the natural registry convention —
+  resolve, report status, and delete normally.</p>
+</li>
+<li><strong>Legacy <code>_default</code>-tenant artifacts stay nameable</strong>: artifacts written by
+  pre-fix <code>PUT /v1/artifacts</code> carry tenant <code>_default</code>; single-tenant name
+  requests (no tenant) may now point names at them instead of being
+  rejected with a tenant mismatch. Real cross-tenant mismatches are still
+  rejected.</li>
+<li><strong>Put-created artifacts can be named after the fact</strong>: <code>PUT /v1/artifacts</code>
+  stamped artifacts with tenant <code>_default</code> while the name routes resolve
+  no-header requests to no tenant — so <code>set_name</code> on an artifact you had
+  just created was rejected with a tenant mismatch. The put route now
+  resolves the tenant the same way materialize does.</li>
+<li><strong>Multi-input transforms bind inputs in caller order</strong>: the stored
+  transform spec sorted its inputs "for deterministic hashing", so the
+  build runner bound <code>input0</code> / <code>input1</code> by lexicographic artifact id —
+  joins could silently swap their operands depending on generated UUIDs,
+  and <code>f(a, b)</code> deduplicated against <code>f(b, a)</code>. Input order is part of the
+  computation now (and of provenance). Existing caches of multi-input
+  transforms whose caller order differed from sorted order will rebuild
+  once.</li>
+<li><strong>Multi-row-group scans no longer silently truncate</strong> (#121): scanning
+  a table whose plan spans multiple Parquet row groups or files produced
+  an Arrow IPC body that standard readers stopped reading after the
+  first row group — <code>materialize</code> + <code>fetch</code> returned ~1M rows from a
+  2.9M-row table with no error. Both the streamed response and the
+  persisted artifact blob are now a single valid IPC stream, with
+  regression tests over a multi-file warehouse.</li>
+<li><strong>Cross-process lock around renv mutations</strong> (#109): concurrent
+  <code>strata run</code> invocations and the server no longer race on the same
+  notebook's R environment — renv init/install/restore now take a file
+  lock on <code>.strata/renv-process.lock</code>, and a held lock surfaces as a
+  structured failure instead of corrupted state.</li>
+</ul>
+<h2 id="020-2026-06-03">0.2.0 — 2026-06-03<a class="headerlink" href="#020-2026-06-03" title="Permanent link">&para;</a></h2>
+<p>Second release. Headline: <strong>R cells</strong> alongside Python in the same
+notebook with cross-language Arrow handoff — first-class in the UI, with
+an R environment panel (one-click renv bootstrap + package install),
+automatic <code>renv::restore()</code> on open, and inline plot output (ggplot2 /
+base graphics render to PNG). Plus run-all batching that amortises
+subprocess cost across consecutive Python cells, a 60-second WS reconnect
+grace so a flaky network doesn't kill a running execution, real-emulator
+integration tests for the S3 / Azure / GCS mount schemes, and versioned
+docs via <code>mike</code>.</p>
+<p>Upgrading from 0.1.0 is non-breaking. The artifact cache stays valid —
+<code>compute_lockfile_hash</code> was extended to fold <code>renv.lock</code> content but
+yields byte-identical output for notebooks without one (every existing
+Python-only notebook). The WS protocol gained reconnect + MessageType
+frames; external WS clients that ignore unknown frame types are
+unaffected. No Python API surface removed.</p>
+<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
+<h4 id="r-cells">R cells<a class="headerlink" href="#r-cells" title="Permanent link">&para;</a></h4>
+<p>R is a first-class notebook language alongside Python: cells execute
+end-to-end, cross-language Arrow exchange works, provenance/caching is
+language-agnostic, and the full UX layer ships in this release — R cells
+in the Add-cell menu, an R environment panel with one-click renv
+bootstrap + package install, and automatic <code>renv::restore()</code> on open.
+The example notebook below shows the shape.</p>
+<ul>
+<li><code>LanguageExecutor</code> + <code>LanguageAnalyzer</code> protocols + registries under
+  <code>src/strata/notebook/languages/</code> — generalises the cell-language story
+  beyond Python.</li>
+<li>R DAG analyzer (<code>languages/r/analyze_cell.R</code>) — defines/references via
+  Rscript walking the parsed expression tree; source-hash cache keeps
+  re-analysis cheap.</li>
+<li>R harness (<code>languages/r/harness.R</code>) — manifest-driven cell-execution
+  subprocess. Reads inputs via <code>arrow::read_ipc_stream</code>, runs the cell
+  body, writes outputs as Arrow IPC (for <code>data.frame</code> / tibble), JSON
+  (for atomic scalars / lists), or RDS (everything else, tagged
+  <code>r_only=true</code>).</li>
+<li><code>ContentType.RDS_OBJECT = "application/x-r-rds"</code> + the
+  <code>StrataRArtifactError</code> exception — Python cells consuming an R-only
+  RDS artifact fail with a structured "re-export as <code>data.frame</code>" hint
+  instead of a <code>NameError</code>. Same gating in the batch harness and the
+  warm-pool worker.</li>
+<li><code>renv.lock</code> content participates in the env hash via
+  <code>compute_lockfile_hash</code>, so editing the lockfile invalidates R cells'
+  cache the same way <code>uv.lock</code> invalidates Python cells'. Backward-
+  compatible: notebooks without <code>renv.lock</code> see byte-identical hashes.</li>
+<li><code>_renv_sync</code> helper + <code>[r]</code> block schema in <code>notebook.toml</code>, wired into
+  session open: opening a notebook with an <code>renv.lock</code> restores the
+  project library automatically (the <code>uv sync</code> analogue for R).</li>
+<li>R cells in the Add-cell menu with the correct <code>.R</code> file extension —
+  no more hand-editing <code>notebook.toml</code> to add one.</li>
+<li>R environment panel at parity with Python: a stacked R card shows the
+  current renv state (System R vs in-sync vs lockfile-edited), a one-click
+  <strong>Initialize renv</strong> bootstrap (install renv → bare project library →
+  <code>jsonlite</code> + <code>arrow</code> → snapshot) with live streamed progress, and a
+  per-package <strong>Install</strong> action driven off the missing-package hint. R
+  environment jobs stream stdout/stderr over the WS and persist a synced
+  R runtime (lock hash + timestamp + R version) on success.</li>
+<li>A missing-package error in an R cell surfaces a structured install hint;
+  an erroring R cell now marks its READY downstream cells stale instead of
+  leaving them green.</li>
+<li>Inline plot output for R cells: base graphics and grid-based plots
+  (ggplot2 / lattice) render to PNG and display in the cell like a Python
+  matplotlib figure. A bare trailing plot object auto-renders (REPL-style);
+  multiple plots in one cell produce ordered displays.</li>
+<li><code># @mount</code>, <code># @env KEY=VAL</code>, and <code># @name</code> annotations work on R
+  cells with no R-specific parser changes — the annotation parser is
+  language-agnostic.</li>
+<li>Headless <code>strata run</code> executes R cells (previously skipped as an
+  unsupported language) and restores the notebook's <code>renv.lock</code> into a
+  project library first — so R and mixed notebooks run end-to-end from
+  the CLI for CI / scheduled jobs, not only through the server.</li>
+<li>New <code>examples/r_lm_vs_sklearn/</code> notebook — Python cell builds a
+  housing DataFrame, R cell fits <code>lm(price ~ sqft + bedrooms + age +
+  location)</code>, Python cell fits the same model with sklearn and prints
+  a side-by-side comparison.</li>
+<li>New <code>examples/r_mtcars_analysis/</code> notebook — a pure-R analysis (every
+  cell R): <code>lm()</code> + <code>aggregate()</code> + inline ggplot2 and base-graphics
+  plots, showing the R DAG, <code>data.frame</code> Arrow handoff, and R-only (RDS)
+  object handoff between R cells.</li>
+<li>CI <code>r-tests</code> job runs on Ubuntu + macOS via <code>r-lib/actions/setup-r</code>
+  with the <code>arrow</code> + <code>jsonlite</code> packages installed from posit/RSPM
+  binaries, against both R <code>release</code> and <code>oldrel-1</code>. The cross-language
+  suite (<code>tests/notebook/test_r_cells.py</code>) exercises Py→R→Py Arrow
+  round-trip, R-only RDS refusal, mount injection, error shapes, cache
+  hit/miss, <code>renv.lock</code> change invalidation, inline plot capture, real
+  <code>renv::restore</code>, and env-annotation injection; a separate <code>r-examples</code>
+  job runs the R example notebooks end-to-end via <code>strata run</code>.</li>
+</ul>
+<h4 id="run-all-batching">Run-all batching<a class="headerlink" href="#run-all-batching" title="Permanent link">&para;</a></h4>
+<p>Consecutive Python cells share a single harness subprocess on
+<code>run all</code> / <code>rerun all</code>, amortising the ~150ms cold-start across the
+batch. R cells are still single-cell (Phase 2). Mixed notebooks
+partition into per-language runs automatically.</p>
+<ul>
+<li><code>harness.execute_batch</code> library entry point + <code>--batch</code> CLI flag —
+  one subprocess executes a sequence of cells against a shared
+  namespace, communicating cache-check / persist requests with the
+  parent over JSON-line pipes.</li>
+<li><code>CellExecutor.execute_batch</code> orchestration with per-cell timeout
+  watchdog inside the batch subprocess (a hung cell can't take down
+  the whole run).</li>
+<li><code>is_cell_batchable</code> gate keeps the partitioner conservative —
+  prompts, SQL, R cells, and any cell with <code># @worker</code> / <code># @mount
+  rw</code> opt out automatically.</li>
+</ul>
+<h4 id="reconnect-resilience">Reconnect resilience<a class="headerlink" href="#reconnect-resilience" title="Permanent link">&para;</a></h4>
+<ul>
+<li>60-second WS reconnect grace before the server tears down a session's
+  execution state — a Wi-Fi blip mid-cell no longer kills the run.</li>
+<li><code>MessageType</code> StrEnum extracted to <code>protocol.py</code> — single canonical
+  source for every C↔S frame name, removes string-literal drift across
+  the codebase + the docs.</li>
+<li>New <code>docs/reference/notebook-protocol.md</code> — the full client-author
+  reference (bootstrap, auth model, reconnect grace, cold-start payload,
+  every message type) so external clients can target the WS protocol
+  without reading server code.</li>
+<li><code>notebook.toml</code> write path preserves TOML datetime values and the
+  <code>array-of-tables</code> shape, so a saved-and-reopened notebook produces a
+  byte-identical TOML for unchanged sections.</li>
+</ul>
+<h4 id="mount-integration-tests">Mount integration tests<a class="headerlink" href="#mount-integration-tests" title="Permanent link">&para;</a></h4>
+<ul>
+<li>S3 mount tests against MinIO via <code>testcontainers</code>.</li>
+<li>Azure mount tests against the Azurite emulator.</li>
+<li>GCS mount tests against <code>fake-gcs-server</code>.</li>
+<li>The notebook-side mount-credentials hook (<code>MountResolver</code>) gets
+  exercised against all three, so credential resolution + path
+  normalisation regressions surface in CI rather than at first remote
+  upload.</li>
+</ul>
+<h4 id="rerun-cells">Rerun cells<a class="headerlink" href="#rerun-cells" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>↻</code> button + Cmd+Shift+Enter rerun a single cell bypassing its cache
+  (and rerunning stale upstreams).</li>
+<li><code>notebook_rerun_all</code> WS message + UI "Rerun all" entry — cascade with
+  cache disabled, useful when you've changed something the provenance
+  hash can't see (a non-deterministic data source, an outside-the-
+  notebook file the cell reads, etc.).</li>
+</ul>
+<h4 id="versioned-docs">Versioned docs<a class="headerlink" href="#versioned-docs" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Documentation site is now version-aware via <code>mike</code>. Visit
+  <code>https://bearing-research.github.io/strata/</code> — the version dropdown
+  in the header lets readers pick <code>latest</code> (always the current
+  release) or a pinned version (<code>0.2.0</code>, <code>0.1.0</code>, ...). Pre-release
+  preview lives under <code>dev</code>.</li>
+</ul>
+<h3 id="changed_1">Changed<a class="headerlink" href="#changed_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Docs site builds + deploys via <code>mike</code> instead of <code>mkdocs gh-deploy</code>.
+  PRs that touch <code>docs/</code> still validate <code>--strict</code> without touching
+  <code>gh-pages</code>; main pushes update the <code>dev</code> alias; release tags pin
+  a versioned snapshot + the <code>latest</code> alias.</li>
+<li><code>create_notebook</code>'s <code>pyproject.toml</code> shape is built from metadata
+  rather than templated as a string — adding a default dep is now a
+  one-line list edit instead of a multi-place template change.</li>
+<li><code>MountResolver</code> derives its TOML on-disk shape from
+  <code>MountSpec.model_dump()</code> rather than a hand-rolled mapping, so
+  schema changes only touch one place.</li>
+<li><code>test_routes.py</code> + <code>test_ws.py</code> boilerplate collapses into shared
+  helpers / fixtures — net subtraction in the test suite, fewer places
+  to drift on protocol changes.</li>
+<li>README's Highlights section calls out R cells, DAG view, loop cells,
+  prompt-cell variable resolution, and auto-install hints. The buried
+  feature list under "Quick Start" is gone.</li>
+</ul>
+<h3 id="fixed_1">Fixed<a class="headerlink" href="#fixed_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>strata run</code> without <code>--no-sync</code> no longer fails at environment sync
+  with "env sync finished without a status snapshot". The headless runner
+  read the session's currently-running-job slot (reset to <code>None</code> on
+  completion) instead of the returned job's terminal status, so the
+  default invocation aborted on every notebook before running a cell.</li>
+<li><code>notebook.toml</code> TOML datetime values and <code>array-of-tables</code> rows no
+  longer churn on a round-trip save (#45). Pre-fix, saving a notebook
+  with no edits would rewrite datetime fields as strings + collapse
+  array-of-tables into inline tables, polluting git diffs.</li>
+<li><code>/{session_id}/...</code> routes are now owner-gated in personal mode with
+  <code>STRATA_PERSONAL_MODE_USER_HEADER</code> set (#41). Pre-fix, a request
+  with the proxy-supplied user header could read another user's session
+  state via <code>GET /v1/notebooks/{id}/cells</code>.</li>
+<li>Three correctness gaps in the run-all dispatcher and three in the
+  batch dispatcher, caught by review (#34, #35, #36).</li>
+<li>The 1-element identifier collapse in the R analyzer's JSON emit
+  (<code>auto_unbox = TRUE</code> was eating single-name vectors). Wrapped
+  <code>defines</code> / <code>references</code> in <code>jsonlite::I()</code>.</li>
+<li>The R analyzer walker mis-attributing reads under in-place mutations
+  (<code>df &lt;- df[complete.cases(df), ]</code> correctly keeps <code>df</code> in
+  references).</li>
+<li>A Python-only artifact (a <code>pickle</code> value or a <code>module/*</code> content type)
+  consumed by an R cell now fails with a structured error naming the
+  variable and the re-export fix, instead of aborting the R subprocess
+  and surfacing a generic "Rscript exited without producing a result
+  manifest" — symmetric with the existing R-only (RDS) → Python guard
+  (#107).</li>
+<li>A Python numpy array / non-tabular scalar read into an R cell now
+  warns that the value is flattened into a <code>data.frame</code> (the Arrow shape
+  metadata can't round-trip into R) instead of changing shape silently
+  (#107).</li>
+<li>macOS / Linux + Python 3.14 SQLite I/O flake in cache_warm tests gets
+  one retry (<code>tests/conftest.py</code>); Iceberg <code>temp_warehouse</code> fixture
+  disposes its catalog engine before yield to close the related flake.</li>
+</ul>
+<h3 id="security_1">Security<a class="headerlink" href="#security_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Phase A scorecard hygiene</strong> — <code>SECURITY.md</code>, Dependabot config,
+  least-privilege workflow permissions.</li>
+<li><strong>Phase C SHA pinning</strong> — every GitHub Action across every workflow
+  pinned to a 40-char commit SHA with the version annotation in a
+  trailing comment. Docker base images (the shipped image + the
+  df-cluster example) are pinned by <code>sha256</code> digest. A Dependabot
+  <code>docker</code> ecosystem keeps both digests and Action SHAs current via
+  weekly group PRs.</li>
+<li><strong>Token-permission least privilege</strong> — <code>docs.yml</code> and <code>release.yml</code>
+  default to read-only, escalating to <code>contents: write</code> only in the
+  single job that pushes the rendered site (mike → gh-pages) or creates
+  the GitHub Release.</li>
+<li>WS upgrade owner-gating closes the cross-session-read path noted
+  above.</li>
+</ul>
+<h3 id="compatibility">Compatibility<a class="headerlink" href="#compatibility" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Cache:</strong> non-breaking for Python-only notebooks. <code>compute_lockfile_hash</code>
+  was extended to fold <code>renv.lock</code>, but the extension is a no-op when
+  the file is absent (every Python-only notebook gets byte-identical
+  hash output).</li>
+<li><strong>WS protocol:</strong> the new <code>MessageType</code> extraction is purely a
+  refactor — frame strings are unchanged. The new reconnect-grace</li>
+<li>per-cell-watchdog frames are additive; clients that ignore unknown
+  frames continue to work.</li>
+<li><strong>REST API:</strong> unchanged.</li>
+<li><strong>Wheel ABI:</strong> still <code>abi3-py312</code> (one wheel per platform covers 3.12+).</li>
+<li><strong>Python deps:</strong> no breaking changes; R support is fully optional
+  (Python-only users don't need R installed).</li>
+</ul>
+<h2 id="010-2026-05-20">0.1.0 — 2026-05-20<a class="headerlink" href="#010-2026-05-20" title="Permanent link">&para;</a></h2>
+<p>First stable release of Strata Notebook. The package is published on
+PyPI as <code>strata-notebook</code>; the Python module is imported as <code>strata</code>.
+Wheels ship for Linux (x86_64, aarch64), macOS (x86_64, arm64), and
+Windows (x86_64) and are abi3-compatible from Python 3.12 through 3.14.</p>
+<p>Strata refuses to start outside a uv-managed Python environment;
+<code>uv tool install strata-notebook</code> is the canonical install path,
+with <code>uv add strata-notebook</code> for project-style installs. <code>pip
+install</code> into a hand-rolled <code>python -m venv</code> is rejected by the
+startup guard. The notebook app boots via <code>strata-notebook</code> (or
+<code>python -m strata</code>); <code>strata-worker</code> boots a remote worker; and
+<code>strata run | export | import</code> covers headless notebook tooling.</p>
+<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
+<h4 id="notebook-ui-and-lifecycle">Notebook UI and lifecycle<a class="headerlink" href="#notebook-ui-and-lifecycle" title="Permanent link">&para;</a></h4>
+<ul>
+<li>notebook home / create / open flows with recent-notebook tracking</li>
+<li>notebook rename, delete, duplicate, and management improvements</li>
+<li>per-notebook Python environments (managed by <code>uv</code>) with status, sync,
+  import / export, and async environment jobs</li>
+<li>Python-version selection in the new-notebook flow</li>
+<li>inline cell display outputs: PNG images, markdown, <code>display(...)</code> side
+  effects, <code>plt.show()</code> / <code>Figure.show()</code>, ordered multiple visible outputs
+  per cell</li>
+<li>markdown cells for prose / documentation</li>
+<li>timing instrumentation and a browser benchmark for create / open flows</li>
+</ul>
+<h4 id="sql-cells">SQL cells<a class="headerlink" href="#sql-cells" title="Permanent link">&para;</a></h4>
+<ul>
+<li>SQL cell language with <code># @sql connection=&lt;name&gt;</code> annotation, named-bind
+  parameters resolved from upstream cells, and an Arrow-IPC artifact
+  produced per query</li>
+<li>per-driver <code>DriverAdapter</code> Protocol with capability flags (per-table
+  freshness, snapshot support, separate probe connection requirement)</li>
+<li>five built-in driver adapters:</li>
+<li><strong>PostgreSQL</strong> via ADBC, freshness via <code>pg_stat_user_tables</code></li>
+<li><strong>SQLite</strong> via ADBC, freshness via <code>PRAGMA data_version</code> /
+    <code>schema_version</code>, read-only via URI <code>mode=ro</code> plus <code>PRAGMA query_only</code></li>
+<li><strong>Snowflake</strong> via ADBC, URI-as-identity, runtime schema resolution,
+    <code>write_role</code> for read / write principal split</li>
+<li><strong>BigQuery</strong> via ADBC, credentials principal in identity, ambient-ADC
+    sentinel, notebook-relative credential paths, <code>write_credentials_path</code>
+    for read / write principal split</li>
+<li><strong>DuckDB</strong> (embedded) via the native DuckDB DBAPI, layered RO
+    enforcement (file flag + cursor-level <code>BEGIN TRANSACTION READ ONLY</code>)</li>
+<li>write cells via <code># @sql write=true</code>, with per-statement status tables</li>
+<li><code># @cache fingerprint | forever | session | ttl=N | snapshot</code> policies</li>
+<li><code># @after &lt;cell&gt;</code> ordering-only DAG annotation</li>
+<li>Connections panel + REST API for managing <code>[connections.&lt;name&gt;]</code> blocks,
+  with literal auth values blanked on disk during the write round-trip</li>
+<li>schema-discovery sidebar enumerating tables and columns visible through
+  each connection</li>
+<li><code>sql_orders_report</code> example notebook demonstrating a five-cell SQL pipeline</li>
+</ul>
+<h4 id="module-export-and-cross-cell-library-code">Module export and cross-cell library code<a class="headerlink" href="#module-export-and-cross-cell-library-code" title="Permanent link">&para;</a></h4>
+<ul>
+<li>cells that mix runtime work and library code (defs, classes, literal
+  constants) can now share the library code across cells; the planner
+  slices the cell's AST, keeps the shareable parts, and validates the
+  slice with <code>symtable</code> so each kept def / class is self-contained</li>
+<li><code>module_export_blocked</code> diagnostic surfaces pre-flight on cell open and
+  names the specific function and unresolved variable</li>
+<li><code>from __future__ import annotations</code> correctly relaxes cross-cell
+  type-hint references (PEP 563 stringifies annotations, so the
+  free-variable check drops them)</li>
+<li>module-level globals written from inside a function are detected</li>
+<li>comprehension elements walk with loop targets locally scoped</li>
+<li>Python 3.14 / PEP 749 deferred-annotation behavior: annotation references
+  go through an explicit AST walk so the cross-cell check is consistent
+  across <code>symtable</code>'s version-dependent free-variable reporting</li>
+<li><code>library_cells</code> example notebook walking through cross-cell library code</li>
+</ul>
+<h4 id="deployment">Deployment<a class="headerlink" href="#deployment" title="Permanent link">&para;</a></h4>
+<ul>
+<li>local service-mode demo stack, smoke script, and deployment guide</li>
+<li>Fly-hosted notebook defaults use persistent notebook storage and a
+  larger auto-extending volume configuration</li>
+<li>Docker builds reuse uv and Cargo caches more effectively for faster
+  local iteration</li>
+</ul>
+<h4 id="release-infrastructure">Release infrastructure<a class="headerlink" href="#release-infrastructure" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>pip install strata-notebook</code> / <code>uv add strata-notebook</code> (the bare
+  <code>strata</code> name on PyPI was held by an unrelated config framework)</li>
+<li>wheel ships the frontend SPA bundled at <code>strata/_frontend/</code>, so
+  <code>strata-notebook</code> works out of the box without a separate frontend build</li>
+<li>abi3-py312 wheel format — one wheel per platform covers Python 3.12+</li>
+<li>tag-driven release workflow with TestPyPI auto-publish and
+  PyPI publish gated by a protected GitHub Environment</li>
+<li>post-build wheel smoke test (<code>wheel-test</code> job) installs the Linux
+  x86_64 wheel into a fresh uv venv, exercises console scripts and
+  <code>/health</code>, asserts the bundled SPA is served at <code>/</code>, and runs the
+  matrix against Python 3.12 / 3.13 / 3.14 — packaging bugs fail
+  the run before the artifact reaches the index</li>
+</ul>
+<h3 id="changed_2">Changed<a class="headerlink" href="#changed_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>markdown rendering uses <code>markdown-it</code> + <code>DOMPurify</code> rather than a
+  hand-rolled renderer, with consistent output between in-place cell
+  preview and <code>Markdown(...)</code> display outputs</li>
+<li>docs split into separate Strata Core and Strata Notebook quickstarts;
+  the root README is an umbrella landing page</li>
+<li>notebook create bootstraps the initial environment asynchronously,
+  making first open substantially faster</li>
+<li>notebook open / create flows reuse prefetched state and lazy-load
+  secondary panels to reduce perceived latency</li>
+<li>add-cell UI replaces per-type buttons with a unified menu</li>
+<li>write-cell status table preserves per-statement rowcounts and is no
+  longer truncated to a default cap</li>
+<li>connection-editor UI fixed for round-trip fidelity (auth blanking,
+  driver-specific extras, theme correctness) and dark-mode parity</li>
+</ul>
+<h3 id="fixed_2">Fixed<a class="headerlink" href="#fixed_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>service-mode session discovery / reconnect policy and related UX
+  regressions</li>
+<li>reconnect metadata loss for remote execution state</li>
+<li>run-all only executing the first cell</li>
+<li>missing-package install UX in the cell output area</li>
+<li>local service-mode browser routing and notebook creation flow</li>
+<li>relative connection paths now resolve against the notebook directory,
+  not the server CWD</li>
+<li>recent-notebook list is server-validated on home-page load so deleted
+  notebooks no longer land the user on a "session not found" toast; a
+  Clear button next to the section title wipes the local list without
+  touching on-disk notebooks</li>
+<li><code>update_notebook_connections</code> is now idempotent when no <code>[connections]</code>
+  block exists and the request is empty — saves with no change no longer
+  churn <code>updated_at</code> or rewrite the on-disk TOML shape (invariant 6)</li>
+<li>timing-based perf assertion in <code>test_concurrent_scans_dont_block_each_other</code>
+  replaced with a structural correctness check (no more CI flakes from
+  runner load)</li>
+</ul>
+<h3 id="security_2">Security<a class="headerlink" href="#security_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>read-only enforcement for SQL cells is layered (file-handle flag +
+  session-level guard) rather than SQL-text keyword filtering — a SQL
+  cell cannot write to the database regardless of how the connection
+  was specified</li>
+<li>BigQuery / Snowflake adapters route reads and writes through different
+  principals when configured (<code>write_credentials_path</code>, <code>write_role</code>),
+  with <code>read_only</code> kwarg on <code>canonicalize_connection_id</code> so changing the
+  write principal does not invalidate read-cell caches</li>
+</ul>
+<h2 id="010a2-2026-05-20">0.1.0a2 — 2026-05-20<a class="headerlink" href="#010a2-2026-05-20" title="Permanent link">&para;</a></h2>
+<p>Third release-validation dry-run. Four changes from <code>0.1.0a1</code>:</p>
+<ul>
+<li><strong>Wheel smoke-test job</strong> added to the release workflow. After the
+  five wheel matrix jobs finish, a new <code>wheel-test</code> job downloads the
+  Linux x86_64 wheel, installs it into a fresh uv-managed venv, and
+  exercises import + console scripts (<code>strata</code>, <code>strata-worker</code>) +
+  server boot + <code>/health</code> + the served SPA at <code>/</code>. The TestPyPI
+  publish job now depends on <code>wheel-test</code>, so a packaging bug fails
+  the CI run before the artifact reaches the index. Catches the
+  class of bug we hit on <code>0.1.0a0</code> (missing <code>packaging</code> dep would
+  have been caught locally instead of in the smoke test we ran
+  after the publish failed).</li>
+<li><strong><code>GET /</code> assertion in the smoke test.</strong> <code>server.py::_mount_frontend()</code>
+  silently skips mounting the SPA when <code>src/strata/_frontend/index.html</code>
+  is absent, so a wheel without the bundle would still pass <code>/health</code>.
+  The smoke now also fetches <code>/</code> and asserts the response is the SPA
+  index (grep for <code>&lt;!doctype html</code>).</li>
+<li><strong><code>abi3-py312</code> forward-compat matrix</strong> on <code>wheel-test</code>. Same wheel
+  is installed and smoke-tested against Python 3.12, 3.13, and 3.14
+  via a job-level matrix. The release contract is "one wheel per
+  platform covers 3.12+"; this validates it against every minor uv
+  knows about.</li>
+<li><strong><code>workflow_dispatch</code> recovery now checks out the tagged ref.</strong>
+  Previously the manual-rerun path checked out whatever branch the
+  user dispatched from — if <code>main</code> had moved since the tag, the
+  rebuilt wheels would have the tagged version label but <code>main</code>'s
+  source. Now every checkout uses
+  <code>${{ inputs.version }}</code> → <code>v${inputs.version}</code> for dispatch,
+  falling back to <code>github.ref</code> for the tag-push path.</li>
+</ul>
+<p>This alpha will <strong>approve the PyPI gate</strong> (unlike <code>a0</code> / <code>a1</code> which
+rejected it) to validate the PyPI trusted-publisher config + the
+GitHub Release creation job before claiming the stable <code>0.1.0</code> slot.</p>
+<h2 id="010a1-2026-05-19">0.1.0a1 — 2026-05-19<a class="headerlink" href="#010a1-2026-05-19" title="Permanent link">&para;</a></h2>
+<p>Second release-validation dry-run. <code>0.1.0a0</code> uploaded all 5 platform
+wheels to TestPyPI successfully but the sdist was rejected with
+HTTP 400 ("License-File LICENSE does not exist in distribution
+file") — maturin's sdist is built via <code>cargo package</code> rooted at
+<code>rust/</code> and didn't pick up <code>LICENSE</code> and <code>README.md</code> from the repo
+root. Added both to <code>[tool.maturin] include</code> with <code>format = ["sdist"]</code>
+so they land in the archive matching the PEP 639 metadata.</p>
+<p>The pipeline never published to PyPI on <code>0.1.0a0</code> because the
+TestPyPI failure short-circuited the run. <code>0.1.0a1</code> is the retry
+with the fix; no other changes from <code>0.1.0a0</code>.</p>
+<h2 id="010a0-2026-05-19">0.1.0a0 — 2026-05-19<a class="headerlink" href="#010a0-2026-05-19" title="Permanent link">&para;</a></h2>
+<p>Release-validation dry-run. The first tagged release in the project's
+history; exercises the full publish pipeline (multi-platform wheel
+matrix, TestPyPI auto-publish, manually-gated PyPI publish) before
+the stable 0.1.0 cut. The wheel content is identical to what 0.1.0
+will ship; only the version label differs. Anyone installing
+<code>strata-notebook==0.1.0a0</code> from PyPI will get a working install with
+the feature surface planned for 0.1.0 (described above); the alpha
+label exists so the version slot can be discarded if the dry-run
+surfaces any release-pipeline bugs.</p>
+<p>The first stable release is still planned as 0.1.0. See the section
+above for the feature inventory; this dry-run aims to validate that
+the inventory ships correctly.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.tabs", "navigation.top", "content.code.copy", "search.highlight", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
