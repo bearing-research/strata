@@ -56,7 +56,7 @@ uv run strata-notebook --host 127.0.0.1 --port 8765
 ```
 
 Then open `examples/sql_orders_report` from the Strata home page. Run
-`setup` first to create the SQLite file, then run the other cells in
+`seed` first to create the SQLite file, then run the other cells in
 order (or hit "Run all").
 
 ## Try this
