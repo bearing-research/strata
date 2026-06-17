@@ -1,6 +1,7 @@
 """Tests for WebSocket notebook execution."""
 
 import asyncio
+import sys
 import tempfile
 import threading
 import time
@@ -147,8 +148,23 @@ def client(app):
     return TestClient(app)
 
 
+# TestClient runs the ASGI app on an anyio portal thread; on macOS + Python 3.12
+# the portal teardown's thread.join() deadlocks on lingering session-manager
+# asyncio tasks after a WebSocket upgrade, hanging CI until the 6h timeout. Skip
+# the WS-upgrade tests on that one combo — they run on every other OS/version.
+# Full fix (migrate to fake-WebSocket objects) tracked in #205.
+_TESTCLIENT_WS_HANGS = sys.platform == "darwin" and sys.version_info[:2] == (3, 12)
+_WS_SKIP_REASON = (
+    "TestClient WebSocket upgrade deadlocks on macOS + Python 3.12 (anyio portal "
+    "teardown thread.join hang); covered on other platforms/versions — fake-WebSocket "
+    "migration tracked in #205."
+)
+
+
 def _ws(client, session):
     """Shorthand for ``client.websocket_connect`` against a notebook session."""
+    if _TESTCLIENT_WS_HANGS:
+        pytest.skip(_WS_SKIP_REASON)
     return client.websocket_connect(f"/v1/notebooks/ws/{session.id}")
 
 
@@ -1536,6 +1552,7 @@ def test_cell_execute_blocked_while_environment_job_running(client, notebook_ses
     assert response["payload"]["code"] == "ENVIRONMENT_BUSY"
 
 
+@pytest.mark.skipif(_TESTCLIENT_WS_HANGS, reason=_WS_SKIP_REASON)
 def test_unknown_notebook(client):
     """Connecting to a non-existent notebook should fail the upgrade."""
     with pytest.raises(Exception):
