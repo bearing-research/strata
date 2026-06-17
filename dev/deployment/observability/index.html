@@ -1754,10 +1754,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#generating-load-to-see-traces" class="md-nav__link">
+  <a href="#generating-load" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Generating load to see traces
+        Generating load
       
     </span>
   </a>
@@ -1901,10 +1901,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#generating-load-to-see-traces" class="md-nav__link">
+  <a href="#generating-load" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Generating load to see traces
+        Generating load
       
     </span>
   </a>
@@ -2035,12 +2035,20 @@ Pipe <code>docker compose logs strata</code> through <code>jq</code> for readabl
 output.</p>
 <h2 id="grafana-dashboards">Grafana dashboards<a class="headerlink" href="#grafana-dashboards" title="Permanent link">&para;</a></h2>
 <p><code>observability/grafana/provisioning/</code> is mounted into the Grafana
-container so dashboards and the Prometheus datasource are
-provisioned on container start, no clicking through the UI to
-import them.</p>
-<p>One dashboard ships out of the box
-(<code>Strata — Iceberg Serving + Observability</code>), covering the serving
-layer end to end:</p>
+container so the dashboard and the Prometheus datasource are
+provisioned on container start — no importing by hand.</p>
+<p>To open it:</p>
+<ol>
+<li>Bring up the stack (above) and go to
+   <a href="http://localhost:3000">http://localhost:3000</a> — log in with
+   <code>admin</code> / <code>admin</code>.</li>
+<li>Left nav → <strong>Dashboards</strong> → <strong>Strata — Iceberg Serving +
+   Observability</strong>.</li>
+<li>Panels stay flat until the server sees traffic. Send some load
+   (see <a href="#generating-load">Generating load</a>) and they fill in within
+   a scrape interval or two (~10s).</li>
+</ol>
+<p>The dashboard covers the serving layer end to end:</p>
 <ul>
 <li><strong>Serving</strong>: scan rate, active scans, throughput, row-group pruning,
   prefetch usage</li>
@@ -2078,17 +2086,27 @@ log aggregator. Point Strata at yours via env vars:</p>
 entry pointing at <code>&lt;strata-host&gt;:8765/metrics/prometheus</code>. There's
 no push-gateway integration; if you need to push (e.g. for jobs in
 ephemeral containers), wrap the scrape in your own sidecar.</p>
-<h2 id="generating-load-to-see-traces">Generating load to see traces<a class="headerlink" href="#generating-load-to-see-traces" title="Permanent link">&para;</a></h2>
-<p>The repo ships a small capacity sweep that hammers the server with
-realistic Iceberg scans, useful for seeing the trace structure
-under load:</p>
+<p>To use the bundled dashboard with your own Grafana, import
+<code>observability/grafana/provisioning/dashboards/strata.json</code> (Dashboards
+→ New → Import) and pick your Prometheus from the dashboard's
+<strong>Datasource</strong> dropdown — it's a template variable, not hard-wired to
+the compose stack.</p>
+<h2 id="generating-load">Generating load<a class="headerlink" href="#generating-load" title="Permanent link">&para;</a></h2>
+<p>A fresh stack is idle, so the Grafana panels and Jaeger are empty
+until the server does some work. The repo ships a small capacity
+sweep that hammers it with realistic Iceberg scans:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>benchmarks/capacity_sweep.py<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--quick<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--no-server<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--base-url<span class="w"> </span>http://localhost:8765
 </code></pre></div>
-<p>After it runs, refresh Jaeger and you'll see a handful of
-materialize spans with their full child waterfall.</p>
+<p>After it runs:</p>
+<ul>
+<li><strong>Grafana</strong> (<a href="http://localhost:3000">:3000</a>) — the scan-rate,
+  cache, and QoS panels move within a scrape interval or two.</li>
+<li><strong>Jaeger</strong> (<a href="http://localhost:16686">:16686</a>) — a handful of
+  materialize spans with their full child waterfall.</li>
+</ul>
 <h2 id="health-endpoints">Health endpoints<a class="headerlink" href="#health-endpoints" title="Permanent link">&para;</a></h2>
 <p>Two simple endpoints intentionally outside the metrics path so
 they're cheap to hit from k8s liveness/readiness probes or
