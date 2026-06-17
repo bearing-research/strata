@@ -230,7 +230,10 @@ has two steps: start the server, then call it from your code.
 uv tool install strata-notebook
 strata-notebook
 
-# 2. From another process, point the client at it:
+# 2. In your own project, install the slim client — a separate package
+#    (httpx + pyarrow only, no server deps, plain pip is fine) — and
+#    point it at the running server:
+pip install strata-client
 ```
 
 ```python
