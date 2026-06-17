@@ -74,7 +74,6 @@ See [Installation](getting-started/installation.md) for full details.
 
 ## Status
 
-Strata is at **0.1.0** — the first stable release. Both surfaces
-(Notebook and Core) are functional and shipped from PyPI. The API
-may still change between 0.x minors before 1.0; pin to a minor if
-you need stability.
+Both surfaces (Notebook and Core) are functional and shipped from
+PyPI. Strata is still pre-1.0, so the API may change between 0.x
+minors; pin to a minor if you need stability.

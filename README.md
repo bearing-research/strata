@@ -199,7 +199,7 @@ it on first read and caches the bytes locally for the session.
 
 ## Known rough edges
 
-Strata is at 0.1 and a few surfaces are explicitly exploratory. The core
+Strata is young and a few surfaces are explicitly exploratory. The core
 (materialization, artifact store, DAG, caching, headless run) is stable
 in the alpha sense; these are the bits where the API or coverage is
 still moving:
@@ -234,7 +234,7 @@ strata-notebook
 ```
 
 ```python
-from strata import StrataClient
+from strata_client import StrataClient
 
 client = StrataClient(base_url="http://localhost:8765")
 artifact = client.materialize(

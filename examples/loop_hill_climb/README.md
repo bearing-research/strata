@@ -57,8 +57,7 @@ demo below.
 
 ## Try the fork
 
-1. Add a new cell below `evolve` (use the `+` button in the UI or
-   `uv run python -m strata.notebook add-cell`).
+1. Add a new cell below `evolve` (the `+` button in the UI).
 2. Paste the following, replacing `<iter-K>` with a mid-iter iteration
    you find interesting (e.g., iter 5 if the search is still making
    progress there):

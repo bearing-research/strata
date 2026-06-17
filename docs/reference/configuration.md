@@ -163,7 +163,7 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | Variable                          | Default              | Description                                                                                  |
 | --------------------------------- | -------------------- | -------------------------------------------------------------------------------------------- |
 | `STRATA_WORKER_TOKEN`             | `None`               | Optional bearer token. When set, the worker's `/v1/*` execution endpoints require `Authorization: Bearer <token>`. `/health` stays open. See [Workers § Authentication](../notebook/workers.md#authentication). |
-| `STRATA_WORKER_MAX_INPUT_BYTES`   | `268435456` (256 MB) | Per-input download cap for the pull-model (`/v1/execute-manifest`). Reject inputs larger than this with 413. |
+| `STRATA_WORKER_MAX_INPUT_BYTES`   | `2147483648` (2 GiB) | Per-input download cap for the pull-model (`/v1/execute-manifest`). Reject inputs larger than this with 413. |
 | `STRATA_WORKER_ALLOW_LOCAL_HOSTS` | `false`              | Bypass the SSRF defense that rejects manifest URLs resolving to private / loopback IPs. Only set for tests or local dev with 127.0.0.1 build servers; production deployments leave it unset. |
 
 ## Rate Limiting
