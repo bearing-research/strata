@@ -270,3 +270,91 @@ class TestGetArtifactInfo:
 
     def test_returns_none_when_artifact_missing(self, manager):
         assert manager.get_artifact_info("nonexistent", 1) is None
+
+
+class TestPublishedArtifactsDashboard:
+    """``GET /v1/notebooks/{id}/artifacts`` (list_notebook_published_artifacts)
+    powers the per-cell registry strip: for each cell it surfaces the ready
+    registry artifacts stamped ``nb_cell=<id>``, with their names and tags
+    (the ``nb_cell`` tag itself hidden)."""
+
+    def _state(self, artifact_dir: Path):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            config=SimpleNamespace(
+                writes_enabled=True,
+                server_transforms_enabled=False,
+                service_writes_enabled=False,
+                artifact_dir=artifact_dir,
+            )
+        )
+
+    def _session(self, cell_ids: list[str]):
+        from types import SimpleNamespace
+
+        cells = [SimpleNamespace(id=cid) for cid in cell_ids]
+        return SimpleNamespace(notebook_state=SimpleNamespace(cells=cells))
+
+    def test_groups_named_and_tagged_artifacts_per_cell(self, tmp_path, monkeypatch):
+        import asyncio
+
+        import strata.server as server_module
+        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.notebook.routes import list_notebook_published_artifacts
+
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir()
+        reset_artifact_store()
+        store = get_artifact_store(artifact_dir)
+        try:
+            # Cell c1 published a ready, named, tagged model.
+            store.create_artifact("model-1", "prov-1")
+            store.finalize_artifact("model-1", 1, '{"fields": []}', 3, 64)
+            store.set_name("team/model", "model-1", 1)
+            store.set_tag("model-1", 1, "nb_cell", "c1")
+            store.set_tag("model-1", 1, "stage", "candidate")
+
+            monkeypatch.setattr(server_module, "_state", self._state(artifact_dir))
+
+            # c2 has no published artifacts and must be omitted from the map.
+            result = asyncio.run(
+                list_notebook_published_artifacts("sess-1", self._session(["c1", "c2"]))
+            )
+
+            assert set(result["cells"]) == {"c1"}
+            (item,) = result["cells"]["c1"]
+            assert item["artifact_id"] == "model-1"
+            assert item["version"] == 1
+            assert item["uri"] == "strata://artifact/model-1@v=1"
+            assert "team/model" in item["names"]
+            # The nb_cell stamp is structural plumbing, not surfaced in the strip.
+            assert item["tags"] == {"stage": "candidate"}
+        finally:
+            reset_artifact_store()
+
+    def test_empty_when_store_unreachable_in_service_mode(self, tmp_path, monkeypatch):
+        """Service mode 403s the published-tier store; the strip degrades to an
+        empty map rather than erroring (graceful until the registry refactor)."""
+        import asyncio
+        from types import SimpleNamespace
+
+        import strata.server as server_module
+        from strata.notebook.routes import list_notebook_published_artifacts
+
+        # writes disabled + no service writes ⇒ _get_artifact_store() raises 403.
+        monkeypatch.setattr(
+            server_module,
+            "_state",
+            SimpleNamespace(
+                config=SimpleNamespace(
+                    writes_enabled=False,
+                    server_transforms_enabled=False,
+                    service_writes_enabled=False,
+                    artifact_dir=tmp_path / "artifacts",
+                )
+            ),
+        )
+
+        result = asyncio.run(list_notebook_published_artifacts("sess-1", self._session(["c1"])))
+        assert result == {"cells": {}}

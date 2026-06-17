@@ -107,3 +107,197 @@ def test_shared_research_store_publish_resolve_read_isolation(tmp_path):
             _headers("team-a", "dave"),  # no artifacts:write
         )
         assert denied.status_code == 403
+
+
+def _name_ref(base: str, name: str, headers: dict) -> tuple[str, int]:
+    """Resolve a name to its (artifact_id, version)."""
+    resp = httpx.get(f"{base}/v1/names/{name}", headers=headers, timeout=30.0)
+    assert resp.status_code == 200, resp.text
+    ref = resp.json()["artifact_uri"].removeprefix("strata://artifact/")
+    art_id, version = ref.split("@v=")
+    return art_id, int(version)
+
+
+def _request_champion(base: str, art_id: str, version: int, headers: dict) -> httpx.Response:
+    return httpx.put(
+        f"{base}/v1/names/team/model/aliases/champion",
+        json={"artifact_id": art_id, "version": version},
+        headers=headers,
+        timeout=30.0,
+    )
+
+
+def test_protected_alias_approval_requires_scope_and_distinct_approver(tmp_path):
+    """The registry governance path for the shared store: a protected alias
+    (``champion``) queues for approval, and deciding it requires the
+    ``admin:registry`` scope *and* a distinct approver — the requester can't
+    self-approve. This is the multi-tenant security claim, untested until now."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+
+    with run_server_with_context(
+        cache_dir,
+        artifact_dir,
+        "service",
+        auth_mode="trusted_proxy",
+        proxy_token=PROXY_TOKEN,
+        multi_tenant_enabled=True,
+        service_writes_enabled=True,
+        registry_protected_aliases=["champion"],
+    ) as ctx:
+        base = ctx.base_url
+        model = pa.table({"weight": [0.1, 0.2, 0.3]})
+
+        # Researcher alice publishes the model and requests the protected alias.
+        assert (
+            _publish(
+                base, model, "team/model", _headers("team-a", "alice", "artifacts:write")
+            ).status_code
+            == 200
+        )
+        art_id, version = _name_ref(base, "team/model", _headers("team-a", "alice"))
+
+        req = _request_champion(
+            base, art_id, version, _headers("team-a", "alice", "artifacts:write")
+        )
+        assert req.status_code == 202  # protected → queued, not applied
+        assert req.json()["status"] == "pending"
+
+        body = {"name": "team/model", "alias": "champion"}
+
+        # (1) Approve without admin:registry → 403.
+        no_scope = httpx.post(
+            f"{base}/v1/registry/pending/approve", json=body, headers=_headers("team-a", "frank")
+        )
+        assert no_scope.status_code == 403
+
+        # (2) The requester cannot self-approve, even with admin:registry → 403.
+        self_app = httpx.post(
+            f"{base}/v1/registry/pending/approve",
+            json=body,
+            headers=_headers("team-a", "alice", "admin:registry"),
+        )
+        assert self_app.status_code == 403
+        assert "Separation of duty" in self_app.json()["detail"]
+
+        # The alias is still not applied.
+        with httpx.Client() as c:
+            still_pending = c.get(
+                f"{base}/v1/names/team/model/aliases/champion", headers=_headers("team-a", "bob")
+            )
+            assert still_pending.status_code == 404
+
+        # (3) A distinct approver with admin:registry applies it.
+        ok = httpx.post(
+            f"{base}/v1/registry/pending/approve",
+            json=body,
+            headers=_headers("team-a", "frank", "admin:registry"),
+        )
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["status"] == "approved"
+
+        # Now champion resolves for the team.
+        resolved = httpx.get(
+            f"{base}/v1/names/team/model/aliases/champion", headers=_headers("team-a", "bob")
+        )
+        assert resolved.status_code == 200
+
+
+def test_protected_alias_admin_star_is_break_glass_self_approve(tmp_path):
+    """``admin:*`` is the break-glass scope: it satisfies admin:registry *and*
+    waives separation of duty, so a superadmin can self-approve their own
+    protected-alias request (the one-operator escape hatch)."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+
+    with run_server_with_context(
+        cache_dir,
+        artifact_dir,
+        "service",
+        auth_mode="trusted_proxy",
+        proxy_token=PROXY_TOKEN,
+        multi_tenant_enabled=True,
+        service_writes_enabled=True,
+        registry_protected_aliases=["champion"],
+    ) as ctx:
+        base = ctx.base_url
+        model = pa.table({"weight": [1.0]})
+        admin = _headers("team-a", "root", "admin:*")
+
+        assert _publish(base, model, "team/model", admin).status_code == 200
+        art_id, version = _name_ref(base, "team/model", admin)
+        assert _request_champion(base, art_id, version, admin).status_code == 202
+
+        # Same principal self-approves — allowed because admin:* is break-glass.
+        ok = httpx.post(
+            f"{base}/v1/registry/pending/approve",
+            json={"name": "team/model", "alias": "champion"},
+            headers=admin,
+        )
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["status"] == "approved"
+
+        resolved = httpx.get(f"{base}/v1/names/team/model/aliases/champion", headers=admin)
+        assert resolved.status_code == 200
+
+
+def test_reject_requires_registry_scope(tmp_path):
+    """Rejecting a pending change is also a governance action — a tenant member
+    without ``admin:registry`` can't quietly drop a colleague's promotion."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+
+    with run_server_with_context(
+        cache_dir,
+        artifact_dir,
+        "service",
+        auth_mode="trusted_proxy",
+        proxy_token=PROXY_TOKEN,
+        multi_tenant_enabled=True,
+        service_writes_enabled=True,
+        registry_protected_aliases=["champion"],
+    ) as ctx:
+        base = ctx.base_url
+        assert (
+            _publish(
+                base,
+                pa.table({"w": [1.0]}),
+                "team/model",
+                _headers("team-a", "alice", "artifacts:write"),
+            ).status_code
+            == 200
+        )
+        art_id, version = _name_ref(base, "team/model", _headers("team-a", "alice"))
+        assert (
+            _request_champion(
+                base, art_id, version, _headers("team-a", "alice", "artifacts:write")
+            ).status_code
+            == 202
+        )
+
+        body = {"name": "team/model", "alias": "champion"}
+        denied = httpx.post(
+            f"{base}/v1/registry/pending/reject", json=body, headers=_headers("team-a", "mallory")
+        )
+        assert denied.status_code == 403
+
+        # An approver can reject it.
+        ok = httpx.post(
+            f"{base}/v1/registry/pending/reject",
+            json=body,
+            headers=_headers("team-a", "frank", "admin:registry"),
+        )
+        assert ok.status_code == 200
+        assert ok.json()["status"] == "rejected"
+        # And the alias never resolves — the change was discarded.
+        gone = httpx.get(
+            f"{base}/v1/names/team/model/aliases/champion",
+            headers=_headers("team-a", "alice"),
+        )
+        assert gone.status_code == 404

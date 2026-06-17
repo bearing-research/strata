@@ -4671,7 +4671,7 @@ async def registry_pending():
     """List protected-alias changes awaiting approval."""
     from strata.auth import get_principal
 
-    store = _get_artifact_store()
+    store = _get_artifact_store(allow_read=True)
     principal = get_principal()
     tenant_id = principal.tenant if principal else None
     return {"pending": store.list_pending_changes(tenant=tenant_id)}
@@ -4709,7 +4709,10 @@ async def approve_pending(request: PendingDecisionRequest):
     """
     principal = _require_registry_approver()
 
-    store = _get_artifact_store()
+    # Applying the change is a registry write — open the service-mode write gate
+    # (``service_writes_enabled``). Authorization is the approver scope above,
+    # not ``artifacts:write``: approvers govern, they need not be publishers.
+    store = _get_artifact_store(allow_write=True)
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
     is_superadmin = principal is not None and principal.has_scope("admin:*")
@@ -4738,7 +4741,8 @@ async def reject_pending(request: PendingDecisionRequest):
     """
     principal = _require_registry_approver()
 
-    store = _get_artifact_store()
+    # Discarding the change mutates the pending queue — same write gate as approve.
+    store = _get_artifact_store(allow_write=True)
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 
