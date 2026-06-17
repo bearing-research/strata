@@ -705,15 +705,21 @@ class StressDriver:
         estimated_bytes = 0
 
         try:
-            # POST /v1/scan
+            # POST /v1/materialize (scan@v1)
             request_body = {
-                "table_uri": query["table_uri"],
-                "snapshot_id": query["snapshot_id"],
-                "columns": query["columns"],
-                "filters": query["filters"],
+                "inputs": [query["table_uri"]],
+                "transform": {
+                    "executor": "scan@v1",
+                    "params": {
+                        "snapshot_id": query["snapshot_id"],
+                        "columns": query["columns"],
+                        "filters": query["filters"],
+                    },
+                },
+                "mode": "stream",
             }
 
-            response = await self._client.post("/v1/scan", json=request_body)
+            response = await self._client.post("/v1/materialize", json=request_body)
             planning_end_time = time.perf_counter()
 
             if response.status_code == 503:
@@ -721,13 +727,12 @@ class StressDriver:
                 error = "Server at capacity (503)"
             else:
                 response.raise_for_status()
-                scan_info = response.json()
-                scan_id = scan_info["scan_id"]
-                num_tasks = scan_info.get("num_tasks", 0)
-                estimated_bytes = scan_info.get("estimated_bytes", 0)
+                stream_url = response.json()["stream_url"]
+                # num_tasks / estimated_bytes aren't in the materialize response;
+                # they stay at their 0 defaults.
 
-                # GET /v1/scan/{scan_id}/batches
-                async with self._client.stream("GET", f"/v1/scan/{scan_id}/batches") as stream:
+                # GET the stream
+                async with self._client.stream("GET", stream_url) as stream:
                     stream.raise_for_status()
 
                     first_chunk = True
@@ -754,13 +759,8 @@ class StressDriver:
         except Exception as e:
             status = RequestStatus.CLIENT_ERROR
             error = str(e)[:200]
-        finally:
-            if scan_id:
-                try:
-                    await self._client.delete(f"/v1/scan/{scan_id}")
-                except Exception:
-                    pass
-
+        # No /v1/scan DELETE in the unified API — materialize streams self-clean
+        # via the stream-state TTL.
         end_time = time.perf_counter()
 
         latency_total_ms = (end_time - start_time) * 1000
@@ -959,27 +959,29 @@ class StressDriver:
         for table_info in self.tables_info:
             table_name = table_info["name"]
             try:
-                # Create scan (loads metadata)
+                # Materialize (loads metadata)
                 start = time.perf_counter()
                 response = await self._client.post(
-                    "/v1/scan",
+                    "/v1/materialize",
                     json={
-                        "table_uri": table_info["table_uri"],
-                        "snapshot_id": table_info["snapshot_id"],
-                        "columns": ["id"],  # Minimal projection
+                        "inputs": [table_info["table_uri"]],
+                        "transform": {
+                            "executor": "scan@v1",
+                            "params": {
+                                "snapshot_id": table_info["snapshot_id"],
+                                "columns": ["id"],  # Minimal projection
+                            },
+                        },
+                        "mode": "stream",
                     },
                     timeout=60.0,  # Longer timeout for cold cache
                 )
                 if response.status_code == 200:
-                    scan_id = response.json()["scan_id"]
+                    stream_url = response.json()["stream_url"]
                     # Consume a few bytes to trigger fetch
-                    async with self._client.stream(
-                        "GET", f"/v1/scan/{scan_id}/batches", timeout=60.0
-                    ) as stream:
+                    async with self._client.stream("GET", stream_url, timeout=60.0) as stream:
                         async for chunk in stream.aiter_bytes(chunk_size=4096):
                             break  # Just read first chunk
-                    # Clean up
-                    await self._client.delete(f"/v1/scan/{scan_id}")
                     elapsed = time.perf_counter() - start
                     print(f"    {table_name}: warmed in {elapsed:.2f}s")
                 else:

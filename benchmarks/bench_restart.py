@@ -201,18 +201,21 @@ def run_scan(client, table_uri: str, metrics_before: dict | None = None) -> Benc
 
     total_start = time.perf_counter()
 
-    # Phase 1: Planning (POST /scan)
+    # Phase 1: Planning (POST /v1/materialize, scan@v1)
     plan_start = time.perf_counter()
-    request_body = {"table_uri": table_uri}
-    response = client._client.post("/v1/scan", json=request_body)
+    request_body = {
+        "inputs": [table_uri],
+        "transform": {"executor": "scan@v1", "params": {}},
+        "mode": "stream",
+    }
+    response = client._client.post("/v1/materialize", json=request_body)
     response.raise_for_status()
-    scan_info = response.json()
-    scan_id = scan_info["scan_id"]
+    stream_url = response.json()["stream_url"]
     planning_latency_ms = (time.perf_counter() - plan_start) * 1000
 
-    # Phase 2: Data fetch (GET /batches)
+    # Phase 2: Data fetch (GET the stream)
     fetch_start = time.perf_counter()
-    response = client._client.get(f"/v1/scan/{scan_id}/batches")
+    response = client._client.get(stream_url)
     response.raise_for_status()
     batches = []
     if response.content:
@@ -220,12 +223,8 @@ def run_scan(client, table_uri: str, metrics_before: dict | None = None) -> Benc
         batches = list(reader)
     fetch_latency_ms = (time.perf_counter() - fetch_start) * 1000
 
-    # Cleanup
-    try:
-        client._client.delete(f"/v1/scan/{scan_id}")
-    except Exception:
-        pass
-
+    # No cleanup: materialize streams are freed server-side by the stream-state
+    # TTL once consumed (the old /v1/scan DELETE is gone).
     total_latency_ms = (time.perf_counter() - total_start) * 1000
     total_rows = sum(b.num_rows for b in batches)
     metrics_after = client.metrics()
