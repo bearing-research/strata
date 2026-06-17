@@ -1,7 +1,6 @@
 """Tests for parallel row group fetching."""
 
 import threading
-import time
 
 import uvicorn
 
@@ -81,19 +80,14 @@ class TestPrometheusMetrics:
 
     def test_prometheus_includes_fetch_parallelism(self, tmp_path):
         """Test Prometheus endpoint includes fetch parallelism metrics."""
-        import socket
-
         import requests
 
         import strata.server as server_module
         from strata.config import StrataConfig
         from strata.server import ServerState, app
+        from tests.conftest import find_free_port, wait_for_server
 
-        # Find a free port
-        sock = socket.socket()
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-        sock.close()
+        port = find_free_port()
 
         config = StrataConfig(
             host="127.0.0.1",
@@ -117,7 +111,9 @@ class TestPrometheusMetrics:
             daemon=True,
         )
         server_thread.start()
-        time.sleep(1)
+        # Poll /health until the server is actually listening — a fixed sleep
+        # races a slow/loaded runner (Windows refused the connection here).
+        assert wait_for_server(port), "server did not become ready"
 
         try:
             response = requests.get(f"http://127.0.0.1:{port}/metrics/prometheus")
