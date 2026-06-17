@@ -26,6 +26,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from strata.adaptive_concurrency import ResizableLimiter
+from strata.api.dependencies import (
+    CurrentPrincipal,
+    ReadStore,
+    RegistryDecisionContext,
+)
 from strata.auth import (
     AuthError,
     get_principal,
@@ -4605,6 +4610,8 @@ async def delete_tag(artifact_id: str, version: int, key: str):
 
 @app.get("/v1/registry/audit")
 async def registry_audit(
+    store: ReadStore,
+    principal: CurrentPrincipal,
     name: str | None = None,
     artifact_id: str | None = None,
     limit: int = 100,
@@ -4615,10 +4622,6 @@ async def registry_audit(
     history. ``admin:*`` (and personal mode, where there is no principal)
     sees the whole store — every other registry route scopes the same way.
     """
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_read=True)
-    principal = get_principal()
     if principal is None or principal.has_scope("admin:*"):
         entries = store.read_audit(name=name, artifact_id=artifact_id, limit=limit)
     else:
@@ -4629,15 +4632,11 @@ async def registry_audit(
 
 
 @app.get("/v1/registry/summary")
-async def registry_summary():
+async def registry_summary(store: ReadStore, principal: CurrentPrincipal):
     """Registry state for the dashboard names table: each name with its
     aliases (``alias -> version``), current version, and that version's tags.
     One call instead of ``/v1/names`` + a per-name alias fetch. Tenant-scoped
     like the other registry reads (personal mode / ``admin:*`` see all)."""
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_read=True)
-    principal = get_principal()
     tenant = None if (principal is None or principal.has_scope("admin:*")) else principal.tenant
 
     aliases_by_name: dict[str, dict[str, int]] = {}
@@ -4667,12 +4666,8 @@ class PendingDecisionRequest(BaseModel):
 
 
 @app.get("/v1/registry/pending")
-async def registry_pending():
+async def registry_pending(store: ReadStore, principal: CurrentPrincipal):
     """List protected-alias changes awaiting approval."""
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_read=True)
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
     return {"pending": store.list_pending_changes(tenant=tenant_id)}
 
@@ -4700,19 +4695,14 @@ def _require_registry_approver():
 
 
 @app.post("/v1/registry/pending/approve")
-async def approve_pending(request: PendingDecisionRequest):
+async def approve_pending(request: PendingDecisionRequest, decision: RegistryDecisionContext):
     """Apply a pending alias change; the approver becomes the audit actor.
 
     Requires the ``admin:registry`` scope under trusted-proxy auth, and
     enforces separation of duty — the requester cannot self-approve unless
     they hold the ``admin:*`` break-glass scope.
     """
-    principal = _require_registry_approver()
-
-    # Applying the change is a registry write — open the service-mode write gate
-    # (``service_writes_enabled``). Authorization is the approver scope above,
-    # not ``artifacts:write``: approvers govern, they need not be publishers.
-    store = _get_artifact_store(allow_write=True)
+    principal, store = decision
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
     is_superadmin = principal is not None and principal.has_scope("admin:*")
@@ -4733,16 +4723,13 @@ async def approve_pending(request: PendingDecisionRequest):
 
 
 @app.post("/v1/registry/pending/reject")
-async def reject_pending(request: PendingDecisionRequest):
+async def reject_pending(request: PendingDecisionRequest, decision: RegistryDecisionContext):
     """Discard a pending alias change (audited).
 
     Requires the ``admin:registry`` scope under trusted-proxy auth so a
     tenant member cannot quietly drop a colleague's pending promotion.
     """
-    principal = _require_registry_approver()
-
-    # Discarding the change mutates the pending queue — same write gate as approve.
-    store = _get_artifact_store(allow_write=True)
+    principal, store = decision
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 
