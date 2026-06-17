@@ -45,6 +45,45 @@ def read_store() -> ArtifactStore:
 ReadStore = Annotated["ArtifactStore", Depends(read_store)]
 
 
+def write_store() -> ArtifactStore:
+    """Artifact store for a write endpoint (put / set_name / set_alias / tags).
+
+    Opens in personal mode, or in service mode with ``service_writes_enabled``
+    AND the ``artifacts:write`` scope (authenticated write-back) — the write
+    stamps the caller's tenant/principal, so it lands in their namespace and
+    can't target another tenant. Binds the mode gate and the scope check
+    together so a write route can't open one without the other.
+
+    Note: the registry approve/reject routes deliberately do NOT use this — a
+    governance decision opens the write *mode* gate but is authorized by the
+    approver scope, not ``artifacts:write`` (see ``registry_decision``).
+    """
+    from strata.server import _authorize_artifact_write, _get_artifact_store
+
+    store = _get_artifact_store(allow_write=True)
+    _authorize_artifact_write()
+    return store
+
+
+WriteStore = Annotated["ArtifactStore", Depends(write_store)]
+
+
+def current_tenant() -> str | None:
+    """Tenant filter for direct artifact endpoints, or ``None`` for unscoped.
+
+    Under trusted-proxy auth, scopes reads/writes to the caller's tenant
+    (``admin:*`` and tenantless legacy artifacts stay unscoped); ``None`` when
+    auth is off. The handler passes this to the store and to
+    ``_ensure_artifact_access`` on the concrete record.
+    """
+    from strata.server import _get_artifact_request_tenant
+
+    return _get_artifact_request_tenant()
+
+
+CurrentTenant = Annotated[str | None, Depends(current_tenant)]
+
+
 def current_principal() -> Principal | None:
     """The request's authenticated principal, or ``None`` when auth is disabled.
 
