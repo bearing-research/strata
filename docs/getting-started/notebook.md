@@ -47,6 +47,19 @@ parent directory under the notebook storage root. Strata creates a
 directory containing `notebook.toml`, a per-notebook `pyproject.toml`,
 a `cells/` folder, and an empty first cell ready to type into.
 
+By default the storage root is `~/.strata/notebooks` — **not** the
+directory you launched from — so new notebooks land there regardless of
+your shell's working directory. To put them somewhere else (the current
+directory is a common choice), start the server with `--notebook-dir`:
+
+```bash
+strata-notebook --notebook-dir .          # current directory
+strata-notebook --notebook-dir ~/work/nb  # or any path
+```
+
+(or set `STRATA_NOTEBOOK_STORAGE_DIR`). The server prints the active
+location on startup.
+
 Each notebook gets its own Python environment, managed by `uv`, so
 installing pandas in one notebook doesn't touch another. Everything
 autosaves: source goes to `cells/*.py`, runtime state to `.strata/`.
@@ -259,7 +272,8 @@ browse them in the UI, stop the running server first (Ctrl+C), then
 point the storage root at `examples/`:
 
 ```bash
-STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples uv run strata-notebook
+strata-notebook --notebook-dir ./examples
+# equivalently: STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples uv run strata-notebook
 ```
 
 (For Docker, edit `docker-compose.yml` to mount `./examples:/data/notebooks`

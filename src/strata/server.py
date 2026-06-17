@@ -1296,6 +1296,7 @@ async def lifespan(app: FastAPI):
         "server_started",
         host=config.host,
         port=config.port,
+        notebook_storage_dir=str(config.notebook_storage_dir),
         warmup_ms=warmup_times.get("total_ms", 0),
         warmup_imports_ms=warmup_times.get("imports_ms", 0),
         warmup_sqlite_ms=warmup_times.get("sqlite_ms", 0),
@@ -6932,15 +6933,55 @@ def _mount_frontend(application: FastAPI) -> None:
 _mount_frontend(app)
 
 
-def main():
+def _build_server_arg_parser():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="strata-notebook",
+        description="Run the Strata notebook server.",
+    )
+    parser.add_argument(
+        "--notebook-dir",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Where new notebooks are created and discovered. Default: "
+            "~/.strata/notebooks (or $STRATA_NOTEBOOK_STORAGE_DIR). Pass '.' "
+            "to use the current directory."
+        ),
+    )
+    return parser
+
+
+def _apply_server_cli_overrides(args) -> None:
+    """Thread CLI flags into the environment so both this process and the app's
+    config load (in the lifespan) pick them up. The flag wins over an existing
+    ``STRATA_NOTEBOOK_STORAGE_DIR`` — it's the more explicit signal.
+    """
+    import os
+    from pathlib import Path
+
+    if args.notebook_dir is not None:
+        os.environ["STRATA_NOTEBOOK_STORAGE_DIR"] = str(
+            Path(args.notebook_dir).expanduser().resolve()
+        )
+
+
+def main(argv: list[str] | None = None):
     """Run the server."""
     import uvicorn
 
     from strata._uv_runtime import assert_uv_managed_runtime
 
+    args = _build_server_arg_parser().parse_args(argv)
+    _apply_server_cli_overrides(args)
+
     assert_uv_managed_runtime()
 
     config = StrataConfig.load()
+    # Make the notebook location obvious — it's a common surprise that new
+    # notebooks land in ~/.strata/notebooks, not the current directory.
+    print(f"Strata: new notebooks are created in {config.notebook_storage_dir}")
     uvicorn.run(
         "strata.server:app",
         host=config.host,
