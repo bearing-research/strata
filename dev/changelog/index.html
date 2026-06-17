@@ -2668,14 +2668,23 @@ exhaustive commit history.</p>
   scan → transform → train → put workflow). Unknown transforms fail fast
   with a 400 listing what's available, and a <code>name=</code> on an async
   materialize is now set when the build completes.</li>
-<li><strong>Artifact store integrity hardening</strong> (#123): artifacts are validated at
+<li>
+<p><strong>Artifact store integrity hardening</strong> (#123): artifacts are validated at
   finalize time (the blob must be exactly one readable Arrow IPC stream
   matching the recorded row count — a mismatch becomes a <code>failed</code> artifact,
   never a serveable one); <code>refresh=True</code> now rebuilds the <em>same</em> artifact as
   a new version and supersedes the old one instead of forking a parallel
   identity the cache never returns; builds stuck in <code>building</code> are swept to
   <code>failed</code> at startup; and <code>strata artifact verify</code> checks a whole store's
-  blobs against metadata after the fact.</li>
+  blobs against metadata after the fact.</p>
+</li>
+<li>
+<p><strong><code>strata-notebook --notebook-dir</code></strong>: control where new notebooks are
+  created. They default to <code>~/.strata/notebooks</code> — not the directory you
+  launched from — so pass <code>--notebook-dir .</code> to use the current directory, or
+  any path (equivalently, set <code>STRATA_NOTEBOOK_STORAGE_DIR</code>). The server now
+  also prints the active notebook location on startup.</p>
+</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
