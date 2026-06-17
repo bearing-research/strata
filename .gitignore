@@ -235,6 +235,13 @@ experiments/**/.strata/
 experiments/**/uv.lock
 experiments/**/*.db
 experiments/**/*.duckdb
+# Experiment runtime/scratch: per-server cache + artifact blobs (named
+# .strata-server-<thing>/, not .strata/) and the Arrow blobs they hold —
+# hundreds of MB, GitHub-rejected. Experiment *code* (e.g. circle_packing_26/)
+# stays tracked; only this generated state is ignored.
+experiments/**/.strata-server*/
+experiments/**/*.arrow
+experiments/**/*.arrowstream
 
 # Frontend build output, copied into the package by the release
 # workflow. Source of truth lives at frontend/dist/.

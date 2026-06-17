@@ -85,13 +85,21 @@ output.
 ## Grafana dashboards
 
 `observability/grafana/provisioning/` is mounted into the Grafana
-container so dashboards and the Prometheus datasource are
-provisioned on container start, no clicking through the UI to
-import them.
+container so the dashboard and the Prometheus datasource are
+provisioned on container start — no importing by hand.
 
-One dashboard ships out of the box
-(`Strata — Iceberg Serving + Observability`), covering the serving
-layer end to end:
+To open it:
+
+1. Bring up the stack (above) and go to
+   [http://localhost:3000](http://localhost:3000) — log in with
+   `admin` / `admin`.
+2. Left nav → **Dashboards** → **Strata — Iceberg Serving +
+   Observability**.
+3. Panels stay flat until the server sees traffic. Send some load
+   (see [Generating load](#generating-load)) and they fill in within
+   a scrape interval or two (~10s).
+
+The dashboard covers the serving layer end to end:
 
 - **Serving**: scan rate, active scans, throughput, row-group pruning,
   prefetch usage
@@ -136,11 +144,17 @@ entry pointing at `<strata-host>:8765/metrics/prometheus`. There's
 no push-gateway integration; if you need to push (e.g. for jobs in
 ephemeral containers), wrap the scrape in your own sidecar.
 
-## Generating load to see traces
+To use the bundled dashboard with your own Grafana, import
+`observability/grafana/provisioning/dashboards/strata.json` (Dashboards
+→ New → Import) and pick your Prometheus from the dashboard's
+**Datasource** dropdown — it's a template variable, not hard-wired to
+the compose stack.
 
-The repo ships a small capacity sweep that hammers the server with
-realistic Iceberg scans, useful for seeing the trace structure
-under load:
+## Generating load
+
+A fresh stack is idle, so the Grafana panels and Jaeger are empty
+until the server does some work. The repo ships a small capacity
+sweep that hammers it with realistic Iceberg scans:
 
 ```bash
 uv run python benchmarks/capacity_sweep.py \
@@ -149,8 +163,12 @@ uv run python benchmarks/capacity_sweep.py \
   --base-url http://localhost:8765
 ```
 
-After it runs, refresh Jaeger and you'll see a handful of
-materialize spans with their full child waterfall.
+After it runs:
+
+- **Grafana** ([:3000](http://localhost:3000)) — the scan-rate,
+  cache, and QoS panels move within a scrape interval or two.
+- **Jaeger** ([:16686](http://localhost:16686)) — a handful of
+  materialize spans with their full child waterfall.
 
 ## Health endpoints
 
