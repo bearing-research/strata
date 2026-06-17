@@ -39,6 +39,16 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
 
+# Serialize gh-pages deploys per ref. Two main pushes landing close together
+# (e.g. back-to-back docs PRs) otherwise race on the `mike` gh-pages push and
+# one is rejected non-fast-forward. Keyed by ref so main deploys queue behind
+# each other (cancel-in-progress=false → no docs update is dropped), while PR
+# `--strict` builds — on their own per-PR ref — cancel stale runs for fast
+# feedback and never contend with a deploy.
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Default to read-only; the build job escalates to contents: write only
 # because the push paths run `mike`, which pushes the rendered site back
 # to the gh-pages branch. PR runs hit only the read-only `mkdocs build
