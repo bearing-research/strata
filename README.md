@@ -35,6 +35,8 @@ blobs or execution metadata bleeding into the history.
 - **reactive:** edit a cell, the cascade re-runs only the downstream cells that depend on it
 - **dag-from-ast:** Strata reads each cell's AST to wire upstream/downstream — no decorators, no manual edges
 - **dag-view:** the dependency graph renders alongside the cells — double-click any node to jump to its source
+- **ambient client (0.3.0):** every cell gets a ready `strata` client in its namespace — publish and consume artifacts across cells with no boilerplate
+- **registry in the UI (0.3.0):** promote and approve named artifacts from a notebook dashboard — pending-approval queue, alias chips, and `model ← features ← scan ← table` lineage
 - **git-friendly:** notebooks are plain `.py` files plus a TOML manifest — readable diffs, no JSON blobs
 - **prompt cells:** LLM calls are first-class DAG nodes, `{{ variable }}` interpolation from upstream cells, cached by template + inputs + model config
 - **SQL cells:** named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery
@@ -46,6 +48,7 @@ blobs or execution metadata bleeding into the history.
 - **auto-install:** missing import in a cell? one click adds the package via uv and re-runs
 - **headless:** `strata run ./my-notebook` for CI and scheduled execution — same DAG, same cache
 - **also a library:** the materialization layer is exposed via HTTP + a `StrataClient`, usable from any Python process
+- **slim client package (0.3.0):** `pip install strata-client` pulls just httpx + pyarrow — use the store from any pipeline or service, no server install
 - **production-ready:** Iceberg-aware scans, trusted-proxy auth, multi-tenancy, S3 / GCS / Azure / local blob backends
 
 ## Quick Start
