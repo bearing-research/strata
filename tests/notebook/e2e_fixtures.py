@@ -6,14 +6,16 @@ and collecting/asserting on WebSocket message sequences.
 
 from __future__ import annotations
 
+import json
 import tempfile
+from collections import deque
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from strata.notebook.routes import get_session_manager
@@ -30,6 +32,58 @@ from strata.notebook.ws import (
 # ============================================================================
 # WebSocket Test Helper
 # ============================================================================
+
+
+class FakeNotebookWebSocket:
+    """In-process stand-in for a Starlette ``WebSocket`` for notebook tests.
+
+    The notebook WS handlers only ever call ``send_text`` (the handlers
+    broadcast through ``_broadcast_message`` / ``_send_message``, which both
+    bottom out at ``send_text``); ``notebook_websocket`` additionally calls
+    ``accept``, ``close``, ``receive_text``, and reads ``headers``. This fake
+    implements exactly that surface so tests can drive handlers (and the
+    endpoint) directly in the event loop — no anyio portal, no real upgrade.
+
+    Drive an inbound message script by pushing raw JSON strings onto
+    ``inbound``; ``receive_text`` pops them in order and raises
+    ``WebSocketDisconnect`` once the queue drains (mirroring a client that
+    closed the socket), which is how ``notebook_websocket`` exits its loop.
+    """
+
+    def __init__(
+        self,
+        *,
+        inbound: list[str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.inbound: deque[str] = deque(inbound or [])
+        self.headers: dict[str, str] = headers or {}
+        self.raw_sent: list[str] = []
+        self.accepted = False
+        self.closed: tuple[int, str] | None = None
+
+    async def accept(self) -> None:
+        self.accepted = True
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        self.closed = (code, reason)
+
+    async def send_text(self, text: str) -> None:
+        self.raw_sent.append(text)
+
+    async def receive_text(self) -> str:
+        if not self.inbound:
+            raise WebSocketDisconnect(code=1000)
+        return self.inbound.popleft()
+
+    @property
+    def sent(self) -> list[dict[str, Any]]:
+        """Every sent frame, parsed from JSON, in emission order."""
+        return [json.loads(text) for text in self.raw_sent]
+
+    def frames_of(self, msg_type: str) -> list[dict[str, Any]]:
+        """Return all sent frames whose ``type`` matches ``msg_type``."""
+        return [frame for frame in self.sent if frame.get("type") == msg_type]
 
 
 class WebSocketTestHelper:

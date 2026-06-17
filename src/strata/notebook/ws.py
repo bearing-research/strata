@@ -536,6 +536,46 @@ def _cancel_pending_grace_teardown(notebook_id: str) -> None:
 # ============================================================================
 
 
+def _ws_caller_identity(websocket: WebSocket) -> str | None:
+    """Resolve the calling user's identity from the WS upgrade headers.
+
+    Mirrors ``routes._caller_identity`` for the WS surface: reads the
+    configured ``personal_mode_user_header`` from the request headers and
+    returns the stripped value (or ``None`` when scoping is unconfigured
+    or the header is absent/blank). The single-user case (header unset)
+    returns ``None`` so the gate passes through unchanged.
+    """
+    try:
+        from strata.server import get_state
+
+        header_name = get_state().config.personal_mode_user_header
+    except RuntimeError:
+        return None
+    if not header_name:
+        return None
+    return (websocket.headers.get(header_name) or "").strip() or None
+
+
+def _ws_owner_allowed(owner: str | None, caller: str | None) -> bool:
+    """Return whether ``caller`` may open a WS for an ``owner``-scoped notebook.
+
+    The WS twin of ``routes._require_owner`` (which raises) — same rules,
+    expressed as a boolean so the handler closes with 1008 on ``False``:
+
+    - Unowned notebooks (``owner is None``) → allow (legacy / serviced).
+    - Per-user scoping configured but no caller identity → deny, so the
+      bypass can't be "just don't send the header."
+    - Owned notebook with a mismatched caller → deny.
+    """
+    from strata.notebook.routes import _user_scoping_enabled
+
+    if owner is None:
+        return True
+    if caller is None:
+        return not _user_scoping_enabled()
+    return owner == caller
+
+
 @router.websocket("/ws/{notebook_id}")
 async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     """WebSocket endpoint for real-time notebook updates.
@@ -596,25 +636,9 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     # the header." Single-user deployments (header unset) keep their
     # existing pass-through behavior.
     owner = session.notebook_state.owner
-    if owner is not None:
-        try:
-            from strata.server import get_state
-
-            header_name = get_state().config.personal_mode_user_header
-        except RuntimeError:
-            header_name = None
-        scoping_enabled = bool(header_name)
-        caller: str | None
-        if header_name:
-            caller = (websocket.headers.get(header_name) or "").strip() or None
-        else:
-            caller = None
-        if caller is None and scoping_enabled:
-            await websocket.close(code=1008, reason="Notebook not found")
-            return
-        if caller is not None and owner != caller:
-            await websocket.close(code=1008, reason="Notebook not found")
-            return
+    if not _ws_owner_allowed(owner, _ws_caller_identity(websocket)):
+        await websocket.close(code=1008, reason="Notebook not found")
+        return
 
     # Accept connection
     await websocket.accept()
