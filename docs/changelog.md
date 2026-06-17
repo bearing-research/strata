@@ -7,6 +7,8 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
+## Unreleased
+
 ## 0.3.0 — 2026-06-17
 
 ### Security
