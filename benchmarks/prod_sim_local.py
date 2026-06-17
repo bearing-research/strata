@@ -680,25 +680,30 @@ class AsyncLoadDriver:
         planning_time_server_ms = 0.0
 
         try:
-            # Phase 1: POST /v1/scan (planning)
+            # Phase 1: POST /v1/materialize (scan@v1 planning)
             request_body = {
-                "table_uri": query["table_uri"],
-                "snapshot_id": query["snapshot_id"],
-                "columns": query["columns"],
-                "filters": query["filters"],
+                "inputs": [query["table_uri"]],
+                "transform": {
+                    "executor": "scan@v1",
+                    "params": {
+                        "snapshot_id": query["snapshot_id"],
+                        "columns": query["columns"],
+                        "filters": query["filters"],
+                    },
+                },
+                "mode": "stream",
             }
 
-            response = await self._client.post("/v1/scan", json=request_body)
+            response = await self._client.post("/v1/materialize", json=request_body)
             planning_end_time = time.perf_counter()
             response.raise_for_status()
             scan_info = response.json()
-            scan_id = scan_info["scan_id"]
-            num_tasks = scan_info.get("num_tasks", 0)
-            estimated_bytes = scan_info.get("estimated_bytes", 0)
-            planning_time_server_ms = scan_info.get("planning_time_ms", 0.0)
+            stream_url = scan_info["stream_url"]
+            # num_tasks / estimated_bytes / server planning time aren't in the
+            # materialize response; they stay at their 0 defaults.
 
-            # Phase 2 & 3: GET /v1/scan/{scan_id}/batches (TTFB + streaming)
-            async with self._client.stream("GET", f"/v1/scan/{scan_id}/batches") as stream:
+            # Phase 2 & 3: GET the stream (TTFB + streaming)
+            async with self._client.stream("GET", stream_url) as stream:
                 stream.raise_for_status()
 
                 first_chunk = True
@@ -740,14 +745,8 @@ class AsyncLoadDriver:
         except Exception as e:
             status = RequestStatus.CLIENT_ERROR
             error = str(e)
-        finally:
-            # Always try to delete the scan to prevent resource leaks
-            if scan_id:
-                try:
-                    await self._client.delete(f"/v1/scan/{scan_id}")
-                except Exception:
-                    pass
-
+        # No explicit cleanup: materialize streams are freed server-side by the
+        # stream-state TTL once consumed (the old /v1/scan DELETE is gone).
         end_time = time.perf_counter()
 
         # Calculate detailed latencies

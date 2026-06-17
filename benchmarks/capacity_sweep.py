@@ -703,7 +703,7 @@ class LoadDriver:
             columns = None  # All columns
             filters = []
 
-        scan_id = None
+        stream_url = None
         status_code = 0
         bytes_read = 0
         error_type = None
@@ -715,18 +715,20 @@ class LoadDriver:
         delete_ms = 0.0
         post_start: float | None = None
         get_start: float | None = None
-        delete_start: float | None = None
 
         try:
-            # POST /v1/scan
+            # POST /v1/materialize (scan@v1 planning)
             post_start = time.perf_counter()
             try:
                 resp = await self._client.post(
-                    "/v1/scan",
+                    "/v1/materialize",
                     json={
-                        "table_uri": table["uri"],
-                        "columns": columns,
-                        "filters": filters,
+                        "inputs": [table["uri"]],
+                        "transform": {
+                            "executor": "scan@v1",
+                            "params": {"columns": columns, "filters": filters},
+                        },
+                        "mode": "stream",
                     },
                 )
                 status_code = resp.status_code
@@ -743,12 +745,12 @@ class LoadDriver:
                     timestamp=time.time(),
                 )
 
-            scan_id = resp.json()["scan_id"]
+            stream_url = resp.json()["stream_url"]
 
-            # GET /v1/scan/{id}/batches (stream)
+            # GET the stream (TTFB + streaming)
             get_start = time.perf_counter()
             try:
-                async with self._client.stream("GET", f"/v1/scan/{scan_id}/batches") as stream:
+                async with self._client.stream("GET", stream_url) as stream:
                     status_code = stream.status_code
                     if stream.status_code == 200:
                         async for chunk in stream.aiter_bytes():
@@ -771,18 +773,9 @@ class LoadDriver:
             error_type = "other"
             error_detail = f"{type(e).__name__}: {e}"
             status_code = 0
-        finally:
-            # Cleanup (always try to delete) with timing
-            if scan_id and self._client:
-                delete_start = time.perf_counter()
-                try:
-                    await self._client.delete(f"/v1/scan/{scan_id}")
-                except asyncio.CancelledError:
-                    pass  # Don't propagate during cleanup
-                except Exception:
-                    pass
-                finally:
-                    delete_ms = (time.perf_counter() - delete_start) * 1000
+        # No explicit cleanup: a materialize stream is freed server-side by the
+        # stream-state TTL once consumed (the old /v1/scan DELETE is gone), so
+        # delete_ms stays 0.
 
         return RequestResult(
             total_latency_ms=(time.perf_counter() - request_start) * 1000,

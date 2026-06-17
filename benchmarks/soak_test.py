@@ -869,7 +869,6 @@ class SoakDriver:
         client-side parsing costs.
         """
         start = time.perf_counter()
-        scan_id = None
 
         # Per-phase status tracking
         post_status = 0
@@ -901,14 +900,20 @@ class SoakDriver:
                 columns = self.bulk_columns
                 filters = []
 
-            # POST /v1/scan
+            # POST /v1/materialize (scan@v1)
             response = await self._client.post(
-                "/v1/scan",
+                "/v1/materialize",
                 json={
-                    "table_uri": table["table_uri"],
-                    "snapshot_id": table["snapshot_id"],
-                    "columns": columns,
-                    "filters": filters,
+                    "inputs": [table["table_uri"]],
+                    "transform": {
+                        "executor": "scan@v1",
+                        "params": {
+                            "snapshot_id": table["snapshot_id"],
+                            "columns": columns,
+                            "filters": filters,
+                        },
+                    },
+                    "mode": "stream",
                 },
             )
             post_status = response.status_code
@@ -917,10 +922,10 @@ class SoakDriver:
                 error_type = "http_error"
                 error_detail = f"POST returned {response.status_code}"
             else:
-                scan_id = response.json()["scan_id"]
+                stream_url = response.json()["stream_url"]
 
                 # Stream response
-                async with self._client.stream("GET", f"/v1/scan/{scan_id}/batches") as stream:
+                async with self._client.stream("GET", stream_url) as stream:
                     stream_status = stream.status_code
 
                     if stream_status != 200:
@@ -969,21 +974,9 @@ class SoakDriver:
         except Exception as e:
             error_type = "other"
             error_detail = str(e)[:100]
-        finally:
-            delete_error_type = None
-            if scan_id:
-                try:
-                    delete_resp = await self._client.delete(f"/v1/scan/{scan_id}")
-                    delete_status = delete_resp.status_code
-                except httpx.TimeoutException:
-                    delete_status = 0
-                    delete_error_type = "timeout"
-                except httpx.ConnectError:
-                    delete_status = 0
-                    delete_error_type = "connection"
-                except Exception:
-                    delete_status = 0
-                    delete_error_type = "other"
+        # No /v1/scan DELETE in the unified API — materialize streams self-clean
+        # via the stream-state TTL; delete_status stays 0.
+        delete_error_type = None
 
         latency_ms = (time.perf_counter() - start) * 1000
         return RequestResult(
@@ -1984,29 +1977,16 @@ def print_results(results: SoakResults):
     print("\n" + "-" * 40)
     print("STATUS CODES BY PHASE")
     print("-" * 40)
-    print("POST /v1/scan:")
+    print("POST /v1/materialize:")
     print(
         f"  2xx: {results.post_success_count:,}  429: {results.post_429_count:,}  "
         f"5xx: {results.post_5xx_count}  other: {results.post_other_fail_count}"
     )
-    print("GET /v1/scan/{id}/batches:")
+    print("GET stream:")
     print(
         f"  2xx: {results.stream_success_count:,}  429: {results.stream_429_count:,}  "
         f"5xx: {results.stream_5xx_count}  other: {results.stream_other_fail_count}"
     )
-    print("DELETE /v1/scan/{id}:")
-    print(
-        f"  2xx: {results.delete_success_count:,}  "
-        f"404 (already gone): {results.delete_already_gone_count:,}"
-    )
-    delete_real_errors = (
-        results.delete_5xx_count + results.delete_timeout_count + results.delete_other_fail_count
-    )
-    if delete_real_errors > 0:
-        print(
-            f"  5xx: {results.delete_5xx_count}  timeout: {results.delete_timeout_count}  "
-            f"other: {results.delete_other_fail_count}"
-        )
 
     # =================================================================
     # Memory (robust 3-window analysis)

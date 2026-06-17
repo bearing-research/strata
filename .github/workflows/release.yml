@@ -37,7 +37,7 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: '24'
+  NODE_VERSION: '26'
   # GitHub plans to default JS actions to Node 24 on 2026-06-02 and
   # remove Node 20 on 2026-09-16. Opting in early silences the
   # per-step deprecation warnings and surfaces any incompatibility
