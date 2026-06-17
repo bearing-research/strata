@@ -212,6 +212,12 @@ exhaustive commit history.
   `failed` at startup; and `strata artifact verify` checks a whole store's
   blobs against metadata after the fact.
 
+- **`strata-notebook --notebook-dir`**: control where new notebooks are
+  created. They default to `~/.strata/notebooks` — not the directory you
+  launched from — so pass `--notebook-dir .` to use the current directory, or
+  any path (equivalently, set `STRATA_NOTEBOOK_STORAGE_DIR`). The server now
+  also prints the active notebook location on startup.
+
 ### Changed
 
 - **Registry name resolution works in service mode** (shared-store groundwork):
