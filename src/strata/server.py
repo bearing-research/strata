@@ -28,8 +28,10 @@ from pydantic import BaseModel, Field
 from strata.adaptive_concurrency import ResizableLimiter
 from strata.api.dependencies import (
     CurrentPrincipal,
+    CurrentTenant,
     ReadStore,
     RegistryDecisionContext,
+    WriteStore,
 )
 from strata.auth import (
     AuthError,
@@ -4132,7 +4134,7 @@ async def finalize_artifact(request: UploadFinalizeRequest):
 
 
 @app.put("/v1/artifacts", response_model=PutArtifactResponse)
-async def put_artifact(request: Request):
+async def put_artifact(request: Request, store: WriteStore, principal: CurrentPrincipal):
     """Directly upload and persist an artifact with provenance tracking.
 
     This is a simplified API for clients that execute transforms locally
@@ -4251,16 +4253,10 @@ async def put_artifact(request: Request):
         raise HTTPException(status_code=400, detail="Missing 'executor' in transform")
     params = transform_dict.get("params", {})
 
-    store = _get_artifact_store(allow_write=True)
-    _authorize_artifact_write()
-
     # Resolve tenant the same way materialize does (principal-based) —
     # get_tenant_id() defaults to "_default", which stranded put-created
     # artifacts in a tenant the name routes (None) could never address.
-    from strata.auth import get_principal as _get_principal
-
-    _principal = _get_principal()
-    tenant_id = _principal.tenant if _principal else None
+    tenant_id = principal.tenant if principal else None
 
     # Resolve input versions for provenance
     input_versions: dict[str, str] = {}
@@ -4372,7 +4368,9 @@ async def put_artifact(request: Request):
 
 
 @app.get("/v1/artifacts/{artifact_id}/v/{version}", response_model=ArtifactInfoResponse)
-async def get_artifact_info(artifact_id: str, version: int):
+async def get_artifact_info(
+    artifact_id: str, version: int, store: ReadStore, tenant_filter: CurrentTenant
+):
     """Get artifact metadata.
 
     Available in service mode (a client needs to poll state/schema of a result),
@@ -4385,9 +4383,6 @@ async def get_artifact_info(artifact_id: str, version: int):
     Returns:
         ArtifactInfoResponse with artifact metadata
     """
-    store = _get_artifact_store(allow_read=True)
-    tenant_filter = _get_artifact_request_tenant()
-
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
         tenant_filter,
@@ -4416,19 +4411,20 @@ class AliasSetRequest(BaseModel):
 
 
 @app.put("/v1/names/{name:path}/aliases/{alias}")
-async def set_alias(name: str, alias: str, request: AliasSetRequest):
+async def set_alias(
+    name: str,
+    alias: str,
+    request: AliasSetRequest,
+    store: WriteStore,
+    principal: CurrentPrincipal,
+):
     """Point ``name @ alias`` (e.g. champion) at an artifact version.
 
     Protected aliases (``registry_protected_aliases`` config) do not apply
     immediately: the change lands in the pending queue (202) and an
     explicit approve applies it.
     """
-    from strata.auth import get_principal
-
     state = get_state()
-    store = _get_artifact_store(allow_write=True)
-    _authorize_artifact_write()
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 
@@ -4481,12 +4477,8 @@ async def set_alias(name: str, alias: str, request: AliasSetRequest):
 
 
 @app.get("/v1/names/{name:path}/aliases/{alias}")
-async def resolve_alias(name: str, alias: str):
+async def resolve_alias(name: str, alias: str, store: ReadStore, principal: CurrentPrincipal):
     """Resolve ``name @ alias`` to its artifact version."""
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_read=True)
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
     artifact = store.resolve_alias(name, alias, tenant=tenant_id)
@@ -4528,12 +4520,8 @@ async def delete_alias(name: str, alias: str):
 
 
 @app.get("/v1/names/{name:path}/aliases")
-async def list_aliases(name: str):
+async def list_aliases(name: str, store: ReadStore, principal: CurrentPrincipal):
     """List the aliases held by a name."""
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_read=True)
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
     aliases = store.list_aliases(name, tenant=tenant_id)
@@ -4557,13 +4545,14 @@ class TagSetRequest(BaseModel):
 
 
 @app.put("/v1/artifacts/{artifact_id}/v/{version}/tags")
-async def set_tag(artifact_id: str, version: int, request: TagSetRequest):
+async def set_tag(
+    artifact_id: str,
+    version: int,
+    request: TagSetRequest,
+    store: WriteStore,
+    principal: CurrentPrincipal,
+):
     """Set a key/value tag on an artifact version."""
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_write=True)
-    _authorize_artifact_write()
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 
@@ -4577,12 +4566,8 @@ async def set_tag(artifact_id: str, version: int, request: TagSetRequest):
 
 
 @app.get("/v1/artifacts/{artifact_id}/v/{version}/tags")
-async def get_tags(artifact_id: str, version: int):
+async def get_tags(artifact_id: str, version: int, store: ReadStore, principal: CurrentPrincipal):
     """Get the tags on an artifact version."""
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_read=True)
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
     return {
@@ -4593,13 +4578,10 @@ async def get_tags(artifact_id: str, version: int):
 
 
 @app.delete("/v1/artifacts/{artifact_id}/v/{version}/tags/{key}")
-async def delete_tag(artifact_id: str, version: int, key: str):
+async def delete_tag(
+    artifact_id: str, version: int, key: str, store: WriteStore, principal: CurrentPrincipal
+):
     """Delete one tag from an artifact version."""
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_write=True)
-    _authorize_artifact_write()
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 
@@ -4746,7 +4728,7 @@ async def reject_pending(request: PendingDecisionRequest, decision: RegistryDeci
 # routes above must stay registered FIRST or ".../aliases/x" URLs would be
 # swallowed as part of the name. The "/aliases" suffix is reserved.
 @app.get("/v1/names/{name:path}", response_model=NameResolveResponse)
-async def resolve_name(name: str):
+async def resolve_name(name: str, store: ReadStore, principal: CurrentPrincipal):
     """Resolve a name to its artifact.
 
     Args:
@@ -4755,12 +4737,7 @@ async def resolve_name(name: str):
     Returns:
         NameResolveResponse with resolved artifact URI
     """
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_read=True)
-
     # Get tenant from auth context for name isolation
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
     name_info = store.get_name(name, tenant=tenant_id)
@@ -4777,7 +4754,7 @@ async def resolve_name(name: str):
 
 
 @app.post("/v1/names", response_model=NameSetResponse)
-async def set_name(request: NameSetRequest):
+async def set_name(request: NameSetRequest, store: WriteStore, principal: CurrentPrincipal):
     """Set or update a name pointer.
 
     Args:
@@ -4786,14 +4763,8 @@ async def set_name(request: NameSetRequest):
     Returns:
         NameSetResponse with name and artifact URIs
     """
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_write=True)
-    _authorize_artifact_write()
-
     # Get tenant + actor from auth context for name isolation and audit
     # attribution (who published this name).
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 
@@ -4842,18 +4813,13 @@ async def delete_name(name: str):
 
 
 @app.get("/v1/names")
-async def list_names():
+async def list_names(store: ReadStore, principal: CurrentPrincipal):
     """List all name pointers.
 
     Returns:
         List of name entries with their artifact mappings
     """
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_read=True)
-
     # Get tenant from auth context for name isolation
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
     names = store.list_names(tenant=tenant_id)
@@ -4870,7 +4836,7 @@ async def list_names():
 
 
 @app.get("/v1/artifacts/names/{name:path}/status", response_model=NameStatusResponse)
-async def get_name_status(name: str):
+async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincipal):
     """Get status of a named artifact including staleness info.
 
     Returns the current state of a named artifact and checks whether any of its
@@ -4885,12 +4851,7 @@ async def get_name_status(name: str):
     Returns:
         NameStatusResponse with staleness information
     """
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_read=True)
-
     # Get tenant from auth context for name isolation
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
     # Get name status from store (includes input_versions)
@@ -4954,6 +4915,8 @@ async def get_name_status(name: str):
 async def get_artifact_lineage(
     artifact_id: str,
     version: int,
+    store: ReadStore,
+    tenant_filter: CurrentTenant,
     max_depth: int = Query(default=10, ge=1, le=100),
 ):
     """Get the lineage (input dependency graph) for an artifact.
@@ -4977,9 +4940,6 @@ async def get_artifact_lineage(
     import json
 
     from strata.artifact_store import TransformSpec
-
-    store = _get_artifact_store(allow_read=True)
-    tenant_filter = _get_artifact_request_tenant()
 
     # Get the root artifact
     artifact = _ensure_artifact_access(
@@ -5150,6 +5110,8 @@ async def get_artifact_lineage(
 async def get_artifact_dependents(
     artifact_id: str,
     version: int,
+    store: ReadStore,
+    tenant_filter: CurrentTenant,
     limit: int = Query(default=100, ge=1, le=1000),
 ):
     """Get artifacts that depend on this artifact (reverse dependencies).
@@ -5173,9 +5135,6 @@ async def get_artifact_dependents(
     import json
 
     from strata.artifact_store import TransformSpec
-
-    store = _get_artifact_store(allow_read=True)
-    tenant_filter = _get_artifact_request_tenant()
 
     # Verify the artifact exists
     artifact = _ensure_artifact_access(
@@ -5799,7 +5758,9 @@ async def finalize_build(
 
 
 @app.post("/v1/artifacts/explain-materialize", response_model=ExplainMaterializeResponse)
-async def explain_materialize(request: ExplainMaterializeRequest):
+async def explain_materialize(
+    request: ExplainMaterializeRequest, store: ReadStore, principal: CurrentPrincipal
+):
     """Explain what materialize would do without actually doing it (dry run).
 
     This endpoint is useful for:
@@ -5815,12 +5776,8 @@ async def explain_materialize(request: ExplainMaterializeRequest):
         ExplainMaterializeResponse explaining what would happen
     """
     from strata.artifact_store import TransformSpec, compute_provenance_hash
-    from strata.auth import get_principal
-
-    store = _get_artifact_store(allow_read=True)
 
     # Get tenant from auth context for artifact isolation
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
     # Parse transform spec
@@ -6033,7 +5990,9 @@ async def garbage_collect_artifacts(max_age_days: float = 7.0):
 
 
 @app.get("/v1/artifacts/{artifact_id}/v/{version}/data")
-async def get_artifact_data(artifact_id: str, version: int):
+async def get_artifact_data(
+    artifact_id: str, version: int, store: ReadStore, tenant_filter: CurrentTenant
+):
     """Stream artifact data as Arrow IPC.
 
     Returns the raw Arrow IPC stream bytes for the artifact, so an identity-scan
@@ -6047,9 +6006,6 @@ async def get_artifact_data(artifact_id: str, version: int):
     Returns:
         StreamingResponse with Arrow IPC data
     """
-    store = _get_artifact_store(allow_read=True)
-    tenant_filter = _get_artifact_request_tenant()
-
     # Verify artifact exists and is ready (tenant scoping)
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
