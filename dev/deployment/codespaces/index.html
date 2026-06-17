@@ -1678,10 +1678,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-time-startup" class="md-nav__link">
+  <a href="#contributing-to-strata" class="md-nav__link">
     <span class="md-ellipsis">
       
-        First-time startup
+        Contributing to Strata
       
     </span>
   </a>
@@ -1792,10 +1792,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#first-time-startup" class="md-nav__link">
+  <a href="#contributing-to-strata" class="md-nav__link">
     <span class="md-ellipsis">
       
-        First-time startup
+        Contributing to Strata
       
     </span>
   </a>
@@ -1823,14 +1823,13 @@
 
 
 <h1 id="github-codespaces">GitHub Codespaces<a class="headerlink" href="#github-codespaces" title="Permanent link">&para;</a></h1>
-<p>Click <strong>"Open in Codespaces"</strong> on the repo to get a full development environment with the server running automatically.</p>
+<p>Click <strong>"Open in Codespaces"</strong> on the repo to get a ready-to-use Strata environment with the server running automatically.</p>
 <h2 id="whats-included">What's included<a class="headerlink" href="#whats-included" title="Permanent link">&para;</a></h2>
 <p>The <code>.devcontainer/</code> configuration provides:</p>
 <ul>
-<li>Python 3.13 via devcontainer features</li>
-<li>Rust toolchain for the native extension</li>
-<li>Node.js 25 for frontend development</li>
-<li>VS Code extensions: Python, Ruff, Volar, rust-analyzer</li>
+<li>Python 3.13 (devcontainer feature, on an Ubuntu 22.04 base)</li>
+<li>VS Code extensions: Python, Ruff</li>
+<li>Strata installed from the published PyPI wheel — no Rust or Node build</li>
 </ul>
 <h2 id="setup-flow">Setup flow<a class="headerlink" href="#setup-flow" title="Permanent link">&para;</a></h2>
 <ol>
@@ -1838,28 +1837,23 @@
 <p><strong><code>postCreateCommand</code></strong> (<code>setup.sh</code>) runs once on container creation:</p>
 <ul>
 <li>Installs <code>uv</code></li>
-<li>Runs <code>uv sync</code> (builds Rust extension)</li>
-<li>Builds the frontend (<code>npm ci &amp;&amp; npm run build</code>)</li>
+<li><code>uv tool install strata-notebook</code> — the prebuilt wheel, so it finishes in under a minute (no Rust compilation)</li>
 </ul>
 </li>
 <li>
 <p><strong><code>postStartCommand</code></strong> (<code>start.sh</code>) runs on every container start:</p>
 <ul>
-<li>Creates a scratch notebook directory if none exists</li>
-<li>Starts the Strata server in the background</li>
-<li>Waits for the health check to pass</li>
+<li>Starts the Strata server in the background and waits for the health check to pass</li>
 </ul>
 </li>
 </ol>
 <h2 id="port-forwarding">Port forwarding<a class="headerlink" href="#port-forwarding" title="Permanent link">&para;</a></h2>
 <p>Port <strong>8765</strong> is forwarded automatically with <code>onAutoForward: "openBrowser"</code>, so your browser opens the notebook UI as soon as the server is ready.</p>
-<h2 id="first-time-startup">First-time startup<a class="headerlink" href="#first-time-startup" title="Permanent link">&para;</a></h2>
-<p>The initial <code>postCreateCommand</code> takes 3-5 minutes (Rust compilation). Subsequent starts are fast since the build is cached in the Codespace volume.</p>
-<p>PyPI wheels now ship, so the Codespace setup is <code>uv tool install
-strata-notebook</code> and finishes in under a minute. If you're using a
-Codespace to <strong>contribute to Strata</strong> (not just try it), install the
-Rust toolchain and clone the repo manually:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>--proto<span class="w"> </span><span class="s1">&#39;=https&#39;</span><span class="w"> </span>-sSf<span class="w"> </span>https://sh.rustup.rs<span class="w"> </span><span class="p">|</span><span class="w"> </span>sh<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>-y
+<h2 id="contributing-to-strata">Contributing to Strata<a class="headerlink" href="#contributing-to-strata" title="Permanent link">&para;</a></h2>
+<p>The Codespace installs the published wheel, which is all you need to <em>use</em>
+Strata. To <strong>develop</strong> Strata — building the Rust extension and frontend
+from source — set up a full dev environment instead:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>--proto<span class="w"> </span><span class="s1">&#39;=https&#39;</span><span class="w"> </span>-sSf<span class="w"> </span>https://sh.rustup.rs<span class="w"> </span><span class="p">|</span><span class="w"> </span>sh<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>-y<span class="w">   </span><span class="c1"># Rust toolchain</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/bearing-research/strata.git
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">cd</span><span class="w"> </span>strata<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras
 </code></pre></div>
