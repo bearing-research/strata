@@ -51,6 +51,29 @@ def _resolve_to_artifact_version(
 class BuildService:
     """Stateless build-plane assembly (pull-model manifest)."""
 
+    def derive_build_state(
+        self,
+        *,
+        error_message: str | None,
+        completed: bool,
+        started: bool,
+        artifact_state: str | None,
+    ) -> str:
+        """Project an identity stream/background build onto the build lifecycle.
+
+        Precedence (highest first): a stream error or a failed artifact ⇒
+        ``failed``; a ready artifact or a completed stream ⇒ ``ready``; a started
+        stream ⇒ ``building``; otherwise ``pending``. ``error_message`` wins over
+        a ready artifact, so a half-failed build never reports ``ready``.
+        """
+        if error_message or artifact_state == "failed":
+            return "failed"
+        if artifact_state == "ready" or completed:
+            return "ready"
+        if started:
+            return "building"
+        return "pending"
+
     def assemble_manifest(
         self,
         store: ArtifactStore,
