@@ -82,6 +82,7 @@ from strata.rate_limiter import (
     init_rate_limiter,
 )
 from strata.services.artifact import artifact_service
+from strata.services.build import build_service
 from strata.services.registry import registry_service
 from strata.slow_ops import get_latency_stats
 from strata.tenant import (
@@ -3593,42 +3594,6 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
     )
 
 
-def _resolve_to_artifact_version(
-    input_uri: str,
-    store,
-    tenant: str | None = None,
-) -> tuple[str, int] | None:
-    """Resolve an input URI to an (artifact_id, version) tuple.
-
-    Args:
-        input_uri: Input URI to resolve
-        store: Artifact store for name resolution
-
-    Returns:
-        (artifact_id, version) tuple or None if cannot resolve
-    """
-    import re
-
-    # Artifact URI: strata://artifact/{id}@v={version}
-    if input_uri.startswith("strata://artifact/"):
-        match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
-        if match:
-            artifact_id = match.group(1)
-            version = int(match.group(2))
-            return (artifact_id, version)
-        return None
-
-    # Name URI: strata://name/{name}
-    if input_uri.startswith("strata://name/"):
-        name = input_uri.replace("strata://name/", "")
-        artifact = store.resolve_name(name, tenant=tenant)
-        if artifact is None:
-            return None
-        return (artifact.id, artifact.version)
-
-    return None
-
-
 def _authorize_table_access(table_uri: str, table_identity) -> None:
     """Enforce table-level ACL under trusted-proxy auth; no-op otherwise.
 
@@ -5079,8 +5044,6 @@ async def get_build_manifest(build_id: str, request: Request):
     Returns:
         BuildManifest with all signed URLs
     """
-    from strata.transforms.signed_urls import generate_build_manifest
-
     state = get_state()
 
     if not _build_transport_available():
@@ -5113,44 +5076,21 @@ async def get_build_manifest(build_id: str, request: Request):
         owner_tenant=build.tenant_id,
     )
 
-    # Get artifact store to resolve input artifacts
+    # The server-mode store gate here never 403s — _build_transport_available()
+    # above already guaranteed it — so this is just the store handle.
     store = _get_artifact_store(allow_server_mode=True)
-
-    # Resolve input artifacts to (artifact_id, version) tuples
-    input_artifacts: list[tuple[str, int]] = []
-    if build.input_uris is not None:
-        for input_uri in build.input_uris:
-            result = _resolve_to_artifact_version(input_uri, store, tenant=build.tenant_id)
-            if result is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Cannot resolve input artifact: {input_uri}",
-                )
-            input_artifacts.append(result)
-
-    # Build base URL from request
     base_url = str(request.base_url).rstrip("/")
 
-    # Build metadata for the executor
-    metadata = {
-        "build_id": build_id,
-        "artifact_id": build.artifact_id,
-        "version": build.version,
-        "executor_ref": build.executor_ref,
-        "params": build.params or {},
-    }
-
-    # Generate manifest with signed URLs
-    manifest = generate_build_manifest(
-        base_url=base_url,
-        build_id=build_id,
-        metadata=metadata,
-        input_artifacts=input_artifacts,
-        max_output_bytes=state.config.max_transform_output_bytes,
-        url_expiry_seconds=state.config.signed_url_expiry_seconds,
-    )
-
-    return manifest.to_dict()
+    try:
+        return build_service.assemble_manifest(
+            store,
+            build=build,
+            base_url=base_url,
+            max_output_bytes=state.config.max_transform_output_bytes,
+            url_expiry_seconds=state.config.signed_url_expiry_seconds,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/v1/artifacts/download")
