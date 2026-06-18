@@ -72,7 +72,7 @@ from strata.tenant import (
     set_tenant_id,
     validate_tenant_id,
 )
-from strata.tenant_registry import get_tenant_registry
+from strata.tenant_registry import get_tenant_registry, init_tenant_registry
 from strata.tracing import init_tracing, instrument_fastapi, trace_span
 from strata.types import (
     ArtifactDependentsResponse,
@@ -213,15 +213,11 @@ class ServerState:
         # Active scans (scan_id -> ReadPlan)
         self.scans: dict[str, ReadPlan] = {}
 
-        # QoS: Two-tier admission control with ResizableLimiters
-        # This prevents bulk queries from starving interactive (dashboard) queries.
-        # Interactive: small, fast queries (dashboards) - get dedicated slots
-        # Bulk: large, slow queries (ETL, exports) - separate pool
-        # Using ResizableLimiter instead of Semaphore for correct dynamic resizing
-        from strata.adaptive_concurrency import ResizableLimiter
-
-        self._interactive_limiter = ResizableLimiter(config.interactive_slots)
-        self._bulk_limiter = ResizableLimiter(config.bulk_slots)
+        # QoS: Two-tier admission control. The actual admission limiters live in
+        # the tenant registry (per-tenant, acquired in the stream handler) and are
+        # configured from interactive_slots / bulk_slots at startup via
+        # init_tenant_registry. ServerState no longer holds its own global
+        # limiters — they were never acquired (issue #185).
 
         # Track which tier each scan is using for proper cleanup
         self._scan_tier: dict[str, str] = {}  # scan_id -> "interactive" | "bulk"
@@ -759,9 +755,13 @@ def _classify_query(plan) -> str:
 
 def _get_qos_metrics(state: ServerState) -> dict:
     """Get QoS tier metrics including queue wait times and per-tenant stats."""
-    # Get global limiter stats (for backward compatibility and aggregate metrics)
-    interactive_stats = state._interactive_limiter.get_stats()
-    bulk_stats = state._bulk_limiter.get_stats()
+    # Top-line capacity/usage reflects the per-tenant admission limiters that
+    # stream admission actually acquires (aggregated across tracked tenants; a
+    # single-tenant deployment reduces to the _default tenant). Previously this
+    # read the never-acquired global limiters, so in_use was always 0 (#185).
+    i_in_use, i_avail, b_in_use, b_avail = get_tenant_registry().aggregate_limiter_usage()
+    interactive_stats = {"capacity": i_in_use + i_avail, "in_use": i_in_use, "available": i_avail}
+    bulk_stats = {"capacity": b_in_use + b_avail, "in_use": b_in_use, "available": b_avail}
 
     # Calculate average queue wait times
     interactive_avg_wait_ms = (
@@ -1116,6 +1116,23 @@ async def lifespan(app: FastAPI):
     )
     await _state._cache_warmer.start()
 
+    # Wire the tenant registry's admission defaults from config so configured
+    # slots actually reach the limiters stream admission acquires (issue #185 —
+    # previously the registry used hard-coded defaults and the configured global
+    # limiters were never acquired). Eagerly materialize the default-tenant
+    # limiters so the adaptive controller and /metrics share a stable handle to
+    # exactly what admission uses; in single-tenant deployments _default is the
+    # only tenant.
+    init_tenant_registry(
+        default_interactive_slots=config.interactive_slots,
+        default_bulk_slots=config.bulk_slots,
+        default_per_client_interactive=config.per_client_interactive,
+        default_per_client_bulk=config.per_client_bulk,
+    )
+    default_interactive_limiter, default_bulk_limiter = (
+        get_tenant_registry().get_or_create_limiters(DEFAULT_TENANT_ID)
+    )
+
     # Initialize adaptive concurrency controller (if enabled)
     from strata.adaptive_concurrency import AdaptiveConcurrencyController, AdaptiveConfig
 
@@ -1129,10 +1146,12 @@ async def lifespan(app: FastAPI):
         max_slots_bulk=config.adaptive_max_bulk,
         hysteresis_count=config.adaptive_hysteresis,
     )
+    # Resize the limiters admission actually acquires (the _default tenant's),
+    # not the orphaned global ones.
     _state._adaptive_controller = AdaptiveConcurrencyController(
         config=adaptive_config,
-        interactive_limiter=_state._interactive_limiter,
-        bulk_limiter=_state._bulk_limiter,
+        interactive_limiter=default_interactive_limiter,
+        bulk_limiter=default_bulk_limiter,
     )
     await _state._adaptive_controller.start()
 

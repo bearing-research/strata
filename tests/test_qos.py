@@ -456,6 +456,32 @@ class TestQoSConfiguration:
                 assert qos["interactive_slots"] == 32
                 assert qos["bulk_slots"] == 8
 
+    def test_configured_slots_reach_admission_limiters(self, qos_warehouse, tmp_path):
+        """#185: interactive_slots / bulk_slots must configure the per-tenant
+        registry limiters the stream handler actually acquires — not just the
+        (former) never-acquired global limiters. Asserts directly on the registry
+        the admission path uses, with non-default values so a missing
+        init_tenant_registry wiring (registry falling back to its hard-coded
+        32/8) would fail.
+        """
+        port = find_free_port()
+        config = StrataConfig(
+            host="127.0.0.1",
+            port=port,
+            cache_dir=tmp_path / "cache",
+            interactive_slots=7,
+            bulk_slots=3,
+            deployment_mode="personal",
+        )
+
+        with run_server(config):
+            from strata.tenant import DEFAULT_TENANT_ID
+            from strata.tenant_registry import get_tenant_registry
+
+            interactive, bulk = get_tenant_registry().get_or_create_limiters(DEFAULT_TENANT_ID)
+            assert interactive.capacity == 7
+            assert bulk.capacity == 3
+
     def test_query_can_be_streamed(self, qos_warehouse, tmp_path):
         """Test that queries can be successfully streamed with QoS enabled."""
         port = find_free_port()
