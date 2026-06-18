@@ -20,13 +20,18 @@ phases move the bodies inward and split routers.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, NamedTuple
+from typing import Annotated, NamedTuple
 
 from fastapi import Depends, HTTPException
 
-if TYPE_CHECKING:
-    from strata.artifact_store import ArtifactStore
-    from strata.types import Principal
+# Imported at runtime (not under TYPE_CHECKING): the typed-dependency aliases
+# below embed these in ``Annotated[...]`` as concrete classes, not string
+# forward refs. A router module that uses an alias (e.g. ``store: ReadStore``)
+# has FastAPI run ``get_type_hints`` against *that module's* globals, where
+# these names are absent — a string forward ref would fail to resolve there
+# (it only worked while the handlers lived in ``server.py``, which imports them).
+from strata.artifact_store import ArtifactStore
+from strata.types import Principal
 
 
 def read_store() -> ArtifactStore:
@@ -42,7 +47,7 @@ def read_store() -> ArtifactStore:
     return _get_artifact_store(allow_read=True)
 
 
-ReadStore = Annotated["ArtifactStore", Depends(read_store)]
+ReadStore = Annotated[ArtifactStore, Depends(read_store)]
 
 
 def personal_mode_store() -> ArtifactStore:
@@ -60,7 +65,7 @@ def personal_mode_store() -> ArtifactStore:
     return _get_artifact_store()
 
 
-PersonalModeStore = Annotated["ArtifactStore", Depends(personal_mode_store)]
+PersonalModeStore = Annotated[ArtifactStore, Depends(personal_mode_store)]
 
 
 def write_store() -> ArtifactStore:
@@ -83,7 +88,7 @@ def write_store() -> ArtifactStore:
     return store
 
 
-WriteStore = Annotated["ArtifactStore", Depends(write_store)]
+WriteStore = Annotated[ArtifactStore, Depends(write_store)]
 
 
 def current_tenant() -> str | None:
@@ -114,7 +119,7 @@ def current_principal() -> Principal | None:
     return get_principal()
 
 
-CurrentPrincipal = Annotated["Principal | None", Depends(current_principal)]
+CurrentPrincipal = Annotated[Principal | None, Depends(current_principal)]
 
 
 class RegistryDecision(NamedTuple):
