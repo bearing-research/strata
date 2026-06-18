@@ -281,8 +281,9 @@ class StrataConfig(BaseSettings):
     multi_tenant_enabled: bool = False
     tenant_header: str = "X-Tenant-ID"
     require_tenant_header: bool = False
-    default_tenant_interactive_slots: Annotated[int, Field(ge=1)] = 32
-    default_tenant_bulk_slots: Annotated[int, Field(ge=1)] = 8
+    # Note: per-tenant admission defaults come from interactive_slots / bulk_slots
+    # (wired into the tenant registry at startup). The former default_tenant_*
+    # fields were never read and were removed (issue #185).
 
     # Trusted proxy authentication settings
     auth_mode: Literal["none", "trusted_proxy"] = "none"
