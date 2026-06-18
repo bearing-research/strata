@@ -95,6 +95,10 @@ jobs:
   unit-tests:
     name: Unit Tests - Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    # Backstop so a deadlocked test (e.g. the intermittent py3.12/macOS WS portal
+    # hang) fails the job in minutes instead of running to GitHub's 6h cap. The
+    # per-test pytest-timeout below normally trips first (and dumps the stack).
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

@@ -99,6 +99,8 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=7.0.0",
+    "pytest-xdist>=3.6.0",
+    "pytest-timeout>=2.3.0",
     "ruff>=0.8.0",
     "moto[s3]>=5.0.0",
     "boto3>=1.35.0",
@@ -193,6 +195,15 @@ unresolved-import = "warn"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Per-test timeout: a deadlocked test (e.g. the intermittent py3.12/macOS
+# TestClient WS portal hang) fails in 3 min with a full thread-stack dump that
+# pinpoints the culprit — instead of hanging the CI job to GitHub's 6h cap. The
+# slowest legitimate test is ~26s (a real uv sync), so 180s is generous headroom.
+# "thread" method is required: the hang is off the main thread, where the default
+# SIGALRM "signal" method can't interrupt it (it's also Windows-compatible).
+# Override per test with @pytest.mark.timeout(N) if a case ever needs longer.
+timeout = 180
+timeout_method = "thread"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests requiring external services",
