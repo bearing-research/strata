@@ -24,7 +24,7 @@ import pyarrow as pa
 
 from strata_client._clientconfig import HasServerUrl
 from strata_client.client import StrataClient
-from strata_client.filters import Filter
+from strata_client.filters import Filter, serialize_filter_value
 
 
 class StrataTableParams(TypedDict, total=False):
@@ -56,7 +56,8 @@ def _build_scan_transform(
         params["columns"] = columns
     if filters:
         params["filters"] = [
-            {"column": f.column, "op": f.op.value, "value": f.value} for f in filters
+            {"column": f.column, "op": f.op.value, "value": serialize_filter_value(f.value)}
+            for f in filters
         ]
     if snapshot_id is not None:
         params["snapshot_id"] = snapshot_id

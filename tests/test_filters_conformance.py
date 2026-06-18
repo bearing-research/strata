@@ -126,3 +126,46 @@ class TestFilterSpecOpValidation:
         )
         filters = params.to_strata_filters()
         assert filters[0].op.value == ">="
+
+
+class TestAdapterToServerFilterRoundTrip:
+    """Finding #2 fast-follow (#193): a richer-typed filter value must survive the
+    full client-adapter → JSON wire → server ``FilterSpec`` path with its Python
+    type intact, so the planner compares against Parquet column stats correctly.
+    Before the fix the adapters passed raw ``f.value`` and a non-primitive (e.g. a
+    timestamp partition filter) failed at ``json.dumps``.
+    """
+
+    _ADAPTERS = ["pandas", "arrow", "polars", "duckdb", "datafusion"]
+    _NON_PRIMITIVE = [
+        datetime(2021, 5, 1, 12, 30, 5),
+        date(2021, 5, 1),
+        time_of_day(12, 30, 5),
+        Decimal("1.50"),
+        uuid.UUID("12345678-1234-5678-1234-567812345678"),
+        b"\x00abc\xff",
+    ]
+
+    @pytest.mark.parametrize("adapter_name", _ADAPTERS)
+    @pytest.mark.parametrize("value", _NON_PRIMITIVE)
+    def test_value_survives_adapter_to_server(self, adapter_name, value):
+        import importlib
+        import json
+
+        from strata_client.filters import Filter as ClientFilter
+        from strata_client.filters import FilterOp as ClientFilterOp
+
+        from strata.types import IdentityParams
+
+        adapter = importlib.import_module(f"strata_client.integration.{adapter_name}")
+        transform = adapter._build_scan_transform(
+            filters=[ClientFilter("col", ClientFilterOp.EQ, value)]
+        )
+        # Simulate the JSON wire hop the client → server request makes.
+        params = json.loads(json.dumps(transform["params"]))
+        identity = IdentityParams.model_validate(params)
+        decoded = identity.to_strata_filters()[0].value
+
+        assert decoded == value
+        # datetime is a subclass of date — assert the exact reconstructed type.
+        assert type(decoded) is type(value)

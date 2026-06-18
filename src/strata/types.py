@@ -20,6 +20,7 @@ from strata.filters import (  # noqa: F401
     FilterValue,
     SupportsOrdering,
     compute_filter_fingerprint,
+    deserialize_filter_value,
 )
 
 if TYPE_CHECKING:
@@ -504,21 +505,6 @@ class WarmAsyncResponse(BaseModel):
     message: str  # Human-readable status message
 
 
-def _deserialize_value(value: FilterValue) -> FilterValue:
-    """Deserialize filter values from JSON."""
-    if isinstance(value, str) and value.startswith("__datetime__:"):
-        return datetime.fromisoformat(value.replace("__datetime__:", ""))
-    return value
-
-
-def serialize_filter(f: Filter) -> dict[str, FilterValue]:
-    """Serialize a Filter for JSON transport."""
-    value = f.value
-    if isinstance(value, datetime):
-        value = f"__datetime__:{value.isoformat()}"
-    return {"column": f.column, "op": f.op.value, "value": value}
-
-
 # ---------------------------------------------------------------------------
 # Unified Materialize API Types
 # ---------------------------------------------------------------------------
@@ -553,7 +539,12 @@ class FilterSpec(BaseModel):
     # (→ 400) instead of escaping as an uncaught ``ValueError`` from
     # ``FilterOp(f.op)`` later in ``to_strata_filters``.
     op: FilterOp
-    value: FilterValue
+    # The wire carries JSON-native scalars only: the client adapters encode richer
+    # types (datetime/Decimal/UUID/bytes) as tagged strings via
+    # ``serialize_filter_value``; ``to_strata_filters`` decodes them back. Typing
+    # the field as the scalar set (rather than the full ``FilterValue``) also stops
+    # pydantic from eagerly coercing a plain ISO string into a ``datetime``.
+    value: str | bool | int | float
 
 
 class IdentityParams(BaseModel):
@@ -575,7 +566,13 @@ class IdentityParams(BaseModel):
     snapshot_id: int | None = None
 
     def to_strata_filters(self) -> list[Filter]:
-        """Convert FilterSpec list to internal Filter objects."""
+        """Convert FilterSpec list to internal Filter objects.
+
+        Filter values arrive over the wire as JSON-native scalars (the client
+        adapters encode richer types via ``serialize_filter_value``), so each is
+        decoded back to its Python type here before the planner compares it
+        against Parquet column stats. Primitive values pass through unchanged.
+        """
         if not self.filters:
             return []
         result = []
@@ -584,7 +581,7 @@ class IdentityParams(BaseModel):
                 Filter(
                     column=f.column,
                     op=f.op,  # already a FilterOp (validated by the model)
-                    value=f.value,
+                    value=deserialize_filter_value(f.value),
                 )
             )
         return result
