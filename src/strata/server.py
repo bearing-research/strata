@@ -29,6 +29,7 @@ from strata.adaptive_concurrency import ResizableLimiter
 from strata.api.dependencies import (
     CurrentPrincipal,
     CurrentTenant,
+    PersonalModeStore,
     ReadStore,
     RegistryDecisionContext,
     WriteStore,
@@ -4488,13 +4489,11 @@ async def resolve_alias(name: str, alias: str, store: ReadStore, principal: Curr
 
 
 @app.delete("/v1/names/{name:path}/aliases/{alias}")
-async def delete_alias(name: str, alias: str):
+async def delete_alias(
+    name: str, alias: str, store: PersonalModeStore, principal: CurrentPrincipal
+):
     """Delete ``name @ alias`` (pending queue for protected aliases)."""
-    from strata.auth import get_principal
-
     state = get_state()
-    store = _get_artifact_store()
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 
@@ -4782,7 +4781,7 @@ async def set_name(request: NameSetRequest, store: WriteStore, principal: Curren
 
 
 @app.delete("/v1/names/{name:path}")
-async def delete_name(name: str):
+async def delete_name(name: str, store: PersonalModeStore, principal: CurrentPrincipal):
     """Delete a name pointer.
 
     Args:
@@ -4791,12 +4790,7 @@ async def delete_name(name: str):
     Returns:
         Success status
     """
-    from strata.auth import get_principal
-
-    store = _get_artifact_store()
-
     # Get tenant from auth context for name isolation
-    principal = get_principal()
     tenant_id = principal.tenant if principal else None
 
     if not store.delete_name(name, tenant=tenant_id):
@@ -5844,18 +5838,17 @@ async def explain_materialize(
 
 
 @app.get("/v1/artifacts/stats")
-async def get_artifact_stats():
+async def get_artifact_stats(store: PersonalModeStore, tenant_filter: CurrentTenant):
     """Get artifact store statistics (personal mode only).
 
     Returns:
         Artifact store statistics
     """
-    store = _get_artifact_store()
-    return store.stats(tenant=_get_artifact_request_tenant())
+    return store.stats(tenant=tenant_filter)
 
 
 @app.get("/v1/artifacts/usage")
-async def get_artifact_usage():
+async def get_artifact_usage(store: PersonalModeStore, tenant_filter: CurrentTenant):
     """Get artifact store usage metrics (personal mode only).
 
     Returns comprehensive usage statistics including:
@@ -5866,12 +5859,13 @@ async def get_artifact_usage():
     Returns:
         Usage metrics dictionary
     """
-    store = _get_artifact_store()
-    return store.get_usage(tenant=_get_artifact_request_tenant())
+    return store.get_usage(tenant=tenant_filter)
 
 
 @app.get("/v1/artifacts")
 async def list_artifacts(
+    store: PersonalModeStore,
+    tenant_filter: CurrentTenant,
     limit: int = 100,
     offset: int = 0,
     state: str | None = None,
@@ -5888,9 +5882,6 @@ async def list_artifacts(
     Returns:
         List of artifact versions with their metadata
     """
-    store = _get_artifact_store()
-    tenant_filter = _get_artifact_request_tenant()
-
     if state is not None and state not in ("ready", "building", "failed"):
         raise HTTPException(
             status_code=400,
@@ -5924,7 +5915,9 @@ async def list_artifacts(
 
 
 @app.delete("/v1/artifacts/{artifact_id}/v/{version}")
-async def delete_artifact(artifact_id: str, version: int):
+async def delete_artifact(
+    artifact_id: str, version: int, store: PersonalModeStore, tenant_filter: CurrentTenant
+):
     """Delete an artifact version (personal mode only).
 
     Deletes the artifact blob and metadata. Also removes any name pointers
@@ -5937,9 +5930,6 @@ async def delete_artifact(artifact_id: str, version: int):
     Returns:
         Success status
     """
-    store = _get_artifact_store()
-    tenant_filter = _get_artifact_request_tenant()
-
     _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
         tenant_filter,
@@ -5953,7 +5943,11 @@ async def delete_artifact(artifact_id: str, version: int):
 
 
 @app.post("/v1/artifacts/gc")
-async def garbage_collect_artifacts(max_age_days: float = 7.0):
+async def garbage_collect_artifacts(
+    store: PersonalModeStore,
+    tenant_filter: CurrentTenant,
+    max_age_days: float = 7.0,
+):
     """Garbage collect unreferenced artifacts (personal mode only).
 
     Deletes artifacts that:
@@ -5970,14 +5964,12 @@ async def garbage_collect_artifacts(max_age_days: float = 7.0):
     Returns:
         GC statistics including deleted count and bytes freed
     """
-    store = _get_artifact_store()
-
     if max_age_days < 0:
         raise HTTPException(status_code=400, detail="max_age_days must be non-negative")
 
     result = store.garbage_collect(
         max_age_days=max_age_days,
-        tenant=_get_artifact_request_tenant(),
+        tenant=tenant_filter,
     )
     return result
 
