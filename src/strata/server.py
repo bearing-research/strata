@@ -81,6 +81,7 @@ from strata.rate_limiter import (
     get_rate_limiter,
     init_rate_limiter,
 )
+from strata.services.artifact import artifact_service
 from strata.slow_ops import get_latency_stats
 from strata.tenant import (
     DEFAULT_TENANT_ID,
@@ -102,8 +103,6 @@ from strata.types import (
     ExplainMaterializeResponse,
     IdentityParams,
     InputChangeInfo,
-    LineageEdge,
-    LineageNode,
     MaterializeRequest,
     MaterializeResponse,
     NameResolveResponse,
@@ -443,25 +442,6 @@ def _authorize_build_access(
         _deny_build_access()
     if owner_tenant is not None and principal.tenant != owner_tenant:
         _deny_build_access()
-
-
-def _input_version_to_artifact_ref(
-    input_uri: str,
-    input_version: str,
-) -> tuple[str, str, int] | None:
-    """Resolve stored input version metadata back to a concrete artifact URI."""
-    if not (input_uri.startswith("strata://artifact/") or input_uri.startswith("strata://name/")):
-        return None
-    if "@v=" not in input_version:
-        return None
-
-    artifact_id, version_text = input_version.split("@v=", 1)
-    try:
-        version = int(version_text)
-    except ValueError:
-        return None
-
-    return (f"strata://artifact/{artifact_id}@v={version}", artifact_id, version)
 
 
 def _cancel_stream_cleanup(state: ServerState, stream_id: str) -> None:
@@ -4924,10 +4904,6 @@ async def get_artifact_lineage(
     Returns:
         ArtifactLineageResponse with nodes and edges representing the lineage graph
     """
-    import json
-
-    from strata.artifact_store import TransformSpec
-
     # Get the root artifact
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
@@ -4940,153 +4916,13 @@ async def get_artifact_lineage(
             detail=f"Artifact is not ready (state={artifact.state})",
         )
 
-    # Build lineage graph via BFS
-    artifact_uri = f"strata://artifact/{artifact_id}@v={version}"
-    nodes: dict[str, LineageNode] = {}
-    edges: list[LineageEdge] = []
-    visited: set[str] = set()
-    queue: list[tuple[str, str, int, int]] = []  # (uri, artifact_id, version, depth)
-
-    # Add root node
-    transform_ref = None
-    if artifact.transform_spec:
-        try:
-            spec = TransformSpec.from_json(artifact.transform_spec)
-            transform_ref = spec.executor
-        except (json.JSONDecodeError, KeyError):
-            pass
-
-    root_node = LineageNode(
-        uri=artifact_uri,
+    return artifact_service.build_lineage(
+        store,
+        artifact=artifact,
         artifact_id=artifact_id,
         version=version,
-        type="artifact",
-        transform_ref=transform_ref,
-        created_at=artifact.created_at,
-    )
-    nodes[artifact_uri] = root_node
-    visited.add(artifact_uri)
-
-    # Parse input_versions and add to queue
-    direct_inputs: list[str] = []
-    if artifact.input_versions:
-        try:
-            input_vers = json.loads(artifact.input_versions)
-            for input_uri, input_version in input_vers.items():
-                direct_inputs.append(input_uri)
-                resolved_input = _input_version_to_artifact_ref(input_uri, input_version)
-                edge_from_uri = resolved_input[0] if resolved_input is not None else input_uri
-                edges.append(
-                    LineageEdge(
-                        from_uri=edge_from_uri,
-                        to_uri=artifact_uri,
-                        input_version=input_version,
-                    )
-                )
-
-                if resolved_input is not None:
-                    resolved_uri, inp_artifact_id, inp_version = resolved_input
-                    queue.append((resolved_uri, inp_artifact_id, inp_version, 1))
-                else:
-                    # It's a table input
-                    if input_uri not in visited:
-                        visited.add(input_uri)
-                        nodes[input_uri] = LineageNode(
-                            uri=input_uri,
-                            type="table",
-                        )
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    # BFS to traverse transitive dependencies
-    max_depth_reached = 0
-    while queue:
-        uri, art_id, art_ver, depth = queue.pop(0)
-
-        if depth > max_depth:
-            continue
-        max_depth_reached = max(max_depth_reached, depth)
-
-        node_uri = f"strata://artifact/{art_id}@v={art_ver}"
-        if node_uri in visited:
-            continue
-        visited.add(node_uri)
-
-        # Get the artifact
-        input_artifact = store.get_artifact(art_id, art_ver)
-        if (
-            input_artifact is None
-            or input_artifact.state != "ready"
-            or (
-                tenant_filter is not None
-                and input_artifact.tenant is not None
-                and input_artifact.tenant != tenant_filter
-            )
-        ):
-            # Add as unknown node
-            nodes[node_uri] = LineageNode(
-                uri=node_uri,
-                artifact_id=art_id,
-                version=art_ver,
-                type="artifact",
-            )
-            continue
-
-        # Parse transform ref
-        art_transform_ref = None
-        if input_artifact.transform_spec:
-            try:
-                spec = TransformSpec.from_json(input_artifact.transform_spec)
-                art_transform_ref = spec.executor
-            except (json.JSONDecodeError, KeyError):
-                pass
-
-        nodes[node_uri] = LineageNode(
-            uri=node_uri,
-            artifact_id=art_id,
-            version=art_ver,
-            type="artifact",
-            transform_ref=art_transform_ref,
-            created_at=input_artifact.created_at,
-        )
-
-        # Add this artifact's inputs to queue
-        if input_artifact.input_versions:
-            try:
-                inp_vers = json.loads(input_artifact.input_versions)
-                for inp_uri, inp_version in inp_vers.items():
-                    resolved_input = _input_version_to_artifact_ref(inp_uri, inp_version)
-                    edge_from_uri = resolved_input[0] if resolved_input is not None else inp_uri
-                    edges.append(
-                        LineageEdge(
-                            from_uri=edge_from_uri,
-                            to_uri=node_uri,
-                            input_version=inp_version,
-                        )
-                    )
-
-                    if resolved_input is not None:
-                        resolved_uri, nested_id, nested_ver = resolved_input
-                        queue.append((resolved_uri, nested_id, nested_ver, depth + 1))
-                    else:
-                        # Table input
-                        if inp_uri not in visited:
-                            visited.add(inp_uri)
-                            nodes[inp_uri] = LineageNode(
-                                uri=inp_uri,
-                                type="table",
-                            )
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-    return ArtifactLineageResponse(
-        artifact_uri=artifact_uri,
-        artifact_id=artifact_id,
-        version=version,
-        nodes=list(nodes.values()),
-        edges=edges,
-        depth=max_depth_reached,
-        direct_inputs=direct_inputs,
+        tenant_filter=tenant_filter,
+        max_depth=max_depth,
     )
 
 
