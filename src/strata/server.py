@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +32,8 @@ from strata.api.dependencies import (
     ReadStore,
     RegistryDecisionContext,
     WriteStore,
+    require_notebook_worker_admin,
+    require_scope,
 )
 from strata.auth import (
     AuthError,
@@ -1888,17 +1890,21 @@ def _validate_admin_notebook_worker_names(
         )
 
 
-@app.get("/v1/admin/notebook-workers")
+@app.get(
+    "/v1/admin/notebook-workers",
+    dependencies=[Depends(require_notebook_worker_admin)],
+)
 async def list_admin_notebook_workers(refresh: bool = False):
     """List the server-managed notebook worker registry."""
-    _require_notebook_worker_admin_access()
     return await _serialize_admin_notebook_workers(force_refresh=refresh)
 
 
-@app.put("/v1/admin/notebook-workers")
+@app.put(
+    "/v1/admin/notebook-workers",
+    dependencies=[Depends(require_notebook_worker_admin)],
+)
 async def update_admin_notebook_workers(request: AdminNotebookWorkersRequest):
     """Replace the server-managed notebook worker registry."""
-    _require_notebook_worker_admin_access()
     _validate_admin_notebook_worker_names(request.workers)
     replace_server_managed_worker_records(
         [
@@ -1912,10 +1918,12 @@ async def update_admin_notebook_workers(request: AdminNotebookWorkersRequest):
     return await _serialize_admin_notebook_workers(force_refresh=True)
 
 
-@app.post("/v1/admin/notebook-workers")
+@app.post(
+    "/v1/admin/notebook-workers",
+    dependencies=[Depends(require_notebook_worker_admin)],
+)
 async def create_admin_notebook_worker(request: AdminNotebookWorkerEntryRequest):
     """Create one service-managed notebook worker."""
-    _require_notebook_worker_admin_access()
     try:
         create_server_managed_worker_record(
             ManagedWorkerRecord(
@@ -1931,13 +1939,15 @@ async def create_admin_notebook_worker(request: AdminNotebookWorkerEntryRequest)
     return await _serialize_admin_notebook_workers(force_refresh=True)
 
 
-@app.put("/v1/admin/notebook-workers/{worker_name}")
+@app.put(
+    "/v1/admin/notebook-workers/{worker_name}",
+    dependencies=[Depends(require_notebook_worker_admin)],
+)
 async def replace_admin_notebook_worker(
     worker_name: str,
     request: AdminNotebookWorkerEntryRequest,
 ):
     """Replace one service-managed notebook worker definition."""
-    _require_notebook_worker_admin_access()
     try:
         update_server_managed_worker_record(
             worker_name,
@@ -1956,13 +1966,15 @@ async def replace_admin_notebook_worker(
     return await _serialize_admin_notebook_workers(force_refresh=True)
 
 
-@app.patch("/v1/admin/notebook-workers/{worker_name}")
+@app.patch(
+    "/v1/admin/notebook-workers/{worker_name}",
+    dependencies=[Depends(require_notebook_worker_admin)],
+)
 async def patch_admin_notebook_worker(
     worker_name: str,
     request: AdminNotebookWorkerPatchRequest,
 ):
     """Patch one service-managed notebook worker."""
-    _require_notebook_worker_admin_access()
     try:
         set_server_managed_worker_enabled(worker_name, request.enabled)
     except KeyError:
@@ -1970,10 +1982,12 @@ async def patch_admin_notebook_worker(
     return await _serialize_admin_notebook_workers(force_refresh=True)
 
 
-@app.delete("/v1/admin/notebook-workers/{worker_name}")
+@app.delete(
+    "/v1/admin/notebook-workers/{worker_name}",
+    dependencies=[Depends(require_notebook_worker_admin)],
+)
 async def delete_admin_notebook_worker(worker_name: str):
     """Delete one service-managed notebook worker."""
-    _require_notebook_worker_admin_access()
     try:
         delete_server_managed_worker_record(worker_name)
     except KeyError:
@@ -1981,51 +1995,36 @@ async def delete_admin_notebook_worker(worker_name: str):
     return await _serialize_admin_notebook_workers(force_refresh=True)
 
 
-@app.post("/v1/admin/notebook-workers/{worker_name}/refresh")
+@app.post(
+    "/v1/admin/notebook-workers/{worker_name}/refresh",
+    dependencies=[Depends(require_notebook_worker_admin)],
+)
 async def refresh_admin_notebook_worker(worker_name: str):
     """Force-refresh health for one service-managed notebook worker."""
-    _require_notebook_worker_admin_access()
     known_workers = {record.worker.name for record in get_server_managed_worker_records()}
     if worker_name not in known_workers:
         raise HTTPException(status_code=404, detail=f"Notebook worker not found: {worker_name}")
     return await _serialize_admin_notebook_workers(force_refresh=True)
 
 
-def _require_tenant_admin_access() -> None:
-    """Authorize the cross-tenant admin observability endpoints.
-
-    These return metrics/config for *every* tenant, so in an authenticated
-    deployment they require the ``admin:tenants`` scope (``admin:*`` also
-    grants it). In personal / no-auth mode there is no principal and the
-    endpoints stay open, matching the other routes.
-    """
-    state = get_state()
-    if state.config.auth_mode == "trusted_proxy":
-        principal = get_principal()
-        if principal is None or not principal.has_scope("admin:tenants"):
-            raise HTTPException(status_code=403, detail="Insufficient scope")
-
-
-@app.get("/v1/admin/tenants")
+@app.get("/v1/admin/tenants", dependencies=[require_scope("admin:tenants")])
 async def list_tenants():
     """List all tracked tenants with their metrics.
 
     Admin endpoint for multi-tenant observability.
     Returns metrics for all tenants that have made requests.
     """
-    _require_tenant_admin_access()
     registry = get_tenant_registry()
     return {"tenants": registry.get_all_tenant_metrics()}
 
 
-@app.get("/v1/admin/tenants/{tenant_id}")
+@app.get("/v1/admin/tenants/{tenant_id}", dependencies=[require_scope("admin:tenants")])
 async def get_tenant_info(tenant_id: str):
     """Get configuration and metrics for a specific tenant.
 
     Path params:
     - tenant_id: The tenant identifier
     """
-    _require_tenant_admin_access()
     registry = get_tenant_registry()
     config = registry.get_config(tenant_id)
     metrics = registry.get_tenant_metrics(tenant_id)
@@ -3172,19 +3171,13 @@ async def inspect_cache_v1(
     return response
 
 
-@app.post("/v1/cache/clear")
+@app.post("/v1/cache/clear", dependencies=[require_scope("admin:cache")])
 async def clear_cache_v1():
     """Clear the disk cache.
 
     Requires admin:cache scope when auth_mode=trusted_proxy.
     """
     state = get_state()
-
-    # Scope check for admin operations
-    if state.config.auth_mode == "trusted_proxy":
-        principal = get_principal()
-        if principal is None or not principal.has_scope("admin:cache"):
-            raise HTTPException(status_code=403, detail="Insufficient scope")
 
     try:
         state.fetcher.cache.clear()

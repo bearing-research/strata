@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, NamedTuple
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 
 if TYPE_CHECKING:
     from strata.artifact_store import ArtifactStore
@@ -125,3 +125,39 @@ def registry_decision() -> RegistryDecision:
 
 
 RegistryDecisionContext = Annotated[RegistryDecision, Depends(registry_decision)]
+
+
+def require_scope(scope: str):
+    """Path-operation dependency: require ``scope`` under trusted-proxy auth.
+
+    Under ``trusted_proxy`` the caller must hold ``scope`` (``admin:*`` grants
+    it); in personal / no-auth mode there is no principal and the endpoint stays
+    open — matching the hand-written admin gates this replaces. Gates by side
+    effect, so use it in the route decorator's ``dependencies=[...]`` rather than
+    as a signature parameter:
+
+        @app.post("/v1/cache/clear", dependencies=[require_scope("admin:cache")])
+    """
+
+    def _require() -> None:
+        from strata.auth import get_principal
+        from strata.server import get_state
+
+        state = get_state()
+        if state.config.auth_mode == "trusted_proxy":
+            principal = get_principal()
+            if principal is None or not principal.has_scope(scope):
+                raise HTTPException(status_code=403, detail="Insufficient scope")
+
+    return Depends(_require)
+
+
+def require_notebook_worker_admin() -> None:
+    """Path-operation dependency for the server-managed notebook worker registry.
+
+    Service-mode only (409 otherwise) plus the ``admin:notebook-workers`` scope
+    under trusted-proxy auth. Use via ``dependencies=[Depends(...)]``.
+    """
+    from strata.server import _require_notebook_worker_admin_access
+
+    _require_notebook_worker_admin_access()
