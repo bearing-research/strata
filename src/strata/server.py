@@ -603,14 +603,12 @@ def _identity_build_status(stream_state: StreamState) -> BuildStatusResponse:
         if artifact is not None:
             artifact_state = artifact.state
 
-    if stream_state.error_message or artifact_state == "failed":
-        build_state = "failed"
-    elif artifact_state == "ready" or stream_state.completed:
-        build_state = "ready"
-    elif stream_state.started:
-        build_state = "building"
-    else:
-        build_state = "pending"
+    build_state = build_service.derive_build_state(
+        error_message=stream_state.error_message,
+        completed=stream_state.completed,
+        started=stream_state.started,
+        artifact_state=artifact_state,
+    )
 
     return BuildStatusResponse(
         build_id=stream_state.stream_id,

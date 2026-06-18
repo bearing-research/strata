@@ -98,3 +98,24 @@ def test_assemble_manifest_handles_no_inputs(captured_manifest):
         url_expiry_seconds=1.0,
     )
     assert captured_manifest["input_artifacts"] == []
+
+
+def _state(**kw):
+    base = dict(error_message=None, completed=False, started=False, artifact_state=None)
+    base.update(kw)
+    return build_service.derive_build_state(**base)
+
+
+def test_derive_build_state_precedence():
+    # Nothing happened yet.
+    assert _state() == "pending"
+    # Started but not done.
+    assert _state(started=True) == "building"
+    # Completed stream, or a ready artifact.
+    assert _state(completed=True) == "ready"
+    assert _state(artifact_state="ready") == "ready"
+    # Failure wins over everything, incl. a ready artifact / completed stream.
+    assert _state(error_message="boom", artifact_state="ready") == "failed"
+    assert _state(artifact_state="failed", completed=True) == "failed"
+    # error_message takes precedence over a started/completed stream too.
+    assert _state(error_message="boom", started=True, completed=True) == "failed"
