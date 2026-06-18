@@ -33,7 +33,7 @@ import pyarrow as pa
 
 from strata_client._clientconfig import HasServerUrl
 from strata_client.client import StrataClient
-from strata_client.filters import Filter
+from strata_client.filters import Filter, serialize_filter_value
 
 if TYPE_CHECKING:
     pass
@@ -49,7 +49,8 @@ def _build_scan_transform(
         params["columns"] = columns
     if filters is not None:
         params["filters"] = [
-            {"column": f.column, "op": f.op.value, "value": f.value} for f in filters
+            {"column": f.column, "op": f.op.value, "value": serialize_filter_value(f.value)}
+            for f in filters
         ]
     return {"executor": "scan@v1", "params": params}
 
