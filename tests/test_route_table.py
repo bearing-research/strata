@@ -9,11 +9,20 @@ unchanged. The dependency count guards the gates: moving a route and dropping it
 
 When a route is *intentionally* added/removed/regated, update ``EXPECTED_ROUTES``
 in the same commit — the diff is the review surface.
+
+The frontend SPA catch-all (``/{full_path:path}``) is deliberately excluded: it
+is mounted by ``_mount_frontend`` only when a built ``frontend/dist`` bundle is
+present, which is true in a dev tree but not in the CI unit-test job — so it is
+environment-dependent and not part of the API surface this guards.
 """
 
 from fastapi.routing import APIRoute
 
 from strata.server import app
+
+# The frontend SPA fallback is conditionally mounted (bundle-dependent); exclude
+# it so the snapshot is deterministic across dev and CI.
+_EXCLUDED_PATHS = {"/{full_path:path}"}
 
 EXPECTED_ROUTES = [
     ("/health", "GET", 0),
@@ -147,7 +156,6 @@ EXPECTED_ROUTES = [
     ("/v1/registry/pending/reject", "POST", 0),
     ("/v1/registry/summary", "GET", 0),
     ("/v1/streams/{stream_id}", "GET", 0),
-    ("/{full_path:path}", "GET", 0),
 ]
 
 
@@ -155,7 +163,7 @@ def _current_routes():
     return sorted(
         (route.path, ",".join(sorted(route.methods)), len(route.dependencies))
         for route in app.routes
-        if isinstance(route, APIRoute)
+        if isinstance(route, APIRoute) and route.path not in _EXCLUDED_PATHS
     )
 
 

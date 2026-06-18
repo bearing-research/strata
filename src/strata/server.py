@@ -31,7 +31,6 @@ from strata.api.dependencies import (
     CurrentTenant,
     PersonalModeStore,
     ReadStore,
-    RegistryDecisionContext,
     WriteStore,
     require_notebook_worker_admin,
     require_scope,
@@ -81,7 +80,6 @@ from strata.rate_limiter import (
 )
 from strata.services.artifact import artifact_service
 from strata.services.build import build_service
-from strata.services.registry import registry_service
 from strata.tenant import (
     DEFAULT_TENANT_ID,
     clear_tenant_context,
@@ -1559,6 +1557,7 @@ instrument_fastapi(app)
 # Register notebook routes + decomposed api routers (P3, server.py router split)
 from strata.api.routers.cache import router as cache_router  # noqa: E402
 from strata.api.routers.debug import router as debug_router  # noqa: E402
+from strata.api.routers.registry import router as registry_router  # noqa: E402
 from strata.notebook import router as notebook_router  # noqa: E402
 from strata.notebook.ws import router as notebook_ws_router  # noqa: E402
 
@@ -1566,6 +1565,7 @@ app.include_router(notebook_router)
 app.include_router(notebook_ws_router)
 app.include_router(cache_router)
 app.include_router(debug_router)
+app.include_router(registry_router)
 
 
 @app.get("/health")
@@ -3839,51 +3839,6 @@ async def delete_tag(
     return {"status": "deleted", "artifact_id": artifact_id, "version": version, "key": key}
 
 
-@app.get("/v1/registry/audit")
-async def registry_audit(
-    store: ReadStore,
-    principal: CurrentPrincipal,
-    name: str | None = None,
-    artifact_id: str | None = None,
-    limit: int = 100,
-):
-    """Read the append-only registry audit, newest first.
-
-    Scoped to the caller's tenant: a principal sees only its own tenant's
-    history. ``admin:*`` (and personal mode, where there is no principal)
-    sees the whole store — every other registry route scopes the same way.
-    """
-    if principal is None or principal.has_scope("admin:*"):
-        entries = store.read_audit(name=name, artifact_id=artifact_id, limit=limit)
-    else:
-        entries = store.read_audit(
-            name=name, artifact_id=artifact_id, limit=limit, tenant=principal.tenant
-        )
-    return {"entries": entries}
-
-
-@app.get("/v1/registry/summary")
-async def registry_summary(store: ReadStore, principal: CurrentPrincipal):
-    """Registry state for the dashboard names table: each name with its
-    aliases (``alias -> version``), current version, and that version's tags.
-    One call instead of ``/v1/names`` + a per-name alias fetch. Tenant-scoped
-    like the other registry reads (personal mode / ``admin:*`` see all)."""
-    tenant = None if (principal is None or principal.has_scope("admin:*")) else principal.tenant
-    return {"names": registry_service.summary(store, tenant=tenant)}
-
-
-class PendingDecisionRequest(BaseModel):
-    name: str
-    alias: str
-
-
-@app.get("/v1/registry/pending")
-async def registry_pending(store: ReadStore, principal: CurrentPrincipal):
-    """List protected-alias changes awaiting approval."""
-    tenant_id = principal.tenant if principal else None
-    return {"pending": store.list_pending_changes(tenant=tenant_id)}
-
-
 def _require_registry_approver():
     """Authorize a registry approval decision; return the principal.
 
@@ -3906,57 +3861,9 @@ def _require_registry_approver():
     return principal
 
 
-@app.post("/v1/registry/pending/approve")
-async def approve_pending(request: PendingDecisionRequest, decision: RegistryDecisionContext):
-    """Apply a pending alias change; the approver becomes the audit actor.
-
-    Requires the ``admin:registry`` scope under trusted-proxy auth, and
-    enforces separation of duty — the requester cannot self-approve unless
-    they hold the ``admin:*`` break-glass scope.
-    """
-    principal, store = decision
-    tenant_id = principal.tenant if principal else None
-    actor = principal.id if principal else None
-    is_superadmin = principal is not None and principal.has_scope("admin:*")
-
-    try:
-        applied = store.approve_alias_change(
-            request.name,
-            request.alias,
-            tenant=tenant_id,
-            actor=actor,
-            require_distinct_approver=not is_superadmin,
-        )
-    except ValueError as e:
-        msg = str(e)
-        status = 403 if msg.startswith("Separation of duty") else 404
-        raise HTTPException(status_code=status, detail=msg)
-    return {"status": "approved", "applied": applied}
-
-
-@app.post("/v1/registry/pending/reject")
-async def reject_pending(request: PendingDecisionRequest, decision: RegistryDecisionContext):
-    """Discard a pending alias change (audited).
-
-    Requires the ``admin:registry`` scope under trusted-proxy auth so a
-    tenant member cannot quietly drop a colleague's pending promotion.
-    """
-    principal, store = decision
-    tenant_id = principal.tenant if principal else None
-    actor = principal.id if principal else None
-
-    try:
-        rejected = store.reject_alias_change(
-            request.name, request.alias, tenant=tenant_id, actor=actor
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return {"status": "rejected", "rejected": rejected}
-
-
-# NOTE: the routes below use a greedy {name:path} converter; the registry
-# routes above must stay registered FIRST or ".../aliases/x" URLs would be
-# swallowed as part of the name. The "/aliases" suffix is reserved.
+# NOTE: this greedy {name:path} route must stay registered AFTER the more
+# specific "/v1/names/{name:path}/aliases/..." routes above, or ".../aliases/x"
+# URLs would be swallowed as part of the name. The "/aliases" suffix is reserved.
 @app.get("/v1/names/{name:path}", response_model=NameResolveResponse)
 async def resolve_name(name: str, store: ReadStore, principal: CurrentPrincipal):
     """Resolve a name to its artifact.
