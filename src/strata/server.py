@@ -82,6 +82,7 @@ from strata.rate_limiter import (
     init_rate_limiter,
 )
 from strata.services.artifact import artifact_service
+from strata.services.registry import registry_service
 from strata.slow_ops import get_latency_stats
 from strata.tenant import (
     DEFAULT_TENANT_ID,
@@ -4591,26 +4592,7 @@ async def registry_summary(store: ReadStore, principal: CurrentPrincipal):
     One call instead of ``/v1/names`` + a per-name alias fetch. Tenant-scoped
     like the other registry reads (personal mode / ``admin:*`` see all)."""
     tenant = None if (principal is None or principal.has_scope("admin:*")) else principal.tenant
-
-    aliases_by_name: dict[str, dict[str, int]] = {}
-    for a in store.list_aliases(None, tenant=tenant):
-        aliases_by_name.setdefault(a.name, {})[a.alias] = a.version
-
-    names = []
-    for n in store.list_names(tenant=tenant):
-        tags = store.get_tags(n.artifact_id, n.version, tenant=tenant)
-        names.append(
-            {
-                "name": n.name,
-                "artifact_id": n.artifact_id,
-                "version": n.version,
-                "uri": f"strata://artifact/{n.artifact_id}@v={n.version}",
-                "aliases": aliases_by_name.get(n.name, {}),
-                # Hide internal stamps (nb_cell) from the user-facing table.
-                "tags": {k: v for k, v in tags.items() if not k.startswith("nb_")},
-            }
-        )
-    return {"names": names}
+    return {"names": registry_service.summary(store, tenant=tenant)}
 
 
 class PendingDecisionRequest(BaseModel):
