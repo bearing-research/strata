@@ -13,7 +13,13 @@ import json
 from typing import TYPE_CHECKING
 
 from strata.artifact_store import TransformSpec
-from strata.types import ArtifactLineageResponse, LineageEdge, LineageNode
+from strata.types import (
+    ArtifactDependentsResponse,
+    ArtifactLineageResponse,
+    DependentInfo,
+    LineageEdge,
+    LineageNode,
+)
 
 if TYPE_CHECKING:
     from strata.artifact_store import ArtifactStore, ArtifactVersion
@@ -192,6 +198,46 @@ class ArtifactService:
             edges=edges,
             depth=max_depth_reached,
             direct_inputs=direct_inputs,
+        )
+
+    def build_dependents(
+        self,
+        store: ArtifactStore,
+        *,
+        artifact_id: str,
+        version: int,
+        tenant_filter: str | None,
+        limit: int,
+    ) -> ArtifactDependentsResponse:
+        """List direct (one-hop) dependents of an artifact, newest store order.
+
+        The caller has already verified the target artifact exists, is ready, and
+        is in-tenant. ``total_count`` reflects all dependents; the returned list is
+        capped at ``limit``.
+        """
+        dependent_results = store.find_dependents(artifact_id, version, tenant=tenant_filter)
+
+        dependents = [
+            DependentInfo(
+                artifact_uri=f"strata://artifact/{dep_artifact.id}@v={dep_artifact.version}",
+                artifact_id=dep_artifact.id,
+                version=dep_artifact.version,
+                name=store.get_name_for_artifact(
+                    dep_artifact.id, dep_artifact.version, tenant=tenant_filter
+                ),
+                transform_ref=_transform_ref(dep_artifact.transform_spec),
+                created_at=dep_artifact.created_at,
+                input_version=input_version,
+            )
+            for dep_artifact, input_version in dependent_results[:limit]
+        ]
+
+        return ArtifactDependentsResponse(
+            artifact_uri=f"strata://artifact/{artifact_id}@v={version}",
+            artifact_id=artifact_id,
+            version=version,
+            dependents=dependents,
+            total_count=len(dependent_results),
         )
 
 

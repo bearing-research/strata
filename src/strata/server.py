@@ -98,7 +98,6 @@ from strata.types import (
     ArtifactLineageResponse,
     BuildSpec,
     BuildStatusResponse,
-    DependentInfo,
     ExplainMaterializeRequest,
     ExplainMaterializeResponse,
     IdentityParams,
@@ -4955,10 +4954,6 @@ async def get_artifact_dependents(
     Returns:
         ArtifactDependentsResponse with list of dependent artifacts
     """
-    import json
-
-    from strata.artifact_store import TransformSpec
-
     # Verify the artifact exists
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
@@ -4971,46 +4966,12 @@ async def get_artifact_dependents(
             detail=f"Artifact is not ready (state={artifact.state})",
         )
 
-    # Find dependents
-    dependent_results = store.find_dependents(artifact_id, version, tenant=tenant_filter)
-
-    # Build response
-    dependents: list[DependentInfo] = []
-    for dep_artifact, input_version in dependent_results[:limit]:
-        # Get name for this artifact if it exists
-        name = store.get_name_for_artifact(
-            dep_artifact.id,
-            dep_artifact.version,
-            tenant=tenant_filter,
-        )
-
-        # Parse transform ref
-        transform_ref = None
-        if dep_artifact.transform_spec:
-            try:
-                spec = TransformSpec.from_json(dep_artifact.transform_spec)
-                transform_ref = spec.executor
-            except (json.JSONDecodeError, KeyError):
-                pass
-
-        dependents.append(
-            DependentInfo(
-                artifact_uri=f"strata://artifact/{dep_artifact.id}@v={dep_artifact.version}",
-                artifact_id=dep_artifact.id,
-                version=dep_artifact.version,
-                name=name,
-                transform_ref=transform_ref,
-                created_at=dep_artifact.created_at,
-                input_version=input_version,
-            )
-        )
-
-    return ArtifactDependentsResponse(
-        artifact_uri=f"strata://artifact/{artifact_id}@v={version}",
+    return artifact_service.build_dependents(
+        store,
         artifact_id=artifact_id,
         version=version,
-        dependents=dependents,
-        total_count=len(dependent_results),
+        tenant_filter=tenant_filter,
+        limit=limit,
     )
 
 

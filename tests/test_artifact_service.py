@@ -32,6 +32,20 @@ class _FakeStore:
         return self._arts.get((art_id, version))
 
 
+class _DependentsStore:
+    """Fake store for build_dependents: scripted find_dependents + name lookups."""
+
+    def __init__(self, results, names=None):
+        self._results = results  # list[(artifact_stub, input_version)]
+        self._names = names or {}
+
+    def find_dependents(self, artifact_id, version, *, tenant=None):
+        return self._results
+
+    def get_name_for_artifact(self, art_id, version, *, tenant=None):
+        return self._names.get((art_id, version))
+
+
 def _lineage(store, root, *, tenant_filter=None, max_depth=10):
     return artifact_service.build_lineage(
         store,
@@ -95,3 +109,33 @@ def test_lineage_marks_cross_tenant_input_as_unknown_stub():
     # (another tenant's SECRET artifact) is never surfaced.
     assert a_node.created_at is None
     assert "strata://artifact/SECRET@v=1" not in by_uri
+
+
+def test_dependents_maps_results_and_resolves_names():
+    results = [
+        (_art("D1", 3), "R@v=1"),
+        (_art("D2", 1), "R@v=1"),
+    ]
+    store = _DependentsStore(results, names={("D1", 3): "champion-model"})
+    resp = artifact_service.build_dependents(
+        store, artifact_id="R", version=1, tenant_filter=None, limit=100
+    )
+
+    assert resp.total_count == 2
+    assert [d.artifact_uri for d in resp.dependents] == [
+        "strata://artifact/D1@v=3",
+        "strata://artifact/D2@v=1",
+    ]
+    assert resp.dependents[0].name == "champion-model"
+    assert resp.dependents[1].name is None
+    assert all(d.input_version == "R@v=1" for d in resp.dependents)
+
+
+def test_dependents_caps_list_at_limit_but_total_counts_all():
+    results = [(_art(f"D{i}", 1), "R@v=1") for i in range(5)]
+    resp = artifact_service.build_dependents(
+        _DependentsStore(results), artifact_id="R", version=1, tenant_filter=None, limit=2
+    )
+
+    assert resp.total_count == 5  # full count, not the page size
+    assert len(resp.dependents) == 2
