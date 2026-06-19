@@ -1,0 +1,18 @@
+[project]
+name = "pipeline"
+version = "0.1.0"
+description = ""
+requires-python = "==3.14.*"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+    "strata-notebook",
+    "pandas>=2.0",
+    "scikit-learn>=1.5",
+]
+
+[tool.uv.sources]
+strata-notebook = { path = "../../.." }
+
+[tool.uv]

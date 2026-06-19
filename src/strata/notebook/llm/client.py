@@ -272,7 +272,7 @@ async def chat_completion_stream(
                 "falling back to prompt-guided JSON."
             ),
         }
-        degraded_body = {
+        degraded_body: dict[str, Any] = {
             "model": config.model,
             "messages": messages,
             max_output_tokens_param(config.base_url): config.max_output_tokens,
