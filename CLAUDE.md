@@ -147,8 +147,13 @@ Two executor protocols:
 
 ### Where to look
 
+HTTP layer: `server.py` (app + lifespan/middleware, plus the
+materialize/streams handlers); per-domain routers in `api/routers/`
+(`cache`, `debug`, `registry`, `metrics_health`, `admin`, `artifacts`,
+`names`, `builds`); typed mode/auth/tenant gates in `api/dependencies.py`;
+pure request-shaping logic in `services/` (`artifact`, `registry`, `build`).
 Data plane: `types.py`, `planner.py`, `cache.py`, `fetcher.py`, `metadata_*.py`,
-`fast_io.py` (+ `rust/src/lib.rs`), `server.py`.
+`fast_io.py` (+ `rust/src/lib.rs`).
 Artifact / build: `artifact_store.py`, `blob_store.py`, `transforms/`.
 Auth / tenancy: `auth.py`, `tenant.py`, `tenant_acl.py`, `tenant_registry.py`.
 Observability: `tracing.py`, `logging.py`, `health.py`, `circuit_breaker.py`,
