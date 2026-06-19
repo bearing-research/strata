@@ -303,6 +303,40 @@ export interface Cell {
   variantName?: string | null
   /** False for inactive variants (shadowed in the DAG). True otherwise. */
   variantActive?: boolean
+  /** pytest source for this cell's unit tests (committed ``cells/{id}.test.py``).
+   * Edited locally and flushed to the backend on run; Python cells only. */
+  testSource?: string
+  /** Last cell-test result, hydrated from ``cell_test_results`` or on open. */
+  testResult?: CellTestResult
+  /** Live test-run lifecycle, hydrated from ``cell_test_status``. */
+  testStatus?: CellTestStatus
+}
+
+/** Lifecycle of a cell-test run (mirrors CellStatus for the spinner). */
+export type CellTestStatus = 'running' | 'ready' | 'error'
+
+/** Outcome of a single pytest test case. */
+export interface CellTestCase {
+  name: string
+  nodeid: string
+  outcome: 'passed' | 'failed' | 'error' | 'skipped'
+  /** Failure/error detail — the rewritten-assert diff for failures. */
+  message: string
+}
+
+/** Result of running a cell's unit tests. */
+export interface CellTestResult {
+  passed: number
+  failed: number
+  errored: number
+  skipped: number
+  tests: CellTestCase[]
+  /** True when the cell source / test source / inputs changed since this run. */
+  stale: boolean
+  /** True when pytest is not importable in the notebook venv. */
+  pytestUnavailable: boolean
+  /** Run timestamp (epoch milliseconds). */
+  ranAt: number
 }
 
 /** A warning or info about a source annotation. */
@@ -683,6 +717,7 @@ export type WsClientMessageType =
   | 'cell_execute_rerun' // Force re-execute target cell, refresh upstreams from cache
   | 'cell_cancel' // Cancel a running cell
   | 'cell_source_update' // Cell source changed (debounced)
+  | 'cell_run_tests' // Persist + run a cell's unit tests (Python only)
   | 'notebook_run_all' // Run all cells (or just stale ones)
   | 'notebook_rerun_all' // Force re-execute every cell (cache off)
   | 'notebook_sync' // Reconnection — request full state
@@ -707,6 +742,8 @@ export type WsServerMessageType =
   | 'cell_error' // Cell execution failed
   | 'cell_assertions' // Assertion results from cell execution
   | 'cell_iteration_progress' // Loop cell completed one iteration
+  | 'cell_test_status' // Cell unit-test run lifecycle (running/ready/error)
+  | 'cell_test_results' // Cell unit-test per-test outcomes + totals
   | 'dag_update' // Authoritative DAG from backend AST analysis
   | 'cascade_prompt' // "This cell needs N upstream cells to run first"
   | 'cascade_progress' // During cascade, reports which cell is running

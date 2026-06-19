@@ -4,6 +4,8 @@ import type {
   CellId,
   CellOutput,
   CellStatus,
+  CellTestResult,
+  CellTestStatus,
   ConnectionSpec,
   DagEdge,
   DependencyInfo,
@@ -244,6 +246,12 @@ function updateSource(id: CellId, source: string) {
   const cell = cellMap.value.get(id)
   if (!cell) return
   cell.source = source
+
+  // A source edit invalidates the last test result (the cell the tests ran
+  // against has changed). Cheap, edit-driven staleness — see runCellTests.
+  if (cell.testResult && !cell.testResult.stale) {
+    cell.testResult = { ...cell.testResult, stale: true }
+  }
 
   // Mark dirty for async backend sync. No local regex extraction —
   // defines/references/DAG update from the backend after flush to
@@ -1252,6 +1260,11 @@ function parseBackendCellPayload(raw: any): Cell {
   cell.consoleStdout = typeof raw.console_stdout === 'string' ? raw.console_stdout : ''
   cell.consoleStderr = typeof raw.console_stderr === 'string' ? raw.console_stderr : ''
 
+  // Unit-test source + last result (Python cells). Hydrated on open so the
+  // panel and the toolbar health badge restore without a re-run.
+  cell.testSource = typeof raw.test_source === 'string' ? raw.test_source : ''
+  cell.testResult = raw.test_result ? parseBackendTestResult(raw.test_result) : undefined
+
   return cell
 }
 
@@ -1800,6 +1813,66 @@ function inspectHistoryFor(cellId: CellId): InspectEntry[] {
   return inspectHistoryMap.value.get(cellId) ?? []
 }
 
+// --- Cell unit-test panels -------------------------------------------------
+// Which cells currently have the Tests panel open. Purely client-side
+// (mirrors the inspect toggle's UX, but there's no backend open/close — the
+// only backend round-trip is running the tests). Test source / result /
+// status live on the Cell itself, like console output.
+const testOpenCells = ref<Set<CellId>>(new Set())
+
+function isTesting(cellId: CellId): boolean {
+  return testOpenCells.value.has(cellId)
+}
+function toggleTests(cellId: CellId) {
+  const next = new Set(testOpenCells.value)
+  if (next.has(cellId)) next.delete(cellId)
+  else next.add(cellId)
+  testOpenCells.value = next
+}
+function closeTests(cellId: CellId) {
+  if (!testOpenCells.value.has(cellId)) return
+  const next = new Set(testOpenCells.value)
+  next.delete(cellId)
+  testOpenCells.value = next
+}
+function updateTestSource(cellId: CellId, source: string) {
+  const cell = cellMap.value.get(cellId)
+  if (!cell) return
+  cell.testSource = source
+  // A test-source edit invalidates the last result.
+  if (cell.testResult && !cell.testResult.stale) {
+    cell.testResult = { ...cell.testResult, stale: true }
+  }
+}
+function runCellTests(cellId: CellId) {
+  const cell = cellMap.value.get(cellId)
+  if (!cell || !wsInstance || !wsInstance.connected()) return
+  cell.testStatus = 'running'
+  wsInstance.runCellTests(cellId, cell.testSource ?? '')
+}
+
+function parseBackendTestResult(raw: any): CellTestResult {
+  return {
+    passed: raw.passed ?? 0,
+    failed: raw.failed ?? 0,
+    errored: raw.errored ?? 0,
+    skipped: raw.skipped ?? 0,
+    tests: Array.isArray(raw.tests)
+      ? raw.tests.map((t: any) => ({
+          name: t.name ?? '',
+          nodeid: t.nodeid ?? '',
+          outcome: t.outcome ?? 'error',
+          message: t.message ?? '',
+        }))
+      : [],
+    // Persisted results carry no `stale` (it's computed at emit time); a
+    // freshly hydrated result is trusted until the user edits the cell/tests.
+    stale: raw.stale === true,
+    pytestUnavailable: raw.pytest_unavailable === true,
+    ranAt: raw.ran_at ?? 0,
+  }
+}
+
 // LLM assistant state
 interface LlmMessage {
   role: 'user' | 'assistant'
@@ -2079,6 +2152,18 @@ function initializeWebSocket() {
               ? 'python'
               : undefined
       }
+    })
+
+    wsInstance.onMessage('cell_test_status', (msg: WsMessage) => {
+      const p = msg.payload as Record<string, any>
+      const cell = cellMap.value.get(p.cell_id as CellId)
+      if (cell) cell.testStatus = p.status as CellTestStatus
+    })
+
+    wsInstance.onMessage('cell_test_results', (msg: WsMessage) => {
+      const p = msg.payload as Record<string, any>
+      const cell = cellMap.value.get(p.cell_id as CellId)
+      if (cell) cell.testResult = parseBackendTestResult(p)
     })
 
     wsInstance.onMessage('dag_update', (msg: WsMessage) => {
@@ -3717,6 +3802,12 @@ export function useNotebook() {
     openInspect,
     evalInspect,
     closeInspect,
+    // Cell unit tests
+    isTesting,
+    toggleTests,
+    closeTests,
+    updateTestSource,
+    runCellTests,
     // Environment / Dependencies
     dependencies,
     dependencyLoading,

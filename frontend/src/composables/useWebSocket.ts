@@ -303,6 +303,13 @@ export function useWebSocket(notebookId: string) {
   }
 
   /**
+   * Persist a cell's unit-test source and run it (Python cells only).
+   */
+  function runCellTests(cellId: string, testSource: string): void {
+    send('cell_run_tests', { cell_id: cellId, test_source: testSource })
+  }
+
+  /**
    * Add a package dependency.
    */
   function addDependency(pkg: string): void {
@@ -410,6 +417,7 @@ export function useWebSocket(notebookId: string) {
     inspectOpen,
     inspectEval,
     inspectClose,
+    runCellTests,
     addDependency,
     removeDependency,
     setVariantActive,

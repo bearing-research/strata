@@ -15,6 +15,7 @@ import { renderMarkdownToHtml } from '../utils/markdown'
 import { isStructuredStream, parsePartialJson } from '../utils/partialJson'
 
 const InspectPanel = defineAsyncComponent(() => import('./InspectPanel.vue'))
+const TestsPanel = defineAsyncComponent(() => import('./TestsPanel.vue'))
 
 const props = defineProps<{ cell: Cell }>()
 const emit = defineEmits<{
@@ -38,6 +39,8 @@ const {
   openInspect,
   isInspecting: storeIsInspecting,
   closeInspect,
+  isTesting: storeIsTesting,
+  toggleTests,
   availableWorkers,
   addDependencyAction,
   addRPackageAction,
@@ -60,6 +63,45 @@ function toggleInspect() {
   }
   openInspect(props.cell.id)
 }
+
+// Cell unit tests — Python cells only. The toolbar button doubles as a health
+// badge so test status is readable without opening the panel.
+const isPythonCell = computed(() => props.cell.language === 'python')
+const isTesting = computed(() => storeIsTesting(props.cell.id))
+
+interface TestBadge {
+  text: string
+  cls: 'pass' | 'fail' | 'error' | 'stale' | 'running'
+  title: string
+}
+
+const testBadge = computed<TestBadge | null>(() => {
+  const cell = props.cell
+  if (cell.testStatus === 'running') {
+    return { text: '…', cls: 'running', title: 'Running tests…' }
+  }
+  const r = cell.testResult
+  if (!r) return null
+  if (r.pytestUnavailable) {
+    return { text: '!', cls: 'error', title: 'pytest is not installed in this notebook' }
+  }
+  const total = r.passed + r.failed + r.errored
+  const suffix = r.stale ? ' · stale' : ''
+  const cls: TestBadge['cls'] = r.stale
+    ? 'stale'
+    : r.errored > 0
+      ? 'error'
+      : r.failed > 0
+        ? 'fail'
+        : 'pass'
+  return {
+    text: `${r.passed}/${total}${suffix}`,
+    cls,
+    title: r.stale
+      ? 'Tests are stale — the cell or its tests changed since the last run'
+      : `${r.passed} passed, ${r.failed} failed, ${r.errored} errored`,
+  }
+})
 
 const editorEl = ref<HTMLElement | null>(null)
 const showCausality = ref(false)
@@ -670,6 +712,18 @@ function outputKey(output: CellOutput, index: number): string {
         <button title="Inspect inputs" :class="{ active: isInspecting }" @click="toggleInspect">
           &#x1F50D;
         </button>
+        <button
+          v-if="isPythonCell"
+          class="tests-toggle"
+          :title="testBadge?.title ?? 'Unit tests'"
+          :class="{ active: isTesting }"
+          @click="toggleTests(cell.id)"
+        >
+          &#x1F9EA;
+          <span v-if="testBadge" class="tests-badge" :class="`tests-badge--${testBadge.cls}`">
+            {{ testBadge.text }}
+          </span>
+        </button>
       </div>
     </div>
 
@@ -1168,6 +1222,9 @@ function outputKey(output: CellOutput, index: number): string {
 
       <!-- Inspect REPL panel -->
       <InspectPanel v-if="isInspecting" :cell-id="cell.id" />
+
+      <!-- Unit-tests panel -->
+      <TestsPanel v-if="isTesting" :cell-id="cell.id" />
     </div>
   </div>
 </template>
@@ -2145,6 +2202,40 @@ function outputKey(output: CellOutput, index: number): string {
 }
 .output-toggle:hover {
   border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+/* Tests toolbar button + health badge */
+.tests-toggle {
+  position: relative;
+}
+.tests-badge {
+  margin-left: 3px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  vertical-align: middle;
+}
+.tests-badge--pass {
+  background: var(--tint-success, rgba(60, 180, 90, 0.18));
+  color: var(--accent-success);
+}
+.tests-badge--fail {
+  background: var(--tint-danger, rgba(220, 70, 70, 0.18));
+  color: var(--accent-danger);
+}
+.tests-badge--error {
+  background: var(--tint-warning, rgba(220, 160, 50, 0.2));
+  color: var(--accent-warning);
+}
+.tests-badge--stale {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+.tests-badge--running {
+  background: var(--bg-elevated);
   color: var(--accent-primary);
 }
 </style>
