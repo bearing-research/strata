@@ -59,7 +59,7 @@ uv sync --all-extras                      # install + build Rust ext (matches CI
 uv run pytest                             # all tests
 uv run pytest tests/test_smoke.py -v      # one file
 uv run pre-commit run --all-files         # format + lint
-uv run ty check src/                      # type check (Astral)
+uv run ty check                           # type check (Astral); scoped to shipped code (src + strata-client)
 uv run python -m strata                   # start server
 ```
 
