@@ -59,6 +59,40 @@ class TestGCTracker:
         finally:
             tracker.uninstall()
 
+    def test_gc_callback_is_nonblocking_when_lock_held(self):
+        """Regression: the GC callback must not block on the tracker lock.
+
+        The callback fires *during* a GC, which an allocation under ``_lock``
+        (e.g. ``get_stats`` building its result) can trigger on the same thread.
+        With a non-reentrant lock, a blocking acquire would self-deadlock — the
+        intermittent py3.12/macOS ``/metrics`` hang. So with the lock already
+        held, the callback must return promptly (skipping the sample), not hang.
+        """
+        from strata.gc_tracker import GCTracker
+
+        tracker = GCTracker()
+        tracker._gc_callback("start", {"generation": 0})
+
+        # Hold the lock, as get_stats/reset do while allocating their result.
+        tracker._lock.acquire()
+        try:
+            done: list[bool] = []
+
+            def _fire():
+                tracker._gc_callback("stop", {"generation": 0})
+                done.append(True)
+
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                # Run from another thread so a true deadlock would hang the
+                # future; a blocking acquire on the held lock would never return.
+                ex.submit(_fire).result(timeout=5)
+
+            assert done == [True]
+            # The sample was dropped (lock was contended), not recorded.
+            assert tracker._total_pauses == 0
+        finally:
+            tracker._lock.release()
+
     def test_tracker_get_recent_pauses(self):
         """Test getting recent pause list."""
         from strata.gc_tracker import GCTracker
