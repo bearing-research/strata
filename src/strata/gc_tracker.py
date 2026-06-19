@@ -151,8 +151,17 @@ class GCTracker:
             # Reset for next collection
             self._gc_start_time = 0.0
 
-            # Thread-safe update
-            with self._lock:
+            # Best-effort, NON-BLOCKING update. This callback fires *during* a GC
+            # — which can be triggered by an allocation made while a thread holds
+            # ``_lock`` (e.g. ``get_stats``/``reset`` building their result). With
+            # a non-reentrant lock a blocking acquire here would self-deadlock
+            # against that holder on the same thread (observed as an intermittent
+            # py3.12/macOS hang on the ``/metrics`` endpoint). Skip recording this
+            # pause when the lock is contended — dropping the occasional sample is
+            # acceptable for best-effort GC observability; a deadlock is not.
+            if not self._lock.acquire(blocking=False):
+                return
+            try:
                 pause = GCPause(
                     timestamp=timestamp,
                     generation=generation,
@@ -170,6 +179,8 @@ class GCTracker:
                 self._total_pauses += 1
                 self._total_pause_ms += duration_ms
                 self._max_pause_ms = max(self._max_pause_ms, duration_ms)
+            finally:
+                self._lock.release()
 
     def install(self) -> None:
         """Install the GC callback. Safe to call multiple times."""
