@@ -1332,6 +1332,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#cell-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell Tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#state" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2042,6 +2053,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#cell-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell Tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#state" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2360,6 +2382,23 @@
 </tr>
 </tbody>
 </table>
+<h3 id="cell-tests">Cell Tests<a class="headerlink" href="#cell-tests" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Payload</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cell_run_tests</code></td>
+<td><code>{ "cell_id": "...", "test_source": "..." }</code></td>
+<td>Persist the cell's unit-test source (<code>cells/{id}.test.py</code>) and run it. Python cells only.</td>
+</tr>
+</tbody>
+</table>
 <h3 id="state">State<a class="headerlink" href="#state" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2520,6 +2559,16 @@
 <td><code>cell_iteration_progress</code></td>
 <td><code>{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "duration_ms": 128 }</code></td>
 <td>Per-iteration update from a <code>@loop</code> cell</td>
+</tr>
+<tr>
+<td><code>cell_test_status</code></td>
+<td><code>{ "cell_id": "...", "status": "running" }</code></td>
+<td>Test run lifecycle: <code>running</code> → <code>ready</code> / <code>error</code> (mirrors <code>cell_status</code>)</td>
+</tr>
+<tr>
+<td><code>cell_test_results</code></td>
+<td><code>{ "cell_id": "...", "passed": 2, "failed": 1, "errored": 0, "skipped": 0, "tests": [{ "name": "...", "nodeid": "...", "outcome": "passed", "message": "..." }], "stale": false, "pytest_unavailable": false, "ran_at": 1718000000000 }</code></td>
+<td>Per-test outcomes + totals from a <code>cell_run_tests</code>. <code>outcome</code> ∈ <code>passed</code>/<code>failed</code>/<code>error</code>/<code>skipped</code>; <code>message</code> carries the rewritten-assert diff for failures. <code>stale</code> flags the result against a since-changed cell/test/input.</td>
 </tr>
 </tbody>
 </table>
