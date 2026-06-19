@@ -188,6 +188,16 @@ select = ["E", "F", "I", "UP"]
 python-version = "3.12"
 python = ".venv"
 
+# Type-check only the shipped libraries. tests/, examples/, experiments/ and
+# benchmarks/ are excluded: the examples/experiments are notebook *cells* whose
+# cross-cell variables and the ambient `strata` client are injected by the
+# harness at runtime, so ty can't see them (every reference reads as
+# unresolved); tests lean on SimpleNamespace stubs + pytest fixture injection
+# that ty likewise can't model. `ty check` (no args) now covers exactly the
+# code we ship — src/ and the strata-client package — and must stay clean.
+[tool.ty.src]
+include = ["src", "packages/strata-client/src"]
+
 [tool.ty.rules]
 # Optional deps (Rust ext, ADBC drivers) use guarded imports
 unresolved-import = "warn"
