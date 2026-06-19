@@ -162,7 +162,7 @@ jobs:
             --ignore=tests/notebook/test_e2e_mounts_s3.py \
             --ignore=tests/notebook/test_e2e_mounts_azure.py \
             --ignore=tests/notebook/test_e2e_mounts_gcs.py \
-            -v --tb=short
+            -n auto --dist loadscope --tb=short
 
       - name: Run unit tests (Windows — notebook subsystem skipped)
         if: runner.os == 'Windows'
@@ -173,7 +173,7 @@ jobs:
             --ignore=tests/test_lineage.py \
             --ignore=tests/test_s3_integration.py \
             --ignore=tests/notebook \
-            -v --tb=short
+            -n auto --dist loadscope --tb=short
 
   # E2E and integration tests - run on Ubuntu only for speed
   e2e-tests:

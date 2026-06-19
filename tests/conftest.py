@@ -42,6 +42,37 @@ from strata_client.client import StrataClient
 from strata.config import StrataConfig
 
 # =============================================================================
+# Global-state isolation
+# =============================================================================
+
+
+@pytest.fixture(autouse=True)
+def _reset_process_globals():
+    """Nuke process-global server state after every test.
+
+    ``strata.server._state`` (plus the tenant registry and artifact-store
+    singletons) are process globals shared by every test on a pytest-xdist
+    worker. A test that sets ``_state`` — e.g. a notebook route test configuring
+    ``notebook_storage_dir`` — could leak it into an unrelated later test on the
+    same worker, which surfaced under xdist as
+    ``TestCellIterationsEndpoint`` getting a 400 "must be inside configured
+    notebook storage" (it passes serially / at a different worker count because
+    test→worker packing differs). Most fixtures already reset on teardown; this
+    autouse teardown is the belt-and-suspenders guarantee that no test starts
+    with a dirty global, so the suite is safe to run in parallel.
+    """
+    yield
+    import strata.server as server_module
+
+    server_module._state = None
+    from strata.artifact_store import reset_artifact_store
+    from strata.tenant_registry import reset_tenant_registry
+
+    reset_artifact_store()
+    reset_tenant_registry()
+
+
+# =============================================================================
 # Common Utility Functions
 # =============================================================================
 
