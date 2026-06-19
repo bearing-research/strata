@@ -157,6 +157,43 @@ class TestSlotAcquisition:
         assert metrics["interactive"]["active"] == 0
 
     @pytest.mark.asyncio
+    async def test_acquire_releases_tenant_slot_on_cancel(self):
+        """Cancelling acquire while queued for a global slot must release the
+        per-tenant slot it already grabbed.
+
+        Regression: the cleanup was `except Exception`, which does not catch
+        asyncio.CancelledError (a BaseException). A client disconnect / shutdown
+        while a build was queued for a global slot leaked the per-tenant slot
+        permanently, eventually returning TenantAtCapacityError for every later
+        build by that tenant (a per-tenant DoS).
+        """
+        config = BuildQoSConfig(
+            interactive_slots=1,  # one global slot
+            per_tenant_interactive=5,  # tenant slots are not the constraint
+            interactive_queue_timeout=10.0,  # long, so the 2nd acquire queues
+        )
+        qos = BuildQoS(config)
+
+        # Fill the single global slot.
+        slot_a = await qos.acquire("t1", BuildPriority.INTERACTIVE)
+        tenant_limiter = qos._tenant_limiters["t1"].interactive
+        assert tenant_limiter.in_use == 1
+
+        # Second acquire grabs a tenant slot, then blocks on the global slot.
+        task = asyncio.create_task(qos.acquire("t1", BuildPriority.INTERACTIVE))
+        await asyncio.sleep(0.05)  # let it reach the global-slot await
+        assert tenant_limiter.in_use == 2  # tenant slot grabbed, now queued
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        # The queued acquire's tenant slot must be released, not leaked.
+        assert tenant_limiter.in_use == 1
+
+        await slot_a.release()
+
+    @pytest.mark.asyncio
     async def test_per_tenant_limit_enforced(self):
         """Per-tenant limit returns 429 when exceeded."""
         config = BuildQoSConfig(

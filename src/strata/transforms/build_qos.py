@@ -452,8 +452,15 @@ class BuildQoS:
                 global_limiter=global_limiter,
             )
 
-        except Exception:
-            # Release tenant slot on any error (if not already released)
+        except BaseException:
+            # Release the tenant slot on ANY exit (if not already released),
+            # including asyncio.CancelledError — a BaseException, not Exception.
+            # The global-slot acquire above is a cancellation point (client
+            # disconnect / shutdown while queued), and `except Exception` let a
+            # cancel escape without releasing the per-tenant slot grabbed at
+            # step 1 — a permanent per-tenant slot leak that bleeds into
+            # TenantAtCapacityError for every later build (effectively a
+            # per-tenant DoS). ResizableLimiter has no timeout-based reclaim.
             if not tenant_slot_released:
                 await tenant_limiter.release()
             raise

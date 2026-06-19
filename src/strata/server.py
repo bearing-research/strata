@@ -3105,8 +3105,17 @@ async def get_stream(stream_id: str, request: Request):
                 headers={"Retry-After": "1"},
             )
 
-    # Queue with deadline
-    acquired = await limiter.acquire(timeout=queue_timeout)
+    # Queue with deadline. If this acquire is cancelled (client disconnect /
+    # shutdown while queued for a tenant slot), release the per-client semaphore
+    # grabbed above before propagating — CancelledError is a BaseException, and
+    # the `if not acquired:` path below only handles the timeout (False) case,
+    # not a cancel, so the semaphore would otherwise leak that client a slot.
+    try:
+        acquired = await limiter.acquire(timeout=queue_timeout)
+    except BaseException:
+        if client_semaphore_acquired and client_semaphore is not None:
+            client_semaphore.release()
+        raise
 
     if not acquired:
         if client_semaphore_acquired and client_semaphore is not None:
