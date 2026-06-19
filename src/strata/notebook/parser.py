@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
@@ -199,10 +200,16 @@ def parse_notebook(directory: Path) -> NotebookState:
                 source = f.read()
 
         # Unit-test source is a committed sibling ``cells/{id}.test.py``
-        # (absent for cells with no tests). Loaded alongside the cell
-        # source so it round-trips on reopen like the cell body itself.
-        test_file = cells_dir / f"{cell_meta.id}.test.py"
-        test_source = test_file.read_text(encoding="utf-8") if test_file.exists() else ""
+        # (absent for cells with no tests). Resolve under ``cells/`` and
+        # confirm containment before reading: ids are backend-generated, but a
+        # hand-edited notebook.toml id with path separators must not let the
+        # read escape the notebook tree.
+        test_path = os.path.realpath(os.path.join(cells_dir, f"{cell_meta.id}.test.py"))
+        cells_root = os.path.realpath(cells_dir)
+        test_source = ""
+        if test_path.startswith(cells_root + os.sep) and os.path.isfile(test_path):
+            with open(test_path, encoding="utf-8") as f:
+                test_source = f.read()
 
         # Resolve mounts: notebook-level defaults, overridden by cell-level
         resolved_mounts = dict(notebook_mounts)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -320,7 +321,9 @@ def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None
         raise FileNotFoundError(f"Cell {cell_id} not found in notebook.toml")
 
     cells_dir = notebook_dir / "cells"
-    test_file = cells_dir / f"{cell_id}.test.py"
+    # ``cell_id`` is validated against notebook.toml above, but basename it
+    # anyway so a path-separator id can never escape ``cells/``.
+    test_file = cells_dir / os.path.basename(f"{cell_id}.test.py")
 
     if test_source.strip():
         cells_dir.mkdir(exist_ok=True)
