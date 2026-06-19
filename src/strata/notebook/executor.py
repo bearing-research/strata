@@ -73,6 +73,8 @@ from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import (
     CellLanguage,
     CellOutput,
+    CellTestCase,
+    CellTestResult,
     MountSpec,
     TableSpec,
     WorkerBackendType,
@@ -538,6 +540,103 @@ class CellExecutor:
             materialize_upstreams=True,
             use_cache=False,
         )
+
+    async def run_cell_tests(self, cell_id: str, test_source: str) -> CellTestResult:
+        """Run a Python cell's unit tests and persist the result.
+
+        Tests target the functions/classes the cell *defines*, which the
+        notebook never stores as artifacts (only consumed variables are). So
+        the run re-executes the cell source — with its upstream inputs injected
+        — and runs ``pytest`` against it via the generated conftest plugin.
+
+        Steps: materialize upstreams (so inputs exist) → stage input blobs and
+        deserialize them to Python values → fingerprint the
+        ``(cell_source, test_source, inputs)`` triple → shell to pytest in the
+        notebook venv → persist + return the structured result.
+
+        Distinct from ``execute_cell``: it never touches the artifact cache or
+        the cell's status, and it doesn't go through the harness — it's a pure
+        read-side check against a re-executed copy of the cell.
+        """
+        # Lazy imports: the serializer pulls in the [notebook] extra
+        # (pandas/pyarrow), which executor.py must not import at module load
+        # (see CLAUDE/feedback: executor is core-deps only). cell_test_runner
+        # is stdlib-only but kept co-located with its single caller.
+        from strata.notebook import serializer
+        from strata.notebook.cell_test_runner import (
+            PytestUnavailableError,
+            run_cell_tests_in_dir,
+        )
+        from strata.notebook.runtime_state import persist_cell_test_result
+
+        cell = self.session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            raise FileNotFoundError(f"Cell {cell_id} not found")
+
+        source = cell.source
+        await self._materialize_upstreams(cell_id)
+
+        source_hash = compute_source_hash(source)
+        test_source_hash = hashlib.sha256(test_source.encode("utf-8")).hexdigest()
+        input_hashes = self._collect_input_hashes(cell_id)
+        input_fingerprint = hashlib.sha256(
+            "|".join(sorted(input_hashes)).encode("utf-8")
+        ).hexdigest()
+        venv_python = Path(self.session.venv_python or "python")
+
+        pytest_unavailable = False
+        with tempfile.TemporaryDirectory(prefix="strata_celltest_") as tmp:
+            blob_dir = Path(tmp) / "inputs"
+            blob_dir.mkdir()
+            input_specs = self._load_input_blobs(cell_id, blob_dir)
+
+            inputs: dict[str, Any] = {}
+            for var_name, spec in input_specs.items():
+                try:
+                    inputs[var_name] = serializer.deserialize_value(
+                        spec["content_type"], blob_dir / spec["file"]
+                    )
+                except Exception:
+                    # A non-deserializable input (e.g. an R-only artifact) is
+                    # left unbound; any test that reads it fails loudly via the
+                    # cell fixture rather than the whole run aborting.
+                    logger.exception(
+                        "Cell-test input %s could not be deserialized for cell %s",
+                        var_name,
+                        cell_id,
+                    )
+
+            raw: dict[str, Any]
+            try:
+                raw = await asyncio.to_thread(
+                    run_cell_tests_in_dir,
+                    rundir=Path(tmp) / "run",
+                    venv_python=venv_python,
+                    cell_source=source,
+                    test_source=test_source,
+                    inputs=inputs,
+                )
+            except PytestUnavailableError:
+                pytest_unavailable = True
+                raw = {"passed": 0, "failed": 0, "errored": 0, "skipped": 0, "tests": []}
+
+        result = CellTestResult(
+            passed=raw["passed"],
+            failed=raw["failed"],
+            errored=raw["errored"],
+            skipped=raw.get("skipped", 0),
+            tests=[CellTestCase(**t) for t in raw["tests"]],
+            cell_source_hash=source_hash,
+            test_source_hash=test_source_hash,
+            input_fingerprint=input_fingerprint,
+            ran_at=int(time.time() * 1000),
+            pytest_unavailable=pytest_unavailable,
+        )
+
+        persist_cell_test_result(self.session.path, cell_id, result.model_dump())
+        cell.test_result = result
+        cell.test_source = test_source
+        return result
 
     async def execute_batch(
         self,

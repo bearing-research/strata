@@ -95,6 +95,23 @@ def test_cell_source_error_is_an_error_not_a_fail(tmp_path):
     assert "Cell did not execute" in res["tests"][0]["message"]
 
 
+def test_collection_failure_is_an_error(tmp_path):
+    """A syntax error in the test file is an error, not a silent zero.
+
+    The module fails to import, so no runtest report fires; the
+    ``pytest_collectreport`` hook is what keeps ``results.json`` from reading
+    as an all-pass "no tests".
+    """
+    res = _run(
+        tmp_path,
+        "x = 1\n",
+        {},
+        "def test_broken(cell):\n    assert (\n",  # unbalanced paren
+    )
+    assert res["errored"] == 1
+    assert res["passed"] == 0
+
+
 def test_skip_counted_separately(tmp_path):
     res = _run(
         tmp_path,

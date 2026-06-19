@@ -51,6 +51,12 @@ All messages are JSON with this shape:
 | -------------------- | --------------------------------------- | -------------- |
 | `cell_source_update` | `{ "cell_id": "...", "source": "..." }` | Source changed |
 
+### Cell Tests
+
+| Type             | Payload                                      | Description                                                                              |
+| ---------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `cell_run_tests` | `{ "cell_id": "...", "test_source": "..." }` | Persist the cell's unit-test source (`cells/{id}.test.py`) and run it. Python cells only. |
+
 ### State
 
 | Type                     | Payload                | Description                           |
@@ -100,6 +106,8 @@ All messages are JSON with this shape:
 | `cell_console`            | `{ "cell_id": "...", "stream": "stdout", "text": "..." }`                                                                | Incremental output                               |
 | `cell_error`              | `{ "cell_id": "...", "error": "..." }`                                                                                   | Execution error                                  |
 | `cell_iteration_progress` | `{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "duration_ms": 128 }` | Per-iteration update from a `@loop` cell         |
+| `cell_test_status`        | `{ "cell_id": "...", "status": "running" }`                                                                              | Test run lifecycle: `running` → `ready` / `error` (mirrors `cell_status`) |
+| `cell_test_results`       | `{ "cell_id": "...", "passed": 2, "failed": 1, "errored": 0, "skipped": 0, "tests": [{ "name": "...", "nodeid": "...", "outcome": "passed", "message": "..." }], "stale": false, "pytest_unavailable": false, "ran_at": 1718000000000 }` | Per-test outcomes + totals from a `cell_run_tests`. `outcome` ∈ `passed`/`failed`/`error`/`skipped`; `message` carries the rewritten-assert diff for failures. `stale` flags the result against a since-changed cell/test/input. |
 
 ### Cascade
 

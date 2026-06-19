@@ -31,6 +31,7 @@ class MessageType(StrEnum):
     NOTEBOOK_RUN_ALL = "notebook_run_all"
     NOTEBOOK_RERUN_ALL = "notebook_rerun_all"
     CELL_SOURCE_UPDATE = "cell_source_update"
+    CELL_RUN_TESTS = "cell_run_tests"
     NOTEBOOK_SYNC = "notebook_sync"
     IMPACT_PREVIEW_REQUEST = "impact_preview_request"
     PROFILING_REQUEST = "profiling_request"
@@ -60,6 +61,11 @@ class MessageType(StrEnum):
     CELL_CONSOLE = "cell_console"
     CELL_ERROR = "cell_error"
     CELL_ITERATION_PROGRESS = "cell_iteration_progress"
+    # Cell unit-test lifecycle. CELL_TEST_STATUS mirrors CELL_STATUS for the
+    # running spinner ({cell_id, status: running|ready|error}); CELL_TEST_RESULTS
+    # carries the per-test outcomes + totals + staleness flag.
+    CELL_TEST_STATUS = "cell_test_status"
+    CELL_TEST_RESULTS = "cell_test_results"
     DAG_UPDATE = "dag_update"
     NOTEBOOK_STATE = "notebook_state"
     CASCADE_PROMPT = "cascade_prompt"

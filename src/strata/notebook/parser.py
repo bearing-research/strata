@@ -10,6 +10,7 @@ from strata.notebook.models import (
     CellMeta,
     CellOutput,
     CellState,
+    CellTestResult,
     ConnectionSpec,
     MalformedConnection,
     MountSpec,
@@ -197,6 +198,12 @@ def parse_notebook(directory: Path) -> NotebookState:
             with open(cell_file, encoding="utf-8") as f:
                 source = f.read()
 
+        # Unit-test source is a committed sibling ``cells/{id}.test.py``
+        # (absent for cells with no tests). Loaded alongside the cell
+        # source so it round-trips on reopen like the cell body itself.
+        test_file = cells_dir / f"{cell_meta.id}.test.py"
+        test_source = test_file.read_text(encoding="utf-8") if test_file.exists() else ""
+
         # Resolve mounts: notebook-level defaults, overridden by cell-level
         resolved_mounts = dict(notebook_mounts)
         for m in cell_meta.mounts:
@@ -215,6 +222,12 @@ def parse_notebook(directory: Path) -> NotebookState:
         else:
             display_outputs = []
 
+        test_result = (
+            CellTestResult(**runtime_cell.test_result)
+            if runtime_cell is not None and runtime_cell.test_result
+            else None
+        )
+
         # Restore console output from .strata/console/
         from strata.notebook.writer import load_cell_console_output
 
@@ -229,6 +242,8 @@ def parse_notebook(directory: Path) -> NotebookState:
             CellState(
                 id=cell_meta.id,
                 source=source,
+                test_source=test_source,
+                test_result=test_result,
                 language=cell_meta.language,
                 order=cell_meta.order,
                 worker=resolved_worker,

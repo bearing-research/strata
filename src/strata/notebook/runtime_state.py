@@ -34,6 +34,7 @@ class CellRuntime:
     last_env_hash: str | None = None
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     display: dict[str, Any] | None = None
+    test_result: dict[str, Any] | None = None
 
     def is_empty(self) -> bool:
         """Whether this entry carries no useful state.
@@ -46,6 +47,7 @@ class CellRuntime:
             or self.last_env_hash
             or self.display_outputs
             or self.display
+            or self.test_result
         )
 
 
@@ -187,6 +189,24 @@ def persist_cell_provenance(
     entry.last_provenance_hash = last_provenance_hash or None
     entry.last_source_hash = last_source_hash or None
     entry.last_env_hash = last_env_hash or None
+    save_runtime_state(notebook_dir, state)
+
+
+def persist_cell_test_result(
+    notebook_dir: Path,
+    cell_id: str,
+    test_result: dict[str, Any] | None,
+) -> None:
+    """Persist (or clear) a cell's last unit-test result.
+
+    Results live in ``.strata/runtime.json`` — they're runtime state, not
+    committed config, so re-running a cell's tests never churns
+    ``notebook.toml``. Passing ``None`` clears a prior result (the entry is
+    pruned on save if it carries nothing else).
+    """
+    state = load_runtime_state(notebook_dir)
+    entry = state.get_or_create_cell(cell_id)
+    entry.test_result = test_result or None
     save_runtime_state(notebook_dir, state)
 
 

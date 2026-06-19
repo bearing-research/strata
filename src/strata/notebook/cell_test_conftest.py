@@ -66,6 +66,20 @@ def pytest_runtest_logreport(report) -> None:  # noqa: ANN001 - pytest Report
     _phase_reports.setdefault(report.nodeid, {})[report.when] = (report.outcome, text)
 
 
+def pytest_collectreport(report) -> None:  # noqa: ANN001 - pytest CollectReport
+    """Record collection failures (e.g. a syntax error in the test file).
+
+    Without this, a module that fails to import never produces a runtest
+    report, so ``pytest_sessionfinish`` would write an all-zero ``results.json``
+    and the failure would read as "no tests" instead of an error. We file it as
+    a failed ``setup`` phase so ``_final_outcome`` collapses it to ``error``.
+    """
+    if report.failed:
+        nodeid = report.nodeid or "<collection>"
+        text = str(report.longrepr) if report.longrepr is not None else ""
+        _phase_reports.setdefault(nodeid, {}).setdefault("setup", ("failed", text))
+
+
 def _final_outcome(phases: dict[str, tuple[str, str]]) -> tuple[str, str]:
     """Collapse a test's setup/call/teardown phases into one outcome + message.
 
