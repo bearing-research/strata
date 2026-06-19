@@ -1237,9 +1237,9 @@ class NotebookSession:
         spawn just to show "R 4.6.0" in the header.
         """
         if hasattr(self, "_system_r_version_cache"):
-            return self._system_r_version_cache  # type: ignore[attr-defined]
+            return self._system_r_version_cache
         version = self._probe_r_version()
-        self._system_r_version_cache = version  # type: ignore[attr-defined]
+        self._system_r_version_cache = version
         return version
 
     def serialize_r_environment_state(self, *, include_packages: bool = False) -> dict[str, Any]:

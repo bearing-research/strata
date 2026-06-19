@@ -53,7 +53,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -3847,8 +3847,10 @@ class CellExecutor:
             # at its remaining timeout. On expiry, SIGKILL the harness,
             # record the cell as cell_error, exit the loop.
             if watchdog_state is not None and watchdog_state.get("active_started_at"):
-                started = watchdog_state["active_started_at"]
-                timeout = watchdog_state["active_timeout"]
+                # Stored as floats; the active_started_at guard above means they
+                # are set. Narrow so the arithmetic is well-typed.
+                started = cast(float, watchdog_state["active_started_at"])
+                timeout = cast(float, watchdog_state["active_timeout"])
                 remaining = timeout - (time.time() - started)
                 if remaining <= 0:
                     watchdog_state["timed_out"] = True
