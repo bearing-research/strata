@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -295,6 +296,41 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str) -> None:
 
     with open(cell_file, "w", encoding="utf-8") as f:
         f.write(source)
+
+
+def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None:
+    """Write (or clear) a cell's unit-test source.
+
+    Test source is a committed sibling ``cells/{cell_id}.test.py`` — versioned
+    next to the cell body, no ``notebook.toml`` schema change. Empty/whitespace
+    test source removes the file rather than committing an empty one, so a cell
+    with no tests carries no ``.test.py``.
+
+    Raises:
+        FileNotFoundError: If the cell is not in notebook.toml.
+    """
+    notebook_dir = Path(notebook_dir)
+    notebook_toml_path = notebook_dir / "notebook.toml"
+
+    with open(notebook_toml_path, "rb") as f:
+        toml_data = tomllib.load(f)
+
+    if not any(cell.get("id") == cell_id for cell in toml_data.get("cells", [])):
+        # FileNotFoundError (not ValueError) so route/WS handlers can map
+        # this to 404 without ambiguity with validation errors.
+        raise FileNotFoundError(f"Cell {cell_id} not found in notebook.toml")
+
+    cells_dir = notebook_dir / "cells"
+    # ``cell_id`` is validated against notebook.toml above, but basename it
+    # anyway so a path-separator id can never escape ``cells/``.
+    test_file = cells_dir / os.path.basename(f"{cell_id}.test.py")
+
+    if test_source.strip():
+        cells_dir.mkdir(exist_ok=True)
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write(test_source)
+    elif test_file.exists():
+        test_file.unlink()
 
 
 def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:

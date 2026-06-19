@@ -465,11 +465,54 @@ class CellOutput(BaseModel):
     error: str | None = Field(default=None, description="Error message if serialization failed")
 
 
+class CellTestCase(BaseModel):
+    """One pytest test case from a cell-test run."""
+
+    name: str = Field(..., description="Test function name (pytest nodeid tail)")
+    nodeid: str = Field(default="", description="Full pytest nodeid")
+    outcome: str = Field(..., description="passed | failed | error | skipped")
+    message: str = Field(
+        default="",
+        description="Failure/error message (the rewritten-assert diff for fails)",
+    )
+
+
+class CellTestResult(BaseModel):
+    """Result of running a cell's unit tests, persisted in runtime state.
+
+    Keyed by the ``(cell_source_hash, test_source_hash, input_fingerprint)``
+    triple so the UI can mark the last result *stale* when the cell source,
+    the test source, or the upstream inputs change since the run.
+    """
+
+    passed: int = Field(default=0, description="Number of passing tests")
+    failed: int = Field(default=0, description="Number of failing assertions")
+    errored: int = Field(default=0, description="Number of errored tests (setup/cell failures)")
+    skipped: int = Field(default=0, description="Number of skipped tests")
+    tests: list[CellTestCase] = Field(default_factory=list, description="Per-test outcomes")
+    cell_source_hash: str = Field(default="", description="Cell source hash the run was against")
+    test_source_hash: str = Field(default="", description="Test source hash the run was against")
+    input_fingerprint: str = Field(default="", description="Upstream input hashes at run time")
+    ran_at: int = Field(default=0, description="Run timestamp (epoch milliseconds)")
+    pytest_unavailable: bool = Field(
+        default=False,
+        description="True when pytest is not importable in the notebook venv",
+    )
+
+
 class CellState(BaseModel):
     """A cell with its source code loaded."""
 
     id: str = Field(..., description="Cell ID")
     source: str = Field(default="", description="Cell source code")
+    test_source: str = Field(
+        default="",
+        description="pytest source for this cell's unit tests (cells/{id}.test.py)",
+    )
+    test_result: CellTestResult | None = Field(
+        default=None,
+        description="Last persisted cell-test result (None until tests are run)",
+    )
     language: CellLanguage = Field(default=CellLanguage.PYTHON, description="Programming language")
     order: float = Field(default=0, description="Display order in notebook")
     status: CellStatus = Field(

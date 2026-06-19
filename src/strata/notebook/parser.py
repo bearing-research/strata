@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from strata.notebook.models import (
     CellMeta,
     CellOutput,
     CellState,
+    CellTestResult,
     ConnectionSpec,
     MalformedConnection,
     MountSpec,
@@ -197,6 +199,18 @@ def parse_notebook(directory: Path) -> NotebookState:
             with open(cell_file, encoding="utf-8") as f:
                 source = f.read()
 
+        # Unit-test source is a committed sibling ``cells/{id}.test.py``
+        # (absent for cells with no tests). Resolve under ``cells/`` and
+        # confirm containment before reading: ids are backend-generated, but a
+        # hand-edited notebook.toml id with path separators must not let the
+        # read escape the notebook tree.
+        test_path = os.path.realpath(os.path.join(cells_dir, f"{cell_meta.id}.test.py"))
+        cells_root = os.path.realpath(cells_dir)
+        test_source = ""
+        if test_path.startswith(cells_root + os.sep) and os.path.isfile(test_path):
+            with open(test_path, encoding="utf-8") as f:
+                test_source = f.read()
+
         # Resolve mounts: notebook-level defaults, overridden by cell-level
         resolved_mounts = dict(notebook_mounts)
         for m in cell_meta.mounts:
@@ -215,6 +229,12 @@ def parse_notebook(directory: Path) -> NotebookState:
         else:
             display_outputs = []
 
+        test_result = (
+            CellTestResult(**runtime_cell.test_result)
+            if runtime_cell is not None and runtime_cell.test_result
+            else None
+        )
+
         # Restore console output from .strata/console/
         from strata.notebook.writer import load_cell_console_output
 
@@ -229,6 +249,8 @@ def parse_notebook(directory: Path) -> NotebookState:
             CellState(
                 id=cell_meta.id,
                 source=source,
+                test_source=test_source,
+                test_result=test_result,
                 language=cell_meta.language,
                 order=cell_meta.order,
                 worker=resolved_worker,

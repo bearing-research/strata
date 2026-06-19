@@ -33,7 +33,7 @@ from strata.notebook.models import CellLanguage, CellStaleness, CellStatus, Work
 from strata.notebook.protocol import MessageType
 from strata.notebook.session import CellStateSnapshot, SessionManager
 from strata.notebook.workers import resolve_worker_spec, worker_transport
-from strata.notebook.writer import write_cell
+from strata.notebook.writer import write_cell, write_cell_tests
 
 if TYPE_CHECKING:
     from strata.notebook.cascade import CascadePlan
@@ -1214,6 +1214,90 @@ async def _handle_cell_execute_rerun(
             ),
         )
     if not scheduled:
+        await _release_execution_request(execution_state, cell_id)
+
+
+async def _handle_cell_run_tests(
+    websocket: WebSocket,
+    session: NotebookSession,
+    payload: dict[str, Any],
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+) -> None:
+    """Handle cell_run_tests: persist the test source, run it, broadcast results.
+
+    Reuses the cell-execution reservation so a test run (which materializes
+    upstreams) can't race a concurrent cell execution. Emits CELL_TEST_STATUS
+    (running → ready/error) around a CELL_TEST_RESULTS frame. v1 supports
+    Python cells only.
+    """
+    cell_id = payload.get("cell_id")
+    test_source = payload.get("test_source", "")
+    seq = execution_state.next_sequence()
+
+    if not cell_id:
+        await _send_error_message(websocket, seq, "Missing cell_id")
+        return
+
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        await _send_error_message(websocket, seq, f"Cell {cell_id} not found")
+        return
+    if cell.language != CellLanguage.PYTHON:
+        await _send_error_message(websocket, seq, "Cell tests are only supported for Python cells")
+        return
+
+    busy_cell = await _reserve_execution_request(execution_state, cell_id)
+    if busy_cell is not None:
+        await _send_error_message(
+            websocket,
+            seq,
+            (
+                f"Notebook is already executing cell {busy_cell}"
+                if busy_cell
+                else "Notebook is already executing another cell"
+            ),
+        )
+        return
+
+    try:
+        write_cell_tests(session.path, cell_id, test_source)
+        cell.test_source = test_source
+
+        await _broadcast_message(
+            notebook_id,
+            _make_message(
+                MessageType.CELL_TEST_STATUS, seq, {"cell_id": cell_id, "status": "running"}
+            ),
+        )
+
+        executor = _make_executor_with_progress(session, notebook_id)
+        result = await executor.run_cell_tests(cell_id, test_source)
+
+        seq = execution_state.next_sequence()
+        results_payload = {**result.model_dump(), "cell_id": cell_id, "stale": False}
+        await _broadcast_message(
+            notebook_id,
+            _make_message(MessageType.CELL_TEST_RESULTS, seq, results_payload),
+        )
+        status = "error" if (result.failed or result.errored) else "ready"
+        await _broadcast_message(
+            notebook_id,
+            _make_message(
+                MessageType.CELL_TEST_STATUS, seq, {"cell_id": cell_id, "status": status}
+            ),
+        )
+    except Exception as e:
+        logger.exception("Cell test run failed for %s: %s", cell_id, e)
+        seq = execution_state.next_sequence()
+        await _send_error_message(websocket, seq, str(e))
+        await _broadcast_message(
+            notebook_id,
+            _make_message(
+                MessageType.CELL_TEST_STATUS, seq, {"cell_id": cell_id, "status": "error"}
+            ),
+        )
+    finally:
         await _release_execution_request(execution_state, cell_id)
 
 
@@ -2860,6 +2944,7 @@ _C2S_HANDLERS: dict[str, _C2SHandler] = {
     MessageType.NOTEBOOK_RUN_ALL: _handle_notebook_run_all,
     MessageType.NOTEBOOK_RERUN_ALL: _handle_notebook_rerun_all,
     MessageType.CELL_SOURCE_UPDATE: _handle_cell_source_update,
+    MessageType.CELL_RUN_TESTS: _handle_cell_run_tests,
     MessageType.NOTEBOOK_SYNC: _handle_notebook_sync,
     MessageType.IMPACT_PREVIEW_REQUEST: _handle_impact_preview_request,
     MessageType.PROFILING_REQUEST: _handle_profiling_request,
