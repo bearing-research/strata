@@ -7,6 +7,82 @@ exhaustive commit history.
 
 ## Unreleased
 
+0.4.0 is a **consolidation and hardening** cycle: the headline is an internal
+restructuring of the server, alongside a new notebook feature, concurrency-bug
+fixes, and CI hardening. No breaking changes.
+
+### Added
+
+- **Per-cell unit tests in the notebook.** Every Python code cell gets a
+  **Tests** panel (the `🧪` toggle next to Inspect, which doubles as a health
+  badge: `✓ 4/4` green, failing red, errored amber, `· stale` when the cell or
+  its tests changed since the last run). Write `pytest`-style tests against the
+  functions a cell defines — they run as **real pytest** against a re-executed
+  copy of the cell with its upstream inputs injected, so assertion rewriting,
+  fixtures, parametrize, and marks all work (`def test_x(cell): assert
+cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
+  ran). Test source is a committed `cells/{id}.test.py`; results persist in
+  `.strata/runtime.json` and rehydrate on reopen. Driveable over WebSocket
+  (`cell_run_tests` → `cell_test_status` / `cell_test_results`). Python cells
+  only; `pytest` must be in the notebook's environment (a missing-pytest run
+  surfaces an actionable message). The generated-conftest runner is written to
+  be liftable to a standalone plugin for CI/pre-commit later.
+
+### Changed
+
+- **Server internals decomposed (gates-first).** `server.py` went from a
+  ~6,950-line module — where all ~76 routes hand-wired their own
+  mode/auth/tenant/QoS gates, the shape behind the service-mode gate bug the
+  0.3.0 registry review caught — to ~3,280 lines, in three layers:
+  **typed dependencies** (`strata/api/dependencies.py`: distinct
+  `ReadStore`/`WriteStore`/`PersonalModeStore` types + principal/scope/tenant
+  gates, so a route can't wire the wrong gate), **services**
+  (`strata/services/`: pure, HTTP-free, unit-testable artifact/registry/build
+  logic), and **per-domain routers** (`strata/api/routers/`: cache, debug,
+  registry, metrics/health, admin, artifacts, names, builds, metadata — nine
+  domains). A route-table snapshot test freezes the full HTTP surface
+  (path, methods, gate count) so the move is provably behavior-preserving. No
+  API changes. The materialize + streaming data plane stays in `server.py` for
+  a later cycle (its QoS/ACL coupling needs the same gate extraction first).
+
+- **WebSocket frame payloads are becoming typed.** Notebook WS payloads were
+  inline dicts; the execution/test and cascade frames (`cell_console`,
+  `cell_output_delta`, `cell_iteration_progress`, `cell_test_status`,
+  `cell_test_results`, `cascade_prompt`, `cascade_progress`) are now `pydantic`
+  models validated at the emit boundary, so the protocol is self-describing for
+  non-Vue clients. Incremental — the remaining frames follow in later cycles.
+  Wire shapes are unchanged (one stale doc field, `cascade_prompt.steps` →
+  `cells_to_run`, was corrected to match what's actually sent).
+
+### Fixed
+
+- **QoS slots no longer leak when a request is cancelled.** Two admission paths
+  caught `except Exception`, which misses `asyncio.CancelledError` (a
+  `BaseException`) — a client disconnect mid-acquire would leak the interactive
+  slot, and enough of them could wedge the limiter. Both now release on
+  cancellation.
+
+- **QoS admission limiters reconcile with config + adaptive sizing** (#185): the
+  interactive/bulk limiter pools now track the configured and adaptively-tuned
+  slot counts instead of drifting from them.
+
+- **GC tracker no longer self-deadlocks.** The GC callback took a non-reentrant
+  lock that a GC pause triggered during the callback could re-enter; it's now
+  non-blocking, removing a rare hang.
+
+- **Filter values serialize correctly through the client integrations** (#193):
+  the filter-value serializer is now wired through the duckdb/pandas/polars
+  adapters and the server, so typed filter literals round-trip consistently.
+
+### Internal
+
+- CI hardening: a per-test `pytest-timeout` plus a job backstop convert
+  multi-hour hangs into named 3-minute failures; process-global server state is
+  reset between tests so the parallel (`xdist`) unit-test runs are isolated;
+  `ty` is scoped to shipped code and the type-check is clean including warnings;
+  the notebook WebSocket tests no longer drive `TestClient`'s portal (a
+  py3.12/macOS hang).
+
 ## 0.3.0 — 2026-06-17
 
 ### Security
@@ -38,7 +114,7 @@ exhaustive commit history.
   `materialize`/`put`/`fetch`/scan, the registry surface (aliases, tags, names,
   audit), the `Filter` helpers, and the duckdb/pandas/polars/datafusion
   integrations (as extras, e.g. `strata-client[duckdb]`): `pip install
-  strata-client`, then `from strata_client import StrataClient`. It resolves its
+strata-client`, then `from strata_client import StrataClient`. It resolves its
   server URL from `STRATA_SERVER_URL` / `STRATA_HOST` / `STRATA_PORT` /
   `pyproject.toml` with no pydantic. The client and the server (`strata-notebook`)
   are **independent** — they share only the JSON wire protocol, neither depends
@@ -46,7 +122,7 @@ exhaustive commit history.
 
   **Breaking (import paths):** the client moved out of the `strata` namespace.
   `from strata.client import StrataClient` → `from strata_client import
-  StrataClient`; the integrations moved from `strata.integration.*` /
+StrataClient`; the integrations moved from `strata.integration.*` /
   `strata.duckdb_ext` / `strata.polars_ext` to `strata_client.integration.*`.
   The server keeps `from strata.types import Filter` working (it owns its own
   copy of the dependency-free `Filter` wire types).
@@ -111,7 +187,7 @@ exhaustive commit history.
   config. Unset → the ambient client targets the local server as before.
 
 - **Authenticated write-back in service mode** (`service_writes_enabled`, shared
-  research store) — **preview**: an opt-in capability letting authenticated clients *publish*
+  research store) — **preview**: an opt-in capability letting authenticated clients _publish_
   to a service-mode store — `put`, `set_name`, `set_alias`, tags — so a team can
   share processed datasets through one central deployment. Each write requires
   trusted-proxy auth and the `artifacts:write` scope, lands in the caller's
@@ -192,9 +268,9 @@ exhaustive commit history.
   `<name>_snapshot` injected so the cell scans exactly the snapshot its
   provenance recorded. `snapshot=<id>` pins a cell to one snapshot forever.
 - **Artifact inspection CLI**: `strata artifact list / show / lineage /
-  pull` work directly against a local store, no server needed. `lineage`
+pull` work directly against a local store, no server needed. `lineage`
   renders the provenance chain down to the lake — `model ← features ←
-  scan ← table @ snapshot` — answering "which snapshot trained this
+scan ← table @ snapshot` — answering "which snapshot trained this
   model?" in one command. References accept a name, `id@v=N`, or a bare
   artifact id; name resolution is tenant-agnostic so legacy stores
   inspect cleanly.
@@ -208,7 +284,7 @@ exhaustive commit history.
 - **Artifact store integrity hardening** (#123): artifacts are validated at
   finalize time (the blob must be exactly one readable Arrow IPC stream
   matching the recorded row count — a mismatch becomes a `failed` artifact,
-  never a serveable one); `refresh=True` now rebuilds the *same* artifact as
+  never a serveable one); `refresh=True` now rebuilds the _same_ artifact as
   a new version and supersedes the old one instead of forking a parallel
   identity the cache never returns; builds stuck in `building` are swept to
   `failed` at startup; and `strata artifact verify` checks a whole store's
@@ -226,8 +302,8 @@ exhaustive commit history.
   resolving a published dataset by name — `GET /v1/names/{name}`, alias
   resolution, name-status, and tag reads — used to 403 in service mode (gated as
   a write). These are reads, so they're now enabled and tenant-scoped (a team
-  resolves its own namespace; cross-team is not found). Registry *writes*
-  (`set_name`/`set_alias`/tags) and *listing* all names stay blocked — those are
+  resolves its own namespace; cross-team is not found). Registry _writes_
+  (`set_name`/`set_alias`/tags) and _listing_ all names stay blocked — those are
   the next step (authenticated write-back).
 
 - **Service-mode config coherence is checked at startup** (hardening): three
@@ -243,8 +319,8 @@ exhaustive commit history.
   `materialize(mode="artifact")` now writes each row-group chunk straight to the
   blob store (write-through) instead of accumulating the whole result in memory
   before persisting. A multi-GB scan no longer holds the full result resident on
-  the server. (Part of decoupling the scan build from the client — see *A client
-  never poisons a scan artifact* under Fixed.)
+  the server. (Part of decoupling the scan build from the client — see _A client
+  never poisons a scan artifact_ under Fixed.)
 
 - **Default cell timeout raised from 30 s to 300 s**: the previous default
   was an easy footgun for I/O-bound cells (network pulls, slow APIs), which
@@ -274,7 +350,7 @@ exhaustive commit history.
 - **Ambient cell `strata` client survives large materialize streams** (ML
   dogfood): a cell scanning a big lake table via the injected `strata` client
   could fail with `IncompleteRead` — and leave the artifact `failed` — on a
-  *fresh* multi-row-group scan. The client read the stream in one blocking
+  _fresh_ multi-row-group scan. The client read the stream in one blocking
   `resp.read()`, which let the server's send buffer fill and tripped its
   `is_disconnected()` check, aborting the stream. The client now drains the
   response in chunks (as httpx does), so large scans complete. Cell execution
@@ -290,7 +366,7 @@ exhaustive commit history.
 
 - **Headless `strata run` no longer drops console output on cache hits**
   (ML dogfood): a re-run whose cells hit cache carried no fresh stdout, and
-  the empty-console write then *unlinked* the file the producing run had
+  the empty-console write then _unlinked_ the file the producing run had
   persisted — so `.strata/console/` ended up holding only the cell that
   actually re-executed. Cache hits now leave the persisted console
   untouched, so `print()` output stays recoverable across runs.
@@ -305,7 +381,7 @@ exhaustive commit history.
   intact for an explicit reject. Concurrent refresh rebuilds of one
   artifact no longer race version allocation. Alias writes targeting the
   version already pointed at are idempotent no-ops (`status:
-  "unchanged"`) — re-running a promote cell doesn't refile approvals or
+"unchanged"`) — re-running a promote cell doesn't refile approvals or
   spam the audit.
 
 - **Namespaced artifact names are no longer write-only** (friction from the
@@ -422,7 +498,7 @@ The example notebook below shows the shape.
   the CLI for CI / scheduled jobs, not only through the server.
 - New `examples/r_lm_vs_sklearn/` notebook — Python cell builds a
   housing DataFrame, R cell fits `lm(price ~ sqft + bedrooms + age +
-  location)`, Python cell fits the same model with sklearn and prints
+location)`, Python cell fits the same model with sklearn and prints
   a side-by-side comparison.
 - New `examples/r_mtcars_analysis/` notebook — a pure-R analysis (every
   cell R): `lm()` + `aggregate()` + inline ggplot2 and base-graphics
@@ -453,7 +529,7 @@ partition into per-language runs automatically.
   the whole run).
 - `is_cell_batchable` gate keeps the partitioner conservative —
   prompts, SQL, R cells, and any cell with `# @worker` / `# @mount
-  rw` opt out automatically.
+rw` opt out automatically.
 
 #### Reconnect resilience
 
@@ -578,8 +654,8 @@ partition into per-language runs automatically.
   hash output).
 - **WS protocol:** the new `MessageType` extraction is purely a
   refactor — frame strings are unchanged. The new reconnect-grace
-  + per-cell-watchdog frames are additive; clients that ignore unknown
-  frames continue to work.
+  - per-cell-watchdog frames are additive; clients that ignore unknown
+    frames continue to work.
 - **REST API:** unchanged.
 - **Wheel ABI:** still `abi3-py312` (one wheel per platform covers 3.12+).
 - **Python deps:** no breaking changes; R support is fully optional
