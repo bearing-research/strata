@@ -7,6 +7,8 @@ from pydantic import ValidationError
 
 from strata.notebook.models import CellTestCase
 from strata.notebook.ws_payloads import (
+    CascadeProgressPayload,
+    CascadePromptPayload,
     CellConsolePayload,
     CellIterationProgressPayload,
     CellOutputDeltaPayload,
@@ -51,6 +53,25 @@ def test_iteration_progress_defaults_and_validation():
     # max_iter is required.
     with pytest.raises(ValidationError):
         CellIterationProgressPayload(cell_id="c1", iteration=2, duration_ms=5)
+
+
+def test_cascade_prompt_payload():
+    wire = CascadePromptPayload(
+        cell_id="c3", plan_id="p1", cells_to_run=["c1", "c2"], estimated_duration_ms=120
+    ).model_dump(mode="json")
+    assert wire == {
+        "cell_id": "c3",
+        "plan_id": "p1",
+        "cells_to_run": ["c1", "c2"],
+        "estimated_duration_ms": 120,
+    }
+
+
+def test_cascade_progress_payload():
+    wire = CascadeProgressPayload(
+        plan_id="p1", current_cell_id="c2", completed=1, total=3
+    ).model_dump(mode="json")
+    assert wire == {"plan_id": "p1", "current_cell_id": "c2", "completed": 1, "total": 3}
 
 
 def test_test_status_payload():

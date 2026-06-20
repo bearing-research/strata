@@ -35,6 +35,8 @@ from strata.notebook.session import CellStateSnapshot, SessionManager
 from strata.notebook.workers import resolve_worker_spec, worker_transport
 from strata.notebook.writer import write_cell, write_cell_tests
 from strata.notebook.ws_payloads import (
+    CascadeProgressPayload,
+    CascadePromptPayload,
     CellConsolePayload,
     CellIterationProgressPayload,
     CellOutputDeltaPayload,
@@ -801,12 +803,12 @@ async def _handle_cell_execute(
             _make_message(
                 MessageType.CASCADE_PROMPT,
                 seq,
-                {
-                    "cell_id": cell_id,
-                    "plan_id": plan.plan_id,
-                    "cells_to_run": [s.cell_id for s in plan.steps],
-                    "estimated_duration_ms": plan.estimated_duration_ms,
-                },
+                CascadePromptPayload(
+                    cell_id=cell_id,
+                    plan_id=plan.plan_id,
+                    cells_to_run=[s.cell_id for s in plan.steps],
+                    estimated_duration_ms=plan.estimated_duration_ms,
+                ).model_dump(mode="json"),
             ),
         )
         await _release_execution_request(execution_state, cell_id)
@@ -1906,12 +1908,12 @@ async def _execute_cascade(
                 _make_message(
                     MessageType.CASCADE_PROGRESS,
                     seq,
-                    {
-                        "plan_id": plan.plan_id,
-                        "current_cell_id": cell_id,
-                        "completed": i,
-                        "total": len([s for s in plan.steps if not s.skip]),
-                    },
+                    CascadeProgressPayload(
+                        plan_id=plan.plan_id,
+                        current_cell_id=cell_id,
+                        completed=i,
+                        total=len([s for s in plan.steps if not s.skip]),
+                    ).model_dump(mode="json"),
                 ),
             )
 

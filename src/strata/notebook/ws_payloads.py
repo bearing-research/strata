@@ -77,6 +77,28 @@ class CellIterationProgressPayload(WsPayload):
     duration_ms: int
 
 
+class CascadePromptPayload(WsPayload):
+    """``cascade_prompt`` — upstream cells must run before the requested cell.
+
+    Sent when a cell's upstreams are stale/idle; the client confirms by sending
+    ``cell_execute_cascade`` with the ``plan_id``.
+    """
+
+    cell_id: str
+    plan_id: str
+    cells_to_run: list[str]
+    estimated_duration_ms: int
+
+
+class CascadeProgressPayload(WsPayload):
+    """``cascade_progress`` — which cell of a confirmed cascade is now running."""
+
+    plan_id: str
+    current_cell_id: str
+    completed: int
+    total: int
+
+
 class CellTestStatusPayload(WsPayload):
     """``cell_test_status`` — cell unit-test run lifecycle (mirrors cell_status)."""
 

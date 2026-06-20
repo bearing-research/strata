@@ -113,7 +113,7 @@ All messages are JSON with this shape:
 
 | Type               | Payload                                                                      | Description                   |
 | ------------------ | ---------------------------------------------------------------------------- | ----------------------------- |
-| `cascade_prompt`   | `{ "cell_id": "...", "plan_id": "...", "steps": [...] }`                     | Upstream cells need execution |
+| `cascade_prompt`   | `{ "cell_id": "...", "plan_id": "...", "cells_to_run": [...], "estimated_duration_ms": 0 }` | Upstream cells need execution |
 | `cascade_progress` | `{ "plan_id": "...", "current_cell_id": "...", "completed": 1, "total": 3 }` | Cascade progress              |
 
 ### DAG
