@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,7 +26,6 @@ from fastapi.staticfiles import StaticFiles
 from strata.adaptive_concurrency import ResizableLimiter
 from strata.api.dependencies import (
     CurrentPrincipal,
-    CurrentTenant,
     ReadStore,
 )
 from strata.auth import (
@@ -59,7 +58,6 @@ from strata.rate_limiter import (
     get_rate_limiter,
     init_rate_limiter,
 )
-from strata.services.artifact import artifact_service
 from strata.services.build import build_service
 from strata.tenant import (
     DEFAULT_TENANT_ID,
@@ -71,8 +69,6 @@ from strata.tenant import (
 from strata.tenant_registry import get_tenant_registry, init_tenant_registry
 from strata.tracing import init_tracing, instrument_fastapi, trace_span
 from strata.types import (
-    ArtifactDependentsResponse,
-    ArtifactLineageResponse,
     BuildSpec,
     BuildStatusResponse,
     ExplainMaterializeRequest,
@@ -2261,112 +2257,6 @@ def _require_registry_approver():
                 "protected-alias changes",
             )
     return principal
-
-
-# ---------------------------------------------------------------------------
-# Lineage and Dependency Introspection Endpoints
-# ---------------------------------------------------------------------------
-
-
-@app.get(
-    "/v1/artifacts/{artifact_id}/v/{version}/lineage",
-    response_model=ArtifactLineageResponse,
-)
-async def get_artifact_lineage(
-    artifact_id: str,
-    version: int,
-    store: ReadStore,
-    tenant_filter: CurrentTenant,
-    max_depth: int = Query(default=10, ge=1, le=100),
-):
-    """Get the lineage (input dependency graph) for an artifact.
-
-    Returns the full input dependency tree, showing all artifacts and tables
-    that this artifact depends on, including transitive dependencies.
-
-    This is useful for:
-    - Understanding data provenance (what data went into this artifact)
-    - Debugging computation graphs
-    - Auditing data lineage for compliance
-
-    Args:
-        artifact_id: Artifact ID to get lineage for
-        version: Version number
-        max_depth: Maximum depth to traverse (default: 10, max: 100)
-
-    Returns:
-        ArtifactLineageResponse with nodes and edges representing the lineage graph
-    """
-    # Get the root artifact
-    artifact = _ensure_artifact_access(
-        store.get_artifact(artifact_id, version),
-        tenant_filter,
-    )
-
-    if artifact.state not in ("ready", "superseded"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Artifact is not ready (state={artifact.state})",
-        )
-
-    return artifact_service.build_lineage(
-        store,
-        artifact=artifact,
-        artifact_id=artifact_id,
-        version=version,
-        tenant_filter=tenant_filter,
-        max_depth=max_depth,
-    )
-
-
-@app.get(
-    "/v1/artifacts/{artifact_id}/v/{version}/dependents",
-    response_model=ArtifactDependentsResponse,
-)
-async def get_artifact_dependents(
-    artifact_id: str,
-    version: int,
-    store: ReadStore,
-    tenant_filter: CurrentTenant,
-    limit: int = Query(default=100, ge=1, le=1000),
-):
-    """Get artifacts that depend on this artifact (reverse dependencies).
-
-    Returns all artifacts that use this artifact as an input. This is useful for:
-    - Impact analysis before modifying or deleting an artifact
-    - Understanding downstream consumers
-    - Planning cascading rebuilds
-
-    Note: Only searches for direct dependents, not transitive dependents.
-    Only returns ready artifacts.
-
-    Args:
-        artifact_id: Artifact ID to find dependents of
-        version: Version number
-        limit: Maximum number of dependents to return (default: 100, max: 1000)
-
-    Returns:
-        ArtifactDependentsResponse with list of dependent artifacts
-    """
-    # Verify the artifact exists
-    artifact = _ensure_artifact_access(
-        store.get_artifact(artifact_id, version),
-        tenant_filter,
-    )
-
-    if artifact.state not in ("ready", "superseded"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Artifact is not ready (state={artifact.state})",
-        )
-
-    return artifact_service.build_dependents(
-        store,
-        artifact_id=artifact_id,
-        version=version,
-        tenant_filter=tenant_filter,
-        limit=limit,
-    )
 
 
 _ACTIVE_BUILD_STATES = ("pending", "building", "running")
