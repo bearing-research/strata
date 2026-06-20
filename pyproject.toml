@@ -8,7 +8,17 @@ authors = [
 ]
 requires-python = ">=3.12"
 license = "Apache-2.0"
-keywords = ["iceberg", "arrow", "cache", "analytics", "duckdb"]
+keywords = [
+    "notebook",
+    "materialization",
+    "provenance",
+    "lineage",
+    "reproducibility",
+    "content-addressed",
+    "iceberg",
+    "arrow",
+    "analytics",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
