@@ -1524,6 +1524,7 @@ from strata.api.routers.artifacts import router as artifacts_router  # noqa: E40
 from strata.api.routers.builds import router as builds_router  # noqa: E402
 from strata.api.routers.cache import router as cache_router  # noqa: E402
 from strata.api.routers.debug import router as debug_router  # noqa: E402
+from strata.api.routers.metadata import router as metadata_router  # noqa: E402
 from strata.api.routers.metrics_health import router as metrics_health_router  # noqa: E402
 from strata.api.routers.names import router as names_router  # noqa: E402
 from strata.api.routers.registry import router as registry_router  # noqa: E402
@@ -1535,6 +1536,7 @@ app.include_router(notebook_ws_router)
 app.include_router(cache_router)
 app.include_router(debug_router)
 app.include_router(registry_router)
+app.include_router(metadata_router)
 app.include_router(metrics_health_router)
 app.include_router(admin_router)
 app.include_router(artifacts_router)
@@ -1573,79 +1575,6 @@ def _require_notebook_worker_admin_access() -> ServerState:
 #
 # Note: /v1/scan endpoints were removed. Use /v1/materialize instead.
 # =============================================================================
-
-
-@app.get("/v1/metadata/stats")
-async def get_metadata_stats_v1():
-    """Get metadata store and cache statistics.
-
-    Returns hit/miss counters and entry counts for:
-    - SQLite metadata store (manifest cache, parquet metadata)
-    - In-memory LRU caches (parquet metadata, manifest resolution)
-
-    Useful for:
-    - Proving cache value (hit rates)
-    - Debugging performance issues
-    - Capacity planning
-    """
-    from strata.metadata_cache import get_metadata_store
-
-    state = get_state()
-
-    result = {
-        "parquet_cache": state.planner.parquet_cache.stats(),
-        "manifest_cache": state.planner.manifest_cache.stats(),
-    }
-
-    # Add SQLite store stats if available
-    try:
-        store = get_metadata_store()
-        result["metadata_store"] = store.stats()
-    except Exception:
-        result["metadata_store"] = None
-
-    return result
-
-
-@app.get("/v1/config/timeouts")
-async def get_timeout_config_v1():
-    """Get all timeout configuration settings.
-
-    Returns timeout configuration organized by category:
-    - planning: Plan timeout settings
-    - scanning: Scan timeout settings
-    - qos_queue: QoS queue wait timeouts
-    - fetching: Row group fetch timeouts
-    - s3: S3 connection and request timeouts
-    """
-    state = get_state()
-    return state.config.get_timeout_config()
-
-
-@app.post("/v1/metadata/cleanup")
-async def cleanup_metadata_v1():
-    """Remove stale metadata entries from the SQLite store.
-
-    Scans all cached parquet metadata entries and removes those where:
-    - The file no longer exists on disk
-    - The file has been modified (different mtime or size)
-
-    This is automatically run on server startup, but can be triggered
-    manually if needed (e.g., after bulk file operations).
-
-    Returns the number of stale entries removed.
-    """
-    from strata.metadata_cache import get_metadata_store
-
-    try:
-        store = get_metadata_store()
-        removed = store.cleanup_stale_parquet_meta()
-        return {
-            "status": "completed",
-            "stale_entries_removed": removed,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---------------------------------------------------------------------------
