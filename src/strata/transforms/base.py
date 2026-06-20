@@ -1,36 +1,9 @@
-"""Base classes for transform definitions.
-
-This module defines the core transform abstraction. A Transform encapsulates:
-1. Parameter schema (what inputs it accepts)
-2. Validation logic (are the parameters valid?)
-3. Execution logic (how to run the transform locally)
-
-Transforms are identified by a reference string in the format: {name}@{version}
-Examples: "scan@v1", "duckdb_sql@v1", "polars_expr@v1"
-
-Local vs Remote Execution:
-- Personal mode: Transforms run locally via Transform.execute()
-- Service mode: Transforms run remotely via HTTP executor (see registry.py)
-
-Example:
-    @register_transform("my_transform@v1")
-    class MyTransform(Transform):
-        class Params(BaseModel):
-            foo: str
-            bar: int = 10
-
-        def validate(self, inputs: list[pa.Table]) -> None:
-            if len(inputs) != 1:
-                raise ValueError("Expected exactly one input")
-
-        def execute(self, inputs: list[pa.Table], params: Params) -> pa.Table:
-            return inputs[0].filter(...)
-"""
+"""Core transform abstraction and the in-process transform registry."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel
 
@@ -38,81 +11,116 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
 
-# Type variable for transform parameters
-P = TypeVar("P", bound=BaseModel)
-
-
-class Transform(ABC, Generic[P]):  # noqa: UP046
+class Transform[P: BaseModel](ABC):
     """Abstract base class for all transforms.
 
-    Each transform must define:
-    - Params: A Pydantic model for parameter validation
-    - execute(): The actual transformation logic
+    A transform encapsulates a parameter schema, optional input validation, and
+    the execution logic that maps input Arrow tables to a single result table.
+    A subclass declares a ``Params`` model, implements :meth:`execute`, and is
+    registered under a ``{name}@{version}`` reference with
+    :func:`register_transform`.
 
-    Optionally:
-    - validate(): Custom validation before execution
-    - input_names: Names for inputs (default: input0, input1, ...)
+    In personal mode a transform runs locally through :meth:`run`. In service
+    mode it runs remotely via a registered HTTP executor.
+
+    Attributes
+    ----------
+    ref : str
+        Reference identifying the transform, formatted ``{name}@{version}``
+        (for example ``"scan@v1"`` or ``"duckdb_sql@v1"``). Assigned by
+        :func:`register_transform`.
+    Params : type of pydantic.BaseModel
+        Model used to parse and validate the transform's parameters.
+
+    Examples
+    --------
+    >>> class MyParams(BaseModel):
+    ...     foo: str
+    ...     bar: int = 10
+    >>> @register_transform("my_transform@v1")
+    ... class MyTransform(Transform[MyParams]):
+    ...     Params = MyParams
+    ...
+    ...     def execute(self, inputs: list[pa.Table], params: MyParams) -> pa.Table:
+    ...         return inputs[0].filter(...)
     """
 
-    # Class-level reference string (set by @register_transform)
     ref: ClassVar[str]
-
-    # Parameter model class
     Params: ClassVar[type[BaseModel]]
 
     def validate(self, inputs: list[pa.Table], params: P) -> None:
         """Validate inputs and parameters before execution.
 
-        Override this to add custom validation logic. Called before execute().
+        Called by :meth:`run` ahead of :meth:`execute`. The default
+        implementation performs no validation; override to add custom checks.
 
-        Args:
-            inputs: List of input Arrow tables
-            params: Validated parameters
+        Parameters
+        ----------
+        inputs : list of pyarrow.Table
+            Input tables for the transform.
+        params : P
+            Validated parameters.
 
-        Raises:
-            ValueError: If validation fails
+        Raises
+        ------
+        ValueError
+            If validation fails.
         """
-        pass  # Default: no extra validation
 
     @abstractmethod
     def execute(self, inputs: list[pa.Table], params: P) -> pa.Table:
-        """Execute the transform.
+        """Run the transformation logic.
 
-        Args:
-            inputs: List of input Arrow tables
-            params: Validated parameters
+        Parameters
+        ----------
+        inputs : list of pyarrow.Table
+            Input tables for the transform.
+        params : P
+            Validated parameters.
 
-        Returns:
-            Result Arrow table
+        Returns
+        -------
+        pyarrow.Table
+            The result table.
         """
         ...
 
     def get_input_names(self, num_inputs: int) -> list[str]:
-        """Get names for input tables.
+        """Return display names for the input tables.
 
-        Override this to provide custom names (e.g., "left", "right" for joins).
-        Default returns ["input0", "input1", ...].
+        The default is ``["input0", "input1", ...]``. Override to provide
+        domain-specific names such as ``"left"`` and ``"right"`` for a join.
 
-        Args:
-            num_inputs: Number of inputs
+        Parameters
+        ----------
+        num_inputs : int
+            Number of inputs.
 
-        Returns:
-            List of input names
+        Returns
+        -------
+        list of str
+            Name for each input, in order.
         """
         return [f"input{i}" for i in range(num_inputs)]
 
     @classmethod
     def parse_params(cls, params: dict[str, Any]) -> BaseModel:
-        """Parse and validate parameters.
+        """Parse and validate raw parameters against ``Params``.
 
-        Args:
-            params: Raw parameter dictionary
+        Parameters
+        ----------
+        params : dict
+            Raw parameter mapping.
 
-        Returns:
-            Validated Params instance
+        Returns
+        -------
+        pydantic.BaseModel
+            A validated ``Params`` instance.
 
-        Raises:
-            ValidationError: If parameters are invalid
+        Raises
+        ------
+        pydantic.ValidationError
+            If the parameters do not satisfy the ``Params`` model.
         """
         return cls.Params.model_validate(params)
 
@@ -121,43 +129,52 @@ class Transform(ABC, Generic[P]):  # noqa: UP046
         inputs: list[pa.Table],
         params: dict[str, Any],
     ) -> pa.Table:
-        """Parse, validate, and execute the transform.
+        """Parse parameters, validate, and execute the transform.
 
-        This is the main entry point for running a transform. It:
-        1. Parses and validates parameters
-        2. Calls validate() for custom validation
-        3. Calls execute() to run the transform
+        The main entry point for running a transform end to end: it parses and
+        validates ``params`` against ``Params``, calls :meth:`validate` for any
+        custom checks, then calls :meth:`execute`.
 
-        Args:
-            inputs: List of input Arrow tables
-            params: Raw parameter dictionary
+        Parameters
+        ----------
+        inputs : list of pyarrow.Table
+            Input tables for the transform.
+        params : dict
+            Raw parameter mapping.
 
-        Returns:
-            Result Arrow table
+        Returns
+        -------
+        pyarrow.Table
+            The result table.
         """
         parsed_params = self.parse_params(params)
         self.validate(inputs, parsed_params)
         return self.execute(inputs, parsed_params)
 
 
-# ---------------------------------------------------------------------------
-# Transform Registry
-# ---------------------------------------------------------------------------
-
-# Global registry of transforms by reference
 _transforms: dict[str, type[Transform]] = {}
 
 
 def register_transform(ref: str):
-    """Decorator to register a transform class.
+    """Register a transform class under a reference.
 
-    Args:
-        ref: Transform reference (e.g., "duckdb_sql@v1")
+    Parameters
+    ----------
+    ref : str
+        Transform reference, formatted ``{name}@{version}`` (for example
+        ``"duckdb_sql@v1"``).
 
-    Example:
-        @register_transform("my_transform@v1")
-        class MyTransform(Transform):
-            ...
+    Returns
+    -------
+    callable
+        A class decorator that sets ``ref`` on the class and adds it to the
+        registry.
+
+    Examples
+    --------
+    >>> @register_transform("my_transform@v1")
+    ... class MyTransform(Transform[MyParams]):
+    ...     ...
     """
 
     def decorator(cls: type[Transform]) -> type[Transform]:
@@ -169,15 +186,20 @@ def register_transform(ref: str):
 
 
 def get_transform(ref: str) -> Transform | None:
-    """Get a transform instance by reference.
+    """Look up a transform instance by reference.
 
-    Args:
-        ref: Transform reference (e.g., "duckdb_sql@v1")
+    Parameters
+    ----------
+    ref : str
+        Transform reference, with an optional ``local://`` prefix that is
+        stripped before lookup.
 
-    Returns:
-        Transform instance, or None if not registered
+    Returns
+    -------
+    Transform or None
+        A new instance of the registered transform, or ``None`` if no transform
+        is registered under ``ref``.
     """
-    # Strip local:// prefix if present
     if ref.startswith("local://"):
         ref = ref[8:]
 
@@ -188,10 +210,12 @@ def get_transform(ref: str) -> Transform | None:
 
 
 def list_transforms() -> list[str]:
-    """List all registered transform references.
+    """List the references of all registered transforms.
 
-    Returns:
-        List of transform references
+    Returns
+    -------
+    list of str
+        Every registered transform reference.
     """
     return list(_transforms.keys())
 
@@ -201,21 +225,29 @@ def _run_transform(
     inputs: list[pa.Table],
     params: dict[str, Any],
 ) -> pa.Table:
-    """Run a transform by reference (internal use only).
+    """Run a registered transform by reference.
 
-    This is an internal function used by the server's build runner
-    and embedded executor. Users should call client.materialize() instead.
+    Internal entry point used by the server's build runner and embedded
+    executor. Library users should call ``client.materialize`` instead.
 
-    Args:
-        ref: Transform reference (e.g., "duckdb_sql@v1")
-        inputs: List of input Arrow tables
-        params: Transform parameters
+    Parameters
+    ----------
+    ref : str
+        Transform reference (for example ``"duckdb_sql@v1"``).
+    inputs : list of pyarrow.Table
+        Input tables for the transform.
+    params : dict
+        Raw parameter mapping.
 
-    Returns:
-        Result Arrow table
+    Returns
+    -------
+    pyarrow.Table
+        The result table.
 
-    Raises:
-        ValueError: If transform is not registered
+    Raises
+    ------
+    ValueError
+        If no transform is registered under ``ref``.
     """
     transform = get_transform(ref)
     if transform is None:
@@ -223,5 +255,4 @@ def _run_transform(
     return transform.run(inputs, params)
 
 
-# Backward compatibility alias (deprecated)
 run_transform = _run_transform
