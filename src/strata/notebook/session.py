@@ -79,6 +79,7 @@ from strata.notebook.writer import (
     update_cell_display_outputs,
     update_environment_metadata,
 )
+from strata.notebook.ws_payloads import cell_status_payload
 
 if TYPE_CHECKING:
     from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -2849,16 +2850,17 @@ class NotebookSession:
             if cell is None:
                 continue
             status = cell.status.value if isinstance(cell.status, CellStatus) else str(cell.status)
-            payload: dict[str, Any] = {
-                "cell_id": cell.id,
-                "status": status,
-                "staleness_reasons": [
+            causality = self.causality_map.get(cell.id)
+            payload = cell_status_payload(
+                cell.id,
+                status,
+                staleness_reasons=[
                     reason.value for reason in (cell.staleness.reasons if cell.staleness else [])
                 ],
-            }
-            causality = self.causality_map.get(cell.id)
-            if causality is not None:
-                payload["causality"] = asdict(causality, dict_factory=skip_none)
+                causality=asdict(causality, dict_factory=skip_none)
+                if causality is not None
+                else None,
+            )
 
             await broadcast_notebook_message(
                 self.id,
