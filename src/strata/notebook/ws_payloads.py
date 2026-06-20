@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from strata.notebook.models import CellTestCase
 
@@ -176,3 +176,55 @@ class CellTestResultsPayload(WsPayload):
     stale: bool
     pytest_unavailable: bool
     ran_at: int
+
+
+class EnvironmentJobModel(WsPayload):
+    """One background environment operation (uv sync / add / remove / import /
+    change-python / R renv), mirroring ``session.EnvironmentJobSnapshot``.
+
+    This is the per-job state the ``environment_job_started`` and
+    ``environment_job_progress`` frames carry. The fields match the snapshot
+    dataclass one-for-one; ``extra="forbid"`` (inherited) turns a field added to
+    the snapshot but not here into a loud test failure — the drift signal.
+    """
+
+    id: str
+    action: str
+    command: str
+    status: str
+    started_at: int
+    package: str | None = None
+    phase: str | None = None
+    duration_ms: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+    finished_at: int | None = None
+    lockfile_changed: bool = False
+    stale_cell_count: int = 0
+    stale_cell_ids: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+class EnvironmentJobEventPayload(WsPayload):
+    """``environment_job_started`` / ``environment_job_progress`` — a job snapshot.
+
+    Both frames carry the same shape: a single ``environment_job``. (The
+    terminal ``environment_job_finished`` and the ``dependency_changed`` alias
+    carry heavier aggregate payloads — serialized cells + environment state +
+    dependency lists — and are typed with the notebook-state phase, not here.)
+    """
+
+    environment_job: EnvironmentJobModel
+
+
+def environment_job_event_payload(job: dict[str, Any]) -> dict[str, Any]:
+    """Build a validated ``environment_job_started`` / ``_progress`` payload.
+
+    ``job`` is ``dataclasses.asdict(EnvironmentJobSnapshot)``; this validates it
+    through :class:`EnvironmentJobModel` and returns the wire dict.
+    """
+    return EnvironmentJobEventPayload.model_validate({"environment_job": job}).model_dump(
+        mode="json"
+    )

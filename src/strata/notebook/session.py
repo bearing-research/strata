@@ -79,7 +79,10 @@ from strata.notebook.writer import (
     update_cell_display_outputs,
     update_environment_metadata,
 )
-from strata.notebook.ws_payloads import cell_status_payload
+from strata.notebook.ws_payloads import (
+    cell_status_payload,
+    environment_job_event_payload,
+)
 
 if TYPE_CHECKING:
     from strata.notebook.artifact_integration import NotebookArtifactManager
@@ -2806,10 +2809,14 @@ class NotebookSession:
         event_type: MessageType,
         job: EnvironmentJobSnapshot,
     ) -> None:
-        """Broadcast a single environment-job state snapshot over notebook WS."""
+        """Broadcast a single environment-job state snapshot over notebook WS.
+
+        Carries the started / progress frames; the payload is validated through
+        ``EnvironmentJobModel`` so the wire shape is the documented contract.
+        """
         await self._broadcast_environment_job_message(
             event_type,
-            {"environment_job": asdict(job)},
+            environment_job_event_payload(asdict(job)),
         )
 
     async def _broadcast_environment_job_message(

@@ -15,7 +15,9 @@ from strata.notebook.ws_payloads import (
     CellStatusPayload,
     CellTestResultsPayload,
     CellTestStatusPayload,
+    EnvironmentJobEventPayload,
     cell_status_payload,
+    environment_job_event_payload,
 )
 
 
@@ -173,3 +175,41 @@ def test_test_results_serializes_nested_cases_and_drops_internal_hashes():
         "pytest_unavailable",
         "ran_at",
     }
+
+
+def test_environment_job_event_wraps_snapshot():
+    job = {
+        "id": "j1",
+        "action": "add",
+        "command": "uv add numpy",
+        "status": "running",
+        "started_at": 1000,
+        "package": "numpy",
+        "phase": "resolving",
+        "stale_cell_ids": ["c1"],
+    }
+    wire = environment_job_event_payload(job)
+    inner = wire["environment_job"]
+    assert inner["id"] == "j1"
+    assert inner["package"] == "numpy"
+    assert inner["stale_cell_ids"] == ["c1"]
+    # Snapshot defaults fill in for the omitted fields.
+    assert inner["stdout"] == ""
+    assert inner["lockfile_changed"] is False
+    assert inner["finished_at"] is None
+
+
+def test_environment_job_model_matches_snapshot_fields():
+    # Drift guard: the typed model must mirror the EnvironmentJobSnapshot
+    # dataclass exactly. asdict(job) is validated with extra="forbid", so a new
+    # snapshot field (or a removed model field) fails loudly here instead of
+    # silently changing the wire contract.
+    import dataclasses
+
+    from strata.notebook.session import EnvironmentJobSnapshot
+
+    snapshot_fields = {f.name for f in dataclasses.fields(EnvironmentJobSnapshot)}
+    model_fields = set(
+        EnvironmentJobEventPayload.model_fields["environment_job"].annotation.model_fields
+    )
+    assert model_fields == snapshot_fields
