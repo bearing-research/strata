@@ -5,15 +5,17 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from strata.notebook.models import CellTestCase
+from strata.notebook.models import CellStatus, CellTestCase
 from strata.notebook.ws_payloads import (
     CascadeProgressPayload,
     CascadePromptPayload,
     CellConsolePayload,
     CellIterationProgressPayload,
     CellOutputDeltaPayload,
+    CellStatusPayload,
     CellTestResultsPayload,
     CellTestStatusPayload,
+    cell_status_payload,
 )
 
 
@@ -53,6 +55,57 @@ def test_iteration_progress_defaults_and_validation():
     # max_iter is required.
     with pytest.raises(ValidationError):
         CellIterationProgressPayload(cell_id="c1", iteration=2, duration_ms=5)
+
+
+def test_cell_status_simple_omits_optional_fields():
+    # A bare status change must serialize to exactly {cell_id, status} —
+    # the optional remote/staleness fields are dropped, preserving the
+    # historical wire shape of the many simple emit sites.
+    wire = cell_status_payload("c1", "idle")
+    assert wire == {"cell_id": "c1", "status": "idle"}
+
+
+def test_cell_status_coerces_enum_status():
+    # Emit sites pass either a CellStatus enum or a plain string.
+    wire = cell_status_payload("c1", CellStatus.ERROR)
+    assert wire == {"cell_id": "c1", "status": "error"}
+
+
+def test_cell_status_running_includes_remote_fields():
+    wire = cell_status_payload("c1", "running", remote_worker="gpu-box", remote_transport="signed")
+    assert wire == {
+        "cell_id": "c1",
+        "status": "running",
+        "remote_worker": "gpu-box",
+        "remote_transport": "signed",
+    }
+
+
+def test_cell_status_staleness_keeps_empty_reasons_list():
+    # The staleness builder always emits staleness_reasons, even when empty —
+    # exclude_none drops None but keeps an empty list, matching prior behavior.
+    wire = cell_status_payload("c1", "stale", staleness_reasons=[])
+    assert wire == {"cell_id": "c1", "status": "stale", "staleness_reasons": []}
+
+
+def test_cell_status_staleness_with_reasons_and_causality():
+    wire = cell_status_payload(
+        "c1",
+        "stale",
+        staleness_reasons=["upstream_changed"],
+        causality={"reason": "upstream", "details": []},
+    )
+    assert wire == {
+        "cell_id": "c1",
+        "status": "stale",
+        "staleness_reasons": ["upstream_changed"],
+        "causality": {"reason": "upstream", "details": []},
+    }
+
+
+def test_cell_status_forbids_extra_field():
+    with pytest.raises(ValidationError):
+        CellStatusPayload(cell_id="c1", status="idle", bogus=1)
 
 
 def test_cascade_prompt_payload():

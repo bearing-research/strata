@@ -42,6 +42,7 @@ from strata.notebook.ws_payloads import (
     CellOutputDeltaPayload,
     CellTestResultsPayload,
     CellTestStatusPayload,
+    cell_status_payload,
 )
 
 if TYPE_CHECKING:
@@ -242,7 +243,7 @@ async def _set_cell_idle(
 
     await _broadcast_message(
         notebook_id,
-        _make_message(MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": "idle"}),
+        _make_message(MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "idle")),
     )
 
 
@@ -260,7 +261,7 @@ async def _broadcast_downstream_stale(
         await _broadcast_message(
             notebook_id,
             _make_message(
-                MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": CellStatus.STALE}
+                MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, CellStatus.STALE)
             ),
         )
 
@@ -273,17 +274,15 @@ async def _broadcast_staleness_updates(
 ) -> None:
     """Broadcast backend staleness state to all notebook clients."""
     for cell_id, staleness in staleness_map.items():
-        payload: dict[str, Any] = {
-            "cell_id": cell_id,
-            "status": staleness.status,
-            "staleness_reasons": (
+        causality = session.causality_map.get(cell_id)
+        payload = cell_status_payload(
+            cell_id,
+            staleness.status,
+            staleness_reasons=(
                 [reason.value for reason in staleness.reasons] if staleness.reasons else []
             ),
-        }
-        causality = session.causality_map.get(cell_id)
-        if causality:
-            payload["causality"] = asdict(causality, dict_factory=skip_none)
-
+            causality=asdict(causality, dict_factory=skip_none) if causality else None,
+        )
         await _broadcast_message(
             notebook_id,
             _make_message(MessageType.CELL_STATUS, seq, payload),
@@ -1815,7 +1814,7 @@ async def _execute_cell_directly(
             await _broadcast_message(
                 notebook_id,
                 _make_message(
-                    MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": CellStatus.ERROR}
+                    MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, CellStatus.ERROR)
                 ),
             )
             await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
@@ -1834,7 +1833,7 @@ async def _execute_cell_directly(
         )
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": "error"}),
+            _make_message(MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "error")),
         )
         await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
     finally:
@@ -1895,7 +1894,7 @@ async def _execute_cascade(
                 await _broadcast_message(
                     notebook_id,
                     _make_message(
-                        MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": "stale"}
+                        MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "stale")
                     ),
                 )
                 continue
@@ -1954,7 +1953,7 @@ async def _execute_cascade(
                 await _broadcast_message(
                     notebook_id,
                     _make_message(
-                        MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": status}
+                        MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, status)
                     ),
                 )
 
@@ -1986,7 +1985,7 @@ async def _execute_cascade(
                 await _broadcast_message(
                     notebook_id,
                     _make_message(
-                        MessageType.CELL_STATUS, seq, {"cell_id": cell_id, "status": "error"}
+                        MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "error")
                     ),
                 )
                 await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
@@ -2249,7 +2248,7 @@ async def _run_partition_batch(
                 _make_message(
                     MessageType.CELL_STATUS,
                     seq,
-                    {"cell_id": result.cell_id, "status": CellStatus.ERROR},
+                    cell_status_payload(result.cell_id, CellStatus.ERROR),
                 ),
             )
             await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
@@ -2372,7 +2371,7 @@ async def _run_partition_single_cell(
             _make_message(
                 MessageType.CELL_STATUS,
                 seq,
-                {"cell_id": cell_id, "status": CellStatus.ERROR},
+                cell_status_payload(cell_id, CellStatus.ERROR),
             ),
         )
         await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
@@ -2393,7 +2392,7 @@ async def _run_partition_single_cell(
             _make_message(
                 MessageType.CELL_STATUS,
                 seq,
-                {"cell_id": cell_id, "status": CellStatus.ERROR},
+                cell_status_payload(cell_id, CellStatus.ERROR),
             ),
         )
         await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
@@ -2721,7 +2720,7 @@ async def execute_cell_for_agent(
 
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_STATUS, 0, {"cell_id": cell_id, "status": status}),
+            _make_message(MessageType.CELL_STATUS, 0, cell_status_payload(cell_id, status)),
         )
 
         return result
@@ -2729,7 +2728,7 @@ async def execute_cell_for_agent(
         downstream_stale = session.mark_cell_error(cell_id)
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_STATUS, 0, {"cell_id": cell_id, "status": "error"}),
+            _make_message(MessageType.CELL_STATUS, 0, cell_status_payload(cell_id, "error")),
         )
         await _broadcast_downstream_stale(notebook_id, 0, downstream_stale)
         raise
@@ -2769,12 +2768,10 @@ def _running_payload(session, cell_id: str, source: str) -> dict[str, Any]:
     override → notebook default → implicit local. We consult the same
     resolver to avoid drifting from the executor's decision.
     """
-    payload: dict[str, Any] = {"cell_id": cell_id, "status": "running"}
-
     try:
         annotations = parse_annotations(source)
     except Exception:
-        return payload
+        return cell_status_payload(cell_id, "running")
 
     cell = session.notebook_state.get_cell(cell_id)
     effective_name = (
@@ -2787,14 +2784,17 @@ def _running_payload(session, cell_id: str, source: str) -> dict[str, Any]:
     try:
         worker_spec = resolve_worker_spec(session.notebook_state, effective_name)
     except Exception:
-        return payload
+        return cell_status_payload(cell_id, "running")
 
     if worker_spec is None or worker_spec.backend == WorkerBackendType.LOCAL:
-        return payload
+        return cell_status_payload(cell_id, "running")
 
-    payload["remote_worker"] = worker_spec.name
-    payload["remote_transport"] = worker_transport(worker_spec)
-    return payload
+    return cell_status_payload(
+        cell_id,
+        "running",
+        remote_worker=worker_spec.name,
+        remote_transport=worker_transport(worker_spec),
+    )
 
 
 def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict[str, Any]:

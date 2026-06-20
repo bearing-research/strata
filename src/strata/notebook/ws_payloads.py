@@ -24,7 +24,7 @@ the agent and environment-job frames, and the client→server frames.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -40,6 +40,57 @@ class WsPayload(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+
+class CellStatusPayload(WsPayload):
+    """``cell_status`` — a cell's execution status changed.
+
+    The most-emitted notebook frame, with three shapes that share one model:
+
+    - a bare status change (``cell_id`` + ``status``);
+    - a *running* broadcast that, for a remote cell, adds ``remote_worker`` +
+      ``remote_transport`` so the UI can show a "dispatching → X" badge;
+    - a staleness update that adds ``staleness_reasons`` (and ``causality`` when
+      the backend tracked why).
+
+    The optional fields default to ``None`` and are dropped on the wire via
+    ``exclude_none=True`` (see :func:`cell_status_payload`), so each emit site
+    keeps its exact historical shape. ``status`` is a ``CellStatus`` value
+    (``idle`` / ``running`` / ``ready`` / ``error`` / ``stale``).
+    """
+
+    cell_id: str
+    status: str
+    remote_worker: str | None = None
+    remote_transport: str | None = None
+    staleness_reasons: list[str] | None = None
+    causality: dict[str, Any] | None = None
+
+
+def cell_status_payload(
+    cell_id: str,
+    status: object,
+    *,
+    remote_worker: str | None = None,
+    remote_transport: str | None = None,
+    staleness_reasons: list[str] | None = None,
+    causality: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a validated ``cell_status`` wire payload.
+
+    Shared by every emit site (in ``ws.py`` and ``session.py``) so the frame
+    has one construction point. ``status`` accepts a ``CellStatus`` enum or a
+    plain string and is coerced to the enum's string value. Absent optional
+    fields are omitted (``exclude_none``), preserving each site's exact shape.
+    """
+    return CellStatusPayload(
+        cell_id=cell_id,
+        status=str(status),
+        remote_worker=remote_worker,
+        remote_transport=remote_transport,
+        staleness_reasons=staleness_reasons,
+        causality=causality,
+    ).model_dump(mode="json", exclude_none=True)
 
 
 class CellConsolePayload(WsPayload):
