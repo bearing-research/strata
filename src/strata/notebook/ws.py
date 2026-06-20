@@ -34,6 +34,13 @@ from strata.notebook.protocol import MessageType
 from strata.notebook.session import CellStateSnapshot, SessionManager
 from strata.notebook.workers import resolve_worker_spec, worker_transport
 from strata.notebook.writer import write_cell, write_cell_tests
+from strata.notebook.ws_payloads import (
+    CellConsolePayload,
+    CellIterationProgressPayload,
+    CellOutputDeltaPayload,
+    CellTestResultsPayload,
+    CellTestStatusPayload,
+)
 
 if TYPE_CHECKING:
     from strata.notebook.cascade import CascadePlan
@@ -1267,7 +1274,9 @@ async def _handle_cell_run_tests(
         await _broadcast_message(
             notebook_id,
             _make_message(
-                MessageType.CELL_TEST_STATUS, seq, {"cell_id": cell_id, "status": "running"}
+                MessageType.CELL_TEST_STATUS,
+                seq,
+                CellTestStatusPayload(cell_id=cell_id, status="running").model_dump(mode="json"),
             ),
         )
 
@@ -1275,7 +1284,17 @@ async def _handle_cell_run_tests(
         result = await executor.run_cell_tests(cell_id, test_source)
 
         seq = execution_state.next_sequence()
-        results_payload = {**result.model_dump(), "cell_id": cell_id, "stale": False}
+        results_payload = CellTestResultsPayload(
+            cell_id=cell_id,
+            passed=result.passed,
+            failed=result.failed,
+            errored=result.errored,
+            skipped=result.skipped,
+            tests=result.tests,
+            stale=False,
+            pytest_unavailable=result.pytest_unavailable,
+            ran_at=result.ran_at,
+        ).model_dump(mode="json")
         await _broadcast_message(
             notebook_id,
             _make_message(MessageType.CELL_TEST_RESULTS, seq, results_payload),
@@ -1284,7 +1303,9 @@ async def _handle_cell_run_tests(
         await _broadcast_message(
             notebook_id,
             _make_message(
-                MessageType.CELL_TEST_STATUS, seq, {"cell_id": cell_id, "status": status}
+                MessageType.CELL_TEST_STATUS,
+                seq,
+                CellTestStatusPayload(cell_id=cell_id, status=status).model_dump(mode="json"),
             ),
         )
     except Exception as e:
@@ -1294,7 +1315,9 @@ async def _handle_cell_run_tests(
         await _broadcast_message(
             notebook_id,
             _make_message(
-                MessageType.CELL_TEST_STATUS, seq, {"cell_id": cell_id, "status": "error"}
+                MessageType.CELL_TEST_STATUS,
+                seq,
+                CellTestStatusPayload(cell_id=cell_id, status="error").model_dump(mode="json"),
             ),
         )
     finally:
@@ -1697,16 +1720,19 @@ def _make_executor_with_progress(
 
     async def _broadcast_iteration_progress(progress: dict[str, Any]) -> None:
         seq = next_notebook_sequence(notebook_id)
+        # Validate the executor's dict as it crosses into the protocol layer.
+        payload = CellIterationProgressPayload(**progress).model_dump(mode="json")
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_ITERATION_PROGRESS, seq, progress),
+            _make_message(MessageType.CELL_ITERATION_PROGRESS, seq, payload),
         )
 
     async def _broadcast_prompt_delta(payload: dict[str, Any]) -> None:
         seq = next_notebook_sequence(notebook_id)
+        typed = CellOutputDeltaPayload(**payload).model_dump(mode="json")
         await _broadcast_message(
             notebook_id,
-            _make_message(MessageType.CELL_OUTPUT_DELTA, seq, payload),
+            _make_message(MessageType.CELL_OUTPUT_DELTA, seq, typed),
         )
 
     executor.on_iteration_complete = _broadcast_iteration_progress
@@ -2853,11 +2879,9 @@ async def _broadcast_execution_result(
             _make_message(
                 MessageType.CELL_CONSOLE,
                 seq,
-                {
-                    "cell_id": cell_id,
-                    "stream": "stdout",
-                    "text": result.stdout,
-                },
+                CellConsolePayload(cell_id=cell_id, stream="stdout", text=result.stdout).model_dump(
+                    mode="json"
+                ),
                 ts=ts,
             ),
         )
@@ -2868,11 +2892,9 @@ async def _broadcast_execution_result(
             _make_message(
                 MessageType.CELL_CONSOLE,
                 seq,
-                {
-                    "cell_id": cell_id,
-                    "stream": "stderr",
-                    "text": result.stderr,
-                },
+                CellConsolePayload(cell_id=cell_id, stream="stderr", text=result.stderr).model_dump(
+                    mode="json"
+                ),
                 ts=ts,
             ),
         )
