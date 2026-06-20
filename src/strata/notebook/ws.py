@@ -43,6 +43,8 @@ from strata.notebook.ws_payloads import (
     CellTestResultsPayload,
     CellTestStatusPayload,
     cell_status_payload,
+    impact_preview_payload,
+    profiling_summary_payload,
 )
 
 if TYPE_CHECKING:
@@ -2545,7 +2547,7 @@ async def _handle_impact_preview_request(
 
     await _send_message(
         websocket,
-        _make_message(MessageType.IMPACT_PREVIEW, seq, asdict(impact)),
+        _make_message(MessageType.IMPACT_PREVIEW, seq, impact_preview_payload(asdict(impact))),
     )
 
 
@@ -2561,7 +2563,9 @@ async def _handle_profiling_request(
     summary = session.get_profiling_summary()
 
     await websocket.send_text(
-        _json_encode(_make_message(MessageType.PROFILING_SUMMARY, seq, summary))
+        _json_encode(
+            _make_message(MessageType.PROFILING_SUMMARY, seq, profiling_summary_payload(summary))
+        )
     )
 
 

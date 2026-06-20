@@ -228,3 +228,68 @@ def environment_job_event_payload(job: dict[str, Any]) -> dict[str, Any]:
     return EnvironmentJobEventPayload.model_validate({"environment_job": job}).model_dump(
         mode="json"
     )
+
+
+class CascadeStepModel(WsPayload):
+    """One cell in an upstream cascade (mirrors ``cascade.CascadeStep``)."""
+
+    cell_id: str
+    cell_name: str
+    reason: str  # a CascadeReason value: stale | missing | target
+    skip: bool = False
+    estimated_ms: int = 0
+
+
+class DownstreamImpactModel(WsPayload):
+    """A downstream cell a run would invalidate (mirrors ``impact.DownstreamImpact``)."""
+
+    cell_id: str
+    cell_name: str
+    current_status: str
+    new_status: str = "stale:upstream"
+
+
+class ImpactPreviewPayload(WsPayload):
+    """``impact_preview`` — upstream/downstream effects of running a cell.
+
+    Mirrors ``impact.ImpactPreview`` (``asdict``-serialized). ``upstream`` reuses
+    the cascade-step shape; ``downstream`` lists the cells that go stale.
+    """
+
+    target_cell_id: str
+    upstream: list[CascadeStepModel] = Field(default_factory=list)
+    downstream: list[DownstreamImpactModel] = Field(default_factory=list)
+    estimated_ms: int = 0
+
+
+def impact_preview_payload(impact: dict[str, Any]) -> dict[str, Any]:
+    """Validate ``dataclasses.asdict(ImpactPreview)`` → the wire dict."""
+    return ImpactPreviewPayload.model_validate(impact).model_dump(mode="json")
+
+
+class CellProfileModel(WsPayload):
+    """Per-cell profiling row in a ``profiling_summary``."""
+
+    cell_id: str
+    cell_name: str
+    status: str
+    duration_ms: int
+    cache_hit: bool
+    artifact_uri: str | None = None
+    execution_count: int
+
+
+class ProfilingSummaryPayload(WsPayload):
+    """``profiling_summary`` — notebook-level execution metrics."""
+
+    total_execution_ms: int
+    cache_hits: int
+    cache_misses: int
+    cache_savings_ms: int
+    total_artifact_bytes: int
+    cell_profiles: list[CellProfileModel] = Field(default_factory=list)
+
+
+def profiling_summary_payload(summary: dict[str, Any]) -> dict[str, Any]:
+    """Validate ``session.get_profiling_summary()`` → the wire dict."""
+    return ProfilingSummaryPayload.model_validate(summary).model_dump(mode="json")

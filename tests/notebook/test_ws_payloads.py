@@ -18,6 +18,8 @@ from strata.notebook.ws_payloads import (
     EnvironmentJobEventPayload,
     cell_status_payload,
     environment_job_event_payload,
+    impact_preview_payload,
+    profiling_summary_payload,
 )
 
 
@@ -197,6 +199,60 @@ def test_environment_job_event_wraps_snapshot():
     assert inner["stdout"] == ""
     assert inner["lockfile_changed"] is False
     assert inner["finished_at"] is None
+
+
+def test_impact_preview_validates_nested_steps():
+    from dataclasses import asdict
+
+    from strata.notebook.cascade import CascadeReason, CascadeStep
+    from strata.notebook.impact import DownstreamImpact, ImpactPreview
+
+    impact = ImpactPreview(
+        target_cell_id="c2",
+        upstream=[CascadeStep(cell_id="c1", cell_name="load", reason=CascadeReason.STALE)],
+        downstream=[
+            DownstreamImpact(cell_id="c3", cell_name="plot", current_status="ready"),
+        ],
+        estimated_ms=42,
+    )
+    wire = impact_preview_payload(asdict(impact))
+    assert wire["target_cell_id"] == "c2"
+    assert wire["estimated_ms"] == 42
+    assert wire["upstream"][0] == {
+        "cell_id": "c1",
+        "cell_name": "load",
+        "reason": "stale",  # CascadeReason StrEnum → its value
+        "skip": False,
+        "estimated_ms": 0,
+    }
+    assert wire["downstream"][0]["new_status"] == "stale:upstream"
+
+
+def test_profiling_summary_validates_and_coerces_status_enum():
+    from strata.notebook.models import CellStatus
+
+    summary = {
+        "total_execution_ms": 100,
+        "cache_hits": 2,
+        "cache_misses": 1,
+        "cache_savings_ms": 30,
+        "total_artifact_bytes": 4096,
+        "cell_profiles": [
+            {
+                "cell_id": "c1",
+                "cell_name": "x",
+                "status": CellStatus.READY,  # enum, as get_profiling_summary emits it
+                "duration_ms": 12,
+                "cache_hit": True,
+                "artifact_uri": None,
+                "execution_count": 3,
+            }
+        ],
+    }
+    wire = profiling_summary_payload(summary)
+    assert wire["total_execution_ms"] == 100
+    assert wire["cell_profiles"][0]["status"] == "ready"
+    assert wire["cell_profiles"][0]["artifact_uri"] is None
 
 
 def test_environment_job_model_matches_snapshot_fields():
