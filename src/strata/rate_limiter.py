@@ -8,7 +8,7 @@ request-rate throttling to prevent abuse and ensure fair usage.
 import time
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class Clock(Protocol):
@@ -30,13 +30,23 @@ class SystemClock:
 class TokenBucket:
     """Token bucket for rate limiting.
 
-    Tokens are added at a fixed rate up to a maximum capacity.
-    Each request consumes one token. If no tokens are available,
-    the request is rejected.
+    Tokens refill at a fixed rate up to ``capacity``; each request consumes one
+    token, and a request with no token available is rejected.
+
+    Attributes
+    ----------
+    capacity : float
+        Maximum tokens (the burst ceiling).
+    refill_rate : float
+        Tokens added per second.
+    tokens : float
+        Current token count (initialized to ``capacity``).
+    last_update : float
+        Timestamp of the last refill.
     """
 
-    capacity: float  # Maximum tokens
-    refill_rate: float  # Tokens per second
+    capacity: float
+    refill_rate: float
     tokens: float = field(init=False)
     last_update: float = field(init=False)
     _clock: Clock = field(default_factory=SystemClock)
@@ -53,7 +63,18 @@ class TokenBucket:
         self.last_update = now
 
     def acquire(self, tokens: float = 1.0) -> bool:
-        """Try to acquire tokens. Returns True if successful."""
+        """Try to consume ``tokens``, refilling first.
+
+        Parameters
+        ----------
+        tokens : float, optional
+            Tokens to consume (default 1.0).
+
+        Returns
+        -------
+        bool
+            ``True`` if enough tokens were available and consumed.
+        """
         self._refill()
         if self.tokens >= tokens:
             self.tokens -= tokens
@@ -66,7 +87,18 @@ class TokenBucket:
         return self.tokens
 
     def time_until_available(self, tokens: float = 1.0) -> float:
-        """Return seconds until requested tokens will be available."""
+        """Return seconds until ``tokens`` will have refilled.
+
+        Parameters
+        ----------
+        tokens : float, optional
+            Tokens needed (default 1.0).
+
+        Returns
+        -------
+        float
+            Seconds to wait (0.0 if already available).
+        """
         self._refill()
         if self.tokens >= tokens:
             return 0.0
@@ -101,10 +133,23 @@ class RateLimitConfig:
 
 @dataclass
 class RateLimitResult:
-    """Result of a rate limit check."""
+    """Outcome of a rate-limit check.
+
+    Attributes
+    ----------
+    allowed : bool
+        Whether the request may proceed.
+    limit_type : str or None
+        Which limit rejected the request: ``"global"`` / ``"client"`` /
+        ``"endpoint"`` (``None`` when allowed).
+    retry_after_seconds : float or None
+        Seconds to wait before retrying, when rejected.
+    tokens_remaining : float or None
+        Client tokens left after the check.
+    """
 
     allowed: bool
-    limit_type: str | None = None  # "global", "client", "endpoint"
+    limit_type: str | None = None
     retry_after_seconds: float | None = None
     tokens_remaining: float | None = None
 
@@ -183,14 +228,19 @@ class RateLimiter:
         client_id: str,
         endpoint: str | None = None,
     ) -> RateLimitResult:
-        """Check if a request should be allowed.
+        """Check a request against the global, per-client, and endpoint limits.
 
-        Args:
-            client_id: Unique identifier for the client (e.g., IP address)
-            endpoint: Optional endpoint path for endpoint-specific limits
+        Parameters
+        ----------
+        client_id : str
+            Unique client identifier (e.g. IP address).
+        endpoint : str or None, optional
+            Endpoint path for endpoint-specific limits.
 
-        Returns:
-            RateLimitResult indicating whether the request is allowed
+        Returns
+        -------
+        RateLimitResult
+            Whether the request is allowed, and why if not.
         """
         if not self.config.enabled:
             return RateLimitResult(allowed=True)
@@ -238,10 +288,12 @@ class RateLimiter:
             )
 
     def cleanup_stale_clients(self) -> int:
-        """Remove client buckets that haven't been used recently.
+        """Drop per-client buckets idle longer than ``client_ttl_seconds``.
 
-        Returns:
-            Number of clients removed
+        Returns
+        -------
+        int
+            Number of client buckets removed.
         """
         with self._lock:
             now = self._clock.time()
@@ -255,8 +307,15 @@ class RateLimiter:
                 del self._client_last_seen[client_id]
             return len(stale)
 
-    def get_stats(self) -> dict:
-        """Get rate limiter statistics."""
+    def get_stats(self) -> dict[str, Any]:
+        """Return request/rejection counters and current bucket state.
+
+        Returns
+        -------
+        dict
+            Counters plus ``active_clients``, ``global_tokens_available``, and
+            ``enabled``.
+        """
         with self._lock:
             return {
                 **self._stats,
@@ -282,12 +341,29 @@ _rate_limiter: RateLimiter | None = None
 
 
 def get_rate_limiter() -> RateLimiter | None:
-    """Get the global rate limiter instance."""
+    """Return the global rate limiter, or ``None`` if not initialized.
+
+    Returns
+    -------
+    RateLimiter or None
+        The process-wide limiter.
+    """
     return _rate_limiter
 
 
 def init_rate_limiter(config: RateLimitConfig | None = None) -> RateLimiter:
-    """Initialize the global rate limiter."""
+    """Create and install the global rate limiter.
+
+    Parameters
+    ----------
+    config : RateLimitConfig or None, optional
+        Configuration; defaults are used when ``None``.
+
+    Returns
+    -------
+    RateLimiter
+        The newly installed limiter.
+    """
     global _rate_limiter
     _rate_limiter = RateLimiter(config)
     return _rate_limiter
