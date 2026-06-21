@@ -39,20 +39,26 @@ def _run_local(
     """Execute a transform locally based on the build spec (internal use only).
 
     This is an internal function used by the server's embedded executor.
-    Users should call client.materialize() instead.
+    Users should call ``client.materialize()`` instead.
 
-    Args:
-        build_spec: BuildSpec containing:
-            - executor: Executor URI (e.g., "duckdb_sql@v1", "local://duckdb_sql@v1")
-            - params: Executor-specific parameters
-            - input_uris: List of input URIs (used for ordering)
-        input_tables: Mapping of input URI -> Arrow Table
+    Parameters
+    ----------
+    build_spec : dict
+        Build spec with ``executor`` (URI, e.g. ``"duckdb_sql@v1"`` /
+        ``"local://duckdb_sql@v1"``), ``params`` (executor-specific), and
+        ``input_uris`` (list, used for input ordering).
+    input_tables : dict of str to pyarrow.Table
+        Mapping of input URI to its Arrow table.
 
-    Returns:
-        Result Arrow Table
+    Returns
+    -------
+    pyarrow.Table
+        The transform result.
 
-    Raises:
-        ValueError: If executor is not supported or inputs are missing
+    Raises
+    ------
+    ValueError
+        If the executor is unsupported or an input table is missing.
     """
     executor = build_spec.get("executor", "")
     params = build_spec.get("params", {})
