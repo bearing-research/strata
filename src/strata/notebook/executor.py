@@ -116,7 +116,6 @@ from strata.notebook.workers import (
     worker_transport,
 )
 from strata.transforms.build_store import get_build_store
-from strata.transforms.signed_urls import generate_build_manifest
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
@@ -2067,7 +2066,7 @@ class CellExecutor:
             )
             build_store.start_build(build_id)
 
-            manifest = generate_build_manifest(
+            manifest = state.url_signer.generate_build_manifest(
                 base_url=base_url,
                 build_id=build_id,
                 metadata={

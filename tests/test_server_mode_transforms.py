@@ -120,12 +120,17 @@ def server_mode_app(server_mode_config):
     # Set up server state with mock planner
     from unittest.mock import MagicMock
 
+    from strata.transforms.signed_urls import URLSigner
+
     mock_state = MagicMock()
     mock_state.config = server_mode_config
     mock_state.planner = MagicMock()
     mock_state.fetcher = MagicMock()
     mock_state.scans = {}
     mock_state.metrics = MagicMock()
+    # A real signer so signed-URL routes produce a verifiable manifest (a bare
+    # MagicMock would serialize to a non-manifest blob).
+    mock_state.url_signer = URLSigner(b"test-secret-key-12345678901234")
 
     # Patch get_state
     original_state = server_module._state
@@ -1365,36 +1370,30 @@ class TestServiceModeReviewFindings:
         Regression: ``create_build`` was called without ``input_uris`` / ``params``,
         producing an empty-input, empty-param manifest.
         """
-        from strata.transforms.signed_urls import reset_signing_secret, set_signing_secret
-
-        set_signing_secret(b"test-secret-key-12345678901234")
-        try:
-            create = server_mode_app.post(
-                "/v1/artifacts/materialize",
-                json={
-                    "inputs": ["strata://artifact/seed@v=1"],
-                    "transform": {
-                        "executor": "duckdb_sql@v1",
-                        "params": {"sql": "SELECT * FROM input"},
-                    },
+        create = server_mode_app.post(
+            "/v1/artifacts/materialize",
+            json={
+                "inputs": ["strata://artifact/seed@v=1"],
+                "transform": {
+                    "executor": "duckdb_sql@v1",
+                    "params": {"sql": "SELECT * FROM input"},
                 },
-            )
-            assert create.status_code == 200, create.text
-            build_id = create.json()["build_id"]
-            assert build_id is not None
+            },
+        )
+        assert create.status_code == 200, create.text
+        build_id = create.json()["build_id"]
+        assert build_id is not None
 
-            manifest = server_mode_app.get(f"/v1/builds/{build_id}/manifest")
-            assert manifest.status_code == 200, manifest.text
-            data = manifest.json()
+        manifest = server_mode_app.get(f"/v1/builds/{build_id}/manifest")
+        assert manifest.status_code == 200, manifest.text
+        data = manifest.json()
 
-            # Inputs flow through (was empty before the fix).
-            assert len(data["inputs"]) == 1
-            assert data["inputs"][0]["artifact_id"] == "seed"
-            assert data["inputs"][0]["version"] == 1
-            # Params flow through.
-            assert data["metadata"]["params"] == {"sql": "SELECT * FROM input"}
-        finally:
-            reset_signing_secret()
+        # Inputs flow through (was empty before the fix).
+        assert len(data["inputs"]) == 1
+        assert data["inputs"][0]["artifact_id"] == "seed"
+        assert data["inputs"][0]["version"] == 1
+        # Params flow through.
+        assert data["metadata"]["params"] == {"sql": "SELECT * FROM input"}
 
     def test_registry_reads_work_in_service_mode(self, server_mode_app):
         """Registry read routes must serve in service mode (allow_read=True),
