@@ -13,11 +13,10 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from strata.transforms.signed_urls import generate_build_manifest
-
 if TYPE_CHECKING:
     from strata.artifact_store import ArtifactStore
     from strata.transforms.build_store import BuildState
+    from strata.transforms.signed_urls import URLSigner
 
 
 def _resolve_to_artifact_version(
@@ -78,6 +77,7 @@ class BuildService:
         self,
         store: ArtifactStore,
         *,
+        signer: URLSigner,
         build: BuildState,
         base_url: str,
         max_output_bytes: int,
@@ -104,7 +104,7 @@ class BuildService:
             "params": build.params or {},
         }
 
-        manifest = generate_build_manifest(
+        manifest = signer.generate_build_manifest(
             base_url=base_url,
             build_id=build.build_id,
             metadata=metadata,

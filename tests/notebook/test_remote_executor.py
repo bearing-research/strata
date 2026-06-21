@@ -17,7 +17,7 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
-from strata.transforms.signed_urls import generate_build_manifest
+from strata.server import get_state
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
 
@@ -230,7 +230,7 @@ def test_remote_executor_executes_signed_manifest_build(
     )
     build_store.start_build(build_id)
 
-    manifest = generate_build_manifest(
+    manifest = get_state().url_signer.generate_build_manifest(
         base_url=base_url,
         build_id=build_id,
         metadata={
@@ -336,20 +336,24 @@ def test_remote_executor_manifest_reports_finalize_failure(
     )
     build_store.start_build(build_id)
 
-    manifest = generate_build_manifest(
-        base_url=base_url,
-        build_id=build_id,
-        metadata={
-            "build_id": build_id,
-            "artifact_id": output_artifact_id,
-            "version": output_version,
-            "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
-            "params": params,
-        },
-        input_artifacts=[(input_artifact_id, input_version)],
-        max_output_bytes=notebook_build_server["config"].max_transform_output_bytes,
-        url_expiry_seconds=notebook_build_server["config"].signed_url_expiry_seconds,
-    ).to_dict()
+    manifest = (
+        get_state()
+        .url_signer.generate_build_manifest(
+            base_url=base_url,
+            build_id=build_id,
+            metadata={
+                "build_id": build_id,
+                "artifact_id": output_artifact_id,
+                "version": output_version,
+                "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
+                "params": params,
+            },
+            input_artifacts=[(input_artifact_id, input_version)],
+            max_output_bytes=notebook_build_server["config"].max_transform_output_bytes,
+            url_expiry_seconds=notebook_build_server["config"].signed_url_expiry_seconds,
+        )
+        .to_dict()
+    )
     manifest["finalize_url"] = f"{base_url}/v1/builds/{build_id}/missing-finalize"
 
     response = httpx.post(

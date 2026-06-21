@@ -168,9 +168,23 @@ class ServerState:
 
     def __init__(self, config: StrataConfig) -> None:
         import os
+        import secrets
         from concurrent.futures import ThreadPoolExecutor
 
+        from strata.transforms.signed_urls import URLSigner
+
         self.config = config
+
+        # Signs pull-model build URLs. Pin the secret from config so signed URLs
+        # survive restarts and match across replicas; fall back to a random
+        # per-process secret when unset (the lifespan logs a warning if the pull
+        # model is enabled without a configured secret).
+        signing_secret = (
+            config.transform_signing_secret.encode("utf-8")
+            if config.transform_signing_secret
+            else secrets.token_bytes(32)
+        )
+        self.url_signer = URLSigner(signing_secret)
 
         # Dedicated thread pool for planning operations.
         # The default executor has only 8-16 workers (min(32, cpu_count + 4)),
@@ -1035,15 +1049,11 @@ async def lifespan(app: FastAPI):
     transform_registry = TransformRegistry.from_config(config.transforms_config)
     set_transform_registry(transform_registry)
 
-    # Pin the pull-model signing secret from config so signed build URLs survive
-    # restarts and match across replicas. Without it the secret is a random
-    # per-process value (set lazily on first use) — in-flight signed URLs die on
-    # restart. Warn only when the pull model is actually in use.
-    from strata.transforms.signed_urls import set_signing_secret
-
-    if config.transform_signing_secret:
-        set_signing_secret(config.transform_signing_secret.encode("utf-8"))
-    elif config.pull_model_enabled:
+    # The signing secret is pinned from config when ServerState is built (so
+    # signed build URLs survive restarts and match across replicas). Without it
+    # the secret is a random per-process value and in-flight signed URLs die on
+    # restart — warn only when the pull model is actually in use.
+    if not config.transform_signing_secret and config.pull_model_enabled:
         logger.warning(
             "pull_model_signing_secret_unset",
             detail=(

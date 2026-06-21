@@ -1014,9 +1014,9 @@ async def test_ws_execute_reports_signed_finalize_failure(
     monkeypatch,
 ):
     """The live WS path should surface signed transport finalize failures."""
-    from strata.transforms.signed_urls import (
-        generate_build_manifest as real_generate_build_manifest,
-    )
+    from strata.transforms.signed_urls import URLSigner
+
+    _real_generate = URLSigner.generate_build_manifest
 
     _, session = notebook_session
 
@@ -1029,12 +1029,10 @@ async def test_ws_execute_reports_signed_finalize_failure(
             data["finalize_url"] = f"{data['finalize_url']}/missing-finalize"
             return data
 
-    def fake_generate_build_manifest(*args, **kwargs):
-        return _BadFinalizeManifest(real_generate_build_manifest(*args, **kwargs))
+    def fake_generate_build_manifest(self, *args, **kwargs):
+        return _BadFinalizeManifest(_real_generate(self, *args, **kwargs))
 
-    monkeypatch.setattr(
-        "strata.notebook.executor.generate_build_manifest", fake_generate_build_manifest
-    )
+    monkeypatch.setattr(URLSigner, "generate_build_manifest", fake_generate_build_manifest)
 
     config = _http_worker_config(
         notebook_executor_server["execute_url"],

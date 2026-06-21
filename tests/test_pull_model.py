@@ -34,7 +34,10 @@ from strata.transforms.build_store import (
     get_build_store,
     reset_build_store,
 )
-from strata.transforms.signed_urls import reset_signing_secret, set_signing_secret
+from strata.transforms.signed_urls import URLSigner
+
+_TEST_SECRET = b"test-secret-key-12345678901234"
+_TEST_SIGNER = URLSigner(_TEST_SECRET)
 
 
 @pytest.fixture
@@ -79,7 +82,6 @@ def build_store(config):
 def client(config, artifact_store, build_store):
     """Create a test client with pull model enabled."""
     # Set signing secret for reproducible tests
-    set_signing_secret(b"test-secret-key-12345678901234")
 
     # Create mock state
     mock_state = MagicMock()
@@ -88,6 +90,7 @@ def client(config, artifact_store, build_store):
     mock_state.fetcher = MagicMock()
     mock_state.scans = {}
     mock_state.metrics = MagicMock()
+    mock_state.url_signer = _TEST_SIGNER
 
     # Patch _state on server module
     original_state = server_module._state
@@ -97,7 +100,6 @@ def client(config, artifact_store, build_store):
 
     # Restore
     server_module._state = original_state
-    reset_signing_secret()
 
 
 @pytest.fixture
@@ -114,14 +116,13 @@ def trusted_proxy_client(temp_dir, artifact_store, build_store):
         hide_forbidden_as_not_found=True,
     )
 
-    set_signing_secret(b"test-secret-key-12345678901234")
-
     mock_state = MagicMock()
     mock_state.config = config
     mock_state.planner = MagicMock()
     mock_state.fetcher = MagicMock()
     mock_state.scans = {}
     mock_state.metrics = MagicMock()
+    mock_state.url_signer = _TEST_SIGNER
 
     original_state = server_module._state
     server_module._state = mock_state
@@ -129,7 +130,6 @@ def trusted_proxy_client(temp_dir, artifact_store, build_store):
     yield TestClient(app)
 
     server_module._state = original_state
-    reset_signing_secret()
 
 
 def create_test_arrow_blob() -> bytes:
@@ -325,8 +325,6 @@ class TestDownloadEndpoint:
 
     def test_download_with_valid_signature(self, client, artifact_store):
         """Can download artifact with valid signed URL."""
-        from strata.transforms.signed_urls import generate_download_url
-
         # Create artifact
         version = create_test_artifact(artifact_store, "dl-test", finalize=True)
 
@@ -334,7 +332,7 @@ class TestDownloadEndpoint:
         blob = artifact_store.read_blob("dl-test", version)
 
         # Generate signed URL
-        signed = generate_download_url(
+        signed = _TEST_SIGNER.generate_download_url(
             base_url="http://testserver",
             artifact_id="dl-test",
             version=version,
@@ -363,12 +361,10 @@ class TestDownloadEndpoint:
 
     def test_download_expired_signature_rejected(self, client, artifact_store):
         """Expired signature is rejected."""
-        from strata.transforms.signed_urls import generate_download_url
-
         version = create_test_artifact(artifact_store, "dl-test2", finalize=True)
 
         # Generate expired URL
-        signed = generate_download_url(
+        signed = _TEST_SIGNER.generate_download_url(
             base_url="http://testserver",
             artifact_id="dl-test2",
             version=version,
@@ -395,11 +391,9 @@ class TestDownloadEndpoint:
 
     def test_download_tampered_signature_rejected(self, client, artifact_store):
         """Tampered parameters are rejected."""
-        from strata.transforms.signed_urls import generate_download_url
-
         version = create_test_artifact(artifact_store, "dl-test3", finalize=True)
 
-        signed = generate_download_url(
+        signed = _TEST_SIGNER.generate_download_url(
             base_url="http://testserver",
             artifact_id="dl-test3",
             version=version,
@@ -430,8 +424,6 @@ class TestUploadEndpoint:
 
     def test_upload_with_valid_signature(self, client, build_store, artifact_store):
         """Can upload artifact with valid signed URL."""
-        from strata.transforms.signed_urls import generate_upload_url
-
         # Create build
         version = create_test_artifact(artifact_store, "up-output", finalize=False)
         build_store.create_build(
@@ -443,7 +435,7 @@ class TestUploadEndpoint:
 
         # Generate signed upload URL
         blob = create_test_arrow_blob()
-        signed = generate_upload_url(
+        signed = _TEST_SIGNER.generate_upload_url(
             base_url="http://testserver",
             build_id="up-build-001",
             max_bytes=len(blob) + 1000,
@@ -477,8 +469,6 @@ class TestUploadEndpoint:
         self, client, build_store, artifact_store
     ):
         """Can upload artifact for a build that has already started."""
-        from strata.transforms.signed_urls import generate_upload_url
-
         version = create_test_artifact(artifact_store, "up-output-building", finalize=False)
         build_store.create_build(
             build_id="up-build-building-001",
@@ -489,7 +479,7 @@ class TestUploadEndpoint:
         build_store.start_build("up-build-building-001")
 
         blob = create_test_arrow_blob()
-        signed = generate_upload_url(
+        signed = _TEST_SIGNER.generate_upload_url(
             base_url="http://testserver",
             build_id="up-build-building-001",
             max_bytes=len(blob) + 1000,
@@ -514,8 +504,6 @@ class TestUploadEndpoint:
 
     def test_upload_exceeds_max_bytes_rejected(self, client, build_store, artifact_store):
         """Upload exceeding max_bytes is rejected."""
-        from strata.transforms.signed_urls import generate_upload_url
-
         version = create_test_artifact(artifact_store, "up-output2", finalize=False)
         build_store.create_build(
             build_id="up-build-002",
@@ -525,7 +513,7 @@ class TestUploadEndpoint:
         )
 
         blob = create_test_arrow_blob()
-        signed = generate_upload_url(
+        signed = _TEST_SIGNER.generate_upload_url(
             base_url="http://testserver",
             build_id="up-build-002",
             max_bytes=10,  # Very small limit
@@ -553,8 +541,6 @@ class TestUploadEndpoint:
         self, client, build_store, artifact_store
     ):
         """A 413 upload must not leave a partial blob in the store."""
-        from strata.transforms.signed_urls import generate_upload_url
-
         version = create_test_artifact(artifact_store, "up-output3", finalize=False)
         build_store.create_build(
             build_id="up-build-003",
@@ -564,7 +550,7 @@ class TestUploadEndpoint:
         )
 
         blob = create_test_arrow_blob()
-        signed = generate_upload_url(
+        signed = _TEST_SIGNER.generate_upload_url(
             base_url="http://testserver",
             build_id="up-build-003",
             max_bytes=10,
@@ -589,8 +575,6 @@ class TestUploadEndpoint:
 
     def test_upload_expired_signature_rejected(self, client, build_store, artifact_store):
         """Expired upload signature is rejected."""
-        from strata.transforms.signed_urls import generate_upload_url
-
         version = create_test_artifact(artifact_store, "up-output3", finalize=False)
         build_store.create_build(
             build_id="up-build-003",
@@ -599,7 +583,7 @@ class TestUploadEndpoint:
             executor_ref="test@v1",
         )
 
-        signed = generate_upload_url(
+        signed = _TEST_SIGNER.generate_upload_url(
             base_url="http://testserver",
             build_id="up-build-003",
             max_bytes=10000,

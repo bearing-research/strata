@@ -10,7 +10,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from strata.services import build as build_module
 from strata.services.build import _resolve_to_artifact_version, build_service
 
 
@@ -36,18 +35,22 @@ def _build(**kw):
 
 
 @pytest.fixture
-def captured_manifest(monkeypatch):
-    """Replace the real signer with a stub that captures its kwargs."""
-    calls = {}
+def captured_manifest():
+    """A stub signer that captures its ``generate_build_manifest`` kwargs.
 
-    def _fake_generate(**kwargs):
-        calls.update(kwargs)
-        return SimpleNamespace(
-            to_dict=lambda: {"ok": True, "n_inputs": len(kwargs["input_artifacts"])}
-        )
+    Returns a namespace exposing ``.signer`` (passed to ``assemble_manifest``)
+    and ``.calls`` (the captured kwargs).
+    """
+    calls: dict = {}
 
-    monkeypatch.setattr(build_module, "generate_build_manifest", _fake_generate)
-    return calls
+    class _FakeSigner:
+        def generate_build_manifest(self, **kwargs):
+            calls.update(kwargs)
+            return SimpleNamespace(
+                to_dict=lambda: {"ok": True, "n_inputs": len(kwargs["input_artifacts"])}
+            )
+
+    return SimpleNamespace(signer=_FakeSigner(), calls=calls)
 
 
 def test_resolve_artifact_and_name_uris():
@@ -63,19 +66,24 @@ def test_assemble_manifest_resolves_inputs_and_builds_metadata(captured_manifest
     build = _build(input_uris=["strata://artifact/X@v=3", "strata://name/champ"])
 
     result = build_service.assemble_manifest(
-        store, build=build, base_url="http://host", max_output_bytes=1000, url_expiry_seconds=60.0
+        store,
+        signer=captured_manifest.signer,
+        build=build,
+        base_url="http://host",
+        max_output_bytes=1000,
+        url_expiry_seconds=60.0,
     )
 
     assert result == {"ok": True, "n_inputs": 2}
-    assert captured_manifest["input_artifacts"] == [("X", 3), ("A", 7)]
-    assert captured_manifest["metadata"] == {
+    assert captured_manifest.calls["input_artifacts"] == [("X", 3), ("A", 7)]
+    assert captured_manifest.calls["metadata"] == {
         "build_id": "b1",
         "artifact_id": "OUT",
         "version": 2,
         "executor_ref": "duckdb_sql@v1",
         "params": {"sql": "select 1"},
     }
-    assert captured_manifest["base_url"] == "http://host"
+    assert captured_manifest.calls["base_url"] == "http://host"
 
 
 def test_assemble_manifest_raises_valueerror_on_unresolvable_input(captured_manifest):
@@ -84,7 +92,12 @@ def test_assemble_manifest_raises_valueerror_on_unresolvable_input(captured_mani
 
     with pytest.raises(ValueError, match="Cannot resolve input artifact"):
         build_service.assemble_manifest(
-            store, build=build, base_url="http://host", max_output_bytes=1, url_expiry_seconds=1.0
+            store,
+            signer=captured_manifest.signer,
+            build=build,
+            base_url="http://host",
+            max_output_bytes=1,
+            url_expiry_seconds=1.0,
         )
 
 
@@ -92,12 +105,13 @@ def test_assemble_manifest_handles_no_inputs(captured_manifest):
     build = _build(input_uris=None)
     build_service.assemble_manifest(
         _FakeStore(),
+        signer=captured_manifest.signer,
         build=build,
         base_url="http://host",
         max_output_bytes=1,
         url_expiry_seconds=1.0,
     )
-    assert captured_manifest["input_artifacts"] == []
+    assert captured_manifest.calls["input_artifacts"] == []
 
 
 def _state(**kw):

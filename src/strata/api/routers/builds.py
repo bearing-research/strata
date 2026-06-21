@@ -181,6 +181,7 @@ async def get_build_manifest(build_id: str, request: Request):
     try:
         return build_service.assemble_manifest(
             store,
+            signer=state.url_signer,
             build=build,
             base_url=base_url,
             max_output_bytes=state.config.max_transform_output_bytes,
@@ -213,8 +214,7 @@ async def download_artifact_signed(
     Returns:
         Arrow IPC stream bytes
     """
-    from strata.server import _get_artifact_store
-    from strata.transforms.signed_urls import verify_download_signature
+    from strata.server import _get_artifact_store, get_state
 
     # Parse and verify signature
     try:
@@ -223,7 +223,7 @@ async def download_artifact_signed(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid parameter format")
 
-    if not verify_download_signature(
+    if not get_state().url_signer.verify_download_signature(
         artifact_id=artifact_id,
         version=version_int,
         build_id=build_id,
@@ -302,8 +302,8 @@ async def upload_artifact_signed(
         _ACTIVE_BUILD_STATES,
         _get_artifact_store,
         _get_runtime_build_store,
+        get_state,
     )
-    from strata.transforms.signed_urls import verify_upload_signature
 
     # Parse and verify signature
     try:
@@ -312,7 +312,7 @@ async def upload_artifact_signed(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid parameter format")
 
-    if not verify_upload_signature(
+    if not get_state().url_signer.verify_upload_signature(
         build_id=build_id,
         max_bytes=max_bytes_int,
         expires_at=expires_at_float,
@@ -398,6 +398,7 @@ async def finalize_build(
         _get_artifact_store,
         _get_runtime_build_store,
         _record_build_output_bytes,
+        get_state,
     )
 
     if not _build_transport_available():
@@ -418,8 +419,6 @@ async def finalize_build(
         raise HTTPException(status_code=404, detail="Build not found")
 
     if signature is not None or expires_at is not None:
-        from strata.transforms.signed_urls import verify_finalize_signature
-
         if signature is None or expires_at is None:
             raise HTTPException(status_code=400, detail="Missing finalize signature parameters")
         try:
@@ -427,7 +426,7 @@ async def finalize_build(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid parameter format")
 
-        if not verify_finalize_signature(
+        if not get_state().url_signer.verify_finalize_signature(
             build_id=build_id,
             expires_at=expires_at_float,
             signature=signature,
