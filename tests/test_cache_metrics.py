@@ -30,8 +30,10 @@ class TestEvictionEvent:
 class TestEvictionStats:
     """Tests for EvictionStats dataclass."""
 
-    def test_to_dict(self):
-        """Test converting stats to dict."""
+    def test_asdict(self):
+        """EvictionStats serializes to a plain field mapping via asdict."""
+        from dataclasses import asdict
+
         from strata.cache_metrics import EvictionStats
 
         stats = EvictionStats(
@@ -47,10 +49,11 @@ class TestEvictionStats:
             pressure_level="low",
         )
 
-        d = stats.to_dict()
+        d = asdict(stats)
         assert d["total_evictions"] == 100
         assert d["total_files_evicted"] == 500
-        assert d["eviction_rate_per_minute"] == 0.83
+        # Raw value — rounding for display is the consumer's concern.
+        assert d["eviction_rate_per_minute"] == 0.833
         assert d["pressure_level"] == "low"
 
 

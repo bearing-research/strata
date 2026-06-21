@@ -1,33 +1,67 @@
-"""Cache eviction metrics and monitoring.
-
-Tracks detailed cache eviction events including:
-- Eviction counts and bytes over time
-- Eviction rate (per minute/hour)
-- Eviction pressure indicator
-- Recent eviction events for debugging
-"""
+"""Cache eviction metrics: event tracking, rates, and pressure level."""
 
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from threading import Lock
+from typing import Any
 
 
 @dataclass
 class EvictionEvent:
-    """Record of a cache eviction event."""
+    """A single cache eviction.
 
-    timestamp: float  # Unix timestamp
+    Attributes
+    ----------
+    timestamp : float
+        Unix timestamp when the eviction happened.
+    files_evicted : int
+        Number of files removed.
+    bytes_evicted : int
+        Total bytes freed.
+    cache_size_before : int
+        Cache size in bytes immediately before the eviction.
+    cache_size_after : int
+        Cache size in bytes immediately after the eviction.
+    reason : str
+        Why the eviction ran: ``"size_limit"``, ``"manual"``, or ``"ttl"``.
+    """
+
+    timestamp: float
     files_evicted: int
     bytes_evicted: int
     cache_size_before: int
     cache_size_after: int
-    reason: str = "size_limit"  # "size_limit", "manual", "ttl"
+    reason: str = "size_limit"
 
 
 @dataclass
 class EvictionStats:
-    """Aggregate eviction statistics."""
+    """Aggregate eviction statistics over the tracked window.
+
+    Attributes
+    ----------
+    total_evictions : int
+        Lifetime eviction count.
+    total_files_evicted : int
+        Lifetime files removed.
+    total_bytes_evicted : int
+        Lifetime bytes freed.
+    evictions_last_minute : int
+        Evictions in the last 60 seconds.
+    evictions_last_hour : int
+        Evictions in the last hour.
+    bytes_evicted_last_minute : int
+        Bytes freed in the last 60 seconds.
+    bytes_evicted_last_hour : int
+        Bytes freed in the last hour.
+    eviction_rate_per_minute : float
+        Evictions per minute, averaged over the last hour.
+    last_eviction_at : float or None
+        Timestamp of the most recent eviction, or ``None`` if none recorded.
+    pressure_level : str
+        Derived load band: ``"low"``, ``"medium"``, ``"high"``, or ``"critical"``.
+    """
 
     total_evictions: int
     total_files_evicted: int
@@ -38,27 +72,21 @@ class EvictionStats:
     bytes_evicted_last_hour: int
     eviction_rate_per_minute: float
     last_eviction_at: float | None
-    pressure_level: str  # "low", "medium", "high", "critical"
-
-    def to_dict(self) -> dict:
-        return {
-            "total_evictions": self.total_evictions,
-            "total_files_evicted": self.total_files_evicted,
-            "total_bytes_evicted": self.total_bytes_evicted,
-            "evictions_last_minute": self.evictions_last_minute,
-            "evictions_last_hour": self.evictions_last_hour,
-            "bytes_evicted_last_minute": self.bytes_evicted_last_minute,
-            "bytes_evicted_last_hour": self.bytes_evicted_last_hour,
-            "eviction_rate_per_minute": round(self.eviction_rate_per_minute, 2),
-            "last_eviction_at": self.last_eviction_at,
-            "pressure_level": self.pressure_level,
-        }
+    pressure_level: str
 
 
 class CacheEvictionTracker:
-    """Tracks cache eviction events and computes metrics."""
+    """Records cache eviction events and computes aggregate metrics."""
 
     def __init__(self, max_events: int = 1000) -> None:
+        """Initialize the tracker.
+
+        Parameters
+        ----------
+        max_events : int, optional
+            Maximum recent events retained for rate/window calculations
+            (default 1000). Older events are dropped.
+        """
         self._lock = Lock()
         self._events: deque[EvictionEvent] = deque(maxlen=max_events)
         self._total_evictions = 0
@@ -73,7 +101,21 @@ class CacheEvictionTracker:
         cache_size_after: int,
         reason: str = "size_limit",
     ) -> None:
-        """Record an eviction event."""
+        """Record one eviction event and update the lifetime totals.
+
+        Parameters
+        ----------
+        files_evicted : int
+            Number of files removed.
+        bytes_evicted : int
+            Total bytes freed.
+        cache_size_before : int
+            Cache size in bytes before the eviction.
+        cache_size_after : int
+            Cache size in bytes after the eviction.
+        reason : str, optional
+            Why the eviction ran (default ``"size_limit"``).
+        """
         event = EvictionEvent(
             timestamp=time.time(),
             files_evicted=files_evicted,
@@ -89,7 +131,14 @@ class CacheEvictionTracker:
             self._total_bytes_evicted += bytes_evicted
 
     def get_stats(self) -> EvictionStats:
-        """Get aggregate eviction statistics."""
+        """Compute aggregate statistics over the retained events.
+
+        Returns
+        -------
+        EvictionStats
+            Lifetime totals, last-minute and last-hour counts, the
+            per-minute rate, and the derived pressure level.
+        """
         now = time.time()
         one_minute_ago = now - 60
         one_hour_ago = now - 3600
@@ -140,27 +189,27 @@ class CacheEvictionTracker:
             pressure_level=pressure,
         )
 
-    def get_recent_events(self, limit: int = 10) -> list[dict]:
-        """Get recent eviction events for debugging."""
+    def get_recent_events(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Return the most recent eviction events, newest first.
+
+        Parameters
+        ----------
+        limit : int, optional
+            Maximum number of events to return (default 10).
+
+        Returns
+        -------
+        list of dict
+            One mapping per event (all ``EvictionEvent`` fields).
+        """
         with self._lock:
             events = list(self._events)
 
-        # Return most recent first
         events = events[-limit:][::-1]
-        return [
-            {
-                "timestamp": e.timestamp,
-                "files_evicted": e.files_evicted,
-                "bytes_evicted": e.bytes_evicted,
-                "cache_size_before": e.cache_size_before,
-                "cache_size_after": e.cache_size_after,
-                "reason": e.reason,
-            }
-            for e in events
-        ]
+        return [asdict(e) for e in events]
 
     def reset(self) -> None:
-        """Reset all statistics."""
+        """Clear all events and lifetime totals."""
         with self._lock:
             self._events.clear()
             self._total_evictions = 0
@@ -173,7 +222,13 @@ _eviction_tracker: CacheEvictionTracker | None = None
 
 
 def get_eviction_tracker() -> CacheEvictionTracker:
-    """Get the global eviction tracker."""
+    """Return the process-wide eviction tracker, creating it on first use.
+
+    Returns
+    -------
+    CacheEvictionTracker
+        The shared tracker instance.
+    """
     global _eviction_tracker
     if _eviction_tracker is None:
         _eviction_tracker = CacheEvictionTracker()
@@ -181,6 +236,6 @@ def get_eviction_tracker() -> CacheEvictionTracker:
 
 
 def reset_eviction_tracker() -> None:
-    """Reset the global eviction tracker (for testing)."""
+    """Drop the process-wide eviction tracker (for testing)."""
     global _eviction_tracker
     _eviction_tracker = None

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import asdict
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
@@ -76,8 +77,7 @@ async def get_cache_evictions_v1(
     - critical: 10+ evictions per minute (cache is thrashing)
     """
     tracker = get_eviction_tracker()
-    stats = tracker.get_stats()
-    result = stats.to_dict()
+    result = asdict(tracker.get_stats())
 
     if include_events:
         result["recent_events"] = tracker.get_recent_events(limit)
