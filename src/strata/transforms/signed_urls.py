@@ -19,7 +19,7 @@ import hashlib
 import hmac
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 from urllib.parse import urlencode
 
@@ -116,33 +116,23 @@ class BuildManifest:
     def to_dict(self) -> dict[str, Any]:
         """Serialize to the JSON wire shape sent to the executor.
 
-        The wire shape deliberately differs from the in-memory struct: the input
-        and output URLs are regrouped under ``inputs`` / ``output``, and the
-        upload entry omits ``build_id`` because it is already carried at the top
-        level. A generic ``dataclasses.asdict`` would not reproduce this shape.
+        The wire shape regroups the URLs under ``inputs`` / ``output``. Each
+        input is the full ``SignedDownloadURL``; the output drops the redundant
+        ``build_id`` (already carried at the top level) — the one place the wire
+        intentionally diverges from a plain field dump.
 
         Returns
         -------
         dict
             ``{build_id, metadata, inputs, output, finalize_url}``.
         """
+        output = asdict(self.output_url)
+        del output["build_id"]
         return {
             "build_id": self.build_id,
             "metadata": self.metadata,
-            "inputs": [
-                {
-                    "url": url.url,
-                    "artifact_id": url.artifact_id,
-                    "version": url.version,
-                    "expires_at": url.expires_at,
-                }
-                for url in self.input_urls
-            ],
-            "output": {
-                "url": self.output_url.url,
-                "max_bytes": self.output_url.max_bytes,
-                "expires_at": self.output_url.expires_at,
-            },
+            "inputs": [asdict(url) for url in self.input_urls],
+            "output": output,
             "finalize_url": self.finalize_url,
         }
 
