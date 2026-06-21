@@ -8,6 +8,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
+from strata.timing import elapsed_ms
+
 
 def _sanitize_server_timing_name(name: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9_.-]", "_", name.strip())
@@ -27,7 +29,7 @@ class NotebookTimingRecorder:
         try:
             yield
         finally:
-            self._phases_ms[name] = (time.perf_counter() - started) * 1000
+            self._phases_ms[name] = elapsed_ms(started)
 
     def record_duration_ms(self, name: str, duration_ms: float | int | None) -> None:
         if duration_ms is None:
@@ -37,7 +39,7 @@ class NotebookTimingRecorder:
     def as_dict(self, *, include_total: bool = True) -> dict[str, float]:
         timings = dict(self._phases_ms)
         if include_total:
-            timings["total"] = (time.perf_counter() - self._started_at) * 1000
+            timings["total"] = elapsed_ms(self._started_at)
         return timings
 
     def server_timing_header(self) -> str:

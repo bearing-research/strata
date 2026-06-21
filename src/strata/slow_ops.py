@@ -29,6 +29,8 @@ from dataclasses import asdict, dataclass, field
 from threading import Lock
 from typing import Any
 
+from strata.timing import elapsed_ms
+
 logger = logging.getLogger("strata.slow_ops")
 
 
@@ -290,7 +292,7 @@ class SlowOpTracker:
         StageTimings
             The completed timings for this operation.
         """
-        self._timings.total_ms = (time.perf_counter() - self._start_time) * 1000
+        self._timings.total_ms = elapsed_ms(self._start_time)
         self.histogram.record("total_request", self._timings.total_ms)
 
         # Apply additional metrics
@@ -381,7 +383,7 @@ class _StageTimer:
         return self
 
     def __exit__(self, *args) -> None:
-        duration_ms = (time.perf_counter() - self.start_time) * 1000
+        duration_ms = elapsed_ms(self.start_time)
         self.tracker.record_stage(self.stage, duration_ms)
 
 

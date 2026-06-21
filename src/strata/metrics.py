@@ -604,29 +604,3 @@ class MetricsCollector:
             self.cache_evicted_bytes = 0
             self.dropped_logs = 0
             self._table_metrics.clear()
-
-
-class Timer:
-    """Context manager that measures wall-clock duration in milliseconds.
-
-    On exit, ``elapsed_ms`` holds the time spent in the ``with`` block.
-
-    Examples
-    --------
-    >>> with Timer() as t:
-    ...     do_work()
-    >>> t.elapsed_ms
-    """
-
-    def __init__(self) -> None:
-        self.start_time: float = 0.0
-        self.elapsed_ms: float = 0.0
-
-    def __enter__(self) -> "Timer":
-        """Start the timer and return self."""
-        self.start_time = time.perf_counter()
-        return self
-
-    def __exit__(self, *args) -> None:
-        """Stop the timer, recording the elapsed milliseconds."""
-        self.elapsed_ms = (time.perf_counter() - self.start_time) * 1000
