@@ -39,10 +39,12 @@ _principal_ctx: ContextVar[Principal | None] = ContextVar("principal", default=N
 
 
 def get_principal() -> Principal | None:
-    """Get the current request's principal from context.
+    """Return the current request's principal from context.
 
-    Returns:
-        Principal if set by auth middleware, None otherwise
+    Returns
+    -------
+    Principal or None
+        The principal set by the auth middleware, or ``None``.
     """
     return _principal_ctx.get()
 
@@ -58,9 +60,12 @@ def set_principal(principal: Principal | None) -> None:
 class TenantAccessError(Exception):
     """Raised when tenant access is denied.
 
-    Attributes:
-        message: Error description
-        status_code: HTTP status code (403 or 404)
+    Attributes
+    ----------
+    message : str
+        Error description.
+    status_code : int
+        HTTP status code to surface (e.g. 401 / 400 / 403 / 404).
     """
 
     def __init__(self, message: str, status_code: int = 403):
@@ -75,14 +80,20 @@ def require_tenant(config: StrataConfig) -> str:
     In service mode with auth enabled, tenant is required for all
     artifact operations. Personal mode skips tenant checks.
 
-    Args:
-        config: Server configuration
+    Parameters
+    ----------
+    config : StrataConfig
+        Server configuration.
 
-    Returns:
-        Tenant ID from the principal
+    Returns
+    -------
+    str
+        Tenant id (or a personal/anonymous sentinel when checks are skipped).
 
-    Raises:
-        TenantAccessError: If tenant is required but not set
+    Raises
+    ------
+    TenantAccessError
+        If a tenant is required but not authenticated/set.
     """
     # Personal mode doesn't require tenant
     if config.deployment_mode == "personal":
@@ -112,13 +123,19 @@ def authorize_resource_tenant(
     Checks that the caller's tenant matches the resource tenant.
     Admin principals bypass this check.
 
-    Args:
-        config: Server configuration
-        resource_tenant: Tenant that owns the resource
-        resource_type: Type of resource for error messages (e.g., "artifact")
+    Parameters
+    ----------
+    config : StrataConfig
+        Server configuration.
+    resource_tenant : str or None
+        Tenant that owns the resource.
+    resource_type : str, optional
+        Resource type for error messages (e.g. ``"artifact"``).
 
-    Raises:
-        TenantAccessError: If access is denied (403 or 404 based on config)
+    Raises
+    ------
+    TenantAccessError
+        If access is denied (403 or 404, per ``hide_forbidden_as_not_found``).
     """
     # Personal mode doesn't enforce tenant isolation
     if config.deployment_mode == "personal":
@@ -163,14 +180,19 @@ def raise_not_found_or_forbidden(
     """Raise appropriate error for access denial.
 
     Used when a resource doesn't exist or access is denied.
-    Returns 404 when hide_forbidden_as_not_found is True.
+    Returns 404 when ``hide_forbidden_as_not_found`` is True.
 
-    Args:
-        config: Server configuration
-        resource_type: Type of resource for error messages
+    Parameters
+    ----------
+    config : StrataConfig
+        Server configuration.
+    resource_type : str, optional
+        Resource type for error messages.
 
-    Raises:
-        HTTPException: 404 or 403 based on configuration
+    Raises
+    ------
+    HTTPException
+        404 or 403, per configuration.
     """
     if config.hide_forbidden_as_not_found:
         raise HTTPException(status_code=404, detail=f"{resource_type.capitalize()} not found")
@@ -184,16 +206,22 @@ def tenant_scoped_lookup(
 ) -> bool:
     """Check if caller can access a resource based on tenant.
 
-    This is a predicate version of authorize_resource_tenant,
+    This is a predicate version of :func:`authorize_resource_tenant`,
     useful for filtering queries.
 
-    Args:
-        caller_tenant: Caller's tenant ID
-        resource_tenant: Resource's tenant ID
-        config: Server configuration
+    Parameters
+    ----------
+    caller_tenant : str or None
+        Caller's tenant id.
+    resource_tenant : str or None
+        Resource's tenant id.
+    config : StrataConfig
+        Server configuration.
 
-    Returns:
-        True if access is allowed, False otherwise
+    Returns
+    -------
+    bool
+        ``True`` if access is allowed.
     """
     # Personal mode allows all access
     if config.deployment_mode == "personal":
@@ -254,36 +282,49 @@ class TenantContext:
         return self.config.deployment_mode == "service" and self.config.auth_mode != "none"
 
     def authorize(self, resource_tenant: str | None, resource_type: str = "resource") -> None:
-        """Authorize access to a resource.
+        """Authorize access to a resource, raising on denial.
 
-        Args:
-            resource_tenant: Tenant that owns the resource
-            resource_type: Type of resource for error messages
+        Parameters
+        ----------
+        resource_tenant : str or None
+            Tenant that owns the resource.
+        resource_type : str, optional
+            Resource type for error messages.
 
-        Raises:
-            TenantAccessError: If access is denied
+        Raises
+        ------
+        TenantAccessError
+            If access is denied.
         """
         authorize_resource_tenant(self.config, resource_tenant, resource_type)
 
     def can_access(self, resource_tenant: str | None) -> bool:
-        """Check if caller can access a resource.
+        """Return whether the caller may access a resource.
 
-        Args:
-            resource_tenant: Tenant that owns the resource
+        Parameters
+        ----------
+        resource_tenant : str or None
+            Tenant that owns the resource.
 
-        Returns:
-            True if access is allowed
+        Returns
+        -------
+        bool
+            ``True`` if access is allowed.
         """
         return tenant_scoped_lookup(self.tenant_id, resource_tenant, self.config)
 
 
 def get_tenant_context(config: StrataConfig) -> TenantContext:
-    """Get the tenant context for the current request.
+    """Return the tenant context for the current request.
 
-    Args:
-        config: Server configuration
+    Parameters
+    ----------
+    config : StrataConfig
+        Server configuration.
 
-    Returns:
-        TenantContext with current principal and config
+    Returns
+    -------
+    TenantContext
+        Context bound to the current principal and config.
     """
     return TenantContext(config=config, principal=get_principal())
