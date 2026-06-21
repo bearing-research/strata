@@ -287,10 +287,16 @@ one level down at the artifact store.
 Content type is selected by value type and stored in
 `transform_spec.params.content_type`:
 
-- `arrow/ipc` — Arrow-representable values (pyarrow Table/RecordBatch, pandas,
-  numpy ndarrays + scalars, datetime/Decimal/UUID/bytes/complex). Shape encoded
-  in schema metadata `strata.arrow.shape` ∈ `table|tensor|scalar`; reader
-  reconstructs the exact Python type.
+- `arrow/ipc` — Arrow-representable values (pyarrow Table/RecordBatch, pandas
+  + polars frames/series, numpy ndarrays + scalars, torch/jax tensors,
+  datetime/Decimal/UUID/bytes/complex). Shape encoded in schema metadata
+  `strata.arrow.shape` ∈ `table|tensor|scalar`; the originating library is
+  tagged in `strata.arrow.source` so the reader reconstructs the exact Python
+  type (degrading to pandas/ndarray when that library is absent on read).
+  Detection + conversion are driven by one ordered registry
+  (`_ARROW_TYPE_RULES` in `serializer.py`): a new arrow-routable type is one
+  rule entry. torch/jax are detected via `sys.modules` (a tensor implies its
+  library is imported), so they cost nothing in notebooks that never use them.
 - `json/object` — dicts, lists, primitive scalars
 - `pickle/object` — everything else (cloudpickle by default;
   `STRATA_NOTEBOOK_OBJECT_CODEC` to override; falls back to stdlib pickle)

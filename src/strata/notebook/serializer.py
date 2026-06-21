@@ -313,47 +313,18 @@ def detect_content_type(value: Any, variable_name: str | None = None) -> Content
 def _is_arrow_representable(value: Any) -> bool:
     """Return whether *value* should flow through the unified arrow/ipc codec.
 
-    Covers everything we know how to encode as an Arrow Table with
-    schema metadata: tables (pyarrow / pandas), n-d numpy arrays, numpy
-    scalars, and typed Python primitives that have a native Arrow
-    representation (datetime family, Decimal, bytes) plus two that
-    don't but that we handle via metadata tags (UUID, complex).
+    Detection is driven by :data:`_ARROW_TYPE_RULES` — the same ordered
+    registry that :func:`_to_arrow_table` uses to encode. A value is
+    arrow-representable iff some rule's ``matches`` predicate accepts it, so a
+    new type becomes one rule entry rather than a branch here *and* a converter
+    there.
 
-    pyarrow is a guaranteed dep of notebook venvs; pandas and numpy
-    are only installed when the user adds them (they're in the
-    [notebook] extra on the strata side, but not baked into generated
-    notebook pyprojects). Their imports are guarded so missing-package
-    notebooks still classify correctly.
+    The covered set: tables (pyarrow / pandas / polars), n-d arrays and scalars
+    (numpy, plus torch / jax tensors via the numpy bridge), and typed Python
+    primitives with a native or tagged Arrow representation (datetime family,
+    Decimal, bytes; UUID and complex via metadata tags).
     """
-    import datetime as _dt
-    from decimal import Decimal
-    from uuid import UUID
-
-    import pyarrow as pa
-
-    if isinstance(value, (pa.Table, pa.RecordBatch)):
-        return True
-    try:
-        import pandas as pd
-
-        if isinstance(value, (pd.DataFrame, pd.Series)):
-            return True
-    except ImportError:
-        pass
-    try:
-        import numpy as np
-
-        if isinstance(value, (np.ndarray, np.generic)):
-            return True
-    except ImportError:
-        pass
-    if isinstance(value, (_dt.datetime, _dt.date, _dt.time, _dt.timedelta)):
-        return True
-    if isinstance(value, (Decimal, bytes, bytearray, UUID)):
-        return True
-    if isinstance(value, complex):
-        return True
-    return False
+    return any(rule.matches(value) for rule in _ARROW_TYPE_RULES)
 
 
 def _is_display_variable_name(variable_name: str | None) -> bool:
@@ -468,9 +439,17 @@ _SHAPE_TABLE = b"table"
 _SHAPE_TENSOR = b"tensor"
 _SHAPE_SCALAR = b"scalar"
 
-# Values of _META_SOURCE — only set for pandas-origin tables.
+# Values of _META_SOURCE — records the originating library so the reader can
+# round-trip back to the exact type (and degrade gracefully when that library
+# isn't installed on the read side). Table-shape: pandas / polars frames and
+# series. Tensor-shape: torch / jax arrays (reconstructed from the shared numpy
+# tensor codec).
 _SOURCE_PANDAS_DATAFRAME = b"pandas.DataFrame"
 _SOURCE_PANDAS_SERIES = b"pandas.Series"
+_SOURCE_POLARS_DATAFRAME = b"polars.DataFrame"
+_SOURCE_POLARS_SERIES = b"polars.Series"
+_SOURCE_TORCH = b"torch.Tensor"
+_SOURCE_JAX = b"jax.Array"
 
 # Values of _META_SCALAR_TYPE — set only for non-native typed scalars
 # that need round-trip help beyond what pyarrow's native types give us.
@@ -535,35 +514,62 @@ def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> Serial
     }
 
 
+class _ArrowRule(NamedTuple):
+    """One entry in the arrow/ipc type registry.
+
+    ``matches`` is a cheap, side-effect-free predicate (typically an
+    ``isinstance`` check) used both to decide the content type
+    (:func:`_is_arrow_representable`) and to pick a converter
+    (:func:`_to_arrow_table`). ``to_table`` does the real conversion and may
+    assume ``matches`` already returned ``True``. Adding a new arrow-routable
+    type is one rule appended to :data:`_ARROW_TYPE_RULES`.
+
+    NamedTuple (not ``@dataclass``) for the same reason as :class:`_Handler` —
+    this module is loaded via ``importlib.util`` in the harness subprocesses,
+    where ``dataclass`` annotation introspection fails.
+    """
+
+    matches: Callable[[Any], bool]
+    to_table: Callable[[Any], Any]
+
+
 def _to_arrow_table(value: Any) -> Any:
     """Dispatch *value* to an Arrow Table with shape metadata stamped.
 
-    Tries each shape-specific converter in order; the first that
-    accepts the value (returns non-None) wins. Each converter owns its
-    own lazy import so pandas-free notebooks keep working.
+    Walks :data:`_ARROW_TYPE_RULES` in order; the first rule whose ``matches``
+    accepts the value converts it. ``matches`` already gated detection, so a
+    miss here means registry drift.
     """
-    for converter in _ARROW_CONVERTERS:
-        table = converter(value)
-        if table is not None:
-            return table
+    for rule in _ARROW_TYPE_RULES:
+        if rule.matches(value):
+            return rule.to_table(value)
     raise ValueError(f"Cannot convert {type(value).__name__} to Arrow")
 
 
-def _arrow_from_pyarrow(value: Any) -> Any | None:
+def _matches_pyarrow(value: Any) -> bool:
+    import pyarrow as pa
+
+    return isinstance(value, (pa.Table, pa.RecordBatch))
+
+
+def _table_from_pyarrow(value: Any) -> Any:
     import pyarrow as pa
 
     if isinstance(value, pa.RecordBatch):
         return _stamp_shape(pa.Table.from_batches([value]), _SHAPE_TABLE)
-    if isinstance(value, pa.Table):
-        return _stamp_shape(value, _SHAPE_TABLE)
-    return None
+    return _stamp_shape(value, _SHAPE_TABLE)  # pa.Table
 
 
-def _arrow_from_pandas(value: Any) -> Any | None:
+def _matches_pandas(value: Any) -> bool:
     try:
         import pandas as pd
     except ImportError:
-        return None
+        return False
+    return isinstance(value, (pd.DataFrame, pd.Series))
+
+
+def _table_from_pandas(value: Any) -> Any:
+    import pandas as pd
     import pyarrow as pa
 
     if isinstance(value, pd.DataFrame):
@@ -571,51 +577,110 @@ def _arrow_from_pandas(value: Any) -> Any | None:
         return _stamp_metadata(
             table, {_META_SHAPE: _SHAPE_TABLE, _META_SOURCE: _SOURCE_PANDAS_DATAFRAME}
         )
-    if isinstance(value, pd.Series):
-        # pa.Table.from_pandas expects a DataFrame — calling it with a
-        # Series historically raised AttributeError. Promote to a
-        # single-column frame and stash the original name so the
-        # deserializer can round-trip back to Series.
-        frame = value.to_frame()
-        table = pa.Table.from_pandas(frame)
+    # pd.Series — pa.Table.from_pandas expects a DataFrame, so promote to a
+    # single-column frame and stash the original name (which may be None or
+    # non-string) so the deserializer can round-trip back to Series.
+    frame = value.to_frame()
+    table = pa.Table.from_pandas(frame)
+    return _stamp_metadata(
+        table,
+        {
+            _META_SHAPE: _SHAPE_TABLE,
+            _META_SOURCE: _SOURCE_PANDAS_SERIES,
+            _META_PD_NAME: str(value.name or "").encode("utf-8"),
+        },
+    )
+
+
+def _matches_polars(value: Any) -> bool:
+    # A polars value implies polars is already imported, so probe sys.modules
+    # rather than importing — keeps the hot path from importing polars just to
+    # reject every non-polars value in polars-installed notebooks.
+    pl = sys.modules.get("polars")
+    return pl is not None and isinstance(value, (pl.DataFrame, pl.Series))
+
+
+def _table_from_polars(value: Any) -> Any:
+    import polars as pl
+
+    if isinstance(value, pl.DataFrame):
+        # to_arrow() is polars' native zero-copy Arrow bridge.
         return _stamp_metadata(
-            table,
-            {
-                _META_SHAPE: _SHAPE_TABLE,
-                _META_SOURCE: _SOURCE_PANDAS_SERIES,
-                _META_PD_NAME: str(value.name or "").encode("utf-8"),
-            },
+            value.to_arrow(), {_META_SHAPE: _SHAPE_TABLE, _META_SOURCE: _SOURCE_POLARS_DATAFRAME}
         )
-    return None
+    # pl.Series — promote to a 1-column frame. The polars Series name is always
+    # a string and survives as the Arrow field name, so it round-trips without
+    # extra metadata (unlike pandas, whose name may be None / non-string).
+    return _stamp_metadata(
+        value.to_frame().to_arrow(),
+        {_META_SHAPE: _SHAPE_TABLE, _META_SOURCE: _SOURCE_POLARS_SERIES},
+    )
 
 
-def _arrow_from_numpy(value: Any) -> Any | None:
+def _matches_numpy(value: Any) -> bool:
     try:
         import numpy as np
     except ImportError:
-        return None
+        return False
+    return isinstance(value, (np.ndarray, np.generic))
+
+
+def _table_from_numpy(value: Any) -> Any:
+    import numpy as np
 
     if isinstance(value, np.ndarray):
         return _ndarray_to_table(value)
-    if isinstance(value, np.generic):
-        # numpy scalar — lose the numpy flavor on round-trip, treat as
-        # the equivalent Python primitive. Users who depend on
-        # type(x) is np.int64 are vanishingly rare.
-        return _python_scalar_to_table(value.item())
-    return None
+    # numpy scalar — lose the numpy flavor on round-trip, treat as the
+    # equivalent Python primitive. Users who depend on type(x) is np.int64 are
+    # vanishingly rare.
+    return _python_scalar_to_table(value.item())
 
 
-def _arrow_from_typed_scalar(value: Any) -> Any | None:
-    """Wrap a typed Python primitive in a 1-row scalar Table.
+def _matches_torch(value: Any) -> bool:
+    torch = sys.modules.get("torch")
+    return torch is not None and isinstance(value, torch.Tensor)
 
-    UUID and complex need a custom Arrow representation (binary(16) and
-    a struct of floats) plus a scalar-type tag so the reader can
-    reconstruct the original Python type. datetime / Decimal / bytes
-    round-trip through pyarrow natively, so they just need the scalar
-    shape tag and no type discriminator.
-    """
+
+def _table_from_torch(value: Any) -> Any:
+    # detach() drops the autograd graph (numpy() refuses grad tensors); cpu()
+    # is a no-op for host tensors and copies device tensors back. Exotic dtypes
+    # (bfloat16) and sparse tensors raise here, which the arrow fallback turns
+    # into a pickle. Round-trips back to a tensor via the _SOURCE_TORCH tag.
+    arr = value.detach().cpu().numpy()
+    return _ndarray_to_table(arr, source=_SOURCE_TORCH)
+
+
+def _matches_jax(value: Any) -> bool:
+    jax = sys.modules.get("jax")
+    return jax is not None and isinstance(value, jax.Array)
+
+
+def _table_from_jax(value: Any) -> Any:
+    import numpy as np
+
+    arr = np.asarray(value)
+    return _ndarray_to_table(arr, source=_SOURCE_JAX)
+
+
+def _matches_typed_scalar(value: Any) -> bool:
     import datetime as _dt
     from decimal import Decimal
+    from uuid import UUID
+
+    return isinstance(
+        value,
+        (_dt.datetime, _dt.date, _dt.time, _dt.timedelta, Decimal, bytes, bytearray, UUID, complex),
+    )
+
+
+def _table_from_typed_scalar(value: Any) -> Any:
+    """Wrap a typed Python primitive in a 1-row scalar Table.
+
+    UUID and complex need a custom Arrow representation (binary(16) and a struct
+    of floats) plus a scalar-type tag so the reader can reconstruct the original
+    Python type. datetime / Decimal / bytes round-trip through pyarrow natively,
+    so they just need the scalar shape tag and no type discriminator.
+    """
     from uuid import UUID
 
     import pyarrow as pa
@@ -635,20 +700,23 @@ def _arrow_from_typed_scalar(value: Any) -> Any | None:
             table, {_META_SHAPE: _SHAPE_SCALAR, _META_SCALAR_TYPE: _SCALAR_TYPE_COMPLEX}
         )
 
-    _dt_types = (_dt.datetime, _dt.date, _dt.time, _dt.timedelta)
-    if isinstance(value, _dt_types) or isinstance(value, (Decimal, bytes, bytearray)):
-        return _python_scalar_to_table(value)
-    return None
+    # datetime family / Decimal / bytes / bytearray
+    return _python_scalar_to_table(value)
 
 
-# Order matters: pyarrow first (cheapest no-op), then pandas / numpy
-# (their isinstance checks need lazy imports), then typed Python
-# primitives.
-_ARROW_CONVERTERS = (
-    _arrow_from_pyarrow,
-    _arrow_from_pandas,
-    _arrow_from_numpy,
-    _arrow_from_typed_scalar,
+# Order matters only across overlapping predicates; these type families are
+# disjoint, so the order is just cheapest-first: pyarrow (no-op), then the
+# DataFrame libs, then the array libs, then typed Python primitives. torch / jax
+# detection probes sys.modules (a tensor implies its library is imported), so
+# they cost nothing in notebooks that never touch them.
+_ARROW_TYPE_RULES: tuple[_ArrowRule, ...] = (
+    _ArrowRule(_matches_pyarrow, _table_from_pyarrow),
+    _ArrowRule(_matches_pandas, _table_from_pandas),
+    _ArrowRule(_matches_polars, _table_from_polars),
+    _ArrowRule(_matches_numpy, _table_from_numpy),
+    _ArrowRule(_matches_torch, _table_from_torch),
+    _ArrowRule(_matches_jax, _table_from_jax),
+    _ArrowRule(_matches_typed_scalar, _table_from_typed_scalar),
 )
 
 
@@ -661,8 +729,12 @@ def _python_scalar_to_table(value: Any) -> Any:
     return _stamp_metadata(table, {_META_SHAPE: _SHAPE_SCALAR})
 
 
-def _ndarray_to_table(arr: Any) -> Any:
-    """Encode an ndarray as a 1-column Table + tensor shape metadata."""
+def _ndarray_to_table(arr: Any, source: bytes | None = None) -> Any:
+    """Encode an ndarray as a 1-column Table + tensor shape metadata.
+
+    *source*, when given, records the originating library (torch / jax) so the
+    reader can rebuild that type instead of a bare ndarray.
+    """
     import numpy as np
     import pyarrow as pa
 
@@ -670,14 +742,14 @@ def _ndarray_to_table(arr: Any) -> Any:
     flat = contiguous.reshape(-1)
     pa_arr = pa.array(flat)
     table = pa.table({"values": pa_arr})
-    return _stamp_metadata(
-        table,
-        {
-            _META_SHAPE: _SHAPE_TENSOR,
-            _META_TENSOR_SHAPE: json.dumps(list(contiguous.shape)).encode("utf-8"),
-            _META_TENSOR_DTYPE: str(contiguous.dtype).encode("utf-8"),
-        },
-    )
+    meta = {
+        _META_SHAPE: _SHAPE_TENSOR,
+        _META_TENSOR_SHAPE: json.dumps(list(contiguous.shape)).encode("utf-8"),
+        _META_TENSOR_DTYPE: str(contiguous.dtype).encode("utf-8"),
+    }
+    if source is not None:
+        meta[_META_SOURCE] = source
+    return _stamp_metadata(table, meta)
 
 
 def _stamp_shape(table: Any, shape: bytes) -> Any:
@@ -1155,6 +1227,13 @@ def _table_to_pandas_or_arrow(table: Any) -> Any:
     meta = table.schema.metadata or {}
     source = meta.get(_META_SOURCE, b"")
 
+    if source in (_SOURCE_POLARS_DATAFRAME, _SOURCE_POLARS_SERIES):
+        polars_value = _table_to_polars(table, source)
+        if polars_value is not None:
+            return polars_value
+        # polars not installed on the read side — fall through to pandas/arrow,
+        # which is a usable (if not identical) view of the same table.
+
     try:
         frame = table.to_pandas()
     except Exception as exc:
@@ -1183,8 +1262,33 @@ def _table_to_pandas_or_arrow(table: Any) -> Any:
     return frame
 
 
+def _table_to_polars(table: Any, source: bytes) -> Any | None:
+    """Rebuild a polars DataFrame / Series, or ``None`` if polars is absent.
+
+    The Series name round-trips through the single Arrow field name, so no
+    extra metadata is needed (see :func:`_table_from_polars`).
+    """
+    try:
+        import polars as pl
+    except ImportError:
+        return None
+
+    # We always wrote a Table, so from_arrow yields a DataFrame; the isinstance
+    # narrows the DataFrame|Series union for the type checker.
+    frame = pl.from_arrow(table)
+    if source == _SOURCE_POLARS_SERIES and isinstance(frame, pl.DataFrame):
+        return frame.to_series(0)
+    return frame
+
+
 def _tensor_from_table(table: Any) -> Any:
-    """Decode a shape=tensor Arrow Table back to a numpy ndarray."""
+    """Decode a shape=tensor Arrow Table back to its original array type.
+
+    Returns a numpy ndarray, or — when the ``_META_SOURCE`` tag says the value
+    came from torch / jax and that library is importable on the read side — the
+    reconstructed ``torch.Tensor`` / ``jax.Array``. Falls back to the ndarray
+    when the origin library isn't installed.
+    """
     import numpy as np
 
     meta = table.schema.metadata or {}
@@ -1195,7 +1299,22 @@ def _tensor_from_table(table: Any) -> Any:
     flat = table.column(0).to_numpy(zero_copy_only=False)
     if dtype_str:
         flat = flat.astype(np.dtype(dtype_str), copy=False)
-    return np.ascontiguousarray(flat).reshape(shape)
+    arr = np.ascontiguousarray(flat).reshape(shape)
+
+    source = meta.get(_META_SOURCE, b"")
+    if source == _SOURCE_TORCH:
+        try:
+            import torch
+        except ImportError:
+            return arr
+        return torch.from_numpy(arr)
+    if source == _SOURCE_JAX:
+        try:
+            import jax.numpy as jnp
+        except ImportError:
+            return arr
+        return jnp.asarray(arr)
+    return arr
 
 
 def _read_arrow_json_fallback(file_path: Path) -> dict[str, Any] | None:

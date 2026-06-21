@@ -898,3 +898,188 @@ class TestRdsArtifactRefusal:
 
         assert err.variable_name == "fit"
         assert "fit" in str(err)
+
+
+class TestPolarsSerialization:
+    """polars DataFrames / Series route through the unified arrow/ipc codec
+    and round-trip back to polars (degrading to pandas when polars is absent)."""
+
+    def test_detect_polars_dataframe_goes_to_arrow_ipc(self):
+        pl = pytest.importorskip("polars")
+        df = pl.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = serialize_value(df, Path(tmpdir), "df")
+
+        assert result["content_type"] == ContentType.ARROW_IPC
+        assert result["rows"] == 3
+        assert result["columns"] == ["a", "b"]
+
+    def test_roundtrip_polars_dataframe(self):
+        pl = pytest.importorskip("polars")
+        orig = pl.DataFrame({"id": [1, 2, 3], "name": ["a", "b", "c"]})
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(orig, tmpdir, "data")
+            loaded = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+
+        assert isinstance(loaded, pl.DataFrame)
+        assert loaded.equals(orig)
+
+    def test_roundtrip_polars_series_preserves_name(self):
+        pl = pytest.importorskip("polars")
+        orig = pl.Series("temps", [10, 20, 30])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(orig, tmpdir, "s")
+            loaded = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+
+        assert isinstance(loaded, pl.Series)
+        assert loaded.name == "temps"
+        assert loaded.to_list() == [10, 20, 30]
+
+    def test_polars_degrades_to_pandas_when_polars_absent(self, monkeypatch):
+        """A polars-sourced artifact stays readable as pandas when the reader
+        has no polars — better than pickle, which would need polars."""
+        pl = pytest.importorskip("polars")
+        orig = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(orig, tmpdir, "data")
+            # Simulate polars missing on the read side.
+            monkeypatch.setitem(__import__("sys").modules, "polars", None)
+            loaded = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+
+        assert isinstance(loaded, pd.DataFrame)
+        assert list(loaded.columns) == ["a", "b"]
+
+
+# Real torch / jax are too heavy for the CI matrix, so these exercise the
+# detection + codec plumbing through API-compatible stub modules. The actual
+# array conversion still runs through the shared numpy tensor codec.
+@pytest.fixture
+def fake_torch(monkeypatch):
+    import sys
+    import types
+
+    import numpy as np
+
+    mod = types.ModuleType("torch")
+
+    class Tensor:
+        def __init__(self, arr):
+            self._arr = np.asarray(arr)
+
+        def detach(self):
+            return self
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return self._arr
+
+    mod.Tensor = Tensor
+    mod.from_numpy = Tensor
+    monkeypatch.setitem(sys.modules, "torch", mod)
+    return mod
+
+
+@pytest.fixture
+def fake_jax(monkeypatch):
+    import sys
+    import types
+
+    import numpy as np
+
+    jax_mod = types.ModuleType("jax")
+    jnp_mod = types.ModuleType("jax.numpy")
+
+    class Array:
+        def __init__(self, arr):
+            self._arr = np.asarray(arr)
+
+        def __array__(self, dtype=None):
+            return self._arr if dtype is None else self._arr.astype(dtype)
+
+    jax_mod.Array = Array
+    jnp_mod.asarray = Array
+    monkeypatch.setitem(sys.modules, "jax", jax_mod)
+    monkeypatch.setitem(sys.modules, "jax.numpy", jnp_mod)
+    return jax_mod
+
+
+class TestTensorLibrarySerialization:
+    """torch / jax arrays route through the arrow tensor codec and round-trip
+    back to their origin type via the _META_SOURCE tag."""
+
+    def test_detect_torch_tensor_goes_to_arrow_ipc(self, fake_torch):
+        import numpy as np
+
+        tensor = fake_torch.Tensor(np.arange(6).reshape(2, 3))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = serialize_value(tensor, Path(tmpdir), "t")
+
+        assert result["content_type"] == ContentType.ARROW_IPC
+
+    def test_roundtrip_torch_tensor(self, fake_torch):
+        import numpy as np
+
+        orig = fake_torch.Tensor(np.arange(6, dtype=np.float32).reshape(2, 3))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(orig, tmpdir, "t")
+            loaded = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+
+        assert isinstance(loaded, fake_torch.Tensor)
+        np.testing.assert_array_equal(loaded.numpy(), orig.numpy())
+
+    def test_torch_tensor_degrades_to_ndarray_when_torch_absent(self, fake_torch):
+        import sys
+
+        import numpy as np
+
+        orig = fake_torch.Tensor(np.arange(4.0).reshape(2, 2))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(orig, tmpdir, "t")
+            del sys.modules["torch"]  # reader has no torch
+            loaded = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+
+        assert isinstance(loaded, np.ndarray)
+        np.testing.assert_array_equal(loaded, np.arange(4.0).reshape(2, 2))
+
+    def test_roundtrip_jax_array(self, fake_jax):
+        import numpy as np
+
+        orig = fake_jax.Array(np.arange(4, dtype=np.int64).reshape(2, 2))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(orig, tmpdir, "a")
+            loaded = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+
+        assert isinstance(loaded, fake_jax.Array)
+        np.testing.assert_array_equal(np.asarray(loaded), np.asarray(orig))
+
+
+class TestArrowTypeRegistry:
+    """The detection registry is the single source of truth for arrow routing."""
+
+    def test_unknown_type_still_pickles(self):
+        # A set is neither arrow-representable, JSON-safe, nor a module/cell
+        # type — it falls through the registry to the pickle catch-all.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = serialize_value({1, 2, 3}, Path(tmpdir), "x")
+        assert result["content_type"] == ContentType.PICKLE_OBJECT
+
+    def test_every_rule_predicate_is_callable(self):
+        # Guards against registry drift (a rule missing one of its halves).
+        for rule in serializer_module._ARROW_TYPE_RULES:
+            assert callable(rule.matches)
+            assert callable(rule.to_table)
