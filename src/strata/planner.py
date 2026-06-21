@@ -17,6 +17,7 @@ from strata.metadata_cache import (
     get_parquet_cache,
 )
 from strata.tenant import get_tenant_id
+from strata.timing import elapsed_ms
 from strata.tracing import trace_span
 from strata.types import (
     CacheKey,
@@ -334,7 +335,7 @@ class ReadPlanner:
         plan.total_row_groups = total_row_groups
         plan.pruned_row_groups = pruned_row_groups
         plan.estimated_bytes = estimated_bytes
-        plan.planning_time_ms = (time.perf_counter() - start_time) * 1000
+        plan.planning_time_ms = elapsed_ms(start_time)
 
         # Set schema: prefer Parquet schema (may have column projection),
         # fall back to Iceberg table schema for empty tables/scans
