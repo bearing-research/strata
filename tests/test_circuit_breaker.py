@@ -365,8 +365,10 @@ class TestCircuitBreakerDecorator:
 class TestCircuitStats:
     """Tests for CircuitStats."""
 
-    def test_stats_to_dict(self):
-        """Test stats conversion to dict."""
+    def test_stats_asdict(self):
+        """CircuitStats serializes to a plain field mapping via asdict."""
+        from dataclasses import asdict
+
         from strata.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
         config = CircuitBreakerConfig(failure_threshold=2)
@@ -376,7 +378,7 @@ class TestCircuitStats:
         breaker.record_failure()
 
         stats = breaker.get_stats()
-        d = stats.to_dict()
+        d = asdict(stats)
 
         assert d["state"] == "closed"
         assert d["total_calls"] == 2
