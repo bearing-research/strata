@@ -18,10 +18,11 @@ Key component: ResizableLimiter
 import asyncio
 import logging
 import math
-import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from threading import Lock
+from typing import Any
 
 logger = logging.getLogger("strata.adaptive")
 
@@ -62,13 +63,17 @@ class ResizableLimiter:
         return max(0, self._capacity - self._in_use)
 
     async def acquire(self, timeout: float | None = None) -> bool:
-        """Acquire a slot, optionally with timeout.
+        """Acquire a slot, optionally bounded by a timeout.
 
-        Args:
-            timeout: Maximum seconds to wait (None = wait forever)
+        Parameters
+        ----------
+        timeout : float or None, optional
+            Maximum seconds to wait; ``None`` waits forever.
 
-        Returns:
-            True if acquired, False if timeout expired
+        Returns
+        -------
+        bool
+            ``True`` if a slot was acquired, ``False`` if the timeout expired.
         """
         async with self._cv:
             if timeout is None:
@@ -108,8 +113,15 @@ class ResizableLimiter:
         If capacity increases, waiting acquirers are woken to compete for slots.
         If capacity decreases, the change takes effect as active requests complete.
 
-        Args:
-            new_capacity: New maximum concurrent requests (must be >= 1)
+        Parameters
+        ----------
+        new_capacity : int
+            New maximum concurrent requests (must be >= 1).
+
+        Raises
+        ------
+        ValueError
+            If ``new_capacity`` is less than 1.
         """
         if new_capacity < 1:
             raise ValueError("capacity must be >= 1")
@@ -120,8 +132,14 @@ class ResizableLimiter:
                 # Wake all waiters to compete for new slots
                 self._cv.notify_all()
 
-    def get_stats(self) -> dict:
-        """Get limiter statistics (non-async, for metrics)."""
+    def get_stats(self) -> dict[str, int]:
+        """Return capacity / in-use / available (non-async, for metrics).
+
+        Returns
+        -------
+        dict
+            ``{capacity, in_use, available}``.
+        """
         return {
             "capacity": self._capacity,
             "in_use": self._in_use,
@@ -131,21 +149,28 @@ class ResizableLimiter:
 
 @dataclass
 class AdaptiveConfig:
-    """Configuration for adaptive concurrency controller.
+    """Configuration for the adaptive concurrency controller.
 
-    Attributes:
-        enabled: Whether adaptive control is enabled
-        adjustment_interval_seconds: How often to check and adjust (seconds)
-        latency_target_p95_ms: Target p95 latency in milliseconds
-        queue_wait_threshold_ms: Queue wait time that indicates pressure
-        min_slots_interactive: Minimum interactive slots (floor)
-        max_slots_interactive: Maximum interactive slots (ceiling)
-        min_slots_bulk: Minimum bulk slots (floor)
-        max_slots_bulk: Maximum bulk slots (ceiling)
-        increase_step: Slots to add when conditions are good
-        decrease_step: Slots to remove when latency is high
-        hysteresis_count: Number of consecutive signals needed to change
-        window_size: Number of samples to keep for rolling p95
+    Attributes
+    ----------
+    enabled : bool
+        Whether adaptive control is enabled (opt-in).
+    adjustment_interval_seconds : float
+        How often to check and adjust, in seconds.
+    latency_target_p95_ms : float
+        Target p95 latency, in milliseconds.
+    queue_wait_threshold_ms : float
+        Queue wait time that indicates pressure.
+    min_slots_interactive, max_slots_interactive : int
+        Interactive-tier slot floor and ceiling.
+    min_slots_bulk, max_slots_bulk : int
+        Bulk-tier slot floor and ceiling.
+    increase_step, decrease_step : int
+        Slots added/removed per adjustment.
+    hysteresis_count : int
+        Consecutive signals required before adjusting.
+    window_size : int
+        Samples kept for the rolling p95.
     """
 
     enabled: bool = False  # Disabled by default (opt-in)
@@ -171,7 +196,7 @@ class RollingLatencyWindow:
 
     def __init__(self, size: int = 100):
         self._size = size
-        self._lock = threading.Lock()
+        self._lock = Lock()
         self._samples: deque[float] = deque(maxlen=size)
         self._count = 0  # Total samples seen (for metrics)
 
@@ -182,10 +207,12 @@ class RollingLatencyWindow:
             self._count += 1
 
     def get_p95(self) -> float | None:
-        """Calculate p95 from the current window.
+        """Return the p95 latency over the current window.
 
-        Returns:
-            p95 latency in ms, or None if not enough samples.
+        Returns
+        -------
+        float or None
+            p95 latency in ms, or ``None`` with fewer than 10 samples.
         """
         with self._lock:
             if len(self._samples) < 10:
@@ -197,8 +224,18 @@ class RollingLatencyWindow:
         idx = max(0, math.ceil(n * 0.95) - 1)
         return sorted_samples[idx]
 
-    def get_stats(self) -> dict:
-        """Get statistics from the current window."""
+    def get_stats(self) -> dict[str, Any]:
+        """Return count, window size, percentiles, and min/max/avg latency.
+
+        Latency values are full precision; rounding for display is the
+        consumer's concern.
+
+        Returns
+        -------
+        dict
+            ``{count, window_size, p50_ms, p95_ms, p99_ms, min_ms, max_ms,
+            avg_ms}`` (latency values are ``None`` when the window is empty).
+        """
         with self._lock:
             if not self._samples:
                 return {
@@ -221,12 +258,12 @@ class RollingLatencyWindow:
         return {
             "count": self._count,
             "window_size": count,
-            "p50_ms": round(pct(0.50), 2),
-            "p95_ms": round(pct(0.95), 2),
-            "p99_ms": round(pct(0.99), 2),
-            "min_ms": round(sorted_samples[0], 2),
-            "max_ms": round(sorted_samples[-1], 2),
-            "avg_ms": round(sum(sorted_samples) / count, 2),
+            "p50_ms": pct(0.50),
+            "p95_ms": pct(0.95),
+            "p99_ms": pct(0.99),
+            "min_ms": sorted_samples[0],
+            "max_ms": sorted_samples[-1],
+            "avg_ms": sum(sorted_samples) / count,
         }
 
     def reset(self) -> None:
@@ -314,11 +351,14 @@ class AdaptiveConcurrencyController:
         self._stop_event = asyncio.Event()
 
     def record_latency(self, tier: str, latency_ms: float) -> None:
-        """Record a completed request latency for adaptive control.
+        """Record a completed request's latency for adaptive control.
 
-        Args:
-            tier: "interactive" or "bulk"
-            latency_ms: Request latency in milliseconds
+        Parameters
+        ----------
+        tier : str
+            ``"interactive"`` or ``"bulk"``.
+        latency_ms : float
+            Request latency in milliseconds.
         """
         if tier == "interactive":
             self._interactive.latency_window.record(latency_ms)
@@ -334,9 +374,12 @@ class AdaptiveConcurrencyController:
         being admitted. High queue wait indicates demand exceeds capacity,
         which is the signal to increase slots (if latency is good).
 
-        Args:
-            tier: "interactive" or "bulk"
-            wait_ms: Time spent waiting in queue (milliseconds)
+        Parameters
+        ----------
+        tier : str
+            ``"interactive"`` or ``"bulk"``.
+        wait_ms : float
+            Time spent waiting in the queue, in milliseconds.
         """
         if tier == "interactive":
             self._interactive.queue_wait_window.record(wait_ms)
@@ -494,8 +537,15 @@ class AdaptiveConcurrencyController:
             },
         )
 
-    def get_metrics(self) -> dict:
-        """Get adaptive control metrics for observability."""
+    def get_metrics(self) -> dict[str, Any]:
+        """Return adaptive-control metrics for observability.
+
+        Returns
+        -------
+        dict
+            Controller config plus per-tier slot counts, signals, event
+            counts, and latency / queue-wait stats.
+        """
         return {
             "enabled": self.config.enabled,
             "target_p95_ms": self.config.latency_target_p95_ms,
