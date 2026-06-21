@@ -3,8 +3,18 @@
 import time
 from collections import deque
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from threading import Lock
 from typing import Any
+
+
+class EvictionPressure(StrEnum):
+    """Cache-eviction load band derived from the per-minute eviction rate."""
+
+    LOW = "low"  # < 1 eviction per minute
+    MEDIUM = "medium"  # 1–5 evictions per minute
+    HIGH = "high"  # 5–10 evictions per minute
+    CRITICAL = "critical"  # 10+ evictions per minute
 
 
 @dataclass
@@ -59,8 +69,8 @@ class EvictionStats:
         Evictions per minute, averaged over the last hour.
     last_eviction_at : float or None
         Timestamp of the most recent eviction, or ``None`` if none recorded.
-    pressure_level : str
-        Derived load band: ``"low"``, ``"medium"``, ``"high"``, or ``"critical"``.
+    pressure_level : EvictionPressure
+        Derived load band (``low`` / ``medium`` / ``high`` / ``critical``).
     """
 
     total_evictions: int
@@ -72,7 +82,7 @@ class EvictionStats:
     bytes_evicted_last_hour: int
     eviction_rate_per_minute: float
     last_eviction_at: float | None
-    pressure_level: str
+    pressure_level: EvictionPressure
 
 
 class CacheEvictionTracker:
@@ -168,13 +178,13 @@ class CacheEvictionTracker:
 
         # Determine pressure level based on eviction rate
         if rate >= 10:
-            pressure = "critical"  # 10+ evictions per minute
+            pressure = EvictionPressure.CRITICAL
         elif rate >= 5:
-            pressure = "high"  # 5-10 evictions per minute
+            pressure = EvictionPressure.HIGH
         elif rate >= 1:
-            pressure = "medium"  # 1-5 evictions per minute
+            pressure = EvictionPressure.MEDIUM
         else:
-            pressure = "low"  # < 1 eviction per minute
+            pressure = EvictionPressure.LOW
 
         return EvictionStats(
             total_evictions=self._total_evictions,
