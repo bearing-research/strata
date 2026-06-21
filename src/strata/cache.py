@@ -2,8 +2,8 @@
 
 import json
 import os
+import time
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -28,7 +28,8 @@ CACHE_META_EXTENSION = ".meta.json"
 # Version history:
 #   1: Initial version (Arrow IPC stream format, SHA-256 keyed)
 #   2: Multi-tenancy support (tenant_id in cache key, tenant-prefixed directories)
-CACHE_VERSION = 2
+#   3: created_at / stats timestamps are epoch floats (were ISO-8601 strings)
+CACHE_VERSION = 3
 
 
 @dataclass
@@ -51,8 +52,8 @@ class CacheEntryMetadata:
         Rows in the cached batch.
     size_bytes : int
         Serialized Arrow IPC stream size in bytes.
-    created_at : str
-        ISO-8601 UTC timestamp of when the entry was written.
+    created_at : float
+        Unix epoch timestamp (seconds) of when the entry was written.
     """
 
     table_id: str
@@ -62,7 +63,7 @@ class CacheEntryMetadata:
     columns: list[str] | None
     num_rows: int
     size_bytes: int
-    created_at: str
+    created_at: float
 
 
 @dataclass
@@ -79,8 +80,8 @@ class CacheStats:
         Configured cache size limit.
     usage_percent : float
         ``total_size_bytes / max_size_bytes * 100``.
-    oldest_entry, newest_entry : str or None
-        ISO timestamps of the oldest/newest entries, or ``None`` when empty.
+    oldest_entry, newest_entry : float or None
+        Epoch timestamps of the oldest/newest entries, or ``None`` when empty.
     entries_by_table : dict of str to int
         Entry count per ``table_id``.
     entries_by_snapshot : dict of str to int
@@ -91,8 +92,8 @@ class CacheStats:
     total_size_bytes: int
     max_size_bytes: int
     usage_percent: float
-    oldest_entry: str | None
-    newest_entry: str | None
+    oldest_entry: float | None
+    newest_entry: float | None
     entries_by_table: dict[str, int]
     entries_by_snapshot: dict[str, int]
 
@@ -329,7 +330,7 @@ class DiskCache:
                 columns=None,  # Could be extracted from projection_fingerprint if needed
                 num_rows=batch.num_rows,
                 size_bytes=len(stream_bytes),
-                created_at=datetime.now(UTC).isoformat(),
+                created_at=time.time(),
             )
             meta_tmp_path.write_text(json.dumps(asdict(metadata)))
 
@@ -388,7 +389,7 @@ class DiskCache:
         """
         total_entries = 0
         total_size = 0
-        timestamps: list[str] = []
+        timestamps: list[float] = []
         by_table: dict[str, int] = {}
         by_snapshot: dict[str, int] = {}
 
