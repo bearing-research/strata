@@ -111,12 +111,18 @@ class CacheWarmer:
     ):
         """Initialize the cache warmer.
 
-        Args:
-            planner: ReadPlanner for planning table scans
-            fetcher: CachedFetcher for fetching row groups
-            metrics: MetricsCollector for logging events
-            max_concurrent_jobs: Maximum jobs running simultaneously
-            job_retention_seconds: How long to keep completed job info
+        Parameters
+        ----------
+        planner : ReadPlanner
+            Planner for table scans.
+        fetcher : CachedFetcher
+            Fetcher for row groups.
+        metrics : MetricsCollector
+            Sink for warming event logs.
+        max_concurrent_jobs : int, optional
+            Maximum jobs running simultaneously (default 3).
+        job_retention_seconds : float, optional
+            How long to keep completed job info (default 3600).
         """
         self._planner = planner
         self._fetcher = fetcher
@@ -156,13 +162,17 @@ class CacheWarmer:
                     job._task.cancel()
 
     async def start_job(self, request: WarmAsyncRequest) -> str:
-        """Start a new warming job.
+        """Start a new warming job and return its id.
 
-        Args:
-            request: Warming request with tables and options
+        Parameters
+        ----------
+        request : WarmAsyncRequest
+            Tables to warm and warming options.
 
-        Returns:
-            Job ID for tracking progress
+        Returns
+        -------
+        str
+            Job id for tracking progress.
         """
         job_id = str(uuid.uuid4())[:8]
 
@@ -188,13 +198,17 @@ class CacheWarmer:
         return job_id
 
     def get_progress(self, job_id: str) -> WarmJobProgress | None:
-        """Get progress for a job.
+        """Return progress for a job, or ``None`` if unknown.
 
-        Args:
-            job_id: Job ID to query
+        Parameters
+        ----------
+        job_id : str
+            Job id to query.
 
-        Returns:
-            Progress info or None if job not found
+        Returns
+        -------
+        WarmJobProgress or None
+            Progress snapshot, or ``None`` when the job is not found.
         """
         job = self._jobs.get(job_id)
         if job is None:
@@ -202,13 +216,17 @@ class CacheWarmer:
         return job.to_progress()
 
     def list_jobs(self, include_completed: bool = False) -> list[WarmJobProgress]:
-        """List all jobs.
+        """List jobs, sorted by priority then start time.
 
-        Args:
-            include_completed: Include completed/failed jobs
+        Parameters
+        ----------
+        include_completed : bool, optional
+            Include completed/failed jobs (default ``False``).
 
-        Returns:
-            List of job progress info
+        Returns
+        -------
+        list of WarmJobProgress
+            Progress for each matching job.
         """
         result = []
         for job in self._jobs.values():
@@ -223,13 +241,17 @@ class CacheWarmer:
         return result
 
     async def cancel_job(self, job_id: str) -> bool:
-        """Cancel a running job.
+        """Cancel a pending or running job.
 
-        Args:
-            job_id: Job ID to cancel
+        Parameters
+        ----------
+        job_id : str
+            Job id to cancel.
 
-        Returns:
-            True if job was cancelled, False if not found or already done
+        Returns
+        -------
+        bool
+            ``True`` if cancelled; ``False`` if unknown or already finished.
         """
         async with self._lock:
             job = self._jobs.get(job_id)
