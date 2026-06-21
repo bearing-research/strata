@@ -45,8 +45,7 @@ async def get_cache_stats_v1():
     cache = state.fetcher.cache
     if not isinstance(cache, DiskCache):
         raise HTTPException(status_code=501, detail="Operation requires DiskCache")
-    stats = cache.get_stats()
-    return stats.to_dict()
+    return asdict(cache.get_stats())
 
 
 @router.get("/v1/cache/evictions")
@@ -122,7 +121,7 @@ async def list_cache_entries_v1():
     if not isinstance(cache, DiskCache):
         raise HTTPException(status_code=501, detail="Operation requires DiskCache")
     entries = cache.list_entries()
-    return {"entries": [e.to_dict() for e in entries]}
+    return {"entries": [asdict(e) for e in entries]}
 
 
 @router.post("/v1/cache/clear", dependencies=[require_scope("admin:cache")])
