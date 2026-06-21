@@ -23,10 +23,11 @@ Thresholds (configurable):
 """
 
 import logging
-import threading
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from threading import Lock
+from typing import Any
 
 logger = logging.getLogger("strata.slow_ops")
 
@@ -83,33 +84,6 @@ class StageTimings:
     phase: str = ""  # warmup, steady, spike, cooldown
     tier: str = ""  # interactive, bulk
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary for logging."""
-        return {
-            "scan_id": self.scan_id,
-            "table_id": self.table_id,
-            "snapshot_id": self.snapshot_id,
-            "request_id": self.request_id,
-            "plan_ms": round(self.plan_ms, 2),
-            "scan_open_ms": round(self.scan_open_ms, 2),
-            "ttfb_ms": round(self.ttfb_ms, 2),
-            "fetch_total_ms": round(self.fetch_total_ms, 2),
-            "fetch_count": self.fetch_count,
-            "fetch_max_ms": round(self.fetch_max_ms, 2),
-            "encode_total_ms": round(self.encode_total_ms, 2),
-            "encode_count": self.encode_count,
-            "encode_max_ms": round(self.encode_max_ms, 2),
-            "scan_close_ms": round(self.scan_close_ms, 2),
-            "total_ms": round(self.total_ms, 2),
-            "bytes_streamed": self.bytes_streamed,
-            "rows_streamed": self.rows_streamed,
-            "tasks_count": self.tasks_count,
-            "columns_count": self.columns_count,
-            "filters_count": self.filters_count,
-            "phase": self.phase,
-            "tier": self.tier,
-        }
-
 
 class LatencyHistogram:
     """Thread-safe histogram for latency distribution tracking.
@@ -119,14 +93,22 @@ class LatencyHistogram:
     """
 
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = Lock()
         # stage -> bucket_idx -> count
         self._counts: dict[str, list[int]] = defaultdict(lambda: [0] * len(BUCKET_LABELS))
         # stage -> (count, sum_ms, max_ms)
         self._stats: dict[str, tuple[int, float, float]] = defaultdict(lambda: (0, 0.0, 0.0))
 
     def record(self, stage: str, duration_ms: float) -> None:
-        """Record a latency observation."""
+        """Record one latency observation for ``stage``.
+
+        Parameters
+        ----------
+        stage : str
+            Stage name (e.g. ``"plan"``, ``"fetch"``).
+        duration_ms : float
+            Observed duration in milliseconds.
+        """
         bucket_idx = self._get_bucket_idx(duration_ms)
 
         with self._lock:
@@ -141,8 +123,22 @@ class LatencyHistogram:
                 return i
         return len(BUCKET_LABELS) - 1
 
-    def get_histogram(self, stage: str) -> dict:
-        """Get histogram for a stage."""
+    def get_histogram(self, stage: str) -> dict[str, Any]:
+        """Return the bucket counts and summary stats for ``stage``.
+
+        The summary values are full precision; rounding for display is the
+        consumer's concern.
+
+        Parameters
+        ----------
+        stage : str
+            Stage name.
+
+        Returns
+        -------
+        dict
+            ``{buckets, count, sum_ms, avg_ms, max_ms}``.
+        """
         with self._lock:
             counts = self._counts.get(stage, [0] * len(BUCKET_LABELS))
             count, sum_ms, max_ms = self._stats.get(stage, (0, 0.0, 0.0))
@@ -150,22 +146,38 @@ class LatencyHistogram:
         return {
             "buckets": dict(zip(BUCKET_LABELS, counts)),
             "count": count,
-            "sum_ms": round(sum_ms, 2),
-            "avg_ms": round(sum_ms / count, 2) if count > 0 else 0.0,
-            "max_ms": round(max_ms, 2),
+            "sum_ms": sum_ms,
+            "avg_ms": sum_ms / count if count > 0 else 0.0,
+            "max_ms": max_ms,
         }
 
-    def get_all_histograms(self) -> dict[str, dict]:
-        """Get histograms for all stages."""
+    def get_all_histograms(self) -> dict[str, dict[str, Any]]:
+        """Return :meth:`get_histogram` for every recorded stage.
+
+        Returns
+        -------
+        dict
+            ``stage -> histogram`` for each stage.
+        """
         with self._lock:
             stages = list(self._counts.keys())
         return {stage: self.get_histogram(stage) for stage in stages}
 
-    def get_percentiles(self, stage: str) -> dict:
-        """Estimate percentiles from histogram buckets.
+    def get_percentiles(self, stage: str) -> dict[str, float]:
+        """Estimate p50/p95/p99 latency for ``stage`` from the buckets.
 
-        This is an approximation since we only have bucket counts,
-        not individual values. Uses bucket midpoints.
+        An approximation: only bucket counts are kept, so bucket midpoints are
+        used rather than exact values.
+
+        Parameters
+        ----------
+        stage : str
+            Stage name.
+
+        Returns
+        -------
+        dict
+            ``{p50_ms, p95_ms, p99_ms}`` (zeros when no samples).
         """
         with self._lock:
             counts = self._counts.get(stage, [0] * len(BUCKET_LABELS))
@@ -265,10 +277,18 @@ class SlowOpTracker:
         self.histogram.record("batch_encode", duration_ms)
 
     def finish(self, **metrics) -> StageTimings:
-        """Finish timing and return the timings object.
+        """Stop the total timer and return the populated timings.
 
-        Args:
-            **metrics: Additional metrics to include (bytes_streamed, rows_streamed, etc.)
+        Parameters
+        ----------
+        **metrics
+            Extra ``StageTimings`` fields to set (e.g. ``bytes_streamed``,
+            ``rows_streamed``); unknown keys are ignored.
+
+        Returns
+        -------
+        StageTimings
+            The completed timings for this operation.
         """
         self._timings.total_ms = (time.perf_counter() - self._start_time) * 1000
         self.histogram.record("total_request", self._timings.total_ms)
@@ -281,10 +301,12 @@ class SlowOpTracker:
         return self._timings
 
     def check_slow_stages(self) -> list[tuple[str, float, float]]:
-        """Check which stages exceeded their thresholds.
+        """Return the stages whose timing exceeded their threshold.
 
-        Returns:
-            List of (stage, actual_ms, threshold_ms) for slow stages.
+        Returns
+        -------
+        list of tuple of (str, float, float)
+            ``(stage, actual_ms, threshold_ms)`` for each slow stage.
         """
         slow = []
 
@@ -314,10 +336,12 @@ class SlowOpTracker:
         return slow
 
     def check_and_log(self) -> bool:
-        """Check for slow stages and log if any found.
+        """Log a warning if any stage was slow.
 
-        Returns:
-            True if any slow stages were logged.
+        Returns
+        -------
+        bool
+            ``True`` if a slow-operation warning was emitted.
         """
         slow_stages = self.check_slow_stages()
 
@@ -332,7 +356,7 @@ class SlowOpTracker:
                 "Slow operation detected",
                 extra={
                     "slow_stages": slow_summary,
-                    **self._timings.to_dict(),
+                    **asdict(self._timings),
                 },
             )
             return True
@@ -363,11 +387,17 @@ class _StageTimer:
 
 # Global histogram for server-wide latency tracking
 _global_histogram: LatencyHistogram | None = None
-_histogram_lock = threading.Lock()
+_histogram_lock = Lock()
 
 
 def get_global_histogram() -> LatencyHistogram:
-    """Get or create the global latency histogram."""
+    """Return the process-wide latency histogram, creating it on first use.
+
+    Returns
+    -------
+    LatencyHistogram
+        The shared histogram.
+    """
     global _global_histogram
     with _histogram_lock:
         if _global_histogram is None:
@@ -376,18 +406,43 @@ def get_global_histogram() -> LatencyHistogram:
 
 
 def record_latency(stage: str, duration_ms: float) -> None:
-    """Record a latency observation to the global histogram."""
+    """Record a latency observation to the global histogram.
+
+    Parameters
+    ----------
+    stage : str
+        Stage name.
+    duration_ms : float
+        Observed duration in milliseconds.
+    """
     get_global_histogram().record(stage, duration_ms)
 
 
-def get_latency_stats() -> dict:
-    """Get latency statistics from the global histogram."""
+def get_latency_stats() -> dict[str, dict[str, Any]]:
+    """Return histograms for every stage from the global histogram.
+
+    Returns
+    -------
+    dict
+        ``stage -> histogram``.
+    """
     histogram = get_global_histogram()
     return histogram.get_all_histograms()
 
 
-def get_latency_percentiles(stage: str) -> dict:
-    """Get percentiles for a specific stage."""
+def get_latency_percentiles(stage: str) -> dict[str, float]:
+    """Return p50/p95/p99 for ``stage`` from the global histogram.
+
+    Parameters
+    ----------
+    stage : str
+        Stage name.
+
+    Returns
+    -------
+    dict
+        ``{p50_ms, p95_ms, p99_ms}``.
+    """
     histogram = get_global_histogram()
     return histogram.get_percentiles(stage)
 
