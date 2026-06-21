@@ -2,7 +2,7 @@
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -33,101 +33,99 @@ CACHE_VERSION = 2
 
 @dataclass
 class CacheEntryMetadata:
-    """Metadata for a cached entry."""
+    """Sidecar metadata for one cached row group.
+
+    Attributes
+    ----------
+    table_id : str
+        Identity of the source table.
+    snapshot_id : int
+        Iceberg snapshot the row group belongs to.
+    file_path : str
+        Source data file path.
+    row_group_id : int
+        Row group index within the file.
+    columns : list of str or None
+        Projected columns, or ``None`` for all columns.
+    num_rows : int
+        Rows in the cached batch.
+    size_bytes : int
+        Serialized Arrow IPC stream size in bytes.
+    created_at : str
+        ISO-8601 UTC timestamp of when the entry was written.
+    """
 
     table_id: str
     snapshot_id: int
     file_path: str
     row_group_id: int
-    columns: list[str] | None  # None means all columns
+    columns: list[str] | None
     num_rows: int
     size_bytes: int
-    created_at: str  # ISO format timestamp
-
-    def to_dict(self) -> dict:
-        return {
-            "table_id": self.table_id,
-            "snapshot_id": self.snapshot_id,
-            "file_path": self.file_path,
-            "row_group_id": self.row_group_id,
-            "columns": self.columns,
-            "num_rows": self.num_rows,
-            "size_bytes": self.size_bytes,
-            "created_at": self.created_at,
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "CacheEntryMetadata":
-        return cls(
-            table_id=d["table_id"],
-            snapshot_id=d["snapshot_id"],
-            file_path=d["file_path"],
-            row_group_id=d["row_group_id"],
-            columns=d.get("columns"),
-            num_rows=d["num_rows"],
-            size_bytes=d["size_bytes"],
-            created_at=d["created_at"],
-        )
+    created_at: str
 
 
 @dataclass
 class CacheStats:
-    """Aggregate statistics for the cache."""
+    """Aggregate statistics for the disk cache.
+
+    Attributes
+    ----------
+    total_entries : int
+        Number of cached row groups (current version only).
+    total_size_bytes : int
+        Total on-disk size of cached data.
+    max_size_bytes : int
+        Configured cache size limit.
+    usage_percent : float
+        ``total_size_bytes / max_size_bytes * 100``.
+    oldest_entry, newest_entry : str or None
+        ISO timestamps of the oldest/newest entries, or ``None`` when empty.
+    entries_by_table : dict of str to int
+        Entry count per ``table_id``.
+    entries_by_snapshot : dict of str to int
+        Entry count per ``"table_id:snapshot_id"``.
+    """
 
     total_entries: int
     total_size_bytes: int
     max_size_bytes: int
     usage_percent: float
-    oldest_entry: str | None  # ISO timestamp
-    newest_entry: str | None  # ISO timestamp
-    entries_by_table: dict[str, int]  # table_id -> count
-    entries_by_snapshot: dict[str, int]  # "table_id:snapshot_id" -> count
-
-    def to_dict(self) -> dict:
-        return {
-            "total_entries": self.total_entries,
-            "total_size_bytes": self.total_size_bytes,
-            "max_size_bytes": self.max_size_bytes,
-            "usage_percent": round(self.usage_percent, 2),
-            "oldest_entry": self.oldest_entry,
-            "newest_entry": self.newest_entry,
-            "entries_by_table": self.entries_by_table,
-            "entries_by_snapshot": self.entries_by_snapshot,
-        }
+    oldest_entry: str | None
+    newest_entry: str | None
+    entries_by_table: dict[str, int]
+    entries_by_snapshot: dict[str, int]
 
 
 class Cache(Protocol):
-    """Protocol for cache implementations."""
+    """Interface for cache backends."""
 
     def get(self, key: CacheKey) -> pa.RecordBatch | None:
-        """Get a cached record batch, or None if not cached."""
+        """Return the cached record batch for ``key``, or ``None`` on a miss."""
         ...
 
     def put(self, key: CacheKey, batch: pa.RecordBatch) -> None:
-        """Store a record batch in the cache."""
+        """Store ``batch`` under ``key``."""
         ...
 
     def contains(self, key: CacheKey) -> bool:
-        """Check if a key is in the cache."""
+        """Return whether ``key`` is cached."""
         ...
 
     def clear(self) -> None:
-        """Clear all cached data."""
+        """Remove all cached data."""
         ...
 
 
 class DiskCache:
-    """Disk-based cache using Arrow IPC Stream format.
+    """Disk-based cache using the Arrow IPC Stream format.
 
-    Each cached row group is stored as a separate .arrowstream file,
-    named by the SHA-256 hash of the cache key.
+    Each cached row group is a separate ``.arrowstream`` file named by the
+    SHA-256 hash of its cache key. Because the on-disk format is the same as
+    the network transfer format, a cache hit is a pure file read with zero
+    Arrow parsing — the bytes go straight from disk to the network::
 
-    Key optimization: We store data in Arrow IPC Stream format (same as
-    network transfer format). This means cache hits are pure file reads
-    with zero parsing - the bytes go directly from disk to network.
-
-    Hot path for cache hit:
-        disk -> read_file_bytes -> network (no Arrow parsing!)
+        disk -> read_file_bytes -> network   (no Arrow parsing)
     """
 
     def __init__(
@@ -135,6 +133,15 @@ class DiskCache:
         config: StrataConfig,
         metrics: MetricsCollector | None = None,
     ) -> None:
+        """Initialize the cache and ensure its directory exists.
+
+        Parameters
+        ----------
+        config : StrataConfig
+            Supplies the cache directory, size limit, and granularity.
+        metrics : MetricsCollector, optional
+            Metrics sink; a fresh collector is created when omitted.
+        """
         self.cache_dir = config.cache_dir
         self.max_size_bytes = config.max_cache_size_bytes
         self.granularity = config.cache_granularity
@@ -144,20 +151,23 @@ class DiskCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _key_path(self, key: CacheKey) -> Path:
-        """Get the file path for a cache key.
+        """Return (and create the directory for) a cache key's data file.
 
-        Directory structure:
-            cache_dir/v{VERSION}/{tenant_prefix}/{hash[:2]}/{hash[2:4]}/{hash}.arrowstream
+        The layout is
+        ``cache_dir/v{VERSION}/{tenant_prefix}/{hash[:2]}/{hash[2:4]}/{hash}.arrowstream``.
+        The ``tenant_prefix`` (first 8 chars of ``SHA-256(tenant_id)``) isolates
+        each tenant's entries, and the version prefix lets old and new cache
+        formats coexist so a format bump can't corrupt readers.
 
-        Tenant isolation:
-        - Each tenant's cache entries are stored under a tenant-prefixed directory
-        - Tenant prefix is first 8 chars of SHA-256(tenant_id) for even distribution
-        - This prevents one tenant from accessing another tenant's cached data
+        Parameters
+        ----------
+        key : CacheKey
+            The cache key.
 
-        The version prefix ensures cache format changes don't cause corruption:
-        - Old server instances continue reading from v1/
-        - New instances with v2 write to v2/, ignoring v1/
-        - Clear old versions manually or via cleanup scripts
+        Returns
+        -------
+        pathlib.Path
+            Path to the entry's ``.arrowstream`` data file.
         """
         import hashlib
 
@@ -172,26 +182,36 @@ class DiskCache:
         return subdir / f"{hex_digest}{CACHE_FILE_EXTENSION}"
 
     def _meta_path(self, data_path: Path) -> Path:
-        """Get the metadata sidecar path for a data file."""
+        """Return the metadata sidecar path for a data file."""
         return data_path.with_suffix(CACHE_META_EXTENSION)
 
     def _data_path_from_meta(self, meta_path: Path) -> Path:
-        """Get the data file path corresponding to a metadata sidecar."""
+        """Return the data file path for a metadata sidecar path."""
         path_str = str(meta_path)
         if path_str.endswith(CACHE_META_EXTENSION):
             return Path(path_str.removesuffix(CACHE_META_EXTENSION) + CACHE_FILE_EXTENSION)
         return meta_path
 
     def _delete_entry_files(self, data_path: Path) -> None:
-        """Delete a cache entry's data file and metadata sidecar."""
+        """Delete an entry's data file and its metadata sidecar."""
         data_path.unlink(missing_ok=True)
         self._meta_path(data_path).unlink(missing_ok=True)
 
     def get(self, key: CacheKey) -> pa.RecordBatch | None:
-        """Get a cached record batch.
+        """Return the cached record batch for ``key``, parsing the stream.
 
-        Note: This parses the cached stream format. For the hot path,
-        use get_as_stream_bytes() which avoids parsing entirely.
+        For the zero-parse hot path use :meth:`get_as_stream_bytes`. A file that
+        fails to parse is treated as corrupt and removed.
+
+        Parameters
+        ----------
+        key : CacheKey
+            The cache key.
+
+        Returns
+        -------
+        pyarrow.RecordBatch or None
+            The cached batch, or ``None`` on a miss / corrupt entry.
         """
         path = self._key_path(key)
         if not path.exists():
@@ -211,16 +231,22 @@ class DiskCache:
             return None
 
     def get_as_stream_bytes(self, key: CacheKey) -> bytes | None:
-        """Get cached data as Arrow IPC stream bytes (zero-copy hot path).
+        """Return cached data as Arrow IPC stream bytes (zero-copy hot path).
 
-        This is THE hot-path optimization. Since we store data in stream
-        format, cache hits require zero Arrow parsing:
-            disk -> mmap -> bytes -> network
+        Since data is stored in stream format, a hit needs no Arrow parsing
+        (``disk -> mmap -> bytes -> network``); memory-mapped reads via Rust
+        (when available) speed up large files and repeated access.
 
-        Uses memory-mapped I/O via Rust when available for faster reads,
-        especially for large files and repeated access (OS page cache reuse).
+        Parameters
+        ----------
+        key : CacheKey
+            The cache key.
 
-        The bytes are already in the exact format needed for network transfer.
+        Returns
+        -------
+        bytes or None
+            The entry's Arrow IPC stream bytes, or ``None`` on a miss / read
+            failure.
         """
         path = self._key_path(key)
         if not path.exists():
@@ -232,16 +258,28 @@ class DiskCache:
             from strata import fast_io
 
             return fast_io.read_file_mmap(str(path))
-        except Exception:
-            # Corrupted cache file, remove it
+        except OSError:
+            # The file vanished or could not be read (read_file_mmap returns
+            # raw bytes, so this is an I/O error, not Arrow corruption). Drop
+            # the unreadable entry and treat it as a miss.
             self._delete_entry_files(path)
             return None
 
     def get_path(self, key: CacheKey) -> Path | None:
-        """Get the cache file path for a key, if it exists.
+        """Return the cache file path for ``key`` if it exists.
 
-        Useful for zero-copy streaming scenarios where the caller
-        handles the file directly.
+        Useful for zero-copy streaming where the caller handles the file
+        directly.
+
+        Parameters
+        ----------
+        key : CacheKey
+            The cache key.
+
+        Returns
+        -------
+        pathlib.Path or None
+            The data file path, or ``None`` on a miss.
         """
         path = self._key_path(key)
         if path.exists():
@@ -249,10 +287,18 @@ class DiskCache:
         return None
 
     def put(self, key: CacheKey, batch: pa.RecordBatch) -> None:
-        """Store a record batch in the cache (crash-safe via atomic rename).
+        """Store ``batch`` under ``key`` crash-safely via atomic rename.
 
-        Stores in Arrow IPC Stream format for zero-copy serving on cache hits.
-        Thread-safe: uses unique temp file names to avoid races between writers.
+        Writes the Arrow IPC stream + a JSON metadata sidecar to unique temp
+        files, then ``os.replace``-es both into place — so concurrent writers
+        don't race and a crash never leaves a half-written entry.
+
+        Parameters
+        ----------
+        key : CacheKey
+            The cache key.
+        batch : pyarrow.RecordBatch
+            The batch to cache.
         """
         import uuid
 
@@ -285,7 +331,7 @@ class DiskCache:
                 size_bytes=len(stream_bytes),
                 created_at=datetime.now(UTC).isoformat(),
             )
-            meta_tmp_path.write_text(json.dumps(metadata.to_dict()))
+            meta_tmp_path.write_text(json.dumps(asdict(metadata)))
 
             # Atomic rename both files
             # If another thread already wrote, that's fine - we just overwrite with same data
@@ -303,11 +349,11 @@ class DiskCache:
             raise
 
     def contains(self, key: CacheKey) -> bool:
-        """Check if a key is in the cache."""
+        """Return whether ``key`` is cached."""
         return self._key_path(key).exists()
 
     def clear(self) -> None:
-        """Clear all cached data (preserves metadata.sqlite)."""
+        """Remove all cached data (preserving ``metadata.sqlite``)."""
         import shutil
 
         for item in self.cache_dir.iterdir():
@@ -320,7 +366,7 @@ class DiskCache:
                 item.unlink()
 
     def get_size_bytes(self) -> int:
-        """Get the current cache size in bytes (current version only)."""
+        """Return the current cache size in bytes (current version only)."""
         total = 0
         versioned_dir = self.cache_dir / f"v{CACHE_VERSION}"
         if versioned_dir.exists():
@@ -329,9 +375,16 @@ class DiskCache:
         return total
 
     def get_stats(self) -> CacheStats:
-        """Get aggregate cache statistics (current version only).
+        """Compute aggregate cache statistics (current version only).
 
-        This provides operators with visibility into cache contents.
+        Walks the metadata sidecars to count entries by table/snapshot, total
+        size, and the oldest/newest timestamps. Corrupt sidecars are skipped,
+        and a sidecar with no data file is pruned.
+
+        Returns
+        -------
+        CacheStats
+            The aggregate statistics.
         """
         total_entries = 0
         total_size = 0
@@ -358,7 +411,7 @@ class DiskCache:
                 if not data_path.exists():
                     meta_path.unlink(missing_ok=True)
                     continue
-                meta = CacheEntryMetadata.from_dict(json.loads(meta_path.read_text()))
+                meta = CacheEntryMetadata(**json.loads(meta_path.read_text()))
                 total_entries += 1
                 total_size += data_path.stat().st_size
                 timestamps.append(meta.created_at)
@@ -392,25 +445,31 @@ class DiskCache:
         )
 
     def list_entries(self) -> list[CacheEntryMetadata]:
-        """List all cache entries with their metadata (current version only)."""
+        """Return every cached entry's metadata (current version only).
+
+        Returns
+        -------
+        list of CacheEntryMetadata
+            One entry per readable sidecar; corrupt sidecars are skipped.
+        """
         entries = []
         versioned_dir = self.cache_dir / f"v{CACHE_VERSION}"
         if not versioned_dir.exists():
             return entries
         for meta_path in versioned_dir.rglob(f"*{CACHE_META_EXTENSION}"):
             try:
-                meta = CacheEntryMetadata.from_dict(json.loads(meta_path.read_text()))
+                meta = CacheEntryMetadata(**json.loads(meta_path.read_text()))
                 entries.append(meta)
             except Exception:
                 continue
         return entries
 
     def _evict_if_needed(self) -> None:
-        """Evict oldest entries if cache exceeds max size.
+        """Evict oldest entries (by mtime) when the cache exceeds its limit.
 
-        Uses oldest-first eviction based on file mtime (write time).
-        Note: This is NOT LRU since get() doesn't update mtime.
-        Only evicts from current version directory.
+        Eviction is oldest-first by file mtime (write time), not LRU — ``get``
+        doesn't touch mtime. Evicts down to 80% of the limit to avoid running
+        on every ``put``. Only the current-version directory is touched.
         """
         current_size = self.get_size_bytes()
         if current_size <= self.max_size_bytes:
@@ -455,9 +514,9 @@ class DiskCache:
 
 
 class CachedFetcher:
-    """Fetcher that caches results using a Cache backend.
+    """A :class:`~strata.fetcher.Fetcher` wrapper that caches results.
 
-    This wraps a Fetcher and Cache to provide transparent caching.
+    Composes a fetcher and a cache so callers get transparent caching.
     """
 
     def __init__(
@@ -467,6 +526,20 @@ class CachedFetcher:
         cache: Cache | None = None,
         metrics: MetricsCollector | None = None,
     ) -> None:
+        """Compose the fetcher and cache.
+
+        Parameters
+        ----------
+        config : StrataConfig
+            Server configuration (S3 filesystem, cache settings).
+        fetcher : Fetcher, optional
+            Backing fetcher; one is created (with the configured S3 filesystem)
+            when omitted.
+        cache : Cache, optional
+            Cache backend; a :class:`DiskCache` is created when omitted.
+        metrics : MetricsCollector, optional
+            Metrics sink; a fresh collector is created when omitted.
+        """
         self.config = config
         self.metrics = metrics or MetricsCollector()
 
@@ -483,7 +556,7 @@ class CachedFetcher:
 
     @staticmethod
     def _project_batch(batch: pa.RecordBatch, columns: list[str] | None) -> pa.RecordBatch:
-        """Return the requested projection from a batch."""
+        """Return ``batch`` projected to ``columns`` (or unchanged if ``None``)."""
         if columns is None:
             return batch
         if batch.schema.names == columns:
@@ -494,7 +567,21 @@ class CachedFetcher:
         )
 
     def fetch(self, task: Task) -> pa.RecordBatch:
-        """Fetch a row group, using cache if available."""
+        """Fetch a row group, serving from cache when possible.
+
+        On a miss, fetches from storage, caches the (full) row group, and
+        returns the requested projection.
+
+        Parameters
+        ----------
+        task : Task
+            The row-group fetch task; its ``cached`` / ``bytes_read`` are updated.
+
+        Returns
+        -------
+        pyarrow.RecordBatch
+            The (projected) row group.
+        """
         histogram = get_cache_histogram()
         cache_full_row_groups = self.config.cache_granularity == CacheGranularity.ROW_GROUP
 
@@ -552,7 +639,18 @@ class CachedFetcher:
         return result_batch
 
     def execute_plan(self, plan: ReadPlan) -> list[pa.RecordBatch]:
-        """Execute a read plan and return all batches."""
+        """Execute a read plan and return all batches.
+
+        Parameters
+        ----------
+        plan : ReadPlan
+            The plan to execute.
+
+        Returns
+        -------
+        list of pyarrow.RecordBatch
+            One batch per task, in plan order.
+        """
         batches = []
         for task in plan.tasks:
             batch = self.fetch(task)
@@ -560,12 +658,34 @@ class CachedFetcher:
         return batches
 
     def stream_plan(self, plan: ReadPlan):
-        """Execute a read plan and yield batches one at a time."""
+        """Execute a read plan, yielding one batch at a time.
+
+        Parameters
+        ----------
+        plan : ReadPlan
+            The plan to execute.
+
+        Yields
+        ------
+        pyarrow.RecordBatch
+            Each task's batch, in plan order.
+        """
         for task in plan.tasks:
             yield self.fetch(task)
 
     def stream_plan_as_ipc(self, plan: ReadPlan):
-        """Execute a read plan and yield Arrow IPC bytes for each batch."""
+        """Execute a read plan, yielding Arrow IPC stream bytes per batch.
+
+        Parameters
+        ----------
+        plan : ReadPlan
+            The plan to execute.
+
+        Yields
+        ------
+        bytes
+            Each batch serialized to Arrow IPC stream format.
+        """
         for task in plan.tasks:
             batch = self.fetch(task)
             # Serialize to IPC stream format
@@ -576,16 +696,21 @@ class CachedFetcher:
             yield sink.getvalue().to_pybytes()
 
     def fetch_as_stream_bytes(self, task: Task) -> bytes:
-        """Fetch row group as Arrow IPC stream bytes (optimized hot path).
+        """Fetch a row group as Arrow IPC stream bytes (optimized hot path).
 
-        For cache hits, this uses the Rust-accelerated path (if available)
-        to avoid creating Python objects for the actual data:
-            disk -> Rust mmap -> Rust serialize -> bytes
+        On a cache hit (full-row-group granularity), uses the Rust-accelerated
+        zero-parse path (``disk -> mmap -> bytes``). On a miss, fetches, caches,
+        and serializes.
 
-        For cache misses, fetches from storage, caches, then returns bytes.
+        Parameters
+        ----------
+        task : Task
+            The fetch task; its ``cached`` / ``bytes_read`` are updated.
 
-        Returns:
-            bytes: Arrow IPC stream format, ready for network transfer
+        Returns
+        -------
+        bytes
+            Arrow IPC stream bytes ready for network transfer.
         """
         histogram = get_cache_histogram()
         cache_full_row_groups = self.config.cache_granularity == CacheGranularity.ROW_GROUP
