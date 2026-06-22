@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from strata.notebook.immutability import (
     InputSnapshot,
@@ -234,3 +235,85 @@ class TestFingerprintRegistry:
         namespace = {"v": "hello"}
         snapshots = snapshot_inputs(namespace, ["v"])
         assert snapshots[0].content_hash is None
+
+
+@pytest.fixture
+def fake_torch(monkeypatch):
+    """API-compatible torch stub (real torch is too heavy for CI). The
+    fingerprint runs through the same numpy-backed sample path as real torch."""
+    import sys
+    import types
+
+    import numpy as np
+
+    mod = types.ModuleType("torch")
+
+    class Tensor:
+        def __init__(self, arr, device="cpu"):
+            self._arr = np.asarray(arr)
+            self.device = device
+
+        @property
+        def shape(self):
+            return self._arr.shape
+
+        @property
+        def dtype(self):
+            return self._arr.dtype
+
+        def detach(self):
+            return self
+
+        def flatten(self):
+            return Tensor(self._arr.reshape(-1), self.device)
+
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return self._arr
+
+        def __getitem__(self, key):
+            return Tensor(self._arr[key], self.device)
+
+        def __len__(self):
+            return len(self._arr)
+
+        def zero_(self):
+            self._arr[:] = 0
+            return self
+
+        def add_(self, value):
+            self._arr += value
+            return self
+
+    mod.Tensor = Tensor
+    monkeypatch.setitem(sys.modules, "torch", mod)
+    return mod
+
+
+class TestTorchFingerprint:
+    """torch tensors get element-level detection via sys.modules probing."""
+
+    def _warned(self, value, mutate) -> bool:
+        namespace = {"v": value}
+        snapshots = snapshot_inputs(namespace, ["v"])
+        mutate(namespace["v"])
+        return len(detect_mutations(namespace, snapshots)) > 0
+
+    def test_torch_inplace_zero_detected(self, fake_torch):
+        assert self._warned(fake_torch.Tensor([1.0, 2.0, 3.0, 4.0]), lambda t: t.zero_())
+
+    def test_torch_inplace_add_detected(self, fake_torch):
+        assert self._warned(fake_torch.Tensor([1.0, 2.0, 3.0]), lambda t: t.add_(5))
+
+    def test_torch_no_mutation_not_flagged(self, fake_torch):
+        assert not self._warned(fake_torch.Tensor([1.0, 2.0, 3.0]), lambda t: t.numpy().sum())
+
+    def test_torch_detected_without_importing_torch(self, fake_torch):
+        # The rule probes sys.modules — a tensor implies torch is already there.
+        import sys
+
+        snapshots = snapshot_inputs({"v": fake_torch.Tensor([1, 2, 3])}, ["v"])
+        assert snapshots[0].content_hash is not None
+        assert isinstance(sys.modules["torch"], type(fake_torch))

@@ -15,6 +15,7 @@ from __future__ import annotations
 import collections.abc
 import copy
 import hashlib
+import sys
 from dataclasses import dataclass
 from typing import Any, NamedTuple, TypedDict
 
@@ -273,6 +274,38 @@ def _hash_ndarray_sample(value: Any) -> str | None:
     return h.hexdigest()
 
 
+def _is_torch(value: Any) -> bool:
+    # A tensor implies torch is imported, so probe sys.modules rather than
+    # importing torch (slow) to reject every value in torch-installed notebooks.
+    # Mirrors serializer._matches_torch. (jax arrays are immutable by design —
+    # no in-place mutation — so they need no rule.)
+    torch = sys.modules.get("torch")
+    return torch is not None and isinstance(value, torch.Tensor)
+
+
+def _hash_torch_sample(value: Any) -> str | None:
+    """Digest a torch tensor from shape/dtype/device + a detached element sample.
+
+    Slices the sample in torch *before* converting to numpy, so huge tensors
+    aren't fully materialized. Exotic dtypes that ``.numpy()`` refuses (bf16,
+    quantized) fall back to identity-only by returning ``None``. Catches the
+    trailing-underscore in-place ops (``x.add_()``, ``x.zero_()``, …).
+    """
+    h = hashlib.sha256()
+    h.update(str(tuple(value.shape)).encode())
+    h.update(str(value.dtype).encode())
+    h.update(str(value.device).encode())
+    try:
+        flat = value.detach().flatten()
+        n = int(flat.shape[0])
+        parts = [flat] if n <= 2 * _MAX_SAMPLE else [flat[:_MAX_SAMPLE], flat[-_MAX_SAMPLE:]]
+        for part in parts:
+            h.update(part.cpu().numpy().tobytes())
+    except (TypeError, RuntimeError, ValueError):
+        return None
+    return h.hexdigest()
+
+
 def _is_mapping(value: Any) -> bool:
     return isinstance(value, collections.abc.Mapping)
 
@@ -338,11 +371,13 @@ def _hash_len_only(value: Any) -> str | None:
         return None
 
 
-# Order: concrete library types first, then the sized catch-all. torch / jax /
-# polars are intentionally deferred (see design-mutation-fingerprint-registry).
+# Order: concrete library types first, then the sized catch-all. polars is
+# deferred (its API is mostly immutable); jax needs no rule (jax arrays are
+# immutable). See design-mutation-fingerprint-registry.
 _FINGERPRINT_RULES: tuple[_FingerprintRule, ...] = (
     _FingerprintRule(_is_pandas, _hash_pandas_sample),
     _FingerprintRule(_is_numpy, _hash_ndarray_sample),
+    _FingerprintRule(_is_torch, _hash_torch_sample),
     _FingerprintRule(_is_mapping, _hash_mapping_sample),
     _FingerprintRule(_is_sequence, _hash_sequence_sample),
     _FingerprintRule(_is_sized, _hash_len_only),
