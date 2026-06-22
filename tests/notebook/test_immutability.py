@@ -175,3 +175,62 @@ class TestInputSnapshot:
         )
 
         assert snapshot.content_hash is None
+
+
+class TestFingerprintRegistry:
+    """Runtime detection now covers numpy / dicts / lists / sized containers,
+    not just pandas (design-mutation-fingerprint-registry)."""
+
+    def _warned(self, value, mutate) -> bool:
+        namespace = {"v": value}
+        snapshots = snapshot_inputs(namespace, ["v"])
+        mutate(namespace["v"])
+        return len(detect_mutations(namespace, snapshots)) > 0
+
+    def test_numpy_inplace_mutation_detected(self):
+        import numpy as np
+
+        assert self._warned(np.array([1, 2, 3, 4]), lambda a: a.fill(9))
+
+    def test_numpy_no_mutation_not_flagged(self):
+        import numpy as np
+
+        assert not self._warned(np.array([1.0, 2.0, 3.0]), lambda a: a.sum())
+
+    def test_dict_key_added_detected(self):
+        assert self._warned({"a": 1}, lambda d: d.update({"z": 9}))
+
+    def test_dict_no_mutation_not_flagged(self):
+        assert not self._warned({"a": 1, "b": 2}, lambda d: d.get("a"))
+
+    def test_list_append_detected(self):
+        assert self._warned([1, 2, 3], lambda lst: lst.append(4))
+
+    def test_list_sort_detected(self):
+        assert self._warned([3, 1, 2], lambda lst: lst.sort())
+
+    def test_list_no_mutation_not_flagged(self):
+        assert not self._warned([1, 2, 3], lambda lst: lst.index(2))
+
+    def test_set_add_detected_via_sized_fallback(self):
+        assert self._warned({1, 2, 3}, lambda s: s.add(9))
+
+    def test_unknown_type_is_identity_only(self):
+        """A type with no fingerprint isn't content-checked — mutating an
+        attribute in place produces no warning (and no snapshot hash)."""
+
+        class Opaque:
+            def __init__(self):
+                self.x = 1
+
+        namespace = {"v": Opaque()}
+        snapshots = snapshot_inputs(namespace, ["v"])
+        assert snapshots[0].content_hash is None
+        namespace["v"].x = 2
+        assert detect_mutations(namespace, snapshots) == []
+
+    def test_string_input_is_not_fingerprinted(self):
+        """str is immutable — excluded from the sized fallback, identity-only."""
+        namespace = {"v": "hello"}
+        snapshots = snapshot_inputs(namespace, ["v"])
+        assert snapshots[0].content_hash is None

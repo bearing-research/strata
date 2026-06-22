@@ -1,15 +1,27 @@
 """Runtime mutation detection for notebook cell inputs.
 
-This module provides heuristic, best-effort mutation detection for input variables.
-It's conservative: if we can't prove a variable wasn't mutated, we report a warning.
+Heuristic, best-effort detection that a cell mutated one of its inputs in place
+(rather than reassigning it) — the residual cases the static analyzer can't see
+(aliases, helper-function mutation, bare method mutators). Each input gets an
+identity check plus a cheap, sampled content fingerprint; a same-identity value
+whose fingerprint changed is reported as a mutation. Fingerprints come from an
+extensible registry (pandas / numpy / mappings / sequences / sized containers);
+unknown types fall back to identity-only. Detection is warn-only — see
+``docs/internal/design-mutation-fingerprint-registry.md``.
 """
 
 from __future__ import annotations
 
+import collections.abc
 import copy
 import hashlib
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any, NamedTuple, TypedDict
+
+# Sampling bounds for content fingerprints: never hash a whole value (this runs
+# on every input of every cell execution), only a head/tail sample.
+_MAX_SAMPLE = 5
+_MAX_REPR = 64
 
 
 @dataclass
@@ -38,9 +50,11 @@ class MutationWarning(TypedDict):
 def snapshot_inputs(namespace: dict[str, Any], input_names: list[str]) -> list[InputSnapshot]:
     """Take snapshots of input variables before cell execution.
 
-    Captures ``id(value)`` for every input, plus a sample content hash for
-    pandas DataFrames / Series (the only types this module can detect in-place
-    mutation for).
+    Captures ``id(value)`` for every input, plus a sample content fingerprint
+    for the types the fingerprint registry recognizes (pandas / numpy /
+    mappings / sequences / other sized containers). Types with no fingerprint
+    get identity-only tracking — reassignment is still detected, in-place
+    mutation isn't.
 
     Parameters
     ----------
@@ -61,23 +75,11 @@ def snapshot_inputs(namespace: dict[str, Any], input_names: list[str]) -> list[I
             continue
 
         value = namespace[var_name]
-        var_id = id(value)
-
-        # For DataFrames, compute a sample hash
-        content_hash = None
-        try:
-            import pandas as pd
-
-            if isinstance(value, (pd.DataFrame, pd.Series)):
-                content_hash = _hash_dataframe_sample(value)
-        except ImportError:
-            pass
-
         snapshots.append(
             InputSnapshot(
                 var_name=var_name,
-                identity=var_id,
-                content_hash=content_hash,
+                identity=id(value),
+                content_hash=_content_fingerprint(value),
             )
         )
 
@@ -153,8 +155,9 @@ def detect_mutations(
 def _check_object_mutation(value: Any, snapshot: InputSnapshot) -> tuple[str, str | None] | None:
     """Check whether a same-identity object was mutated in place.
 
-    Only pandas DataFrame / Series carry a snapshot hash to compare against;
-    every other type returns ``None`` (no detectable mutation).
+    Compares the value's current content fingerprint against the one captured
+    at snapshot time. A value with no fingerprint at snapshot time (unknown
+    type) can't be checked and returns ``None``.
 
     Parameters
     ----------
@@ -168,57 +171,182 @@ def _check_object_mutation(value: Any, snapshot: InputSnapshot) -> tuple[str, st
     tuple of (str, str or None), or None
         ``(message, suggestion)`` when a mutation is detected, else ``None``.
     """
-    try:
-        import pandas as pd
-    except ImportError:
+    if snapshot.content_hash is None:
         return None
+    if _content_fingerprint(value) == snapshot.content_hash:
+        return None
+    return (
+        f"'{snapshot.var_name}' was mutated in place (no reassignment)",
+        "If a downstream cell needs the original, copy it before mutating "
+        "(e.g. x = x.copy()) or reassign instead of mutating in place.",
+    )
 
-    if isinstance(value, (pd.DataFrame, pd.Series)) and snapshot.content_hash:
-        current_hash = _hash_dataframe_sample(value)
-        if current_hash != snapshot.content_hash:
-            return (
-                f"'{snapshot.var_name}' was mutated without reassignment",
-                "Consider using df = df.copy() or df = df.drop(...) instead of inplace=True",
-            )
+
+# ---------------------------------------------------------------------------
+# Content fingerprint registry
+#
+# A value's fingerprint is a cheap, sampled digest taken before a cell runs and
+# recompared after. The registry mirrors ``serializer._ARROW_TYPE_RULES``: an
+# ordered list of (matches, fingerprint) pairs, first match wins. Adding a
+# library is one entry. Fingerprints MUST stay cheap (sampled, not full-value)
+# and MUST NOT raise — they run on every input of every cell execution, before
+# the user's code; returning ``None`` means "couldn't fingerprint, skip".
+# ---------------------------------------------------------------------------
+
+
+class _FingerprintRule(NamedTuple):
+    """One entry in the content-fingerprint registry.
+
+    ``matches`` is a cheap, side-effect-free predicate; ``fingerprint`` returns
+    a sampled hex digest or ``None`` when the value can't be hashed. NamedTuple
+    (not ``@dataclass``) mirrors the serializer's registry tuples.
+    """
+
+    matches: collections.abc.Callable[[Any], bool]
+    fingerprint: collections.abc.Callable[[Any], str | None]
+
+
+def _content_fingerprint(value: Any) -> str | None:
+    """Return a sampled content digest for *value*, or ``None`` if unknown.
+
+    Walks :data:`_FINGERPRINT_RULES` in order; the first rule whose ``matches``
+    accepts the value produces the digest. Unknown types yield ``None``
+    (identity-only tracking).
+    """
+    for rule in _FINGERPRINT_RULES:
+        if rule.matches(value):
+            return rule.fingerprint(value)
     return None
 
 
-def _hash_dataframe_sample(df: Any) -> str | None:
-    """Hash the first 5 + last 5 rows of a DataFrame for mutation detection.
-
-    A sample-based hash that avoids full-table hashing — fast for any size and
-    catches most in-place edits. Returns ``None`` when the sample can't be
-    JSON-encoded (e.g. object columns holding unserializable values), which
-    callers treat as "no hash captured" and skip detection for.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame or pandas.Series
-        The value to sample-hash.
-
-    Returns
-    -------
-    str or None
-        Hex digest, or ``None`` if the sample couldn't be hashed.
-    """
-    h = hashlib.sha256()
-
-    h.update(str(df.shape).encode())
+def _is_pandas(value: Any) -> bool:
     try:
-        h.update(str(df.dtypes.to_dict()).encode())
+        import pandas as pd
+    except ImportError:
+        return False
+    return isinstance(value, (pd.DataFrame, pd.Series))
+
+
+def _hash_pandas_sample(value: Any) -> str | None:
+    """Digest a DataFrame/Series from its shape, dtypes, and head/tail rows."""
+    h = hashlib.sha256()
+    h.update(str(value.shape).encode())
+    try:
+        h.update(str(value.dtypes.to_dict()).encode())
     except AttributeError:
         # Series have a single .dtype, not .dtypes.to_dict().
-        h.update(str(df.dtype).encode())
+        h.update(str(value.dtype).encode())
 
     try:
-        h.update(df.head(5).to_json().encode())
-        if len(df) > 5:
-            h.update(df.tail(5).to_json().encode())
+        h.update(value.head(_MAX_SAMPLE).to_json().encode())
+        if len(value) > _MAX_SAMPLE:
+            h.update(value.tail(_MAX_SAMPLE).to_json().encode())
     except (ValueError, OverflowError, TypeError):
         # to_json() chokes on some object-dtype payloads; degrade gracefully.
         return None
-
     return h.hexdigest()
+
+
+def _is_numpy(value: Any) -> bool:
+    try:
+        import numpy as np
+    except ImportError:
+        return False
+    return isinstance(value, np.ndarray)
+
+
+def _hash_ndarray_sample(value: Any) -> str | None:
+    """Digest an ndarray from its shape, dtype, and a head/tail element sample."""
+    import numpy as np
+
+    h = hashlib.sha256()
+    h.update(str(value.shape).encode())
+    h.update(str(value.dtype).encode())
+    try:
+        flat = np.ascontiguousarray(value).reshape(-1)
+        if flat.size > 2 * _MAX_SAMPLE:
+            flat = np.concatenate([flat[:_MAX_SAMPLE], flat[-_MAX_SAMPLE:]])
+        h.update(flat.tobytes())
+    except (ValueError, TypeError):
+        # Object/structured dtypes that won't reduce to bytes — skip.
+        return None
+    return h.hexdigest()
+
+
+def _is_mapping(value: Any) -> bool:
+    return isinstance(value, collections.abc.Mapping)
+
+
+def _hash_mapping_sample(value: Any) -> str | None:
+    """Digest a mapping from its length and a sorted sample of key reprs.
+
+    Keys are hashable (so repr is safe and cheap); values are not hashed — a
+    same-key value edit is the subscript form the static analyzer already
+    recaptures (``d[k] = v``). This catches add / remove / clear / pop / update.
+    """
+    h = hashlib.sha256()
+    try:
+        h.update(str(len(value)).encode())
+        for key in sorted(value.keys(), key=repr)[: 2 * _MAX_SAMPLE]:
+            h.update(repr(key)[:_MAX_REPR].encode())
+    except (TypeError, ValueError):
+        return None
+    return h.hexdigest()
+
+
+def _is_sequence(value: Any) -> bool:
+    # Concrete mutable/indexable sequences only — str/bytes are immutable, and
+    # abc.Sequence would wrongly include them.
+    return isinstance(value, (list, tuple))
+
+
+def _hash_sequence_sample(value: Any) -> str | None:
+    """Digest a list/tuple from its length and the identities of a head/tail
+    sample of elements.
+
+    ``id()`` (not ``repr``) keeps this crash-proof for arbitrary elements and
+    is stable within the snapshot→detect window (same process). It catches
+    append / extend / insert / remove / pop / sort / reverse; an in-place edit
+    of an element object isn't a mutation of the sequence itself.
+    """
+    h = hashlib.sha256()
+    try:
+        n = len(value)
+        h.update(str(n).encode())
+        sample = value if n <= 2 * _MAX_SAMPLE else (*value[:_MAX_SAMPLE], *value[-_MAX_SAMPLE:])
+        for element in sample:
+            h.update(str(id(element)).encode())
+    except (TypeError, ValueError):
+        return None
+    return h.hexdigest()
+
+
+def _is_sized(value: Any) -> bool:
+    # Last-resort catch-all for other sized containers (set, frozenset, deque,
+    # custom). Earlier rules claim pandas/numpy/dict/list first. str/bytes are
+    # immutable, so excluded.
+    return isinstance(value, collections.abc.Sized) and not isinstance(
+        value, (str, bytes, bytearray)
+    )
+
+
+def _hash_len_only(value: Any) -> str | None:
+    """Length-only digest — catches add/remove on otherwise-opaque containers."""
+    try:
+        return hashlib.sha256(str(len(value)).encode()).hexdigest()
+    except (TypeError, ValueError):
+        return None
+
+
+# Order: concrete library types first, then the sized catch-all. torch / jax /
+# polars are intentionally deferred (see design-mutation-fingerprint-registry).
+_FINGERPRINT_RULES: tuple[_FingerprintRule, ...] = (
+    _FingerprintRule(_is_pandas, _hash_pandas_sample),
+    _FingerprintRule(_is_numpy, _hash_ndarray_sample),
+    _FingerprintRule(_is_mapping, _hash_mapping_sample),
+    _FingerprintRule(_is_sequence, _hash_sequence_sample),
+    _FingerprintRule(_is_sized, _hash_len_only),
+)
 
 
 def apply_defensive_copy(value: Any, content_type: str) -> Any:
