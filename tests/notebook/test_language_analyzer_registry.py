@@ -28,17 +28,17 @@ def _make_cell(language: CellLanguage, source: str = "") -> CellState:
 class TestBuiltInRegistrations:
     """The four shipped languages must resolve at import time."""
 
-    def test_python_registered(self):
-        assert get_language_analyzer(CellLanguage.PYTHON) is not None
-
-    def test_prompt_registered(self):
-        assert get_language_analyzer(CellLanguage.PROMPT) is not None
-
-    def test_sql_registered(self):
-        assert get_language_analyzer(CellLanguage.SQL) is not None
-
-    def test_markdown_registered(self):
-        assert get_language_analyzer(CellLanguage.MARKDOWN) is not None
+    @pytest.mark.parametrize(
+        "language",
+        [
+            CellLanguage.PYTHON,
+            CellLanguage.PROMPT,
+            CellLanguage.SQL,
+            CellLanguage.MARKDOWN,
+        ],
+    )
+    def test_shipped_language_registered(self, language):
+        assert get_language_analyzer(language) is not None
 
 
 class TestDispatch:

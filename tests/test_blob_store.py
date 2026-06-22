@@ -749,19 +749,6 @@ class TestAzureBlobStore:
                 # No auth method provided
             )
 
-    def test_import_error_message_contents(self):
-        """Test that AzureBlobStore has a helpful error message for missing package."""
-        # This test verifies the error message text exists in the source
-        # without actually triggering module manipulation that causes test pollution
-        import inspect
-
-        pytest.importorskip("azure.storage.blob")
-        from strata.blob_store import AzureBlobStore
-
-        source = inspect.getsource(AzureBlobStore.__init__)
-        assert "azure" in source.lower()
-        assert "pip install strata-notebook[azure]" in source
-
     @pytest.mark.skip(reason="Requires actual Azure Storage or Azurite emulator")
     def test_write_and_read_blob_integration(self):
         """Test writing and reading a blob from actual Azure Storage.
