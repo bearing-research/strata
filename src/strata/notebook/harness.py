@@ -350,6 +350,7 @@ def _run_one_batched_cell(
     cell_id = cell["cell_id"]
     source = cell["source"]
     consumed_vars: list[str] = list(cell.get("consumed_vars") or [])
+    references: list[str] = list(cell.get("references") or [])
     cell_env: dict = cell.get("env") or {}
     mount_manifest: dict = cell.get("mount_manifest") or {}
     table_manifest: dict = cell.get("table_manifest") or {}
@@ -428,6 +429,11 @@ def _run_one_batched_cell(
             old_stdout, old_stderr = sys.stdout, sys.stderr
             sys.stdout = stdout_capture
             sys.stderr = stderr_capture
+            # Snapshot this cell's read-set so we can warn if it mutates an
+            # upstream input in place. Unlike single-cell, batch can't recapture
+            # such mutations (the DAG is static), so this is warn-only — it
+            # closes the asymmetry where batch was the one path with no guard.
+            input_snapshots = _immut.snapshot_inputs(namespace, references)
             try:
                 try:
                     with display_capture.capture_side_effects():
@@ -445,6 +451,11 @@ def _run_one_batched_cell(
                         },
                     )
                     return ("cell_error", "cell_error")
+
+                # Warn (don't recapture) on in-place mutation of an input the
+                # static analyzer couldn't see (aliases, helper-fn mutation,
+                # bare mutators). Parity with single-cell / pool detection.
+                mutation_warnings = list(_immut.detect_mutations(namespace, input_snapshots))
 
                 # Success: serialize consumed vars + displays.
                 #
@@ -500,6 +511,7 @@ def _run_one_batched_cell(
                     "stderr": stderr_capture.getvalue(),
                     "source_hash": source_hash,
                     "env_hash": env_hash,
+                    "mutation_warnings": mutation_warnings,
                 },
             )
             ack = _recv_response(resp_in)

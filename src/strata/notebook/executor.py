@@ -393,6 +393,7 @@ class BatchCellResult:
     outputs: dict[str, Any] = field(default_factory=dict)
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     cache_hit: bool = False
+    mutation_warnings: list[MutationWarning] = field(default_factory=list)
 
 
 @dataclass(kw_only=True)
@@ -4015,6 +4016,7 @@ class CellExecutor:
                             stderr=payload.get("stderr", ""),
                             outputs=payload.get("outputs") or {},
                             display_outputs=display_outputs,
+                            mutation_warnings=payload.get("mutation_warnings") or [],
                         ),
                     )
                 else:

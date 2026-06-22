@@ -684,3 +684,72 @@ def test_batch_injects_ambient_client(batch_pipes):
     assert persist["outputs"]["client_type"]["preview"] == "StrataClient"
     # The injected client is an input, not a cell output.
     assert "strata" not in persist["outputs"]
+
+
+def test_batch_warns_on_inplace_mutation_of_input(batch_pipes):
+    """A cell that mutates an upstream DataFrame in place surfaces a mutation
+    warning in its persist frame — batch detection parity with single-cell.
+
+    Uses the aliased form (``alias = df; alias.drop(inplace=True)``), the exact
+    residual case the static analyzer can't see, so only runtime detection
+    catches it. Batch can't recapture (the DAG is static), so it warns.
+    """
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+
+    cells = [
+        {
+            "cell_id": "make",
+            "source": "import pandas as pd\ndf = pd.DataFrame({'a': [1, 2, 3]})",
+            "consumed_vars": ["df"],
+            "references": [],
+            "env": {},
+            "mount_manifest": {},
+            "source_hash": "src-make",
+            "env_hash": "env",
+        },
+        {
+            "cell_id": "mutate",
+            "source": "alias = df\nalias.drop(index=[0], inplace=True)",
+            "consumed_vars": [],
+            "references": ["df"],
+            "env": {},
+            "mount_manifest": {},
+            "source_hash": "src-mutate",
+            "env_hash": "env",
+        },
+    ]
+
+    thread, errors = _run_in_thread(cells, {}, output_dir, frame_w, resp_r)
+
+    frames: list[dict] = []
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        frames.append(frame)
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "abc"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test/x"})
+        elif frame["type"] == "batch_end":
+            break
+
+    thread.join(timeout=5)
+    assert not thread.is_alive(), "harness thread did not exit"
+    assert not errors, f"harness raised: {errors!r}"
+
+    persist_make = next(
+        f["payload"] for f in frames if f["type"] == "persist" and f["payload"]["cell_id"] == "make"
+    )
+    persist_mutate = next(
+        f["payload"]
+        for f in frames
+        if f["type"] == "persist" and f["payload"]["cell_id"] == "mutate"
+    )
+
+    # The producing cell mutated nothing it received.
+    assert persist_make["mutation_warnings"] == []
+    # The mutating cell warns about df.
+    warnings = persist_mutate["mutation_warnings"]
+    assert len(warnings) == 1
+    assert warnings[0]["var_name"] == "df"
