@@ -66,10 +66,16 @@ def _reset_process_globals():
 
     server_module._state = None
     from strata.artifact_store import reset_artifact_store
+    from strata.rate_limiter import reset_rate_limiter
     from strata.tenant_registry import reset_tenant_registry
 
     reset_artifact_store()
     reset_tenant_registry()
+    # The rate limiter is a process global. A server test that initializes it
+    # (e.g. via lifespan) leaves a token bucket that a later test using the app
+    # without lifespan inherits — surfacing as a spurious 429 once the bucket is
+    # drained. Reset so every test starts with rate limiting disabled (None).
+    reset_rate_limiter()
 
 
 # =============================================================================
