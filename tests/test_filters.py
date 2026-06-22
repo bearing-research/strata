@@ -162,47 +162,22 @@ class TestFiltersToIcebergExpression:
         assert filters_to_iceberg_expression(None) is None
         assert filters_to_iceberg_expression([]) is None
 
-    def test_single_eq_filter(self):
-        from pyiceberg.expressions import EqualTo
+    @pytest.mark.parametrize(
+        ("op", "expr_type_name"),
+        [
+            (FilterOp.EQ, "EqualTo"),
+            (FilterOp.GT, "GreaterThan"),
+            (FilterOp.LT, "LessThan"),
+            (FilterOp.GE, "GreaterThanOrEqual"),
+            (FilterOp.LE, "LessThanOrEqual"),
+            (FilterOp.NE, "NotEqualTo"),
+        ],
+    )
+    def test_single_filter_maps_op_to_expression(self, op, expr_type_name):
+        import pyiceberg.expressions as pie
 
-        filters = [Filter(column="category", op=FilterOp.EQ, value="A")]
-        expr = filters_to_iceberg_expression(filters)
-        assert isinstance(expr, EqualTo)
-
-    def test_single_gt_filter(self):
-        from pyiceberg.expressions import GreaterThan
-
-        filters = [Filter(column="value", op=FilterOp.GT, value=100)]
-        expr = filters_to_iceberg_expression(filters)
-        assert isinstance(expr, GreaterThan)
-
-    def test_single_lt_filter(self):
-        from pyiceberg.expressions import LessThan
-
-        filters = [Filter(column="value", op=FilterOp.LT, value=100)]
-        expr = filters_to_iceberg_expression(filters)
-        assert isinstance(expr, LessThan)
-
-    def test_single_ge_filter(self):
-        from pyiceberg.expressions import GreaterThanOrEqual
-
-        filters = [Filter(column="value", op=FilterOp.GE, value=100)]
-        expr = filters_to_iceberg_expression(filters)
-        assert isinstance(expr, GreaterThanOrEqual)
-
-    def test_single_le_filter(self):
-        from pyiceberg.expressions import LessThanOrEqual
-
-        filters = [Filter(column="value", op=FilterOp.LE, value=100)]
-        expr = filters_to_iceberg_expression(filters)
-        assert isinstance(expr, LessThanOrEqual)
-
-    def test_single_ne_filter(self):
-        from pyiceberg.expressions import NotEqualTo
-
-        filters = [Filter(column="category", op=FilterOp.NE, value="A")]
-        expr = filters_to_iceberg_expression(filters)
-        assert isinstance(expr, NotEqualTo)
+        expr = filters_to_iceberg_expression([Filter(column="value", op=op, value=100)])
+        assert isinstance(expr, getattr(pie, expr_type_name))
 
     def test_multiple_filters_combined_with_and(self):
         from pyiceberg.expressions import And

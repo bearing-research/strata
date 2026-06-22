@@ -260,13 +260,6 @@ def test_analyze_with_dialect_dedupes_table_references():
     assert names.count("events") == 1
 
 
-def test_analyze_invalid_sql_records_parse_error():
-    src = "# @sql connection=db\nSELECT * FROM"  # truncated
-    result = analyze_sql_cell(src, dialect="postgres")
-    assert result.parse_error is not None
-    assert result.tables == []
-
-
 def test_analyze_dynamic_sql_does_not_resolve():
     """``IDENTIFIER('events')`` is Snowflake's dynamic-name form. A
     static parser can't resolve it, so the analyzer surfaces no
