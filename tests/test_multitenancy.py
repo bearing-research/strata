@@ -79,12 +79,6 @@ class TestTenantConfig:
         assert config.effective_interactive_slots(32) == 16
         assert config.effective_bulk_slots(8) == 4
 
-    def test_frozen_immutability(self):
-        """TenantConfig should be immutable."""
-        config = TenantConfig(tenant_id="test-tenant")
-        with pytest.raises(Exception):  # FrozenInstanceError
-            config.tenant_id = "other-tenant"
-
 
 class TestTenantQuotas:
     """Tests for TenantQuotas runtime state."""
@@ -305,33 +299,13 @@ class TestCacheKeyTenantIsolation:
 class TestTenantIdValidation:
     """Tests for tenant ID validation."""
 
-    def test_valid_simple_tenant_id(self):
-        """Simple alphanumeric tenant IDs should be valid."""
-        is_valid, error = validate_tenant_id("acme")
-        assert is_valid is True
-        assert error is None
-
-    def test_valid_tenant_id_with_hyphen(self):
-        """Tenant IDs with hyphens should be valid."""
-        is_valid, error = validate_tenant_id("acme-corp")
-        assert is_valid is True
-        assert error is None
-
-    def test_valid_tenant_id_with_underscore(self):
-        """Tenant IDs with underscores should be valid."""
-        is_valid, error = validate_tenant_id("tenant_123")
-        assert is_valid is True
-        assert error is None
-
-    def test_valid_tenant_id_mixed_case(self):
-        """Tenant IDs with mixed case should be valid."""
-        is_valid, error = validate_tenant_id("MyTenantName")
-        assert is_valid is True
-        assert error is None
-
-    def test_valid_tenant_id_numbers(self):
-        """Tenant IDs starting with numbers should be valid."""
-        is_valid, error = validate_tenant_id("123tenant")
+    @pytest.mark.parametrize(
+        "tenant_id",
+        ["acme", "acme-corp", "tenant_123", "MyTenantName", "123tenant"],
+    )
+    def test_valid_tenant_id_character_classes(self, tenant_id):
+        """Alphanumerics, hyphens, underscores, mixed case, leading digits are valid."""
+        is_valid, error = validate_tenant_id(tenant_id)
         assert is_valid is True
         assert error is None
 

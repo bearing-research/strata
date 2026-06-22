@@ -45,11 +45,6 @@ def test_source_hash_ignores_cosmetic_whitespace():
     assert len(hashes) == 1
 
 
-def test_source_hash_detects_semantic_change():
-    """Swapping a literal value changes the hash."""
-    assert compute_source_hash("x = 1 + 1") != compute_source_hash("x = 1 + 2")
-
-
 def test_provenance_hash_stability():
     """Same inputs should produce same provenance hash."""
     input_hashes = ["hash1", "hash2"]

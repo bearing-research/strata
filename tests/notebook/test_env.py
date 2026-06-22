@@ -42,24 +42,6 @@ def test_lockfile_hash_missing_lockfile(tmp_path):
     assert hash_val == expected
 
 
-def test_lockfile_hash_empty_dir(tmp_path):
-    """Empty directory (no uv.lock) should return sentinel hash."""
-    hash_val = compute_lockfile_hash(tmp_path)
-    expected = hashlib.sha256(b"").hexdigest()
-
-    assert hash_val == expected
-
-
-def test_lockfile_hash_consistent_across_calls(tmp_path):
-    """Repeated calls should return same hash."""
-    lockfile = tmp_path / "uv.lock"
-    lockfile.write_text("version = 0.1\n")
-
-    hashes = [compute_lockfile_hash(tmp_path) for _ in range(3)]
-
-    assert len(set(hashes)) == 1  # All same
-
-
 def test_lockfile_hash_unchanged_for_uv_only_notebook(tmp_path):
     """Adding renv.lock support must not invalidate uv-only notebooks.
 

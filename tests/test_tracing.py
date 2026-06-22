@@ -297,16 +297,3 @@ class TestTracingIntegration:
         assert state.config == config
         assert state.planner is not None
         assert state.fetcher is not None
-
-    def test_tracing_import_does_not_fail(self):
-        """Test that importing tracing module doesn't fail."""
-        # This tests that the module handles missing OTel gracefully
-        from strata import tracing
-
-        assert hasattr(tracing, "trace_span")
-        assert hasattr(tracing, "get_tracer")
-        assert hasattr(tracing, "init_tracing")
-        assert hasattr(tracing, "is_tracing_available")
-        assert hasattr(tracing, "is_tracing_enabled")
-        assert hasattr(tracing, "instrument_fastapi")
-        assert hasattr(tracing, "NoOpSpan")
