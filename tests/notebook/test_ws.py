@@ -13,6 +13,7 @@ portal entirely and gives #52 direct owner-gate coverage. See #205 / #52.
 import asyncio
 import json
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -79,19 +80,25 @@ def _make_fake_ws(session, *, inbound=None, headers=None):
     return fake, _ensure_execution_state(session.id)
 
 
-async def _wait_until(predicate, *, yields=2000):
-    """Yield control to the loop until ``predicate()`` is true.
+async def _wait_until(predicate, *, timeout=10.0, interval=0.005):
+    """Poll until ``predicate()`` becomes true, then return.
 
-    Used to let a handler-scheduled background task reach its next ``await``
-    (e.g. broadcast the ``running`` frame, then block on a long sleep) before
-    the test cancels it. Bounded by a yield count rather than wall-clock time
-    so it carries no timing assertion; raises if the predicate never holds.
+    A bounded wait, not a timing assertion: it succeeds the moment the
+    condition holds and fails only if it never does within the generous
+    ``timeout``. Unlike a tight ``asyncio.sleep(0)`` spin, it sleeps a small
+    *real* interval between checks, so conditions that depend on a background
+    thread — e.g. the build server finalizing a cancelled build on its own
+    uvicorn thread — actually get CPU to make progress under load (coverage,
+    parallel servers). ``timeout`` is a generous ceiling that only trips on a
+    genuine hang, never on how fast the condition is reached.
     """
-    for _ in range(yields):
-        if predicate():
-            return
-        await asyncio.sleep(0)
-    raise AssertionError("condition never became true while draining the event loop")
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                "condition never became true while waiting on the event loop / background threads"
+            )
+        await asyncio.sleep(interval)
 
 
 def _running_frames(fake, cell_id):
