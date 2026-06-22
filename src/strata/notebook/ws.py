@@ -2186,6 +2186,10 @@ async def _run_partition_batch(
                     if session.dag is not None
                     else set()
                 ),
+                # Read-set for runtime mutation detection: the harness snapshots
+                # these before the cell runs and warns if any are mutated in
+                # place (the residual forms the static analyzer can't see).
+                "references": sorted(cell.references or []),
                 "env": effective_env,
                 "mount_manifest": mount_manifest,
                 "table_manifest": table_manifest,
@@ -2228,6 +2232,7 @@ async def _run_partition_batch(
             cache_hit=result.cache_hit,
             error=result.error,
             execution_method="batch" if not result.cache_hit else "cached",
+            mutation_warnings=result.mutation_warnings,
         )
 
         session.record_execution(result.cell_id, 0.0, result.cache_hit)

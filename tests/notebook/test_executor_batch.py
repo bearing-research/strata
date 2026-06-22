@@ -374,3 +374,39 @@ async def test_display_only_cell_is_cacheable(tmp_path: Path):
     assert c2_second.status == "cache_hit", (
         f"display-only cell should cache-hit on re-run; got {c2_second.status}"
     )
+
+
+@pytest.mark.asyncio
+async def test_batch_warns_on_inplace_input_mutation_end_to_end(tmp_path: Path):
+    """A batched cell that mutates an upstream DataFrame in place surfaces a
+    mutation warning on its BatchCellResult — the full harness → persist →
+    executor chain. Uses the aliased form the static analyzer can't recapture.
+    """
+    src_make = "import pandas as pd\ndf = pd.DataFrame({'a': [1, 2, 3]})\n"
+    src_mutate = "alias = df\nalias.drop(index=[0], inplace=True)\nn = len(df)\n"
+    session = _make_session_with_cells(
+        tmp_path,
+        [("make", src_make), ("mutate", src_mutate)],
+    )
+    specs = _populate_consumed_vars(
+        [_cell_spec("make", src_make), _cell_spec("mutate", src_mutate)],
+        session,
+    )
+    # references drive the harness's runtime mutation detection.
+    for spec in specs:
+        cell = session.notebook_state.get_cell(spec["cell_id"])
+        spec["references"] = sorted(cell.references or [])
+
+    executor = CellExecutor(session)
+    result = await executor.execute_batch(specs)
+
+    assert result.completed, (
+        f"batch did not complete: end_reason={result.end_reason} "
+        f"failed_cell_id={result.failed_cell_id}"
+    )
+    by_id = {r.cell_id: r for r in result.cell_results}
+    # Producer mutated nothing it received; mutator warns about df.
+    assert by_id["make"].mutation_warnings == []
+    warnings = by_id["mutate"].mutation_warnings
+    assert len(warnings) == 1
+    assert warnings[0]["var_name"] == "df"
