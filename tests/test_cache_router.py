@@ -7,6 +7,8 @@ plus targeted state patches for the error / warmer-present branches.
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -143,6 +145,10 @@ class TestCacheStatsAndEntries:
 
 
 class TestClearCache:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="DiskCache.clear() hits Windows file-locking on the just-created cache dir",
+    )
     def test_clear_succeeds(self, cache_client):
         client, _ = cache_client
         resp = client.post("/v1/cache/clear")
