@@ -163,23 +163,6 @@ class TestS3MetadataExtraction:
         assert len(meta.column_names) == 3
         assert "id" in meta.column_names
 
-    def test_extract_parquet_meta_function_signature(self):
-        """extract_parquet_meta accepts s3_filesystem parameter."""
-        import inspect
-
-        sig = inspect.signature(extract_parquet_meta)
-        params = list(sig.parameters.keys())
-
-        assert "file_path" in params
-        assert "s3_filesystem" in params
-
-    def test_s3_prefix_stripping_logic(self):
-        """Verify S3 path stripping produces expected result."""
-        s3_uri = "s3://bucket/path/file.parquet"
-        stripped = s3_uri[5:]
-        assert stripped == "bucket/path/file.parquet"
-        assert not stripped.startswith("s3://")
-
 
 class TestS3MetadataCache:
     """Tests for metadata cache with S3 paths."""

@@ -20,23 +20,21 @@ from strata.notebook.models import CellLanguage
 
 
 class TestBuiltInRegistrations:
-    """The five shipped languages must resolve at import time."""
+    """The five shipped languages must resolve at import time (R registers its
+    adapter at ``languages.r`` package import)."""
 
-    def test_python_registered(self):
-        assert get_language_executor(CellLanguage.PYTHON) is not None
-
-    def test_prompt_registered(self):
-        assert get_language_executor(CellLanguage.PROMPT) is not None
-
-    def test_sql_registered(self):
-        assert get_language_executor(CellLanguage.SQL) is not None
-
-    def test_markdown_registered(self):
-        assert get_language_executor(CellLanguage.MARKDOWN) is not None
-
-    def test_r_registered(self):
-        """``languages.r`` registers its adapter at package import time."""
-        assert get_language_executor(CellLanguage.R) is not None
+    @pytest.mark.parametrize(
+        "language",
+        [
+            CellLanguage.PYTHON,
+            CellLanguage.PROMPT,
+            CellLanguage.SQL,
+            CellLanguage.MARKDOWN,
+            CellLanguage.R,
+        ],
+    )
+    def test_shipped_language_registered(self, language):
+        assert get_language_executor(language) is not None
 
 
 class TestBehaviourFlags:

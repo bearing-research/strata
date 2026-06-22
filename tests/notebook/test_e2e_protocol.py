@@ -196,49 +196,25 @@ class TestSourceUpdate:
 class TestDataTypes:
     """Test different Python data types survive the artifact round-trip."""
 
-    def test_dict_output(self, setup):
-        """Dict variable is serialized and available."""
+    @pytest.mark.parametrize(
+        ("source", "var_name"),
+        [
+            ('d = {"a": 1, "b": [2, 3]}', "d"),
+            ("items = [1, 2, 3, 4, 5]", "items"),
+            ("nothing = None", "nothing"),
+            ("flag = True", "flag"),
+        ],
+    )
+    def test_primitive_output_is_serialized(self, setup, source, var_name):
+        """Dict / list / None / bool variables are serialized into cell_output."""
         client, tmp = setup
-        nb = NotebookBuilder(tmp).add_cell("c1", 'd = {"a": 1, "b": [2, 3]}')
+        nb = NotebookBuilder(tmp).add_cell("c1", source)
 
         with open_notebook_session(client, nb.path) as (sid, session):
             with ws_connect(client, sid) as ws:
                 result = execute_cell_and_wait(ws, "c1")
                 assert result["type"] == "cell_output"
-                assert "d" in result["payload"]["outputs"]
-
-    def test_list_output(self, setup):
-        """List variable is serialized."""
-        client, tmp = setup
-        nb = NotebookBuilder(tmp).add_cell("c1", "items = [1, 2, 3, 4, 5]")
-
-        with open_notebook_session(client, nb.path) as (sid, session):
-            with ws_connect(client, sid) as ws:
-                result = execute_cell_and_wait(ws, "c1")
-                assert result["type"] == "cell_output"
-                assert "items" in result["payload"]["outputs"]
-
-    def test_none_output(self, setup):
-        """None variable is serialized."""
-        client, tmp = setup
-        nb = NotebookBuilder(tmp).add_cell("c1", "nothing = None")
-
-        with open_notebook_session(client, nb.path) as (sid, session):
-            with ws_connect(client, sid) as ws:
-                result = execute_cell_and_wait(ws, "c1")
-                assert result["type"] == "cell_output"
-                assert "nothing" in result["payload"]["outputs"]
-
-    def test_bool_output(self, setup):
-        """Boolean variable is serialized."""
-        client, tmp = setup
-        nb = NotebookBuilder(tmp).add_cell("c1", "flag = True")
-
-        with open_notebook_session(client, nb.path) as (sid, session):
-            with ws_connect(client, sid) as ws:
-                result = execute_cell_and_wait(ws, "c1")
-                assert result["type"] == "cell_output"
-                assert "flag" in result["payload"]["outputs"]
+                assert var_name in result["payload"]["outputs"]
 
     def test_variable_round_trip(self, setup):
         """Variable from c1 survives artifact store and is usable in c2."""

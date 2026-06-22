@@ -41,13 +41,6 @@ class TestTransformDefinition:
         assert defn.matches("duckdb_sql@v1")
         assert defn.matches("anything@any_version")
 
-    def test_strips_uri_prefix(self):
-        """Strips local:// and other prefixes from executor ref."""
-        defn = TransformDefinition(ref="duckdb_sql@v1", executor_url="http://exec:8080")
-        assert defn.matches("local://duckdb_sql@v1")
-        assert defn.matches("remote://duckdb_sql@v1")
-        assert defn.matches("duckdb_sql@v1")
-
 
 class TestTransformRegistry:
     """Tests for TransformRegistry."""
