@@ -83,6 +83,38 @@ class TestAnalyzerAssignmentTypes:
         assert "obj" in result.references
         assert result.mutation_defines == ["obj"]
 
+    def test_inplace_method_call_is_mutation_define(self):
+        """df.drop(..., inplace=True) mutates df → define + reference + mutation."""
+        result = analyze_cell("df.drop(columns=['a'], inplace=True)")
+        assert result.defines == ["df"]
+        assert "df" in result.references
+        assert result.mutation_defines == ["df"]
+
+    def test_inplace_false_is_not_a_mutation(self):
+        """inplace=False reads df but does not mutate it."""
+        result = analyze_cell("df.drop(columns=['a'], inplace=False)")
+        assert "df" in result.references
+        assert result.mutation_defines == []
+        assert result.defines == []
+
+    def test_inplace_non_literal_is_not_a_mutation(self):
+        """A non-literal inplace= flag is too ambiguous to treat as a mutation."""
+        result = analyze_cell("df.sort_values('a', inplace=flag)")
+        assert result.mutation_defines == []
+
+    def test_inplace_on_local_assignment_does_not_drag_phantom_upstream(self):
+        """df = ...; df.fillna(inplace=True): df is locally produced, not upstream."""
+        result = analyze_cell("df = make()\ndf.fillna(0, inplace=True)")
+        assert "df" in result.defines
+        assert result.mutation_defines == []
+        assert "df" not in result.references
+
+    def test_inplace_on_call_result_has_no_receiver_define(self):
+        """get_df().drop(inplace=True): mutating a temporary has no cross-cell effect."""
+        result = analyze_cell("get_df().drop(columns=['a'], inplace=True)")
+        assert result.mutation_defines == []
+        assert result.defines == []
+
     def test_annotated_assignment(self):
         """Annotated assignment: x: int = ..."""
         result = analyze_cell("x: int = 1")
