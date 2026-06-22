@@ -2,12 +2,59 @@
 
 import pytest
 
+from strata.notebook.analyzer import analyze_cell
 from strata.notebook.dag import (
     CellAnalysisWithId,
     DagEdge,
     NotebookDag,
     VariantNameCollisionError,
 )
+
+
+def _analyzed_cell(cell_id: str, source: str) -> CellAnalysisWithId:
+    """Build a DAG cell from real source via the analyzer (defines/references)."""
+    analysis = analyze_cell(source)
+    return CellAnalysisWithId(
+        id=cell_id,
+        defines=analysis.defines,
+        references=analysis.references,
+    )
+
+
+class TestInplaceMutationRouting:
+    """An ``inplace=True`` method call makes the mutating cell a (re)producer
+    of the receiver, so downstream reads resolve to the post-mutation value in
+    both single-cell and batch execution (issue: batch input-isolation gap)."""
+
+    def test_inplace_mutation_routes_downstream_through_mutating_cell(self):
+        cells = [
+            _analyzed_cell("load", "df = load_data()"),
+            _analyzed_cell("mutate", "df.drop(columns=['x'], inplace=True)"),
+            _analyzed_cell("use", "total = df.sum()"),
+        ]
+        dag = NotebookDag.from_cells(cells)
+
+        # df is read by the mutating cell (edge load → mutate) and the mutating
+        # cell becomes df's producer for the downstream reader (mutate → use).
+        assert dag.cell_upstream["mutate"] == ["load"]
+        assert dag.cell_upstream["use"] == ["mutate"]
+
+        # Therefore the mutating cell must serialize df (recapture), and load's
+        # df is consumed by the mutating cell — not directly by the reader.
+        assert dag.consumed_variables["mutate"] == {"df"}
+        assert dag.consumed_variables["load"] == {"df"}
+
+    def test_non_inplace_method_does_not_reroute(self):
+        """Without inplace=True the call is a pure read — df still flows load → use."""
+        cells = [
+            _analyzed_cell("load", "df = load_data()"),
+            _analyzed_cell("peek", "head = df.head()"),
+            _analyzed_cell("use", "total = df.sum()"),
+        ]
+        dag = NotebookDag.from_cells(cells)
+
+        assert dag.cell_upstream["use"] == ["load"]
+        assert dag.consumed_variables["peek"] == set()
 
 
 class TestDagBuildingBasics:

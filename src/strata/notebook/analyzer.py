@@ -45,6 +45,14 @@ def _collect_name_targets(target: ast.expr, out: set[str]) -> None:
         _collect_name_targets(target.value, out)
 
 
+def _has_inplace_true(keywords: list[ast.keyword]) -> bool:
+    """Return whether a call's keywords contain a literal ``inplace=True``."""
+    return any(
+        kw.arg == "inplace" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+        for kw in keywords
+    )
+
+
 class VariableAnalyzer(ast.NodeVisitor):
     """AST visitor that collects defined and referenced variables."""
 
@@ -166,6 +174,30 @@ class VariableAnalyzer(ast.NodeVisitor):
         self._add_assign_target(node.target)
         if node.value:
             self.visit(node.value)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        """Detect in-place mutation expressed as ``X.method(..., inplace=True)``.
+
+        ``inplace=True`` is the unambiguous pandas idiom for "mutate the
+        receiver" (``df.drop`` / ``fillna`` / ``sort_values`` / ``rename`` …).
+        Unlike ``df["col"] = …`` it isn't an assignment target, so the analyzer
+        would otherwise treat ``df`` as read-only. In the shared-namespace
+        batch path that divergence is a correctness bug: a downstream cell
+        observes the mutated object while the stored artifact still holds the
+        pre-mutation value, so its provenance references stale inputs.
+
+        Flagging the receiver root as a mutation-define routes it through the
+        same machinery as subscript mutation — the cell becomes a (re)producer
+        of ``df`` in the DAG and serializes the post-mutation value, so
+        downstream reads resolve to it in both single-cell and batch execution.
+        Only a literal ``inplace=True`` triggers this (not ``inplace=False`` or
+        a variable), and only an attribute call on a name/attribute receiver
+        (mutating a call result has no cross-cell effect).
+        """
+        if isinstance(node.func, ast.Attribute) and _has_inplace_true(node.keywords):
+            self._add_reference_target(node.func.value)
+            self._add_mutation_define(node.func.value)
+        self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Handle: def f(): ... — function name is defined, body is nested scope.
