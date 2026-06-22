@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from typing import Any
 from unittest.mock import patch
 
@@ -215,17 +214,29 @@ class TestParallelSafeDispatch:
 
     @pytest.mark.asyncio
     async def test_read_only_tools_run_concurrently(self):
-        # Two concurrent reads should overlap, so the total wall time
-        # is closer to one delay than two.
-        delay = 0.1
+        # Reads must overlap rather than run serially. Asserted structurally via
+        # peak concurrency (no wall-clock threshold): each read records that it
+        # is in flight, and a rendezvous gate makes both enter before either
+        # leaves. Concurrent dispatch → peak == 2; a serial regression keeps
+        # peak at 1 and trips the gate's safety timeout — a fast, clear failure.
+        running = 0
+        peak = 0
         call_count = 0
+        both_in_flight = asyncio.Event()
 
         async def fake_execute_tool(
             session, tool_name, arguments, notebook_id=None, approval_callback=None
         ):
-            nonlocal call_count
+            nonlocal running, peak, call_count
             call_count += 1
-            await asyncio.sleep(delay)
+            running += 1
+            peak = max(peak, running)
+            if running >= 2:
+                both_in_flight.set()  # last arrival releases the rest
+            # Block until every read is concurrently in flight. Under serial
+            # dispatch the sibling never enters, so this times out quickly.
+            await asyncio.wait_for(both_in_flight.wait(), timeout=5)
+            running -= 1
             return f"{tool_name} result"
 
         tool_calls = [
@@ -241,7 +252,6 @@ class TestParallelSafeDispatch:
         record: list[AgentToolCall] = []
 
         with patch("strata.notebook.llm.agent.execute_tool", fake_execute_tool):
-            start = time.monotonic()
             messages = await _run_tool_calls_in_safe_groups(
                 session=None,  # type: ignore[arg-type]
                 tool_calls=tool_calls,
@@ -250,12 +260,10 @@ class TestParallelSafeDispatch:
                 progress_callback=None,
                 record=record,
             )
-            elapsed = time.monotonic() - start
 
         assert call_count == 2
-        # If they ran serially, elapsed >= 2*delay. The parallel path
-        # should comfortably finish under 1.5*delay.
-        assert elapsed < delay * 1.5
+        # Both reads were in flight at the same time → they ran concurrently.
+        assert peak == 2
         assert {m["tool_call_id"] for m in messages} == {"c1", "c2"}
 
     @pytest.mark.asyncio
