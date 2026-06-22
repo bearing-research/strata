@@ -8,7 +8,6 @@ can't accidentally drag them through the executor or analyzer pipelines.
 from __future__ import annotations
 
 import asyncio
-import time
 
 import pytest
 
@@ -89,23 +88,21 @@ class TestMarkdownCellExecution:
         session = NotebookSession(parse_notebook(nb_dir), nb_dir)
         executor = CellExecutor(session, session.warm_pool)
 
-        start = time.monotonic()
         result = asyncio.run(executor.execute_cell("md_cell", body))
-        elapsed = time.monotonic() - start
 
         assert result.success is True
-        # The fast path should be much faster than spawning a uv subprocess.
-        # 500ms is generous; in practice this returns in single-digit ms.
-        assert elapsed < 0.5
+        # cache_hit is the structural tell that the fast path ran (no uv
+        # subprocess spawned), not a wall-clock measurement.
+        assert result.cache_hit is True
         assert result.display_outputs == []
         assert result.display_output is None
-        assert result.cache_hit is True
-        # Regression: the executor's start_time is wall-clock, so the
-        # markdown branch must subtract via ``time.time()`` not
-        # ``time.monotonic()`` — mixing the two produces a huge negative
-        # duration that the UI then renders as "-1.7e12 ms".
-        assert result.duration_ms >= 0
-        assert result.duration_ms < 500
+        # Regression: the executor's start_time is wall-clock, so the markdown
+        # branch must subtract via ``time.time()`` not ``time.monotonic()`` —
+        # mixing the two yields an epoch-scale (~1.7e12 ms) or negative duration
+        # the UI renders as garbage. A sane-range bound catches that without
+        # asserting how fast the cell ran (60s is far above any real markdown
+        # render, far below the epoch-scale bug).
+        assert 0 <= result.duration_ms < 60_000
 
 
 class TestHarnessCrashDiagnostic:

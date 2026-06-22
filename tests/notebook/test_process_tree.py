@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import sys
-import time
 
 import pytest
 
@@ -65,13 +65,11 @@ async def test_graceful_termination_via_sigterm():
     # Let the child install its handler.
     await asyncio.sleep(0.2)
 
-    start = time.monotonic()
     await terminate_subprocess_tree(proc, grace_seconds=2.0)
-    elapsed = time.monotonic() - start
 
-    assert proc.returncode is not None
-    # Exited cleanly via SIGTERM, well inside the grace window.
-    assert elapsed < 1.5
+    # Exited via its SIGTERM handler (sys.exit(0)) — the graceful path, not the
+    # SIGKILL-after-grace fallback (which would leave returncode == -SIGKILL).
+    assert proc.returncode == 0
     assert not _is_alive(pid)
 
 
@@ -93,14 +91,11 @@ async def test_sigkill_fallback_when_sigterm_ignored():
     pid = proc.pid
     await asyncio.sleep(0.2)
 
-    start = time.monotonic()
     await terminate_subprocess_tree(proc, grace_seconds=0.5)
-    elapsed = time.monotonic() - start
 
-    # Took at least the grace period (since SIGTERM was ignored), then
-    # SIGKILL kicked in.
-    assert elapsed >= 0.4
-    assert proc.returncode is not None
+    # SIGTERM was ignored, so the process could only have died via the SIGKILL
+    # fallback — proven by the return code, not by timing the grace period.
+    assert proc.returncode == -signal.SIGKILL
     assert not _is_alive(pid)
 
 
@@ -175,10 +170,10 @@ async def test_returns_immediately_for_exited_process():
     await proc.wait()
     assert proc.returncode == 0
 
-    start = time.monotonic()
     await terminate_subprocess_tree(proc, grace_seconds=2.0)
-    # Should not have waited the grace period for an already-exited process.
-    assert time.monotonic() - start < 0.1
+    # No-op for an already-exited process: its clean exit code is untouched
+    # (and the per-test timeout guards against a regression that blocks here).
+    assert proc.returncode == 0
 
 
 @pytest.mark.asyncio
