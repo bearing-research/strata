@@ -83,6 +83,37 @@ def test_assertion_rewriting_fires(tmp_path):
     assert "assert 3 == 5" in msg
 
 
+def test_failure_message_includes_captured_stdout(tmp_path):
+    """A print() before the failing assert is captured in the message, not lost.
+
+    ``report.longrepr`` carries only the traceback + assert diff; the test's own
+    stdout/stderr is appended from ``report.capstdout`` so debugging output a test
+    emitted is visible in the UI.
+    """
+    res = _run(
+        tmp_path,
+        "x = 1\n",
+        {},
+        "def test_fail(cell):\n    print('debug: x is', cell.x)\n    assert cell.x == 2\n",
+    )
+    msg = next(t["message"] for t in res["tests"] if t["name"] == "test_fail")
+    assert "assert 1 == 2" in msg  # the assert diff is still there
+    assert "Captured stdout" in msg
+    assert "debug: x is 1" in msg  # the test's own print survived
+
+
+def test_passing_test_has_no_captured_output_noise(tmp_path):
+    """Captured output is only appended on failure — passing tests stay clean."""
+    res = _run(
+        tmp_path,
+        "x = 1\n",
+        {},
+        "def test_ok(cell):\n    print('chatty')\n    assert cell.x == 1\n",
+    )
+    msg = next(t["message"] for t in res["tests"] if t["name"] == "test_ok")
+    assert msg == ""  # passing → empty message, no captured-stdout block
+
+
 def test_cell_source_error_is_an_error_not_a_fail(tmp_path):
     res = _run(
         tmp_path,
