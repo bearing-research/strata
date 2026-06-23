@@ -26,6 +26,7 @@ from strata.notebook.dependencies import (
     RPackageInfo,
     RPackageListing,
     add_dependency,
+    ensure_dev_tool,
     export_requirements_text,
     import_environment_yaml_text,
     import_environment_yaml_text_streaming,
@@ -127,6 +128,47 @@ class TestAddDependency:
         result = add_dependency(nb_dir, "this-package-definitely-does-not-exist-xyz123")
         assert result.success is False
         assert result.error is not None
+
+    def test_dev_flag_passes_uv_add_dev(self, tmp_path: Path):
+        """``dev=True`` runs ``uv add --dev`` (so the tool lands in the dev group)."""
+        nb_dir = create_notebook(tmp_path, "dev_arg")
+        captured: dict = {}
+        original = add_dependency.__globals__["_run_uv_command"]
+
+        def _capture(notebook_dir, args, **kwargs):
+            captured["args"] = args
+            return original(notebook_dir, args, **kwargs)
+
+        with patch("strata.notebook.dependencies._run_uv_command", side_effect=_capture):
+            result = add_dependency(nb_dir, "iniconfig", dev=True)
+
+        assert result.success
+        assert captured["args"] == ["add", "--dev", "iniconfig"]
+
+    def test_dev_dependency_not_in_runtime_deps(self, tmp_path: Path):
+        """A dev add lands in [dependency-groups] dev, not [project.dependencies]."""
+        import tomllib
+
+        nb_dir = create_notebook(tmp_path, "dev_group")
+        assert add_dependency(nb_dir, "iniconfig", dev=True).success
+
+        data = tomllib.loads((nb_dir / "pyproject.toml").read_text())
+        runtime = data.get("project", {}).get("dependencies", [])
+        dev = data.get("dependency-groups", {}).get("dev", [])
+        assert not any("iniconfig" in d for d in runtime)
+        assert any("iniconfig" in d for d in dev)
+
+    def test_ensure_dev_tool_installs_into_dev_group(self, tmp_path: Path):
+        """``ensure_dev_tool`` is the generic provisioning entry (dev group)."""
+        import tomllib
+
+        nb_dir = create_notebook(tmp_path, "ensure_tool")
+        result = ensure_dev_tool(nb_dir, "iniconfig")
+
+        assert result.success
+        data = tomllib.loads((nb_dir / "pyproject.toml").read_text())
+        dev = data.get("dependency-groups", {}).get("dev", [])
+        assert any("iniconfig" in d for d in dev)
 
     def test_add_when_uv_missing(self, tmp_path: Path):
         """Returns failure when uv is not available."""

@@ -498,6 +498,10 @@ class CellTestResult(BaseModel):
         default=False,
         description="True when pytest is not importable in the notebook venv",
     )
+    auto_installed: list[str] = Field(
+        default_factory=list,
+        description="Dev tools (e.g. pytest) auto-provisioned into the venv for this run",
+    )
 
 
 class CellState(BaseModel):

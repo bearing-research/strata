@@ -176,6 +176,7 @@ class CellTestResultsPayload(WsPayload):
     stale: bool
     pytest_unavailable: bool
     ran_at: int
+    auto_installed: list[str] = Field(default_factory=list)
 
 
 class EnvironmentJobModel(WsPayload):

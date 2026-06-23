@@ -166,6 +166,7 @@ def test_test_results_serializes_nested_cases_and_drops_internal_hashes():
     # Client-facing fields + nested cases serialize as plain dicts.
     assert wire["passed"] == 1
     assert wire["tests"][1]["message"] == "assert 3 == 5"
+    assert wire["auto_installed"] == []  # no dev tool provisioned this run
     assert set(wire) == {
         "cell_id",
         "passed",
@@ -176,6 +177,7 @@ def test_test_results_serializes_nested_cases_and_drops_internal_hashes():
         "stale",
         "pytest_unavailable",
         "ran_at",
+        "auto_installed",
     }
 
 
