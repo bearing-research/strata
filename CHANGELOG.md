@@ -5,7 +5,7 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## 0.4.0 — 2026-06-22
+## 0.4.0 — 2026-06-24
 
 0.4.0 is a **consolidation and hardening** cycle: the headline is an internal
 restructuring of the server, alongside a new notebook feature, concurrency-bug
