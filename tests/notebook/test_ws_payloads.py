@@ -269,3 +269,74 @@ def test_environment_job_model_matches_snapshot_fields():
         EnvironmentJobEventPayload.model_fields["environment_job"].annotation.model_fields
     )
     assert model_fields == snapshot_fields
+
+
+def test_dag_update_payload_round_trips_realistic_shape():
+    """A realistic dag_update — edges, topology, a module cell + a plain cell,
+    and a variant group — validates and round-trips without dropping fields."""
+    from strata.notebook.ws_payloads import dag_update_payload
+
+    raw = {
+        "edges": [
+            {"from_cell_id": "a", "to_cell_id": "b", "variable": "x"},
+        ],
+        "roots": ["a"],
+        "leaves": ["b"],
+        "topological_order": ["a", "b"],
+        "cells": [
+            {
+                "id": "a",
+                "defines": ["featurize"],
+                "references": [],
+                "upstream_ids": [],
+                "downstream_ids": ["b"],
+                "is_leaf": False,
+                "annotation_diagnostics": [],
+                "variant_group": None,
+                "variant_name": None,
+                "variant_active": None,
+                "is_module_cell": True,
+                "module_exports": [{"name": "featurize", "kind": "function"}],
+            },
+            {
+                # A non-Python / non-module cell omits is_module_cell + module_exports.
+                "id": "b",
+                "defines": ["y"],
+                "references": ["x"],
+                "upstream_ids": ["a"],
+                "downstream_ids": [],
+                "is_leaf": True,
+                "annotation_diagnostics": [{"code": "worker_unknown", "message": "…"}],
+                "variant_group": "model",
+                "variant_name": "rf",
+                "variant_active": True,
+            },
+        ],
+        "variant_groups": [{"group": "model", "active": "rf", "members": ["rf", "xgb"]}],
+    }
+
+    wire = dag_update_payload(raw)
+
+    assert [e["from_cell_id"] for e in wire["edges"]] == ["a"]
+    assert wire["topological_order"] == ["a", "b"]
+    module_cell = next(c for c in wire["cells"] if c["id"] == "a")
+    assert module_cell["is_module_cell"] is True
+    assert module_cell["module_exports"] == [{"name": "featurize", "kind": "function"}]
+    plain_cell = next(c for c in wire["cells"] if c["id"] == "b")
+    assert plain_cell["is_module_cell"] is False  # default when omitted
+    assert plain_cell["module_exports"] is None
+    assert plain_cell["annotation_diagnostics"][0]["code"] == "worker_unknown"
+    assert wire["variant_groups"][0]["group"] == "model"
+
+
+def test_dag_update_payload_rejects_unmodeled_cell_field():
+    from strata.notebook.ws_payloads import dag_update_payload
+
+    with pytest.raises(ValidationError):
+        dag_update_payload(
+            {
+                "cells": [
+                    {"id": "a", "is_leaf": True, "surprise_field": 1},
+                ],
+            }
+        )

@@ -43,6 +43,7 @@ from strata.notebook.ws_payloads import (
     CellTestResultsPayload,
     CellTestStatusPayload,
     cell_status_payload,
+    dag_update_payload,
     impact_preview_payload,
     profiling_summary_payload,
 )
@@ -1508,16 +1509,18 @@ async def _handle_cell_source_update(
             _make_message(
                 MessageType.DAG_UPDATE,
                 seq,
-                {
-                    "edges": dag_edges,
-                    "roots": list(session.dag.roots) if session.dag else [],
-                    "leaves": list(session.dag.leaves) if session.dag else [],
-                    "topological_order": (session.dag.topological_order if session.dag else []),
-                    "cells": cells_analysis,
-                    "variant_groups": [
-                        vg.model_dump() for vg in session.notebook_state.variant_groups
-                    ],
-                },
+                dag_update_payload(
+                    {
+                        "edges": dag_edges,
+                        "roots": list(session.dag.roots) if session.dag else [],
+                        "leaves": list(session.dag.leaves) if session.dag else [],
+                        "topological_order": (session.dag.topological_order if session.dag else []),
+                        "cells": cells_analysis,
+                        "variant_groups": [
+                            vg.model_dump() for vg in session.notebook_state.variant_groups
+                        ],
+                    }
+                ),
             ),
         )
 
@@ -1597,16 +1600,18 @@ async def _handle_variant_set_active(
             _make_message(
                 MessageType.DAG_UPDATE,
                 seq,
-                {
-                    "edges": dag_edges,
-                    "roots": list(session.dag.roots) if session.dag else [],
-                    "leaves": list(session.dag.leaves) if session.dag else [],
-                    "topological_order": (session.dag.topological_order if session.dag else []),
-                    "cells": cells_analysis,
-                    "variant_groups": [
-                        vg.model_dump() for vg in session.notebook_state.variant_groups
-                    ],
-                },
+                dag_update_payload(
+                    {
+                        "edges": dag_edges,
+                        "roots": list(session.dag.roots) if session.dag else [],
+                        "leaves": list(session.dag.leaves) if session.dag else [],
+                        "topological_order": (session.dag.topological_order if session.dag else []),
+                        "cells": cells_analysis,
+                        "variant_groups": [
+                            vg.model_dump() for vg in session.notebook_state.variant_groups
+                        ],
+                    }
+                ),
             ),
         )
 

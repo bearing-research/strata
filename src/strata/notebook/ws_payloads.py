@@ -18,8 +18,8 @@ a silently-shipped one — the point of typing the protocol is to catch drift.
 This is the **incremental first phase** (#44 is explicitly phase-by-phase): the
 during/after-execution streaming + test frames, which have small, stable shapes.
 Later phases cover ``cell_status`` / ``cell_output`` / ``cell_error`` (the big
-trio with many optional fields), the cascade / dag / ``notebook_state`` frames,
-the agent and environment-job frames, and the client→server frames.
+trio with many optional fields), the ``notebook_state`` aggregate frame, the
+``inspect_result`` frame, and the client→server frames.
 """
 
 from __future__ import annotations
@@ -293,3 +293,63 @@ class ProfilingSummaryPayload(WsPayload):
 def profiling_summary_payload(summary: dict[str, Any]) -> dict[str, Any]:
     """Validate ``session.get_profiling_summary()`` → the wire dict."""
     return ProfilingSummaryPayload.model_validate(summary).model_dump(mode="json")
+
+
+class DagEdgeModel(WsPayload):
+    """One DAG edge (mirrors ``NotebookDag.serialize_edges`` entries)."""
+
+    from_cell_id: str
+    to_cell_id: str
+    variable: str
+
+
+class ModuleExportModel(WsPayload):
+    """A symbol a module cell exports (name + kind)."""
+
+    name: str
+    kind: str
+
+
+class CellAnalysisModel(WsPayload):
+    """Per-cell DAG analysis carried on ``dag_update``.
+
+    The frontend merges authoritative defines / references / edges from this
+    without a REST round-trip. ``is_module_cell`` / ``module_exports`` are only
+    present for Python cells that export code symbols (default absent otherwise).
+    """
+
+    id: str
+    defines: list[str] = Field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
+    upstream_ids: list[str] = Field(default_factory=list)
+    downstream_ids: list[str] = Field(default_factory=list)
+    is_leaf: bool
+    # Already ``model_dump``-ed AnnotationDiagnostic rows — passed through.
+    annotation_diagnostics: list[dict[str, Any]] = Field(default_factory=list)
+    variant_group: str | None = None
+    variant_name: str | None = None
+    variant_active: bool | None = None
+    is_module_cell: bool = False
+    module_exports: list[ModuleExportModel] | None = None
+
+
+class DagUpdatePayload(WsPayload):
+    """``dag_update`` — the DAG changed.
+
+    Carries the edge list, roots/leaves/topological order, per-cell analysis,
+    and the active variant groups, so the client re-renders the graph and merges
+    authoritative cell relationships without a REST round-trip.
+    """
+
+    edges: list[DagEdgeModel] = Field(default_factory=list)
+    roots: list[str] = Field(default_factory=list)
+    leaves: list[str] = Field(default_factory=list)
+    topological_order: list[str] = Field(default_factory=list)
+    cells: list[CellAnalysisModel] = Field(default_factory=list)
+    # Already ``model_dump``-ed VariantGroup rows — passed through.
+    variant_groups: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def dag_update_payload(raw: dict[str, Any]) -> dict[str, Any]:
+    """Validate an assembled ``dag_update`` dict → the wire dict."""
+    return DagUpdatePayload.model_validate(raw).model_dump(mode="json")
