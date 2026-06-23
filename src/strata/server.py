@@ -2267,22 +2267,10 @@ def _require_registry_approver():
 _ACTIVE_BUILD_STATES = ("pending", "building", "running")
 
 
-def _build_transport_available() -> bool:
-    """Whether signed build transport APIs are available in the current mode."""
-    state = get_state()
-    return state.config.writes_enabled or state.config.server_transforms_enabled
-
-
-def _get_runtime_build_store():
-    """Get or initialize the runtime build store for signed build transport APIs."""
-    from strata.transforms.build_store import get_build_store
-
-    state = get_state()
-    artifact_dir = state.config.artifact_dir
-    if artifact_dir is None:
-        return None
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    return get_build_store(artifact_dir / "artifacts.sqlite")
+# ``_build_transport_available`` and ``_get_runtime_build_store`` moved into
+# ``strata.api.dependencies`` (#295) — they gate only the signed-transport build
+# routes (``api/routers/builds.py``), which now import them, and the
+# ``BuildTransportStore`` / ``RequiredBuildStore`` dependencies wrap them.
 
 
 @app.post("/v1/artifacts/explain-materialize", response_model=ExplainMaterializeResponse)

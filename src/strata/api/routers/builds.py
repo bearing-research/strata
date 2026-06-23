@@ -1,13 +1,17 @@
 """Build status + pull-model manifest routes.
 
 Moved verbatim from ``server.py`` (P3 / A3a, router split). The build handlers
-are thin shells over build-store lookup + post-fetch authz; the gate/transport
-helpers stay centralized in ``server.py`` and are reached via in-body lazy
-import (``get_state``, ``StreamState``, ``_authorize_build_access``,
-``_identity_build_status``, ``_build_transport_available``,
-``_get_runtime_build_store``, ``_get_artifact_store``, ``_ACTIVE_BUILD_STATES``).
-The pure manifest assembly already lives in ``BuildService.assemble_manifest``.
-The signed download/upload/finalize transport routes are a separate slice.
+are thin shells over build-store lookup + post-fetch authz. The build-store /
+transport gate lives in ``strata.api.dependencies`` (#295): the manifest +
+finalize routes take the ``BuildTransportStore`` param dependency (404 if
+transport is off, else the resolved store); ``get_build_status`` and the
+signature-authed upload route resolve it in-body via ``build_transport_available``
+/ ``runtime_build_store`` to preserve their exact gate ordering. The remaining
+server-owned collaborators (``get_state``, ``StreamState``,
+``_authorize_build_access``, ``_identity_build_status``, ``_get_artifact_store``,
+``_ACTIVE_BUILD_STATES``, ``_record_build_output_bytes``) are still reached via
+in-body lazy import. The pure manifest assembly lives in
+``BuildService.assemble_manifest``.
 """
 
 from __future__ import annotations
@@ -20,6 +24,11 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from strata.api.dependencies import (
+    BuildTransportStore,
+    build_transport_available,
+    runtime_build_store,
+)
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.services.build import build_service
 from strata.types import BuildStatusResponse
@@ -43,8 +52,6 @@ async def get_build_status(build_id: str):
     from strata.server import (
         StreamState,
         _authorize_build_access,
-        _build_transport_available,
-        _get_runtime_build_store,
         _identity_build_status,
         get_state,
     )
@@ -62,7 +69,10 @@ async def get_build_status(build_id: str):
 
         return _identity_build_status(stream_state)
 
-    if not _build_transport_available():
+    # In-body gate (not the BuildTransportStore param dependency): the identity
+    # StreamState path above must answer even when transport is off, so the 404
+    # can't run as a blanket param.
+    if not build_transport_available():
         raise HTTPException(
             status_code=404,
             detail=(
@@ -72,7 +82,7 @@ async def get_build_status(build_id: str):
         )
 
     # Get build store
-    build_store = _get_runtime_build_store()
+    build_store = runtime_build_store()
     if build_store is None:
         raise HTTPException(
             status_code=500,
@@ -112,7 +122,7 @@ async def get_build_status_compat(build_id: str):
 
 
 @router.get("/v1/builds/{build_id}/manifest")
-async def get_build_manifest(build_id: str, request: Request):
+async def get_build_manifest(build_id: str, request: Request, build_store: BuildTransportStore):
     """Get build manifest with signed URLs for pull-model execution.
 
     This endpoint returns a manifest containing:
@@ -135,26 +145,11 @@ async def get_build_manifest(build_id: str, request: Request):
     from strata.server import (
         _ACTIVE_BUILD_STATES,
         _authorize_build_access,
-        _build_transport_available,
         _get_artifact_store,
-        _get_runtime_build_store,
         get_state,
     )
 
     state = get_state()
-
-    if not _build_transport_available():
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Build manifest is only available when personal-mode writes "
-                "or server-mode transforms are enabled"
-            ),
-        )
-
-    build_store = _get_runtime_build_store()
-    if build_store is None:
-        raise HTTPException(status_code=500, detail="Build store not initialized")
 
     build = build_store.get_build(build_id)
     if build is None:
@@ -301,7 +296,6 @@ async def upload_artifact_signed(
     from strata.server import (
         _ACTIVE_BUILD_STATES,
         _get_artifact_store,
-        _get_runtime_build_store,
         get_state,
     )
 
@@ -320,8 +314,10 @@ async def upload_artifact_signed(
     ):
         raise HTTPException(status_code=403, detail="Invalid or expired signature")
 
-    # Check build exists and is in correct state
-    build_store = _get_runtime_build_store()
+    # Check build exists and is in correct state. Resolved in-body (not via the
+    # RequiredBuildStore param) so the signature check above runs first — the
+    # signature is the authorization, it must precede the store-500.
+    build_store = runtime_build_store()
     if build_store is None:
         raise HTTPException(status_code=500, detail="Build store not initialized")
 
@@ -369,6 +365,7 @@ async def upload_artifact_signed(
 async def finalize_build(
     build_id: str,
     request: Request,
+    build_store: BuildTransportStore,
     expires_at: str | None = None,
     signature: str | None = None,
 ):
@@ -394,25 +391,10 @@ async def finalize_build(
     from strata.server import (
         _ACTIVE_BUILD_STATES,
         _authorize_build_access,
-        _build_transport_available,
         _get_artifact_store,
-        _get_runtime_build_store,
         _record_build_output_bytes,
         get_state,
     )
-
-    if not _build_transport_available():
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Build finalize is only available when personal-mode writes "
-                "or server-mode transforms are enabled"
-            ),
-        )
-
-    build_store = _get_runtime_build_store()
-    if build_store is None:
-        raise HTTPException(status_code=500, detail="Build store not initialized")
 
     build = build_store.get_build(build_id)
     if build is None:

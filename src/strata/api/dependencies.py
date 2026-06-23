@@ -31,6 +31,7 @@ from fastapi import Depends, HTTPException
 # these names are absent — a string forward ref would fail to resolve there
 # (it only worked while the handlers lived in ``server.py``, which imports them).
 from strata.artifact_store import ArtifactStore
+from strata.transforms.build_store import BuildStore
 from strata.types import Principal
 
 
@@ -184,3 +185,82 @@ def require_notebook_worker_admin() -> None:
     from strata.server import _require_notebook_worker_admin_access
 
     _require_notebook_worker_admin_access()
+
+
+# --- Build-store / signed-transport gate (#295) -----------------------------
+# The signed build-transport routes (status / manifest / download / upload /
+# finalize) need two things the handler used to hand-wire: a mode check
+# (``build_transport_available``) and the resolved runtime build store
+# (``runtime_build_store``). The plain helpers were ``server._build_transport_
+# available`` / ``server._get_runtime_build_store``, reached by the builds router
+# via lazy import; they live here now so a router imports them at module top
+# instead of from ``strata.server``. The ``Depends`` wrappers below bind the mode
+# gate and the store resolution together for the routes where that ordering is
+# behavior-preserving.
+
+
+def build_transport_available() -> bool:
+    """Whether signed build-transport APIs are available in the current mode.
+
+    True in personal mode (``writes_enabled``) or when server-mode transforms are
+    enabled — the two modes that can issue and honor signed build URLs.
+    """
+    from strata.server import get_state
+
+    state = get_state()
+    return state.config.writes_enabled or state.config.server_transforms_enabled
+
+
+def runtime_build_store() -> BuildStore | None:
+    """Resolve the runtime build store, or ``None`` when no ``artifact_dir`` is set.
+
+    The signed-transport build store is the SQLite registry under the artifact
+    directory; a deployment without one has nowhere to track builds.
+    """
+    from strata.server import get_state
+    from strata.transforms.build_store import get_build_store
+
+    state = get_state()
+    artifact_dir = state.config.artifact_dir
+    if artifact_dir is None:
+        return None
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    return get_build_store(artifact_dir / "artifacts.sqlite")
+
+
+def require_build_store() -> BuildStore:
+    """Param dependency: the resolved build store, 500 if uninitialized.
+
+    No transport-mode gate — for the signature-authed upload route, which must
+    not 404 on mode (the signature is the authorization). Routes that *should*
+    404 when transport is off use :data:`BuildTransportStore` instead.
+    """
+    store = runtime_build_store()
+    if store is None:
+        raise HTTPException(status_code=500, detail="Build store not initialized")
+    return store
+
+
+RequiredBuildStore = Annotated[BuildStore, Depends(require_build_store)]
+
+
+def require_build_transport_store() -> BuildStore:
+    """Param dependency: 404 if transport is unavailable, else the build store (500 if None).
+
+    Binds the transport-mode gate and the store resolution so the manifest +
+    finalize routes can't open one without the other. The 404 here is the single
+    message for what were three per-route variants ("polling"/"manifest"/
+    "finalize"); it is executor-facing and unasserted.
+    """
+    if not build_transport_available():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Signed build transport is only available when personal-mode "
+                "writes or server-mode transforms are enabled"
+            ),
+        )
+    return require_build_store()
+
+
+BuildTransportStore = Annotated[BuildStore, Depends(require_build_transport_store)]
