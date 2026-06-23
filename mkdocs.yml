@@ -69,6 +69,7 @@ nav:
     - Examples: notebook/examples.md
     - Cell Types: notebook/cells.md
     - Cell Annotations: notebook/annotations.md
+    - Cell Unit Tests: notebook/testing.md
     - Lake-Aware Cells: notebook/lake-aware-cells.md
     - Registry Dashboard: notebook/registry-dashboard.md
     - Distributed Workers: notebook/workers.md
