@@ -1950,7 +1950,7 @@ async def materialize_artifact(request: MaterializeRequest):
     """
     import uuid
 
-    from strata.artifact_store import TransformSpec, compute_provenance_hash
+    from strata.artifact_store import TransformSpec
     from strata.auth import get_principal
 
     # Get tenant and principal from auth context early for artifact isolation
@@ -1991,10 +1991,9 @@ async def materialize_artifact(request: MaterializeRequest):
                 raise
             input_versions[input_uri] = input_uri
 
-    # Use resolved versions as hashes for provenance calculation
-    input_hashes = [f"{uri}:{version}" for uri, version in sorted(input_versions.items())]
+    from strata.services.materialize import materialize_service
 
-    provenance_hash = compute_provenance_hash(input_hashes, transform_spec)
+    provenance_hash = materialize_service.compute_provenance(transform_spec, input_versions)
 
     # Check for existing artifact with same provenance (tenant-scoped)
     existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
@@ -2012,14 +2011,11 @@ async def materialize_artifact(request: MaterializeRequest):
             state="ready",
         )
 
-    # Cache miss - create new artifact in building state (tenant-scoped).
-    # A refresh rebuild reuses the existing artifact id so it becomes a new
-    # version of the same artifact; finalize supersedes the old ready version
-    # and provenance lookups resolve to the rebuild (#123).
-    if request.refresh and existing is not None:
-        artifact_id = existing.id
-    else:
-        artifact_id = str(uuid.uuid4())
+    # Cache miss — create a new artifact in building state (tenant-scoped). A
+    # refresh rebuild reuses the existing id (#123); see rebuild_artifact_id.
+    artifact_id = materialize_service.rebuild_artifact_id(
+        existing, refresh=request.refresh, new_id=str(uuid.uuid4())
+    )
     version = store.create_artifact(
         artifact_id=artifact_id,
         provenance_hash=provenance_hash,
@@ -2670,18 +2666,18 @@ async def _handle_identity_materialize(
                 stream_url=stream_url if request.mode == "stream" else None,
             )
 
-    # Cache miss (or refresh rebuild) - need to build the artifact.
-    # A refresh rebuild reuses the existing artifact id so it becomes a new
-    # version of the same artifact; finalize supersedes the old ready version
-    # and provenance lookups resolve to the rebuild (#123). The stream id
-    # stays unique per request — older streams for the same artifact id may
-    # still be in the registry.
-    if request.refresh and existing is not None:
-        artifact_id = existing.id
-        stream_id = str(uuid.uuid4())
-    else:
-        artifact_id = str(uuid.uuid4())
-        stream_id = artifact_id  # Use same ID for simplicity
+    # Cache miss (or refresh rebuild) - need to build the artifact. A refresh
+    # rebuild reuses the existing id (#123, see rebuild_artifact_id) so finalize
+    # supersedes the old ready version and provenance lookups resolve to the
+    # rebuild. The stream id stays unique per request (older streams for the same
+    # artifact id may linger in the registry); a fresh miss reuses the artifact
+    # id as the stream id.
+    from strata.services.materialize import materialize_service
+
+    artifact_id = materialize_service.rebuild_artifact_id(
+        existing, refresh=request.refresh, new_id=str(uuid.uuid4())
+    )
+    stream_id = str(uuid.uuid4()) if (request.refresh and existing is not None) else artifact_id
 
     # Create artifact in building state (if store is available)
     artifact_version = 1

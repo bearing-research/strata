@@ -19,11 +19,42 @@ from strata.types import (
 )
 
 if TYPE_CHECKING:
-    from strata.artifact_store import ArtifactStore
+    from strata.artifact_store import ArtifactStore, ArtifactVersion
 
 
 class MaterializeService:
     """Pure materialize-plane computations (no HTTP, no version resolution)."""
+
+    def compute_provenance(
+        self,
+        transform_spec: TransformSpec,
+        resolved_versions: dict[str, str],
+    ) -> str:
+        """Provenance hash for a transform over already-resolved input versions.
+
+        Inputs are sorted before hashing, so the hash is independent of input
+        ordering — the invariant that keeps the same computation from hashing to
+        two different cache keys.
+        """
+        input_hashes = [f"{uri}:{version}" for uri, version in sorted(resolved_versions.items())]
+        return compute_provenance_hash(input_hashes, transform_spec)
+
+    def rebuild_artifact_id(
+        self,
+        existing: ArtifactVersion | None,
+        *,
+        refresh: bool,
+        new_id: str,
+    ) -> str:
+        """Artifact id for a build: reuse the existing id on a refresh rebuild.
+
+        A refresh rebuild becomes a new *version* of the same artifact so
+        finalize supersedes the old ready version and provenance lookups resolve
+        to the rebuild (#123). Every other miss mints a fresh id.
+        """
+        if refresh and existing is not None:
+            return existing.id
+        return new_id
 
     def explain(
         self,
@@ -47,8 +78,7 @@ class MaterializeService:
             inputs=request.inputs,
         )
 
-        input_hashes = [f"{uri}:{version}" for uri, version in sorted(resolved_versions.items())]
-        provenance_hash = compute_provenance_hash(input_hashes, transform_spec)
+        provenance_hash = self.compute_provenance(transform_spec, resolved_versions)
 
         existing = store.find_by_provenance(provenance_hash, tenant=tenant)
         if existing is not None:
