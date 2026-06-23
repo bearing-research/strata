@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from strata.artifact_store import TransformSpec as ArtifactTransformSpec
 from strata.services.materialize import MaterializeService
 from strata.types import ExplainMaterializeRequest, TransformSpec
 
@@ -134,3 +135,39 @@ def test_error_markers_pass_through(service):
         resolved_versions=resolved,
     )
     assert resp.resolved_input_versions == resolved
+
+
+class TestComputeProvenance:
+    def _spec(self, inputs):
+        return ArtifactTransformSpec(executor="scan@v1", params={}, inputs=inputs)
+
+    def test_is_independent_of_input_ordering(self, service):
+        # The cache-integrity invariant: same computation → same hash regardless
+        # of the dict iteration order of resolved inputs.
+        spec = self._spec(["a", "b"])
+        h1 = service.compute_provenance(spec, {"a": "1", "b": "2"})
+        h2 = service.compute_provenance(spec, {"b": "2", "a": "1"})
+        assert h1 == h2
+
+    def test_changes_with_a_version(self, service):
+        spec = self._spec(["a"])
+        assert service.compute_provenance(spec, {"a": "1"}) != service.compute_provenance(
+            spec, {"a": "2"}
+        )
+
+
+class TestRebuildArtifactId:
+    def test_fresh_miss_uses_new_id(self, service):
+        assert service.rebuild_artifact_id(None, refresh=False, new_id="new") == "new"
+
+    def test_refresh_reuses_existing_id(self, service):
+        existing = SimpleNamespace(id="old", version=2)
+        assert service.rebuild_artifact_id(existing, refresh=True, new_id="new") == "old"
+
+    def test_refresh_without_existing_uses_new_id(self, service):
+        assert service.rebuild_artifact_id(None, refresh=True, new_id="new") == "new"
+
+    def test_non_refresh_with_existing_still_uses_new_id(self, service):
+        # A non-refresh miss (e.g. a building row) mints a fresh id, not a reuse.
+        existing = SimpleNamespace(id="old", version=2)
+        assert service.rebuild_artifact_id(existing, refresh=False, new_id="new") == "new"
