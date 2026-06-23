@@ -7,7 +7,85 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
-## Unreleased
+## 0.4.0 — 2026-06-22
+
+0.4.0 is a **consolidation and hardening** cycle: the headline is an internal
+restructuring of the server, alongside a new notebook feature, concurrency-bug
+fixes, and CI hardening. No breaking changes.
+
+### Added
+
+- **Per-cell unit tests in the notebook.** Every Python code cell gets a
+  **Tests** panel (the `🧪` toggle next to Inspect, which doubles as a health
+  badge: `✓ 4/4` green, failing red, errored amber, `· stale` when the cell or
+  its tests changed since the last run). Write `pytest`-style tests against the
+  functions a cell defines — they run as **real pytest** against a re-executed
+  copy of the cell with its upstream inputs injected, so assertion rewriting,
+  fixtures, parametrize, and marks all work (`def test_x(cell): assert
+cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
+  ran). Test source is a committed `cells/{id}.test.py`; results persist in
+  `.strata/runtime.json` and rehydrate on reopen. Driveable over WebSocket
+  (`cell_run_tests` → `cell_test_status` / `cell_test_results`). Python cells
+  only; `pytest` must be in the notebook's environment (a missing-pytest run
+  surfaces an actionable message). The generated-conftest runner is written to
+  be liftable to a standalone plugin for CI/pre-commit later. See the
+  `pandas_basics` example for a worked set of cell tests.
+
+### Changed
+
+- **Server internals decomposed (gates-first).** `server.py` went from a
+  ~6,950-line module — where all ~76 routes hand-wired their own
+  mode/auth/tenant/QoS gates, the shape behind the service-mode gate bug the
+  0.3.0 registry review caught — to ~3,210 lines, in three layers:
+  **typed dependencies** (`strata/api/dependencies.py`: distinct
+  `ReadStore`/`WriteStore`/`PersonalModeStore` types + principal/scope/tenant
+  gates, so a route can't wire the wrong gate), **services**
+  (`strata/services/`: pure, HTTP-free, unit-testable artifact/registry/build
+  logic), and **per-domain routers** (`strata/api/routers/`: cache, debug,
+  registry, metrics/health, admin, artifacts, names, builds, metadata — nine
+  domains). A route-table snapshot test freezes the full HTTP surface
+  (path, methods, gate count) so the move is provably behavior-preserving. No
+  API changes. The materialize + streaming data plane stays in `server.py` for
+  a later cycle (its QoS/ACL coupling needs the same gate extraction first).
+
+- **WebSocket frame payloads are becoming typed.** Notebook WS payloads were
+  inline dicts; the execution/test and cascade frames (`cell_console`,
+  `cell_output_delta`, `cell_iteration_progress`, `cell_test_status`,
+  `cell_test_results`, `cascade_prompt`, `cascade_progress`) are now `pydantic`
+  models validated at the emit boundary, so the protocol is self-describing for
+  non-Vue clients. Incremental — the remaining frames follow in later cycles.
+  Wire shapes are unchanged (one stale doc field, `cascade_prompt.steps` →
+  `cells_to_run`, was corrected to match what's actually sent).
+
+### Fixed
+
+- **QoS slots no longer leak when a request is cancelled.** Two admission paths
+  caught `except Exception`, which misses `asyncio.CancelledError` (a
+  `BaseException`) — a client disconnect mid-acquire would leak the interactive
+  slot, and enough of them could wedge the limiter. Both now release on
+  cancellation.
+
+- **QoS admission limiters reconcile with config + adaptive sizing** (#185): the
+  interactive/bulk limiter pools now track the configured and adaptively-tuned
+  slot counts instead of drifting from them.
+
+- **GC tracker no longer self-deadlocks.** The GC callback took a non-reentrant
+  lock that a GC pause triggered during the callback could re-enter; it's now
+  non-blocking, removing a rare hang.
+
+- **Filter values serialize correctly through the client integrations** (#193):
+  the filter-value serializer is now wired through the duckdb/pandas/polars
+  adapters and the server, so typed filter literals round-trip consistently.
+
+### Internal
+
+- CI hardening: a per-test `pytest-timeout` plus a job backstop convert
+  multi-hour hangs into named 3-minute failures; process-global server state
+  (including the rate limiter) is reset between tests so the parallel (`xdist`)
+  unit-test runs are isolated; flaky wall-clock timing assertions were replaced
+  with structural checks; `ty` is scoped to shipped code and the type-check is
+  clean including warnings; the notebook WebSocket tests no longer drive
+  `TestClient`'s portal (a py3.12/macOS hang).
 
 ## 0.3.0 — 2026-06-17
 

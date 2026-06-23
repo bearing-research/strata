@@ -42,6 +42,7 @@ blobs or execution metadata bleeding into the history.
 - **SQL cells:** named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery
 - **R cells (0.2.0):** Python and R cells share a DAG; cross-language Arrow exchange means a `pandas.DataFrame` is a `data.frame` for the next cell. First-class in the UI — Add-R-cell menu, an R environment panel with one-click renv bootstrap + package install, automatic `renv::restore()` on open, and inline plots (ggplot2 / base graphics render to PNG). Runs headlessly too — `strata run` executes R cells for CI
 - **loop cells:** `# @loop max_iter=N carry=state` iterates a cell with explicit carry between steps — each iteration is its own artifact
+- **cell unit tests (0.4.0):** a 🧪 Tests panel on any Python cell runs **real pytest** against the cell's defs and upstream inputs (`def test_x(cell): assert cell.featurize(cell.trips)…`) — assertion rewriting, fixtures, and parametrize all work; the toggle doubles as a health badge (`✓ 4/4`, red on fail, `· stale` when the cell changed)
 - **distributed:** `# @worker gpu-fly` dispatches a single cell to a remote box — bring your own compute
 - **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3 / GCS / Azure prefix a local `pathlib.Path`
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
@@ -191,7 +192,7 @@ it on first read and caches the bytes locally for the session.
 
 | Example                                             | What it shows                                                                       |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [pandas_basics](https://bearing-research.github.io/strata/examples/pandas_basics/)             | Linear DataFrame chain, caching, staleness propagation                              |
+| [pandas_basics](https://bearing-research.github.io/strata/examples/pandas_basics/)             | Linear DataFrame chain, caching, staleness propagation, per-cell unit tests          |
 | [iris_classification](https://bearing-research.github.io/strata/examples/iris_classification/) | End-to-end ML, DAG branching, mixed output types                                    |
 | [titanic_ml](https://bearing-research.github.io/strata/examples/titanic_ml/)                   | Feature engineering + model comparison                                              |
 | [s3_mount](https://bearing-research.github.io/strata/examples/s3_mount/)                       | Reading a public S3 bucket via a mount                                              |
