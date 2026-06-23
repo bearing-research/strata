@@ -7,11 +7,11 @@ finalize routes take the ``BuildTransportStore`` param dependency (404 if
 transport is off, else the resolved store); ``get_build_status`` and the
 signature-authed upload route resolve it in-body via ``build_transport_available``
 / ``runtime_build_store`` to preserve their exact gate ordering. The remaining
-server-owned collaborators (``get_state``, ``StreamState``,
-``_authorize_build_access``, ``_identity_build_status``, ``_get_artifact_store``,
-``_ACTIVE_BUILD_STATES``, ``_record_build_output_bytes``) are still reached via
-in-body lazy import. The pure manifest assembly lives in
-``BuildService.assemble_manifest``.
+server-owned collaborators (``get_state``, ``_authorize_build_access``,
+``_identity_build_status``, ``_get_artifact_store``, ``_ACTIVE_BUILD_STATES``,
+``_record_build_output_bytes``) are still reached via in-body lazy import;
+``StreamState`` comes from ``strata.streaming`` (#302). The pure manifest
+assembly lives in ``BuildService.assemble_manifest``.
 """
 
 from __future__ import annotations
@@ -50,17 +50,17 @@ async def get_build_status(build_id: str):
         BuildStatusResponse with current build state
     """
     from strata.server import (
-        StreamState,
         _authorize_build_access,
         _identity_build_status,
         get_state,
     )
+    from strata.streaming import StreamState
 
     state = get_state()
 
     # Identity materialize artifact-mode builds are tracked in the stream registry
     # even when server-mode transforms are disabled.
-    stream_state = state._streams.get(build_id)
+    stream_state = state.streams.get(build_id)
     if isinstance(stream_state, StreamState):
         _authorize_build_access(
             owner_principal=stream_state.plan.owner_principal,

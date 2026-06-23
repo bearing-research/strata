@@ -7,13 +7,11 @@ import os
 import re
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from strata.adaptive_concurrency import AdaptiveConcurrencyController
-    from strata.transforms.build_qos import BuildSlot
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -58,6 +56,7 @@ from strata.rate_limiter import (
     init_rate_limiter,
 )
 from strata.services.build import build_service
+from strata.streaming import StreamRegistry, StreamState
 from strata.tenant import (
     DEFAULT_TENANT_ID,
     clear_tenant_context,
@@ -282,40 +281,17 @@ class ServerState:
         # Adaptive concurrency controller (initialized async in lifespan)
         self._adaptive_controller: AdaptiveConcurrencyController | None = None
 
-        # Unified materialize streaming state
-        # Maps stream_id -> StreamState for active streams
-        self._streams: dict[str, StreamState] = {}
-        self._stream_cleanup_tasks: dict[str, asyncio.Task[None]] = {}
-        # TTL for stream entries (default 5 minutes after creation, then cleaned up)
-        self._stream_ttl_seconds = config.stream_state_ttl_seconds
+        # Unified materialize streaming state: the stream table + per-stream TTL
+        # cleanup tasks live in StreamRegistry (#302). The scan table + prefetch
+        # counters stay on ServerState for now; on_expire runs the scan-side
+        # cleanup (prefetch discard + scan pop) when a stream's TTL elapses.
+        self.streams = StreamRegistry(
+            config.stream_state_ttl_seconds,
+            on_expire=lambda scan_id: _expire_scan(self, scan_id),
+        )
 
 
-@dataclass
-class StreamState:
-    """State for a streaming materialize operation.
-
-    Tracks the read plan, streaming progress, and artifact metadata
-    for a unified materialize request in stream mode.
-    """
-
-    stream_id: str
-    plan: ReadPlan  # The underlying scan plan
-    artifact_id: str  # Artifact being built
-    artifact_version: int
-    created_at: float  # Unix timestamp
-    mode: str = "stream"  # "stream" for client streaming, "artifact" for background build
-    name: str | None = None
-    tenant: str | None = None
-    executor_ref: str = "scan@v1"
-    started: bool = False  # True once streaming has begun
-    completed: bool = False  # True once streaming finished
-    bytes_streamed: int = 0  # Bytes streamed to client so far
-    started_at: float | None = None
-    completed_at: float | None = None
-    error_message: str | None = None
-    background_task: asyncio.Task[None] | None = None
-    build_slot: BuildSlot | None = None
-    qos_tenant_id: str | None = None
+# ``StreamState`` moved to ``strata.streaming.registry`` (#302); imported above.
 
 
 # Global state (initialized in lifespan)
@@ -376,37 +352,15 @@ def _authorize_build_access(
         _deny_build_access()
 
 
-def _cancel_stream_cleanup(state: ServerState, stream_id: str) -> None:
-    """Cancel any pending cleanup task for a stream."""
-    task = state._stream_cleanup_tasks.pop(stream_id, None)
-    if task is not None:
-        task.cancel()
+def _expire_scan(state: ServerState, scan_id: str) -> None:
+    """Scan-side cleanup for a stream whose TTL elapsed (the registry's on_expire).
 
-
-def _schedule_stream_cleanup(
-    state: ServerState,
-    stream_id: str,
-    scan_id: str | None = None,
-) -> None:
-    """Remove completed or abandoned stream state after the configured TTL."""
-    _cancel_stream_cleanup(state, stream_id)
-
-    async def _cleanup() -> None:
-        try:
-            await asyncio.sleep(state._stream_ttl_seconds)
-        except asyncio.CancelledError:
-            return
-        finally:
-            if state._stream_cleanup_tasks.get(stream_id) is asyncio.current_task():
-                state._stream_cleanup_tasks.pop(stream_id, None)
-
-        if scan_id is not None:
-            _discard_prefetch(state, scan_id, count_wasted=True)
-        state._streams.pop(stream_id, None)
-        if scan_id is not None:
-            state.scans.pop(scan_id, None)
-
-    state._stream_cleanup_tasks[stream_id] = asyncio.create_task(_cleanup())
+    Discards any prefetched first chunk and drops the scan from the active table.
+    The stream-table pop + cleanup-task bookkeeping live in ``StreamRegistry``;
+    this is the prefetch/scan state that still lives on ``ServerState`` (#302).
+    """
+    _discard_prefetch(state, scan_id, count_wasted=True)
+    state.scans.pop(scan_id, None)
 
 
 def _mark_stream_artifact_failed(stream_state: StreamState) -> None:
@@ -681,7 +635,7 @@ async def _build_identity_artifact(stream_state: StreamState) -> None:
         if stream_state.build_slot is not None:
             await stream_state.build_slot.release()
         stream_state.completed_at = time.time()
-        _schedule_stream_cleanup(state, stream_state.stream_id)
+        state.streams.schedule_cleanup(stream_state.stream_id)
 
 
 def require_writes_enabled() -> None:
@@ -1006,11 +960,9 @@ async def _graceful_shutdown(state: ServerState) -> None:
         if _get_active_scan_count() == 0:
             state.metrics.log_event("shutdown_drained")
 
-    for cleanup_task in list(state._stream_cleanup_tasks.values()):
-        cleanup_task.cancel()
-    state._stream_cleanup_tasks.clear()
+    state.streams.shutdown_cleanups()
 
-    for stream_state in list(state._streams.values()):
+    for stream_state in state.streams.active_streams():
         if stream_state.background_task is not None and not stream_state.background_task.done():
             stream_state.background_task.cancel()
 
@@ -2483,11 +2435,11 @@ async def _handle_identity_materialize(
     )
 
     if request.mode == "stream":
-        state._streams[stream_id] = stream_state
+        state.streams.register(stream_state)
         # Register for QoS/accounting only when a client will actually stream.
         state.scans[plan.scan_id] = plan
         _start_prefetch(state, plan)
-        _schedule_stream_cleanup(state, stream_id, plan.scan_id)
+        state.streams.schedule_cleanup(stream_id, plan.scan_id)
 
         return MaterializeResponse(
             hit=False,
@@ -2538,7 +2490,7 @@ async def _handle_identity_materialize(
                     headers={"Retry-After": str(int(e.retry_after or 5))},
                 )
 
-        state._streams[stream_id] = stream_state
+        state.streams.register(stream_state)
         stream_state.background_task = asyncio.create_task(_build_identity_artifact(stream_state))
         return MaterializeResponse(
             hit=False,
@@ -2574,10 +2526,10 @@ async def get_stream(stream_id: str, request: Request):
     state = get_state()
 
     # Look up stream state
-    if stream_id not in state._streams:
+    stream_state = state.streams.get(stream_id)
+    if stream_state is None:
         raise HTTPException(status_code=404, detail=f"Stream {stream_id} not found")
 
-    stream_state = state._streams[stream_id]
     plan = stream_state.plan
 
     # Reuse the scan-based streaming infrastructure
@@ -2602,7 +2554,7 @@ async def get_stream(stream_id: str, request: Request):
                 raise HTTPException(status_code=403, detail="Access denied")
 
     # Mark stream as started
-    _cancel_stream_cleanup(state, stream_id)
+    state.streams.cancel_cleanup(stream_id)
     stream_state.started = True
     stream_state.started_at = time.time()
 
@@ -2729,7 +2681,7 @@ async def get_stream(stream_id: str, request: Request):
             finally:
                 await _release_qos()
                 stream_state.completed_at = time.time()
-                _schedule_stream_cleanup(state, stream_id, scan_id)
+                state.streams.schedule_cleanup(stream_id, scan_id)
 
         return StreamingResponse(
             serve_passthrough(),
@@ -2755,7 +2707,7 @@ async def get_stream(stream_id: str, request: Request):
     except asyncio.CancelledError:
         await _release_qos()
         stream_state.completed_at = time.time()
-        _schedule_stream_cleanup(state, stream_id, scan_id)
+        state.streams.schedule_cleanup(stream_id, scan_id)
         raise
 
     # The build is done — the scan is what the QoS slot gated, so release it now,
@@ -2769,7 +2721,7 @@ async def get_stream(stream_id: str, request: Request):
     stream_state.completed_at = time.time()
 
     if artifact is None or artifact.state not in ("ready", "superseded"):
-        _schedule_stream_cleanup(state, stream_id, scan_id)
+        state.streams.schedule_cleanup(stream_id, scan_id)
         return JSONResponse(
             status_code=500,
             content={
@@ -2801,7 +2753,7 @@ async def get_stream(stream_id: str, request: Request):
             state.metrics.record_client_disconnect()
             raise
         finally:
-            _schedule_stream_cleanup(state, stream_id, scan_id)
+            state.streams.schedule_cleanup(stream_id, scan_id)
 
     return StreamingResponse(
         serve_blob(),
