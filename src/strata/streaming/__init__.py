@@ -8,5 +8,6 @@ the scan-build/prefetch manager and the two-tier QoS admission. See
 """
 
 from strata.streaming.registry import StreamRegistry, StreamState
+from strata.streaming.scan_builds import ScanBuildManager
 
-__all__ = ["StreamRegistry", "StreamState"]
+__all__ = ["ScanBuildManager", "StreamRegistry", "StreamState"]

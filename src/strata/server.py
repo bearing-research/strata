@@ -56,7 +56,7 @@ from strata.rate_limiter import (
     init_rate_limiter,
 )
 from strata.services.build import build_service
-from strata.streaming import StreamRegistry, StreamState
+from strata.streaming import ScanBuildManager, StreamRegistry, StreamState
 from strata.tenant import (
     DEFAULT_TENANT_ID,
     clear_tenant_context,
@@ -72,7 +72,6 @@ from strata.types import (
     IdentityParams,
     MaterializeRequest,
     MaterializeResponse,
-    ReadPlan,
 )
 
 logger = get_logger(__name__)
@@ -201,8 +200,10 @@ class ServerState:
         self.planner = ReadPlanner(config)
         self.fetcher = CachedFetcher(config, metrics=self.metrics)
 
-        # Active scans (scan_id -> ReadPlan)
-        self.scans: dict[str, ReadPlan] = {}
+        # Active scan table + opportunistic prefetch live in ScanBuildManager
+        # (#302), reached as state.scan_builds.{register_scan,get_scan,pop_scan,
+        # start_prefetch,discard_prefetch,consume_prefetched_first,prefetch_metrics}.
+        self.scan_builds = ScanBuildManager()
 
         # QoS: Two-tier admission control. The actual admission limiters live in
         # the tenant registry (per-tenant, acquired in the stream handler) and are
@@ -250,19 +251,6 @@ class ServerState:
         self._client_semaphore_max_entries = 10000  # LRU eviction threshold
         self._client_rejected = 0  # Rejections due to per-client cap
 
-        # Prefetch management: limit concurrent prefetches to avoid resource exhaustion
-        # when clients spam POST /scan without consuming the streams.
-        # Max 4 concurrent prefetches (independent of streaming concurrency).
-        self._prefetch_semaphore = asyncio.Semaphore(4)
-        # Track prefetch tasks by scan_id for cancellation on stream cleanup.
-        self._prefetch_futures: dict[str, asyncio.Task[None]] = {}
-        # Prefetch metrics for observability
-        self._prefetch_started = 0  # Total prefetches started
-        self._prefetch_used = 0  # Prefetches consumed by streaming
-        self._prefetch_wasted = 0  # Prefetches discarded (scan deleted/abandoned)
-        self._prefetch_skipped = 0  # Prefetches skipped (server busy)
-        self._prefetch_in_flight = 0  # Prefetches actively fetching
-
         # Readiness tracking for capacity-based health checks
         # Track when each tier became saturated (no slots available)
         self._interactive_saturated_since: float | None = None
@@ -287,7 +275,7 @@ class ServerState:
         # cleanup (prefetch discard + scan pop) when a stream's TTL elapses.
         self.streams = StreamRegistry(
             config.stream_state_ttl_seconds,
-            on_expire=lambda scan_id: _expire_scan(self, scan_id),
+            on_expire=self.scan_builds.expire_scan,
         )
 
 
@@ -352,17 +340,6 @@ def _authorize_build_access(
         _deny_build_access()
 
 
-def _expire_scan(state: ServerState, scan_id: str) -> None:
-    """Scan-side cleanup for a stream whose TTL elapsed (the registry's on_expire).
-
-    Discards any prefetched first chunk and drops the scan from the active table.
-    The stream-table pop + cleanup-task bookkeeping live in ``StreamRegistry``;
-    this is the prefetch/scan state that still lives on ``ServerState`` (#302).
-    """
-    _discard_prefetch(state, scan_id, count_wasted=True)
-    state.scans.pop(scan_id, None)
-
-
 def _mark_stream_artifact_failed(stream_state: StreamState) -> None:
     """Best-effort transition a stream-backed artifact to failed state."""
     from strata.artifact_store import get_artifact_store
@@ -376,73 +353,6 @@ def _mark_stream_artifact_failed(stream_state: StreamState) -> None:
         store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
     except Exception:
         pass
-
-
-def _discard_prefetch(state: ServerState, scan_id: str, *, count_wasted: bool) -> None:
-    """Cancel or discard any prefetched first chunk for a scan."""
-    plan = state.scans.get(scan_id)
-    prefetched_ready = plan is not None and plan.prefetched_first is not None
-    task = state._prefetch_futures.pop(scan_id, None)
-
-    if task is not None and not task.done():
-        task.cancel()
-        if count_wasted:
-            state._prefetch_wasted += 1
-    elif prefetched_ready and count_wasted:
-        state._prefetch_wasted += 1
-
-    if plan is not None:
-        plan.prefetched_first = None
-
-
-def _start_prefetch(state: ServerState, plan: ReadPlan) -> None:
-    """Best-effort prefetch of the first row group for stream-mode reads."""
-    if (
-        not plan.tasks
-        or plan.scan_id in state._prefetch_futures
-        or plan.prefetched_first is not None
-    ):
-        return
-
-    async def _prefetch() -> None:
-        if state._draining:
-            return
-
-        # Prefetch is opportunistic; skip instead of queueing behind existing work.
-        if getattr(state._prefetch_semaphore, "_value", 0) <= 0:
-            state._prefetch_skipped += 1
-            return
-
-        await state._prefetch_semaphore.acquire()
-        state._prefetch_started += 1
-        state._prefetch_in_flight += 1
-        try:
-            loop = asyncio.get_running_loop()
-            plan.prefetched_first = await loop.run_in_executor(
-                state._fetch_executor,
-                state.fetcher.fetch_as_stream_bytes,
-                plan.tasks[0],
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            logger.warning(
-                "prefetch_failed",
-                scan_id=plan.scan_id,
-                error=str(e),
-            )
-        finally:
-            state._prefetch_in_flight -= 1
-            state._prefetch_semaphore.release()
-
-    task = asyncio.create_task(_prefetch())
-    state._prefetch_futures[plan.scan_id] = task
-
-    def _cleanup_prefetch(done_task: asyncio.Task[None]) -> None:
-        if state._prefetch_futures.get(plan.scan_id) is done_task:
-            state._prefetch_futures.pop(plan.scan_id, None)
-
-    task.add_done_callback(_cleanup_prefetch)
 
 
 def _normalized_build_qos_tenant_id(tenant_id: str | None) -> str:
@@ -567,23 +477,8 @@ async def _build_identity_artifact(stream_state: StreamState) -> None:
                 # Consume the eagerly-prefetched first row group when stream mode
                 # warmed one (no-op in artifact mode, which never prefetches).
                 chunk: bytes | None = None
-                if index == 0 and plan.prefetched_first is not None:
-                    chunk = plan.prefetched_first
-                    plan.prefetched_first = None
-                    state._prefetch_used += 1
-                elif index == 0:
-                    prefetch_task = state._prefetch_futures.get(scan_id)
-                    if prefetch_task is not None:
-                        try:
-                            await asyncio.wait_for(asyncio.shield(prefetch_task), timeout=0.05)
-                        except TimeoutError:
-                            pass
-                        if plan.prefetched_first is not None:
-                            chunk = plan.prefetched_first
-                            plan.prefetched_first = None
-                            state._prefetch_used += 1
-                        else:
-                            _discard_prefetch(state, scan_id, count_wasted=True)
+                if index == 0:
+                    chunk = await state.scan_builds.consume_prefetched_first(plan, scan_id)
 
                 if chunk is None:
                     chunk = await loop.run_in_executor(
@@ -2437,8 +2332,8 @@ async def _handle_identity_materialize(
     if request.mode == "stream":
         state.streams.register(stream_state)
         # Register for QoS/accounting only when a client will actually stream.
-        state.scans[plan.scan_id] = plan
-        _start_prefetch(state, plan)
+        state.scan_builds.register_scan(plan)
+        state.scan_builds.start_prefetch(state, plan)
         state.streams.schedule_cleanup(stream_id, plan.scan_id)
 
         return MaterializeResponse(
@@ -2533,10 +2428,10 @@ async def get_stream(stream_id: str, request: Request):
     plan = stream_state.plan
 
     # Reuse the scan-based streaming infrastructure
-    # The plan is already registered in state.scans
+    # The plan is already registered in the scan-build manager.
     scan_id = plan.scan_id
 
-    if scan_id not in state.scans:
+    if scan_id not in state.scan_builds:
         raise HTTPException(status_code=404, detail=f"Stream {stream_id} not found")
 
     # Ownership check (when auth_mode=trusted_proxy)
