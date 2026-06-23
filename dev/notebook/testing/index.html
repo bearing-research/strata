@@ -10,9 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://bearing-research.github.io/strata/dev/examples/s3_mount/">
+        <link rel="canonical" href="https://bearing-research.github.io/strata/dev/notebook/testing/">
       
       
+        <link rel="prev" href="../annotations/">
+      
+      
+        <link rel="next" href="../lake-aware-cells/">
       
       
         
@@ -23,7 +27,7 @@
     
     
       
-        <title>S3 Mount — reading a public bucket from a notebook - Strata</title>
+        <title>Cell Unit Tests - Strata</title>
       
     
     
@@ -74,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#s3-mount-reading-a-public-bucket-from-a-notebook" class="md-skip">
+        <a href="#cell-unit-tests" class="md-skip">
           Skip to content
         </a>
       
@@ -112,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              S3 Mount — reading a public bucket from a notebook
+              Cell Unit Tests
             
           </span>
         </div>
@@ -261,10 +265,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../../getting-started/notebook/" class="md-tabs__link">
           
   
@@ -440,28 +446,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
-        
-          
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -479,7 +488,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -525,7 +534,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/concepts/" class="md-nav__link">
+      <a href="../concepts/" class="md-nav__link">
         
   
   
@@ -553,7 +562,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/comparison/" class="md-nav__link">
+      <a href="../comparison/" class="md-nav__link">
         
   
   
@@ -581,7 +590,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/examples/" class="md-nav__link">
+      <a href="../examples/" class="md-nav__link">
         
   
   
@@ -609,7 +618,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/cells/" class="md-nav__link">
+      <a href="../cells/" class="md-nav__link">
         
   
   
@@ -637,7 +646,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/annotations/" class="md-nav__link">
+      <a href="../annotations/" class="md-nav__link">
         
   
   
@@ -662,10 +671,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../notebook/testing/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -681,6 +717,109 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-cell-fixture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The cell fixture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-and-running-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing and running tests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Writing and running tests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-health-badge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The health badge
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-persists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What persists
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#over-websocket" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Over WebSocket
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a-worked-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A worked example
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -693,7 +832,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/lake-aware-cells/" class="md-nav__link">
+      <a href="../lake-aware-cells/" class="md-nav__link">
         
   
   
@@ -721,7 +860,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/registry-dashboard/" class="md-nav__link">
+      <a href="../registry-dashboard/" class="md-nav__link">
         
   
   
@@ -749,7 +888,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/workers/" class="md-nav__link">
+      <a href="../workers/" class="md-nav__link">
         
   
   
@@ -777,7 +916,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/ai/" class="md-nav__link">
+      <a href="../ai/" class="md-nav__link">
         
   
   
@@ -805,7 +944,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/environment/" class="md-nav__link">
+      <a href="../environment/" class="md-nav__link">
         
   
   
@@ -833,7 +972,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/secrets/" class="md-nav__link">
+      <a href="../secrets/" class="md-nav__link">
         
   
   
@@ -861,7 +1000,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/cli/" class="md-nav__link">
+      <a href="../cli/" class="md-nav__link">
         
   
   
@@ -889,7 +1028,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/agent-authoring/" class="md-nav__link">
+      <a href="../agent-authoring/" class="md-nav__link">
         
   
   
@@ -917,7 +1056,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/import/" class="md-nav__link">
+      <a href="../import/" class="md-nav__link">
         
   
   
@@ -945,7 +1084,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/export/" class="md-nav__link">
+      <a href="../export/" class="md-nav__link">
         
   
   
@@ -973,7 +1112,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/keyboard/" class="md-nav__link">
+      <a href="../keyboard/" class="md-nav__link">
         
   
   
@@ -1687,10 +1826,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-it-shows" class="md-nav__link">
+  <a href="#the-cell-fixture" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What it shows
+        The cell fixture
       
     </span>
   </a>
@@ -1698,10 +1837,38 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#mount-declaration" class="md-nav__link">
+  <a href="#writing-and-running-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Mount declaration
+        Writing and running tests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Writing and running tests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-health-badge" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The health badge
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-persists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What persists
       
     </span>
   </a>
@@ -1709,10 +1876,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cells" class="md-nav__link">
+  <a href="#over-websocket" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cells
+        Over WebSocket
       
     </span>
   </a>
@@ -1720,10 +1887,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#running" class="md-nav__link">
+  <a href="#a-worked-example" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Running
+        A worked example
       
     </span>
   </a>
@@ -1731,32 +1898,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#swapping-in-a-private-bucket" class="md-nav__link">
+  <a href="#limitations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Swapping in a private bucket
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#load-jfk-weather-from-s3" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Load JFK weather from S3
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#monthly-weather-summary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Monthly weather summary
+        Limitations
       
     </span>
   </a>
@@ -1783,85 +1928,125 @@
   
 
 
-<h1 id="s3-mount-reading-a-public-bucket-from-a-notebook">S3 Mount — reading a public bucket from a notebook<a class="headerlink" href="#s3-mount-reading-a-public-bucket-from-a-notebook" title="Permanent link">&para;</a></h1>
-<p>Demonstrates Strata's <strong>mount</strong> feature: a notebook cell can read a
-remote filesystem path as if it were local, with no custom code inside
-the cell.</p>
-<p>The example mounts a single file from NOAA's GSOD (Global Surface
-Summary of Day) dataset — a public, anonymous-readable S3 bucket — and
-runs a small pandas analysis over it.</p>
-<h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
+<h1 id="cell-unit-tests">Cell Unit Tests<a class="headerlink" href="#cell-unit-tests" title="Permanent link">&para;</a></h1>
+<p>Every Python cell can carry <strong>its own <code>pytest</code> tests</strong> — written right next to
+the cell, run against the cell's real outputs, with per-test pass/fail surfaced
+inline. It's the missing half of a reactive notebook: the DAG keeps your cells
+<em>consistent</em>, and cell tests keep them <em>correct</em>.</p>
+<p>These are <strong>real pytest runs</strong>, not a lookalike. Assertion rewriting (so a
+failed <code>assert df.shape == (200, 5)</code> shows you both sides), fixtures,
+<code>@pytest.mark.parametrize</code>, and marks all work, because the runner shells out to
+<code>pytest</code> in the notebook's own environment.</p>
+<div class="admonition note">
+<p class="admonition-title">Python cells only</p>
+<p>Cell tests are available on Python code cells. <code>pytest</code> must be installed in
+the notebook's environment (<code>uv add pytest</code> — or it's already there if your
+cells use it). A run with no <code>pytest</code> surfaces an actionable message rather
+than failing silently.</p>
+</div>
+<hr />
+<h2 id="the-cell-fixture">The <code>cell</code> fixture<a class="headerlink" href="#the-cell-fixture" title="Permanent link">&para;</a></h2>
+<p>Tests receive one fixture — <strong><code>cell</code></strong> — whose attributes are the cell's
+namespace <strong>after it runs against its real upstream inputs</strong>. <code>cell.X</code> is
+whatever <code>X</code> is at the end of the cell:</p>
 <ul>
-<li>Declaring a mount in <code>notebook.toml</code> under <code>[[mounts]]</code>.</li>
-<li>Using fsspec <code>options</code> to authenticate (here, <code>anon = true</code> for a
-  public bucket).</li>
-<li>Accessing the mounted path as a <code>pathlib.Path</code> inside a cell.</li>
-<li>Zero AWS credentials required — <code>anon = true</code> tells fsspec to skip
-  the credential chain.</li>
+<li>a <strong>function or class</strong> the cell defines (<code>cell.featurize</code>, <code>cell.Model</code>),</li>
+<li>an <strong>upstream input</strong> the cell consumes (<code>cell.trips</code>, <code>cell.sales</code>),</li>
+<li>a <strong>value</strong> the cell computed (<code>cell.revenue</code>, <code>cell.accuracy</code>).</li>
 </ul>
-<h2 id="mount-declaration">Mount declaration<a class="headerlink" href="#mount-declaration" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[[mounts]]</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;jfk_weather&quot;</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">uri</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;s3://noaa-gsod-pds/2024/72503014732.csv&quot;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;ro&quot;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">options</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">anon</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># tests for a cell that builds a `sales` DataFrame</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_row_count</span><span class="p">(</span><span class="n">cell</span><span class="p">):</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">cell</span><span class="o">.</span><span class="n">sales</span><span class="p">)</span> <span class="o">==</span> <span class="mi">200</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_revenue_is_units_times_price</span><span class="p">(</span><span class="n">cell</span><span class="p">):</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">expected</span> <span class="o">=</span> <span class="n">cell</span><span class="o">.</span><span class="n">sales</span><span class="p">[</span><span class="s2">&quot;units&quot;</span><span class="p">]</span> <span class="o">*</span> <span class="n">cell</span><span class="o">.</span><span class="n">sales</span><span class="p">[</span><span class="s2">&quot;price&quot;</span><span class="p">]</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="k">assert</span> <span class="p">(</span><span class="n">cell</span><span class="o">.</span><span class="n">sales</span><span class="p">[</span><span class="s2">&quot;revenue&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">expected</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
 </code></pre></div>
-<p>Inside a cell, <code>jfk_weather</code> is a <code>pathlib.Path</code>; the CSV is
-materialized locally by fsspec on first read.</p>
-<h2 id="cells">Cells<a class="headerlink" href="#cells" title="Permanent link">&para;</a></h2>
+<p>The cell body runs <strong>once</strong> per test session (in a fixture), with its upstream
+artifacts deserialized and injected — so <code>cell.sales</code> is the actual DataFrame
+your upstream cell produced, not a mock. If the cell source itself raises, every
+test that requests <code>cell</code> reports a clear <em>setup</em> error rather than an opaque
+collection failure.</p>
+<h2 id="writing-and-running-tests">Writing and running tests<a class="headerlink" href="#writing-and-running-tests" title="Permanent link">&para;</a></h2>
+<p>Open the <strong>Tests</strong> panel on any Python cell — the <code>🧪</code> toggle next to Inspect —
+and write your tests. They're saved as a committed sibling file,
+<code>cells/&lt;cell-id&gt;.test.py</code>, so they version and review alongside the cell source.
+A cell with no tests simply carries no <code>.test.py</code> file.</p>
+<p>Running them (the <code>▶</code> in the panel, or see <a href="#over-websocket">over WebSocket</a>
+below) shells out to <code>pytest</code> against a temporary run directory holding a copy
+of the cell source, the upstream inputs, and your test file staged under a
+<code>test_*.py</code> name (which is what gives you native collection <strong>and</strong> assertion
+rewriting).</p>
+<h3 id="the-health-badge">The health badge<a class="headerlink" href="#the-health-badge" title="Permanent link">&para;</a></h3>
+<p>The <code>🧪</code> toggle doubles as a status badge, so a cell's test health is visible
+without opening the panel:</p>
 <table>
 <thead>
 <tr>
-<th>Cell</th>
-<th>What it does</th>
+<th>Badge</th>
+<th>Meaning</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>load</code></td>
-<td>Reads the weather CSV into a DataFrame, parses dates, keeps the columns we need.</td>
+<td><code>✓ 4/4</code></td>
+<td>all tests passed</td>
 </tr>
 <tr>
-<td><code>summary</code></td>
-<td>Groups by month and aggregates avg / max / min / total-precip.</td>
+<td>red</td>
+<td>one or more <strong>failed</strong></td>
+</tr>
+<tr>
+<td>amber</td>
+<td><strong>errored</strong> — the cell source or test setup blew up</td>
+</tr>
+<tr>
+<td><code>· stale</code></td>
+<td>the cell or its tests changed since the last run</td>
 </tr>
 </tbody>
 </table>
-<h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
-<p>From the project root:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">8765</span>
+<p>Stale is computed from a fingerprint of <code>(cell source, test source, input
+versions)</code>. Edit the cell, edit the tests, or change an upstream — the badge
+goes stale, telling you the last green result no longer reflects the code.</p>
+<h2 id="what-persists">What persists<a class="headerlink" href="#what-persists" title="Permanent link">&para;</a></h2>
+<p>Results are saved to <code>.strata/runtime.json</code> and <strong>rehydrate when you reopen the
+notebook</strong>, so you see the last run's pass/fail and the stale badge immediately,
+without re-running. (Test <em>source</em> lives in the committed <code>cells/&lt;id&gt;.test.py</code>;
+the <em>results</em> are runtime state under <code>.strata/</code>, like the rest of
+<a href="../concepts/"><code>runtime.json</code></a>.)</p>
+<h2 id="over-websocket">Over WebSocket<a class="headerlink" href="#over-websocket" title="Permanent link">&para;</a></h2>
+<p>Cell tests are fully driveable over the notebook WebSocket protocol, so non-Vue
+clients and automation can run them too:</p>
+<ul>
+<li>send <strong><code>cell_run_tests</code></strong> with the cell id;</li>
+<li>receive <strong><code>cell_test_status</code></strong> (running → done) and <strong><code>cell_test_results</code></strong>
+  (per-test outcomes, counts, durations).</li>
+</ul>
+<p>See the <a href="../../reference/websocket/">WebSocket Protocol reference</a> for the frame
+shapes.</p>
+<h2 id="a-worked-example">A worked example<a class="headerlink" href="#a-worked-example" title="Permanent link">&para;</a></h2>
+<p>The <a href="../../examples/pandas_basics/"><code>pandas_basics</code></a> example ships tests on four
+of its cells — validating a produced DataFrame, a computed column, a filter
+invariant, and an aggregation — a good template for the common shapes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># cells/select-filter.test.py — pin a filter invariant</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_predicate_holds_for_every_row</span><span class="p">(</span><span class="n">cell</span><span class="p">):</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">assert</span> <span class="p">(</span><span class="n">cell</span><span class="o">.</span><span class="n">high_value</span><span class="p">[</span><span class="s2">&quot;units&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">20</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="k">assert</span> <span class="p">(</span><span class="n">cell</span><span class="o">.</span><span class="n">high_value</span><span class="p">[</span><span class="s2">&quot;price&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">30</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
 </code></pre></div>
-<p>Then open <code>examples/s3_mount</code> from the Strata home page.</p>
-<h2 id="swapping-in-a-private-bucket">Swapping in a private bucket<a class="headerlink" href="#swapping-in-a-private-bucket" title="Permanent link">&para;</a></h2>
-<p>Drop the <code>options = { anon = true }</code> line and configure AWS credentials
-the normal way (<code>aws configure</code>, <code>AWS_PROFILE</code>, IAM role, etc.). fsspec
-will pick them up automatically.</p>
-<h2 id="load-jfk-weather-from-s3">Load JFK weather from S3<a class="headerlink" href="#load-jfk-weather-from-s3" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># @name Load JFK weather from S3</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">weather</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">jfk_weather</span> <span class="o">/</span> <span class="s2">&quot;72503014732.csv&quot;</span><span class="p">)</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">weather</span><span class="p">[</span><span class="s2">&quot;DATE&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">to_datetime</span><span class="p">(</span><span class="n">weather</span><span class="p">[</span><span class="s2">&quot;DATE&quot;</span><span class="p">])</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">weather</span> <span class="o">=</span> <span class="n">weather</span><span class="p">[[</span><span class="s2">&quot;DATE&quot;</span><span class="p">,</span> <span class="s2">&quot;NAME&quot;</span><span class="p">,</span> <span class="s2">&quot;TEMP&quot;</span><span class="p">,</span> <span class="s2">&quot;MAX&quot;</span><span class="p">,</span> <span class="s2">&quot;MIN&quot;</span><span class="p">,</span> <span class="s2">&quot;PRCP&quot;</span><span class="p">]]</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">weather</span>
-</code></pre></div>
-<h2 id="monthly-weather-summary">Monthly weather summary<a class="headerlink" href="#monthly-weather-summary" title="Permanent link">&para;</a></h2>
-<p><sub><strong>kind</strong> python</sub></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># @name Monthly weather summary</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">monthly</span> <span class="o">=</span> <span class="p">(</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">weather</span><span class="o">.</span><span class="n">assign</span><span class="p">(</span><span class="n">month</span><span class="o">=</span><span class="n">weather</span><span class="p">[</span><span class="s2">&quot;DATE&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">dt</span><span class="o">.</span><span class="n">to_period</span><span class="p">(</span><span class="s2">&quot;M&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">str</span><span class="p">))</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;month&quot;</span><span class="p">,</span> <span class="n">as_index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="o">.</span><span class="n">agg</span><span class="p">(</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>        <span class="n">avg_temp</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;TEMP&quot;</span><span class="p">,</span> <span class="s2">&quot;mean&quot;</span><span class="p">),</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>        <span class="n">max_temp</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;MAX&quot;</span><span class="p">,</span> <span class="s2">&quot;max&quot;</span><span class="p">),</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>        <span class="n">min_temp</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;MIN&quot;</span><span class="p">,</span> <span class="s2">&quot;min&quot;</span><span class="p">),</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>        <span class="n">total_precip</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;PRCP&quot;</span><span class="p">,</span> <span class="s2">&quot;sum&quot;</span><span class="p">),</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="p">)</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="p">)</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="n">monthly</span>
-</code></pre></div>
+<h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Python cells only</strong> (not prompt, SQL, R, or markdown cells).</li>
+<li><code>pytest</code> must be in the notebook environment.</li>
+<li>Tests run against a <strong>re-executed copy</strong> of the cell with injected inputs —
+  they don't share live state with an interactive run, so they're deterministic
+  but won't see, e.g., a variable you only set in the REPL.</li>
+</ul>
+<p>The generated test runner is written to be liftable to a standalone pytest
+plugin, so the same cell tests can drive a CI or pre-commit check later.</p>
+<hr />
+<p><strong>See also:</strong> <a href="../cells/">Cell Types</a> · <a href="../annotations/">Cell Annotations</a> ·
+<a href="../../examples/pandas_basics/"><code>pandas_basics</code> example</a></p>
 
 
 
