@@ -1,20 +1,25 @@
-"""Artifact CRUD routes: put, info, data, list, delete, gc, stats, usage.
+"""Artifact CRUD + personal-mode upload/finalize routes.
 
-Moved verbatim from ``server.py`` (P3 / A1, router split). These handlers are
-thin: they take an already-gated store + tenant filter via the typed
-dependencies and shape the response. The post-fetch ACL helpers
-(``_ensure_artifact_access``, ``_authorize_artifact_read``) stay in ``server.py``
-— ``_authorize_artifact_read`` re-checks the shared table ACL and both are used
-by other (still-resident) routes — so the handlers lazy-import them in-body.
-Names / aliases / tags and the materialize/build/transport routes are separate
-slices and stay put.
+Moved verbatim from ``server.py`` (P3 / A1, router split; upload/finalize added
+in #295). These handlers are thin: they take an already-gated store + tenant
+filter via the typed dependencies and shape the response. The personal-mode
+upload/finalize pair takes ``PersonalModeStore`` (the bare write-mode gate); the
+signature-authed signed-transport upload/finalize live in ``builds.py``. The
+post-fetch ACL helpers (``_ensure_artifact_access``, ``_authorize_artifact_read``)
+stay in ``server.py`` — ``_authorize_artifact_read`` re-checks the shared table
+ACL and both are used by other (still-resident) routes — so the handlers
+lazy-import them in-body. Names / aliases / tags and the stateful
+materialize/streams routes are separate slices and stay put.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import tempfile
 import uuid
+from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -36,6 +41,8 @@ from strata.types import (
     ArtifactInfoResponse,
     ArtifactLineageResponse,
     PutArtifactResponse,
+    UploadFinalizeRequest,
+    UploadFinalizeResponse,
 )
 
 logger = get_logger(__name__)
@@ -613,4 +620,104 @@ async def get_artifact_dependents(
         version=version,
         tenant_filter=tenant_filter,
         limit=limit,
+    )
+
+
+@router.post("/v1/artifacts/upload/{artifact_id}/v/{version}")
+async def upload_artifact_blob(
+    artifact_id: str, version: int, request: Request, store: PersonalModeStore
+):
+    """Upload artifact blob data (personal mode only).
+
+    The client POSTs raw Arrow IPC stream bytes to this endpoint.
+    After upload, call /v1/artifacts/finalize to complete the artifact.
+
+    Args:
+        artifact_id: Artifact ID from materialize response
+        version: Version number from materialize response
+        request: Raw request body containing Arrow IPC bytes
+    """
+    # Verify artifact exists and is in building state
+    artifact = store.get_artifact(artifact_id, version)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if artifact.state != "building":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Artifact is not in building state (state={artifact.state})",
+        )
+
+    byte_size = 0
+    fd, tmp_name = tempfile.mkstemp(prefix="strata_upload_", suffix=".tmp")
+    staged = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as dst:
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                byte_size += len(chunk)
+                dst.write(chunk)
+        if byte_size == 0:
+            raise HTTPException(status_code=400, detail="Empty request body")
+        await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, staged)
+    finally:
+        try:
+            staged.unlink()
+        except FileNotFoundError:
+            pass
+
+    return {"status": "uploaded", "byte_size": byte_size}
+
+
+@router.post("/v1/artifacts/finalize", response_model=UploadFinalizeResponse)
+async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeStore):
+    """Finalize an artifact after upload (personal mode only).
+
+    After uploading the blob, call this to transition the artifact to ready state.
+    Optionally sets a name pointer to the artifact.
+
+    Returns:
+        UploadFinalizeResponse with artifact URI and optional name URI
+    """
+    # Verify blob exists
+    if not store.blob_exists(request.artifact_id, request.version):
+        raise HTTPException(
+            status_code=400,
+            detail="Blob not uploaded. Call upload endpoint first.",
+        )
+
+    # Get blob size without materializing the payload
+    byte_size = store.blob_size(request.artifact_id, request.version) or 0
+
+    # Finalize artifact
+    try:
+        finalized_artifact = store.finalize_artifact(
+            artifact_id=request.artifact_id,
+            version=request.version,
+            schema_json=request.arrow_schema,
+            row_count=request.row_count,
+            byte_size=byte_size,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if finalized_artifact is None:
+        raise HTTPException(status_code=500, detail="Failed to finalize artifact")
+
+    artifact_uri = f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}"
+    name_uri = None
+
+    # Set name if requested
+    if request.name:
+        try:
+            store.set_name(request.name, finalized_artifact.id, finalized_artifact.version)
+            name_uri = f"strata://name/{request.name}"
+        except ValueError as e:
+            # Don't fail the whole request if name setting fails
+            logger.warning(f"Failed to set name {request.name}: {e}")
+
+    return UploadFinalizeResponse(
+        artifact_uri=artifact_uri,
+        byte_size=finalized_artifact.byte_size or byte_size,
+        name_uri=name_uri,
     )
