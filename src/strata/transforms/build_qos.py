@@ -592,3 +592,20 @@ def reset_build_qos() -> None:
     """Reset the build QoS singleton (for testing)."""
     global _build_qos
     _build_qos = None
+
+
+def normalized_build_qos_tenant_id(tenant_id: str | None) -> str:
+    """Normalize tenant IDs for build QoS accounting."""
+    return tenant_id or "__default__"
+
+
+async def record_build_output_bytes(tenant_id: str | None, bytes_produced: int) -> None:
+    """Best-effort quota accounting for completed builds."""
+    build_qos = get_build_qos()
+    if build_qos is None:
+        return
+
+    await build_qos.record_bytes(
+        normalized_build_qos_tenant_id(tenant_id),
+        max(0, bytes_produced),
+    )

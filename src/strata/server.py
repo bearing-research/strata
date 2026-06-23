@@ -38,7 +38,6 @@ from strata.cache_warmer import CacheWarmer
 from strata.config import StrataConfig
 from strata.fast_io import (
     IncrementalIpcMerger,
-    validate_ipc_stream_reader,
 )
 from strata.gc_tracker import install_gc_tracker
 from strata.json_types import JsonValue
@@ -340,26 +339,6 @@ def _authorize_build_access(
         _deny_build_access()
 
 
-def _mark_stream_artifact_failed(stream_state: StreamState) -> None:
-    """Best-effort transition a stream-backed artifact to failed state."""
-    from strata.artifact_store import get_artifact_store
-
-    state = get_state()
-    store = get_artifact_store(state.config.artifact_dir)
-    if store is None:
-        return
-
-    try:
-        store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
-    except Exception:
-        pass
-
-
-def _normalized_build_qos_tenant_id(tenant_id: str | None) -> str:
-    """Normalize tenant IDs for build QoS accounting."""
-    return tenant_id or "__default__"
-
-
 def _estimate_transform_output_bytes(
     state: ServerState,
     max_output_bytes: int | None,
@@ -368,20 +347,6 @@ def _estimate_transform_output_bytes(
     if max_output_bytes is not None and max_output_bytes > 0:
         return max_output_bytes
     return state.config.build_runner_default_max_output
-
-
-async def _record_build_output_bytes(tenant_id: str | None, bytes_produced: int) -> None:
-    """Best-effort quota accounting for completed builds."""
-    from strata.transforms.build_qos import get_build_qos
-
-    build_qos = get_build_qos()
-    if build_qos is None:
-        return
-
-    await build_qos.record_bytes(
-        _normalized_build_qos_tenant_id(tenant_id),
-        max(0, bytes_produced),
-    )
 
 
 def _identity_build_status(stream_state: StreamState) -> BuildStatusResponse:
@@ -417,120 +382,6 @@ def _identity_build_status(stream_state: StreamState) -> BuildStatusResponse:
         completed_at=stream_state.completed_at,
         error_message=stream_state.error_message,
     )
-
-
-async def _build_identity_artifact(stream_state: StreamState) -> None:
-    """Build a scan@v1 artifact in the background for artifact-mode requests."""
-    state = get_state()
-    plan = stream_state.plan
-
-    stream_state.started = True
-    stream_state.started_at = time.time()
-
-    try:
-        from strata.artifact_store import get_artifact_store
-
-        store = get_artifact_store(state.config.artifact_dir)
-        if store is None:
-            return  # No artifact store in service mode
-
-        if not plan.tasks:
-            if plan.schema is not None:
-                sink = pa.BufferOutputStream()
-                writer = ipc.new_stream(sink, plan.schema)
-                writer.close()
-                empty_stream = sink.getvalue().to_pybytes()
-            else:
-                empty_stream = b""
-
-            store.write_blob(stream_state.artifact_id, stream_state.artifact_version, empty_stream)
-            await _finalize_written_blob(stream_state, 0, len(empty_stream))
-            stream_state.bytes_streamed = len(empty_stream)
-            stream_state.completed = True
-            return
-
-        loop = asyncio.get_running_loop()
-        scan_id = plan.scan_id
-        row_count = 0
-        byte_size = 0
-        start_time = time.perf_counter()
-
-        # Write each merged row-group chunk straight to the blob (write-through,
-        # bounded memory — no full-result buffer). The IncrementalIpcMerger emits
-        # one valid IPC stream across the row groups so standard readers see every
-        # row. The blob commits atomically when the writer context exits.
-        merger = IncrementalIpcMerger() if len(plan.tasks) > 1 else None
-        with store.open_blob_writer(
-            stream_state.artifact_id, stream_state.artifact_version
-        ) as blob:
-            for index, task in enumerate(plan.tasks):
-                if state._draining:
-                    raise RuntimeError("Server is shutting down")
-
-                # Bound the build's wall-clock the same way the old streaming
-                # generator did — a runaway scan marks the artifact failed
-                # rather than holding resources indefinitely.
-                if time.perf_counter() - start_time > state.config.scan_timeout_seconds:
-                    state.metrics.record_stream_abort_timeout()
-                    raise RuntimeError(f"Scan timed out after {state.config.scan_timeout_seconds}s")
-
-                # Consume the eagerly-prefetched first row group when stream mode
-                # warmed one (no-op in artifact mode, which never prefetches).
-                chunk: bytes | None = None
-                if index == 0:
-                    chunk = await state.scan_builds.consume_prefetched_first(plan, scan_id)
-
-                if chunk is None:
-                    chunk = await loop.run_in_executor(
-                        state._fetch_executor,
-                        state.fetcher.fetch_as_stream_bytes,
-                        task,
-                    )
-                out = merger.feed(chunk) if merger is not None else chunk
-                if out:
-                    blob.write(out)
-                    byte_size += len(out)
-                row_count += task.num_rows
-
-            if merger is not None:
-                tail = merger.finish()
-                if tail:
-                    blob.write(tail)
-                    byte_size += len(tail)
-
-        await _finalize_written_blob(stream_state, row_count, byte_size)
-        stream_state.bytes_streamed = byte_size
-        stream_state.completed = True
-    except asyncio.CancelledError:
-        stream_state.error_message = "Build cancelled"
-        _mark_stream_artifact_failed(stream_state)
-        raise
-    except Exception as e:
-        stream_state.error_message = str(e)
-        logger.error(
-            "identity_artifact_build_error",
-            artifact_id=stream_state.artifact_id,
-            error=str(e),
-        )
-        _mark_stream_artifact_failed(stream_state)
-    finally:
-        from strata.artifact_store import get_artifact_store
-
-        artifact_ready = False
-        store = get_artifact_store(state.config.artifact_dir)
-        if store is not None:
-            artifact = store.get_artifact(stream_state.artifact_id, stream_state.artifact_version)
-            artifact_ready = artifact is not None and artifact.state == "ready"
-
-        if stream_state.completed and stream_state.error_message is None and artifact_ready:
-            await _record_build_output_bytes(
-                stream_state.qos_tenant_id,
-                stream_state.bytes_streamed,
-            )
-        if stream_state.build_slot is not None:
-            await stream_state.build_slot.release()
-        stream_state.completed_at = time.time()
-        state.streams.schedule_cleanup(stream_state.stream_id)
 
 
 def require_writes_enabled() -> None:
@@ -1795,6 +1646,7 @@ async def materialize_artifact(request: MaterializeRequest):
         from strata.transforms.build_qos import (
             BuildQoSError,
             get_build_qos,
+            normalized_build_qos_tenant_id,
         )
         from strata.transforms.build_store import get_build_store
 
@@ -1811,7 +1663,7 @@ async def materialize_artifact(request: MaterializeRequest):
             )
 
         # Use tenant for build QoS (fallback to __default__ for QoS tracking)
-        build_tenant_id = _normalized_build_qos_tenant_id(tenant_id)
+        build_tenant_id = normalized_build_qos_tenant_id(tenant_id)
         estimated_output_bytes = _estimate_transform_output_bytes(
             state,
             transform_defn.max_output_bytes if transform_defn is not None else None,
@@ -2026,46 +1878,6 @@ def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
 # =============================================================================
 
 
-def _compute_identity_provenance(
-    table_identity: str,
-    snapshot_id: int,
-    columns: list[str] | None,
-    filters: list,
-) -> str:
-    """Compute provenance hash for identity transform.
-
-    The hash uniquely identifies a table scan based on:
-    - Table identity + snapshot ID
-    - Column projection (sorted for determinism)
-    - Row filters (normalized)
-
-    This enables query-level deduplication: same query -> same artifact.
-    """
-    import hashlib
-
-    from strata.types import compute_filter_fingerprint
-
-    hasher = hashlib.sha256()
-
-    # Input: table identity + snapshot
-    hasher.update(f"table:{table_identity}@{snapshot_id}".encode())
-
-    # Transform: executor ref
-    hasher.update(b"executor:scan@v1")
-
-    # Params: sorted columns
-    if columns:
-        hasher.update(f"columns:{sorted(columns)}".encode())
-    else:
-        hasher.update(b"columns:*")
-
-    # Params: normalized filters
-    filter_fp = compute_filter_fingerprint(filters)
-    hasher.update(f"filters:{filter_fp}".encode())
-
-    return hasher.hexdigest()
-
-
 @app.post("/v1/materialize", response_model=MaterializeResponse)
 async def unified_materialize(request: MaterializeRequest):
     """Unified endpoint for all data access (replaces /v1/scan and /v1/artifacts/materialize).
@@ -2234,7 +2046,9 @@ async def _handle_identity_materialize(
         plan.owner_tenant = principal.tenant
 
     # Compute provenance hash for identity transform
-    provenance_hash = _compute_identity_provenance(
+    from strata.services.materialize import materialize_service
+
+    provenance_hash = materialize_service.compute_identity_provenance(
         table_identity=str(plan.table_identity),
         snapshot_id=plan.snapshot_id,
         columns=identity_params.columns,
@@ -2281,8 +2095,6 @@ async def _handle_identity_materialize(
     # rebuild. The stream id stays unique per request (older streams for the same
     # artifact id may linger in the registry); a fresh miss reuses the artifact
     # id as the stream id.
-    from strata.services.materialize import materialize_service
-
     artifact_id = materialize_service.rebuild_artifact_id(
         existing, refresh=request.refresh, new_id=str(uuid.uuid4())
     )
@@ -2361,11 +2173,12 @@ async def _handle_identity_materialize(
         from strata.transforms.build_qos import (
             BuildQoSError,
             get_build_qos,
+            normalized_build_qos_tenant_id,
         )
 
         build_qos = get_build_qos()
         if build_qos is not None:
-            qos_tenant_id = _normalized_build_qos_tenant_id(tenant_id)
+            qos_tenant_id = normalized_build_qos_tenant_id(tenant_id)
             estimated_output_bytes = max(0, plan.estimated_bytes)
             priority = build_qos.classify_build(
                 estimated_output_bytes=estimated_output_bytes,
@@ -2386,7 +2199,9 @@ async def _handle_identity_materialize(
                 )
 
         state.streams.register(stream_state)
-        stream_state.background_task = asyncio.create_task(_build_identity_artifact(stream_state))
+        stream_state.background_task = asyncio.create_task(
+            state.scan_builds.build_identity_artifact(state, stream_state)
+        )
         return MaterializeResponse(
             hit=False,
             artifact_uri=artifact_uri,
@@ -2590,7 +2405,9 @@ async def get_stream(stream_id: str, request: Request):
     # cache entry (the #164 IncompleteRead bug): we wait for the build, then
     # serve the persisted blob over the same reliable path as GET .../data.
     if stream_state.background_task is None:
-        stream_state.background_task = asyncio.create_task(_build_identity_artifact(stream_state))
+        stream_state.background_task = asyncio.create_task(
+            state.scan_builds.build_identity_artifact(state, stream_state)
+        )
     build_task = stream_state.background_task
 
     # Wait for the build. It runs as a decoupled background task, shielded so a
@@ -2655,78 +2472,6 @@ async def get_stream(stream_id: str, request: Request):
         media_type="application/vnd.apache.arrow.stream",
         headers={"X-Arrow-Row-Count": str(artifact.row_count or 0)},
     )
-
-
-async def _finalize_written_blob(stream_state: StreamState, row_count: int, byte_size: int) -> None:
-    """Finalize a scan artifact whose blob was already **written through** to the
-    blob store (bounded memory) — no full-result buffer.
-
-    The blob is on disk by the time this runs; re-read it in bounded memory (one
-    record batch at a time, in a worker thread) for the integrity gate, then flip
-    state to ``ready``. The sole finalizer for scan builds — both the stream and
-    artifact materialize paths route through the write-through build
-    (``_build_identity_artifact``). See docs/internal/design-streaming-decouple.md.
-    """
-    from strata.artifact_store import get_artifact_store
-
-    state = get_state()
-    store = get_artifact_store(state.config.artifact_dir)
-
-    if store is None:
-        return  # No artifact store in service mode
-
-    try:
-        # Integrity gate (#124): bounded re-read confirms the persisted blob is
-        # exactly one readable IPC stream whose row total matches the plan.
-        if byte_size == 0:
-            readable_rows, schema_json = 0, ""
-        else:
-
-            def _read_and_validate() -> tuple[int, str]:
-                with store.open_blob_reader(
-                    stream_state.artifact_id, stream_state.artifact_version
-                ) as blob:
-                    return validate_ipc_stream_reader(blob)
-
-            readable_rows, schema_json = await asyncio.to_thread(_read_and_validate)
-        if readable_rows != row_count:
-            raise ValueError(
-                f"Artifact blob integrity check failed: stream yields "
-                f"{readable_rows} rows, build reported {row_count}"
-            )
-
-        # The blob is already persisted; finalize_and_set_name flips state to
-        # ready and records metadata + the requested name pointer atomically.
-        finalized_artifact = store.finalize_and_set_name(
-            artifact_id=stream_state.artifact_id,
-            version=stream_state.artifact_version,
-            schema_json=schema_json,
-            row_count=row_count,
-            byte_size=byte_size,
-            name=stream_state.name,
-            tenant=stream_state.tenant,
-        )
-        if finalized_artifact is not None:
-            stream_state.artifact_id = finalized_artifact.id
-            stream_state.artifact_version = finalized_artifact.version
-
-        logger.info(
-            "stream_artifact_finalized",
-            artifact_id=stream_state.artifact_id,
-            version=stream_state.artifact_version,
-            byte_size=byte_size,
-            row_count=row_count,
-        )
-    except Exception as e:
-        logger.error(
-            "stream_artifact_finalize_error",
-            artifact_id=stream_state.artifact_id,
-            error=str(e),
-        )
-        try:
-            store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
-        except Exception:
-            pass
 
 
 def _mount_frontend(application: FastAPI) -> None:

@@ -119,6 +119,34 @@ class MaterializeService:
         input_hashes = [f"{uri}:{version}" for uri, version in sorted(resolved_versions.items())]
         return compute_provenance_hash(input_hashes, transform_spec)
 
+    def compute_identity_provenance(
+        self,
+        table_identity: str,
+        snapshot_id: int,
+        columns: list[str] | None,
+        filters: list,
+    ) -> str:
+        """Provenance hash for a ``scan@v1`` identity transform.
+
+        Uniquely identifies a table scan by table identity + snapshot, the
+        (sorted) column projection, and the normalized row filters — so the same
+        query dedups to the same artifact. Pure; no HTTP, no store.
+        """
+        import hashlib
+
+        from strata.types import compute_filter_fingerprint
+
+        hasher = hashlib.sha256()
+        hasher.update(f"table:{table_identity}@{snapshot_id}".encode())
+        hasher.update(b"executor:scan@v1")
+        if columns:
+            hasher.update(f"columns:{sorted(columns)}".encode())
+        else:
+            hasher.update(b"columns:*")
+        filter_fp = compute_filter_fingerprint(filters)
+        hasher.update(f"filters:{filter_fp}".encode())
+        return hasher.hexdigest()
+
     def rebuild_artifact_id(
         self,
         existing: ArtifactVersion | None,

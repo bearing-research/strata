@@ -8,10 +8,11 @@ transport is off, else the resolved store); ``get_build_status`` and the
 signature-authed upload route resolve it in-body via ``build_transport_available``
 / ``runtime_build_store`` to preserve their exact gate ordering. The remaining
 server-owned collaborators (``get_state``, ``_authorize_build_access``,
-``_identity_build_status``, ``_get_artifact_store``, ``_ACTIVE_BUILD_STATES``,
-``_record_build_output_bytes``) are still reached via in-body lazy import;
-``StreamState`` comes from ``strata.streaming`` (#302). The pure manifest
-assembly lives in ``BuildService.assemble_manifest``.
+``_identity_build_status``, ``_get_artifact_store``, ``_ACTIVE_BUILD_STATES``)
+are still reached via in-body lazy import; ``StreamState`` comes from
+``strata.streaming`` and ``record_build_output_bytes`` from
+``strata.transforms.build_qos`` (#302). The pure manifest assembly lives in
+``BuildService.assemble_manifest``.
 """
 
 from __future__ import annotations
@@ -392,9 +393,9 @@ async def finalize_build(
         _ACTIVE_BUILD_STATES,
         _authorize_build_access,
         _get_artifact_store,
-        _record_build_output_bytes,
         get_state,
     )
+    from strata.transforms.build_qos import record_build_output_bytes
 
     build = build_store.get_build(build_id)
     if build is None:
@@ -541,7 +542,7 @@ async def finalize_build(
             finalized_artifact.version,
         )
     build_store.complete_build(build_id)
-    await _record_build_output_bytes(build.tenant_id, byte_size)
+    await record_build_output_bytes(build.tenant_id, byte_size)
 
     artifact_uri = f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}"
     name_uri = f"strata://name/{build.name}" if build.name else None
