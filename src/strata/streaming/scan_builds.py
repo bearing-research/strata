@@ -1,28 +1,35 @@
-"""Scan-build manager — the active scan table + opportunistic prefetch.
+"""Scan-build manager — active scan table, prefetch, and the background build.
 
-Owns the ``scan_id -> ReadPlan`` table and the best-effort first-row-group
-prefetch that ``server.py`` held as ``ServerState.scans`` / ``_prefetch_*`` and
-mutated through the free ``_start_prefetch`` / ``_discard_prefetch`` helpers.
-Held on ``ServerState`` as ``state.scan_builds``.
+Owns the ``scan_id -> ReadPlan`` table, the best-effort first-row-group prefetch,
+and the write-through scan@v1 background build that ``server.py`` held as
+``ServerState.scans`` / ``_prefetch_*`` and the free ``_start_prefetch`` /
+``_discard_prefetch`` / ``_build_identity_artifact`` / ``_finalize_written_blob``
+/ ``_mark_stream_artifact_failed`` helpers. Held on ``ServerState`` as
+``state.scan_builds``.
 
-Phase 2a of the stream-runtime extraction (#302): the scan table + prefetch.
-The background build (``_build_identity_artifact`` / ``_finalize_written_blob``)
-still lives in ``server.py`` and calls this manager's API; a later phase folds it
-in too. The prefetch methods that need shared infra (fetcher, fetch executor,
-draining flag) take ``state`` per-call, so the manager owns the prefetch *state*
-without a back-reference to ``ServerState``. See
+Phases 2a + 2b of the stream-runtime extraction (#302). Methods that need shared
+infra (config, fetcher, fetch executor, draining flag, artifact store, the stream
+registry) take ``state`` per-call, so the manager owns the scan/prefetch *state*
+without a back-reference to ``ServerState``. The build stays the SHIELDED,
+decoupled task (#165) — the manager creates it, the handler shields it. See
 ``docs/internal/design-stream-runtime-extraction.md``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING
 
+import pyarrow as pa
+import pyarrow.ipc as ipc
+
+from strata.fast_io import IncrementalIpcMerger, validate_ipc_stream_reader
 from strata.logging import get_logger
 
 if TYPE_CHECKING:
     from strata.server import ServerState
+    from strata.streaming.registry import StreamState
     from strata.types import ReadPlan
 
 logger = get_logger(__name__)
@@ -170,3 +177,215 @@ class ScanBuildManager:
         """
         self.discard_prefetch(scan_id, count_wasted=True)
         self.pop_scan(scan_id)
+
+    # --- background build ---------------------------------------------------
+
+    def mark_stream_artifact_failed(self, state: ServerState, stream_state: StreamState) -> None:
+        """Best-effort transition a stream-backed artifact to failed state."""
+        from strata.artifact_store import get_artifact_store
+
+        store = get_artifact_store(state.config.artifact_dir)
+        if store is None:
+            return
+
+        try:
+            store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
+        except Exception:
+            pass
+
+    async def build_identity_artifact(self, state: ServerState, stream_state: StreamState) -> None:
+        """Build a scan@v1 artifact in the background for artifact-mode requests.
+
+        The build is the SHIELDED, decoupled task (#165): it scans row group by
+        row group straight to the blob (write-through, bounded memory) and
+        finalizes ready/failed on its own merits, so a slow or dropped reader can
+        never poison the cache entry.
+        """
+        from strata.artifact_store import get_artifact_store
+        from strata.transforms.build_qos import record_build_output_bytes
+
+        plan = stream_state.plan
+
+        stream_state.started = True
+        stream_state.started_at = time.time()
+
+        try:
+            store = get_artifact_store(state.config.artifact_dir)
+            if store is None:
+                return  # No artifact store in service mode
+
+            if not plan.tasks:
+                if plan.schema is not None:
+                    sink = pa.BufferOutputStream()
+                    writer = ipc.new_stream(sink, plan.schema)
+                    writer.close()
+                    empty_stream = sink.getvalue().to_pybytes()
+                else:
+                    empty_stream = b""
+
+                store.write_blob(
+                    stream_state.artifact_id, stream_state.artifact_version, empty_stream
+                )
+                await self.finalize_written_blob(state, stream_state, 0, len(empty_stream))
+                stream_state.bytes_streamed = len(empty_stream)
+                stream_state.completed = True
+                return
+
+            loop = asyncio.get_running_loop()
+            scan_id = plan.scan_id
+            row_count = 0
+            byte_size = 0
+            start_time = time.perf_counter()
+
+            # Write each merged row-group chunk straight to the blob (write-through,
+            # bounded memory — no full-result buffer). The IncrementalIpcMerger emits
+            # one valid IPC stream across the row groups so standard readers see
+            # every row. The blob commits atomically when the writer context exits.
+            merger = IncrementalIpcMerger() if len(plan.tasks) > 1 else None
+            with store.open_blob_writer(
+                stream_state.artifact_id, stream_state.artifact_version
+            ) as blob:
+                for index, task in enumerate(plan.tasks):
+                    if state._draining:
+                        raise RuntimeError("Server is shutting down")
+
+                    # Bound the build's wall-clock the same way the old streaming
+                    # generator did — a runaway scan marks the artifact failed
+                    # rather than holding resources indefinitely.
+                    if time.perf_counter() - start_time > state.config.scan_timeout_seconds:
+                        state.metrics.record_stream_abort_timeout()
+                        raise RuntimeError(
+                            f"Scan timed out after {state.config.scan_timeout_seconds}s"
+                        )
+
+                    # Consume the eagerly-prefetched first row group when stream
+                    # mode warmed one (no-op in artifact mode, which never prefetches).
+                    chunk: bytes | None = None
+                    if index == 0:
+                        chunk = await self.consume_prefetched_first(plan, scan_id)
+
+                    if chunk is None:
+                        chunk = await loop.run_in_executor(
+                            state._fetch_executor,
+                            state.fetcher.fetch_as_stream_bytes,
+                            task,
+                        )
+                    out = merger.feed(chunk) if merger is not None else chunk
+                    if out:
+                        blob.write(out)
+                        byte_size += len(out)
+                    row_count += task.num_rows
+
+                if merger is not None:
+                    tail = merger.finish()
+                    if tail:
+                        blob.write(tail)
+                        byte_size += len(tail)
+
+            await self.finalize_written_blob(state, stream_state, row_count, byte_size)
+            stream_state.bytes_streamed = byte_size
+            stream_state.completed = True
+        except asyncio.CancelledError:
+            stream_state.error_message = "Build cancelled"
+            self.mark_stream_artifact_failed(state, stream_state)
+            raise
+        except Exception as e:
+            stream_state.error_message = str(e)
+            logger.error(
+                "identity_artifact_build_error",
+                artifact_id=stream_state.artifact_id,
+                error=str(e),
+            )
+            self.mark_stream_artifact_failed(state, stream_state)
+        finally:
+            artifact_ready = False
+            store = get_artifact_store(state.config.artifact_dir)
+            if store is not None:
+                artifact = store.get_artifact(
+                    stream_state.artifact_id, stream_state.artifact_version
+                )
+                artifact_ready = artifact is not None and artifact.state == "ready"
+
+            if stream_state.completed and stream_state.error_message is None and artifact_ready:
+                await record_build_output_bytes(
+                    stream_state.qos_tenant_id,
+                    stream_state.bytes_streamed,
+                )
+            if stream_state.build_slot is not None:
+                await stream_state.build_slot.release()
+            stream_state.completed_at = time.time()
+            state.streams.schedule_cleanup(stream_state.stream_id)
+
+    async def finalize_written_blob(
+        self,
+        state: ServerState,
+        stream_state: StreamState,
+        row_count: int,
+        byte_size: int,
+    ) -> None:
+        """Finalize a scan artifact whose blob was already **written through**.
+
+        The blob is on disk by the time this runs; re-read it in bounded memory
+        (one record batch at a time, in a worker thread) for the integrity gate
+        (#124), then flip state to ``ready``. The sole finalizer for scan builds —
+        both the stream and artifact materialize paths route through the
+        write-through build. See docs/internal/design-streaming-decouple.md.
+        """
+        from strata.artifact_store import get_artifact_store
+
+        store = get_artifact_store(state.config.artifact_dir)
+        if store is None:
+            return  # No artifact store in service mode
+
+        try:
+            # Integrity gate (#124): bounded re-read confirms the persisted blob is
+            # exactly one readable IPC stream whose row total matches the plan.
+            if byte_size == 0:
+                readable_rows, schema_json = 0, ""
+            else:
+
+                def _read_and_validate() -> tuple[int, str]:
+                    with store.open_blob_reader(
+                        stream_state.artifact_id, stream_state.artifact_version
+                    ) as blob:
+                        return validate_ipc_stream_reader(blob)
+
+                readable_rows, schema_json = await asyncio.to_thread(_read_and_validate)
+            if readable_rows != row_count:
+                raise ValueError(
+                    f"Artifact blob integrity check failed: stream yields "
+                    f"{readable_rows} rows, build reported {row_count}"
+                )
+
+            # The blob is already persisted; finalize_and_set_name flips state to
+            # ready and records metadata + the requested name pointer atomically.
+            finalized_artifact = store.finalize_and_set_name(
+                artifact_id=stream_state.artifact_id,
+                version=stream_state.artifact_version,
+                schema_json=schema_json,
+                row_count=row_count,
+                byte_size=byte_size,
+                name=stream_state.name,
+                tenant=stream_state.tenant,
+            )
+            if finalized_artifact is not None:
+                stream_state.artifact_id = finalized_artifact.id
+                stream_state.artifact_version = finalized_artifact.version
+
+            logger.info(
+                "stream_artifact_finalized",
+                artifact_id=stream_state.artifact_id,
+                version=stream_state.artifact_version,
+                byte_size=byte_size,
+                row_count=row_count,
+            )
+        except Exception as e:
+            logger.error(
+                "stream_artifact_finalize_error",
+                artifact_id=stream_state.artifact_id,
+                error=str(e),
+            )
+            try:
+                store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
+            except Exception:
+                pass
