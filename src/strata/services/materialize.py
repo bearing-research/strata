@@ -1,15 +1,17 @@
 """Materialize-plane services extracted from ``server.py`` handlers.
 
-Stateless; methods receive an already-resolved artifact store + tenant from the
-route's dependencies. No FastAPI/HTTP coupling — input-version *resolution*
-(which can 400/404) stays in the handler, which passes the resolved versions in,
-so the service is pure and unit-testable without a TestClient. See
-``docs/internal/design-server-decomposition.md`` (phase 2).
+Stateless; methods receive an already-resolved artifact store (+ planner +
+tenant) from the route's dependencies. No FastAPI/HTTP coupling: the pure
+input-version *resolution* lives here and signals failure with the plain
+:class:`InputResolutionError` (a status hint, not an ``HTTPException``); the
+thin wrapper in ``strata.api.dependencies`` maps that to HTTP and applies the
+table ACL. See ``docs/internal/design-server-decomposition.md`` (phase 2/3).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import re
+from typing import TYPE_CHECKING, NamedTuple
 
 from strata.artifact_store import TransformSpec, compute_provenance_hash
 from strata.types import (
@@ -22,8 +24,86 @@ if TYPE_CHECKING:
     from strata.artifact_store import ArtifactStore, ArtifactVersion
 
 
+class InputResolutionError(Exception):
+    """An input URI could not be resolved to a version.
+
+    Carries the HTTP ``status_code`` + ``detail`` the original inline resolver
+    raised (400 for a malformed/unknown URI or a failed table plan, 404 for an
+    unknown name) so the dependency-layer wrapper can reproduce the exact
+    response without the service importing FastAPI.
+    """
+
+    def __init__(self, status_code: int, detail: str):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+class ResolvedInput(NamedTuple):
+    """A resolved input version, plus the table identity when the input is a table.
+
+    ``table_identity`` is ``None`` for artifact/name inputs and set for table
+    URIs — the wrapper uses it to run the table ACL (deny-first on every table
+    input) as a visible step, which the pure resolver deliberately does not do.
+    """
+
+    version: str
+    table_identity: object | None = None
+
+
 class MaterializeService:
-    """Pure materialize-plane computations (no HTTP, no version resolution)."""
+    """Pure materialize-plane computations (no HTTP, no auth)."""
+
+    def resolve_input_version(
+        self,
+        input_uri: str,
+        *,
+        store: ArtifactStore,
+        planner,
+        tenant: str | None = None,
+    ) -> ResolvedInput:
+        """Resolve an input URI to its current version (pure; no ACL, no HTTP).
+
+        - ``strata://artifact/{id}@v={n}`` → ``"{id}@v={n}"``
+        - ``strata://name/{name}`` → the named artifact's ``"{id}@v={version}"``
+        - ``file://…`` / ``s3://…`` table → the current snapshot id, plus the
+          plan's ``table_identity`` so the caller can ACL-gate it.
+
+        Raises:
+            InputResolutionError: malformed/unknown URI, unknown name, or a table
+                whose plan fails — carrying the status the wrapper re-raises.
+        """
+        # Artifact URI: strata://artifact/{id}@v={version}
+        if input_uri.startswith("strata://artifact/"):
+            match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
+            if match:
+                return ResolvedInput(f"{match.group(1)}@v={int(match.group(2))}")
+            raise InputResolutionError(400, f"Invalid artifact URI: {input_uri}")
+
+        # Name URI: strata://name/{name}
+        if input_uri.startswith("strata://name/"):
+            name = input_uri.replace("strata://name/", "")
+            artifact = store.resolve_name(name, tenant=tenant)
+            if artifact is None:
+                raise InputResolutionError(404, f"Name not found: {name}")
+            return ResolvedInput(f"{artifact.id}@v={artifact.version}")
+
+        # Table URI: file:// or s3://
+        if input_uri.startswith("file://") or input_uri.startswith("s3://"):
+            try:
+                plan = planner.plan(
+                    table_uri=input_uri,
+                    snapshot_id=None,  # Current snapshot
+                    columns=None,
+                    filters=None,
+                )
+            except Exception as e:
+                raise InputResolutionError(
+                    400, f"Could not resolve table {input_uri}: {str(e)}"
+                ) from e
+            return ResolvedInput(str(plan.snapshot_id), table_identity=plan.table_identity)
+
+        raise InputResolutionError(400, f"Unknown input URI type: {input_uri}")
 
     def compute_provenance(
         self,

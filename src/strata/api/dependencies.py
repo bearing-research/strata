@@ -264,3 +264,78 @@ def require_build_transport_store() -> BuildStore:
 
 
 BuildTransportStore = Annotated[BuildStore, Depends(require_build_transport_store)]
+
+
+# --- Table-input resolution + ACL (#295) ------------------------------------
+# ``_resolve_input_version`` resolved a table/artifact/name URI to a version AND
+# ACL-gated table inputs in one inline server helper — the finding-1 fix
+# (deny-first on *every* table input) lived there, shared by materialize,
+# explain, and name-status staleness. The pure resolution moved to
+# ``MaterializeService.resolve_input_version`` (unit-testable, raises a domain
+# error). What stays request-scoped — the table ACL and the HTTP mapping — lives
+# here, so the materialize/explain handlers and the names router call one
+# enforced unit instead of reaching into ``strata.server``.
+
+
+def authorize_table_access(table_uri: str, table_identity) -> None:
+    """Enforce table-level ACL under trusted-proxy auth; no-op otherwise.
+
+    The direct scan path (``scan@v1``) and every path that resolves a *table*
+    URI as a transform input share this one gate, so a table input can't be used
+    to read a table the caller is denied on the direct scan path.
+
+    Raises:
+        HTTPException: 401 if no principal; 403/404 (per
+        ``hide_forbidden_as_not_found``) if the ACL denies the table.
+    """
+    from strata.auth import AclEvaluator, get_principal
+    from strata.server import get_state
+    from strata.types import TableRef
+
+    state = get_state()
+    if state.config.auth_mode != "trusted_proxy":
+        return
+
+    principal = get_principal()
+    if principal is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    table_ref = TableRef.from_table_identity(table_identity, table_uri=table_uri)
+    if not AclEvaluator(state.config.acl_config).authorize(principal, table_ref):
+        if state.config.hide_forbidden_as_not_found:
+            raise HTTPException(status_code=404, detail="Table not found")
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
+def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
+    """Resolve an input URI to its current version string, ACL-gating tables.
+
+    The single enforced unit for materialize, explain, and name-status
+    staleness: it resolves via the pure
+    :meth:`MaterializeService.resolve_input_version` (mapping the domain
+    :class:`~strata.services.materialize.InputResolutionError` back to its HTTP
+    status), then runs :func:`authorize_table_access` for table inputs — so the
+    deny-first-on-every-input invariant is enforced here, once, rather than
+    re-implemented per handler.
+
+    Raises:
+        HTTPException: 400/404 for an unresolvable URI; 401/403/404 for an
+        ACL-denied table.
+    """
+    from strata.server import _get_artifact_store, get_state
+    from strata.services.materialize import InputResolutionError, materialize_service
+
+    store = _get_artifact_store(allow_server_mode=True)
+    try:
+        resolved = materialize_service.resolve_input_version(
+            input_uri, store=store, planner=get_state().planner, tenant=tenant
+        )
+    except InputResolutionError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+    # Gate table inputs through the same ACL as the direct scan path — a
+    # transform input must not bypass it. Run after resolution (outside the
+    # error mapping) so a 401/403/404 isn't rewritten into a 400.
+    if resolved.table_identity is not None:
+        authorize_table_access(input_uri, resolved.table_identity)
+    return resolved.version

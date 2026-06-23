@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from strata.artifact_store import TransformSpec as ArtifactTransformSpec
-from strata.services.materialize import MaterializeService
+from strata.services.materialize import InputResolutionError, MaterializeService
 from strata.types import ExplainMaterializeRequest, TransformSpec
 
 
@@ -154,6 +154,93 @@ class TestComputeProvenance:
         assert service.compute_provenance(spec, {"a": "1"}) != service.compute_provenance(
             spec, {"a": "2"}
         )
+
+
+class _FakeResolveStore:
+    """Store stub for resolve_input_version: only ``resolve_name`` is touched."""
+
+    def __init__(self, *, named=None):
+        self._named = named
+        self.calls = []
+
+    def resolve_name(self, name, *, tenant=None):
+        self.calls.append((name, tenant))
+        return self._named
+
+
+class _FakePlanner:
+    """Planner stub returning a fixed plan, or raising to simulate a bad table."""
+
+    def __init__(self, *, snapshot_id=None, table_identity=None, error=None):
+        self._snapshot_id = snapshot_id
+        self._table_identity = table_identity
+        self._error = error
+        self.calls = []
+
+    def plan(self, *, table_uri, snapshot_id, columns, filters):
+        self.calls.append(table_uri)
+        if self._error is not None:
+            raise self._error
+        return SimpleNamespace(snapshot_id=self._snapshot_id, table_identity=self._table_identity)
+
+
+class TestResolveInputVersion:
+    """The pure resolver (no ACL, no HTTP) — the unit the dependency wrapper wraps."""
+
+    def test_artifact_uri_returns_id_and_version(self, service):
+        resolved = service.resolve_input_version(
+            "strata://artifact/abc@v=3", store=_FakeResolveStore(), planner=_FakePlanner()
+        )
+        assert resolved.version == "abc@v=3"
+        assert resolved.table_identity is None
+
+    def test_malformed_artifact_uri_is_400(self, service):
+        with pytest.raises(InputResolutionError) as exc:
+            service.resolve_input_version(
+                "strata://artifact/no-version", store=_FakeResolveStore(), planner=_FakePlanner()
+            )
+        assert exc.value.status_code == 400
+
+    def test_name_uri_resolves_via_store(self, service):
+        store = _FakeResolveStore(named=SimpleNamespace(id="xyz", version=7))
+        resolved = service.resolve_input_version(
+            "strata://name/daily", store=store, planner=_FakePlanner(), tenant="acme"
+        )
+        assert resolved.version == "xyz@v=7"
+        assert resolved.table_identity is None
+        assert store.calls == [("daily", "acme")]  # tenant threaded through
+
+    def test_unknown_name_is_404(self, service):
+        with pytest.raises(InputResolutionError) as exc:
+            service.resolve_input_version(
+                "strata://name/missing", store=_FakeResolveStore(named=None), planner=_FakePlanner()
+            )
+        assert exc.value.status_code == 404
+
+    def test_table_uri_returns_snapshot_and_identity(self, service):
+        planner = _FakePlanner(snapshot_id=4242, table_identity="cat.ns.t")
+        resolved = service.resolve_input_version(
+            "file:///wh#db.t", store=_FakeResolveStore(), planner=planner
+        )
+        assert resolved.version == "4242"
+        # The identity is surfaced so the wrapper can ACL-gate the table input.
+        assert resolved.table_identity == "cat.ns.t"
+
+    def test_table_plan_failure_is_400(self, service):
+        planner = _FakePlanner(error=RuntimeError("no such table"))
+        with pytest.raises(InputResolutionError) as exc:
+            service.resolve_input_version(
+                "s3://wh#db.t", store=_FakeResolveStore(), planner=planner
+            )
+        assert exc.value.status_code == 400
+        assert "no such table" in exc.value.detail
+
+    def test_unknown_uri_scheme_is_400(self, service):
+        with pytest.raises(InputResolutionError) as exc:
+            service.resolve_input_version(
+                "ftp://nope", store=_FakeResolveStore(), planner=_FakePlanner()
+            )
+        assert exc.value.status_code == 400
 
 
 class TestRebuildArtifactId:
