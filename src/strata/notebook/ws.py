@@ -1298,6 +1298,7 @@ async def _handle_cell_run_tests(
             stale=False,
             pytest_unavailable=result.pytest_unavailable,
             ran_at=result.ran_at,
+            auto_installed=result.auto_installed,
         ).model_dump(mode="json")
         await _broadcast_message(
             notebook_id,

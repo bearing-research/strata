@@ -115,6 +115,84 @@ async def test_run_cell_tests_injects_upstream_inputs():
     assert result.input_fingerprint  # an upstream input was fingerprinted
 
 
+@pytest.mark.asyncio
+async def test_run_cell_tests_auto_provisions_pytest_then_retries(monkeypatch):
+    """A missing pytest auto-installs into the dev group and the run retries once."""
+    from strata.notebook import cell_test_runner, dependencies
+    from strata.notebook.dependencies import DependencyChangeResult
+
+    session = _session_with([("cell1", "def add(a, b):\n    return a + b\n", None)])
+    executor = CellExecutor(session)
+
+    calls = {"n": 0}
+    passed_run = {
+        "passed": 1,
+        "failed": 0,
+        "errored": 0,
+        "skipped": 0,
+        "tests": [
+            {
+                "name": "test_ok",
+                "nodeid": "test_cell.py::test_ok",
+                "outcome": "passed",
+                "message": "",
+            }
+        ],
+    }
+
+    def fake_run(**_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise cell_test_runner.PytestUnavailableError("pytest missing")
+        return passed_run
+
+    installs = {"n": 0}
+
+    def fake_ensure(notebook_dir, tool, *, timeout=120):
+        installs["n"] += 1
+        assert tool == "pytest"
+        return DependencyChangeResult(success=True, package=tool, action="add")
+
+    monkeypatch.setattr(cell_test_runner, "run_cell_tests_in_dir", fake_run)
+    monkeypatch.setattr(dependencies, "ensure_dev_tool", fake_ensure)
+
+    result = await executor.run_cell_tests("cell1", "def test_ok(cell):\n    assert True\n")
+
+    assert installs["n"] == 1  # provisioned exactly once
+    assert calls["n"] == 2  # retried after the install
+    assert result.auto_installed == ["pytest"]
+    assert result.pytest_unavailable is False
+    assert result.passed == 1
+
+
+@pytest.mark.asyncio
+async def test_run_cell_tests_auto_provision_failure_surfaces_unavailable(monkeypatch):
+    """If the auto-install fails, fall back to the actionable pytest_unavailable flag."""
+    from strata.notebook import cell_test_runner, dependencies
+    from strata.notebook.dependencies import DependencyChangeResult
+
+    session = _session_with([("cell1", "def add(a, b):\n    return a + b\n", None)])
+    executor = CellExecutor(session)
+
+    calls = {"n": 0}
+
+    def fake_run(**_kwargs):
+        calls["n"] += 1
+        raise cell_test_runner.PytestUnavailableError("pytest missing")
+
+    def fake_ensure(notebook_dir, tool, *, timeout=120):
+        return DependencyChangeResult(success=False, package=tool, action="add", error="boom")
+
+    monkeypatch.setattr(cell_test_runner, "run_cell_tests_in_dir", fake_run)
+    monkeypatch.setattr(dependencies, "ensure_dev_tool", fake_ensure)
+
+    result = await executor.run_cell_tests("cell1", "def test_ok(cell):\n    assert True\n")
+
+    assert calls["n"] == 1  # no retry when the install fails
+    assert result.pytest_unavailable is True
+    assert result.auto_installed == []
+
+
 # ---------------------------------------------------------------------------
 # WebSocket handler
 # ---------------------------------------------------------------------------

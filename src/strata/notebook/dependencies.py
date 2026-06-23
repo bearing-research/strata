@@ -1302,16 +1302,21 @@ def add_dependency(
     notebook_dir: Path,
     package: str,
     *,
+    dev: bool = False,
     timeout: int = 120,
 ) -> DependencyChangeResult:
     """Add a Python package to the notebook.
 
-    Runs ``uv add <package>`` which updates pyproject.toml, resolves
-    dependencies, writes uv.lock, and syncs .venv.
+    Runs ``uv add <package>`` (or ``uv add --dev <package>`` when *dev*) which
+    updates pyproject.toml, resolves dependencies, writes uv.lock, and syncs
+    .venv. A dev-group add lands in ``[dependency-groups] dev`` — it is synced
+    into the venv but excluded from the cell-provenance env hash, so dev tooling
+    (pytest/ruff/ty) doesn't invalidate cell caches (see ``env.py``).
 
     Args:
         notebook_dir: Path to notebook directory
         package: Package specifier (e.g. ``"requests"`` or ``"pandas>=2.0"``)
+        dev: Add to the ``dev`` dependency group rather than runtime deps.
         timeout: Subprocess timeout in seconds
 
     Returns:
@@ -1319,22 +1324,23 @@ def add_dependency(
     """
     lock = _get_notebook_lock(notebook_dir)
     with lock:
-        return _add_dependency_locked(notebook_dir, package, timeout=timeout)
+        return _add_dependency_locked(notebook_dir, package, dev=dev, timeout=timeout)
 
 
 def _add_dependency_locked(
-    notebook_dir: Path, package: str, *, timeout: int = 120
+    notebook_dir: Path, package: str, *, dev: bool = False, timeout: int = 120
 ) -> DependencyChangeResult:
     old_lockfile_hash = _lockfile_hash(notebook_dir)
 
+    args = ["add", "--dev", package] if dev else ["add", package]
     command_result = _run_uv_command(
         notebook_dir,
-        ["add", package],
+        args,
         timeout=timeout,
         display_name="uv add",
     )
     if command_result.success:
-        logger.info("uv add %s succeeded in %s", package, notebook_dir)
+        logger.info("uv add %s%s succeeded in %s", "--dev " if dev else "", package, notebook_dir)
     else:
         return DependencyChangeResult(
             success=False,
@@ -1353,6 +1359,23 @@ def _add_dependency_locked(
         dependencies=list_dependencies(notebook_dir),
         operation_log=command_result.operation_log,
     )
+
+
+def ensure_dev_tool(
+    notebook_dir: Path,
+    tool: str,
+    *,
+    timeout: int = 120,
+) -> DependencyChangeResult:
+    """Provision a dev tool (pytest / ruff / ty / mypy) into the notebook.
+
+    The single entry point features use to install their tooling on demand —
+    adds *tool* to the ``dev`` dependency group via :func:`add_dependency`. Dev
+    tools are synced into the venv but kept out of the cell-provenance env hash,
+    so provisioning one never invalidates a cell. Future tool-backed features
+    (lint, type-check) call this instead of reimplementing ``uv add --dev``.
+    """
+    return add_dependency(notebook_dir, tool, dev=True, timeout=timeout)
 
 
 def remove_dependency(

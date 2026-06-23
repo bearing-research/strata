@@ -585,6 +585,7 @@ class CellExecutor:
         venv_python = Path(self.session.venv_python or "python")
 
         pytest_unavailable = False
+        auto_installed: list[str] = []
         with tempfile.TemporaryDirectory(prefix="strata_celltest_") as tmp:
             blob_dir = Path(tmp) / "inputs"
             blob_dir.mkdir()
@@ -606,19 +607,49 @@ class CellExecutor:
                         cell_id,
                     )
 
-            raw: dict[str, Any]
-            try:
-                raw = await asyncio.to_thread(
-                    run_cell_tests_in_dir,
-                    rundir=Path(tmp) / "run",
+            def _run(rundir_name: str) -> dict[str, Any]:
+                return run_cell_tests_in_dir(
+                    rundir=Path(tmp) / rundir_name,
                     venv_python=venv_python,
                     cell_source=source,
                     test_source=test_source,
                     inputs=inputs,
                 )
+
+            empty_raw: dict[str, Any] = {
+                "passed": 0,
+                "failed": 0,
+                "errored": 0,
+                "skipped": 0,
+                "tests": [],
+            }
+            raw: dict[str, Any]
+            try:
+                raw = await asyncio.to_thread(_run, "run")
             except PytestUnavailableError:
-                pytest_unavailable = True
-                raw = {"passed": 0, "failed": 0, "errored": 0, "skipped": 0, "tests": []}
+                # Auto-provision pytest into the notebook's dev group and retry
+                # once. Dev tools are excluded from the cell-provenance env hash,
+                # so installing pytest won't invalidate cell caches. If the
+                # install fails or pytest is still missing, fall back to the
+                # actionable pytest_unavailable flag (no silent failure).
+                from strata.notebook.dependencies import ensure_dev_tool
+
+                install = await asyncio.to_thread(ensure_dev_tool, self.session.path, "pytest")
+                if install.success:
+                    auto_installed = ["pytest"]
+                    try:
+                        raw = await asyncio.to_thread(_run, "run")
+                    except PytestUnavailableError:
+                        pytest_unavailable = True
+                        raw = empty_raw
+                else:
+                    logger.warning(
+                        "Auto-install of pytest failed for notebook %s: %s",
+                        self.session.path,
+                        install.error,
+                    )
+                    pytest_unavailable = True
+                    raw = empty_raw
 
         result = CellTestResult(
             passed=raw["passed"],
@@ -631,6 +662,7 @@ class CellExecutor:
             input_fingerprint=input_fingerprint,
             ran_at=int(time.time() * 1000),
             pytest_unavailable=pytest_unavailable,
+            auto_installed=auto_installed,
         )
 
         persist_cell_test_result(self.session.path, cell_id, result.model_dump())
