@@ -1,7 +1,12 @@
 """Environment hashing for notebook dependencies.
 
-For now, we compute the hash of the entire uv.lock file.
-Runtime-only filtering (excluding dev deps) is a future optimization.
+The cell-provenance env hash folds ``uv.lock`` (+ ``renv.lock``). A notebook with
+no dev-dependencies hashes the **raw ``uv.lock`` bytes** (the historical
+behavior — byte-identical, so existing caches are untouched). When a
+``[dependency-groups] dev`` group is present, the uv contribution becomes a
+fingerprint of just the **runtime dependency closure** instead, so adding or
+removing a dev tool (pytest / ruff / ty / mypy) — which doesn't change what a
+cell *computes* — never invalidates the cell's cache.
 """
 
 from __future__ import annotations
@@ -9,8 +14,10 @@ from __future__ import annotations
 import ast
 import hashlib
 import logging
+import tomllib
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +146,101 @@ def compute_lockfile_hash(notebook_dir: Path) -> str:
     return hasher.hexdigest()
 
 
+def _runtime_uv_closure_fingerprint(raw_uv_lock: bytes) -> bytes | None:
+    """Fingerprint a ``uv.lock``'s runtime dependency closure, or ``None``.
+
+    Returns ``None`` when the lock declares **no** dev-dependencies (the caller
+    then folds the raw bytes — byte-identical to the historical hash, so notebooks
+    without dev tooling are completely unaffected) or cannot be parsed (safe
+    fallback to raw bytes).
+
+    Otherwise it walks the resolution graph from the root project's **runtime**
+    direct deps (its ``dependencies`` — *not* ``[package.dev-dependencies]``) and
+    folds each reachable package's ``name@version`` plus its artifact hashes. So
+    the digest tracks runtime content — including transitive runtime upgrades a
+    dev install might force — while being invariant to the dev tools themselves.
+    """
+    try:
+        # tomllib yields dynamically-typed nested structures; treat as Any and
+        # guard each access with isinstance below.
+        data: Any = tomllib.loads(raw_uv_lock.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return None
+
+    packages = data.get("package")
+    if not isinstance(packages, list):
+        return None
+
+    by_name: dict[str, list[dict]] = {}
+    root: dict | None = None
+    for pkg in packages:
+        if not isinstance(pkg, dict):
+            continue
+        name = pkg.get("name")
+        if not isinstance(name, str):
+            continue
+        by_name.setdefault(name, []).append(pkg)
+        source = pkg.get("source")
+        if isinstance(source, dict) and (
+            source.get("virtual") == "." or source.get("editable") == "."
+        ):
+            root = pkg
+
+    # No identifiable root, or no dev group to exclude → let the caller fold raw
+    # bytes (the historical, byte-identical behavior).
+    if root is None or not root.get("dev-dependencies"):
+        return None
+
+    def _dep_names(entries: Any) -> list[str]:
+        names: list[str] = []
+        if isinstance(entries, list):
+            for d in entries:
+                if isinstance(d, dict):
+                    dep_name = d.get("name")
+                    if isinstance(dep_name, str):
+                        names.append(dep_name)
+        return names
+
+    # Seed with the root's RUNTIME direct deps, then walk each reached package's
+    # own dependencies + optional-dependencies (extras of a runtime dep are
+    # runtime). Dev-only packages are never reached → excluded.
+    seen: set[str] = set()
+    frontier = _dep_names(root.get("dependencies"))
+    while frontier:
+        name = frontier.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        for pkg in by_name.get(name, []):
+            frontier.extend(_dep_names(pkg.get("dependencies")))
+            optional = pkg.get("optional-dependencies")
+            if isinstance(optional, dict):
+                for group in optional.values():
+                    frontier.extend(_dep_names(group))
+
+    hasher = hashlib.sha256()
+    for name in sorted(seen):
+        for pkg in sorted(by_name.get(name, []), key=lambda p: str(p.get("version", ""))):
+            hasher.update(b"\0pkg=")
+            hasher.update(name.encode("utf-8"))
+            hasher.update(b"@")
+            hasher.update(str(pkg.get("version", "")).encode("utf-8"))
+            # Artifact hashes pin content — catches a same-version re-pin.
+            artifact_hashes: list[str] = []
+            sdist = pkg.get("sdist")
+            if isinstance(sdist, dict) and isinstance(sdist.get("hash"), str):
+                artifact_hashes.append(sdist["hash"])
+            wheels = pkg.get("wheels")
+            if isinstance(wheels, list):
+                for wheel in wheels:
+                    if isinstance(wheel, dict) and isinstance(wheel.get("hash"), str):
+                        artifact_hashes.append(wheel["hash"])
+            for artifact_hash in sorted(artifact_hashes):
+                hasher.update(b"|")
+                hasher.update(artifact_hash.encode("utf-8"))
+    return hasher.digest()
+
+
 def _fold_lockfile_into_hash(
     hasher: hashlib._Hash, notebook_dir: Path, filename: str, *, tag: bytes | None
 ) -> None:
@@ -164,6 +266,17 @@ def _fold_lockfile_into_hash(
     except OSError as exc:
         logger.warning("Could not read %s: %s", filename, exc)
         return
+    # uv.lock: when a dev group is present, fold a fingerprint of only the
+    # *runtime* dependency closure instead of the raw bytes, so dev tools
+    # (pytest/ruff/ty) don't invalidate cell caches. No dev group (or a parse
+    # failure) → fall through to the raw-bytes fold, byte-identical to the
+    # historical hash (no re-hash for existing/non-dev notebooks).
+    if filename == "uv.lock":
+        fingerprint = _runtime_uv_closure_fingerprint(content)
+        if fingerprint is not None:
+            hasher.update(b"\0uv-runtime=")
+            hasher.update(fingerprint)
+            return
     if tag is not None:
         hasher.update(tag)
     hasher.update(content)
