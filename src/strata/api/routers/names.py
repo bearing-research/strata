@@ -1,11 +1,12 @@
 """Name registry routes: names (resolve/set/delete/list/status), aliases, and tags.
 
 Moved verbatim from ``server.py`` (P3 / A1b, router split). Thin handlers over
-the P1 typed dependencies. Two server-private helpers are reached via in-body
-lazy import and stay in ``server.py``: ``get_state`` (the protected-alias config
-on the alias set/delete paths) and ``_resolve_input_version`` (the shared
-table-ACL resolver used by name-status staleness; also used by materialize).
-The governance gate body ``_require_registry_approver`` also stays in server.py.
+the P1 typed dependencies. ``get_state`` (the protected-alias config on the
+alias set/delete paths) and the governance gate ``_require_registry_approver``
+are reached via in-body lazy import and stay in ``server.py``. The shared
+table-ACL resolver used by name-status staleness is ``resolve_input_version``,
+imported from ``strata.api.dependencies`` (#295) — the same enforced unit
+materialize and explain call.
 
 Route order matters: the greedy ``/v1/names/{name:path}`` resolver MUST stay
 registered AFTER the more specific ``/v1/names/{name:path}/aliases/...`` routes,
@@ -345,7 +346,7 @@ async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincip
     Returns:
         NameStatusResponse with staleness information
     """
-    from strata.server import _resolve_input_version
+    from strata.api.dependencies import resolve_input_version
 
     # Get tenant from auth context for name isolation
     tenant_id = principal.tenant if principal else None
@@ -359,7 +360,7 @@ async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincip
     changed_inputs: list[InputChangeInfo] = []
     for input_uri, old_version in status.input_versions.items():
         try:
-            current_version = _resolve_input_version(input_uri, tenant=tenant_id)
+            current_version = resolve_input_version(input_uri, tenant=tenant_id)
             if current_version != old_version:
                 changed_inputs.append(
                     InputChangeInfo(

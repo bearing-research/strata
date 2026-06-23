@@ -27,6 +27,8 @@ from strata.adaptive_concurrency import ResizableLimiter
 from strata.api.dependencies import (
     CurrentPrincipal,
     ReadStore,
+    authorize_table_access,
+    resolve_input_version,
 )
 from strata.auth import (
     AuthError,
@@ -77,7 +79,6 @@ from strata.types import (
     MaterializeRequest,
     MaterializeResponse,
     ReadPlan,
-    TableRef,
     UploadFinalizeRequest,
     UploadFinalizeResponse,
 )
@@ -1768,33 +1769,15 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
     )
 
 
-def _authorize_table_access(table_uri: str, table_identity) -> None:
-    """Enforce table-level ACL under trusted-proxy auth; no-op otherwise.
-
-    The direct scan path (``scan@v1``) and every path that resolves a *table*
-    URI as a transform input share this one gate, so a table input can't be used
-    to read a table the caller is denied on the direct scan path (the ACL was
-    previously only checked on ``scan@v1``, letting transforms bypass it).
-
-    Raises:
-        HTTPException: 401 if no principal; 403/404 (per
-        ``hide_forbidden_as_not_found``) if the ACL denies the table.
-    """
-    state = get_state()
-    if state.config.auth_mode != "trusted_proxy":
-        return
-
-    from strata.auth import AclEvaluator
-
-    principal = get_principal()
-    if principal is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    table_ref = TableRef.from_table_identity(table_identity, table_uri=table_uri)
-    if not AclEvaluator(state.config.acl_config).authorize(principal, table_ref):
-        if state.config.hide_forbidden_as_not_found:
-            raise HTTPException(status_code=404, detail="Table not found")
-        raise HTTPException(status_code=403, detail="Access denied")
+# ``_authorize_table_access`` + the table-input resolver moved into
+# ``strata.api.dependencies`` (#295) so the materialize/explain handlers and the
+# names router call one enforced unit (deny-first on every table input) instead
+# of reaching into ``strata.server``. These module-level aliases keep the
+# private names the in-module callers (``_authorize_artifact_read``,
+# ``_handle_identity_materialize``) and the test suite use, and let
+# ``monkeypatch.setattr("strata.server._resolve_input_version", …)`` keep working.
+_authorize_table_access = authorize_table_access
+_resolve_input_version = resolve_input_version
 
 
 def _authorize_artifact_read(artifact) -> None:
@@ -1864,69 +1847,6 @@ def _authorize_artifact_write() -> None:
                 "message": "Publishing to the store requires the 'artifacts:write' scope.",
             },
         )
-
-
-def _resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
-    """Resolve an input URI to its current version string.
-
-    For table URIs (file:// or s3://): returns the current snapshot ID
-    For artifact URIs (strata://artifact/...): returns the artifact version
-    For artifact names (strata://name/...): resolves to artifact version
-
-    Args:
-        input_uri: Input URI to resolve
-
-    Returns:
-        Version string (snapshot ID for tables, "artifact_id@v=N" for artifacts)
-
-    Raises:
-        HTTPException: If input cannot be resolved
-    """
-    import re
-
-    store = _get_artifact_store(allow_server_mode=True)
-    state = get_state()
-
-    # Artifact URI: strata://artifact/{id}@v={version}
-    if input_uri.startswith("strata://artifact/"):
-        match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
-        if match:
-            artifact_id = match.group(1)
-            version = int(match.group(2))
-            return f"{artifact_id}@v={version}"
-        raise HTTPException(status_code=400, detail=f"Invalid artifact URI: {input_uri}")
-
-    # Name URI: strata://name/{name}
-    if input_uri.startswith("strata://name/"):
-        name = input_uri.replace("strata://name/", "")
-        artifact = store.resolve_name(name, tenant=tenant)
-        if artifact is None:
-            raise HTTPException(status_code=404, detail=f"Name not found: {name}")
-        return f"{artifact.id}@v={artifact.version}"
-
-    # Table URI: file:// or s3://
-    if input_uri.startswith("file://") or input_uri.startswith("s3://"):
-        try:
-            # Get current snapshot ID from planner
-            plan = state.planner.plan(
-                table_uri=input_uri,
-                snapshot_id=None,  # Current snapshot
-                columns=None,
-                filters=None,
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Could not resolve table {input_uri}: {str(e)}",
-            ) from e
-        # Gate table inputs through the same ACL as the direct scan path — a
-        # transform input must not bypass it. Raised outside the try so a
-        # 403/404 isn't rewritten into a 400.
-        _authorize_table_access(input_uri, plan.table_identity)
-        return str(plan.snapshot_id)
-
-    # Unknown URI type
-    raise HTTPException(status_code=400, detail=f"Unknown input URI type: {input_uri}")
 
 
 @app.post("/v1/artifacts/materialize", response_model=MaterializeResponse)
@@ -2267,22 +2187,10 @@ def _require_registry_approver():
 _ACTIVE_BUILD_STATES = ("pending", "building", "running")
 
 
-def _build_transport_available() -> bool:
-    """Whether signed build transport APIs are available in the current mode."""
-    state = get_state()
-    return state.config.writes_enabled or state.config.server_transforms_enabled
-
-
-def _get_runtime_build_store():
-    """Get or initialize the runtime build store for signed build transport APIs."""
-    from strata.transforms.build_store import get_build_store
-
-    state = get_state()
-    artifact_dir = state.config.artifact_dir
-    if artifact_dir is None:
-        return None
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    return get_build_store(artifact_dir / "artifacts.sqlite")
+# ``_build_transport_available`` and ``_get_runtime_build_store`` moved into
+# ``strata.api.dependencies`` (#295) — they gate only the signed-transport build
+# routes (``api/routers/builds.py``), which now import them, and the
+# ``BuildTransportStore`` / ``RequiredBuildStore`` dependencies wrap them.
 
 
 @app.post("/v1/artifacts/explain-materialize", response_model=ExplainMaterializeResponse)
