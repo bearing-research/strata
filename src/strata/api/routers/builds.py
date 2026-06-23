@@ -354,10 +354,7 @@ async def upload_artifact_signed(
             store.publish_blob_from_path, build.artifact_id, build.version, staged
         )
     finally:
-        try:
-            staged.unlink()
-        except FileNotFoundError:
-            pass
+        staged.unlink(missing_ok=True)
 
     return {"status": "uploaded", "build_id": build_id, "byte_size": byte_size}
 
@@ -470,10 +467,7 @@ async def finalize_build(
                         dst.write(chunk)
                 read_notebook_output_bundle_manifest_path(staged_path)
             finally:
-                try:
-                    staged_path.unlink()
-                except FileNotFoundError:
-                    pass
+                staged_path.unlink(missing_ok=True)
             return "", 0
 
         try:

@@ -661,10 +661,7 @@ async def upload_artifact_blob(
             raise HTTPException(status_code=400, detail="Empty request body")
         await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, staged)
     finally:
-        try:
-            staged.unlink()
-        except FileNotFoundError:
-            pass
+        staged.unlink(missing_ok=True)
 
     return {"status": "uploaded", "byte_size": byte_size}
 
