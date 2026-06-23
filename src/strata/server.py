@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import tempfile
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -25,8 +24,6 @@ from fastapi.staticfiles import StaticFiles
 
 from strata.adaptive_concurrency import ResizableLimiter
 from strata.api.dependencies import (
-    CurrentPrincipal,
-    ReadStore,
     authorize_table_access,
     resolve_input_version,
 )
@@ -73,14 +70,10 @@ from strata.tracing import init_tracing, instrument_fastapi, trace_span
 from strata.types import (
     BuildSpec,
     BuildStatusResponse,
-    ExplainMaterializeRequest,
-    ExplainMaterializeResponse,
     IdentityParams,
     MaterializeRequest,
     MaterializeResponse,
     ReadPlan,
-    UploadFinalizeRequest,
-    UploadFinalizeResponse,
 )
 
 logger = get_logger(__name__)
@@ -167,7 +160,6 @@ class ServerState:
     """Shared server state."""
 
     def __init__(self, config: StrataConfig) -> None:
-        import os
         import secrets
         from concurrent.futures import ThreadPoolExecutor
 
@@ -1530,6 +1522,7 @@ from strata.api.routers.artifacts import router as artifacts_router  # noqa: E40
 from strata.api.routers.builds import router as builds_router  # noqa: E402
 from strata.api.routers.cache import router as cache_router  # noqa: E402
 from strata.api.routers.debug import router as debug_router  # noqa: E402
+from strata.api.routers.materialize import router as materialize_router  # noqa: E402
 from strata.api.routers.metadata import router as metadata_router  # noqa: E402
 from strata.api.routers.metrics_health import router as metrics_health_router  # noqa: E402
 from strata.api.routers.names import router as names_router  # noqa: E402
@@ -1548,6 +1541,7 @@ app.include_router(admin_router)
 app.include_router(artifacts_router)
 app.include_router(names_router)
 app.include_router(builds_router)
+app.include_router(materialize_router)
 
 
 def _require_notebook_worker_admin_access() -> ServerState:
@@ -2060,108 +2054,6 @@ async def materialize_artifact(request: MaterializeRequest):
     )
 
 
-@app.post("/v1/artifacts/upload/{artifact_id}/v/{version}")
-async def upload_artifact_blob(artifact_id: str, version: int, request: Request):
-    """Upload artifact blob data (personal mode only).
-
-    The client POSTs raw Arrow IPC stream bytes to this endpoint.
-    After upload, call /v1/artifacts/finalize to complete the artifact.
-
-    Args:
-        artifact_id: Artifact ID from materialize response
-        version: Version number from materialize response
-        request: Raw request body containing Arrow IPC bytes
-    """
-    store = _get_artifact_store()
-
-    # Verify artifact exists and is in building state
-    artifact = store.get_artifact(artifact_id, version)
-    if artifact is None:
-        raise HTTPException(status_code=404, detail="Artifact not found")
-    if artifact.state != "building":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Artifact is not in building state (state={artifact.state})",
-        )
-
-    byte_size = 0
-    fd, tmp_name = tempfile.mkstemp(prefix="strata_upload_", suffix=".tmp")
-    staged = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as dst:
-            async for chunk in request.stream():
-                if not chunk:
-                    continue
-                byte_size += len(chunk)
-                dst.write(chunk)
-        if byte_size == 0:
-            raise HTTPException(status_code=400, detail="Empty request body")
-        await asyncio.to_thread(store.publish_blob_from_path, artifact_id, version, staged)
-    finally:
-        try:
-            staged.unlink()
-        except FileNotFoundError:
-            pass
-
-    return {"status": "uploaded", "byte_size": byte_size}
-
-
-@app.post("/v1/artifacts/finalize", response_model=UploadFinalizeResponse)
-async def finalize_artifact(request: UploadFinalizeRequest):
-    """Finalize an artifact after upload (personal mode only).
-
-    After uploading the blob, call this to transition the artifact to ready state.
-    Optionally sets a name pointer to the artifact.
-
-    Returns:
-        UploadFinalizeResponse with artifact URI and optional name URI
-    """
-    store = _get_artifact_store()
-
-    # Verify blob exists
-    if not store.blob_exists(request.artifact_id, request.version):
-        raise HTTPException(
-            status_code=400,
-            detail="Blob not uploaded. Call upload endpoint first.",
-        )
-
-    # Get blob size without materializing the payload
-    byte_size = store.blob_size(request.artifact_id, request.version) or 0
-
-    # Finalize artifact
-    try:
-        finalized_artifact = store.finalize_artifact(
-            artifact_id=request.artifact_id,
-            version=request.version,
-            schema_json=request.arrow_schema,
-            row_count=request.row_count,
-            byte_size=byte_size,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    if finalized_artifact is None:
-        raise HTTPException(status_code=500, detail="Failed to finalize artifact")
-
-    artifact_uri = f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}"
-    name_uri = None
-
-    # Set name if requested
-    if request.name:
-        try:
-            store.set_name(request.name, finalized_artifact.id, finalized_artifact.version)
-            name_uri = f"strata://name/{request.name}"
-        except ValueError as e:
-            # Don't fail the whole request if name setting fails
-            logger.warning(f"Failed to set name {request.name}: {e}")
-
-    return UploadFinalizeResponse(
-        artifact_uri=artifact_uri,
-        byte_size=finalized_artifact.byte_size or byte_size,
-        name_uri=name_uri,
-    )
-
-
 def _require_registry_approver():
     """Authorize a registry approval decision; return the principal.
 
@@ -2191,44 +2083,6 @@ _ACTIVE_BUILD_STATES = ("pending", "building", "running")
 # ``strata.api.dependencies`` (#295) — they gate only the signed-transport build
 # routes (``api/routers/builds.py``), which now import them, and the
 # ``BuildTransportStore`` / ``RequiredBuildStore`` dependencies wrap them.
-
-
-@app.post("/v1/artifacts/explain-materialize", response_model=ExplainMaterializeResponse)
-async def explain_materialize(
-    request: ExplainMaterializeRequest, store: ReadStore, principal: CurrentPrincipal
-):
-    """Explain what materialize would do without actually doing it (dry run).
-
-    This endpoint is useful for:
-    - Checking if a computation would be a cache hit or miss
-    - Understanding why a rebuild is needed
-    - Debugging provenance and staleness issues
-    - Scripts that want to print "Rebuild needed: raw_q1 moved from v12 → v13"
-
-    Args:
-        request: ExplainMaterializeRequest with inputs, transform, and optional name
-
-    Returns:
-        ExplainMaterializeResponse explaining what would happen
-    """
-    from strata.services.materialize import materialize_service
-
-    # Get tenant from auth context for artifact isolation.
-    tenant_id = principal.tenant if principal else None
-
-    # Resolve current input versions (may 400/404 per input — captured as an
-    # error marker so the dry run still returns a full picture). The pure
-    # provenance / cache-hit / staleness logic lives in MaterializeService.
-    resolved_versions: dict[str, str] = {}
-    for input_uri in request.inputs:
-        try:
-            resolved_versions[input_uri] = _resolve_input_version(input_uri, tenant=tenant_id)
-        except HTTPException as e:
-            resolved_versions[input_uri] = f"<error: {e.detail}>"
-
-    return materialize_service.explain(
-        store, request=request, tenant=tenant_id, resolved_versions=resolved_versions
-    )
 
 
 def _parse_artifact_uri(uri: str) -> tuple[str, int] | None:
@@ -3103,7 +2957,6 @@ def _apply_server_cli_overrides(args) -> None:
     config load (in the lifespan) pick them up. The flag wins over an existing
     ``STRATA_NOTEBOOK_STORAGE_DIR`` — it's the more explicit signal.
     """
-    import os
     from pathlib import Path
 
     if args.notebook_dir is not None:
