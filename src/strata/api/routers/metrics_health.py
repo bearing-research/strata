@@ -195,13 +195,7 @@ async def metrics():
         "max_response_bytes": state.config.max_response_bytes,
     }
     # Add prefetch metrics for observability
-    stats["prefetch"] = {
-        "started": state._prefetch_started,
-        "used": state._prefetch_used,
-        "wasted": state._prefetch_wasted,
-        "skipped": state._prefetch_skipped,
-        "in_flight": state._prefetch_in_flight,
-    }
+    stats["prefetch"] = state.scan_builds.prefetch_metrics()
     # Add QoS tier metrics
     stats["qos"] = _get_qos_metrics(state)
     # Get cache size and entry count in thread pool to avoid blocking (involves filesystem ops)
@@ -303,6 +297,7 @@ async def metrics_prometheus():
 
     state = get_state()
     stats = state.metrics.get_aggregate_stats()
+    prefetch = state.scan_builds.prefetch_metrics()
 
     lines = [
         "# HELP strata_cache_hits_total Total number of cache hits",
@@ -383,23 +378,23 @@ async def metrics_prometheus():
         "",
         "# HELP strata_prefetch_started_total Total prefetches started",
         "# TYPE strata_prefetch_started_total counter",
-        f"strata_prefetch_started_total {state._prefetch_started}",
+        f"strata_prefetch_started_total {prefetch['started']}",
         "",
         "# HELP strata_prefetch_used_total Prefetches successfully used by streaming",
         "# TYPE strata_prefetch_used_total counter",
-        f"strata_prefetch_used_total {state._prefetch_used}",
+        f"strata_prefetch_used_total {prefetch['used']}",
         "",
         "# HELP strata_prefetch_wasted_total Prefetches wasted (scan deleted/abandoned)",
         "# TYPE strata_prefetch_wasted_total counter",
-        f"strata_prefetch_wasted_total {state._prefetch_wasted}",
+        f"strata_prefetch_wasted_total {prefetch['wasted']}",
         "",
         "# HELP strata_prefetch_skipped_total Prefetches skipped (server busy)",
         "# TYPE strata_prefetch_skipped_total counter",
-        f"strata_prefetch_skipped_total {state._prefetch_skipped}",
+        f"strata_prefetch_skipped_total {prefetch['skipped']}",
         "",
         "# HELP strata_prefetch_in_flight Current prefetches in flight",
         "# TYPE strata_prefetch_in_flight gauge",
-        f"strata_prefetch_in_flight {state._prefetch_in_flight}",
+        f"strata_prefetch_in_flight {prefetch['in_flight']}",
     ]
 
     # Add GC stats for diagnosing periodic stalls
