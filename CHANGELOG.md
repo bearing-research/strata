@@ -5,7 +5,7 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## Unreleased
+## 0.4.0 — 2026-06-22
 
 0.4.0 is a **consolidation and hardening** cycle: the headline is an internal
 restructuring of the server, alongside a new notebook feature, concurrency-bug
@@ -26,14 +26,15 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   (`cell_run_tests` → `cell_test_status` / `cell_test_results`). Python cells
   only; `pytest` must be in the notebook's environment (a missing-pytest run
   surfaces an actionable message). The generated-conftest runner is written to
-  be liftable to a standalone plugin for CI/pre-commit later.
+  be liftable to a standalone plugin for CI/pre-commit later. See the
+  `pandas_basics` example for a worked set of cell tests.
 
 ### Changed
 
 - **Server internals decomposed (gates-first).** `server.py` went from a
   ~6,950-line module — where all ~76 routes hand-wired their own
   mode/auth/tenant/QoS gates, the shape behind the service-mode gate bug the
-  0.3.0 registry review caught — to ~3,280 lines, in three layers:
+  0.3.0 registry review caught — to ~3,210 lines, in three layers:
   **typed dependencies** (`strata/api/dependencies.py`: distinct
   `ReadStore`/`WriteStore`/`PersonalModeStore` types + principal/scope/tenant
   gates, so a route can't wire the wrong gate), **services**
@@ -77,11 +78,12 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
 ### Internal
 
 - CI hardening: a per-test `pytest-timeout` plus a job backstop convert
-  multi-hour hangs into named 3-minute failures; process-global server state is
-  reset between tests so the parallel (`xdist`) unit-test runs are isolated;
-  `ty` is scoped to shipped code and the type-check is clean including warnings;
-  the notebook WebSocket tests no longer drive `TestClient`'s portal (a
-  py3.12/macOS hang).
+  multi-hour hangs into named 3-minute failures; process-global server state
+  (including the rate limiter) is reset between tests so the parallel (`xdist`)
+  unit-test runs are isolated; flaky wall-clock timing assertions were replaced
+  with structural checks; `ty` is scoped to shipped code and the type-check is
+  clean including warnings; the notebook WebSocket tests no longer drive
+  `TestClient`'s portal (a py3.12/macOS hang).
 
 ## 0.3.0 — 2026-06-17
 

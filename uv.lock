@@ -3650,7 +3650,7 @@ wheels = [
 
 [[package]]
 name = "strata-client"
-version = "0.4.0.dev0"
+version = "0.4.0"
 source = { editable = "packages/strata-client" }
 dependencies = [
     { name = "httpx" },
@@ -3694,7 +3694,7 @@ provides-extras = ["duckdb", "pandas", "polars", "datafusion", "all"]
 
 [[package]]
 name = "strata-notebook"
-version = "0.4.0.dev0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
