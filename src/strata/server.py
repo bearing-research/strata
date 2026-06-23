@@ -74,7 +74,6 @@ from strata.types import (
     ExplainMaterializeRequest,
     ExplainMaterializeResponse,
     IdentityParams,
-    InputChangeInfo,
     MaterializeRequest,
     MaterializeResponse,
     ReadPlan,
@@ -2308,20 +2307,14 @@ async def explain_materialize(
     Returns:
         ExplainMaterializeResponse explaining what would happen
     """
-    from strata.artifact_store import TransformSpec, compute_provenance_hash
+    from strata.services.materialize import materialize_service
 
-    # Get tenant from auth context for artifact isolation
+    # Get tenant from auth context for artifact isolation.
     tenant_id = principal.tenant if principal else None
 
-    # Parse transform spec
-    transform = request.transform
-    transform_spec = TransformSpec(
-        executor=transform.executor,
-        params=transform.params,
-        inputs=request.inputs,
-    )
-
-    # Resolve current input versions
+    # Resolve current input versions (may 400/404 per input — captured as an
+    # error marker so the dry run still returns a full picture). The pure
+    # provenance / cache-hit / staleness logic lives in MaterializeService.
     resolved_versions: dict[str, str] = {}
     for input_uri in request.inputs:
         try:
@@ -2329,57 +2322,8 @@ async def explain_materialize(
         except HTTPException as e:
             resolved_versions[input_uri] = f"<error: {e.detail}>"
 
-    # Compute provenance hash with current versions
-    input_hashes = [f"{uri}:{version}" for uri, version in sorted(resolved_versions.items())]
-    provenance_hash = compute_provenance_hash(input_hashes, transform_spec)
-
-    # Check for existing artifact with same provenance (tenant-scoped)
-    existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
-    if existing is not None:
-        return ExplainMaterializeResponse(
-            would_hit=True,
-            artifact_uri=f"strata://artifact/{existing.id}@v={existing.version}",
-            would_build=False,
-            resolved_input_versions=resolved_versions,
-        )
-
-    # Cache miss - check if there's an existing named artifact that would be stale
-    changed_inputs: list[InputChangeInfo] = []
-    is_stale = False
-    stale_reason = None
-    existing_artifact_uri = None
-
-    if request.name:
-        name_status = store.get_name_status(request.name, tenant=tenant_id)
-        if name_status is not None:
-            existing_artifact_uri = name_status.artifact_uri
-            # Compare stored versions vs current
-            for input_uri, old_version in name_status.input_versions.items():
-                current_version = resolved_versions.get(input_uri)
-                if current_version and current_version != old_version:
-                    changed_inputs.append(
-                        InputChangeInfo(
-                            input_uri=input_uri,
-                            old_version=old_version,
-                            new_version=current_version,
-                        )
-                    )
-
-            is_stale = len(changed_inputs) > 0
-            if is_stale:
-                changes = [
-                    f"{c.input_uri}: {c.old_version} → {c.new_version}" for c in changed_inputs
-                ]
-                stale_reason = f"Rebuild needed: {', '.join(changes)}"
-
-    return ExplainMaterializeResponse(
-        would_hit=False,
-        artifact_uri=existing_artifact_uri,
-        would_build=True,
-        is_stale=is_stale,
-        stale_reason=stale_reason,
-        changed_inputs=changed_inputs if changed_inputs else None,
-        resolved_input_versions=resolved_versions,
+    return materialize_service.explain(
+        store, request=request, tenant=tenant_id, resolved_versions=resolved_versions
     )
 
 
