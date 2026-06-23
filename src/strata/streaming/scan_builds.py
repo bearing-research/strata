@@ -18,6 +18,7 @@ decoupled task (#165) — the manager creates it, the handler shields it. See
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from typing import TYPE_CHECKING
 
@@ -146,10 +147,10 @@ class ScanBuildManager:
 
         prefetch_task = self._prefetch_futures.get(scan_id)
         if prefetch_task is not None:
-            try:
+            # Wait briefly for an in-flight prefetch; a timeout just means it
+            # isn't ready yet, so fall through to consume-or-discard below.
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(asyncio.shield(prefetch_task), timeout=0.05)
-            except TimeoutError:
-                pass
             if plan.prefetched_first is not None:
                 chunk = plan.prefetched_first
                 plan.prefetched_first = None
@@ -190,8 +191,14 @@ class ScanBuildManager:
 
         try:
             store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
-        except Exception:
-            pass
+        except Exception as e:
+            # Best-effort cleanup on an already-failed build — record why marking
+            # it failed didn't take, but don't mask the original error by raising.
+            logger.debug(
+                "mark_stream_artifact_failed_error",
+                artifact_id=stream_state.artifact_id,
+                error=str(e),
+            )
 
     async def build_identity_artifact(self, state: ServerState, stream_state: StreamState) -> None:
         """Build a scan@v1 artifact in the background for artifact-mode requests.
@@ -387,5 +394,11 @@ class ScanBuildManager:
             )
             try:
                 store.fail_artifact(stream_state.artifact_id, stream_state.artifact_version)
-            except Exception:
-                pass
+            except Exception as fail_err:
+                # Best-effort: the finalize already failed and was logged above;
+                # record that the fail-artifact cleanup also errored, don't raise.
+                logger.debug(
+                    "stream_artifact_fail_cleanup_error",
+                    artifact_id=stream_state.artifact_id,
+                    error=str(fail_err),
+                )
