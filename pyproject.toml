@@ -98,6 +98,12 @@ sql-bigquery = [
 sql-duckdb = [
     "duckdb>=1.0.0",
 ]
+# Notebook TUI: a read-only Textual spectator that attaches to a running
+# notebook session over the WS protocol (httpx + websockets are already core
+# deps). Install only if you want the terminal viewer (`strata-notebook-tui`).
+tui = [
+    "textual>=0.80.0",
+]
 
 [dependency-groups]
 dev = [
@@ -127,6 +133,8 @@ dev = [
     "adbc-driver-manager>=1.0.0",
     "adbc-driver-postgresql>=1.0.0",
     "adbc-driver-sqlite>=1.0.0",
+    # TUI viewer (the [tui] extra) — dev-installed so its tests can import it.
+    "textual>=0.80.0",
 ]
 docs = [
     "mkdocs>=1.6.0",
@@ -137,6 +145,7 @@ docs = [
 [project.scripts]
 strata = "strata.cli:main"
 strata-notebook = "strata.server:main"
+strata-notebook-tui = "strata.notebook.tui.cli:main"
 strata-worker = "strata.notebook.remote_executor:main"
 
 [project.urls]
