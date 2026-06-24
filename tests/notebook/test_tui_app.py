@@ -91,6 +91,50 @@ async def test_number_keys_focus_panels_for_arrow_scrolling(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resync_preserves_selection(monkeypatch):
+    """A periodic/manual resync keeps the current selection (doesn't jump to top)."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 30)) as pilot:
+        state = {
+            "type": "notebook_state",
+            "seq": 0,
+            "ts": "t",
+            "payload": {
+                "name": "NB",
+                "cells": [
+                    {"id": "a", "source": "x=1"},
+                    {"id": "b", "source": "y=2"},
+                    {"id": "c", "source": "z=3"},
+                ],
+            },
+        }
+        app._dispatch(json.dumps(state))
+        await pilot.pause()
+
+        app._select_cell("c")  # move selection to cell c
+        await pilot.pause()
+        assert app._selected == "c"
+
+        # A no-op resync (identical state) must not disturb the selection.
+        app._dispatch(json.dumps(state))
+        await pilot.pause()
+        assert app._selected == "c"
+
+        # A resync that changes cell a's source rebuilds but keeps selection on c.
+        changed = json.loads(json.dumps(state))
+        changed["payload"]["cells"][0]["source"] = "x = 999"
+        app._dispatch(json.dumps(changed))
+        await pilot.pause()
+        assert app._selected == "c"
+
+
+@pytest.mark.asyncio
 async def test_follow_mode_tracks_the_running_cell(monkeypatch):
     """With follow on, a cell going `running` is auto-selected; `f` toggles it off."""
 
