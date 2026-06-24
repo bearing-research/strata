@@ -504,21 +504,42 @@ def _single_table(cell: CellView) -> tuple[list[str], list[Any], int | None] | N
     )
 
 
+# A terminal can't show a wide DataFrame's every column legibly — cap the count
+# and signal the rest in the caption (the web UI is where you see them all).
+_MAX_TABLE_COLS = 8
+
+
 def _render_table(columns: list[str], preview: list[Any], total: int | None) -> Table:
-    """Build a Rich table from a serialized preview (≤20 rows of cell values)."""
+    """Build a Rich table from a serialized preview (≤20 rows × ≤8 columns).
+
+    Values truncate with an ellipsis (one line each) rather than folding into tall
+    rows; extra rows and columns are noted in the caption.
+    """
     table = Table(show_header=True, header_style="bold", expand=False)
-    for name in columns:
-        table.add_column(name, overflow="fold", max_width=24)
+    shown = columns[:_MAX_TABLE_COLS]
+    extra_cols = len(columns) - len(shown)
+    for name in shown:
+        table.add_column(name, overflow="ellipsis", max_width=24, no_wrap=True)
+    if extra_cols:
+        table.add_column("…")
     for row in preview[:20]:
         if isinstance(row, list):
-            cells = [_cell_str(v) for v in row]
+            cells = [_cell_str(v) for v in row[: len(shown)]]
         elif isinstance(row, dict):  # defensive: map by column name
-            cells = [_cell_str(row.get(name)) for name in columns]
+            cells = [_cell_str(row.get(name)) for name in shown]
         else:
             continue
+        if extra_cols:
+            cells.append("…")
         table.add_row(*cells)
-    if total is not None and total > len(preview[:20]):
-        table.caption = f"showing {len(preview[:20])} of {total} rows"
+    shown_rows = len(preview[:20])
+    notes = []
+    if total is not None and total > shown_rows:
+        notes.append(f"{shown_rows} of {total} rows")
+    if extra_cols:
+        notes.append(f"+{extra_cols} more cols")
+    if notes:
+        table.caption = "showing " + ", ".join(notes)
     return table
 
 
