@@ -15,6 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from strata.notebook.annotations import parse_annotations
+
 
 @dataclass
 class CellView:
@@ -85,11 +87,16 @@ class NotebookViewModel:
                 continue
             order.append(cid)
             prior = self.cells.get(cid)
+            source = str(raw.get("source") or "")
             new_cells[cid] = CellView(
                 id=cid,
-                name=str(raw.get("name") or ""),
+                # The display name is the ``# @name`` annotation (which always
+                # wins), falling back to the persisted name — same precedence the
+                # web UI and export use. The serialized ``name`` field is the
+                # persisted notebook.toml name, which the annotation overrides.
+                name=parse_annotations(source).name or str(raw.get("name") or ""),
                 language=str(raw.get("language") or "python"),
-                source=str(raw.get("source") or ""),
+                source=source,
                 status=str(raw.get("status") or "idle"),
                 display_outputs=_snapshot_display_outputs(raw),
                 outputs=prior.outputs if prior else [],

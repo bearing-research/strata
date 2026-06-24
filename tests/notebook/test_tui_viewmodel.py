@@ -30,6 +30,23 @@ def test_apply_notebook_state_seeds_cells_in_order():
     assert vm.cells["b"].language == "python"  # defaulted
 
 
+def test_name_annotation_overrides_persisted_name():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(
+        _state(
+            # @name annotation wins over the persisted name field.
+            {"id": "a", "source": "# @name load\nimport pyarrow", "name": "persisted"},
+            # No annotation → fall back to the persisted name.
+            {"id": "b", "source": "y = 1", "name": "kept"},
+            # Neither → empty (the app shows the id prefix).
+            {"id": "c", "source": "z = 1"},
+        )
+    )
+    assert vm.cells["a"].name == "load"
+    assert vm.cells["b"].name == "kept"
+    assert vm.cells["c"].name == ""
+
+
 def test_display_outputs_normalized_from_snapshot():
     vm = NotebookViewModel()
     vm.apply_notebook_state(

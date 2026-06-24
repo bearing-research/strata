@@ -11,12 +11,12 @@ import pytest
 from rich.syntax import Syntax
 
 from strata.notebook.tui.app import (
-    _first_line,
     _glyph,
     _render_outputs,
     _render_table,
     _single_markdown,
     _single_table,
+    _source_preview,
     _source_renderable,
     _time_str,
 )
@@ -30,9 +30,14 @@ def test_glyph_known_and_unknown():
     assert _glyph("mystery") == "?"
 
 
-def test_first_line_skips_blank_lines():
-    assert _first_line("\n\n  x = 1\ny = 2") == "x = 1"
-    assert _first_line("   \n  ") == "(empty)"
+def test_source_preview_skips_annotations_and_blanks():
+    # Leading #-comment/annotation block is skipped → shows the first code line,
+    # not a redundant "# @name load".
+    assert _source_preview("# @name load\nimport pyarrow as pa\nx = 1") == "import pyarrow as pa"
+    assert _source_preview("\n\n  x = 1\ny = 2") == "x = 1"
+    assert _source_preview("   \n  ") == "(empty)"
+    # Comment-only cell falls back to the comment rather than "(empty)".
+    assert _source_preview("# just a note") == "# just a note"
 
 
 def test_render_outputs_error_takes_precedence():

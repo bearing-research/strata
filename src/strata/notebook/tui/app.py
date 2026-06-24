@@ -57,8 +57,19 @@ def _glyph(status: str) -> str:
     return _STATUS_GLYPHS.get(status, "?")
 
 
-def _first_line(source: str) -> str:
-    for line in source.splitlines():
+def _source_preview(source: str) -> str:
+    """First line of actual code for the cell-list label.
+
+    Skips the leading ``#``-comment/annotation block (e.g. ``# @name load``) so a
+    named cell shows its code, not a redundant repeat of its name. Falls back to
+    the first non-blank line (a comment-only cell) or ``(empty)``.
+    """
+    lines = source.splitlines()
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped
+    for line in lines:
         if line.strip():
             return line.strip()
     return "(empty)"
@@ -374,7 +385,7 @@ class NotebookTUI(App[None]):
     def _cell_label(self, cell: CellView) -> str:
         name = cell.name or cell.id[:8]
         suffix = f"  [{cell.iteration}]" if cell.iteration else ""
-        return f"{name}  {_first_line(cell.source)[:40]}{suffix}"
+        return f"{name}  {_source_preview(cell.source)[:40]}{suffix}"
 
     def _refresh_cell(self, cid: str) -> None:
         cell = self.vm.cells.get(cid)
