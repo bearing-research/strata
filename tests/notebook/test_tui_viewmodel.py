@@ -171,6 +171,53 @@ def test_cell_iteration_progress_sets_iteration():
     assert vm.cells["a"].iteration == "iter 3/10"
 
 
+def test_agent_text_delta_streams_into_one_block():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    vm.apply_frame("agent_text_delta", {"job_id": "j", "text": "Let me "})
+    vm.apply_frame("agent_text_delta", {"job_id": "j", "text": "look at the data."})
+    assert vm.agent_feed == ["Let me look at the data."]  # merged into one entry
+    assert vm.agent_status == "thinking"
+    assert "agent" in vm.banner
+
+
+def test_agent_progress_then_text_are_separate_entries():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    vm.apply_frame("agent_text_delta", {"text": "thinking"})
+    vm.apply_frame("agent_progress", {"event": "tool_call", "detail": "edit cell a"})
+    vm.apply_frame("agent_text_delta", {"text": "done editing"})
+    assert vm.agent_feed == ["thinking", "• tool_call: edit cell a", "done editing"]
+
+
+def test_agent_confirm_request_shows_awaiting_driver():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    vm.apply_frame("agent_confirm_request", {"job_id": "j", "description": "delete cell b"})
+    assert vm.agent_status == "awaiting confirm"
+    assert "awaiting driver" in vm.agent_feed[-1]
+    assert "delete cell b" in vm.agent_feed[-1]
+
+
+def test_agent_done_summarizes():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    vm.apply_frame(
+        "agent_done",
+        {"job_id": "j", "model": "claude", "tokens": {"input": 100, "output": 50}},
+    )
+    assert vm.agent_status == "done"
+    assert "agent done" in vm.agent_feed[-1]
+    assert "claude" in vm.agent_feed[-1] and "100+50" in vm.agent_feed[-1]
+
+
+def test_agent_frames_are_notebook_level():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    # No cell id returned — agent activity isn't tied to one cell row.
+    assert vm.apply_frame("agent_text_delta", {"text": "hi"}) == set()
+
+
 def test_malformed_dag_edges_ignored():
     vm = NotebookViewModel()
     vm.apply_notebook_state(
