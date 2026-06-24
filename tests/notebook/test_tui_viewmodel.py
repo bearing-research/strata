@@ -66,9 +66,13 @@ def test_cell_output_sets_outputs_and_clears_error():
     vm.apply_notebook_state(_state({"id": "a"}))
     vm.apply_frame("cell_error", {"cell_id": "a", "error": "boom"})
     assert vm.cells["a"].error == "boom"
-    vm.apply_frame("cell_output", {"cell_id": "a", "outputs": [{"name": "x", "preview": 1}]})
+    vm.apply_frame(
+        "cell_output",
+        {"cell_id": "a", "outputs": [{"name": "x", "preview": 1}], "duration_ms": 250},
+    )
     assert vm.cells["a"].outputs == [{"name": "x", "preview": 1}]
     assert vm.cells["a"].error is None
+    assert vm.cells["a"].duration_ms == 250  # timing captured from the frame
 
 
 def test_cell_output_delta_streams_and_retry_clears():

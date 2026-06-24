@@ -185,7 +185,7 @@ class NotebookTUI(App[None]):
 
     async def on_mount(self) -> None:
         table = self.query_one("#cells", DataTable)
-        table.add_columns(" ", "cell")
+        table.add_columns(" ", "cell", "time")
         self._set_connection("connecting…")
         self.run_worker(self._bootstrap(), name="bootstrap", exclusive=True)
 
@@ -350,7 +350,7 @@ class NotebookTUI(App[None]):
         table.clear()
         for cid in self.vm.cell_order:
             cell = self.vm.cells[cid]
-            table.add_row(_glyph(cell.status), self._cell_label(cell), key=cid)
+            table.add_row(_glyph(cell.status), self._cell_label(cell), _time_str(cell), key=cid)
         self._set_connection("connected")
         if self.vm.cell_order:
             if self._selected not in self.vm.cells:
@@ -370,6 +370,7 @@ class NotebookTUI(App[None]):
         try:
             table.update_cell(cid, " ", _glyph(cell.status))
             table.update_cell(cid, "cell", self._cell_label(cell))
+            table.update_cell(cid, "time", _time_str(cell))
         except Exception:  # noqa: BLE001 — row may not exist yet (pre-snapshot frame)
             return
         if cid == self._selected:
@@ -414,6 +415,16 @@ def _single_markdown(cell: CellView) -> str | None:
     ):
         return output["markdown_text"]
     return None
+
+
+def _time_str(cell: CellView) -> str:
+    """Compact last-run timing for the cell list: 'cached', '0.4s', or '120ms'."""
+    if cell.cache_hit:
+        return "cached"
+    ms = cell.duration_ms
+    if ms is None:
+        return ""
+    return f"{ms / 1000:.1f}s" if ms >= 1000 else f"{ms}ms"
 
 
 def _is_table(output: dict[str, Any]) -> bool:

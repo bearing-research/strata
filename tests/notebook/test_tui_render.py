@@ -16,6 +16,7 @@ from strata.notebook.tui.app import (
     _render_table,
     _single_markdown,
     _single_table,
+    _time_str,
 )
 from strata.notebook.tui.client import TuiClient, TuiClientError, _json_or_error
 from strata.notebook.tui.viewmodel import CellView
@@ -83,6 +84,15 @@ def _table_output(rows_total=100):
         "rows": rows_total,
         "preview": [[1, "alice"], [2, "bob"]],
     }
+
+
+def test_time_str_formats_duration_and_cache():
+    assert _time_str(CellView(id="a")) == ""  # no run yet
+    assert _time_str(CellView(id="a", cache_hit=True)) == "cached"
+    assert _time_str(CellView(id="a", duration_ms=120)) == "120ms"
+    assert _time_str(CellView(id="a", duration_ms=1500)) == "1.5s"
+    # cache hit wins over a recorded duration.
+    assert _time_str(CellView(id="a", duration_ms=999, cache_hit=True)) == "cached"
 
 
 def test_single_table_detects_one_tabular_output():
