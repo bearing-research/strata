@@ -9,7 +9,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from strata.notebook.tui.app import _first_line, _glyph, _render_outputs
+from strata.notebook.tui.app import _first_line, _glyph, _render_outputs, _single_markdown
 from strata.notebook.tui.client import TuiClient, TuiClientError, _json_or_error
 from strata.notebook.tui.viewmodel import CellView
 
@@ -59,6 +59,33 @@ def test_render_outputs_live_outputs_and_stream():
 
 def test_render_outputs_empty():
     assert _render_outputs(CellView(id="a")) == "(no output)"
+
+
+def test_single_markdown_detects_pure_markdown_output():
+    cell = CellView(
+        id="a",
+        display_outputs=[{"content_type": "text/markdown", "markdown_text": "# Title\n- a\n- b"}],
+    )
+    assert _single_markdown(cell) == "# Title\n- a\n- b"
+
+
+def test_single_markdown_none_when_mixed_or_nonmarkdown():
+    # Two outputs → not a single markdown block.
+    two = CellView(
+        id="a",
+        display_outputs=[
+            {"content_type": "text/markdown", "markdown_text": "# A"},
+            {"content_type": "image/png"},
+        ],
+    )
+    assert _single_markdown(two) is None
+    # Non-markdown single output.
+    json_cell = CellView(id="a", display_outputs=[{"content_type": "json/object"}])
+    assert _single_markdown(json_cell) is None
+    # Live outputs / error present → use the text path.
+    md = {"content_type": "text/markdown", "markdown_text": "# A"}
+    assert _single_markdown(CellView(id="a", display_outputs=[md], error="boom")) is None
+    assert _single_markdown(CellView(id="a", display_outputs=[md], outputs=[{"name": "x"}])) is None
 
 
 def test_ws_url_swaps_scheme():
