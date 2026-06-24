@@ -37,6 +37,9 @@ class CellView:
     error: str | None = None
     # Loop-cell progress, e.g. "iter 3/10" (``cell_iteration_progress``).
     iteration: str = ""
+    # Last run timing from a ``cell_output`` frame.
+    duration_ms: int | None = None
+    cache_hit: bool = False
 
 
 class NotebookViewModel:
@@ -93,6 +96,8 @@ class NotebookViewModel:
                 stream_text=prior.stream_text if prior else "",
                 console=prior.console if prior else "",
                 error=prior.error if prior else None,
+                duration_ms=prior.duration_ms if prior else None,
+                cache_hit=prior.cache_hit if prior else False,
             )
 
         self.cell_order = order
@@ -147,6 +152,9 @@ class NotebookViewModel:
             outputs = payload.get("outputs")
             cell.outputs = outputs if isinstance(outputs, list) else []
             cell.error = None
+            duration = payload.get("duration_ms")
+            cell.duration_ms = int(duration) if isinstance(duration, (int, float)) else None
+            cell.cache_hit = bool(payload.get("cache_hit"))
         elif msg_type == "cell_output_delta":
             if payload.get("kind") == "retry":
                 cell.stream_text = ""
