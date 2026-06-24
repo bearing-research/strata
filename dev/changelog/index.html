@@ -2710,12 +2710,14 @@ cell.featurize(cell.trips)…</code> — <code>cell.X</code> is any def or input
   a later cycle (its QoS/ACL coupling needs the same gate extraction first).</p>
 </li>
 <li>
-<p><strong>WebSocket frame payloads are becoming typed.</strong> Notebook WS payloads were
-  inline dicts; the execution/test and cascade frames (<code>cell_console</code>,
+<p><strong>WebSocket frame payloads are now typed.</strong> Notebook WS payloads were inline
+  dicts; the execution/test, cascade, cell-status, environment-job, dag-update,
+  impact-preview and profiling-summary frames (<code>cell_status</code>, <code>cell_console</code>,
   <code>cell_output_delta</code>, <code>cell_iteration_progress</code>, <code>cell_test_status</code>,
-  <code>cell_test_results</code>, <code>cascade_prompt</code>, <code>cascade_progress</code>) are now <code>pydantic</code>
-  models validated at the emit boundary, so the protocol is self-describing for
-  non-Vue clients. Incremental — the remaining frames follow in later cycles.
+  <code>cell_test_results</code>, <code>cascade_prompt</code>, <code>cascade_progress</code>, <code>environment_job_*</code>,
+  <code>dag_update</code>, <code>impact_preview</code>, <code>profiling_summary</code>) are now <code>pydantic</code> models
+  validated at the emit boundary, so the protocol is self-describing for non-Vue
+  clients. A few low-traffic frames remain inline and follow in later cycles.
   Wire shapes are unchanged (one stale doc field, <code>cascade_prompt.steps</code> →
   <code>cells_to_run</code>, was corrected to match what's actually sent).</p>
 </li>
