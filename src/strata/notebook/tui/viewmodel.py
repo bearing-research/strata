@@ -35,6 +35,8 @@ class CellView:
     # Accumulated stdout/stderr (``cell_console``).
     console: str = ""
     error: str | None = None
+    # Loop-cell progress, e.g. "iter 3/10" (``cell_iteration_progress``).
+    iteration: str = ""
 
 
 class NotebookViewModel:
@@ -47,6 +49,9 @@ class NotebookViewModel:
         # DAG edges as (from_cell_id, to_cell_id), from the notebook_state `dag`
         # block (notebook_sync includes it) and refreshed by dag_update frames.
         self.edges: list[tuple[str, str]] = []
+        # Notebook-level activity line (cascade / environment job), shown in the
+        # header. Updated by cascade_* and environment_job_* frames.
+        self.banner: str = ""
 
     # -- snapshot ------------------------------------------------------------
 
@@ -101,6 +106,18 @@ class NotebookViewModel:
             self.edges = _parse_edges(payload)
             return set(self.cell_order)  # whole-graph change
 
+        # Notebook-level activity (not tied to one cell) → header banner.
+        if msg_type in ("cascade_prompt", "cascade_progress"):
+            self.banner = _cascade_banner(msg_type, payload)
+            return set()
+        if msg_type in (
+            "environment_job_started",
+            "environment_job_progress",
+            "environment_job_finished",
+        ):
+            self.banner = _env_banner(payload)
+            return set()
+
         cid = payload.get("cell_id")
         if not isinstance(cid, str):
             return set()
@@ -122,9 +139,39 @@ class NotebookViewModel:
             cell.stream_text += str(payload.get("text") or "")
         elif msg_type == "cell_error":
             cell.error = str(payload.get("error") or "error")
+        elif msg_type == "cell_iteration_progress":
+            iteration = payload.get("iteration")
+            max_iter = payload.get("max_iter")
+            cell.iteration = f"iter {iteration}/{max_iter}" if iteration and max_iter else ""
         else:
             return set()
         return {cid}
+
+
+def _cascade_banner(msg_type: str, payload: dict[str, Any]) -> str:
+    """One-line cascade status for the header (running upstreams before a cell)."""
+    if msg_type == "cascade_prompt":
+        n = len(payload.get("cells_to_run") or [])
+        return f"⟳ cascade: {n} upstream cell(s) to run"
+    completed = payload.get("completed")
+    total = payload.get("total")
+    current = payload.get("current_cell_id") or ""
+    head = f"⟳ cascade {completed}/{total}" if total else "⟳ cascade"
+    return f"{head} · {current}".rstrip(" ·")
+
+
+def _env_banner(payload: dict[str, Any]) -> str:
+    """One-line environment-job status (uv add / sync / import …)."""
+    job = payload.get("environment_job")
+    if not isinstance(job, dict):
+        return ""
+    action = str(job.get("action") or "env")
+    package = str(job.get("package") or "")
+    status = str(job.get("status") or "")
+    phase = str(job.get("phase") or "")
+    label = f"⚙ {action} {package}".rstrip()
+    tail = " · ".join(p for p in (status, phase) if p)
+    return f"{label}: {tail}" if tail else label
 
 
 def _parse_edges(dag: Any) -> list[tuple[str, str]]:

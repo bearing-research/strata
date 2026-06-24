@@ -85,8 +85,8 @@ def test_cell_output_delta_streams_and_retry_clears():
 def test_unknown_and_unaddressed_frames_are_noops():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a"}))
-    # Not-yet-handled frame type (M2+/M3) → no-op.
-    assert vm.apply_frame("cascade_progress", {"plan_id": "p", "completed": 1}) == set()
+    # Not-yet-handled frame type (e.g. impact_preview) → no-op.
+    assert vm.apply_frame("impact_preview", {"target_cell_id": "a"}) == set()
     # Frame for an unknown cell → no-op (no crash).
     assert vm.apply_frame("cell_status", {"cell_id": "ghost", "status": "running"}) == set()
     # Frame with no cell_id → no-op.
@@ -131,6 +131,44 @@ def test_dag_update_frame_refreshes_edges():
     )
     assert vm.edges == [("a", "b"), ("b", "c")]
     assert changed == {"a", "b", "c"}  # whole-graph change
+
+
+def test_cascade_progress_sets_banner():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    changed = vm.apply_frame(
+        "cascade_progress",
+        {"plan_id": "p", "current_cell_id": "a", "completed": 2, "total": 4},
+    )
+    assert changed == set()  # notebook-level, not a specific cell
+    assert "2/4" in vm.banner and "a" in vm.banner
+
+
+def test_cascade_prompt_sets_banner():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    vm.apply_frame("cascade_prompt", {"cell_id": "a", "plan_id": "p", "cells_to_run": ["x", "y"]})
+    assert "2 upstream" in vm.banner
+
+
+def test_environment_job_sets_banner():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    vm.apply_frame(
+        "environment_job_progress",
+        {"environment_job": {"action": "add", "package": "pytest", "status": "running"}},
+    )
+    assert "pytest" in vm.banner and "running" in vm.banner
+
+
+def test_cell_iteration_progress_sets_iteration():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    changed = vm.apply_frame(
+        "cell_iteration_progress", {"cell_id": "a", "iteration": 3, "max_iter": 10}
+    )
+    assert changed == {"a"}
+    assert vm.cells["a"].iteration == "iter 3/10"
 
 
 def test_malformed_dag_edges_ignored():
