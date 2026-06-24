@@ -88,7 +88,7 @@ state, follow mode, and any cascade / environment / agent activity.
 | `f` | Toggle **follow mode** (auto-select the running cell) |
 | `d` | Show the notebook **DAG** (layered ASCII; `Esc`/`d`/`q` to close) |
 | `i` | Enlarge the selected cell's **image** output to full screen (`Esc`/`i`/`q` to close) |
-| `r` | Resync (request a fresh snapshot) |
+| `r` | Force an immediate resync (the viewer also auto-resyncs in the background) |
 | `q` | Quit |
 
 The tabs render richly: source is **syntax-highlighted** by cell language,

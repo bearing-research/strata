@@ -202,6 +202,9 @@ class NotebookTUI(App[None]):
         self._conn_state = "connecting…"
         # The selected cell's image renderable (if any) — enlarged by `i`.
         self._current_image: Any = None
+        # Signature of the last-rendered cell list, so a periodic resync that
+        # changed nothing is a no-op (no flicker, no selection jump).
+        self._render_sig: tuple[Any, ...] = ()
         # Follow mode: auto-select the cell that goes running so the detail
         # panels track the action (an agent / run-all moving through the notebook).
         self._follow = True
@@ -234,6 +237,11 @@ class NotebookTUI(App[None]):
         table.add_columns(" ", "cell", "time")
         self._set_connection("connecting…")
         self.run_worker(self._bootstrap(), name="bootstrap", exclusive=True)
+        # Live frames stream status/output/console instantly, but source edits and
+        # cell add/remove/reorder only arrive in a full snapshot — so poll one
+        # periodically. The rebuild is a no-op when nothing changed (see
+        # _rebuild_cells), so this stays cheap and never disturbs the selection.
+        self.set_interval(2.5, self._send_sync)
 
     async def _bootstrap(self) -> None:
         try:
@@ -405,15 +413,31 @@ class NotebookTUI(App[None]):
         self.query_one("#agent-scroll", VerticalScroll).scroll_end(animate=False)
 
     def _rebuild_cells(self) -> None:
+        self._set_connection("connected")
+        # Skip the rebuild when nothing the list shows has changed — so the
+        # periodic resync doesn't flicker the table or move the cursor.
+        sig = tuple(
+            (cid, c.status, c.name, c.iteration, c.duration_ms, c.cache_hit, c.source)
+            for cid in self.vm.cell_order
+            for c in (self.vm.cells[cid],)
+        )
+        if sig == self._render_sig:
+            return
+        self._render_sig = sig
+
         table = self.query_one("#cells", DataTable)
         table.clear()
         for cid in self.vm.cell_order:
             cell = self.vm.cells[cid]
             table.add_row(_glyph(cell.status), self._cell_label(cell), _time_str(cell), key=cid)
-        self._set_connection("connected")
         if self.vm.cell_order:
             if self._selected not in self.vm.cells:
                 self._selected = self.vm.cell_order[0]
+            # Restore the cursor to the selected cell (clear() reset it to row 0).
+            try:
+                table.move_cursor(row=self.vm.cell_order.index(self._selected), animate=False)
+            except Exception:  # noqa: BLE001 — row not materialized yet
+                pass
             self._show_detail(self._selected)
 
     def _cell_label(self, cell: CellView) -> str:
