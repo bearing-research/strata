@@ -19,9 +19,17 @@ from rich.markdown import Markdown
 from rich.table import Table
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Header, OptionList, Static
+from textual.widgets import (
+    DataTable,
+    Footer,
+    Header,
+    OptionList,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 from textual.widgets.option_list import Option
 
 from strata.notebook.tui.client import TuiClient, TuiClientError
@@ -106,25 +114,16 @@ class DagScreen(ModalScreen[None]):
 class NotebookTUI(App[None]):
     """Top-level spectator app."""
 
+    # The detail panes are TABS (one at a time) rather than stacked, so each gets
+    # the full height — stacking Source/Output/Console/Agent collapsed them to ~1
+    # row on a short (24-line) terminal.
     CSS = """
-    #top { height: 64%; }
     #cells { width: 38%; border: solid $primary; }
     #detail { width: 62%; }
-    /* Each panel is a scroll region that fills 1/3 of the detail pane; the inner
-       content is height:auto so it grows past the region and the scrollbar
-       activates (a 1fr child would fill the region exactly and never scroll). */
-    .scroll-panel { height: 1fr; border: solid $primary; }
+    .scroll-panel { height: 1fr; }
     #source, #output, #console-body, #agent { height: auto; width: 1fr; padding: 0 1; }
-    /* The agent feed gets the full width across the bottom — the headline. */
-    #agent-scroll { height: 1fr; border: solid $accent; }
+    #cells:focus, .scroll-panel:focus { background: $boost; }
     .panel-title { background: $primary; color: $text; padding: 0 1; }
-    .agent-title { background: $accent; color: $text; padding: 0 1; }
-    /* Highlight the focused panel so it's obvious which one the arrow keys
-       drive (cells = move selection; a detail panel = scroll it). */
-    #cells:focus, .scroll-panel:focus {
-        border: solid $accent;
-        background: $boost;
-    }
     """
 
     BINDINGS = [
@@ -132,14 +131,20 @@ class NotebookTUI(App[None]):
         Binding("r", "refresh", "Resync"),
         Binding("d", "show_dag", "DAG"),
         Binding("f", "toggle_follow", "Follow"),
-        Binding("1", "focus_panel('cells')", "Cells"),
-        Binding("2", "focus_panel('source-scroll')", "Source"),
-        Binding("3", "focus_panel('output-scroll')", "Output"),
-        Binding("4", "focus_panel('console-scroll')", "Console"),
-        Binding("5", "focus_panel('agent-scroll')", "Agent"),
-        Binding("tab", "focus_next", "Next panel", show=False),
-        Binding("shift+tab", "focus_previous", "Prev panel", show=False),
+        Binding("1", "focus_cells", "Cells"),
+        Binding("2", "show_tab('tab-source')", "Source"),
+        Binding("3", "show_tab('tab-output')", "Output"),
+        Binding("4", "show_tab('tab-console')", "Console"),
+        Binding("5", "show_tab('tab-agent')", "Agent"),
     ]
+
+    # Tab id → the scroll region to focus when that tab is selected.
+    _TAB_SCROLL = {
+        "tab-source": "#source-scroll",
+        "tab-output": "#output-scroll",
+        "tab-console": "#console-scroll",
+        "tab-agent": "#agent-scroll",
+    }
 
     def __init__(
         self,
@@ -164,21 +169,21 @@ class NotebookTUI(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        with Horizontal(id="top"):
+        with Horizontal():
             yield DataTable(id="cells", cursor_type="row", zebra_stripes=True)
-            with Vertical(id="detail"):
-                yield Static("Source", classes="panel-title")
-                with VerticalScroll(id="source-scroll", classes="scroll-panel"):
-                    yield Static("", id="source")
-                yield Static("Output", classes="panel-title")
-                with VerticalScroll(id="output-scroll", classes="scroll-panel"):
-                    yield Static("", id="output")
-                yield Static("Console", classes="panel-title")
-                with VerticalScroll(id="console-scroll", classes="scroll-panel"):
-                    yield Static("", id="console-body")
-        yield Static("Agent", classes="agent-title", id="agent-title")
-        with VerticalScroll(id="agent-scroll", classes="scroll-panel"):
-            yield Static("(no agent activity)", id="agent")
+            with TabbedContent(id="detail", initial="tab-source"):
+                with TabPane("Source", id="tab-source"):
+                    with VerticalScroll(id="source-scroll", classes="scroll-panel"):
+                        yield Static("", id="source")
+                with TabPane("Output", id="tab-output"):
+                    with VerticalScroll(id="output-scroll", classes="scroll-panel"):
+                        yield Static("", id="output")
+                with TabPane("Console", id="tab-console"):
+                    with VerticalScroll(id="console-scroll", classes="scroll-panel"):
+                        yield Static("", id="console-body")
+                with TabPane("Agent", id="tab-agent"):
+                    with VerticalScroll(id="agent-scroll", classes="scroll-panel"):
+                        yield Static("(no agent activity)", id="agent")
         yield Footer()
 
     # -- lifecycle -----------------------------------------------------------
@@ -232,15 +237,19 @@ class NotebookTUI(App[None]):
         )
         self.push_screen(DagScreen(dag_text))
 
-    def action_focus_panel(self, panel_id: str) -> None:
-        """Move keyboard focus to a panel so up/down navigate it.
-
-        ``cells`` (the list) → up/down move the cell selection; a detail
-        ``*-scroll`` region → up/down (+ PageUp/Down, Home/End) scroll it.
-        """
+    def action_focus_cells(self) -> None:
+        """Focus the cell list so up/down move the selection."""
         try:
-            self.query_one(f"#{panel_id}").focus()
-        except Exception:  # noqa: BLE001 — panel not mounted yet; ignore
+            self.query_one("#cells", DataTable).focus()
+        except Exception:  # noqa: BLE001 — not mounted yet
+            return
+
+    def action_show_tab(self, tab_id: str) -> None:
+        """Switch the detail tab and focus its scroll region (up/down scroll it)."""
+        try:
+            self.query_one("#detail", TabbedContent).active = tab_id
+            self.query_one(self._TAB_SCROLL[tab_id], VerticalScroll).focus()
+        except Exception:  # noqa: BLE001 — not mounted yet
             return
 
     # -- WS loop -------------------------------------------------------------
@@ -338,10 +347,14 @@ class NotebookTUI(App[None]):
             return
 
     def _render_agent(self) -> None:
-        title = f"Agent · {self.vm.agent_status}" if self.vm.agent_status else "Agent"
-        self.query_one("#agent-title", Static).update(title)
         body = "\n".join(self.vm.agent_feed) if self.vm.agent_feed else "(no agent activity)"
         self.query_one("#agent", Static).update(body)
+        # Reflect agent status on the tab label; the header banner has it too.
+        label = f"Agent · {self.vm.agent_status}" if self.vm.agent_status else "Agent"
+        try:
+            self.query_one("#detail", TabbedContent).get_tab("tab-agent").label = label
+        except Exception:  # noqa: BLE001 — tab not mounted yet
+            pass
         # Follow the stream: keep the latest reasoning/events in view.
         self.query_one("#agent-scroll", VerticalScroll).scroll_end(animate=False)
 

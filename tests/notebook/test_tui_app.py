@@ -45,14 +45,21 @@ async def test_detail_panels_are_tall_and_content_overflows(monkeypatch):
 
         from textual.containers import VerticalScroll
 
-        # The three detail panels split the detail pane — each well taller than
-        # the old ~3-line squish.
-        for pid in ("#source-scroll", "#output-scroll", "#console-scroll"):
+        # Detail panes are tabs: the ACTIVE one gets (nearly) the full height —
+        # not the ~1-row squish that stacking them produced on short terminals.
+        # Each tab is full-height when activated.
+        tabs = ((None, "#source-scroll"), ("3", "#output-scroll"), ("4", "#console-scroll"))
+        for key, pid in tabs:
+            if key is not None:
+                await pilot.press(key)
+                await pilot.pause()
             panel = app.query_one(pid, VerticalScroll)
-            assert panel.size.height >= 4, f"{pid} squished to {panel.size.height} rows"
+            assert panel.size.height >= 20, f"{pid} only {panel.size.height} rows (terminal is 40)"
 
-        # The source Static is height:auto, so it grows to its ~50-line content
-        # and overflows its scroll region → scrollbar.
+        # Back on Source: the Static is height:auto, so it grows to its ~50-line
+        # content and overflows the (now tall) scroll region → scrollbar.
+        await pilot.press("2")
+        await pilot.pause()
         source = app.query_one("#source", Static)
         source_panel = app.query_one("#source-scroll", VerticalScroll)
         assert source.size.height >= 45, f"content didn't grow (got {source.size.height})"
