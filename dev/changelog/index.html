@@ -2635,12 +2635,29 @@
 exhaustive commit history.</p>
 <p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
 <h2 id="040-2026-06-24">0.4.0 — 2026-06-24<a class="headerlink" href="#040-2026-06-24" title="Permanent link">&para;</a></h2>
-<p>0.4.0 is a <strong>consolidation and hardening</strong> cycle: the headline is an internal
-restructuring of the server, alongside a new notebook feature, concurrency-bug
-fixes, and CI hardening. No breaking changes.</p>
+<p>0.4.0 is a <strong>consolidation and hardening</strong> cycle. The headlines are a new
+<strong>read-only terminal viewer</strong> for notebooks and an internal restructuring of the
+server, alongside per-cell unit tests, broader value serialization with in-place
+mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.</p>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Per-cell unit tests in the notebook.</strong> Every Python code cell gets a
+<li>
+<p><strong>A terminal viewer for notebooks (<code>strata-notebook-tui</code>).</strong> A read-only,
+  full-screen spectator that attaches to a running notebook session over the
+  WebSocket protocol and renders it live — cells flip status as they run, with
+  the detail view following the action. Per-cell tabs: <strong>Source</strong>
+  (syntax-highlighted with the one-dark theme, matching the web UI), <strong>Output</strong>
+  (markdown renders as markdown, a DataFrame/table renders as a real table),
+  <strong>Console</strong>, and <strong>Agent</strong> (an AI agent's reasoning streams here as it drives
+  the notebook). Plus a layered ASCII <strong>DAG</strong> view (<code>d</code>), a per-cell run-time
+  column, cascade / environment-job progress in the header, and follow mode.
+  Ships behind the <code>[tui]</code> extra (<code>uv tool install "strata-notebook[tui]"</code>); it
+  never edits or runs cells — purely for watching, e.g. an agent build a
+  notebook in one terminal while you watch in another. See
+  <a href="../notebook/tui/">Terminal Viewer</a>.</p>
+</li>
+<li>
+<p><strong>Per-cell unit tests in the notebook.</strong> Every Python code cell gets a
   <strong>Tests</strong> panel (the <code>🧪</code> toggle next to Inspect, which doubles as a health
   badge: <code>✓ 4/4</code> green, failing red, errored amber, <code>· stale</code> when the cell or
   its tests changed since the last run). Write <code>pytest</code>-style tests against the
@@ -2654,7 +2671,25 @@ cell.featurize(cell.trips)…</code> — <code>cell.X</code> is any def or input
   only; <code>pytest</code> must be in the notebook's environment (a missing-pytest run
   surfaces an actionable message). The generated-conftest runner is written to
   be liftable to a standalone plugin for CI/pre-commit later. See the
-  <code>pandas_basics</code> example for a worked set of cell tests.</li>
+  <code>pandas_basics</code> example for a worked set of cell tests.</p>
+</li>
+<li>
+<p><strong>Cell-test tooling auto-provisions.</strong> Running a cell's tests when <code>pytest</code>
+  isn't in the notebook environment now installs it on demand (a generic
+  dev-tool provisioning path) and retries, instead of failing; a failing test's
+  captured stdout/stderr is surfaced in the result message. Dev-group
+  dependencies are excluded from the cell-provenance environment hash, so adding
+  a test tool doesn't invalidate cached cell outputs.</p>
+</li>
+<li>
+<p><strong>Broader value serialization with in-place mutation tracking.</strong> Cell outputs
+  now serialize polars, torch, and jax values through a unified Arrow type
+  registry (alongside the existing pandas / numpy / pyarrow support). In-place
+  mutations — <code>df.sort_values(inplace=True)</code>, or mutating a numpy array / dict /
+  list / set / torch tensor received from upstream — are detected (statically
+  recaptured into the DAG and verified at runtime via a fingerprint registry),
+  so provenance stays correct when a cell mutates a value it didn't define.</p>
+</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
