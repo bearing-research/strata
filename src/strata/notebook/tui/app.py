@@ -447,9 +447,10 @@ def _source_renderable(cell: CellView):
         return "(empty)"
     lexer = _SOURCE_LEXERS.get(cell.language, "python")
     try:
-        # ``ansi_dark`` uses the terminal's own palette, so it sits naturally in
-        # the TUI instead of forcing a truecolor scheme.
-        return Syntax(cell.source, lexer, theme="ansi_dark", word_wrap=True)
+        # ``one-dark`` is the same theme the web UI uses (@codemirror/theme-one-dark),
+        # so the terminal source view matches the browser. It's truecolor; Textual
+        # downsamples for terminals without 24-bit support.
+        return Syntax(cell.source, lexer, theme="one-dark", word_wrap=True)
     except Exception:  # noqa: BLE001 — unknown lexer / pygments hiccup → raw source
         return cell.source
 
