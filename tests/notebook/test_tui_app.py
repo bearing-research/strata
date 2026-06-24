@@ -84,6 +84,55 @@ async def test_number_keys_focus_panels_for_arrow_scrolling(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_follow_mode_tracks_the_running_cell(monkeypatch):
+    """With follow on, a cell going `running` is auto-selected; `f` toggles it off."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 40)) as pilot:
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {
+                        "name": "NB",
+                        "cells": [{"id": "a"}, {"id": "b"}, {"id": "c"}],
+                    },
+                }
+            )
+        )
+        await pilot.pause()
+        assert app._selected == "a"  # first cell selected on load
+
+        def _status(cid, status):
+            app._dispatch(
+                json.dumps(
+                    {
+                        "type": "cell_status",
+                        "seq": 0,
+                        "ts": "t",
+                        "payload": {"cell_id": cid, "status": status},
+                    }
+                )
+            )
+
+        _status("c", "running")
+        await pilot.pause()
+        assert app._selected == "c"  # followed to the running cell
+
+        await pilot.press("f")  # turn follow off
+        _status("b", "running")
+        await pilot.pause()
+        assert app._selected == "c"  # stays put when follow is off
+
+
+@pytest.mark.asyncio
 async def test_agent_frames_render_in_agent_panel(monkeypatch):
     """agent_* frames stream into the Agent panel + drive its title/header."""
 

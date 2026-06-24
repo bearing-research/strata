@@ -129,6 +129,7 @@ class NotebookTUI(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Resync"),
         Binding("d", "show_dag", "DAG"),
+        Binding("f", "toggle_follow", "Follow"),
         Binding("1", "focus_panel('cells')", "Cells"),
         Binding("2", "focus_panel('source-scroll')", "Source"),
         Binding("3", "focus_panel('output-scroll')", "Output"),
@@ -153,6 +154,9 @@ class NotebookTUI(App[None]):
         self.vm = NotebookViewModel()
         self._selected: str | None = None
         self._conn_state = "connecting…"
+        # Follow mode: auto-select the cell that goes running so the detail
+        # panels track the action (an agent / run-all moving through the notebook).
+        self._follow = True
 
     # -- layout --------------------------------------------------------------
 
@@ -288,6 +292,14 @@ class NotebookTUI(App[None]):
         changed = self.vm.apply_frame(msg_type, payload)
         for cid in changed:
             self._refresh_cell(cid)
+        # Follow mode: jump to a cell as it starts running so the detail panels
+        # track the action.
+        if self._follow and msg_type == "cell_status":
+            cid = payload.get("cell_id")
+            if isinstance(cid, str):
+                cell = self.vm.cells.get(cid)
+                if cell is not None and cell.status == "running":
+                    self._select_cell(cid)
         # Notebook-level activity (cascade / env job / agent) updates the header
         # banner + agent panel even when no specific cell changed.
         self._render_status()
@@ -300,11 +312,28 @@ class NotebookTUI(App[None]):
         self._conn_state = state
         self._render_status()
 
+    def action_toggle_follow(self) -> None:
+        self._follow = not self._follow
+        self._render_status()
+
     def _render_status(self) -> None:
         self.title = self.vm.notebook_name or "Strata Notebook"
-        self.sub_title = (
-            f"{self._conn_state}  ·  {self.vm.banner}" if self.vm.banner else self._conn_state
-        )
+        bits = [self._conn_state]
+        if self._follow:
+            bits.append("⏵ follow")
+        if self.vm.banner:
+            bits.append(self.vm.banner)
+        self.sub_title = "  ·  ".join(bits)
+
+    def _select_cell(self, cid: str) -> None:
+        """Move the cell-list cursor to *cid* (which refreshes the detail panels)."""
+        if cid not in self.vm.cell_order:
+            return
+        table = self.query_one("#cells", DataTable)
+        try:
+            table.move_cursor(row=self.vm.cell_order.index(cid), animate=False)
+        except Exception:  # noqa: BLE001 — row not materialized yet
+            return
 
     def _render_agent(self) -> None:
         title = f"Agent · {self.vm.agent_status}" if self.vm.agent_status else "Agent"
