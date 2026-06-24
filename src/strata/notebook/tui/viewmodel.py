@@ -44,6 +44,9 @@ class NotebookViewModel:
         self.notebook_name: str = ""
         self.cell_order: list[str] = []
         self.cells: dict[str, CellView] = {}
+        # DAG edges as (from_cell_id, to_cell_id), from the notebook_state `dag`
+        # block (notebook_sync includes it) and refreshed by dag_update frames.
+        self.edges: list[tuple[str, str]] = []
 
     # -- snapshot ------------------------------------------------------------
 
@@ -83,6 +86,7 @@ class NotebookViewModel:
 
         self.cell_order = order
         self.cells = new_cells
+        self.edges = _parse_edges(payload.get("dag"))
 
     # -- incremental frames --------------------------------------------------
 
@@ -93,6 +97,10 @@ class NotebookViewModel:
         are no-ops here and return an empty set. ``notebook_state`` is handled
         by :meth:`apply_notebook_state`, not here.
         """
+        if msg_type == "dag_update":
+            self.edges = _parse_edges(payload)
+            return set(self.cell_order)  # whole-graph change
+
         cid = payload.get("cell_id")
         if not isinstance(cid, str):
             return set()
@@ -117,6 +125,24 @@ class NotebookViewModel:
         else:
             return set()
         return {cid}
+
+
+def _parse_edges(dag: Any) -> list[tuple[str, str]]:
+    """Extract (from_cell_id, to_cell_id) pairs from a dag/dag_update payload."""
+    if not isinstance(dag, dict):
+        return []
+    raw_edges = dag.get("edges")
+    if not isinstance(raw_edges, list):
+        return []
+    edges: list[tuple[str, str]] = []
+    for edge in raw_edges:
+        if not isinstance(edge, dict):
+            continue
+        src = edge.get("from_cell_id")
+        dst = edge.get("to_cell_id")
+        if isinstance(src, str) and isinstance(dst, str):
+            edges.append((src, dst))
+    return edges
 
 
 def _snapshot_display_outputs(raw: dict[str, Any]) -> list[dict[str, Any]]:

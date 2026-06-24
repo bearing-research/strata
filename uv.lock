@@ -1287,6 +1287,18 @@ grpc = [
 ]
 
 [[package]]
+name = "grandalf"
+version = "0.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyparsing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/95/0e/4ac934b416857969f9135dec17ac80660634327e003a870835dd1f382659/grandalf-0.8.tar.gz", hash = "sha256:2813f7aab87f0d20f334a3162ccfbcbf085977134a17a5b516940a93a77ea974", size = 38128, upload-time = "2023-01-26T07:37:06.668Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/30/44c7eb0a952478dbb5f2f67df806686d6a7e4b19f6204e091c4f49dc7c69/grandalf-0.8-py3-none-any.whl", hash = "sha256:793ca254442f4a79252ea9ff1ab998e852c1e071b863593e5383afee906b4185", size = 41802, upload-time = "2023-01-10T15:16:19.753Z" },
+]
+
+[[package]]
 name = "greenlet"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3782,6 +3794,7 @@ sql-sqlite = [
     { name = "adbc-driver-sqlite" },
 ]
 tui = [
+    { name = "grandalf" },
     { name = "textual" },
 ]
 
@@ -3794,6 +3807,7 @@ dev = [
     { name = "boto3" },
     { name = "datafusion" },
     { name = "gcsfs" },
+    { name = "grandalf" },
     { name = "moto", extra = ["s3"] },
     { name = "pandas" },
     { name = "polars" },
@@ -3832,6 +3846,7 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'sql-duckdb'", specifier = ">=1.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "filelock", specifier = ">=3.16.0" },
+    { name = "grandalf", marker = "extra == 'tui'", specifier = ">=0.8" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "infisicalsdk", specifier = ">=1.0.16" },
     { name = "jsonschema", specifier = ">=4.0.0" },
@@ -3867,6 +3882,7 @@ dev = [
     { name = "boto3", specifier = ">=1.35.0" },
     { name = "datafusion", specifier = ">=50.1.0" },
     { name = "gcsfs", specifier = ">=2026.0.0" },
+    { name = "grandalf", specifier = ">=0.8" },
     { name = "moto", extras = ["s3"], specifier = ">=5.0.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "polars", specifier = ">=1.36.1" },

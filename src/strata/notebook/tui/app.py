@@ -23,6 +23,7 @@ from textual.widgets import DataTable, Footer, Header, OptionList, Static
 from textual.widgets.option_list import Option
 
 from strata.notebook.tui.client import TuiClient, TuiClientError
+from strata.notebook.tui.dag_render import render_dag
 from strata.notebook.tui.viewmodel import CellView, NotebookViewModel
 
 # Status glyphs for ``CellStatus`` values. ``?`` is the placeholder before the
@@ -79,6 +80,27 @@ class SessionPickerScreen(ModalScreen[str]):
         self.app.exit(message="No session selected.")
 
 
+class DagScreen(ModalScreen[None]):
+    """Full-screen layered ASCII view of the notebook DAG (read-only)."""
+
+    BINDINGS = [Binding("escape,d,q", "dismiss", "Close")]
+
+    CSS = """
+    DagScreen { align: center middle; }
+    #dag-box { width: 90%; height: 90%; border: solid $accent; }
+    #dag-art { width: auto; height: auto; padding: 1 2; }
+    """
+
+    def __init__(self, dag_text: str) -> None:
+        super().__init__()
+        self._dag_text = dag_text
+
+    def compose(self) -> ComposeResult:
+        yield Static("DAG  (Esc/d/q to close · arrows to scroll)", classes="panel-title")
+        with VerticalScroll(id="dag-box"):
+            yield Static(self._dag_text, id="dag-art")
+
+
 class NotebookTUI(App[None]):
     """Top-level spectator app."""
 
@@ -102,6 +124,7 @@ class NotebookTUI(App[None]):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Resync"),
+        Binding("d", "show_dag", "DAG"),
         Binding("1", "focus_panel('cells')", "Cells"),
         Binding("2", "focus_panel('source-scroll')", "Source"),
         Binding("3", "focus_panel('output-scroll')", "Output"),
@@ -182,6 +205,17 @@ class NotebookTUI(App[None]):
 
     async def action_refresh(self) -> None:
         await self._send_sync()
+
+    def action_show_dag(self) -> None:
+        """Open the layered DAG view of the current cells/edges."""
+        if not self.vm.cell_order:
+            return
+        labels = {cid: (self.vm.cells[cid].name or cid) for cid in self.vm.cell_order}
+        statuses = {cid: self.vm.cells[cid].status for cid in self.vm.cell_order}
+        dag_text = render_dag(
+            self.vm.cell_order, labels, statuses, self.vm.edges, selected=self._selected
+        )
+        self.push_screen(DagScreen(dag_text))
 
     def action_focus_panel(self, panel_id: str) -> None:
         """Move keyboard focus to a panel so up/down navigate it.
