@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import websockets
+from rich.markdown import Markdown
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -384,8 +385,28 @@ class NotebookTUI(App[None]):
         if cell is None:
             return
         self.query_one("#source", Static).update(cell.source or "(empty)")
-        self.query_one("#output", Static).update(_render_outputs(cell))
+        # Render a pure-markdown output with Rich (headers/lists/code); otherwise
+        # fall back to the plain-text summary.
+        markdown = _single_markdown(cell)
+        output = self.query_one("#output", Static)
+        output.update(Markdown(markdown) if markdown is not None else _render_outputs(cell))
         self.query_one("#console-body", Static).update(cell.console or "(no console output)")
+
+
+def _single_markdown(cell: CellView) -> str | None:
+    """Return the cell's markdown text when its output is exactly one rendered
+    markdown block (so it can render with Rich), else None for the text path.
+    """
+    if cell.error or cell.stream_text or cell.outputs:
+        return None
+    if len(cell.display_outputs) != 1:
+        return None
+    output = cell.display_outputs[0]
+    if output.get("content_type") == "text/markdown" and isinstance(
+        output.get("markdown_text"), str
+    ):
+        return output["markdown_text"]
+    return None
 
 
 def _render_outputs(cell: CellView) -> str:
