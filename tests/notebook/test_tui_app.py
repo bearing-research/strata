@@ -80,3 +80,38 @@ async def test_number_keys_focus_panels_for_arrow_scrolling(monkeypatch):
         await pilot.press("1")  # Cells
         await pilot.pause()
         assert app.focused is app.query_one("#cells")
+
+
+@pytest.mark.asyncio
+async def test_d_opens_dag_screen(monkeypatch):
+    """`d` opens the layered DAG screen; Esc closes it."""
+    from strata.notebook.tui.app import DagScreen
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 40)) as pilot:
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {
+                        "name": "NB",
+                        "cells": [{"id": "a", "status": "ready"}, {"id": "b", "status": "idle"}],
+                        "dag": {"edges": [{"from_cell_id": "a", "to_cell_id": "b"}]},
+                    },
+                }
+            )
+        )
+        await pilot.pause()
+        await pilot.press("d")
+        await pilot.pause()
+        assert isinstance(app.screen, DagScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, DagScreen)

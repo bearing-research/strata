@@ -86,7 +86,7 @@ def test_unknown_and_unaddressed_frames_are_noops():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a"}))
     # Not-yet-handled frame type (M2+/M3) → no-op.
-    assert vm.apply_frame("dag_update", {"edges": []}) == set()
+    assert vm.apply_frame("cascade_progress", {"plan_id": "p", "completed": 1}) == set()
     # Frame for an unknown cell → no-op (no crash).
     assert vm.apply_frame("cell_status", {"cell_id": "ghost", "status": "running"}) == set()
     # Frame with no cell_id → no-op.
@@ -103,6 +103,42 @@ def test_resync_preserves_live_console_and_outputs():
     assert vm.cells["a"].status == "ready"  # snapshot wins for status
     assert vm.cells["a"].console == "kept\n"  # live console preserved
     assert vm.cells["a"].outputs == [{"name": "x"}]  # live outputs preserved
+
+
+def test_edges_parsed_from_notebook_state_dag():
+    vm = NotebookViewModel()
+    payload = {
+        "name": "NB",
+        "cells": [{"id": "a"}, {"id": "b"}],
+        "dag": {"edges": [{"from_cell_id": "a", "to_cell_id": "b", "variable": "x"}]},
+    }
+    vm.apply_notebook_state(payload)
+    assert vm.edges == [("a", "b")]
+
+
+def test_dag_update_frame_refreshes_edges():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state({"name": "NB", "cells": [{"id": "a"}, {"id": "b"}, {"id": "c"}]})
+    assert vm.edges == []
+    changed = vm.apply_frame(
+        "dag_update",
+        {
+            "edges": [
+                {"from_cell_id": "a", "to_cell_id": "b"},
+                {"from_cell_id": "b", "to_cell_id": "c"},
+            ]
+        },
+    )
+    assert vm.edges == [("a", "b"), ("b", "c")]
+    assert changed == {"a", "b", "c"}  # whole-graph change
+
+
+def test_malformed_dag_edges_ignored():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(
+        {"name": "NB", "cells": [{"id": "a"}], "dag": {"edges": ["bad", {"from_cell_id": "a"}]}}
+    )
+    assert vm.edges == []  # entries missing a string from/to are skipped
 
 
 def test_dropped_cell_is_removed_on_resync():
