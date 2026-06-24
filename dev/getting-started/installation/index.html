@@ -979,6 +979,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../notebook/tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terminal Viewer (TUI)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../notebook/keyboard/" class="md-nav__link">
         
   
@@ -2119,6 +2147,10 @@ and CLI binary are both named <code>strata</code>.</p>
 <tr>
 <td><code>uv run strata artifact &lt;cmd&gt; [dir]</code></td>
 <td>Inspect a local artifact store without a server: <code>list</code>, <code>show &lt;ref&gt;</code>, <code>lineage &lt;ref&gt;</code> (renders model ← features ← scan ← table @ snapshot), <code>pull &lt;ref&gt; --to FILE</code>, <code>audit [name]</code> (registry history), <code>pending</code> (approval queue), <code>verify</code>. <code>&lt;ref&gt;</code> is a name, <code>id@v=N</code>, or bare id.</td>
+</tr>
+<tr>
+<td><code>uv run strata-notebook-tui</code></td>
+<td>Read-only terminal viewer that attaches to a running notebook session. Needs the <code>[tui]</code> extra. See <a href="../../notebook/tui/">Terminal Viewer</a>.</td>
 </tr>
 <tr>
 <td><code>uv run strata-worker --port 9000</code></td>
