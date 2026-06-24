@@ -105,14 +105,18 @@ class NotebookTUI(App[None]):
     """Top-level spectator app."""
 
     CSS = """
+    #top { height: 64%; }
     #cells { width: 38%; border: solid $primary; }
     #detail { width: 62%; }
     /* Each panel is a scroll region that fills 1/3 of the detail pane; the inner
        content is height:auto so it grows past the region and the scrollbar
        activates (a 1fr child would fill the region exactly and never scroll). */
     .scroll-panel { height: 1fr; border: solid $primary; }
-    #source, #output, #console-body { height: auto; width: 1fr; padding: 0 1; }
+    #source, #output, #console-body, #agent { height: auto; width: 1fr; padding: 0 1; }
+    /* The agent feed gets the full width across the bottom — the headline. */
+    #agent-scroll { height: 1fr; border: solid $accent; }
     .panel-title { background: $primary; color: $text; padding: 0 1; }
+    .agent-title { background: $accent; color: $text; padding: 0 1; }
     /* Highlight the focused panel so it's obvious which one the arrow keys
        drive (cells = move selection; a detail panel = scroll it). */
     #cells:focus, .scroll-panel:focus {
@@ -129,6 +133,7 @@ class NotebookTUI(App[None]):
         Binding("2", "focus_panel('source-scroll')", "Source"),
         Binding("3", "focus_panel('output-scroll')", "Output"),
         Binding("4", "focus_panel('console-scroll')", "Console"),
+        Binding("5", "focus_panel('agent-scroll')", "Agent"),
         Binding("tab", "focus_next", "Next panel", show=False),
         Binding("shift+tab", "focus_previous", "Prev panel", show=False),
     ]
@@ -153,7 +158,7 @@ class NotebookTUI(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        with Horizontal():
+        with Horizontal(id="top"):
             yield DataTable(id="cells", cursor_type="row", zebra_stripes=True)
             with Vertical(id="detail"):
                 yield Static("Source", classes="panel-title")
@@ -165,6 +170,9 @@ class NotebookTUI(App[None]):
                 yield Static("Console", classes="panel-title")
                 with VerticalScroll(id="console-scroll", classes="scroll-panel"):
                     yield Static("", id="console-body")
+        yield Static("Agent", classes="agent-title", id="agent-title")
+        with VerticalScroll(id="agent-scroll", classes="scroll-panel"):
+            yield Static("(no agent activity)", id="agent")
         yield Footer()
 
     # -- lifecycle -----------------------------------------------------------
@@ -280,9 +288,11 @@ class NotebookTUI(App[None]):
         changed = self.vm.apply_frame(msg_type, payload)
         for cid in changed:
             self._refresh_cell(cid)
-        # Notebook-level activity (cascade / env job) updates the header banner
-        # even when no specific cell changed.
+        # Notebook-level activity (cascade / env job / agent) updates the header
+        # banner + agent panel even when no specific cell changed.
         self._render_status()
+        if msg_type.startswith("agent_"):
+            self._render_agent()
 
     # -- rendering -----------------------------------------------------------
 
@@ -295,6 +305,14 @@ class NotebookTUI(App[None]):
         self.sub_title = (
             f"{self._conn_state}  ·  {self.vm.banner}" if self.vm.banner else self._conn_state
         )
+
+    def _render_agent(self) -> None:
+        title = f"Agent · {self.vm.agent_status}" if self.vm.agent_status else "Agent"
+        self.query_one("#agent-title", Static).update(title)
+        body = "\n".join(self.vm.agent_feed) if self.vm.agent_feed else "(no agent activity)"
+        self.query_one("#agent", Static).update(body)
+        # Follow the stream: keep the latest reasoning/events in view.
+        self.query_one("#agent-scroll", VerticalScroll).scroll_end(animate=False)
 
     def _rebuild_cells(self) -> None:
         table = self.query_one("#cells", DataTable)
