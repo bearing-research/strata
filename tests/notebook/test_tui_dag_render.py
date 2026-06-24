@@ -36,6 +36,17 @@ def test_every_cell_is_boxed_with_its_glyph():
     assert _BOX_CHARS & set(art)
 
 
+def test_diamond_has_clean_corners_and_tees_no_crossing():
+    """A diamond (a→{b,c}→d) renders with clean elbows + branch/merge tees and
+    no spurious ``┼`` — the direction-accumulation prettifier in action.
+    """
+    order, labels, statuses, edges = _diamond()
+    art = render_dag(order, labels, statuses, edges)
+    assert any(ch in art for ch in "┌┐└┘")  # clean corners, not the old ┼
+    assert "├" in art or "┤" in art  # fork off / merge into a trunk → tee
+    assert "┼" not in art  # a diamond has no true edge crossing
+
+
 def test_selected_cell_uses_double_border():
     order, labels, statuses, edges = _diamond()
     art = render_dag(order, labels, statuses, edges, selected="b")

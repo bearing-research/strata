@@ -265,32 +265,6 @@ class _VertexView:
 # -- rasterization ----------------------------------------------------------
 
 
-@dataclass
-class _Grid:
-    rows: int
-    cols: int
-    _cells: list[list[str]] = field(init=False)
-
-    def __post_init__(self) -> None:
-        self._cells = [[" "] * self.cols for _ in range(self.rows)]
-
-    def put(self, r: int, c: int, ch: str) -> None:
-        if 0 <= r < self.rows and 0 <= c < self.cols:
-            self._cells[r][c] = ch
-
-    def put_text(self, r: int, c: int, text: str) -> None:
-        for i, ch in enumerate(text):
-            self.put(r, c + i, ch)
-
-    def line(self, r: int, c: int, ch: str) -> None:
-        if not (0 <= r < self.rows and 0 <= c < self.cols):
-            return
-        self._cells[r][c] = _merge(self._cells[r][c], ch)
-
-    def to_string(self) -> str:
-        return "\n".join("".join(row).rstrip() for row in self._cells).rstrip("\n")
-
-
 _SEG = {
     "─": frozenset("WE"),
     "│": frozenset("NS"),
@@ -305,6 +279,7 @@ _SEG = {
     "┼": frozenset("NSEW"),
 }
 _SEG_INV = {v: k for k, v in _SEG.items()}
+_OPP = {"N": "S", "S": "N", "E": "W", "W": "E"}
 
 
 def _merge(existing: str, incoming: str) -> str:
@@ -315,12 +290,64 @@ def _merge(existing: str, incoming: str) -> str:
     return _SEG_INV.get(a | b, incoming)
 
 
+@dataclass
+class _Grid:
+    rows: int
+    cols: int
+    _cells: list[list[str]] = field(init=False)
+    # Accumulated connection directions per line cell. Rendering the glyph from
+    # the *union* of directions makes every junction correct by construction:
+    # an elbow → corner, a branch off a shared trunk → tee, a true crossing → ┼.
+    _dirs: dict[tuple[int, int], set[str]] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._cells = [[" "] * self.cols for _ in range(self.rows)]
+        self._dirs = {}
+
+    def _in(self, r: int, c: int) -> bool:
+        return 0 <= r < self.rows and 0 <= c < self.cols
+
+    def put(self, r: int, c: int, ch: str) -> None:
+        if self._in(r, c):
+            self._cells[r][c] = ch
+
+    def put_text(self, r: int, c: int, text: str) -> None:
+        for i, ch in enumerate(text):
+            self.put(r, c + i, ch)
+
+    def merge(self, r: int, c: int, ch: str) -> None:
+        if self._in(r, c):
+            self._cells[r][c] = _merge(self._cells[r][c], ch)
+
+    def add_dir(self, r: int, c: int, direction: str) -> None:
+        if self._in(r, c):
+            self._dirs.setdefault((r, c), set()).add(direction)
+
+    def render_dirs(self) -> None:
+        for (r, c), dirs in self._dirs.items():
+            glyph = _SEG_INV.get(frozenset(dirs))
+            if glyph is not None:
+                self._cells[r][c] = glyph
+
+    def to_string(self) -> str:
+        return "\n".join("".join(row).rstrip() for row in self._cells).rstrip("\n")
+
+
 def _rasterize(layout: _Layout, selected: str | None) -> _Grid:
     grid = _Grid(rows=max(layout.rows, 1), cols=max(layout.cols, 1))
-    for index, path in enumerate(layout.edge_paths):  # edges first; boxes on top
-        _draw_polyline(grid, path, lane=index % _LAYER_GAP)
+    # 1. Accumulate every edge's connection directions, then render junctions.
+    for index, path in enumerate(layout.edge_paths):
+        _accumulate_edge(grid, path, lane=index % _LAYER_GAP)
+    grid.render_dirs()
+    # 2. Boxes draw over the lines.
     for box in layout.boxes.values():
         _draw_box(grid, box, selected=box.cid == selected)
+    # 3. Box-attach junctions, merged onto the (now-drawn) box borders: a tee
+    #    DOWN out of each source bottom, a tee UP into each target top.
+    for path in layout.edge_paths:
+        if path:
+            grid.merge(path[0][0], path[0][1], "┬")
+            grid.merge(path[-1][0], path[-1][1], "┴")
     return grid
 
 
@@ -334,39 +361,55 @@ def _draw_box(grid: _Grid, box: _Placed, *, selected: bool) -> None:
     grid.put(top + 2, left, bl)
     grid.put(top + 2, left + w - 1, br)
     for i in range(left + 1, left + w - 1):
-        # ``line`` so an edge junction (┬/┴) under/over the border shows through.
-        grid.line(top, i, hz)
-        grid.line(top + 2, i, hz)
+        grid.put(top, i, hz)
+        grid.put(top + 2, i, hz)
     grid.put(top + 1, left, vt)
     grid.put(top + 1, left + w - 1, vt)
     grid.put_text(top + 1, left + 1, box.text)
 
 
-def _draw_polyline(grid: _Grid, pts: list[tuple[int, int]], *, lane: int) -> None:
-    """Draw an orthogonal edge through ``pts`` (top→down); horizontals jog in the
-    inter-layer gap on a per-edge ``lane`` row so parallel edges don't overlap.
-    """
-    if len(pts) < 2:
-        return
-    for (r0, c0), (r1, c1) in zip(pts, pts[1:]):
-        if c0 == c1:
-            for r in range(min(r0, r1), max(r0, r1) + 1):
-                grid.line(r, c0, "│")
-            continue
-        # Jog row inside the gap below the source row (never on a box row).
-        jog = min(r0 + 1 + lane, r1 - 1) if r1 > r0 else r0
-        for r in range(min(r0, jog), max(r0, jog) + 1):
-            grid.line(r, c0, "│")
-        lo, hi = sorted((c0, c1))
-        for c in range(lo, hi + 1):
-            grid.line(jog, c, "─")
-        grid.line(jog, c0, "┐" if c1 < c0 else "┌")
-        grid.line(jog, c1, "└" if c1 < c0 else "┘")
-        for r in range(min(jog, r1), max(jog, r1) + 1):
-            grid.line(r, c1, "│")
+def _accumulate_edge(grid: _Grid, pts: list[tuple[int, int]], *, lane: int) -> None:
+    """Walk an edge's full orthogonal cell path and record each step's directions.
 
-    # Stamp the box junctions last (overwrite) so they're clean tees, not the
-    # ``┼`` a passing vertical would merge to: tee DOWN out of the source bottom,
-    # tee UP into the target top.
-    grid.put(pts[0][0], pts[0][1], "┬")
-    grid.put(pts[-1][0], pts[-1][1], "┴")
+    Horizontal jogs sit on a per-edge ``lane`` row inside the inter-layer gap so
+    parallel edges don't pile onto the same row.
+    """
+    cells = _edge_cells(pts, lane)
+    for prev, cur in zip(cells, cells[1:]):
+        step = _step_dir(prev, cur)
+        grid.add_dir(prev[0], prev[1], step)
+        grid.add_dir(cur[0], cur[1], _OPP[step])
+
+
+def _edge_cells(pts: list[tuple[int, int]], lane: int) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
+    for (r0, c0), (r1, c1) in zip(pts, pts[1:]):
+        seg = _elbow_cells(r0, c0, r1, c1, lane)
+        if out and seg and out[-1] == seg[0]:
+            seg = seg[1:]  # don't repeat the shared join cell
+        out.extend(seg)
+    return out
+
+
+def _elbow_cells(r0: int, c0: int, r1: int, c1: int, lane: int) -> list[tuple[int, int]]:
+    if c0 == c1:
+        return [(r, c0) for r in _between(r0, r1)]
+    # Down the source column to a jog row in the gap, across, down to the target.
+    jog = min(r0 + 1 + lane, r1 - 1) if r1 > r0 else r0
+    cells = [(r, c0) for r in _between(r0, jog)]
+    cells += [(jog, c) for c in _between(c0, c1)][1:]
+    cells += [(r, c1) for r in _between(jog, r1)][1:]
+    return cells
+
+
+def _between(a: int, b: int) -> list[int]:
+    step = 1 if b >= a else -1
+    return list(range(a, b + step, step))
+
+
+def _step_dir(a: tuple[int, int], b: tuple[int, int]) -> str:
+    if b[0] < a[0]:
+        return "N"
+    if b[0] > a[0]:
+        return "S"
+    return "W" if b[1] < a[1] else "E"
