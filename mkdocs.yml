@@ -80,6 +80,7 @@ nav:
     - Authoring Programmatically: notebook/agent-authoring.md
     - Import from Jupyter: notebook/import.md
     - Export: notebook/export.md
+    - Terminal Viewer (TUI): notebook/tui.md
     - Keyboard Shortcuts: notebook/keyboard.md
   - Core:
     - Quickstart: getting-started/core.md
