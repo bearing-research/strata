@@ -76,12 +76,14 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   API changes. The materialize + streaming data plane stays in `server.py` for
   a later cycle (its QoS/ACL coupling needs the same gate extraction first).
 
-- **WebSocket frame payloads are becoming typed.** Notebook WS payloads were
-  inline dicts; the execution/test and cascade frames (`cell_console`,
+- **WebSocket frame payloads are now typed.** Notebook WS payloads were inline
+  dicts; the execution/test, cascade, cell-status, environment-job, dag-update,
+  impact-preview and profiling-summary frames (`cell_status`, `cell_console`,
   `cell_output_delta`, `cell_iteration_progress`, `cell_test_status`,
-  `cell_test_results`, `cascade_prompt`, `cascade_progress`) are now `pydantic`
-  models validated at the emit boundary, so the protocol is self-describing for
-  non-Vue clients. Incremental — the remaining frames follow in later cycles.
+  `cell_test_results`, `cascade_prompt`, `cascade_progress`, `environment_job_*`,
+  `dag_update`, `impact_preview`, `profiling_summary`) are now `pydantic` models
+  validated at the emit boundary, so the protocol is self-describing for non-Vue
+  clients. A few low-traffic frames remain inline and follow in later cycles.
   Wire shapes are unchanged (one stale doc field, `cascade_prompt.steps` →
   `cells_to_run`, was corrected to match what's actually sent).
 
