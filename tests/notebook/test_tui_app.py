@@ -140,6 +140,52 @@ async def test_follow_mode_tracks_the_running_cell(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_image_output_renders_without_crashing(monkeypatch):
+    """A single image/png output is rendered inline (terminal-image renderable)."""
+    import base64
+    import io
+
+    from PIL import Image as PILImage
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    buf = io.BytesIO()
+    PILImage.new("RGB", (8, 8), "green").save(buf, format="PNG")
+    data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(80, 24)) as pilot:
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {
+                        "name": "NB",
+                        "cells": [
+                            {
+                                "id": "a",
+                                "status": "ready",
+                                "display_outputs": [
+                                    {"content_type": "image/png", "inline_data_url": data_url}
+                                ],
+                            }
+                        ],
+                    },
+                }
+            )
+        )
+        await pilot.pause()
+        # The image render path was taken (Output isn't the text placeholder).
+        out = str(app.query_one("#output", Static).render())
+        assert "open in the web UI" not in out
+
+
+@pytest.mark.asyncio
 async def test_agent_frames_render_in_agent_panel(monkeypatch):
     """agent_* frames stream into the Agent panel + drive its title/header."""
 

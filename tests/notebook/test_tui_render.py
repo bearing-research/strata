@@ -6,14 +6,22 @@ renders through, so they stay fast and headless.
 
 from __future__ import annotations
 
+import base64
+import io
+
 import httpx
 import pytest
+from PIL import Image as PILImage
 from rich.syntax import Syntax
+from textual_image.renderable import Image as TerminalImage
 
 from strata.notebook.tui.app import (
+    _decode_data_url,
     _glyph,
+    _image_renderable,
     _render_outputs,
     _render_table,
+    _single_image,
     _single_markdown,
     _single_table,
     _source_preview,
@@ -22,6 +30,12 @@ from strata.notebook.tui.app import (
 )
 from strata.notebook.tui.client import TuiClient, TuiClientError, _json_or_error
 from strata.notebook.tui.viewmodel import CellView
+
+
+def _png_data_url(color: str = "red", size: tuple[int, int] = (4, 4)) -> str:
+    buf = io.BytesIO()
+    PILImage.new("RGB", size, color).save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
 def test_glyph_known_and_unknown():
@@ -105,6 +119,42 @@ def test_source_renderable_highlights_by_language():
     unknown = _source_renderable(CellView(id="a", source="y", language="mystery"))
     assert isinstance(unknown, Syntax) and unknown.lexer.name == "Python"
     assert _source_renderable(CellView(id="a", source="")) == "(empty)"
+
+
+def test_decode_data_url():
+    raw = _decode_data_url(_png_data_url())
+    assert raw is not None and raw[:8] == b"\x89PNG\r\n\x1a\n"  # PNG magic
+    assert _decode_data_url("https://example.com/x.png") is None  # not a data URL
+    assert _decode_data_url("data:image/png;base64,abc") is None  # invalid base64 length
+
+
+def _image_cell(url: str, **kw) -> CellView:
+    out = {"content_type": "image/png", "inline_data_url": url}
+    return CellView(id="a", display_outputs=[out], **kw)
+
+
+def test_single_image_detects_one_image_output():
+    url = _png_data_url()
+    assert _single_image(_image_cell(url)) == url
+    # Mixed outputs / non-image / error → None.
+    mixed = CellView(
+        id="a",
+        display_outputs=[
+            {"content_type": "image/png", "inline_data_url": url},
+            {"content_type": "json/object"},
+        ],
+    )
+    assert _single_image(mixed) is None
+    nonimg = CellView(id="a", display_outputs=[{"content_type": "text/markdown"}])
+    assert _single_image(nonimg) is None
+    assert _single_image(_image_cell(url, error="x")) is None
+
+
+def test_image_renderable_builds_and_degrades():
+    assert isinstance(_image_renderable(_image_cell(_png_data_url())), TerminalImage)
+    # Non-image bytes behind a valid data URL → None (not a decodable image).
+    bad_url = "data:image/png;base64," + base64.b64encode(b"not a png").decode()
+    assert _image_renderable(_image_cell(bad_url)) is None
 
 
 def test_time_str_formats_duration_and_cache():

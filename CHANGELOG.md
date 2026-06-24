@@ -19,7 +19,8 @@ mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.
   WebSocket protocol and renders it live — cells flip status as they run, with
   the detail view following the action. Per-cell tabs: **Source**
   (syntax-highlighted with the one-dark theme, matching the web UI), **Output**
-  (markdown renders as markdown, a DataFrame/table renders as a real table),
+  (markdown renders as markdown, a DataFrame/table renders as a real table,
+  images render inline via the terminal's graphics protocol),
   **Console**, and **Agent** (an AI agent's reasoning streams here as it drives
   the notebook). Plus a layered ASCII **DAG** view (`d`), a per-cell run-time
   column, cascade / environment-job progress in the header, and follow mode.
