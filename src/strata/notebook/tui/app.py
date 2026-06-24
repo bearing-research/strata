@@ -147,6 +147,7 @@ class NotebookTUI(App[None]):
         self._ws: Any = None
         self.vm = NotebookViewModel()
         self._selected: str | None = None
+        self._conn_state = "connecting…"
 
     # -- layout --------------------------------------------------------------
 
@@ -274,16 +275,26 @@ class NotebookTUI(App[None]):
         if msg_type == "notebook_state":
             self.vm.apply_notebook_state(payload)
             self._rebuild_cells()
+            self._render_status()
             return
         changed = self.vm.apply_frame(msg_type, payload)
         for cid in changed:
             self._refresh_cell(cid)
+        # Notebook-level activity (cascade / env job) updates the header banner
+        # even when no specific cell changed.
+        self._render_status()
 
     # -- rendering -----------------------------------------------------------
 
     def _set_connection(self, state: str) -> None:
+        self._conn_state = state
+        self._render_status()
+
+    def _render_status(self) -> None:
         self.title = self.vm.notebook_name or "Strata Notebook"
-        self.sub_title = state
+        self.sub_title = (
+            f"{self._conn_state}  ·  {self.vm.banner}" if self.vm.banner else self._conn_state
+        )
 
     def _rebuild_cells(self) -> None:
         table = self.query_one("#cells", DataTable)
@@ -299,7 +310,8 @@ class NotebookTUI(App[None]):
 
     def _cell_label(self, cell: CellView) -> str:
         name = cell.name or cell.id[:8]
-        return f"{name}  {_first_line(cell.source)[:40]}"
+        suffix = f"  [{cell.iteration}]" if cell.iteration else ""
+        return f"{name}  {_first_line(cell.source)[:40]}{suffix}"
 
     def _refresh_cell(self, cid: str) -> None:
         cell = self.vm.cells.get(cid)
