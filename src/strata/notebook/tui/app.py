@@ -16,6 +16,7 @@ from typing import Any
 
 import websockets
 from rich.markdown import Markdown
+from rich.syntax import Syntax
 from rich.table import Table
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -399,7 +400,7 @@ class NotebookTUI(App[None]):
         cell = self.vm.cells.get(cid)
         if cell is None:
             return
-        self.query_one("#source", Static).update(cell.source or "(empty)")
+        self.query_one("#source", Static).update(_source_renderable(cell))
         # Render a pure-markdown output with Rich (headers/lists/code) or a single
         # tabular output as a real table; otherwise the plain-text summary.
         output = self.query_one("#output", Static)
@@ -428,6 +429,29 @@ def _single_markdown(cell: CellView) -> str | None:
     ):
         return output["markdown_text"]
     return None
+
+
+# Cell language → Pygments lexer for source highlighting.
+_SOURCE_LEXERS = {
+    "python": "python",
+    "sql": "sql",
+    "markdown": "markdown",
+    "r": "r",
+    "prompt": "markdown",  # prompt cells are templated text
+}
+
+
+def _source_renderable(cell: CellView):
+    """Syntax-highlighted source for the cell's language (plain text on failure)."""
+    if not cell.source:
+        return "(empty)"
+    lexer = _SOURCE_LEXERS.get(cell.language, "python")
+    try:
+        # ``ansi_dark`` uses the terminal's own palette, so it sits naturally in
+        # the TUI instead of forcing a truecolor scheme.
+        return Syntax(cell.source, lexer, theme="ansi_dark", word_wrap=True)
+    except Exception:  # noqa: BLE001 — unknown lexer / pygments hiccup → raw source
+        return cell.source
 
 
 def _time_str(cell: CellView) -> str:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from rich.syntax import Syntax
 
 from strata.notebook.tui.app import (
     _first_line,
@@ -16,6 +17,7 @@ from strata.notebook.tui.app import (
     _render_table,
     _single_markdown,
     _single_table,
+    _source_renderable,
     _time_str,
 )
 from strata.notebook.tui.client import TuiClient, TuiClientError, _json_or_error
@@ -84,6 +86,20 @@ def _table_output(rows_total=100):
         "rows": rows_total,
         "preview": [[1, "alice"], [2, "bob"]],
     }
+
+
+def test_source_renderable_highlights_by_language():
+    py = _source_renderable(CellView(id="a", source="x = 1", language="python"))
+    assert isinstance(py, Syntax)
+    assert py.lexer is not None and py.lexer.name == "Python"
+
+    sql = _source_renderable(CellView(id="a", source="select 1", language="sql"))
+    assert isinstance(sql, Syntax) and sql.lexer.name == "SQL"
+
+    # Unknown language defaults to Python; empty source is a plain placeholder.
+    unknown = _source_renderable(CellView(id="a", source="y", language="mystery"))
+    assert isinstance(unknown, Syntax) and unknown.lexer.name == "Python"
+    assert _source_renderable(CellView(id="a", source="")) == "(empty)"
 
 
 def test_time_str_formats_duration_and_cache():
