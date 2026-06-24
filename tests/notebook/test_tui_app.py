@@ -184,6 +184,13 @@ async def test_image_output_renders_without_crashing(monkeypatch):
         out = str(app.query_one("#output", Static).render())
         assert "open in the web UI" not in out
 
+        # `i` enlarges it to the full-screen image view.
+        from strata.notebook.tui.app import ImageScreen
+
+        await pilot.press("i")
+        await pilot.pause()
+        assert isinstance(app.screen, ImageScreen)
+
 
 @pytest.mark.asyncio
 async def test_agent_frames_render_in_agent_panel(monkeypatch):

@@ -87,6 +87,7 @@ state, follow mode, and any cascade / environment / agent activity.
 | `↑` `↓` `PgUp` `PgDn` `Home` `End` | Scroll the focused pane |
 | `f` | Toggle **follow mode** (auto-select the running cell) |
 | `d` | Show the notebook **DAG** (layered ASCII; `Esc`/`d`/`q` to close) |
+| `i` | Enlarge the selected cell's **image** output to full screen (`Esc`/`i`/`q` to close) |
 | `r` | Resync (request a fresh snapshot) |
 | `q` | Quit |
 

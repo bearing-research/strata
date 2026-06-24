@@ -128,6 +128,27 @@ class DagScreen(ModalScreen[None]):
             yield Static(self._dag_text, id="dag-art")
 
 
+class ImageScreen(ModalScreen[None]):
+    """Full-screen view of a cell's image output — renders larger than the panel."""
+
+    BINDINGS = [Binding("escape,i,q", "dismiss", "Close")]
+
+    CSS = """
+    ImageScreen { align: center middle; }
+    #image-box { width: 95%; height: 95%; border: solid $accent; }
+    #image-art { width: auto; height: auto; padding: 1 2; }
+    """
+
+    def __init__(self, renderable: Any) -> None:
+        super().__init__()
+        self._renderable = renderable
+
+    def compose(self) -> ComposeResult:
+        yield Static("Image  (Esc/i/q to close · arrows to scroll)", classes="panel-title")
+        with VerticalScroll(id="image-box"):
+            yield Static(self._renderable, id="image-art")
+
+
 class NotebookTUI(App[None]):
     """Top-level spectator app."""
 
@@ -147,6 +168,7 @@ class NotebookTUI(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Resync"),
         Binding("d", "show_dag", "DAG"),
+        Binding("i", "view_image", "Image"),
         Binding("f", "toggle_follow", "Follow"),
         Binding("1", "focus_cells", "Cells"),
         Binding("2", "show_tab('tab-source')", "Source"),
@@ -178,6 +200,8 @@ class NotebookTUI(App[None]):
         self.vm = NotebookViewModel()
         self._selected: str | None = None
         self._conn_state = "connecting…"
+        # The selected cell's image renderable (if any) — enlarged by `i`.
+        self._current_image: Any = None
         # Follow mode: auto-select the cell that goes running so the detail
         # panels track the action (an agent / run-all moving through the notebook).
         self._follow = True
@@ -253,6 +277,11 @@ class NotebookTUI(App[None]):
             self.vm.cell_order, labels, statuses, self.vm.edges, selected=self._selected
         )
         self.push_screen(DagScreen(dag_text))
+
+    def action_view_image(self) -> None:
+        """Enlarge the selected cell's image output to (almost) full screen."""
+        if self._current_image is not None:
+            self.push_screen(ImageScreen(self._current_image))
 
     def action_focus_cells(self) -> None:
         """Focus the cell list so up/down move the selection."""
@@ -423,6 +452,7 @@ class NotebookTUI(App[None]):
         markdown = _single_markdown(cell)
         table = None if markdown is not None else _single_table(cell)
         image = None if (markdown is not None or table is not None) else _image_renderable(cell)
+        self._current_image = image  # enable `i` to enlarge when there's an image
         if markdown is not None:
             output.update(Markdown(markdown))
         elif table is not None:
@@ -594,7 +624,10 @@ def _image_renderable(cell: CellView) -> Any | None:
     if raw is None:
         return None
     try:
-        return TerminalImage(PILImage.open(io.BytesIO(raw)))
+        # auto/auto preserves aspect ratio and uses as much of the container as
+        # possible — so the same renderable fits the panel inline and scales up
+        # in the full-screen image view.
+        return TerminalImage(PILImage.open(io.BytesIO(raw)), width="auto", height="auto")
     except (OSError, ValueError):  # not a decodable image
         return None
 
