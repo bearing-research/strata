@@ -56,3 +56,27 @@ async def test_detail_panels_are_tall_and_content_overflows(monkeypatch):
         source_panel = panels[0]
         assert source.size.height >= 45, f"content didn't grow (got {source.size.height})"
         assert source.size.height > source_panel.size.height
+
+
+@pytest.mark.asyncio
+async def test_number_keys_focus_panels_for_arrow_scrolling(monkeypatch):
+    """1/2/3/4 select a panel so the arrow keys navigate/scroll it."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.press("2")  # Source
+        await pilot.pause()
+        assert app.focused is app.query_one("#source-scroll")
+
+        await pilot.press("4")  # Console
+        await pilot.pause()
+        assert app.focused is app.query_one("#console-scroll")
+
+        await pilot.press("1")  # Cells
+        await pilot.pause()
+        assert app.focused is app.query_one("#cells")

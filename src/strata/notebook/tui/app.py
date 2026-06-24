@@ -91,11 +91,23 @@ class NotebookTUI(App[None]):
     .scroll-panel { height: 1fr; border: solid $primary; }
     #source, #output, #console-body { height: auto; width: 1fr; padding: 0 1; }
     .panel-title { background: $primary; color: $text; padding: 0 1; }
+    /* Highlight the focused panel so it's obvious which one the arrow keys
+       drive (cells = move selection; a detail panel = scroll it). */
+    #cells:focus, .scroll-panel:focus {
+        border: solid $accent;
+        background: $boost;
+    }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Resync"),
+        Binding("1", "focus_panel('cells')", "Cells"),
+        Binding("2", "focus_panel('source-scroll')", "Source"),
+        Binding("3", "focus_panel('output-scroll')", "Output"),
+        Binding("4", "focus_panel('console-scroll')", "Console"),
+        Binding("tab", "focus_next", "Next panel", show=False),
+        Binding("shift+tab", "focus_previous", "Prev panel", show=False),
     ]
 
     def __init__(
@@ -121,13 +133,13 @@ class NotebookTUI(App[None]):
             yield DataTable(id="cells", cursor_type="row", zebra_stripes=True)
             with Vertical(id="detail"):
                 yield Static("Source", classes="panel-title")
-                with VerticalScroll(classes="scroll-panel"):
+                with VerticalScroll(id="source-scroll", classes="scroll-panel"):
                     yield Static("", id="source")
                 yield Static("Output", classes="panel-title")
-                with VerticalScroll(classes="scroll-panel"):
+                with VerticalScroll(id="output-scroll", classes="scroll-panel"):
                     yield Static("", id="output")
                 yield Static("Console", classes="panel-title")
-                with VerticalScroll(classes="scroll-panel"):
+                with VerticalScroll(id="console-scroll", classes="scroll-panel"):
                     yield Static("", id="console-body")
         yield Footer()
 
@@ -170,6 +182,17 @@ class NotebookTUI(App[None]):
 
     async def action_refresh(self) -> None:
         await self._send_sync()
+
+    def action_focus_panel(self, panel_id: str) -> None:
+        """Move keyboard focus to a panel so up/down navigate it.
+
+        ``cells`` (the list) → up/down move the cell selection; a detail
+        ``*-scroll`` region → up/down (+ PageUp/Down, Home/End) scroll it.
+        """
+        try:
+            self.query_one(f"#{panel_id}").focus()
+        except Exception:  # noqa: BLE001 — panel not mounted yet; ignore
+            return
 
     # -- WS loop -------------------------------------------------------------
 
