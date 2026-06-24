@@ -9,11 +9,26 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ## 0.4.0 — 2026-06-24
 
-0.4.0 is a **consolidation and hardening** cycle: the headline is an internal
-restructuring of the server, alongside a new notebook feature, concurrency-bug
-fixes, and CI hardening. No breaking changes.
+0.4.0 is a **consolidation and hardening** cycle. The headlines are a new
+**read-only terminal viewer** for notebooks and an internal restructuring of the
+server, alongside per-cell unit tests, broader value serialization with in-place
+mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.
 
 ### Added
+
+- **A terminal viewer for notebooks (`strata-notebook-tui`).** A read-only,
+  full-screen spectator that attaches to a running notebook session over the
+  WebSocket protocol and renders it live — cells flip status as they run, with
+  the detail view following the action. Per-cell tabs: **Source**
+  (syntax-highlighted with the one-dark theme, matching the web UI), **Output**
+  (markdown renders as markdown, a DataFrame/table renders as a real table),
+  **Console**, and **Agent** (an AI agent's reasoning streams here as it drives
+  the notebook). Plus a layered ASCII **DAG** view (`d`), a per-cell run-time
+  column, cascade / environment-job progress in the header, and follow mode.
+  Ships behind the `[tui]` extra (`uv tool install "strata-notebook[tui]"`); it
+  never edits or runs cells — purely for watching, e.g. an agent build a
+  notebook in one terminal while you watch in another. See
+  [Terminal Viewer](notebook/tui.md).
 
 - **Per-cell unit tests in the notebook.** Every Python code cell gets a
   **Tests** panel (the `🧪` toggle next to Inspect, which doubles as a health
@@ -30,6 +45,21 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   surfaces an actionable message). The generated-conftest runner is written to
   be liftable to a standalone plugin for CI/pre-commit later. See the
   `pandas_basics` example for a worked set of cell tests.
+
+- **Cell-test tooling auto-provisions.** Running a cell's tests when `pytest`
+  isn't in the notebook environment now installs it on demand (a generic
+  dev-tool provisioning path) and retries, instead of failing; a failing test's
+  captured stdout/stderr is surfaced in the result message. Dev-group
+  dependencies are excluded from the cell-provenance environment hash, so adding
+  a test tool doesn't invalidate cached cell outputs.
+
+- **Broader value serialization with in-place mutation tracking.** Cell outputs
+  now serialize polars, torch, and jax values through a unified Arrow type
+  registry (alongside the existing pandas / numpy / pyarrow support). In-place
+  mutations — `df.sort_values(inplace=True)`, or mutating a numpy array / dict /
+  list / set / torch tensor received from upstream — are detected (statically
+  recaptured into the DAG and verified at runtime via a fingerprint registry),
+  so provenance stays correct when a cell mutates a value it didn't define.
 
 ### Changed
 
