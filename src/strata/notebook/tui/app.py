@@ -16,6 +16,7 @@ from typing import Any
 
 import websockets
 from rich.markdown import Markdown
+from rich.table import Table
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -385,11 +386,17 @@ class NotebookTUI(App[None]):
         if cell is None:
             return
         self.query_one("#source", Static).update(cell.source or "(empty)")
-        # Render a pure-markdown output with Rich (headers/lists/code); otherwise
-        # fall back to the plain-text summary.
-        markdown = _single_markdown(cell)
+        # Render a pure-markdown output with Rich (headers/lists/code) or a single
+        # tabular output as a real table; otherwise the plain-text summary.
         output = self.query_one("#output", Static)
-        output.update(Markdown(markdown) if markdown is not None else _render_outputs(cell))
+        markdown = _single_markdown(cell)
+        table = None if markdown is not None else _single_table(cell)
+        if markdown is not None:
+            output.update(Markdown(markdown))
+        elif table is not None:
+            output.update(_render_table(*table))
+        else:
+            output.update(_render_outputs(cell))
         self.query_one("#console-body", Static).update(cell.console or "(no console output)")
 
 
@@ -407,6 +414,57 @@ def _single_markdown(cell: CellView) -> str | None:
     ):
         return output["markdown_text"]
     return None
+
+
+def _is_table(output: dict[str, Any]) -> bool:
+    """True for a tabular output (arrow/ipc with named columns + a row preview)."""
+    return (
+        str(output.get("content_type") or "").startswith("arrow")
+        and isinstance(output.get("columns"), list)
+        and bool(output.get("columns"))
+        and isinstance(output.get("preview"), list)
+    )
+
+
+def _single_table(cell: CellView) -> tuple[list[str], list[Any], int | None] | None:
+    """Return (columns, preview-rows, total-rows) when the cell has exactly one
+    tabular output (so it renders as a real table), else None for the text path.
+    """
+    if cell.error or cell.stream_text:
+        return None
+    candidates = [o for o in (*cell.display_outputs, *cell.outputs) if isinstance(o, dict)]
+    if len(candidates) != 1 or not _is_table(candidates[0]):
+        return None
+    output = candidates[0]
+    rows = output.get("rows")
+    return (
+        [str(c) for c in output["columns"]],
+        output["preview"],
+        rows if isinstance(rows, int) else None,
+    )
+
+
+def _render_table(columns: list[str], preview: list[Any], total: int | None) -> Table:
+    """Build a Rich table from a serialized preview (≤20 rows of cell values)."""
+    table = Table(show_header=True, header_style="bold", expand=False)
+    for name in columns:
+        table.add_column(name, overflow="fold", max_width=24)
+    for row in preview[:20]:
+        if isinstance(row, list):
+            cells = [_cell_str(v) for v in row]
+        elif isinstance(row, dict):  # defensive: map by column name
+            cells = [_cell_str(row.get(name)) for name in columns]
+        else:
+            continue
+        table.add_row(*cells)
+    if total is not None and total > len(preview[:20]):
+        table.caption = f"showing {len(preview[:20])} of {total} rows"
+    return table
+
+
+def _cell_str(value: Any) -> str:
+    text = str(value)
+    return text if len(text) <= 40 else text[:37] + "…"
 
 
 def _render_outputs(cell: CellView) -> str:

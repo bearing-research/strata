@@ -9,7 +9,14 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from strata.notebook.tui.app import _first_line, _glyph, _render_outputs, _single_markdown
+from strata.notebook.tui.app import (
+    _first_line,
+    _glyph,
+    _render_outputs,
+    _render_table,
+    _single_markdown,
+    _single_table,
+)
 from strata.notebook.tui.client import TuiClient, TuiClientError, _json_or_error
 from strata.notebook.tui.viewmodel import CellView
 
@@ -67,6 +74,52 @@ def test_single_markdown_detects_pure_markdown_output():
         display_outputs=[{"content_type": "text/markdown", "markdown_text": "# Title\n- a\n- b"}],
     )
     assert _single_markdown(cell) == "# Title\n- a\n- b"
+
+
+def _table_output(rows_total=100):
+    return {
+        "content_type": "arrow/ipc",
+        "columns": ["id", "name"],
+        "rows": rows_total,
+        "preview": [[1, "alice"], [2, "bob"]],
+    }
+
+
+def test_single_table_detects_one_tabular_output():
+    cell = CellView(id="a", outputs=[_table_output()])
+    result = _single_table(cell)
+    assert result is not None
+    columns, preview, total = result
+    assert columns == ["id", "name"]
+    assert preview == [[1, "alice"], [2, "bob"]]
+    assert total == 100
+
+
+def test_single_table_none_when_not_a_single_table():
+    # Two outputs → not a single table.
+    assert _single_table(CellView(id="a", outputs=[_table_output(), _table_output()])) is None
+    # Non-tabular output.
+    assert _single_table(CellView(id="a", outputs=[{"content_type": "json/object"}])) is None
+    # Error/stream present → text path.
+    assert _single_table(CellView(id="a", outputs=[_table_output()], error="x")) is None
+
+
+def test_render_table_includes_columns_values_and_truncation_caption():
+    table = _render_table(["id", "name"], [[1, "alice"], [2, "bob"]], total=100)
+    text = " ".join(_render_to_text(table).split())  # normalize wrapped whitespace
+    assert "id" in text and "name" in text
+    assert "alice" in text and "bob" in text
+    assert "showing 2 of 100 rows" in text
+
+
+def _render_to_text(renderable) -> str:
+    from io import StringIO
+
+    from rich.console import Console
+
+    buf = StringIO()
+    Console(file=buf, width=120).print(renderable)
+    return buf.getvalue()
 
 
 def test_single_markdown_none_when_mixed_or_nonmarkdown():
