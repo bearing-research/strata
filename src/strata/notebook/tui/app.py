@@ -85,8 +85,11 @@ class NotebookTUI(App[None]):
     CSS = """
     #cells { width: 38%; border: solid $primary; }
     #detail { width: 62%; }
-    #source, #output { border: solid $primary; padding: 0 1; height: 1fr; }
-    #console { border: solid $primary; height: 1fr; }
+    /* Each panel is a scroll region that fills 1/3 of the detail pane; the inner
+       content is height:auto so it grows past the region and the scrollbar
+       activates (a 1fr child would fill the region exactly and never scroll). */
+    .scroll-panel { height: 1fr; border: solid $primary; }
+    #source, #output, #console-body { height: auto; width: 1fr; padding: 0 1; }
     .panel-title { background: $primary; color: $text; padding: 0 1; }
     """
 
@@ -118,13 +121,13 @@ class NotebookTUI(App[None]):
             yield DataTable(id="cells", cursor_type="row", zebra_stripes=True)
             with Vertical(id="detail"):
                 yield Static("Source", classes="panel-title")
-                with VerticalScroll():
+                with VerticalScroll(classes="scroll-panel"):
                     yield Static("", id="source")
                 yield Static("Output", classes="panel-title")
-                with VerticalScroll():
+                with VerticalScroll(classes="scroll-panel"):
                     yield Static("", id="output")
                 yield Static("Console", classes="panel-title")
-                with VerticalScroll(id="console"):
+                with VerticalScroll(classes="scroll-panel"):
                     yield Static("", id="console-body")
         yield Footer()
 
