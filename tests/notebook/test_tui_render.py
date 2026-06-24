@@ -143,6 +143,16 @@ def test_render_table_includes_columns_values_and_truncation_caption():
     assert "showing 2 of 100 rows" in text
 
 
+def test_render_table_caps_wide_tables():
+    cols = [f"c{i}" for i in range(20)]
+    rows = [[f"v{i}" for i in range(20)]]
+    text = " ".join(_render_to_text(_render_table(cols, rows, total=5)).split())
+    # Only the first 8 columns render; the rest are signalled in the caption.
+    assert "c0" in text and "c7" in text
+    assert "c8" not in text and "c19" not in text
+    assert "+12 more cols" in text
+
+
 def _render_to_text(renderable) -> str:
     from io import StringIO
 
