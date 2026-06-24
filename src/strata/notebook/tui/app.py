@@ -10,11 +10,15 @@ keybindings — a spectator. The cascade/dag/env frames (M2) and the agent panel
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import io
 import json
 from datetime import UTC, datetime
 from typing import Any
 
 import websockets
+from PIL import Image as PILImage
 from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.table import Table
@@ -32,6 +36,7 @@ from textual.widgets import (
     TabPane,
 )
 from textual.widgets.option_list import Option
+from textual_image.renderable import Image as TerminalImage
 
 from strata.notebook.tui.client import TuiClient, TuiClientError
 from strata.notebook.tui.dag_render import render_dag
@@ -412,15 +417,18 @@ class NotebookTUI(App[None]):
         if cell is None:
             return
         self.query_one("#source", Static).update(_source_renderable(cell))
-        # Render a pure-markdown output with Rich (headers/lists/code) or a single
-        # tabular output as a real table; otherwise the plain-text summary.
+        # Render a pure-markdown output with Rich, a single tabular output as a
+        # real table, or a single image inline; otherwise the plain-text summary.
         output = self.query_one("#output", Static)
         markdown = _single_markdown(cell)
         table = None if markdown is not None else _single_table(cell)
+        image = None if (markdown is not None or table is not None) else _image_renderable(cell)
         if markdown is not None:
             output.update(Markdown(markdown))
         elif table is not None:
             output.update(_render_table(*table))
+        elif image is not None:
+            output.update(image)
         else:
             output.update(_render_outputs(cell))
         self.query_one("#console-body", Static).update(cell.console or "(no console output)")
@@ -546,6 +554,49 @@ def _render_table(columns: list[str], preview: list[Any], total: int | None) -> 
 def _cell_str(value: Any) -> str:
     text = str(value)
     return text if len(text) <= 40 else text[:37] + "…"
+
+
+def _decode_data_url(url: str) -> bytes | None:
+    """Decode a ``data:image/...;base64,<...>`` URL to raw bytes (None if malformed)."""
+    marker = "base64,"
+    idx = url.find(marker)
+    if not url.startswith("data:image/") or idx == -1:
+        return None
+    try:
+        return base64.b64decode(url[idx + len(marker) :])
+    except (ValueError, binascii.Error):
+        return None
+
+
+def _single_image(cell: CellView) -> str | None:
+    """Return the data URL when the cell's output is exactly one image, else None."""
+    if cell.error or cell.stream_text:
+        return None
+    candidates = [o for o in (*cell.display_outputs, *cell.outputs) if isinstance(o, dict)]
+    if len(candidates) != 1:
+        return None
+    output = candidates[0]
+    if output.get("content_type") == "image/png" and isinstance(output.get("inline_data_url"), str):
+        return output["inline_data_url"]
+    return None
+
+
+def _image_renderable(cell: CellView) -> Any | None:
+    """A terminal-image renderable for a single-image cell, or None to fall back.
+
+    ``TerminalImage`` picks the terminal's best graphics protocol (kitty / iTerm /
+    Sixel) and degrades to Unicode half-blocks when none is available.
+    """
+    url = _single_image(cell)
+    if url is None:
+        return None
+    raw = _decode_data_url(url)
+    if raw is None:
+        return None
+    try:
+        return TerminalImage(PILImage.open(io.BytesIO(raw)))
+    except (OSError, ValueError):  # not a decodable image
+        return None
 
 
 def _render_outputs(cell: CellView) -> str:

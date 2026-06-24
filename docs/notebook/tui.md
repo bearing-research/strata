@@ -91,8 +91,11 @@ state, follow mode, and any cascade / environment / agent activity.
 | `q` | Quit |
 
 The tabs render richly: source is **syntax-highlighted** by cell language,
-markdown outputs render as formatted markdown, and a single DataFrame / table
-output renders as a real table with a row-count caption.
+markdown outputs render as formatted markdown, a single DataFrame / table output
+renders as a real table with a row-count caption, and image outputs (e.g.
+matplotlib figures) render **inline** — using the terminal's graphics protocol
+(kitty / iTerm2 / Sixel) where available, degrading to Unicode half-blocks
+otherwise.
 
 Cell status glyphs:
 

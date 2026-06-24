@@ -105,6 +105,9 @@ tui = [
     "textual>=0.80.0",
     # Pure-Python Sugiyama layered layout for the ASCII DAG view.
     "grandalf>=0.8",
+    # Inline image rendering — terminal graphics protocol (kitty/iTerm/Sixel)
+    # with a Unicode half-block fallback. Pulls in Pillow.
+    "textual-image>=0.13",
 ]
 
 [dependency-groups]
@@ -138,6 +141,7 @@ dev = [
     # TUI viewer (the [tui] extra) — dev-installed so its tests can import it.
     "textual>=0.80.0",
     "grandalf>=0.8",
+    "textual-image>=0.13",
 ]
 docs = [
     "mkdocs>=1.6.0",
