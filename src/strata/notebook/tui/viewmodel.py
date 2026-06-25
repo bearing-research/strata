@@ -113,6 +113,12 @@ class NotebookViewModel:
                 error=prior.error if prior else None,
                 duration_ms=prior.duration_ms if prior else None,
                 cache_hit=prior.cache_hit if prior else False,
+                # Test results arrive only via cell_test_* frames (a snapshot
+                # never carries them), so preserve them across a resync — else the
+                # 2.5s auto-resync blanks the badge + Tests tab.
+                test_summary=prior.test_summary if prior else "",
+                test_cases=prior.test_cases if prior else [],
+                test_unavailable=prior.test_unavailable if prior else False,
             )
 
         self.cell_order = order
