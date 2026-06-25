@@ -126,6 +126,26 @@ def test_resync_preserves_live_console_and_outputs():
     assert vm.cells["a"].outputs == [{"name": "x"}]  # live outputs preserved
 
 
+def test_resync_preserves_test_results():
+    # Test results arrive only via cell_test_* frames; the periodic resync (a
+    # fresh notebook_state) must not blank the badge + per-test cases.
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a", "status": "idle"}))
+    vm.apply_frame(
+        "cell_test_results",
+        {
+            "cell_id": "a",
+            "passed": 2,
+            "failed": 1,
+            "tests": [{"name": "t", "outcome": "failed", "message": "boom"}],
+        },
+    )
+    assert vm.cells["a"].test_summary == "✗ 2/3"
+    vm.apply_notebook_state(_state({"id": "a", "status": "ready"}))
+    assert vm.cells["a"].test_summary == "✗ 2/3"  # badge survives resync
+    assert vm.cells["a"].test_cases[0]["name"] == "t"  # per-test cases survive
+
+
 def test_edges_parsed_from_notebook_state_dag():
     vm = NotebookViewModel()
     payload = {
