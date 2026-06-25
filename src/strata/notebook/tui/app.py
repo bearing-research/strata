@@ -489,11 +489,17 @@ class NotebookTUI(App[None]):
 
 
 def _single_markdown(cell: CellView) -> str | None:
-    """Return the cell's markdown text when its output is exactly one rendered
-    markdown block (so it can render with Rich), else None for the text path.
+    """Return the markdown text to render with Rich in the Output tab, else None.
+
+    Two cases: a markdown-*language* cell renders its own source (it produces no
+    execution outputs — the Source tab shows the raw text, Output shows it
+    rendered), or any cell whose single display output is one rendered markdown
+    block. Otherwise None → the plain-text output path.
     """
     if cell.error or cell.stream_text or cell.outputs:
         return None
+    if cell.language == "markdown" and not cell.display_outputs:
+        return cell.source or None
     if len(cell.display_outputs) != 1:
         return None
     output = cell.display_outputs[0]

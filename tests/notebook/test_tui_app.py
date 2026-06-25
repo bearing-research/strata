@@ -237,6 +237,45 @@ async def test_image_output_renders_without_crashing(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_markdown_language_cell_renders_in_output(monkeypatch):
+    """A markdown-language cell renders its source as markdown in the Output tab."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 40)) as pilot:
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {
+                        "name": "NB",
+                        "cells": [
+                            {
+                                "id": "a",
+                                "language": "markdown",
+                                "source": "# Heading\n\nbody text",
+                                "status": "ready",
+                            }
+                        ],
+                    },
+                }
+            )
+        )
+        await pilot.pause()
+        out = str(app.query_one("#output", Static).render())
+        # The markdown render path was taken: the Output is a rich Markdown
+        # renderable, not the plain-text "(no output)" placeholder.
+        assert "(no output)" not in out
+        assert "Markdown" in out
+
+
+@pytest.mark.asyncio
 async def test_agent_frames_render_in_agent_panel(monkeypatch):
     """agent_* frames stream into the Agent panel + drive its title/header."""
 
