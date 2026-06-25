@@ -2056,7 +2056,10 @@ pane is a set of tabs for the selected cell. A header line shows the connection
 state, follow mode, and any cascade / environment / agent activity.</p>
 <p>When the driver runs a cell's <a href="../testing/">unit tests</a>, the result shows as a
 badge on that cell in the list — <code>✓ 4/4</code> (green), <code>✗ 2/4</code> on failure, <code>·stale</code>
-when the cell changed since the run — and the header notes the test run.</p>
+when the cell changed since the run — and the header notes the test run. The
+<strong>Tests</strong> tab (<code>6</code>) shows the individual outcomes for the selected cell: each
+test as <code>✓</code>/<code>✗</code>/<code>⚠</code>/<code>○</code> with its failure message (the rewritten-assert diff)
+underneath — the pytest run, in the terminal.</p>
 <table>
 <thead>
 <tr>
@@ -2070,8 +2073,8 @@ when the cell changed since the run — and the header notes the test run.</p>
 <td>Focus the cell list (<code>↑</code>/<code>↓</code> move the selection)</td>
 </tr>
 <tr>
-<td><code>2</code> / <code>3</code> / <code>4</code> / <code>5</code></td>
-<td>Switch to the Source / Output / Console / Agent tab</td>
+<td><code>2</code> / <code>3</code> / <code>4</code> / <code>5</code> / <code>6</code></td>
+<td>Switch to the Source / Output / Console / Agent / Tests tab</td>
 </tr>
 <tr>
 <td><code>↑</code> <code>↓</code> <code>PgUp</code> <code>PgDn</code> <code>Home</code> <code>End</code></td>
