@@ -276,6 +276,42 @@ async def test_markdown_language_cell_renders_in_output(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cell_test_results_show_badge_in_cell_label(monkeypatch):
+    """A cell_test_results frame surfaces a pass/fail badge in the cell-list label."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 40)) as pilot:
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {"name": "NB", "cells": [{"id": "a", "source": "x=1"}]},
+                }
+            )
+        )
+        await pilot.pause()
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "cell_test_results",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {"cell_id": "a", "passed": 3, "failed": 0, "errored": 0},
+                }
+            )
+        )
+        await pilot.pause()
+        assert "✓ 3/3" in app._cell_label(app.vm.cells["a"])
+
+
+@pytest.mark.asyncio
 async def test_agent_frames_render_in_agent_panel(monkeypatch):
     """agent_* frames stream into the Agent panel + drive its title/header."""
 

@@ -457,7 +457,16 @@ class NotebookTUI(App[None]):
         # Skip the rebuild when nothing the list shows has changed — so the
         # periodic resync doesn't flicker the table or move the cursor.
         sig = tuple(
-            (cid, c.status, c.name, c.iteration, c.duration_ms, c.cache_hit, c.source)
+            (
+                cid,
+                c.status,
+                c.name,
+                c.iteration,
+                c.duration_ms,
+                c.cache_hit,
+                c.source,
+                c.test_summary,
+            )
             for cid in self.vm.cell_order
             for c in (self.vm.cells[cid],)
         )
@@ -482,7 +491,12 @@ class NotebookTUI(App[None]):
 
     def _cell_label(self, cell: CellView) -> str:
         name = cell.name or cell.id[:8]
-        suffix = f"  [{cell.iteration}]" if cell.iteration else ""
+        bits = []
+        if cell.iteration:
+            bits.append(f"[{cell.iteration}]")
+        if cell.test_summary:
+            bits.append(cell.test_summary)
+        suffix = ("  " + "  ".join(bits)) if bits else ""
         return f"{name}  {_source_preview(cell.source)[:40]}{suffix}"
 
     def _refresh_cell(self, cid: str) -> None:

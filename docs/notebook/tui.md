@@ -80,6 +80,10 @@ The left pane lists the cells (status glyph, name, and last-run time); the right
 pane is a set of tabs for the selected cell. A header line shows the connection
 state, follow mode, and any cascade / environment / agent activity.
 
+When the driver runs a cell's [unit tests](testing.md), the result shows as a
+badge on that cell in the list — `✓ 4/4` (green), `✗ 2/4` on failure, `·stale`
+when the cell changed since the run — and the header notes the test run.
+
 | Key | Action |
 | --- | --- |
 | `1` | Focus the cell list (`↑`/`↓` move the selection) |
