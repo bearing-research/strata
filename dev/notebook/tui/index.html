@@ -2052,14 +2052,17 @@ confirmation prompts are shown as <em>"awaiting driver confirmation"</em> — th
 is read-only, so the web UI (the driver) answers them.</p>
 <h2 id="layout-and-keys">Layout and keys<a class="headerlink" href="#layout-and-keys" title="Permanent link">&para;</a></h2>
 <p>The left pane lists the cells (status glyph, name, and last-run time); the right
-pane is a set of tabs for the selected cell. A header line shows the connection
-state, follow mode, and any cascade / environment / agent activity.</p>
+pane is split into two tab-groups for the selected cell — the <strong>code</strong> on top
+(Source, Tests source) and the <strong>runtime</strong> on the bottom (Output, Console, Agent,
+Results). A header line shows the connection state, follow mode, and any
+cascade / environment / agent activity.</p>
 <p>When the driver runs a cell's <a href="../testing/">unit tests</a>, the result shows as a
 badge on that cell in the list — <code>✓ 4/4</code> (green), <code>✗ 2/4</code> on failure, <code>·stale</code>
 when the cell changed since the run — and the header notes the test run. The
-<strong>Tests</strong> tab (<code>6</code>) shows the individual outcomes for the selected cell: each
-test as <code>✓</code>/<code>✗</code>/<code>⚠</code>/<code>○</code> with its failure message (the rewritten-assert diff)
-underneath — the pytest run, in the terminal.</p>
+top <strong>Tests</strong> tab (<code>3</code>) shows the test <em>source</em>; the bottom <strong>Results</strong> tab (<code>7</code>)
+shows the individual outcomes for the selected cell: each test as <code>✓</code>/<code>✗</code>/<code>⚠</code>/<code>○</code>
+with its failure message (the rewritten-assert diff) underneath — the pytest run,
+in the terminal.</p>
 <table>
 <thead>
 <tr>
@@ -2073,8 +2076,12 @@ underneath — the pytest run, in the terminal.</p>
 <td>Focus the cell list (<code>↑</code>/<code>↓</code> move the selection)</td>
 </tr>
 <tr>
-<td><code>2</code> / <code>3</code> / <code>4</code> / <code>5</code> / <code>6</code></td>
-<td>Switch to the Source / Output / Console / Agent / Tests tab</td>
+<td><code>2</code> / <code>3</code></td>
+<td>Top group: Source / Tests source</td>
+</tr>
+<tr>
+<td><code>4</code> / <code>5</code> / <code>6</code> / <code>7</code></td>
+<td>Bottom group: Output / Console / Agent / Results</td>
 </tr>
 <tr>
 <td><code>↑</code> <code>↓</code> <code>PgUp</code> <code>PgDn</code> <code>Home</code> <code>End</code></td>

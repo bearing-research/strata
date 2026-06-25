@@ -2645,16 +2645,17 @@ mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.
 <p><strong>A terminal viewer for notebooks (<code>strata-notebook-tui</code>).</strong> A read-only,
   full-screen spectator that attaches to a running notebook session over the
   WebSocket protocol and renders it live — cells flip status as they run, with
-  the detail view following the action. Per-cell tabs: <strong>Source</strong>
-  (syntax-highlighted with the one-dark theme, matching the web UI), <strong>Output</strong>
-  (markdown cells and markdown outputs render as markdown, a DataFrame/table
-  renders as a real table, images render inline via the terminal's graphics
-  protocol — enlarge one full-screen with <code>i</code>), <strong>Console</strong>, and <strong>Agent</strong> (an
-  AI agent's reasoning streams here as it drives the notebook). Plus a layered
-  ASCII <strong>DAG</strong> view (<code>d</code>), a per-cell run-time column, cascade /
-  environment-job progress in the header, follow mode, per-cell unit-test result
-  badges with a <strong>Tests</strong> tab showing each test's outcome and failure message, a
-  <code>?</code> keybinding reference, and background auto-resync so the view stays live
+  the detail view following the action. The detail pane splits into a <strong>code</strong>
+  group — <strong>Source</strong> (syntax-highlighted with the one-dark theme, matching the
+  web UI) and <strong>Tests</strong> (the cell's test source) — and a <strong>runtime</strong> group:
+  <strong>Output</strong> (markdown cells and markdown outputs render as markdown, a
+  DataFrame/table renders as a real table, images render inline via the
+  terminal's graphics protocol — enlarge one full-screen with <code>i</code>), <strong>Console</strong>,
+  <strong>Agent</strong> (an AI agent's reasoning streams here as it drives the notebook), and
+  <strong>Results</strong> (each unit test's outcome + failure diff). Plus a layered ASCII
+  <strong>DAG</strong> view (<code>d</code>), a per-cell run-time column, cascade / environment-job
+  progress in the header, follow mode, per-cell unit-test result badges, a <code>?</code>
+  keybinding reference, and background auto-resync so the view stays live
   without manual refresh. Ships behind the <code>[tui]</code> extra
   (<code>uv tool install "strata-notebook[tui]"</code>); it never edits or runs cells —
   purely for watching, e.g. an agent build a notebook in one terminal while you
