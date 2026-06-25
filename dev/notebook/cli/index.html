@@ -1034,6 +1034,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#inspecting-a-notebook-cell-dag-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspecting a notebook (cell, dag, status)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1980,6 +1991,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#inspecting-a-notebook-cell-dag-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspecting a notebook (cell, dag, status)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2157,6 +2179,26 @@ run</code> is the expensive step. See
 directory, then syncs the venv (skip with <code>--no-env</code>; <code>strata run</code> syncs it
 later). Idempotent on an existing notebook directory: the <code>notebook_id</code> and
 any existing cells are preserved, so re-running it never orphans artifacts.</p>
+<h2 id="inspecting-a-notebook-cell-dag-status">Inspecting a notebook (<code>cell</code>, <code>dag</code>, <code>status</code>)<a class="headerlink" href="#inspecting-a-notebook-cell-dag-status" title="Permanent link">&para;</a></h2>
+<p>For agents (and humans) that need to read a notebook's state without executing
+it, three read-only commands print structured JSON (default) or a compact human
+view. They open the notebook locally — no server, no env sync:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># every cell: id, name, status, source</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>strata<span class="w"> </span>cell<span class="w"> </span>show<span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w">  </span><span class="c1"># one cell: source, status, outputs, console, staleness</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>strata<span class="w"> </span>dag<span class="w">       </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># dependency edges + topological order</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>strata<span class="w"> </span>status<span class="w">    </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># per-cell status + staleness summary</span>
+</code></pre></div>
+<p>Each takes <code>--format human|json</code> (JSON is the default — these are agent-first).
+The JSON shapes match the server's REST API (<code>GET /{id}/cells</code>, <code>GET /{id}/dag</code>),
+so a script written against the local CLI keeps working against a running
+server later. Exit codes follow the same contract as <code>run</code> / <code>validate</code>: <code>0</code>
+success, <code>1</code> operation failure (e.g. unknown cell — a structured <code>{"error": …}</code>
+on stdout), <code>2</code> invocation error (bad path) on stderr.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>my_analysis<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.cells[] | select(.status == &quot;error&quot;) | .id&#39;</span>
+</code></pre></div>
+<p>These are the read-only first slice of a fuller agent tool surface (granular
+run, cell tests, authoring, and driving a running server land in later
+releases).</p>
 
 
 
