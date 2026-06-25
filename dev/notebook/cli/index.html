@@ -1045,6 +1045,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#running-a-cell-or-its-tests-cell-run-cell-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running a cell or its tests (cell run, cell test)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2002,6 +2013,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#running-a-cell-or-its-tests-cell-run-cell-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running a cell or its tests (cell run, cell test)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2196,9 +2218,28 @@ success, <code>1</code> operation failure (e.g. unknown cell — a structured <c
 on stdout), <code>2</code> invocation error (bad path) on stderr.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>my_analysis<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.cells[] | select(.status == &quot;error&quot;) | .id&#39;</span>
 </code></pre></div>
-<p>These are the read-only first slice of a fuller agent tool surface (granular
-run, cell tests, authoring, and driving a running server land in later
-releases).</p>
+<h2 id="running-a-cell-or-its-tests-cell-run-cell-test">Running a cell or its tests (<code>cell run</code>, <code>cell test</code>)<a class="headerlink" href="#running-a-cell-or-its-tests-cell-run-cell-test" title="Permanent link">&para;</a></h2>
+<p>Beyond inspection, an agent can execute one cell at a time (not the whole
+notebook) and run a cell's unit tests, both with structured output:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>run<span class="w">  </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span><span class="o">[</span>--rerun<span class="w"> </span><span class="p">|</span><span class="w"> </span>--force<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-sync<span class="o">]</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>strata<span class="w"> </span>cell<span class="w"> </span><span class="nb">test</span><span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span><span class="o">[</span>--no-sync<span class="o">]</span>
+</code></pre></div>
+<p><code>cell run</code> materializes the cell (using the cache and re-running stale upstreams
+by default; <code>--rerun</code> bypasses the target's cache, <code>--force</code> runs against
+whatever upstream artifacts already exist). <code>cell test</code> runs the cell's
+<code>cells/{cell_id}.test.py</code> via pytest and reports per-test outcomes. Both <strong>sync
+the venv first</strong> (like <code>strata run</code>) unless you pass <code>--no-sync</code>.</p>
+<p><code>--format json</code> (default) writes a single clean JSON object to <strong>stdout</strong> — the
+executor's logs go to stderr, so the stdout stream stays parseable:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>run<span class="w"> </span>nb<span class="w"> </span>featurize<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;{status, cache_hit, error}&#39;</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>strata<span class="w"> </span>cell<span class="w"> </span><span class="nb">test</span><span class="w"> </span>nb<span class="w"> </span>featurize<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.cases[] | select(.outcome != &quot;passed&quot;)&#39;</span>
+</code></pre></div>
+<p>Exit codes: <code>cell run</code> → <code>0</code> ran ok, <code>1</code> the cell errored (or unknown cell), <code>2</code>
+setup error (no venv under <code>--no-sync</code>, sync failure). <code>cell test</code> → <code>0</code> all
+passed, <code>1</code> a test failed/errored, <code>2</code> pytest unavailable in the venv.</p>
+<p>These — with the inspect commands above — are the local slice of a fuller agent
+tool surface (authoring, env management, and driving a running server land in
+later releases).</p>
 
 
 
