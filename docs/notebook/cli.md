@@ -176,6 +176,34 @@ on stdout), `2` invocation error (bad path) on stderr.
 strata cell list my_analysis | jq '.cells[] | select(.status == "error") | .id'
 ```
 
-These are the read-only first slice of a fuller agent tool surface (granular
-run, cell tests, authoring, and driving a running server land in later
-releases).
+## Running a cell or its tests (`cell run`, `cell test`)
+
+Beyond inspection, an agent can execute one cell at a time (not the whole
+notebook) and run a cell's unit tests, both with structured output:
+
+```bash
+strata cell run  <notebook_dir> <cell_id> [--rerun | --force] [--no-sync]
+strata cell test <notebook_dir> <cell_id> [--no-sync]
+```
+
+`cell run` materializes the cell (using the cache and re-running stale upstreams
+by default; `--rerun` bypasses the target's cache, `--force` runs against
+whatever upstream artifacts already exist). `cell test` runs the cell's
+`cells/{cell_id}.test.py` via pytest and reports per-test outcomes. Both **sync
+the venv first** (like `strata run`) unless you pass `--no-sync`.
+
+`--format json` (default) writes a single clean JSON object to **stdout** — the
+executor's logs go to stderr, so the stdout stream stays parseable:
+
+```bash
+strata cell run nb featurize --format json | jq '{status, cache_hit, error}'
+strata cell test nb featurize --format json | jq '.cases[] | select(.outcome != "passed")'
+```
+
+Exit codes: `cell run` → `0` ran ok, `1` the cell errored (or unknown cell), `2`
+setup error (no venv under `--no-sync`, sync failure). `cell test` → `0` all
+passed, `1` a test failed/errored, `2` pytest unavailable in the venv.
+
+These — with the inspect commands above — are the local slice of a fuller agent
+tool surface (authoring, env management, and driving a running server land in
+later releases).
