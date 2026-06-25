@@ -856,13 +856,12 @@ def cell_list_main(args: argparse.Namespace) -> int:
     ops = _open_local_ops(args.notebook_dir)
     if ops is None:
         return 2
-    data = ops.list_cells()
+    cells = ops.list_cells()
     if args.format == "json":
-        _emit_json(data)
+        _emit_json([cell.model_dump(mode="json") for cell in cells])
     else:
-        for cell in data["cells"]:
-            status = str(cell.get("status") or "?")
-            print(f"{status:8} {cell['id']:18} {cell.get('name') or ''}")
+        for cell in cells:
+            print(f"{cell.status:8} {cell.id:18} {cell.name}")
     return 0
 
 
@@ -873,7 +872,7 @@ def cell_show_main(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
     try:
-        data = ops.get_cell(args.cell_id)
+        cell = ops.get_cell(args.cell_id)
     except NotebookOpsError as exc:
         if args.format == "json":
             _emit_json({"error": str(exc)})
@@ -881,17 +880,16 @@ def cell_show_main(args: argparse.Namespace) -> int:
             print(f"error: {exc}", file=sys.stderr)
         return 1
     if args.format == "json":
-        _emit_json(data)
+        _emit_json(cell.model_dump(mode="json"))
     else:
-        print(f"id:       {data.get('id')}")
-        print(f"name:     {data.get('name') or ''}")
-        print(f"language: {data.get('language')}")
-        print(f"status:   {data.get('status')}")
-        reasons = data.get("staleness_reasons") or []
-        if reasons:
-            print(f"stale:    {', '.join(reasons)}")
+        print(f"id:       {cell.id}")
+        print(f"name:     {cell.name}")
+        print(f"language: {cell.language}")
+        print(f"status:   {cell.status}")
+        if cell.staleness_reasons:
+            print(f"stale:    {', '.join(cell.staleness_reasons)}")
         print("--- source ---")
-        print(data.get("source") or "")
+        print(cell.source)
     return 0
 
 
@@ -904,13 +902,13 @@ def dag_main(args: argparse.Namespace) -> int:
     ops = _open_local_ops(args.notebook_dir)
     if ops is None:
         return 2
-    data = ops.dag()
+    dag = ops.dag()
     if args.format == "json":
-        _emit_json(data)
+        _emit_json(dag.model_dump(mode="json"))
     else:
-        for edge in data["edges"]:
-            print(f"{edge['from_cell_id']} → {edge['to_cell_id']}  ({edge.get('variable')})")
-        print(f"topo: {' → '.join(data['topological_order'])}")
+        for edge in dag.edges:
+            print(f"{edge.from_cell_id} → {edge.to_cell_id}  ({edge.variable})")
+        print(f"topo: {' → '.join(dag.topological_order)}")
     return 0
 
 
@@ -923,13 +921,12 @@ def status_main(args: argparse.Namespace) -> int:
     ops = _open_local_ops(args.notebook_dir)
     if ops is None:
         return 2
-    data = ops.status()
+    status = ops.status()
     if args.format == "json":
-        _emit_json(data)
+        _emit_json(status.model_dump(mode="json"))
     else:
-        print(f"notebook: {data.get('name')}  ({data.get('notebook_id')})")
-        for cell in data["cells"]:
-            status = str(cell.get("status") or "?")
-            stale = " ·stale" if cell.get("staleness_reasons") else ""
-            print(f"  {status:8} {cell['id']:18} {cell.get('name') or ''}{stale}")
+        print(f"notebook: {status.name}  ({status.notebook_id})")
+        for cell in status.cells:
+            stale = " ·stale" if cell.staleness_reasons else ""
+            print(f"  {cell.status:8} {cell.id:18} {cell.name}{stale}")
     return 0
