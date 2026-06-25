@@ -2647,15 +2647,17 @@ mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.
   WebSocket protocol and renders it live — cells flip status as they run, with
   the detail view following the action. Per-cell tabs: <strong>Source</strong>
   (syntax-highlighted with the one-dark theme, matching the web UI), <strong>Output</strong>
-  (markdown renders as markdown, a DataFrame/table renders as a real table,
-  images render inline via the terminal's graphics protocol),
-  <strong>Console</strong>, and <strong>Agent</strong> (an AI agent's reasoning streams here as it drives
-  the notebook). Plus a layered ASCII <strong>DAG</strong> view (<code>d</code>), a per-cell run-time
-  column, cascade / environment-job progress in the header, and follow mode.
-  Ships behind the <code>[tui]</code> extra (<code>uv tool install "strata-notebook[tui]"</code>); it
-  never edits or runs cells — purely for watching, e.g. an agent build a
-  notebook in one terminal while you watch in another. See
-  <a href="../notebook/tui/">Terminal Viewer</a>.</p>
+  (markdown cells and markdown outputs render as markdown, a DataFrame/table
+  renders as a real table, images render inline via the terminal's graphics
+  protocol — enlarge one full-screen with <code>i</code>), <strong>Console</strong>, and <strong>Agent</strong> (an
+  AI agent's reasoning streams here as it drives the notebook). Plus a layered
+  ASCII <strong>DAG</strong> view (<code>d</code>), a per-cell run-time column, cascade /
+  environment-job progress in the header, follow mode, per-cell unit-test result
+  badges, a <code>?</code> keybinding reference, and background auto-resync so the view
+  stays live without manual refresh. Ships behind the <code>[tui]</code> extra
+  (<code>uv tool install "strata-notebook[tui]"</code>); it never edits or runs cells —
+  purely for watching, e.g. an agent build a notebook in one terminal while you
+  watch in another. See <a href="../notebook/tui/">Terminal Viewer</a>.</p>
 </li>
 <li>
 <p><strong>Per-cell unit tests in the notebook.</strong> Every Python code cell gets a
