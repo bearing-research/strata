@@ -82,12 +82,15 @@ state, follow mode, and any cascade / environment / agent activity.
 
 When the driver runs a cell's [unit tests](testing.md), the result shows as a
 badge on that cell in the list — `✓ 4/4` (green), `✗ 2/4` on failure, `·stale`
-when the cell changed since the run — and the header notes the test run.
+when the cell changed since the run — and the header notes the test run. The
+**Tests** tab (`6`) shows the individual outcomes for the selected cell: each
+test as `✓`/`✗`/`⚠`/`○` with its failure message (the rewritten-assert diff)
+underneath — the pytest run, in the terminal.
 
 | Key | Action |
 | --- | --- |
 | `1` | Focus the cell list (`↑`/`↓` move the selection) |
-| `2` / `3` / `4` / `5` | Switch to the Source / Output / Console / Agent tab |
+| `2` / `3` / `4` / `5` / `6` | Switch to the Source / Output / Console / Agent / Tests tab |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End` | Scroll the focused pane |
 | `f` | Toggle **follow mode** (auto-select the running cell) |
 | `d` | Show the notebook **DAG** (layered ASCII; `Esc`/`d`/`q` to close) |

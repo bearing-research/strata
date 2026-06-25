@@ -213,6 +213,35 @@ def test_cell_test_frames_set_badge_and_banner():
     assert vm.cells["a"].test_summary == "✓ 4/4"  # not clobbered
 
 
+def test_cell_test_results_capture_per_test_cases():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    vm.apply_frame(
+        "cell_test_results",
+        {
+            "cell_id": "a",
+            "passed": 1,
+            "failed": 1,
+            "tests": [
+                {"name": "test_ok", "outcome": "passed", "message": ""},
+                {"name": "test_bad", "outcome": "failed", "message": "assert 1 == 2"},
+            ],
+        },
+    )
+    cases = vm.cells["a"].test_cases
+    assert [c["name"] for c in cases] == ["test_ok", "test_bad"]
+    assert cases[1]["outcome"] == "failed" and "assert 1 == 2" in cases[1]["message"]
+    assert vm.cells["a"].test_unavailable is False
+
+
+def test_cell_test_results_pytest_unavailable_flag():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    vm.apply_frame("cell_test_results", {"cell_id": "a", "pytest_unavailable": True})
+    assert vm.cells["a"].test_unavailable is True
+    assert vm.cells["a"].test_cases == []
+
+
 def test_cell_test_results_failure_and_unavailable_badges():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a"}))
