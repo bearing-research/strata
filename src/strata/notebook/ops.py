@@ -150,6 +150,16 @@ class NotebookStatus(BaseModel):
     cells: list[CellStatusRow]
 
 
+class DependencyResult(BaseModel):
+    """The outcome of adding or removing a notebook dependency, agent-facing."""
+
+    package: str
+    action: str  # "add" | "remove"
+    success: bool
+    lockfile_changed: bool
+    error: str | None = None
+
+
 class NotebookOpsError(Exception):
     """An operation failed (unknown cell, DAG cycle, …).
 
@@ -261,6 +271,70 @@ class NotebookOps(Protocol):
         NotebookOpsError
             If no such cell exists or it has no test source.
         """
+        ...
+
+    def add_cell(
+        self, source: str, *, after: str | None = None, language: str = "python"
+    ) -> CellView:
+        """Add a new cell with backend-minted id.
+
+        Parameters
+        ----------
+        source : str
+            The new cell's source.
+        after : str or None, optional
+            Insert after this cell id (``None`` appends at the end).
+        language : str, optional
+            One of ``python``, ``markdown``, ``sql``, ``r``, ``prompt``.
+
+        Returns
+        -------
+        CellView
+            The newly created cell.
+
+        Raises
+        ------
+        NotebookOpsError
+            If ``after`` names a missing cell, or ``language`` is unsupported.
+        """
+        ...
+
+    def edit_cell(self, cell_id: str, source: str) -> CellView:
+        """Replace a cell's source, returning the updated cell.
+
+        Raises
+        ------
+        NotebookOpsError
+            If no such cell exists.
+        """
+        ...
+
+    def remove_cell(self, cell_id: str) -> None:
+        """Delete a cell (and its source / test files).
+
+        Raises
+        ------
+        NotebookOpsError
+            If no such cell exists.
+        """
+        ...
+
+    def move_cell(self, cell_id: str, index: int) -> list[CellView]:
+        """Move a cell to ``index`` in notebook order; returns the new order.
+
+        Raises
+        ------
+        NotebookOpsError
+            If no such cell exists.
+        """
+        ...
+
+    async def add_dependency(self, package: str) -> DependencyResult:
+        """Add a Python dependency to the notebook (``uv add``)."""
+        ...
+
+    async def remove_dependency(self, package: str) -> DependencyResult:
+        """Remove a Python dependency from the notebook (``uv remove``)."""
         ...
 
 
@@ -386,6 +460,90 @@ class LocalNotebookOps:
 
             self._executor = CellExecutor(self._session)
         return self._executor
+
+    # -- authoring + env (P2) ------------------------------------------------
+
+    _LANGUAGES = ("python", "markdown", "sql", "r", "prompt")
+
+    def add_cell(
+        self, source: str, *, after: str | None = None, language: str = "python"
+    ) -> CellView:
+        """Add a new cell (see :meth:`NotebookOps.add_cell`)."""
+        import uuid
+
+        from strata.notebook.writer import add_cell_to_notebook, write_cell
+
+        if language not in self._LANGUAGES:
+            raise NotebookOpsError(
+                f"unsupported language {language!r} ({'|'.join(self._LANGUAGES)})"
+            )
+        if after is not None and self._session.notebook_state.get_cell(after) is None:
+            raise NotebookOpsError(f"no cell with id {after!r} to insert after")
+        cell_id = str(uuid.uuid4())[:8]
+        add_cell_to_notebook(self.notebook_dir, cell_id, after, language=language)
+        write_cell(self.notebook_dir, cell_id, source)
+        self._reload()
+        return self.get_cell(cell_id)
+
+    def edit_cell(self, cell_id: str, source: str) -> CellView:
+        """Replace a cell's source (see :meth:`NotebookOps.edit_cell`)."""
+        from strata.notebook.writer import write_cell
+
+        if self._session.notebook_state.get_cell(cell_id) is None:
+            raise NotebookOpsError(f"no cell with id {cell_id!r}")
+        write_cell(self.notebook_dir, cell_id, source)
+        self._reload()
+        return self.get_cell(cell_id)
+
+    def remove_cell(self, cell_id: str) -> None:
+        """Delete a cell (see :meth:`NotebookOps.remove_cell`)."""
+        from strata.notebook.writer import remove_cell_from_notebook
+
+        if self._session.notebook_state.get_cell(cell_id) is None:
+            raise NotebookOpsError(f"no cell with id {cell_id!r}")
+        remove_cell_from_notebook(self.notebook_dir, cell_id)
+        self._reload()
+
+    def move_cell(self, cell_id: str, index: int) -> list[CellView]:
+        """Reorder a cell (see :meth:`NotebookOps.move_cell`)."""
+        from strata.notebook.writer import reorder_cells
+
+        order = [cell.id for cell in self._session.notebook_state.cells]
+        if cell_id not in order:
+            raise NotebookOpsError(f"no cell with id {cell_id!r}")
+        order.remove(cell_id)
+        order.insert(max(0, index), cell_id)
+        reorder_cells(self.notebook_dir, order)
+        self._reload()
+        return self.list_cells()
+
+    async def add_dependency(self, package: str) -> DependencyResult:
+        """Add a dependency (see :meth:`NotebookOps.add_dependency`)."""
+        return await self._mutate_dependency(package, "add")
+
+    async def remove_dependency(self, package: str) -> DependencyResult:
+        """Remove a dependency (see :meth:`NotebookOps.remove_dependency`)."""
+        return await self._mutate_dependency(package, "remove")
+
+    async def _mutate_dependency(self, package: str, action: str) -> DependencyResult:
+        outcome = await self._session.mutate_dependency(package, action=action)
+        result = outcome.result
+        return DependencyResult(
+            package=result.package,
+            action=result.action,
+            success=result.success,
+            lockfile_changed=result.lockfile_changed,
+            error=result.error,
+        )
+
+    def _reload(self) -> None:
+        """Re-parse the notebook after a file mutation so reads see fresh state."""
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+
+        state = parse_notebook(self.notebook_dir)
+        self._session = NotebookSession(state, self.notebook_dir)
+        self._executor = None
 
 
 # ---------------------------------------------------------------------------

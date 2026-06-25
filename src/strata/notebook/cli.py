@@ -875,6 +875,38 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     test_p.add_argument("--format", choices=["human", "json"], default="json")
     test_p.set_defaults(func=cell_test_main)
 
+    add_p = sub.add_parser("add", help="Add a new cell from a source file")
+    add_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    add_p.add_argument("--file", required=True, help="Source file (`-` for stdin)")
+    add_p.add_argument("--after", help="Insert after this cell id (default: at the end)")
+    add_p.add_argument(
+        "--language",
+        choices=["python", "markdown", "sql", "r", "prompt"],
+        default="python",
+    )
+    add_p.add_argument("--format", choices=["human", "json"], default="json")
+    add_p.set_defaults(func=cell_add_main)
+
+    edit_p = sub.add_parser("edit", help="Replace a cell's source from a file")
+    edit_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    edit_p.add_argument("cell_id", help="Cell id to edit")
+    edit_p.add_argument("--file", required=True, help="Source file (`-` for stdin)")
+    edit_p.add_argument("--format", choices=["human", "json"], default="json")
+    edit_p.set_defaults(func=cell_edit_main)
+
+    rm_p = sub.add_parser("rm", help="Delete a cell")
+    rm_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    rm_p.add_argument("cell_id", help="Cell id to delete")
+    rm_p.add_argument("--format", choices=["human", "json"], default="json")
+    rm_p.set_defaults(func=cell_rm_main)
+
+    mv_p = sub.add_parser("mv", help="Move a cell to a new position")
+    mv_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    mv_p.add_argument("cell_id", help="Cell id to move")
+    mv_p.add_argument("--to", type=int, required=True, help="Target index (0-based)")
+    mv_p.add_argument("--format", choices=["human", "json"], default="json")
+    mv_p.set_defaults(func=cell_mv_main)
+
     # `strata cell` with no action → help.
     parser.set_defaults(func=lambda args: (parser.print_help(), 0)[1])
 
@@ -918,6 +950,142 @@ def cell_show_main(args: argparse.Namespace) -> int:
         print("--- source ---")
         print(cell.source)
     return 0
+
+
+def _read_source_arg(path: str) -> str:
+    """Read cell source from *path*, or stdin when ``path == "-"``."""
+    if path == "-":
+        return sys.stdin.read()
+    return Path(path).expanduser().read_text(encoding="utf-8")
+
+
+def _emit_op_error(exc: Exception, fmt: str) -> int:
+    if fmt == "json":
+        _emit_json({"error": str(exc)})
+    else:
+        print(f"error: {exc}", file=sys.stderr)
+    return 1
+
+
+def cell_add_main(args: argparse.Namespace) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    from strata.notebook.ops import NotebookOpsError
+
+    try:
+        source = _read_source_arg(args.file)
+    except OSError as exc:
+        print(f"error: cannot read --file: {exc}", file=sys.stderr)
+        return 2
+    try:
+        cell = ops.add_cell(source, after=args.after, language=args.language)
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    if args.format == "json":
+        _emit_json(cell.model_dump(mode="json"))
+    else:
+        print(f"added {cell.id}  {cell.name}")
+    return 0
+
+
+def cell_edit_main(args: argparse.Namespace) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    from strata.notebook.ops import NotebookOpsError
+
+    try:
+        source = _read_source_arg(args.file)
+    except OSError as exc:
+        print(f"error: cannot read --file: {exc}", file=sys.stderr)
+        return 2
+    try:
+        cell = ops.edit_cell(args.cell_id, source)
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    if args.format == "json":
+        _emit_json(cell.model_dump(mode="json"))
+    else:
+        print(f"edited {cell.id}  {cell.name}")
+    return 0
+
+
+def cell_rm_main(args: argparse.Namespace) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    from strata.notebook.ops import NotebookOpsError
+
+    try:
+        ops.remove_cell(args.cell_id)
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    if args.format == "json":
+        _emit_json({"removed": args.cell_id})
+    else:
+        print(f"removed {args.cell_id}")
+    return 0
+
+
+def cell_mv_main(args: argparse.Namespace) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    from strata.notebook.ops import NotebookOpsError
+
+    try:
+        cells = ops.move_cell(args.cell_id, args.to)
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    if args.format == "json":
+        _emit_json([cell.model_dump(mode="json") for cell in cells])
+    else:
+        print("  ".join(cell.id for cell in cells))
+    return 0
+
+
+def add_dep_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register the ``strata dep <action>`` group (add, rm)."""
+    sub = parser.add_subparsers(dest="dep_command", metavar="<action>")
+    for action, verb in (("add", "Add"), ("rm", "Remove")):
+        dep_p = sub.add_parser(action, help=f"{verb} a Python dependency")
+        dep_p.add_argument("notebook_dir", help="Path to the notebook directory")
+        dep_p.add_argument("package", help="Package spec, e.g. 'pandas' or 'pandas>=2'")
+        dep_p.add_argument("--format", choices=["human", "json"], default="json")
+        dep_p.set_defaults(func=dep_add_main if action == "add" else dep_rm_main)
+    parser.set_defaults(func=lambda args: (parser.print_help(), 0)[1])
+
+
+def dep_add_main(args: argparse.Namespace) -> int:
+    import asyncio
+
+    return asyncio.run(_dep_async(args, "add"))
+
+
+def dep_rm_main(args: argparse.Namespace) -> int:
+    import asyncio
+
+    return asyncio.run(_dep_async(args, "remove"))
+
+
+async def _dep_async(args: argparse.Namespace, action: str) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    try:
+        if action == "add":
+            result = await ops.add_dependency(args.package)
+        else:
+            result = await ops.remove_dependency(args.package)
+    finally:
+        await ops.aclose()
+    if args.format == "json":
+        _emit_json(result.model_dump(mode="json"))
+    else:
+        tail = "ok" if result.success else f"failed — {result.error or ''}"
+        print(f"{action} {result.package}: {tail}")
+    return 0 if result.success else 1
 
 
 async def _prepare_env_for_ops(ops: object, args: argparse.Namespace) -> int:
