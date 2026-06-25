@@ -274,6 +274,37 @@ async def test_agent_frames_render_in_agent_panel(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_question_mark_opens_help_screen(monkeypatch):
+    """`?` opens the keybinding help; Esc closes it."""
+    from strata.notebook.tui.app import HelpScreen
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 40)) as pilot:
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {"name": "NB", "cells": [{"id": "a", "status": "idle"}]},
+                }
+            )
+        )
+        await pilot.pause()
+        await pilot.press("question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
+
+
+@pytest.mark.asyncio
 async def test_d_opens_dag_screen(monkeypatch):
     """`d` opens the layered DAG screen; Esc closes it."""
     from strata.notebook.tui.app import DagScreen

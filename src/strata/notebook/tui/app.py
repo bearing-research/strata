@@ -149,6 +149,41 @@ class ImageScreen(ModalScreen[None]):
             yield Static(self._renderable, id="image-art")
 
 
+class HelpScreen(ModalScreen[None]):
+    """Full-screen keybinding reference (read-only)."""
+
+    BINDINGS = [Binding("escape,question_mark,q", "dismiss", "Close")]
+
+    CSS = """
+    HelpScreen { align: center middle; }
+    #help-box { width: 60%; height: auto; max-height: 90%; border: solid $accent; }
+    #help-art { width: auto; height: auto; padding: 1 2; }
+    """
+
+    # (key, action) rows, mirroring docs/notebook/tui.md.
+    _ROWS = [
+        ("1", "Focus the cell list (↑/↓ move the selection)"),
+        ("2 / 3 / 4 / 5", "Source / Output / Console / Agent tab"),
+        ("↑ ↓ PgUp PgDn Home End", "Scroll the focused pane"),
+        ("f", "Toggle follow mode (auto-select the running cell)"),
+        ("d", "Show the notebook DAG"),
+        ("i", "Enlarge the selected cell's image output"),
+        ("r", "Force an immediate resync (also auto-resyncs in the background)"),
+        ("?", "Show this help"),
+        ("q", "Quit"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Static("Keybindings  (Esc/?/q to close)", classes="panel-title")
+        table = Table(show_header=True, header_style="bold", expand=False, box=None)
+        table.add_column("Key", style="bold cyan", no_wrap=True)
+        table.add_column("Action")
+        for key, action in self._ROWS:
+            table.add_row(key, action)
+        with VerticalScroll(id="help-box"):
+            yield Static(table, id="help-art")
+
+
 class NotebookTUI(App[None]):
     """Top-level spectator app."""
 
@@ -166,6 +201,7 @@ class NotebookTUI(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("question_mark", "show_help", "Help"),
         Binding("r", "refresh", "Resync"),
         Binding("d", "show_dag", "DAG"),
         Binding("i", "view_image", "Image"),
@@ -290,6 +326,10 @@ class NotebookTUI(App[None]):
         """Enlarge the selected cell's image output to (almost) full screen."""
         if self._current_image is not None:
             self.push_screen(ImageScreen(self._current_image))
+
+    def action_show_help(self) -> None:
+        """Show the keybinding reference."""
+        self.push_screen(HelpScreen())
 
     def action_focus_cells(self) -> None:
         """Focus the cell list so up/down move the selection."""
