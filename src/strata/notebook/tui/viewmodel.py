@@ -46,6 +46,10 @@ class CellView:
     # "✗ 2/4", or "tests…" while running. The other 0.4.0 headline — surfaced so
     # the spectator sees the driver run a cell's tests.
     test_summary: str = ""
+    # Per-test outcomes (name / outcome / message) from the last cell_test_results
+    # frame, rendered in the Tests tab (the "pytest window").
+    test_cases: list[dict[str, Any]] = field(default_factory=list)
+    test_unavailable: bool = False
 
 
 class NotebookViewModel:
@@ -188,6 +192,11 @@ class NotebookViewModel:
                 self.banner = f"🧪 {cell.name or cid}: running tests"
         elif msg_type == "cell_test_results":
             cell.test_summary = _test_badge(payload)
+            cases = payload.get("tests")
+            cell.test_cases = (
+                [c for c in cases if isinstance(c, dict)] if isinstance(cases, list) else []
+            )
+            cell.test_unavailable = bool(payload.get("pytest_unavailable"))
             self.banner = f"🧪 {cell.name or cid} tests: {cell.test_summary}"
         else:
             return set()

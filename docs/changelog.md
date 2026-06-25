@@ -27,8 +27,9 @@ mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.
   AI agent's reasoning streams here as it drives the notebook). Plus a layered
   ASCII **DAG** view (`d`), a per-cell run-time column, cascade /
   environment-job progress in the header, follow mode, per-cell unit-test result
-  badges, a `?` keybinding reference, and background auto-resync so the view
-  stays live without manual refresh. Ships behind the `[tui]` extra
+  badges with a **Tests** tab showing each test's outcome and failure message, a
+  `?` keybinding reference, and background auto-resync so the view stays live
+  without manual refresh. Ships behind the `[tui]` extra
   (`uv tool install "strata-notebook[tui]"`); it never edits or runs cells —
   purely for watching, e.g. an agent build a notebook in one terminal while you
   watch in another. See [Terminal Viewer](notebook/tui.md).

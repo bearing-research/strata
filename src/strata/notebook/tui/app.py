@@ -22,6 +22,7 @@ from PIL import Image as PILImage
 from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
@@ -163,7 +164,7 @@ class HelpScreen(ModalScreen[None]):
     # (key, action) rows, mirroring docs/notebook/tui.md.
     _ROWS = [
         ("1", "Focus the cell list (↑/↓ move the selection)"),
-        ("2 / 3 / 4 / 5", "Source / Output / Console / Agent tab"),
+        ("2 / 3 / 4 / 5 / 6", "Source / Output / Console / Agent / Tests tab"),
         ("↑ ↓ PgUp PgDn Home End", "Scroll the focused pane"),
         ("f", "Toggle follow mode (auto-select the running cell)"),
         ("d", "Show the notebook DAG"),
@@ -194,7 +195,7 @@ class NotebookTUI(App[None]):
     #cells { width: 38%; border: solid $primary; }
     #detail { width: 62%; }
     .scroll-panel { height: 1fr; }
-    #source, #output, #console-body, #agent { height: auto; width: 1fr; padding: 0 1; }
+    #source, #output, #console-body, #agent, #tests-body { height: auto; width: 1fr; padding: 0 1; }
     #cells:focus, .scroll-panel:focus { background: $boost; }
     .panel-title { background: $primary; color: $text; padding: 0 1; }
     """
@@ -211,6 +212,7 @@ class NotebookTUI(App[None]):
         Binding("3", "show_tab('tab-output')", "Output"),
         Binding("4", "show_tab('tab-console')", "Console"),
         Binding("5", "show_tab('tab-agent')", "Agent"),
+        Binding("6", "show_tab('tab-tests')", "Tests"),
     ]
 
     # Tab id → the scroll region to focus when that tab is selected.
@@ -219,6 +221,7 @@ class NotebookTUI(App[None]):
         "tab-output": "#output-scroll",
         "tab-console": "#console-scroll",
         "tab-agent": "#agent-scroll",
+        "tab-tests": "#tests-scroll",
     }
 
     def __init__(
@@ -236,6 +239,9 @@ class NotebookTUI(App[None]):
         self.vm = NotebookViewModel()
         self._selected: str | None = None
         self._conn_state = "connecting…"
+        # The DataTable column keys (status / cell / time), captured from
+        # add_columns so update_cell can target them — labels aren't keys.
+        self._col_keys: list[Any] = []
         # The selected cell's image renderable (if any) — enlarged by `i`.
         self._current_image: Any = None
         # Signature of the last-rendered cell list, so a periodic resync that
@@ -264,13 +270,17 @@ class NotebookTUI(App[None]):
                 with TabPane("Agent", id="tab-agent"):
                     with VerticalScroll(id="agent-scroll", classes="scroll-panel"):
                         yield Static("(no agent activity)", id="agent")
+                with TabPane("Tests", id="tab-tests"):
+                    with VerticalScroll(id="tests-scroll", classes="scroll-panel"):
+                        yield Static("(no tests run)", id="tests-body")
         yield Footer()
 
     # -- lifecycle -----------------------------------------------------------
 
     async def on_mount(self) -> None:
         table = self.query_one("#cells", DataTable)
-        table.add_columns(" ", "cell", "time")
+        # Keep the returned ColumnKeys — add_columns labels are NOT usable as keys.
+        self._col_keys = list(table.add_columns(" ", "cell", "time"))
         self._set_connection("connecting…")
         self.run_worker(self._bootstrap(), name="bootstrap", exclusive=True)
         # Live frames stream status/output/console instantly, but source edits and
@@ -503,11 +513,14 @@ class NotebookTUI(App[None]):
         cell = self.vm.cells.get(cid)
         if cell is None:
             return
+        if not self._col_keys:
+            return
         table = self.query_one("#cells", DataTable)
+        status_col, cell_col, time_col = self._col_keys
         try:
-            table.update_cell(cid, " ", _glyph(cell.status))
-            table.update_cell(cid, "cell", self._cell_label(cell))
-            table.update_cell(cid, "time", _time_str(cell))
+            table.update_cell(cid, status_col, _glyph(cell.status))
+            table.update_cell(cid, cell_col, self._cell_label(cell))
+            table.update_cell(cid, time_col, _time_str(cell))
         except Exception:  # noqa: BLE001 — row may not exist yet (pre-snapshot frame)
             return
         if cid == self._selected:
@@ -540,6 +553,33 @@ class NotebookTUI(App[None]):
         else:
             output.update(_render_outputs(cell))
         self.query_one("#console-body", Static).update(cell.console or "(no console output)")
+        self.query_one("#tests-body", Static).update(_render_tests(cell))
+
+
+# Per-test outcome → glyph + Rich style for the Tests tab.
+_TEST_GLYPH = {"passed": "✓", "failed": "✗", "error": "⚠", "skipped": "○"}
+_TEST_STYLE = {"passed": "green", "failed": "red", "error": "yellow", "skipped": "dim"}
+
+
+def _render_tests(cell: CellView):
+    """The 'pytest window': per-test outcomes + failure messages for the cell."""
+    if cell.test_unavailable:
+        return "pytest is not available in this notebook's environment."
+    if not cell.test_cases:
+        # A summary with no cases means a run with 0 collected tests; else nothing ran.
+        return cell.test_summary or "(no tests run)"
+    text = Text()
+    if cell.test_summary:
+        text.append(f"{cell.test_summary}\n\n", style="bold")
+    for case in cell.test_cases:
+        outcome = str(case.get("outcome") or "")
+        name = str(case.get("name") or case.get("nodeid") or "?")
+        text.append(f"{_TEST_GLYPH.get(outcome, '?')} {name}\n", style=_TEST_STYLE.get(outcome, ""))
+        message = str(case.get("message") or "")
+        if message and outcome in ("failed", "error"):
+            for line in message.splitlines():
+                text.append(f"    {line}\n", style="dim")
+    return text
 
 
 def _single_markdown(cell: CellView) -> str | None:

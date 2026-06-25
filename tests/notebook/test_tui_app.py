@@ -276,6 +276,101 @@ async def test_markdown_language_cell_renders_in_output(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_live_frame_updates_table_row_without_resync(monkeypatch):
+    """A live cell frame updates the cell-list row in place (not only on resync).
+
+    Regression: the columns are keyed by auto-generated ColumnKeys, so update_cell
+    by label silently raised and _refresh_cell bailed before re-rendering.
+    """
+    from textual.widgets import DataTable
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 40)) as pilot:
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {"name": "NB", "cells": [{"id": "a", "status": "idle"}]},
+                }
+            )
+        )
+        await pilot.pause()
+        table = app.query_one("#cells", DataTable)
+        status_col = app._col_keys[0]
+        assert str(table.get_cell("a", status_col)) == "○"  # idle glyph
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "cell_status",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {"cell_id": "a", "status": "ready"},
+                }
+            )
+        )
+        await pilot.pause()
+        assert str(table.get_cell("a", status_col)) == "✓"  # updated live, no resync
+
+
+@pytest.mark.asyncio
+async def test_tests_tab_shows_per_test_outcomes(monkeypatch):
+    """Key 6 opens the Tests tab; it renders per-test outcomes + failure messages."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 40)) as pilot:
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {"name": "NB", "cells": [{"id": "a", "source": "x=1"}]},
+                }
+            )
+        )
+        await pilot.pause()
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "cell_test_results",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {
+                        "cell_id": "a",
+                        "passed": 1,
+                        "failed": 1,
+                        "tests": [
+                            {"name": "test_ok", "outcome": "passed", "message": ""},
+                            {"name": "test_bad", "outcome": "failed", "message": "assert 1 == 2"},
+                        ],
+                    },
+                }
+            )
+        )
+        await pilot.pause()
+        await pilot.press("6")  # focus the Tests tab
+        await pilot.pause()
+        from textual.containers import VerticalScroll
+
+        assert app.focused is app.query_one("#tests-scroll", VerticalScroll)
+        body = str(app.query_one("#tests-body", Static).render())
+        assert "test_ok" in body and "test_bad" in body
+        assert "assert 1 == 2" in body  # failure message shown
+
+
+@pytest.mark.asyncio
 async def test_cell_test_results_show_badge_in_cell_label(monkeypatch):
     """A cell_test_results frame surfaces a pass/fail badge in the cell-list label."""
 
