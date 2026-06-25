@@ -25,7 +25,7 @@ from rich.table import Table
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     DataTable,
@@ -164,7 +164,8 @@ class HelpScreen(ModalScreen[None]):
     # (key, action) rows, mirroring docs/notebook/tui.md.
     _ROWS = [
         ("1", "Focus the cell list (↑/↓ move the selection)"),
-        ("2 / 3 / 4 / 5 / 6", "Source / Output / Console / Agent / Tests tab"),
+        ("2 / 3", "Top: Source / Tests source"),
+        ("4 / 5 / 6 / 7", "Bottom: Output / Console / Agent / Results"),
         ("↑ ↓ PgUp PgDn Home End", "Scroll the focused pane"),
         ("f", "Toggle follow mode (auto-select the running cell)"),
         ("d", "Show the notebook DAG"),
@@ -188,14 +189,18 @@ class HelpScreen(ModalScreen[None]):
 class NotebookTUI(App[None]):
     """Top-level spectator app."""
 
-    # The detail panes are TABS (one at a time) rather than stacked, so each gets
-    # the full height — stacking Source/Output/Console/Agent collapsed them to ~1
-    # row on a short (24-line) terminal.
+    # The detail area is split into two stacked tab-groups: the CODE the user
+    # reads (Source + Tests source) on top, the RUNTIME (Output / Console / Agent /
+    # test Results) on the bottom. Within each group the panes are tabs (one at a
+    # time) so the active pane gets the group's full height.
     CSS = """
     #cells { width: 38%; border: solid $primary; }
     #detail { width: 62%; }
+    #detail-top, #detail-bottom { height: 1fr; }
     .scroll-panel { height: 1fr; }
-    #source, #output, #console-body, #agent, #tests-body { height: auto; width: 1fr; padding: 0 1; }
+    #source, #testsrc-body, #output, #console-body, #agent, #results-body {
+        height: auto; width: 1fr; padding: 0 1;
+    }
     #cells:focus, .scroll-panel:focus { background: $boost; }
     .panel-title { background: $primary; color: $text; padding: 0 1; }
     """
@@ -209,19 +214,22 @@ class NotebookTUI(App[None]):
         Binding("f", "toggle_follow", "Follow"),
         Binding("1", "focus_cells", "Cells"),
         Binding("2", "show_tab('tab-source')", "Source"),
-        Binding("3", "show_tab('tab-output')", "Output"),
-        Binding("4", "show_tab('tab-console')", "Console"),
-        Binding("5", "show_tab('tab-agent')", "Agent"),
-        Binding("6", "show_tab('tab-tests')", "Tests"),
+        Binding("3", "show_tab('tab-testsrc')", "Tests"),
+        Binding("4", "show_tab('tab-output')", "Output"),
+        Binding("5", "show_tab('tab-console')", "Console"),
+        Binding("6", "show_tab('tab-agent')", "Agent"),
+        Binding("7", "show_tab('tab-results')", "Results"),
     ]
 
-    # Tab id → the scroll region to focus when that tab is selected.
-    _TAB_SCROLL = {
-        "tab-source": "#source-scroll",
-        "tab-output": "#output-scroll",
-        "tab-console": "#console-scroll",
-        "tab-agent": "#agent-scroll",
-        "tab-tests": "#tests-scroll",
+    # Tab id → (its TabbedContent group, the scroll region to focus). The top
+    # group holds the code tabs, the bottom group the runtime tabs.
+    _TAB_INFO = {
+        "tab-source": ("#detail-top", "#source-scroll"),
+        "tab-testsrc": ("#detail-top", "#testsrc-scroll"),
+        "tab-output": ("#detail-bottom", "#output-scroll"),
+        "tab-console": ("#detail-bottom", "#console-scroll"),
+        "tab-agent": ("#detail-bottom", "#agent-scroll"),
+        "tab-results": ("#detail-bottom", "#results-scroll"),
     }
 
     def __init__(
@@ -257,22 +265,29 @@ class NotebookTUI(App[None]):
         yield Header(show_clock=False)
         with Horizontal():
             yield DataTable(id="cells", cursor_type="row", zebra_stripes=True)
-            with TabbedContent(id="detail", initial="tab-source"):
-                with TabPane("Source", id="tab-source"):
-                    with VerticalScroll(id="source-scroll", classes="scroll-panel"):
-                        yield Static("", id="source")
-                with TabPane("Output", id="tab-output"):
-                    with VerticalScroll(id="output-scroll", classes="scroll-panel"):
-                        yield Static("", id="output")
-                with TabPane("Console", id="tab-console"):
-                    with VerticalScroll(id="console-scroll", classes="scroll-panel"):
-                        yield Static("", id="console-body")
-                with TabPane("Agent", id="tab-agent"):
-                    with VerticalScroll(id="agent-scroll", classes="scroll-panel"):
-                        yield Static("(no agent activity)", id="agent")
-                with TabPane("Tests", id="tab-tests"):
-                    with VerticalScroll(id="tests-scroll", classes="scroll-panel"):
-                        yield Static("(no tests run)", id="tests-body")
+            with Vertical(id="detail"):
+                # Top group — the code: cell source + test source.
+                with TabbedContent(id="detail-top", initial="tab-source"):
+                    with TabPane("Source", id="tab-source"):
+                        with VerticalScroll(id="source-scroll", classes="scroll-panel"):
+                            yield Static("", id="source")
+                    with TabPane("Tests", id="tab-testsrc"):
+                        with VerticalScroll(id="testsrc-scroll", classes="scroll-panel"):
+                            yield Static("(no tests for this cell)", id="testsrc-body")
+                # Bottom group — the runtime: output, console, agent, test results.
+                with TabbedContent(id="detail-bottom", initial="tab-output"):
+                    with TabPane("Output", id="tab-output"):
+                        with VerticalScroll(id="output-scroll", classes="scroll-panel"):
+                            yield Static("", id="output")
+                    with TabPane("Console", id="tab-console"):
+                        with VerticalScroll(id="console-scroll", classes="scroll-panel"):
+                            yield Static("", id="console-body")
+                    with TabPane("Agent", id="tab-agent"):
+                        with VerticalScroll(id="agent-scroll", classes="scroll-panel"):
+                            yield Static("(no agent activity)", id="agent")
+                    with TabPane("Results", id="tab-results"):
+                        with VerticalScroll(id="results-scroll", classes="scroll-panel"):
+                            yield Static("(no tests run)", id="results-body")
         yield Footer()
 
     # -- lifecycle -----------------------------------------------------------
@@ -349,10 +364,11 @@ class NotebookTUI(App[None]):
             return
 
     def action_show_tab(self, tab_id: str) -> None:
-        """Switch the detail tab and focus its scroll region (up/down scroll it)."""
+        """Switch to a detail tab (in its group) and focus its scroll region."""
         try:
-            self.query_one("#detail", TabbedContent).active = tab_id
-            self.query_one(self._TAB_SCROLL[tab_id], VerticalScroll).focus()
+            group_id, scroll_id = self._TAB_INFO[tab_id]
+            self.query_one(group_id, TabbedContent).active = tab_id
+            self.query_one(scroll_id, VerticalScroll).focus()
         except Exception:  # noqa: BLE001 — not mounted yet
             return
 
@@ -537,6 +553,7 @@ class NotebookTUI(App[None]):
         if cell is None:
             return
         self.query_one("#source", Static).update(_source_renderable(cell))
+        self.query_one("#testsrc-body", Static).update(_test_source_renderable(cell))
         # Render a pure-markdown output with Rich, a single tabular output as a
         # real table, or a single image inline; otherwise the plain-text summary.
         output = self.query_one("#output", Static)
@@ -553,7 +570,17 @@ class NotebookTUI(App[None]):
         else:
             output.update(_render_outputs(cell))
         self.query_one("#console-body", Static).update(cell.console or "(no console output)")
-        self.query_one("#tests-body", Static).update(_render_tests(cell))
+        self.query_one("#results-body", Static).update(_render_tests(cell))
+
+
+def _test_source_renderable(cell: CellView):
+    """Syntax-highlighted test source for the top Tests tab (the test *code*)."""
+    if not cell.test_source:
+        return "(no tests for this cell)"
+    try:
+        return Syntax(cell.test_source, "python", theme="one-dark", word_wrap=True)
+    except Exception:  # noqa: BLE001 — pygments hiccup → raw source
+        return cell.test_source
 
 
 # Per-test outcome → glyph + Rich style for the Tests tab.

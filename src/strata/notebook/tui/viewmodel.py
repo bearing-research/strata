@@ -47,9 +47,12 @@ class CellView:
     # the spectator sees the driver run a cell's tests.
     test_summary: str = ""
     # Per-test outcomes (name / outcome / message) from the last cell_test_results
-    # frame, rendered in the Tests tab (the "pytest window").
+    # frame, rendered in the Results tab (the "pytest window").
     test_cases: list[dict[str, Any]] = field(default_factory=list)
     test_unavailable: bool = False
+    # The cell's test source (``cells/{id}.test.py``), shown in the top Tests tab.
+    # Carried in every notebook_state snapshot, so read fresh (not frame-only).
+    test_source: str = ""
 
 
 class NotebookViewModel:
@@ -105,6 +108,7 @@ class NotebookViewModel:
                 name=parse_annotations(source).name or str(raw.get("name") or ""),
                 language=str(raw.get("language") or "python"),
                 source=source,
+                test_source=str(raw.get("test_source") or ""),
                 status=str(raw.get("status") or "idle"),
                 display_outputs=_snapshot_display_outputs(raw),
                 outputs=prior.outputs if prior else [],

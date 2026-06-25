@@ -45,16 +45,21 @@ async def test_detail_panels_are_tall_and_content_overflows(monkeypatch):
 
         from textual.containers import VerticalScroll
 
-        # Detail panes are tabs: the ACTIVE one gets (nearly) the full height —
-        # not the ~1-row squish that stacking them produced on short terminals.
-        # Each tab is full-height when activated.
-        tabs = ((None, "#source-scroll"), ("3", "#output-scroll"), ("4", "#console-scroll"))
+        # Two stacked tab-groups (top: code, bottom: runtime). The active pane in
+        # each group gets that group's height (~half the column) — not the ~1-row
+        # squish that fully-stacking every panel produced on short terminals.
+        tabs = (
+            (None, "#source-scroll"),  # top group, default
+            ("3", "#testsrc-scroll"),  # top group
+            ("4", "#output-scroll"),  # bottom group, default
+            ("5", "#console-scroll"),  # bottom group
+        )
         for key, pid in tabs:
             if key is not None:
                 await pilot.press(key)
                 await pilot.pause()
             panel = app.query_one(pid, VerticalScroll)
-            assert panel.size.height >= 20, f"{pid} only {panel.size.height} rows (terminal is 40)"
+            assert panel.size.height >= 10, f"{pid} only {panel.size.height} rows (terminal is 40)"
 
         # Back on Source: the Static is height:auto, so it grows to its ~50-line
         # content and overflows the (now tall) scroll region → scrollbar.
@@ -68,7 +73,7 @@ async def test_detail_panels_are_tall_and_content_overflows(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_number_keys_focus_panels_for_arrow_scrolling(monkeypatch):
-    """1/2/3/4 select a panel so the arrow keys navigate/scroll it."""
+    """Number keys select a panel (across both groups) so arrows scroll it."""
 
     async def _noop(self) -> None:
         return None
@@ -77,11 +82,11 @@ async def test_number_keys_focus_panels_for_arrow_scrolling(monkeypatch):
 
     app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
     async with app.run_test(size=(100, 40)) as pilot:
-        await pilot.press("2")  # Source
+        await pilot.press("3")  # Tests source (top group)
         await pilot.pause()
-        assert app.focused is app.query_one("#source-scroll")
+        assert app.focused is app.query_one("#testsrc-scroll")
 
-        await pilot.press("4")  # Console
+        await pilot.press("5")  # Console (bottom group)
         await pilot.pause()
         assert app.focused is app.query_one("#console-scroll")
 
@@ -320,6 +325,47 @@ async def test_live_frame_updates_table_row_without_resync(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_tests_source_tab_shows_test_code(monkeypatch):
+    """Key 3 (top group) shows the cell's test source from the snapshot."""
+    from textual.containers import VerticalScroll
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 40)) as pilot:
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {
+                        "name": "NB",
+                        "cells": [
+                            {
+                                "id": "a",
+                                "source": "x = 1",
+                                "test_source": "def test_x(cell):\n    assert cell.x == 1",
+                            }
+                        ],
+                    },
+                }
+            )
+        )
+        await pilot.pause()
+        assert app.vm.cells["a"].test_source.startswith("def test_x")
+        await pilot.press("3")  # Tests source tab (top group)
+        await pilot.pause()
+        assert app.focused is app.query_one("#testsrc-scroll", VerticalScroll)
+        # A cell with no test source shows the placeholder, not a crash.
+        body = str(app.query_one("#testsrc-body", Static).render())
+        assert "no tests for this cell" not in body  # this cell HAS test source
+
+
+@pytest.mark.asyncio
 async def test_tests_tab_shows_per_test_outcomes(monkeypatch):
     """Key 6 opens the Tests tab; it renders per-test outcomes + failure messages."""
 
@@ -360,12 +406,12 @@ async def test_tests_tab_shows_per_test_outcomes(monkeypatch):
             )
         )
         await pilot.pause()
-        await pilot.press("6")  # focus the Tests tab
+        await pilot.press("7")  # focus the Results tab (bottom group)
         await pilot.pause()
         from textual.containers import VerticalScroll
 
-        assert app.focused is app.query_one("#tests-scroll", VerticalScroll)
-        body = str(app.query_one("#tests-body", Static).render())
+        assert app.focused is app.query_one("#results-scroll", VerticalScroll)
+        body = str(app.query_one("#results-body", Static).render())
         assert "test_ok" in body and "test_bad" in body
         assert "assert 1 == 2" in body  # failure message shown
 
