@@ -17,16 +17,17 @@ mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.
 - **A terminal viewer for notebooks (`strata-notebook-tui`).** A read-only,
   full-screen spectator that attaches to a running notebook session over the
   WebSocket protocol and renders it live — cells flip status as they run, with
-  the detail view following the action. Per-cell tabs: **Source**
-  (syntax-highlighted with the one-dark theme, matching the web UI), **Output**
-  (markdown cells and markdown outputs render as markdown, a DataFrame/table
-  renders as a real table, images render inline via the terminal's graphics
-  protocol — enlarge one full-screen with `i`), **Console**, and **Agent** (an
-  AI agent's reasoning streams here as it drives the notebook). Plus a layered
-  ASCII **DAG** view (`d`), a per-cell run-time column, cascade /
-  environment-job progress in the header, follow mode, per-cell unit-test result
-  badges with a **Tests** tab showing each test's outcome and failure message, a
-  `?` keybinding reference, and background auto-resync so the view stays live
+  the detail view following the action. The detail pane splits into a **code**
+  group — **Source** (syntax-highlighted with the one-dark theme, matching the
+  web UI) and **Tests** (the cell's test source) — and a **runtime** group:
+  **Output** (markdown cells and markdown outputs render as markdown, a
+  DataFrame/table renders as a real table, images render inline via the
+  terminal's graphics protocol — enlarge one full-screen with `i`), **Console**,
+  **Agent** (an AI agent's reasoning streams here as it drives the notebook), and
+  **Results** (each unit test's outcome + failure diff). Plus a layered ASCII
+  **DAG** view (`d`), a per-cell run-time column, cascade / environment-job
+  progress in the header, follow mode, per-cell unit-test result badges, a `?`
+  keybinding reference, and background auto-resync so the view stays live
   without manual refresh. Ships behind the `[tui]` extra
   (`uv tool install "strata-notebook[tui]"`); it never edits or runs cells —
   purely for watching, e.g. an agent build a notebook in one terminal while you
