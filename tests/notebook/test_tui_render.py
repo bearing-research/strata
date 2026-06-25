@@ -98,6 +98,25 @@ def test_single_markdown_detects_pure_markdown_output():
     assert _single_markdown(cell) == "# Title\n- a\n- b"
 
 
+def test_single_markdown_renders_markdown_language_cell_source():
+    # A markdown-language cell produces no outputs — its source IS the rendered
+    # Output (the Source tab shows the raw text).
+    cell = CellView(id="a", language="markdown", source="# Notes\n\nsome **bold** text")
+    assert _single_markdown(cell) == "# Notes\n\nsome **bold** text"
+    # Empty markdown cell → None (falls through to the "(no output)" text path).
+    assert _single_markdown(CellView(id="a", language="markdown", source="")) is None
+    # A markdown cell that somehow carries a display output isn't treated as source.
+    with_output = CellView(
+        id="a",
+        language="markdown",
+        source="# raw",
+        display_outputs=[
+            {"content_type": "image/png", "inline_data_url": "data:image/png;base64,x"}
+        ],
+    )
+    assert _single_markdown(with_output) is None
+
+
 def _table_output(rows_total=100):
     return {
         "content_type": "arrow/ipc",
