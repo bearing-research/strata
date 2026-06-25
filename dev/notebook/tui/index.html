@@ -2054,6 +2054,9 @@ is read-only, so the web UI (the driver) answers them.</p>
 <p>The left pane lists the cells (status glyph, name, and last-run time); the right
 pane is a set of tabs for the selected cell. A header line shows the connection
 state, follow mode, and any cascade / environment / agent activity.</p>
+<p>When the driver runs a cell's <a href="../testing/">unit tests</a>, the result shows as a
+badge on that cell in the list — <code>✓ 4/4</code> (green), <code>✗ 2/4</code> on failure, <code>·stale</code>
+when the cell changed since the run — and the header notes the test run.</p>
 <table>
 <thead>
 <tr>
