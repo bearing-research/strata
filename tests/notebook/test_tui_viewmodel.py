@@ -192,6 +192,52 @@ def test_cell_iteration_progress_sets_iteration():
     assert vm.cells["a"].iteration == "iter 3/10"
 
 
+def test_cell_test_frames_set_badge_and_banner():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a", "name": "featurize"}))
+
+    # running → pending badge + banner.
+    assert vm.apply_frame("cell_test_status", {"cell_id": "a", "status": "running"}) == {"a"}
+    assert vm.cells["a"].test_summary == "tests…"
+    assert "running tests" in vm.banner
+
+    # results → outcome badge + banner; the trailing ready status keeps the badge.
+    changed = vm.apply_frame(
+        "cell_test_results",
+        {"cell_id": "a", "passed": 4, "failed": 0, "errored": 0, "skipped": 0, "stale": False},
+    )
+    assert changed == {"a"}
+    assert vm.cells["a"].test_summary == "✓ 4/4"
+    assert "✓ 4/4" in vm.banner
+    vm.apply_frame("cell_test_status", {"cell_id": "a", "status": "ready"})
+    assert vm.cells["a"].test_summary == "✓ 4/4"  # not clobbered
+
+
+def test_cell_test_results_failure_and_unavailable_badges():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+
+    vm.apply_frame(
+        "cell_test_results",
+        {"cell_id": "a", "passed": 2, "failed": 1, "errored": 0, "skipped": 1, "stale": True},
+    )
+    assert vm.cells["a"].test_summary == "✗ 2/4 ·stale"
+
+    vm.apply_frame("cell_test_results", {"cell_id": "a", "pytest_unavailable": True})
+    assert vm.cells["a"].test_summary == "⚠ pytest n/a"
+
+
+def test_point_to_point_frames_stay_noops():
+    # impact_preview / profiling_summary / inspect_result are sent only to the
+    # requesting client, so a read-only spectator never receives them.
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    assert vm.apply_frame("impact_preview", {"target_cell_id": "a"}) == set()
+    assert vm.apply_frame("profiling_summary", {"total_execution_ms": 1}) == set()
+    assert vm.apply_frame("inspect_result", {"cell_id": "a", "action": "open"}) == set()
+    assert vm.banner == ""  # nothing surfaced
+
+
 def test_agent_text_delta_streams_into_one_block():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a"}))

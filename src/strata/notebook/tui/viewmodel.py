@@ -42,6 +42,10 @@ class CellView:
     # Last run timing from a ``cell_output`` frame.
     duration_ms: int | None = None
     cache_hit: bool = False
+    # Cell-unit-test outcome badge from ``cell_test_*`` frames, e.g. "✓ 4/4",
+    # "✗ 2/4", or "tests…" while running. The other 0.4.0 headline — surfaced so
+    # the spectator sees the driver run a cell's tests.
+    test_summary: str = ""
 
 
 class NotebookViewModel:
@@ -116,9 +120,13 @@ class NotebookViewModel:
     def apply_frame(self, msg_type: str, payload: dict[str, Any]) -> set[str]:
         """Fold one live frame in; return the set of affected cell ids.
 
-        Unknown / not-yet-handled frame types (cascade, dag, agent, env — M2+)
-        are no-ops here and return an empty set. ``notebook_state`` is handled
-        by :meth:`apply_notebook_state`, not here.
+        Unknown frame types are no-ops here and return an empty set.
+        ``notebook_state`` is handled by :meth:`apply_notebook_state`, not here.
+
+        ``impact_preview`` / ``profiling_summary`` / ``inspect_result`` are
+        intentionally *not* handled: the server sends them point-to-point to the
+        client that requested them (not via ``_broadcast_message``), so a
+        read-only spectator never receives them — there is nothing to surface.
         """
         if msg_type == "dag_update":
             self.edges = _parse_edges(payload)
@@ -172,6 +180,15 @@ class NotebookViewModel:
             iteration = payload.get("iteration")
             max_iter = payload.get("max_iter")
             cell.iteration = f"iter {iteration}/{max_iter}" if iteration and max_iter else ""
+        elif msg_type == "cell_test_status":
+            # "running" sets a pending badge; the final ready/error state's real
+            # counts arrive in the cell_test_results frame, so keep that badge.
+            if str(payload.get("status") or "") == "running":
+                cell.test_summary = "tests…"
+                self.banner = f"🧪 {cell.name or cid}: running tests"
+        elif msg_type == "cell_test_results":
+            cell.test_summary = _test_badge(payload)
+            self.banner = f"🧪 {cell.name or cid} tests: {cell.test_summary}"
         else:
             return set()
         return {cid}
@@ -208,6 +225,22 @@ class NotebookViewModel:
             self.agent_feed.append(_agent_done_line(payload))
             self.agent_status = "done"
             self.banner = "🤖 agent: done"
+
+
+def _test_badge(payload: dict[str, Any]) -> str:
+    """Compact cell-test outcome: "✓ 4/4", "✗ 2/4", "⚠ pytest n/a" (+ " ·stale")."""
+    if payload.get("pytest_unavailable"):
+        return "⚠ pytest n/a"
+
+    def _count(key: str) -> int:
+        value = payload.get(key)
+        return value if isinstance(value, int) else 0
+
+    passed = _count("passed")
+    total = passed + _count("failed") + _count("errored") + _count("skipped")
+    glyph = "✓" if (_count("failed") == 0 and _count("errored") == 0) else "✗"
+    badge = f"{glyph} {passed}/{total}"
+    return f"{badge} ·stale" if payload.get("stale") else badge
 
 
 def _confirm_desc(payload: dict[str, Any]) -> str:
