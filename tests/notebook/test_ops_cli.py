@@ -163,6 +163,70 @@ async def test_run_tests_maps_and_requires_test_source(chain_nb, monkeypatch):
     assert result.cases[1].outcome == "failed" and "assert 1 == 2" in result.cases[1].message
 
 
+def test_add_cell_inserts_and_validates(chain_nb):
+    ops = LocalNotebookOps(chain_nb)
+    cell = ops.add_cell("z = 9", after="a", language="python")
+    assert cell.source == "z = 9"
+    ids = [c.id for c in ops.list_cells()]
+    assert ids[ids.index("a") + 1] == cell.id  # inserted right after a
+    with pytest.raises(NotebookOpsError):
+        ops.add_cell("x", after="ghost")
+    with pytest.raises(NotebookOpsError):
+        ops.add_cell("x", language="cobol")
+
+
+def test_edit_cell_persists(chain_nb):
+    ops = LocalNotebookOps(chain_nb)
+    updated = ops.edit_cell("a", "x = 999")
+    assert updated.source == "x = 999"
+    # A fresh open sees the written source (it went to disk, not just memory).
+    assert LocalNotebookOps(chain_nb).get_cell("a").source == "x = 999"
+    with pytest.raises(NotebookOpsError):
+        ops.edit_cell("ghost", "y")
+
+
+def test_remove_and_move_cell(chain_nb):
+    ops = LocalNotebookOps(chain_nb)
+    moved = ops.move_cell("a", 1)
+    assert [c.id for c in moved] == ["b", "a"]
+    ops.remove_cell("b")
+    assert [c.id for c in ops.list_cells()] == ["a"]
+    with pytest.raises(NotebookOpsError):
+        ops.remove_cell("ghost")
+    with pytest.raises(NotebookOpsError):
+        ops.move_cell("ghost", 0)
+
+
+@pytest.mark.asyncio
+async def test_add_dependency_maps_result(chain_nb, monkeypatch):
+    ops = LocalNotebookOps(chain_nb)
+
+    class _Result:
+        success, package, action, error, lockfile_changed = True, "pandas", "add", None, True
+
+    class _Outcome:
+        result = _Result()
+
+    async def _fake(package, *, action):
+        assert package == "pandas" and action == "add"
+        return _Outcome()
+
+    monkeypatch.setattr(ops._session, "mutate_dependency", _fake)
+    res = await ops.add_dependency("pandas")
+    assert res.success and res.package == "pandas" and res.action == "add"
+    assert res.lockfile_changed and res.error is None
+
+
+def test_cli_cell_add_then_rm(chain_nb, tmp_path, capsys):
+    src = tmp_path / "s.py"
+    src.write_text("w = 5")
+    assert main(["cell", "add", str(chain_nb), "--file", str(src), "--format", "json"]) == 0
+    new = json.loads(capsys.readouterr().out)
+    assert new["source"] == "w = 5"
+    assert main(["cell", "rm", str(chain_nb), new["id"], "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"removed": new["id"]}
+
+
 def test_cli_dag_and_status_json(chain_nb, capsys):
     assert main(["dag", str(chain_nb), "--format", "json"]) == 0
     dag = json.loads(capsys.readouterr().out)

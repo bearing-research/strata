@@ -21,6 +21,7 @@ import sys
 from strata.notebook.cli import (
     add_cell_arguments,
     add_dag_arguments,
+    add_dep_arguments,
     add_export_arguments,
     add_import_arguments,
     add_new_arguments,
@@ -267,6 +268,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     add_status_arguments(status_parser)
     status_parser.set_defaults(func=status_main)
+
+    dep_parser = subparsers.add_parser(
+        "dep",
+        help="Manage notebook dependencies (add, rm)",
+        description="Add or remove a Python dependency in a notebook directory.",
+    )
+    add_dep_arguments(dep_parser)
 
     return parser
 
