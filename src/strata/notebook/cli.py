@@ -829,7 +829,7 @@ def _open_local_ops(notebook_dir_arg: str):
         return None
 
 
-def _emit_json(data: Any) -> None:
+def _emit_json(data: object) -> None:
     print(json.dumps(data, indent=2, default=str))
 
 
