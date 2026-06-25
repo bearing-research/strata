@@ -19,14 +19,19 @@ import argparse
 import sys
 
 from strata.notebook.cli import (
+    add_cell_arguments,
+    add_dag_arguments,
     add_export_arguments,
     add_import_arguments,
     add_new_arguments,
     add_run_arguments,
+    add_status_arguments,
     add_validate_arguments,
+    dag_main,
     export_main,
     import_main,
     new_main,
+    status_main,
     validate_main,
 )
 from strata.notebook.cli import run_main as _run_main_direct
@@ -240,6 +245,28 @@ def _build_parser() -> argparse.ArgumentParser:
     verify_parser.set_defaults(func=_dispatch_artifact("cmd_verify"))
 
     artifact_parser.set_defaults(func=lambda args: (artifact_parser.print_help(), 0)[1])
+
+    # Agent inspect commands (CLI-hardening P0, NotebookOps local backend).
+    cell_parser = subparsers.add_parser(
+        "cell",
+        help="Per-cell operations (list, show; run/test/author land in later phases)",
+        description="Inspect and (later) drive individual notebook cells.",
+    )
+    add_cell_arguments(cell_parser)
+
+    dag_parser = subparsers.add_parser(
+        "dag",
+        help="Print a notebook's dependency graph (edges + topological order)",
+    )
+    add_dag_arguments(dag_parser)
+    dag_parser.set_defaults(func=dag_main)
+
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Print per-cell status + staleness for a notebook",
+    )
+    add_status_arguments(status_parser)
+    status_parser.set_defaults(func=status_main)
 
     return parser
 

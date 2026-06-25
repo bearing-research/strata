@@ -797,3 +797,139 @@ def export_main(args: argparse.Namespace) -> int:
     else:
         sys.stdout.write(rendered)
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Agent inspect commands (NotebookOps, local backend) — `strata cell …` etc.
+#
+# Read-only P0 of the CLI-hardening phase: a full-feature agent tool over the
+# same NotebookOps core the MCP server will reuse. JSON by default (agent-first);
+# `--format human` gives a compact view. See docs/internal/design-cli-hardening.md.
+# ---------------------------------------------------------------------------
+
+
+def _open_local_ops(notebook_dir_arg: str):
+    """Open a :class:`LocalNotebookOps` for *notebook_dir_arg*, or None on error.
+
+    Prints the error to stderr; callers return exit 2 on None.
+    """
+    notebook_dir = Path(notebook_dir_arg).expanduser().resolve()
+    if not (notebook_dir / "notebook.toml").is_file():
+        print(
+            f"error: {notebook_dir} is not a Strata notebook (no notebook.toml)",
+            file=sys.stderr,
+        )
+        return None
+    from strata.notebook.ops import LocalNotebookOps
+
+    try:
+        return LocalNotebookOps(notebook_dir)
+    except Exception as exc:  # noqa: BLE001 — surface any open failure as exit 2
+        print(f"error: failed to open notebook: {exc}", file=sys.stderr)
+        return None
+
+
+def _emit_json(data: Any) -> None:
+    print(json.dumps(data, indent=2, default=str))
+
+
+def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register the ``strata cell <action>`` group (P0: list, show)."""
+    sub = parser.add_subparsers(dest="cell_command", metavar="<action>")
+
+    list_p = sub.add_parser("list", help="List cells (id, name, status)")
+    list_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    list_p.add_argument("--format", choices=["human", "json"], default="json")
+    list_p.set_defaults(func=cell_list_main)
+
+    show_p = sub.add_parser("show", help="Show one cell: source, status, outputs, console")
+    show_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    show_p.add_argument("cell_id", help="Cell id to show")
+    show_p.add_argument("--format", choices=["human", "json"], default="json")
+    show_p.set_defaults(func=cell_show_main)
+
+    # `strata cell` with no action → help.
+    parser.set_defaults(func=lambda args: (parser.print_help(), 0)[1])
+
+
+def cell_list_main(args: argparse.Namespace) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    data = ops.list_cells()
+    if args.format == "json":
+        _emit_json(data)
+    else:
+        for cell in data["cells"]:
+            status = str(cell.get("status") or "?")
+            print(f"{status:8} {cell['id']:18} {cell.get('name') or ''}")
+    return 0
+
+
+def cell_show_main(args: argparse.Namespace) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    from strata.notebook.ops import NotebookOpsError
+
+    try:
+        data = ops.get_cell(args.cell_id)
+    except NotebookOpsError as exc:
+        if args.format == "json":
+            _emit_json({"error": str(exc)})
+        else:
+            print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if args.format == "json":
+        _emit_json(data)
+    else:
+        print(f"id:       {data.get('id')}")
+        print(f"name:     {data.get('name') or ''}")
+        print(f"language: {data.get('language')}")
+        print(f"status:   {data.get('status')}")
+        reasons = data.get("staleness_reasons") or []
+        if reasons:
+            print(f"stale:    {', '.join(reasons)}")
+        print("--- source ---")
+        print(data.get("source") or "")
+    return 0
+
+
+def add_dag_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("notebook_dir", help="Path to the notebook directory")
+    parser.add_argument("--format", choices=["human", "json"], default="json")
+
+
+def dag_main(args: argparse.Namespace) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    data = ops.dag()
+    if args.format == "json":
+        _emit_json(data)
+    else:
+        for edge in data["edges"]:
+            print(f"{edge['from_cell_id']} → {edge['to_cell_id']}  ({edge.get('variable')})")
+        print(f"topo: {' → '.join(data['topological_order'])}")
+    return 0
+
+
+def add_status_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("notebook_dir", help="Path to the notebook directory")
+    parser.add_argument("--format", choices=["human", "json"], default="json")
+
+
+def status_main(args: argparse.Namespace) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    data = ops.status()
+    if args.format == "json":
+        _emit_json(data)
+    else:
+        print(f"notebook: {data.get('name')}  ({data.get('notebook_id')})")
+        for cell in data["cells"]:
+            status = str(cell.get("status") or "?")
+            stale = " ·stale" if cell.get("staleness_reasons") else ""
+            print(f"  {status:8} {cell['id']:18} {cell.get('name') or ''}{stale}")
+    return 0

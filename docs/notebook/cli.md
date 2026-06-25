@@ -151,3 +151,31 @@ Creates `<parent>/my_analysis/` with `notebook.toml`, `pyproject.toml`
 directory, then syncs the venv (skip with `--no-env`; `strata run` syncs it
 later). Idempotent on an existing notebook directory: the `notebook_id` and
 any existing cells are preserved, so re-running it never orphans artifacts.
+
+## Inspecting a notebook (`cell`, `dag`, `status`)
+
+For agents (and humans) that need to read a notebook's state without executing
+it, three read-only commands print structured JSON (default) or a compact human
+view. They open the notebook locally — no server, no env sync:
+
+```bash
+strata cell list <notebook_dir>            # every cell: id, name, status, source
+strata cell show <notebook_dir> <cell_id>  # one cell: source, status, outputs, console, staleness
+strata dag       <notebook_dir>            # dependency edges + topological order
+strata status    <notebook_dir>            # per-cell status + staleness summary
+```
+
+Each takes `--format human|json` (JSON is the default — these are agent-first).
+The JSON shapes match the server's REST API (`GET /{id}/cells`, `GET /{id}/dag`),
+so a script written against the local CLI keeps working against a running
+server later. Exit codes follow the same contract as `run` / `validate`: `0`
+success, `1` operation failure (e.g. unknown cell — a structured `{"error": …}`
+on stdout), `2` invocation error (bad path) on stderr.
+
+```bash
+strata cell list my_analysis | jq '.cells[] | select(.status == "error") | .id'
+```
+
+These are the read-only first slice of a fuller agent tool surface (granular
+run, cell tests, authoring, and driving a running server land in later
+releases).
