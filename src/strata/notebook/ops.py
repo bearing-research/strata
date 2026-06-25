@@ -107,6 +107,31 @@ class DagView(BaseModel):
     variable_producer: dict[str, str]
 
 
+class RunResult(BaseModel):
+    """The outcome of running a single cell, agent-facing."""
+
+    cell_id: str
+    status: str  # "ok" | "error"
+    cache_hit: bool
+    execution_method: str
+    duration_ms: float
+    error: str | None = None
+    stdout: str = ""
+    stderr: str = ""
+
+
+class TestRunResult(BaseModel):
+    """The outcome of running a cell's unit tests, agent-facing."""
+
+    cell_id: str
+    passed: int
+    failed: int
+    errored: int
+    skipped: int
+    pytest_unavailable: bool
+    cases: list[TestCaseView]
+
+
 class CellStatusRow(BaseModel):
     """One cell's row in a :class:`NotebookStatus` summary."""
 
@@ -193,6 +218,51 @@ class NotebookOps(Protocol):
         """
         ...
 
+    async def run_cell(self, cell_id: str, *, mode: str = "normal") -> RunResult:
+        """Execute one cell and return its outcome.
+
+        Parameters
+        ----------
+        cell_id : str
+            Identifier of the cell to run.
+        mode : {"normal", "rerun", "force"}, optional
+            ``normal`` uses the cache and materializes stale upstreams; ``rerun``
+            bypasses the target's cache but still materializes upstreams;
+            ``force`` runs against whatever upstream artifacts already exist.
+
+        Returns
+        -------
+        RunResult
+            Execution metadata (status, cache hit, duration, method) plus the
+            cell's captured stdout / stderr and any error.
+
+        Raises
+        ------
+        NotebookOpsError
+            If no such cell exists, or ``mode`` is not recognized.
+        """
+        ...
+
+    async def run_tests(self, cell_id: str) -> TestRunResult:
+        """Run a cell's unit tests and return per-test outcomes.
+
+        Parameters
+        ----------
+        cell_id : str
+            Identifier of the (Python) cell whose ``cells/{id}.test.py`` to run.
+
+        Returns
+        -------
+        TestRunResult
+            Pass / fail / error / skip counts and per-test cases.
+
+        Raises
+        ------
+        NotebookOpsError
+            If no such cell exists or it has no test source.
+        """
+        ...
+
 
 class LocalNotebookOps:
     """:class:`NotebookOps` over an in-process session — offline, no server.
@@ -208,8 +278,10 @@ class LocalNotebookOps:
         from strata.notebook.parser import parse_notebook
         from strata.notebook.session import NotebookSession
 
+        self.notebook_dir = notebook_dir
         state = parse_notebook(notebook_dir)
         self._session = NotebookSession(state, notebook_dir)
+        self._executor: object | None = None
 
     def list_cells(self) -> list[CellView]:
         """List every cell in order (see :meth:`NotebookOps.list_cells`)."""
@@ -234,6 +306,86 @@ class LocalNotebookOps:
             name=state.name,
             cells=[_status_row(cell) for cell in state.cells],
         )
+
+    # -- execution (P1) ------------------------------------------------------
+
+    async def sync_environment(self) -> None:
+        """Sync the notebook venv (``uv sync``) before executing.
+
+        Raises
+        ------
+        NotebookOpsError
+            If the environment sync fails.
+        """
+        from strata.notebook.cli import _sync_environment
+
+        ok, err = await _sync_environment(self._session)
+        if not ok:
+            raise NotebookOpsError(err or "environment sync failed")
+
+    async def run_cell(self, cell_id: str, *, mode: str = "normal") -> RunResult:
+        """Execute one cell (see :meth:`NotebookOps.run_cell`).
+
+        Assumes the environment is ready — call :meth:`sync_environment` first
+        (the CLI does, unless ``--no-sync``).
+        """
+        cell = self._session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            raise NotebookOpsError(f"no cell with id {cell_id!r}")
+        executor = self._ensure_executor()
+        if mode == "normal":
+            result = await executor.execute_cell(cell_id, cell.source)
+        elif mode == "rerun":
+            result = await executor.execute_cell_rerun(cell_id, cell.source)
+        elif mode == "force":
+            result = await executor.execute_cell_force(cell_id, cell.source)
+        else:
+            raise NotebookOpsError(f"unknown run mode {mode!r} (normal|rerun|force)")
+        return RunResult(
+            cell_id=result.cell_id,
+            status="ok" if result.success else "error",
+            cache_hit=result.cache_hit,
+            execution_method=result.execution_method,
+            duration_ms=result.duration_ms,
+            error=result.error,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
+
+    async def run_tests(self, cell_id: str) -> TestRunResult:
+        """Run a cell's unit tests (see :meth:`NotebookOps.run_tests`)."""
+        cell = self._session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            raise NotebookOpsError(f"no cell with id {cell_id!r}")
+        if not cell.test_source.strip():
+            raise NotebookOpsError(f"cell {cell_id!r} has no tests (cells/{cell_id}.test.py)")
+        executor = self._ensure_executor()
+        result = await executor.run_cell_tests(cell_id, cell.test_source)
+        return TestRunResult(
+            cell_id=cell_id,
+            passed=result.passed,
+            failed=result.failed,
+            errored=result.errored,
+            skipped=result.skipped,
+            pytest_unavailable=result.pytest_unavailable,
+            cases=[
+                TestCaseView(name=case.name, outcome=case.outcome, message=case.message)
+                for case in result.tests
+            ],
+        )
+
+    async def aclose(self) -> None:
+        """Release the warm process pool, if one was started (cleanup on exit)."""
+        from strata.notebook.cli import _drain_warm_pool
+
+        await _drain_warm_pool(self._session)
+
+    def _ensure_executor(self):
+        if self._executor is None:
+            from strata.notebook.executor import CellExecutor
+
+            self._executor = CellExecutor(self._session)
+        return self._executor
 
 
 # ---------------------------------------------------------------------------

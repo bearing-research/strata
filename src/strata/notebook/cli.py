@@ -848,6 +848,33 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     show_p.add_argument("--format", choices=["human", "json"], default="json")
     show_p.set_defaults(func=cell_show_main)
 
+    run_p = sub.add_parser("run", help="Execute one cell")
+    run_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    run_p.add_argument("cell_id", help="Cell id to run")
+    mode_group = run_p.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--rerun",
+        action="store_true",
+        help="Bypass the target cell's cache (materialize upstreams)",
+    )
+    mode_group.add_argument(
+        "--force", action="store_true", help="Run against existing upstream artifacts only"
+    )
+    run_p.add_argument(
+        "--no-sync", action="store_true", help="Skip `uv sync`; require an existing .venv"
+    )
+    run_p.add_argument("--format", choices=["human", "json"], default="json")
+    run_p.set_defaults(func=cell_run_main)
+
+    test_p = sub.add_parser("test", help="Run a cell's unit tests")
+    test_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    test_p.add_argument("cell_id", help="Cell id whose tests to run")
+    test_p.add_argument(
+        "--no-sync", action="store_true", help="Skip `uv sync`; require an existing .venv"
+    )
+    test_p.add_argument("--format", choices=["human", "json"], default="json")
+    test_p.set_defaults(func=cell_test_main)
+
     # `strata cell` with no action → help.
     parser.set_defaults(func=lambda args: (parser.print_help(), 0)[1])
 
@@ -891,6 +918,121 @@ def cell_show_main(args: argparse.Namespace) -> int:
         print("--- source ---")
         print(cell.source)
     return 0
+
+
+async def _prepare_env_for_ops(ops: object, args: argparse.Namespace) -> int:
+    """Sync or verify the notebook venv. Returns ``0`` ok, ``2`` setup failure.
+
+    Mirrors ``strata run``: sync by default, or (``--no-sync``) require an
+    existing ``.venv``. Setup failures print to stderr and map to exit 2.
+    """
+    from strata.notebook.ops import NotebookOpsError
+
+    if args.no_sync:
+        venv_dir = Path(args.notebook_dir).expanduser().resolve() / ".venv"
+        if not venv_dir.exists():
+            print(
+                f"error: notebook has no .venv at {venv_dir}\n"
+                f"hint: run without --no-sync, or `uv sync` in the notebook dir first",
+                file=sys.stderr,
+            )
+            return 2
+        return 0
+    if args.format == "human":
+        print(_dim("syncing environment…"))
+    try:
+        await ops.sync_environment()  # type: ignore[attr-defined]
+    except NotebookOpsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def cell_run_main(args: argparse.Namespace) -> int:
+    import asyncio
+
+    return asyncio.run(_cell_run_async(args))
+
+
+async def _cell_run_async(args: argparse.Namespace) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    from strata.notebook.ops import NotebookOpsError
+
+    try:
+        rc = await _prepare_env_for_ops(ops, args)
+        if rc != 0:
+            return rc
+        mode = "force" if args.force else "rerun" if args.rerun else "normal"
+        try:
+            result = await ops.run_cell(args.cell_id, mode=mode)
+        except NotebookOpsError as exc:
+            if args.format == "json":
+                _emit_json({"error": str(exc)})
+            else:
+                print(f"error: {exc}", file=sys.stderr)
+            return 1
+    finally:
+        await ops.aclose()
+
+    if args.format == "json":
+        _emit_json(result.model_dump(mode="json"))
+    else:
+        timing = f"{result.execution_method}, {_format_ms(result.duration_ms)}"
+        print(f"{result.status}  {result.cell_id}  ({timing})")
+        if result.stdout:
+            print("--- stdout ---")
+            print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+        if result.error:
+            print("--- error ---")
+            print(result.error)
+    return 0 if result.status == "ok" else 1
+
+
+def cell_test_main(args: argparse.Namespace) -> int:
+    import asyncio
+
+    return asyncio.run(_cell_test_async(args))
+
+
+async def _cell_test_async(args: argparse.Namespace) -> int:
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    from strata.notebook.ops import NotebookOpsError
+
+    try:
+        rc = await _prepare_env_for_ops(ops, args)
+        if rc != 0:
+            return rc
+        try:
+            result = await ops.run_tests(args.cell_id)
+        except NotebookOpsError as exc:
+            if args.format == "json":
+                _emit_json({"error": str(exc)})
+            else:
+                print(f"error: {exc}", file=sys.stderr)
+            return 1
+    finally:
+        await ops.aclose()
+
+    if args.format == "json":
+        _emit_json(result.model_dump(mode="json"))
+    else:
+        glyphs = {"passed": "✓", "failed": "✗", "error": "⚠", "skipped": "○"}
+        for case in result.cases:
+            print(f"{glyphs.get(case.outcome, '?')} {case.name}")
+            if case.message and case.outcome in ("failed", "error"):
+                for line in case.message.splitlines():
+                    print(f"    {line}")
+        print(
+            f"{result.passed} passed, {result.failed} failed, "
+            f"{result.errored} errored, {result.skipped} skipped"
+        )
+    if result.pytest_unavailable:
+        return 2
+    return 1 if (result.failed or result.errored) else 0
 
 
 def add_dag_arguments(parser: argparse.ArgumentParser) -> None:
