@@ -2522,3 +2522,47 @@ def test_run_cell_tests_endpoint_no_test_source_is_400(client, tmp_path):
 
     response = client.post(f"/v1/notebooks/{session_id}/cells/plain/tests")
     assert response.status_code == 400, response.text
+
+
+@pytest.mark.parametrize(
+    "mode,method",
+    [("rerun", "execute_cell_rerun"), ("force", "execute_cell_force"), ("normal", "execute_cell")],
+)
+def test_execute_cell_mode_dispatches(client, tmp_path, monkeypatch, mode, method):
+    """POST /cells/{id}/execute?mode= routes to the matching executor method."""
+    from strata.notebook.executor import CellExecutionResult
+
+    notebook_dir = create_notebook(tmp_path, "ModeNb", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1", None, language="python")
+    write_cell(notebook_dir, "c1", "x = 1\n")
+    session_id = open_session_id(client, notebook_dir)
+
+    called: list[str] = []
+
+    def _fake(name):
+        async def _run(self, cell_id, source):
+            called.append(name)
+            return CellExecutionResult(
+                cell_id=cell_id, success=True, duration_ms=1.0, execution_method="cold"
+            )
+
+        return _run
+
+    for candidate in ("execute_cell", "execute_cell_rerun", "execute_cell_force"):
+        monkeypatch.setattr(f"strata.notebook.routes.CellExecutor.{candidate}", _fake(candidate))
+
+    response = client.post(f"/v1/notebooks/{session_id}/cells/c1/execute", params={"mode": mode})
+    assert response.status_code == 200, response.text
+    assert called == [method]
+    assert response.json()["status"] == "ready"
+
+
+def test_execute_cell_unknown_mode_is_400(client, tmp_path):
+    """An unrecognized run mode is rejected before any execution."""
+    notebook_dir = create_notebook(tmp_path, "BadModeNb", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1", None, language="python")
+    write_cell(notebook_dir, "c1", "x = 1\n")
+    session_id = open_session_id(client, notebook_dir)
+
+    response = client.post(f"/v1/notebooks/{session_id}/cells/c1/execute", params={"mode": "bogus"})
+    assert response.status_code == 400, response.text

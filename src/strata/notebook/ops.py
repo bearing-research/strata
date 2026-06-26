@@ -634,6 +634,53 @@ class RemoteNotebookOps:
             cells=[_status_row_from_wire(cell) for cell in state.get("cells") or []],
         )
 
+    # -- execution -----------------------------------------------------------
+
+    async def run_cell(self, cell_id: str, *, mode: str = "normal") -> RunResult:
+        """Execute one cell on the server (see :meth:`NotebookOps.run_cell`).
+
+        The server owns its venv, so there is no client-side environment sync —
+        unlike the local backend, which calls ``uv sync`` first.
+        """
+        import asyncio
+
+        data = await asyncio.to_thread(
+            self._post,
+            f"/v1/notebooks/{self._session_id}/cells/{cell_id}/execute",
+            params={"mode": mode},
+            cell_id=cell_id,
+        )
+        return _run_result_from_wire(data)
+
+    async def run_tests(self, cell_id: str) -> TestRunResult:
+        """Run a cell's unit tests on the server (see :meth:`NotebookOps.run_tests`)."""
+        import asyncio
+
+        data = await asyncio.to_thread(
+            self._post,
+            f"/v1/notebooks/{self._session_id}/cells/{cell_id}/tests",
+            params=None,
+            cell_id=cell_id,
+        )
+        return _test_run_result_from_wire(data, cell_id)
+
+    def _post(self, path: str, *, params: dict[str, str] | None, cell_id: str) -> dict[str, Any]:
+        """POST to *path* and return the JSON body, mapping HTTP errors to ops errors."""
+        import httpx
+
+        url = f"{self._base_url}{path}"
+        try:
+            resp = self._client.post(url, params=params)
+        except httpx.HTTPError as exc:
+            raise NotebookOpsError(f"cannot reach {self._base_url}: {exc}") from exc
+        if resp.status_code == 404:
+            raise NotebookOpsError(f"no cell with id {cell_id!r}")
+        if resp.status_code == 409:
+            raise NotebookOpsError(f"environment busy: {_error_detail(resp)}")
+        if resp.status_code >= 400:
+            raise NotebookOpsError(_error_detail(resp))
+        return resp.json()
+
     def close(self) -> None:
         """Close the httpx client if this instance created it."""
         if self._owns_client:
@@ -706,6 +753,55 @@ def _status_row_from_wire(data: dict[str, Any]) -> CellStatusRow:
         status=data["status"],
         staleness_reasons=list(data.get("staleness_reasons") or []),
     )
+
+
+def _run_result_from_wire(data: dict[str, Any]) -> RunResult:
+    """Project the server's execute-result wire dict into a :class:`RunResult`.
+
+    The server renames ``success`` → ``status`` (``"ready"`` / ``"error"``); the
+    agent-facing :class:`RunResult` uses ``"ok"`` / ``"error"``.
+    """
+    return RunResult(
+        cell_id=data["cell_id"],
+        status="ok" if data.get("status") == "ready" else "error",
+        cache_hit=data.get("cache_hit", False),
+        execution_method=data.get("execution_method") or "",
+        duration_ms=data.get("duration_ms", 0.0),
+        error=data.get("error"),
+        stdout=data.get("stdout") or "",
+        stderr=data.get("stderr") or "",
+    )
+
+
+def _test_run_result_from_wire(data: dict[str, Any], cell_id: str) -> TestRunResult:
+    return TestRunResult(
+        cell_id=data.get("cell_id") or cell_id,
+        passed=data.get("passed", 0),
+        failed=data.get("failed", 0),
+        errored=data.get("errored", 0),
+        skipped=data.get("skipped", 0),
+        pytest_unavailable=data.get("pytest_unavailable", False),
+        cases=[
+            TestCaseView(
+                name=case["name"], outcome=case["outcome"], message=case.get("message", "")
+            )
+            for case in data.get("tests", [])
+        ],
+    )
+
+
+def _error_detail(resp: Any) -> str:
+    """Pull a human message out of a FastAPI error response body."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return resp.text or f"server returned {resp.status_code}"
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if isinstance(detail, dict):
+        return detail.get("message") or str(detail)
+    if isinstance(detail, str):
+        return detail
+    return f"server returned {resp.status_code}"
 
 
 def _cell_view(cell: CellState) -> CellView:

@@ -2794,16 +2794,25 @@ def _format_dag(session) -> dict:
 
 
 @router.post("/{notebook_id}/cells/{cell_id}/execute")
-async def execute_cell(notebook_id: str, session: SessionDep, cell_id: str) -> dict:
+async def execute_cell(
+    notebook_id: str, session: SessionDep, cell_id: str, mode: str = "normal"
+) -> dict:
     """Execute a cell and return results.
 
     Args:
         notebook_id: Notebook/session ID
         cell_id: Cell ID to execute
+        mode: ``normal`` (cache on, cascade stale upstreams), ``rerun`` (bypass
+            the target's cache, still cascade), or ``force`` (run against
+            existing upstream artifacts). Mirrors the three WS run modes so the
+            CLI / MCP remote backend has run / rerun / force parity with local.
 
     Returns:
         Execution result with outputs and stdout/stderr
     """
+
+    if mode not in ("normal", "rerun", "force"):
+        raise HTTPException(status_code=400, detail=f"unknown run mode {mode!r}")
 
     environment_block_reason = session.environment_execution_block_message()
     if environment_block_reason:
@@ -2827,7 +2836,12 @@ async def execute_cell(notebook_id: str, session: SessionDep, cell_id: str) -> d
         # cell.status transitions through running → ready/error.
         session.mark_cell_running(cell_id)
         executor = CellExecutor(session, session.warm_pool)
-        result = await executor.execute_cell(cell_id, cell.source)
+        if mode == "rerun":
+            result = await executor.execute_cell_rerun(cell_id, cell.source)
+        elif mode == "force":
+            result = await executor.execute_cell_force(cell_id, cell.source)
+        else:
+            result = await executor.execute_cell(cell_id, cell.source)
         session.record_execution(cell_id, result.duration_ms, result.cache_hit)
         session.apply_execution_result_metadata(cell_id, result)
         if result.success:

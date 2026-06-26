@@ -20,6 +20,7 @@ from strata.notebook.ops import (
     NotebookOpsError,
     OutputView,
     RemoteNotebookOps,
+    RunResult,
 )
 from tests.notebook.test_cli import _build_notebook
 
@@ -183,3 +184,132 @@ def test_cli_list_routes_to_remote(monkeypatch, capsys):
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert [c["id"] for c in data] == ["a"]
+
+
+# -- remote execution (run / test) -------------------------------------------
+
+
+def _exec_remote(handler) -> RemoteNotebookOps:
+    return RemoteNotebookOps(
+        "http://test", "s1", client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+
+@pytest.mark.asyncio
+async def test_remote_run_cell_maps_and_passes_mode():
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["mode"] = request.url.params.get("mode")
+        return httpx.Response(
+            200,
+            json={
+                "cell_id": "c1",
+                "status": "ready",  # the server renames success → status
+                "cache_hit": True,
+                "execution_method": "warm",
+                "duration_ms": 12.5,
+                "error": None,
+                "stdout": "hi\n",
+                "stderr": "",
+            },
+        )
+
+    result = await _exec_remote(handler).run_cell("c1", mode="rerun")
+    assert result.status == "ok" and result.cache_hit and result.stdout == "hi\n"
+    assert result.execution_method == "warm"
+    assert seen["path"] == "/v1/notebooks/s1/cells/c1/execute"
+    assert seen["mode"] == "rerun"
+
+
+@pytest.mark.asyncio
+async def test_remote_run_cell_error_status_maps_to_error():
+    handler = lambda req: httpx.Response(  # noqa: E731
+        200, json={"cell_id": "c1", "status": "error", "error": "boom"}
+    )
+    result = await _exec_remote(handler).run_cell("c1")
+    assert result.status == "error" and result.error == "boom"
+
+
+@pytest.mark.asyncio
+async def test_remote_run_cell_http_errors():
+    def make(code: int, body: dict) -> RemoteNotebookOps:
+        return _exec_remote(lambda req: httpx.Response(code, json=body))
+
+    with pytest.raises(NotebookOpsError, match="no cell"):
+        await make(404, {"detail": "Cell not found"}).run_cell("c1")
+    with pytest.raises(NotebookOpsError, match="environment busy"):
+        await make(409, {"detail": {"message": "syncing"}}).run_cell("c1")
+    with pytest.raises(NotebookOpsError, match="unknown run mode"):
+        await make(400, {"detail": "unknown run mode 'x'"}).run_cell("c1")
+
+
+@pytest.mark.asyncio
+async def test_remote_run_tests_maps():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/notebooks/s1/cells/c1/tests"
+        return httpx.Response(
+            200,
+            json={
+                "cell_id": "c1",
+                "passed": 1,
+                "failed": 1,
+                "errored": 0,
+                "skipped": 0,
+                "pytest_unavailable": False,
+                "tests": [
+                    {"name": "t_ok", "nodeid": "n1", "outcome": "passed", "message": ""},
+                    {"name": "t_bad", "nodeid": "n2", "outcome": "failed", "message": "assert"},
+                ],
+            },
+        )
+
+    result = await _exec_remote(handler).run_tests("c1")
+    assert result.passed == 1 and result.failed == 1 and not result.pytest_unavailable
+    assert [c.name for c in result.cases] == ["t_ok", "t_bad"]
+    assert result.cases[1].outcome == "failed" and result.cases[1].message == "assert"
+
+
+@pytest.mark.asyncio
+async def test_remote_run_tests_no_tests_is_ops_error():
+    remote = _exec_remote(lambda req: httpx.Response(400, json={"detail": "Cell c1 has no tests"}))
+    with pytest.raises(NotebookOpsError, match="no tests"):
+        await remote.run_tests("c1")
+
+
+def test_cli_cell_run_routes_to_remote(monkeypatch, capsys):
+    class _FakeRemote:
+        def __init__(self, base_url, session_id, **_):
+            assert base_url == "http://srv" and session_id == "s1"
+
+        async def run_cell(self, cell_id, *, mode="normal"):
+            assert cell_id == "c1" and mode == "rerun"  # --rerun → mode=rerun
+            return RunResult(
+                cell_id="c1",
+                status="ok",
+                cache_hit=False,
+                execution_method="cold",
+                duration_ms=3.0,
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("strata.notebook.ops.RemoteNotebookOps", _FakeRemote)
+    rc = main(
+        [
+            "cell",
+            "run",
+            "--server",
+            "http://srv",
+            "--session",
+            "s1",
+            "c1",
+            "--rerun",
+            "--format",
+            "json",
+        ]
+    )
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "ok"

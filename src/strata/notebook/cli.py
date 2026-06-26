@@ -845,10 +845,11 @@ def _add_target_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _open_read_ops(args: argparse.Namespace):
-    """Open the read backend for *args* — remote when ``--server`` is set, else local.
+    """Open the ops backend for *args* — remote when ``--server`` is set, else local.
 
-    Returns the ops object, or None on a usage error (message already printed to
-    stderr; callers return exit 2).
+    Used by the read commands and by ``cell run`` / ``cell test``. Returns the
+    ops object, or None on a usage error (message already printed to stderr;
+    callers return exit 2).
     """
     if args.server:
         if not args.session:
@@ -883,7 +884,7 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     show_p.set_defaults(func=cell_show_main)
 
     run_p = sub.add_parser("run", help="Execute one cell")
-    run_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    _add_target_args(run_p)
     run_p.add_argument("cell_id", help="Cell id to run")
     mode_group = run_p.add_mutually_exclusive_group()
     mode_group.add_argument(
@@ -901,7 +902,7 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     run_p.set_defaults(func=cell_run_main)
 
     test_p = sub.add_parser("test", help="Run a cell's unit tests")
-    test_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    _add_target_args(test_p)
     test_p.add_argument("cell_id", help="Cell id whose tests to run")
     test_p.add_argument(
         "--no-sync", action="store_true", help="Skip `uv sync`; require an existing .venv"
@@ -1157,26 +1158,28 @@ def cell_run_main(args: argparse.Namespace) -> int:
 
 
 async def _cell_run_async(args: argparse.Namespace) -> int:
-    ops = _open_local_ops(args.notebook_dir)
+    is_remote = bool(args.server)
+    ops = _open_read_ops(args)
     if ops is None:
         return 2
     from strata.notebook.ops import NotebookOpsError
 
     try:
-        rc = await _prepare_env_for_ops(ops, args)
-        if rc != 0:
-            return rc
+        # The local backend syncs its venv first; a remote server owns its own.
+        if not is_remote:
+            rc = await _prepare_env_for_ops(ops, args)
+            if rc != 0:
+                return rc
         mode = "force" if args.force else "rerun" if args.rerun else "normal"
         try:
             result = await ops.run_cell(args.cell_id, mode=mode)
         except NotebookOpsError as exc:
-            if args.format == "json":
-                _emit_json({"error": str(exc)})
-            else:
-                print(f"error: {exc}", file=sys.stderr)
-            return 1
+            return _emit_op_error(exc, args.format)
     finally:
-        await ops.aclose()
+        if is_remote:
+            ops.close()
+        else:
+            await ops.aclose()
 
     if args.format == "json":
         _emit_json(result.model_dump(mode="json"))
@@ -1199,25 +1202,26 @@ def cell_test_main(args: argparse.Namespace) -> int:
 
 
 async def _cell_test_async(args: argparse.Namespace) -> int:
-    ops = _open_local_ops(args.notebook_dir)
+    is_remote = bool(args.server)
+    ops = _open_read_ops(args)
     if ops is None:
         return 2
     from strata.notebook.ops import NotebookOpsError
 
     try:
-        rc = await _prepare_env_for_ops(ops, args)
-        if rc != 0:
-            return rc
+        if not is_remote:
+            rc = await _prepare_env_for_ops(ops, args)
+            if rc != 0:
+                return rc
         try:
             result = await ops.run_tests(args.cell_id)
         except NotebookOpsError as exc:
-            if args.format == "json":
-                _emit_json({"error": str(exc)})
-            else:
-                print(f"error: {exc}", file=sys.stderr)
-            return 1
+            return _emit_op_error(exc, args.format)
     finally:
-        await ops.aclose()
+        if is_remote:
+            ops.close()
+        else:
+            await ops.aclose()
 
     if args.format == "json":
         _emit_json(result.model_dump(mode="json"))
