@@ -313,3 +313,171 @@ def test_cli_cell_run_routes_to_remote(monkeypatch, capsys):
     )
     assert rc == 0
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
+
+
+# -- remote authoring (add / edit / rm / mv / dep) ---------------------------
+
+
+def _wire_cell(cell_id: str, source: str, *, name: str = "") -> dict:
+    """A minimal serialized-cell wire dict (what the server returns for a cell)."""
+    return {
+        "id": cell_id,
+        "language": "python",
+        "status": "idle",
+        "source": source,
+        "annotations": {"name": name},
+    }
+
+
+def test_remote_add_cell_mints_then_sets_source():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/notebooks/s1/cells":
+            assert json.loads(request.content) == {"after_cell_id": "a", "language": "python"}
+            return httpx.Response(200, json={"id": "new1"})  # add mints an empty cell
+        if request.method == "PUT" and request.url.path == "/v1/notebooks/s1/cells/new1":
+            assert json.loads(request.content) == {"source": "z = 9"}
+            return httpx.Response(
+                200, json={"cell": _wire_cell("new1", "z = 9", name="n"), "dag": {}}
+            )
+        return httpx.Response(404)
+
+    cell = _exec_remote(handler).add_cell("z = 9", after="a")
+    assert cell.id == "new1" and cell.source == "z = 9" and cell.name == "n"
+
+
+def test_remote_edit_cell_and_unknown():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT" and request.url.path == "/v1/notebooks/s1/cells/c1":
+            return httpx.Response(200, json={"cell": _wire_cell("c1", "x = 2"), "dag": {}})
+        return httpx.Response(404, json={"detail": "Cell not found"})
+
+    assert _exec_remote(handler).edit_cell("c1", "x = 2").source == "x = 2"
+    with pytest.raises(NotebookOpsError, match="no cell"):
+        _exec_remote(handler).edit_cell("ghost", "y")
+
+
+def test_remote_remove_cell_and_unknown():
+    ok = _exec_remote(
+        lambda req: httpx.Response(200, json={"message": "Cell deleted", "cell_id": "c1"})
+    )
+    assert ok.remove_cell("c1") is None
+    with pytest.raises(NotebookOpsError, match="no cell"):
+        _exec_remote(lambda req: httpx.Response(404)).remove_cell("ghost")
+
+
+def test_remote_move_cell_reorders():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "/sessions/" in request.url.path:
+            return httpx.Response(
+                200,
+                json={
+                    "id": "nb",
+                    "name": "N",
+                    "cells": [_wire_cell("a", ""), _wire_cell("b", "")],
+                    "dag": {},
+                },
+            )
+        if request.method == "PUT" and request.url.path == "/v1/notebooks/s1/cells/reorder":
+            assert json.loads(request.content)["cell_ids"] == ["b", "a"]
+            return httpx.Response(
+                200, json={"notebook_id": "nb", "cells": [_wire_cell("b", ""), _wire_cell("a", "")]}
+            )
+        return httpx.Response(404)
+
+    cells = _exec_remote(handler).move_cell("a", 1)
+    assert [c.id for c in cells] == ["b", "a"]
+
+
+def test_remote_move_cell_unknown_is_ops_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"id": "nb", "name": "N", "cells": [_wire_cell("a", "")], "dag": {}}
+        )
+
+    with pytest.raises(NotebookOpsError, match="no cell"):
+        _exec_remote(handler).move_cell("ghost", 0)
+
+
+@pytest.mark.asyncio
+async def test_remote_add_dependency_maps():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST" and request.url.path == "/v1/notebooks/s1/dependencies"
+        assert json.loads(request.content) == {"package": "pandas"}
+        return httpx.Response(
+            200, json={"success": True, "package": "pandas", "lockfile_changed": True}
+        )
+
+    res = await _exec_remote(handler).add_dependency("pandas")
+    assert res.success and res.package == "pandas" and res.action == "add" and res.lockfile_changed
+
+
+@pytest.mark.asyncio
+async def test_remote_remove_dependency_uses_path():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "DELETE"
+        assert request.url.path == "/v1/notebooks/s1/dependencies/pandas"
+        return httpx.Response(
+            200, json={"success": True, "package": "pandas", "lockfile_changed": True}
+        )
+
+    res = await _exec_remote(handler).remove_dependency("pandas")
+    assert res.success and res.action == "remove"
+
+
+@pytest.mark.asyncio
+async def test_remote_dependency_failure_is_structured_not_raised():
+    # A failed `uv` resolve (400) is a result with success=False, not an exception.
+    remote = _exec_remote(
+        lambda req: httpx.Response(400, json={"detail": {"message": "no such package"}})
+    )
+    res = await remote.add_dependency("nope")
+    assert res.success is False and "no such package" in (res.error or "")
+
+
+@pytest.mark.asyncio
+async def test_remote_dependency_busy_raises():
+    remote = _exec_remote(lambda req: httpx.Response(409, json={"detail": {"message": "syncing"}}))
+    with pytest.raises(NotebookOpsError, match="environment busy"):
+        await remote.remove_dependency("pandas")
+
+
+def test_cli_cell_add_routes_to_remote(monkeypatch, tmp_path, capsys):
+    class _FakeRemote:
+        def __init__(self, base_url, session_id, **_):
+            assert base_url == "http://srv" and session_id == "s1"
+
+        def add_cell(self, source, *, after=None, language="python"):
+            assert source == "w = 5"
+            return CellView(
+                id="new1",
+                name="",
+                language="python",
+                status="idle",
+                source="w = 5",
+                staleness_reasons=[],
+                upstream_ids=[],
+                downstream_ids=[],
+                outputs=[],
+                console_stdout="",
+                console_stderr="",
+            )
+
+    monkeypatch.setattr("strata.notebook.ops.RemoteNotebookOps", _FakeRemote)
+    src = tmp_path / "s.py"
+    src.write_text("w = 5")
+    rc = main(
+        [
+            "cell",
+            "add",
+            "--server",
+            "http://srv",
+            "--session",
+            "s1",
+            "--file",
+            str(src),
+            "--format",
+            "json",
+        ]
+    )
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["id"] == "new1"

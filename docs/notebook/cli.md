@@ -192,8 +192,8 @@ strata status    --server http://localhost:8765 --session $SID
 `<id>` is the session id (the route `{id}`, not the `notebook.toml` id). The
 output is identical to the local backend — both project the same wire shape — so
 a script written against a local notebook works unchanged against a live session.
-`cell run` and `cell test` accept the same selector (see below); the authoring
-commands stay local for now and gain remote support in a later release. Remote
+`cell run` / `cell test` and the authoring commands accept the same selector
+(see below), so the entire surface works against a live session. Remote
 operations target a personal-mode server (the use case is driving the session
 you're watching locally).
 
@@ -256,7 +256,12 @@ lockfile changed. All take `--format json|human` and use the shared exit codes
 echo 'total = sum(nums)' | strata cell add nb --file - --after load --format json | jq .id
 ```
 
+These also accept `--server <url> --session <id>` to author into a live session
+instead of a local directory — edits land in the running notebook a human is
+watching in the TUI. (`cell add` makes two calls: it mints the cell on the
+server, then sets its source.)
+
 Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
-run/test`), this is the full **local** agent surface. Inspect and execution also
-drive a *running* server via `--server/--session` (above); remote authoring and
-an MCP server land in later releases.
+run/test`), this is the full agent surface — and **all of it** works either
+offline against a directory or `--server/--session` against a running server. An
+MCP server wrapping the same operations lands in a later release.

@@ -593,15 +593,26 @@ class RemoteNotebookOps:
         self._owns_client = client is None
         self._client: httpx.Client = client if client is not None else httpx.Client(timeout=30.0)
 
-    def _state(self) -> dict[str, Any]:
-        """Fetch the live session snapshot (name, cells, dag) or raise."""
+    def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Issue one request, turning a connection failure into an ops error."""
         import httpx
 
-        url = f"{self._base_url}/v1/notebooks/sessions/{self._session_id}"
+        url = f"{self._base_url}{path}"
         try:
-            resp = self._client.get(url)
+            return self._client.request(method, url, json=json, params=params)
         except httpx.HTTPError as exc:
             raise NotebookOpsError(f"cannot reach {self._base_url}: {exc}") from exc
+
+    def _state(self) -> dict[str, Any]:
+        """Fetch the live session snapshot (name, cells, dag) or raise."""
+        resp = self._send("GET", f"/v1/notebooks/sessions/{self._session_id}")
         if resp.status_code == 404:
             raise NotebookOpsError(f"no session {self._session_id!r} on {self._base_url}")
         if resp.status_code >= 400:
@@ -609,6 +620,32 @@ class RemoteNotebookOps:
                 f"server returned {resp.status_code} for session {self._session_id!r}"
             )
         return resp.json()
+
+    def _cell_op(
+        self,
+        method: str,
+        path: str,
+        *,
+        cell_id: str | None = None,
+        json: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Issue a cell-scoped request and return the JSON body, mapping errors.
+
+        ``404`` becomes "no cell …" when *cell_id* is known (else the server's
+        detail), ``409`` an environment-busy error, any other ``4xx``/``5xx`` the
+        server's detail message.
+        """
+        resp = self._send(method, path, json=json, params=params)
+        if resp.status_code == 404:
+            raise NotebookOpsError(
+                f"no cell with id {cell_id!r}" if cell_id else _error_detail(resp)
+            )
+        if resp.status_code == 409:
+            raise NotebookOpsError(f"environment busy: {_error_detail(resp)}")
+        if resp.status_code >= 400:
+            raise NotebookOpsError(_error_detail(resp))
+        return resp.json() if resp.content else {}
 
     def list_cells(self) -> list[CellView]:
         """List every cell (see :meth:`NotebookOps.list_cells`)."""
@@ -645,10 +682,11 @@ class RemoteNotebookOps:
         import asyncio
 
         data = await asyncio.to_thread(
-            self._post,
+            self._cell_op,
+            "POST",
             f"/v1/notebooks/{self._session_id}/cells/{cell_id}/execute",
-            params={"mode": mode},
             cell_id=cell_id,
+            params={"mode": mode},
         )
         return _run_result_from_wire(data)
 
@@ -657,29 +695,101 @@ class RemoteNotebookOps:
         import asyncio
 
         data = await asyncio.to_thread(
-            self._post,
+            self._cell_op,
+            "POST",
             f"/v1/notebooks/{self._session_id}/cells/{cell_id}/tests",
-            params=None,
             cell_id=cell_id,
         )
         return _test_run_result_from_wire(data, cell_id)
 
-    def _post(self, path: str, *, params: dict[str, str] | None, cell_id: str) -> dict[str, Any]:
-        """POST to *path* and return the JSON body, mapping HTTP errors to ops errors."""
-        import httpx
+    # -- authoring -----------------------------------------------------------
 
-        url = f"{self._base_url}{path}"
-        try:
-            resp = self._client.post(url, params=params)
-        except httpx.HTTPError as exc:
-            raise NotebookOpsError(f"cannot reach {self._base_url}: {exc}") from exc
-        if resp.status_code == 404:
+    def add_cell(
+        self, source: str, *, after: str | None = None, language: str = "python"
+    ) -> CellView:
+        """Add a new cell (see :meth:`NotebookOps.add_cell`).
+
+        Two calls: POST to mint the cell (server assigns the id), then PUT its
+        source — the add endpoint creates an empty cell.
+        """
+        base = f"/v1/notebooks/{self._session_id}/cells"
+        created = self._cell_op("POST", base, json={"after_cell_id": after, "language": language})
+        cell_id = created["id"]
+        updated = self._cell_op(
+            "PUT", f"{base}/{cell_id}", cell_id=cell_id, json={"source": source}
+        )
+        return _cell_view_from_wire(updated["cell"])
+
+    def edit_cell(self, cell_id: str, source: str) -> CellView:
+        """Replace a cell's source (see :meth:`NotebookOps.edit_cell`)."""
+        updated = self._cell_op(
+            "PUT",
+            f"/v1/notebooks/{self._session_id}/cells/{cell_id}",
+            cell_id=cell_id,
+            json={"source": source},
+        )
+        return _cell_view_from_wire(updated["cell"])
+
+    def remove_cell(self, cell_id: str) -> None:
+        """Delete a cell (see :meth:`NotebookOps.remove_cell`)."""
+        self._cell_op(
+            "DELETE", f"/v1/notebooks/{self._session_id}/cells/{cell_id}", cell_id=cell_id
+        )
+
+    def move_cell(self, cell_id: str, index: int) -> list[CellView]:
+        """Reorder a cell (see :meth:`NotebookOps.move_cell`)."""
+        order = [cell.get("id") for cell in self._state().get("cells") or []]
+        if cell_id not in order:
             raise NotebookOpsError(f"no cell with id {cell_id!r}")
+        order.remove(cell_id)
+        order.insert(max(0, index), cell_id)
+        result = self._cell_op(
+            "PUT", f"/v1/notebooks/{self._session_id}/cells/reorder", json={"cell_ids": order}
+        )
+        return [_cell_view_from_wire(cell) for cell in result.get("cells") or []]
+
+    async def add_dependency(self, package: str) -> DependencyResult:
+        """Add a dependency on the server (see :meth:`NotebookOps.add_dependency`)."""
+        import asyncio
+
+        return await asyncio.to_thread(self._mutate_dependency, package, "add")
+
+    async def remove_dependency(self, package: str) -> DependencyResult:
+        """Remove a dependency on the server (see :meth:`NotebookOps.remove_dependency`)."""
+        import asyncio
+
+        return await asyncio.to_thread(self._mutate_dependency, package, "remove")
+
+    def _mutate_dependency(self, package: str, action: str) -> DependencyResult:
+        base = f"/v1/notebooks/{self._session_id}/dependencies"
+        if action == "add":
+            resp = self._send("POST", base, json={"package": package})
+        else:
+            resp = self._send("DELETE", f"{base}/{package}")
+        if resp.status_code == 404:
+            raise NotebookOpsError(f"no session {self._session_id!r} on {self._base_url}")
         if resp.status_code == 409:
             raise NotebookOpsError(f"environment busy: {_error_detail(resp)}")
+        if resp.status_code == 400:
+            # A failed `uv` resolve is a structured outcome, not an ops error —
+            # parity with the local backend's DependencyResult(success=False).
+            return DependencyResult(
+                package=package,
+                action=action,
+                success=False,
+                lockfile_changed=False,
+                error=_error_detail(resp),
+            )
         if resp.status_code >= 400:
             raise NotebookOpsError(_error_detail(resp))
-        return resp.json()
+        data = resp.json()
+        return DependencyResult(
+            package=data.get("package") or package,
+            action=action,
+            success=True,
+            lockfile_changed=data.get("lockfile_changed", False),
+            error=None,
+        )
 
     def close(self) -> None:
         """Close the httpx client if this instance created it."""
