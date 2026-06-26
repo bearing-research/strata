@@ -10,9 +10,10 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 ## 0.4.0 — 2026-06-24
 
 0.4.0 is a **consolidation and hardening** cycle. The headlines are a new
-**read-only terminal viewer** for notebooks and an internal restructuring of the
-server, alongside per-cell unit tests, broader value serialization with in-place
-mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.
+**read-only terminal viewer** for notebooks and a **full agent-facing notebook
+CLI**, alongside an internal restructuring of the server, per-cell unit tests,
+broader value serialization with in-place mutation tracking, concurrency-bug
+fixes, and CI hardening. No breaking changes.
 
 ### Added
 
@@ -34,6 +35,19 @@ mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.
   (`uv tool install "strata-notebook[tui]"`); it never edits or runs cells —
   purely for watching, e.g. an agent build a notebook in one terminal while you
   watch in another. See [Terminal Viewer](notebook/tui.md).
+
+- **A full notebook CLI for agents (`strata cell`, `dag`, `status`, `dep`).**
+  The `strata` command grew an agent-facing surface over one shared
+  `NotebookOps` core: **inspect** (`cell list/show`, `dag`, `status`),
+  **execute** one cell at a time (`cell run` in normal / `--rerun` / `--force`
+  mode, `cell test`), and **author** (`cell add/edit/rm/mv`, `cell annotate` to
+  splice `# @key` annotations, `dep add/rm`) — all with `--format json` and a
+  stable exit-code contract (`0` ok / `1` operation failure / `2` invocation
+  error), so an agent can drive a notebook as a first-class tool. Every command
+  runs **either offline against a notebook directory or against a live session
+  on a running server** via `--server/--session` (the same session a human
+  watches in the TUI). See [Notebook CLI](notebook/cli.md) and [Authoring
+  Programmatically](notebook/agent-authoring.md).
 
 - **Per-cell unit tests in the notebook.** Every Python code cell gets a
   **Tests** panel (the `🧪` toggle next to Inspect, which doubles as a health
