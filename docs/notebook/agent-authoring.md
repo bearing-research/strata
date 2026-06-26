@@ -23,6 +23,27 @@ codes: `0` success (warnings allowed), `1` failure with structured
 findings on stdout, `2` invocation error on stderr. Iterate on the
 diagnostics until both exit `0`.
 
+## Editing files vs. driving commands
+
+Writing the files directly — as below — is the canonical contract, and the
+rest of this page documents it. If you'd rather not hand-edit `notebook.toml`
+or mint cell ids yourself, the `strata cell` and `strata dep` commands perform
+the same edits and print structured JSON:
+
+```bash
+strata cell add  my_analysis --file step.py --after load   # mint + insert a cell
+strata cell edit my_analysis <id> --file step.py           # replace a cell's source
+strata cell rm   my_analysis <id>                          # delete a cell
+strata cell mv   my_analysis <id> --to 2                   # reorder
+strata dep add   my_analysis pandas                        # uv add
+```
+
+They write the same plain-text files described here, so the two approaches are
+interchangeable, and the same commands (plus `cell list/show`, `dag`, `status`,
+`cell run/test`) also drive a *running* session over `--server/--session`. See
+the [Notebook CLI](cli.md) for the full command surface. The rest of this page
+is the file-format contract underneath both.
+
 ## On-disk layout
 
 ```
