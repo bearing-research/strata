@@ -192,9 +192,10 @@ strata status    --server http://localhost:8765 --session $SID
 `<id>` is the session id (the route `{id}`, not the `notebook.toml` id). The
 output is identical to the local backend — both project the same wire shape — so
 a script written against a local notebook works unchanged against a live session.
-Remote reads target a personal-mode server (the use case is driving the session
-you're watching locally); `cell run/test` and the authoring commands stay local
-for now and gain remote support in a later release.
+`cell run` and `cell test` accept the same selector (see below); the authoring
+commands stay local for now and gain remote support in a later release. Remote
+operations target a personal-mode server (the use case is driving the session
+you're watching locally).
 
 ## Running a cell or its tests (`cell run`, `cell test`)
 
@@ -211,6 +212,12 @@ by default; `--rerun` bypasses the target's cache, `--force` runs against
 whatever upstream artifacts already exist). `cell test` runs the cell's
 `cells/{cell_id}.test.py` via pytest and reports per-test outcomes. Both **sync
 the venv first** (like `strata run`) unless you pass `--no-sync`.
+
+Both also accept `--server <url> --session <id>` to run on a live session instead
+of a local directory (`strata cell run --server http://localhost:8765 --session
+$SID <cell_id> --rerun`). The server owns its venv, so the remote path never syncs
+— `--no-sync` is a local-only flag — and `--rerun` / `--force` map to the
+server's run modes, so remote execution has the same three modes as local.
 
 `--format json` (default) writes a single clean JSON object to **stdout** — the
 executor's logs go to stderr, so the stdout stream stays parseable:
@@ -250,6 +257,6 @@ echo 'total = sum(nums)' | strata cell add nb --file - --after load --format jso
 ```
 
 Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
-run/test`), this is the full **local** agent surface. The read commands also
-drive a *running* server via `--server/--session` (above); remote execution and
-authoring, plus an MCP server, land in later releases.
+run/test`), this is the full **local** agent surface. Inspect and execution also
+drive a *running* server via `--server/--session` (above); remote authoring and
+an MCP server land in later releases.
