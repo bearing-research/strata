@@ -195,6 +195,42 @@ def _exec_remote(handler) -> RemoteNotebookOps:
     )
 
 
+def test_remote_add_cell_malformed_response_raises():
+    # POST mints with no "id" → a clean ops error, not a KeyError traceback.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})
+
+    with pytest.raises(NotebookOpsError, match="missing 'id'"):
+        _exec_remote(handler).add_cell("x = 1")
+
+
+def test_remote_edit_cell_malformed_response_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"dag": {}})  # no "cell"
+
+    with pytest.raises(NotebookOpsError, match="missing 'cell'"):
+        _exec_remote(handler).edit_cell("c1", "x = 1")
+
+
+def test_cli_read_closes_remote_client(monkeypatch, capsys):
+    closed = {"n": 0}
+
+    class _FakeRemote:
+        def __init__(self, base_url, session_id, **_):
+            pass
+
+        def list_cells(self):
+            return []
+
+        def close(self):
+            closed["n"] += 1
+
+    monkeypatch.setattr("strata.notebook.ops.RemoteNotebookOps", _FakeRemote)
+    rc = main(["cell", "list", "--server", "http://srv", "--session", "s1", "--format", "json"])
+    assert rc == 0
+    assert closed["n"] == 1  # the remote client was closed on the sync read path
+
+
 @pytest.mark.asyncio
 async def test_remote_run_cell_maps_and_passes_mode():
     seen: dict[str, str] = {}

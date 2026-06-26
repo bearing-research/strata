@@ -216,18 +216,33 @@ def _format_directive(key: str, value: str) -> str:
     return f"# @{key} {value}" if value else f"# @{key}"
 
 
+def _line_sep(source: str) -> str:
+    """The dominant line ending, so a splice preserves CRLF vs LF."""
+    return "\r\n" if "\r\n" in source else "\n"
+
+
+# Directives that may appear more than once in a cell; the single-line splice in
+# ``set_annotation_directive`` would silently collapse them, so it refuses them.
+_REPEATABLE_DIRECTIVES = frozenset({"env", "mount", "table"})
+
+
 def set_annotation_directive(source: str, key: str, value: str) -> str:
     """Return *source* with a single ``# @key value`` directive set.
 
     Replaces the first existing ``# @key`` directive in the leading comment
     block (dropping any duplicate ``# @key`` lines) and leaves the cell body
     untouched. When the key is absent, the directive is inserted after the last
-    existing annotation, or at the very top when the cell has none. Intended for
-    scalar directives (``name``, ``worker``, ``timeout``, ``model``, …); for the
-    repeatable ones (``mount``, ``table``, ``env``) edit the source directly.
+    existing annotation, or at the very top when the cell has none.
+
+    Intended for scalar directives (``name``, ``worker``, ``timeout``, ``model``,
+    …). The repeatable ones (``env``, ``mount``, ``table``) raise ``ValueError``
+    — collapsing them to one line would drop data; edit the source directly.
     """
     key = key.lower()
+    if key in _REPEATABLE_DIRECTIVES:
+        raise ValueError(f"@{key} is repeatable; edit the cell source directly")
     new_line = _format_directive(key, value)
+    sep = _line_sep(source)
     lines = source.splitlines()
     block_end = _leading_block_end(lines)
 
@@ -242,13 +257,14 @@ def set_annotation_directive(source: str, key: str, value: str) -> str:
         directives = [i for i in range(block_end) if parse_annotation_directive(lines[i])]
         lines.insert(directives[-1] + 1 if directives else 0, new_line)
 
-    result = "\n".join(lines)
-    return result + "\n" if source.endswith("\n") else result
+    result = sep.join(lines)
+    return result + sep if source.endswith("\n") else result
 
 
 def remove_annotation_directive(source: str, key: str) -> str:
     """Return *source* with every ``# @key`` directive removed from the block."""
     key = key.lower()
+    sep = _line_sep(source)
     lines = source.splitlines()
     block_end = _leading_block_end(lines)
     kept = [
@@ -258,8 +274,8 @@ def remove_annotation_directive(source: str, key: str) -> str:
             i < block_end and (d := parse_annotation_directive(line)) is not None and d[0] == key
         )
     ]
-    result = "\n".join(kept)
-    return result + "\n" if source.endswith("\n") else result
+    result = sep.join(kept)
+    return result + sep if source.endswith("\n") else result
 
 
 @dataclass

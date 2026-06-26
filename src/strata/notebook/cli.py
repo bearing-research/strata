@@ -19,6 +19,7 @@ import asyncio
 import json
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -864,6 +865,28 @@ def _open_read_ops(args: argparse.Namespace):
     return _open_local_ops(args.notebook_dir)
 
 
+def _close_ops(ops: object) -> None:
+    """Close a remote ops client if it owns one (local ops hold no client)."""
+    close = getattr(ops, "close", None)
+    if callable(close):
+        close()
+
+
+@contextmanager
+def _read_ops(args: argparse.Namespace):
+    """Open the ops backend and guarantee a remote client is closed on exit.
+
+    Yields ``None`` on a usage error (the sync commands return exit 2). Mirrors
+    the ``finally: ops.close()`` the async run/test/dep paths already do.
+    """
+    ops = _open_read_ops(args)
+    try:
+        yield ops
+    finally:
+        if ops is not None:
+            _close_ops(ops)
+
+
 def _emit_json(data: object) -> None:
     print(json.dumps(data, indent=2, default=str))
 
@@ -968,44 +991,40 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def cell_list_main(args: argparse.Namespace) -> int:
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
-    cells = ops.list_cells()
-    if args.format == "json":
-        _emit_json([cell.model_dump(mode="json") for cell in cells])
-    else:
-        for cell in cells:
-            print(f"{cell.status:8} {cell.id:18} {cell.name}")
-    return 0
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        cells = ops.list_cells()
+        if args.format == "json":
+            _emit_json([cell.model_dump(mode="json") for cell in cells])
+        else:
+            for cell in cells:
+                print(f"{cell.status:8} {cell.id:18} {cell.name}")
+        return 0
 
 
 def cell_show_main(args: argparse.Namespace) -> int:
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
     from strata.notebook.ops import NotebookOpsError
 
-    try:
-        cell = ops.get_cell(args.cell_id)
-    except NotebookOpsError as exc:
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        try:
+            cell = ops.get_cell(args.cell_id)
+        except NotebookOpsError as exc:
+            return _emit_op_error(exc, args.format)
         if args.format == "json":
-            _emit_json({"error": str(exc)})
+            _emit_json(cell.model_dump(mode="json"))
         else:
-            print(f"error: {exc}", file=sys.stderr)
-        return 1
-    if args.format == "json":
-        _emit_json(cell.model_dump(mode="json"))
-    else:
-        print(f"id:       {cell.id}")
-        print(f"name:     {cell.name}")
-        print(f"language: {cell.language}")
-        print(f"status:   {cell.status}")
-        if cell.staleness_reasons:
-            print(f"stale:    {', '.join(cell.staleness_reasons)}")
-        print("--- source ---")
-        print(cell.source)
-    return 0
+            print(f"id:       {cell.id}")
+            print(f"name:     {cell.name}")
+            print(f"language: {cell.language}")
+            print(f"status:   {cell.status}")
+            if cell.staleness_reasons:
+                print(f"stale:    {', '.join(cell.staleness_reasons)}")
+            print("--- source ---")
+            print(cell.source)
+        return 0
 
 
 def _read_source_arg(path: str) -> str:
@@ -1024,9 +1043,6 @@ def _emit_op_error(exc: Exception, fmt: str) -> int:
 
 
 def cell_add_main(args: argparse.Namespace) -> int:
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
     from strata.notebook.ops import NotebookOpsError
 
     try:
@@ -1034,21 +1050,21 @@ def cell_add_main(args: argparse.Namespace) -> int:
     except OSError as exc:
         print(f"error: cannot read --file: {exc}", file=sys.stderr)
         return 2
-    try:
-        cell = ops.add_cell(source, after=args.after, language=args.language)
-    except NotebookOpsError as exc:
-        return _emit_op_error(exc, args.format)
-    if args.format == "json":
-        _emit_json(cell.model_dump(mode="json"))
-    else:
-        print(f"added {cell.id}  {cell.name}")
-    return 0
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        try:
+            cell = ops.add_cell(source, after=args.after, language=args.language)
+        except NotebookOpsError as exc:
+            return _emit_op_error(exc, args.format)
+        if args.format == "json":
+            _emit_json(cell.model_dump(mode="json"))
+        else:
+            print(f"added {cell.id}  {cell.name}")
+        return 0
 
 
 def cell_edit_main(args: argparse.Namespace) -> int:
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
     from strata.notebook.ops import NotebookOpsError
 
     try:
@@ -1056,49 +1072,52 @@ def cell_edit_main(args: argparse.Namespace) -> int:
     except OSError as exc:
         print(f"error: cannot read --file: {exc}", file=sys.stderr)
         return 2
-    try:
-        cell = ops.edit_cell(args.cell_id, source)
-    except NotebookOpsError as exc:
-        return _emit_op_error(exc, args.format)
-    if args.format == "json":
-        _emit_json(cell.model_dump(mode="json"))
-    else:
-        print(f"edited {cell.id}  {cell.name}")
-    return 0
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        try:
+            cell = ops.edit_cell(args.cell_id, source)
+        except NotebookOpsError as exc:
+            return _emit_op_error(exc, args.format)
+        if args.format == "json":
+            _emit_json(cell.model_dump(mode="json"))
+        else:
+            print(f"edited {cell.id}  {cell.name}")
+        return 0
 
 
 def cell_rm_main(args: argparse.Namespace) -> int:
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
     from strata.notebook.ops import NotebookOpsError
 
-    try:
-        ops.remove_cell(args.cell_id)
-    except NotebookOpsError as exc:
-        return _emit_op_error(exc, args.format)
-    if args.format == "json":
-        _emit_json({"removed": args.cell_id})
-    else:
-        print(f"removed {args.cell_id}")
-    return 0
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        try:
+            ops.remove_cell(args.cell_id)
+        except NotebookOpsError as exc:
+            return _emit_op_error(exc, args.format)
+        if args.format == "json":
+            _emit_json({"removed": args.cell_id})
+        else:
+            print(f"removed {args.cell_id}")
+        return 0
 
 
 def cell_mv_main(args: argparse.Namespace) -> int:
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
     from strata.notebook.ops import NotebookOpsError
 
-    try:
-        cells = ops.move_cell(args.cell_id, args.to)
-    except NotebookOpsError as exc:
-        return _emit_op_error(exc, args.format)
-    if args.format == "json":
-        _emit_json([cell.model_dump(mode="json") for cell in cells])
-    else:
-        print("  ".join(cell.id for cell in cells))
-    return 0
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        try:
+            cells = ops.move_cell(args.cell_id, args.to)
+        except NotebookOpsError as exc:
+            return _emit_op_error(exc, args.format)
+        if args.format == "json":
+            _emit_json([cell.model_dump(mode="json") for cell in cells])
+        else:
+            print("  ".join(cell.id for cell in cells))
+        return 0
 
 
 def _valid_annotation_key(key: str) -> bool:
@@ -1128,29 +1147,32 @@ def cell_annotate_main(args: argparse.Namespace) -> int:
             print(f"error: invalid annotation key {key!r}", file=sys.stderr)
             return 2
 
-    ops = _open_read_ops(args)
-    if ops is None:
-        return 2
     from strata.notebook.annotations import (
         remove_annotation_directive,
         set_annotation_directive,
     )
     from strata.notebook.ops import NotebookOpsError
 
-    try:
-        source = ops.get_cell(args.cell_id).source
-        for key, value in sets:
-            source = set_annotation_directive(source, key, value)
-        for key in args.unset:
-            source = remove_annotation_directive(source, key.strip())
-        cell = ops.edit_cell(args.cell_id, source)
-    except NotebookOpsError as exc:
-        return _emit_op_error(exc, args.format)
-    if args.format == "json":
-        _emit_json(cell.model_dump(mode="json"))
-    else:
-        print(f"annotated {cell.id}  {cell.name}")
-    return 0
+    with _read_ops(args) as ops:
+        if ops is None:
+            return 2
+        try:
+            source = ops.get_cell(args.cell_id).source
+            for key, value in sets:
+                source = set_annotation_directive(source, key, value)
+            for key in args.unset:
+                source = remove_annotation_directive(source, key.strip())
+            cell = ops.edit_cell(args.cell_id, source)
+        except ValueError as exc:  # e.g. a repeatable directive passed to --set
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        except NotebookOpsError as exc:
+            return _emit_op_error(exc, args.format)
+        if args.format == "json":
+            _emit_json(cell.model_dump(mode="json"))
+        else:
+            print(f"annotated {cell.id}  {cell.name}")
+        return 0
 
 
 def add_dep_arguments(parser: argparse.ArgumentParser) -> None:
