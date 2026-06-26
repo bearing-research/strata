@@ -942,6 +942,27 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     mv_p.add_argument("--format", choices=["human", "json"], default="json")
     mv_p.set_defaults(func=cell_mv_main)
 
+    annotate_p = sub.add_parser("annotate", help="Set or remove a cell's `# @key` annotations")
+    _add_target_args(annotate_p)
+    annotate_p.add_argument("cell_id", help="Cell id to annotate")
+    annotate_p.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="set_",
+        metavar="KEY=VALUE",
+        help="Set a scalar annotation, e.g. --set worker=gpu-box (repeatable)",
+    )
+    annotate_p.add_argument(
+        "--unset",
+        action="append",
+        default=[],
+        metavar="KEY",
+        help="Remove an annotation directive, e.g. --unset worker (repeatable)",
+    )
+    annotate_p.add_argument("--format", choices=["human", "json"], default="json")
+    annotate_p.set_defaults(func=cell_annotate_main)
+
     # `strata cell` with no action → help.
     parser.set_defaults(func=lambda args: (parser.print_help(), 0)[1])
 
@@ -1077,6 +1098,58 @@ def cell_mv_main(args: argparse.Namespace) -> int:
         _emit_json([cell.model_dump(mode="json") for cell in cells])
     else:
         print("  ".join(cell.id for cell in cells))
+    return 0
+
+
+def _valid_annotation_key(key: str) -> bool:
+    return bool(key) and all(c.isalnum() or c == "_" for c in key)
+
+
+def cell_annotate_main(args: argparse.Namespace) -> int:
+    """Splice `# @key` directives into a cell's source, preserving the body.
+
+    Composes `get_cell` + `edit_cell`, so it works against a local directory or
+    a live `--server/--session` with no backend-specific code.
+    """
+    if not args.set_ and not args.unset:
+        print("error: provide at least one --set KEY=VALUE or --unset KEY", file=sys.stderr)
+        return 2
+
+    sets: list[tuple[str, str]] = []
+    for item in args.set_:
+        key, sep, value = item.partition("=")
+        key = key.strip()
+        if not sep or not _valid_annotation_key(key):
+            print(f"error: --set expects a valid KEY=VALUE, got {item!r}", file=sys.stderr)
+            return 2
+        sets.append((key, value))
+    for key in args.unset:
+        if not _valid_annotation_key(key.strip()):
+            print(f"error: invalid annotation key {key!r}", file=sys.stderr)
+            return 2
+
+    ops = _open_read_ops(args)
+    if ops is None:
+        return 2
+    from strata.notebook.annotations import (
+        remove_annotation_directive,
+        set_annotation_directive,
+    )
+    from strata.notebook.ops import NotebookOpsError
+
+    try:
+        source = ops.get_cell(args.cell_id).source
+        for key, value in sets:
+            source = set_annotation_directive(source, key, value)
+        for key in args.unset:
+            source = remove_annotation_directive(source, key.strip())
+        cell = ops.edit_cell(args.cell_id, source)
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    if args.format == "json":
+        _emit_json(cell.model_dump(mode="json"))
+    else:
+        print(f"annotated {cell.id}  {cell.name}")
     return 0
 
 

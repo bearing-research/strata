@@ -237,20 +237,25 @@ An agent can also build and edit a notebook through commands (instead of writing
 `notebook.toml` + `cells/*.py` by hand):
 
 ```bash
-strata cell add  <notebook_dir> --file body.py [--after <id>] [--language python|markdown|sql|r|prompt]
-strata cell edit <notebook_dir> <cell_id> --file body.py     # replace a cell's source
-strata cell rm   <notebook_dir> <cell_id>                     # delete a cell
-strata cell mv   <notebook_dir> <cell_id> --to <index>        # reorder (0-based)
-strata dep add   <notebook_dir> <package>                     # uv add
-strata dep rm    <notebook_dir> <package>                     # uv remove
+strata cell add      <notebook_dir> --file body.py [--after <id>] [--language python|markdown|sql|r|prompt]
+strata cell edit     <notebook_dir> <cell_id> --file body.py     # replace a cell's source
+strata cell rm       <notebook_dir> <cell_id>                     # delete a cell
+strata cell mv       <notebook_dir> <cell_id> --to <index>        # reorder (0-based)
+strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout
+strata dep add       <notebook_dir> <package>                     # uv add
+strata dep rm        <notebook_dir> <package>                     # uv remove
 ```
 
 `--file -` reads cell source from stdin. `cell add` mints a backend-style 8-char
 id (the same scheme the server uses) and prints the new cell; `mv` prints the new
-order. Dependency commands run `uv add` / `uv remove` and report whether the
-lockfile changed. All take `--format json|human` and use the shared exit codes
-(`0` ok, `1` operation failure such as an unknown cell or a failed `uv` resolve,
-`2` invocation error).
+order. `cell annotate` splices `# @key` [annotations](annotations.md) into a
+cell's source (`--set KEY=VALUE` / `--unset KEY`, both repeatable) while leaving
+the body untouched — a convenience over rewriting the whole source with `edit`;
+it targets scalar directives (`name`, `worker`, `timeout`, `model`, …), so edit
+the source directly for repeatable `mount` / `table` / `env`. Dependency
+commands run `uv add` / `uv remove` and report whether the lockfile changed. All
+take `--format json|human` and use the shared exit codes (`0` ok, `1` operation
+failure such as an unknown cell or a failed `uv` resolve, `2` invocation error).
 
 ```bash
 echo 'total = sum(nums)' | strata cell add nb --file - --after load --format json | jq .id

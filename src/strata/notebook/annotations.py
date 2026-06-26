@@ -201,6 +201,67 @@ def strip_leading_annotations(source: str) -> str:
     return ""
 
 
+def _leading_block_end(lines: list[str]) -> int:
+    """Index of the first cell-body line — end of the leading comment block."""
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return i
+    return len(lines)
+
+
+def _format_directive(key: str, value: str) -> str:
+    """Render a ``# @key value`` line (``# @key`` when *value* is empty)."""
+    value = value.strip()
+    return f"# @{key} {value}" if value else f"# @{key}"
+
+
+def set_annotation_directive(source: str, key: str, value: str) -> str:
+    """Return *source* with a single ``# @key value`` directive set.
+
+    Replaces the first existing ``# @key`` directive in the leading comment
+    block (dropping any duplicate ``# @key`` lines) and leaves the cell body
+    untouched. When the key is absent, the directive is inserted after the last
+    existing annotation, or at the very top when the cell has none. Intended for
+    scalar directives (``name``, ``worker``, ``timeout``, ``model``, …); for the
+    repeatable ones (``mount``, ``table``, ``env``) edit the source directly.
+    """
+    key = key.lower()
+    new_line = _format_directive(key, value)
+    lines = source.splitlines()
+    block_end = _leading_block_end(lines)
+
+    matches = [
+        i for i in range(block_end) if (d := parse_annotation_directive(lines[i])) and d[0] == key
+    ]
+    if matches:
+        lines[matches[0]] = new_line
+        for i in reversed(matches[1:]):  # collapse accidental duplicates
+            del lines[i]
+    else:
+        directives = [i for i in range(block_end) if parse_annotation_directive(lines[i])]
+        lines.insert(directives[-1] + 1 if directives else 0, new_line)
+
+    result = "\n".join(lines)
+    return result + "\n" if source.endswith("\n") else result
+
+
+def remove_annotation_directive(source: str, key: str) -> str:
+    """Return *source* with every ``# @key`` directive removed from the block."""
+    key = key.lower()
+    lines = source.splitlines()
+    block_end = _leading_block_end(lines)
+    kept = [
+        line
+        for i, line in enumerate(lines)
+        if not (
+            i < block_end and (d := parse_annotation_directive(line)) is not None and d[0] == key
+        )
+    ]
+    result = "\n".join(kept)
+    return result + "\n" if source.endswith("\n") else result
+
+
 @dataclass
 class CellAnnotations:
     """Parsed annotations from a cell's leading comment block."""
