@@ -2849,6 +2849,64 @@ async def execute_cell(notebook_id: str, session: SessionDep, cell_id: str) -> d
         raise HTTPException(status_code=500, detail="Execution failed")
 
 
+@router.post("/{notebook_id}/cells/{cell_id}/tests")
+async def run_cell_tests_endpoint(notebook_id: str, session: SessionDep, cell_id: str) -> dict:
+    """Run a Python cell's unit tests and return the result.
+
+    The REST twin of the WS ``cell_run_tests`` message: runs the committed
+    ``cells/{cell_id}.test.py`` via pytest against a re-executed copy of the
+    cell, persists the result (so a client watching over WS sees it on its next
+    state sync), and returns the per-test outcomes. Used by the CLI's remote
+    backend and the MCP server, which don't drive WebSockets.
+    """
+    cell = session.notebook_state.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+    if cell.language != CellLanguage.PYTHON:
+        raise HTTPException(
+            status_code=400, detail="Cell tests are only supported for Python cells"
+        )
+    if not cell.test_source.strip():
+        raise HTTPException(status_code=400, detail=f"Cell {cell_id} has no tests")
+
+    environment_block_reason = session.environment_execution_block_message()
+    if environment_block_reason:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": environment_block_reason,
+                "code": "ENVIRONMENT_BUSY",
+                "environment_job": session.serialize_environment_job_state(),
+            },
+        )
+
+    try:
+        executor = CellExecutor(session, session.warm_pool)
+        result = await executor.run_cell_tests(cell_id, cell.test_source)
+    except Exception:
+        logger.exception("Cell test run failed")
+        raise HTTPException(status_code=500, detail="Test run failed")
+
+    return {
+        "cell_id": cell_id,
+        "passed": result.passed,
+        "failed": result.failed,
+        "errored": result.errored,
+        "skipped": result.skipped,
+        "pytest_unavailable": result.pytest_unavailable,
+        "ran_at": result.ran_at,
+        "tests": [
+            {
+                "name": case.name,
+                "nodeid": case.nodeid,
+                "outcome": case.outcome,
+                "message": case.message,
+            }
+            for case in result.tests
+        ],
+    }
+
+
 def _render_notebook_export(
     session,
     *,

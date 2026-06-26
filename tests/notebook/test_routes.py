@@ -2469,3 +2469,56 @@ class TestRuntimeConfigRegistryFlag:
         cfg = _serialize_notebook_runtime_config()
         assert cfg["deployment_mode"] == "service"
         assert cfg["registry_enabled"] is False
+
+
+# ---------------------------------------------------------------------------
+# Cell tests endpoint (REST twin of WS cell_run_tests)
+# ---------------------------------------------------------------------------
+
+
+def test_run_cell_tests_endpoint(client, tmp_path, monkeypatch):
+    """POST /cells/{id}/tests runs the cell's tests and returns per-test outcomes."""
+    from strata.notebook.models import CellTestCase, CellTestResult
+    from strata.notebook.writer import write_cell_tests
+
+    notebook_dir = create_notebook(tmp_path, "TestsEndpointNb", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "feat", None, language="python")
+    write_cell(notebook_dir, "feat", "def double(x):\n    return x * 2\n")
+    write_cell_tests(
+        notebook_dir, "feat", "def test_double(cell):\n    assert cell.double(2) == 4\n"
+    )
+    session_id = open_session_id(client, notebook_dir)
+
+    async def _fake_run(self, cell_id, test_source):
+        assert cell_id == "feat" and "test_double" in test_source
+        return CellTestResult(
+            passed=1,
+            failed=1,
+            tests=[
+                CellTestCase(name="test_double", outcome="passed"),
+                CellTestCase(name="test_bad", outcome="failed", message="boom"),
+            ],
+        )
+
+    monkeypatch.setattr("strata.notebook.routes.CellExecutor.run_cell_tests", _fake_run)
+
+    response = client.post(f"/v1/notebooks/{session_id}/cells/feat/tests")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["passed"] == 1 and body["failed"] == 1
+    assert [t["outcome"] for t in body["tests"]] == ["passed", "failed"]
+    assert body["tests"][1]["message"] == "boom"
+
+    # Unknown cell → 404.
+    assert client.post(f"/v1/notebooks/{session_id}/cells/ghost/tests").status_code == 404
+
+
+def test_run_cell_tests_endpoint_no_test_source_is_400(client, tmp_path):
+    """A cell with no cells/{id}.test.py → 400 (nothing to run)."""
+    notebook_dir = create_notebook(tmp_path, "NoTestsNb", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "plain", None, language="python")
+    write_cell(notebook_dir, "plain", "x = 1\n")
+    session_id = open_session_id(client, notebook_dir)
+
+    response = client.post(f"/v1/notebooks/{session_id}/cells/plain/tests")
+    assert response.status_code == 400, response.text
