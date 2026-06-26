@@ -6,17 +6,20 @@ the verbs in each surface. Two backends implement the protocol:
 
 - :class:`LocalNotebookOps` (here) — an in-process ``NotebookSession``, offline,
   the same path ``strata run`` takes. No server required.
-- ``RemoteNotebookOps`` (a later phase) — an httpx REST client against a running
+- :class:`RemoteNotebookOps` (here) — an httpx client against a running
   ``strata-notebook``, so the same commands drive a session a human can watch in
-  the TUI / web UI.
+  the TUI / web UI. Read verbs land first (P3b); run / author verbs follow.
 
 The verbs return small **curated view models** (``CellView`` / ``DagView`` /
 ``NotebookStatus``) — agent-facing projections of the internal ``CellState`` /
 ``NotebookDag`` domain models, fully typed (no ``Any``) and free of internal
 bookkeeping. They are *the* contract: both backends return them and the MCP
-server wraps them, so all three surfaces agree. (The raw server ``serialize()``
-wire dict — ``CellState`` + ~7 computed overlays — is deliberately not modelled;
-see ``docs/internal/design-cli-hardening.md``.)
+server wraps them, so all three surfaces agree. A single wire-dict mapper
+(``_cell_view_from_wire``) builds them — the local backend feeds it
+``CellState.serialize()``, the remote backend feeds it the server's JSON, so the
+two paths cannot drift. (The raw server ``serialize()`` wire dict — ``CellState``
++ ~7 computed overlays — is deliberately not modelled as a view; see
+``docs/internal/design-cli-hardening.md``.)
 
 This module is import-light: it pulls ``parse_notebook`` / ``NotebookSession``
 lazily and never imports the FastAPI server tree, so ``strata cell …`` stays a
@@ -26,13 +29,15 @@ fast CLI.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, JsonValue
 
 if TYPE_CHECKING:
+    import httpx
+
     from strata.notebook.dag import NotebookDag
-    from strata.notebook.models import CellOutput, CellState, CellTestResult
+    from strata.notebook.models import CellState
 
 
 # ---------------------------------------------------------------------------
@@ -546,71 +551,170 @@ class LocalNotebookOps:
         self._executor = None
 
 
+_EMPTY_DAG: dict[str, Any] = {
+    "edges": [],
+    "topological_order": [],
+    "leaves": [],
+    "roots": [],
+    "variable_producer": {},
+}
+
+
+class RemoteNotebookOps:
+    """:class:`NotebookOps` reads over a running ``strata-notebook`` server.
+
+    Drives a live session — the same one a human can watch in the TUI / web UI —
+    by its ``session_id``, reading the session-state endpoint and projecting the
+    server's JSON through the shared wire mapper, so a remote ``CellView`` is
+    byte-for-byte what the local backend would return for that notebook.
+
+    Read-only today (P3b); run / author verbs land in a later phase. The
+    session-state endpoint it reads is personal-mode only, which matches the
+    intended use — driving the session you're watching locally.
+
+    Parameters
+    ----------
+    base_url : str
+        Server root, e.g. ``http://localhost:8765``.
+    session_id : str
+        The open session to drive — the route ``{id}`` (a session id, *not* the
+        ``notebook.toml`` id).
+    client : httpx.Client or None, optional
+        An httpx client to reuse; one is created (and owned) when omitted.
+    """
+
+    def __init__(
+        self, base_url: str, session_id: str, *, client: httpx.Client | None = None
+    ) -> None:
+        import httpx
+
+        self._base_url = base_url.rstrip("/")
+        self._session_id = session_id
+        self._owns_client = client is None
+        self._client: httpx.Client = client if client is not None else httpx.Client(timeout=30.0)
+
+    def _state(self) -> dict[str, Any]:
+        """Fetch the live session snapshot (name, cells, dag) or raise."""
+        import httpx
+
+        url = f"{self._base_url}/v1/notebooks/sessions/{self._session_id}"
+        try:
+            resp = self._client.get(url)
+        except httpx.HTTPError as exc:
+            raise NotebookOpsError(f"cannot reach {self._base_url}: {exc}") from exc
+        if resp.status_code == 404:
+            raise NotebookOpsError(f"no session {self._session_id!r} on {self._base_url}")
+        if resp.status_code >= 400:
+            raise NotebookOpsError(
+                f"server returned {resp.status_code} for session {self._session_id!r}"
+            )
+        return resp.json()
+
+    def list_cells(self) -> list[CellView]:
+        """List every cell (see :meth:`NotebookOps.list_cells`)."""
+        return [_cell_view_from_wire(cell) for cell in self._state().get("cells") or []]
+
+    def get_cell(self, cell_id: str) -> CellView:
+        """Project one cell (see :meth:`NotebookOps.get_cell`)."""
+        for cell in self._state().get("cells") or []:
+            if cell.get("id") == cell_id:
+                return _cell_view_from_wire(cell)
+        raise NotebookOpsError(f"no cell with id {cell_id!r}")
+
+    def dag(self) -> DagView:
+        """Build the DAG view (see :meth:`NotebookOps.dag`)."""
+        return DagView.model_validate(self._state().get("dag") or _EMPTY_DAG)
+
+    def status(self) -> NotebookStatus:
+        """Summarize per-cell status (see :meth:`NotebookOps.status`)."""
+        state = self._state()
+        return NotebookStatus(
+            notebook_id=state.get("id") or "",
+            name=state.get("name") or "",
+            cells=[_status_row_from_wire(cell) for cell in state.get("cells") or []],
+        )
+
+    def close(self) -> None:
+        """Close the httpx client if this instance created it."""
+        if self._owns_client:
+            self._client.close()
+
+
 # ---------------------------------------------------------------------------
 # Projections: domain models → view models.
 # ---------------------------------------------------------------------------
 
 
-def _cell_name(cell: CellState) -> str:
-    """The cell's display name — its ``# @name`` annotation, else empty."""
-    from strata.notebook.annotations import parse_annotations
-
-    return parse_annotations(cell.source).name or ""
+# Both backends map from the same wire dict — ``CellState.serialize()`` locally,
+# the server's JSON remotely — so the two paths produce identical view models.
 
 
-def _staleness_reasons(cell: CellState) -> list[str]:
-    if cell.staleness is None:
-        return []
-    return [reason.value for reason in cell.staleness.reasons]
-
-
-def _output_view(output: CellOutput) -> OutputView:
+def _output_view_from_wire(data: dict[str, Any]) -> OutputView:
     return OutputView(
-        content_type=output.content_type,
-        preview=output.preview,
-        rows=output.rows,
-        columns=output.columns,
+        content_type=data.get("content_type"),
+        preview=data.get("preview"),
+        rows=data.get("rows"),
+        columns=data.get("columns"),
     )
 
 
-def _test_view(result: CellTestResult) -> CellTestView:
+def _test_view_from_wire(data: dict[str, Any]) -> CellTestView:
     return CellTestView(
-        passed=result.passed,
-        failed=result.failed,
-        errored=result.errored,
-        skipped=result.skipped,
+        passed=data.get("passed", 0),
+        failed=data.get("failed", 0),
+        errored=data.get("errored", 0),
+        skipped=data.get("skipped", 0),
         cases=[
-            TestCaseView(name=case.name, outcome=case.outcome, message=case.message)
-            for case in result.tests
+            TestCaseView(
+                name=case["name"], outcome=case["outcome"], message=case.get("message", "")
+            )
+            for case in data.get("tests", [])
         ],
     )
 
 
-def _cell_view(cell: CellState) -> CellView:
+def _cell_view_from_wire(data: dict[str, Any]) -> CellView:
+    """Project a serialized-cell wire dict into a :class:`CellView`.
+
+    Reads only the agent-facing fields; the wire dict's internal bookkeeping
+    (provenance hashes, remote-build state, …) is simply not consulted.
+    """
+    annotations = data.get("annotations") or {}
+    test = data.get("test_result")
     return CellView(
-        id=cell.id,
-        name=_cell_name(cell),
-        language=cell.language.value,
-        status=cell.status.value,
-        source=cell.source,
-        staleness_reasons=_staleness_reasons(cell),
-        upstream_ids=list(cell.upstream_ids),
-        downstream_ids=list(cell.downstream_ids),
-        outputs=[_output_view(output) for output in cell.display_outputs],
-        console_stdout=cell.console_stdout,
-        console_stderr=cell.console_stderr,
-        test=_test_view(cell.test_result) if cell.test_result is not None else None,
+        id=data["id"],
+        name=annotations.get("name") or "",
+        language=data["language"],
+        status=data["status"],
+        source=data.get("source") or "",
+        staleness_reasons=list(data.get("staleness_reasons") or []),
+        upstream_ids=list(data.get("upstream_ids") or []),
+        downstream_ids=list(data.get("downstream_ids") or []),
+        outputs=[_output_view_from_wire(output) for output in data.get("display_outputs") or []],
+        console_stdout=data.get("console_stdout") or "",
+        console_stderr=data.get("console_stderr") or "",
+        test=_test_view_from_wire(test) if test else None,
     )
+
+
+def _status_row_from_wire(data: dict[str, Any]) -> CellStatusRow:
+    annotations = data.get("annotations") or {}
+    return CellStatusRow(
+        id=data["id"],
+        name=annotations.get("name") or "",
+        language=data["language"],
+        status=data["status"],
+        staleness_reasons=list(data.get("staleness_reasons") or []),
+    )
+
+
+def _cell_view(cell: CellState) -> CellView:
+    """Local projection: serialize the cell to the wire dict, then map it."""
+    return _cell_view_from_wire(cell.serialize())
 
 
 def _status_row(cell: CellState) -> CellStatusRow:
-    return CellStatusRow(
-        id=cell.id,
-        name=_cell_name(cell),
-        language=cell.language.value,
-        status=cell.status.value,
-        staleness_reasons=_staleness_reasons(cell),
-    )
+    return _status_row_from_wire(cell.serialize())
 
 
 def _dag_view(dag: NotebookDag | None) -> DagView:
