@@ -2426,6 +2426,15 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
         New cell state
     """
 
+    # Validate the insertion anchor up front (before the try, so the 400 isn't
+    # masked as a 500 by the catch-all) — matches LocalNotebookOps.add_cell.
+    if req.after_cell_id is not None and not any(
+        c.id == req.after_cell_id for c in session.notebook_state.cells
+    ):
+        raise HTTPException(
+            status_code=400, detail=f"after_cell_id {req.after_cell_id!r} not found"
+        )
+
     try:
         # Generate cell ID
         cell_id = str(uuid.uuid4())[:8]
@@ -2501,6 +2510,8 @@ async def delete_cell(notebook_id: str, session: SessionDep, cell_id: str) -> di
                 "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
             },
         }
+    except HTTPException:
+        raise  # the 404 above is intentional — don't let the catch-all mask it as 500
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc) or "Not found")
     except PermissionError as exc:
