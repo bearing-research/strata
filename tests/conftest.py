@@ -64,6 +64,19 @@ def _reset_process_globals():
     yield
     import strata.server as server_module
 
+    # Drain pending stream-cleanup tasks before dropping the state. Production
+    # does this in graceful shutdown (``_graceful_shutdown`` →
+    # ``streams.shutdown_cleanups()``), but tests that bypass the lifespan (a
+    # bare ``TestClient(app)``) would otherwise orphan the TTL tasks, which
+    # surface as "no running event loop" / "Task was destroyed but it is
+    # pending" noise once their loop closes. ``shutdown_cleanups`` only cancels
+    # tasks, so it never raises.
+    state = server_module._state
+    if state is not None:
+        streams = getattr(state, "streams", None)
+        if streams is not None:
+            streams.shutdown_cleanups()
+
     server_module._state = None
     from strata.artifact_store import reset_artifact_store
     from strata.rate_limiter import reset_rate_limiter
