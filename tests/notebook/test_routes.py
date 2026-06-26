@@ -1328,6 +1328,24 @@ def test_delete_cell(client, tmp_path):
     assert len(response.json()["cells"]) == 0
 
 
+def test_delete_unknown_cell_is_404_not_500(client, tmp_path):
+    """Deleting a missing cell is a 404 — the catch-all must not mask it as 500."""
+    notebook_dir = create_notebook(tmp_path, "Delete 404 Test")
+    session_id = open_session_id(client, notebook_dir)
+
+    response = client.delete(f"/v1/notebooks/{session_id}/cells/ghost")
+    assert response.status_code == 404, response.text
+
+
+def test_add_cell_bad_after_is_400(client, tmp_path):
+    """An after_cell_id that names no cell is rejected (parity with the local backend)."""
+    notebook_dir = create_notebook(tmp_path, "Add After Test")
+    session_id = open_session_id(client, notebook_dir)
+
+    response = client.post(f"/v1/notebooks/{session_id}/cells", json={"after_cell_id": "ghost"})
+    assert response.status_code == 400, response.text
+
+
 def test_reorder_cells(client, tmp_path):
     """PUT /v1/notebooks/{id}/cells/reorder reorders cells in-place."""
     notebook_dir = create_notebook(tmp_path, "Reorder Test")
