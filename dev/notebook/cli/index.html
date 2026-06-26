@@ -2286,8 +2286,8 @@ directory. Pass <code>--server &lt;url&gt; --session &lt;id&gt;</code> in place 
 <p><code>&lt;id&gt;</code> is the session id (the route <code>{id}</code>, not the <code>notebook.toml</code> id). The
 output is identical to the local backend — both project the same wire shape — so
 a script written against a local notebook works unchanged against a live session.
-<code>cell run</code> and <code>cell test</code> accept the same selector (see below); the authoring
-commands stay local for now and gain remote support in a later release. Remote
+<code>cell run</code> / <code>cell test</code> and the authoring commands accept the same selector
+(see below), so the entire surface works against a live session. Remote
 operations target a personal-mode server (the use case is driving the session
 you're watching locally).</p>
 <h2 id="running-a-cell-or-its-tests-cell-run-cell-test">Running a cell or its tests (<code>cell run</code>, <code>cell test</code>)<a class="headerlink" href="#running-a-cell-or-its-tests-cell-run-cell-test" title="Permanent link">&para;</a></h2>
@@ -2332,10 +2332,14 @@ lockfile changed. All take <code>--format json|human</code> and use the shared e
 <code>2</code> invocation error).</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;total = sum(nums)&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>strata<span class="w"> </span>cell<span class="w"> </span>add<span class="w"> </span>nb<span class="w"> </span>--file<span class="w"> </span>-<span class="w"> </span>--after<span class="w"> </span>load<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>.id
 </code></pre></div>
+<p>These also accept <code>--server &lt;url&gt; --session &lt;id&gt;</code> to author into a live session
+instead of a local directory — edits land in the running notebook a human is
+watching in the TUI. (<code>cell add</code> makes two calls: it mints the cell on the
+server, then sets its source.)</p>
 <p>Together with inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>) and execution (<code>cell
-run/test</code>), this is the full <strong>local</strong> agent surface. Inspect and execution also
-drive a <em>running</em> server via <code>--server/--session</code> (above); remote authoring and
-an MCP server land in later releases.</p>
+run/test</code>), this is the full agent surface — and <strong>all of it</strong> works either
+offline against a directory or <code>--server/--session</code> against a running server. An
+MCP server wrapping the same operations lands in a later release.</p>
 
 
 
