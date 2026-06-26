@@ -276,11 +276,30 @@ PUT /v1/notebooks/{session_id}/cells/reorder
 ### Execute Cell (REST)
 
 ```
-POST /v1/notebooks/{session_id}/cells/{cell_id}/execute
+POST /v1/notebooks/{session_id}/cells/{cell_id}/execute?mode=normal
 ```
+
+The optional `mode` query parameter selects the run mode: `normal` (default —
+use the cache and materialize stale upstreams), `rerun` (bypass the target
+cell's cache, still materialize upstreams), or `force` (run against whatever
+upstream artifacts already exist). An unrecognized mode returns `400`.
 
 !!! tip
 For interactive use, prefer the WebSocket `cell_execute` message. The REST endpoint is for programmatic access.
+
+### Run Cell Tests (REST)
+
+```
+POST /v1/notebooks/{session_id}/cells/{cell_id}/tests
+```
+
+Runs the committed `cells/{cell_id}.test.py` via pytest against a re-executed
+copy of the cell and returns per-test outcomes: `{ "cell_id", "passed",
+"failed", "errored", "skipped", "pytest_unavailable", "ran_at", "tests": [{
+"name", "nodeid", "outcome", "message" }] }`. Python cells only — a non-Python
+cell or one with no test source returns `400`. The REST twin of the WebSocket
+`cell_run_tests` message, for clients (the CLI, agents) that don't drive a
+socket.
 
 ### List Loop Cell Iterations
 
