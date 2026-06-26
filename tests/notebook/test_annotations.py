@@ -378,3 +378,18 @@ class TestSpliceDirectives:
 
     def test_no_trailing_newline_preserved(self):
         assert self._set("x = 1", "name", "n") == "# @name n\nx = 1"
+
+    def test_set_rejects_repeatable_directives(self):
+        import pytest
+
+        for key in ("env", "mount", "table"):
+            with pytest.raises(ValueError, match="repeatable"):
+                self._set("x = 1\n", key, "whatever")
+
+    def test_set_preserves_crlf(self):
+        out = self._set("x = 1\r\n", "name", "n")
+        assert out == "# @name n\r\nx = 1\r\n"
+
+    def test_remove_preserves_crlf(self):
+        out = self._rm("# @worker a\r\nx = 1\r\n", "worker")
+        assert out == "x = 1\r\n"

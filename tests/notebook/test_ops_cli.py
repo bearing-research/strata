@@ -270,6 +270,13 @@ def test_cli_cell_annotate_bad_set_is_exit_2(chain_nb, capsys):
     assert "KEY=VALUE" in capsys.readouterr().err
 
 
+def test_cli_cell_annotate_repeatable_key_is_exit_2(chain_nb, capsys):
+    # @env is repeatable — splicing one line would clobber others, so it's refused.
+    rc = main(["cell", "annotate", str(chain_nb), "a", "--set", "env=A=1", "--format", "json"])
+    assert rc == 2
+    assert "repeatable" in capsys.readouterr().err
+
+
 def test_cli_dag_and_status_json(chain_nb, capsys):
     assert main(["dag", str(chain_nb), "--format", "json"]) == 0
     dag = json.loads(capsys.readouterr().out)

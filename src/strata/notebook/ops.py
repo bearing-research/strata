@@ -714,11 +714,11 @@ class RemoteNotebookOps:
         """
         base = f"/v1/notebooks/{self._session_id}/cells"
         created = self._cell_op("POST", base, json={"after_cell_id": after, "language": language})
-        cell_id = created["id"]
+        cell_id = _require_field(created, "id")
         updated = self._cell_op(
             "PUT", f"{base}/{cell_id}", cell_id=cell_id, json={"source": source}
         )
-        return _cell_view_from_wire(updated["cell"])
+        return _cell_view_from_wire(_require_field(updated, "cell"))
 
     def edit_cell(self, cell_id: str, source: str) -> CellView:
         """Replace a cell's source (see :meth:`NotebookOps.edit_cell`)."""
@@ -728,7 +728,7 @@ class RemoteNotebookOps:
             cell_id=cell_id,
             json={"source": source},
         )
-        return _cell_view_from_wire(updated["cell"])
+        return _cell_view_from_wire(_require_field(updated, "cell"))
 
     def remove_cell(self, cell_id: str) -> None:
         """Delete a cell (see :meth:`NotebookOps.remove_cell`)."""
@@ -912,6 +912,14 @@ def _error_detail(resp: Any) -> str:
     if isinstance(detail, str):
         return detail
     return f"server returned {resp.status_code}"
+
+
+def _require_field(data: dict[str, Any], key: str) -> Any:
+    """Return ``data[key]`` or raise — a server response missing it is malformed."""
+    value = data.get(key)
+    if value is None:
+        raise NotebookOpsError(f"malformed server response: missing {key!r}")
+    return value
 
 
 def _cell_view(cell: CellState) -> CellView:
