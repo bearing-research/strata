@@ -2636,9 +2636,10 @@ exhaustive commit history.</p>
 <p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
 <h2 id="040-2026-06-24">0.4.0 — 2026-06-24<a class="headerlink" href="#040-2026-06-24" title="Permanent link">&para;</a></h2>
 <p>0.4.0 is a <strong>consolidation and hardening</strong> cycle. The headlines are a new
-<strong>read-only terminal viewer</strong> for notebooks and an internal restructuring of the
-server, alongside per-cell unit tests, broader value serialization with in-place
-mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.</p>
+<strong>read-only terminal viewer</strong> for notebooks and a <strong>full agent-facing notebook
+CLI</strong>, alongside an internal restructuring of the server, per-cell unit tests,
+broader value serialization with in-place mutation tracking, concurrency-bug
+fixes, and CI hardening. No breaking changes.</p>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
@@ -2660,6 +2661,20 @@ mutation tracking, concurrency-bug fixes, and CI hardening. No breaking changes.
   (<code>uv tool install "strata-notebook[tui]"</code>); it never edits or runs cells —
   purely for watching, e.g. an agent build a notebook in one terminal while you
   watch in another. See <a href="../notebook/tui/">Terminal Viewer</a>.</p>
+</li>
+<li>
+<p><strong>A full notebook CLI for agents (<code>strata cell</code>, <code>dag</code>, <code>status</code>, <code>dep</code>).</strong>
+  The <code>strata</code> command grew an agent-facing surface over one shared
+  <code>NotebookOps</code> core: <strong>inspect</strong> (<code>cell list/show</code>, <code>dag</code>, <code>status</code>),
+  <strong>execute</strong> one cell at a time (<code>cell run</code> in normal / <code>--rerun</code> / <code>--force</code>
+  mode, <code>cell test</code>), and <strong>author</strong> (<code>cell add/edit/rm/mv</code>, <code>cell annotate</code> to
+  splice <code># @key</code> annotations, <code>dep add/rm</code>) — all with <code>--format json</code> and a
+  stable exit-code contract (<code>0</code> ok / <code>1</code> operation failure / <code>2</code> invocation
+  error), so an agent can drive a notebook as a first-class tool. Every command
+  runs <strong>either offline against a notebook directory or against a live session
+  on a running server</strong> via <code>--server/--session</code> (the same session a human
+  watches in the TUI). See <a href="../notebook/cli/">Notebook CLI</a> and <a href="../notebook/agent-authoring/">Authoring
+  Programmatically</a>.</p>
 </li>
 <li>
 <p><strong>Per-cell unit tests in the notebook.</strong> Every Python code cell gets a
