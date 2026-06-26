@@ -2565,6 +2565,7 @@
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">classifier</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
 </code></pre></div>
 <p>Annotations are parsed from the <strong>first contiguous block</strong> of <code>#</code>-prefixed lines. Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format <code># @key value</code>.</p>
+<p>In the editor you type them directly into the cell. From a script or agent you can either write them into the source you pass to <code>strata cell add/edit</code>, or splice a single directive without touching the body: <code>strata cell annotate &lt;notebook_dir&gt; &lt;cell_id&gt; --set worker=gpu-box --unset timeout</code> (see the <a href="../cli/#authoring-cells-and-dependencies-cell-addeditrmmv-dep">CLI</a>).</p>
 <hr />
 <h2 id="name">@name<a class="headerlink" href="#name" title="Permanent link">&para;</a></h2>
 <p>Set a human-readable display name for the cell. Shown in the DAG view and as a badge in the cell editor.</p>
