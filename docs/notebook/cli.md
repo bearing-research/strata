@@ -176,6 +176,26 @@ on stdout), `2` invocation error (bad path) on stderr.
 strata cell list my_analysis | jq '.cells[] | select(.status == "error") | .id'
 ```
 
+### Reading a live session (`--server` / `--session`)
+
+The four read commands also inspect a session on a **running** `strata-notebook`
+— the same session a human is watching in the TUI or web UI — instead of a local
+directory. Pass `--server <url> --session <id>` in place of the notebook path:
+
+```bash
+strata cell list --server http://localhost:8765 --session $SID
+strata cell show --server http://localhost:8765 --session $SID <cell_id>
+strata dag       --server http://localhost:8765 --session $SID
+strata status    --server http://localhost:8765 --session $SID
+```
+
+`<id>` is the session id (the route `{id}`, not the `notebook.toml` id). The
+output is identical to the local backend — both project the same wire shape — so
+a script written against a local notebook works unchanged against a live session.
+Remote reads target a personal-mode server (the use case is driving the session
+you're watching locally); `cell run/test` and the authoring commands stay local
+for now and gain remote support in a later release.
+
 ## Running a cell or its tests (`cell run`, `cell test`)
 
 Beyond inspection, an agent can execute one cell at a time (not the whole
@@ -230,5 +250,6 @@ echo 'total = sum(nums)' | strata cell add nb --file - --after load --format jso
 ```
 
 Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
-run/test`), this is the full **local** agent surface; driving a *running* server
-(so a human can watch in the TUI) and an MCP server land in later releases.
+run/test`), this is the full **local** agent surface. The read commands also
+drive a *running* server via `--server/--session` (above); remote execution and
+authoring, plus an MCP server, land in later releases.

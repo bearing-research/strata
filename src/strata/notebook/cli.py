@@ -829,6 +829,40 @@ def _open_local_ops(notebook_dir_arg: str):
         return None
 
 
+def _add_target_args(parser: argparse.ArgumentParser) -> None:
+    """Register the read-command target: a local dir *or* a remote session.
+
+    A read command names its notebook either by directory (local, offline) or by
+    ``--server URL --session ID`` (a live session on a running ``strata-notebook``).
+    """
+    parser.add_argument(
+        "notebook_dir", nargs="?", help="Path to the notebook directory (local backend)"
+    )
+    parser.add_argument(
+        "--server", help="Server root for a live session, e.g. http://localhost:8765"
+    )
+    parser.add_argument("--session", help="Session id to drive on --server")
+
+
+def _open_read_ops(args: argparse.Namespace):
+    """Open the read backend for *args* — remote when ``--server`` is set, else local.
+
+    Returns the ops object, or None on a usage error (message already printed to
+    stderr; callers return exit 2).
+    """
+    if args.server:
+        if not args.session:
+            print("error: --server requires --session <id>", file=sys.stderr)
+            return None
+        from strata.notebook.ops import RemoteNotebookOps
+
+        return RemoteNotebookOps(args.server, args.session)
+    if not args.notebook_dir:
+        print("error: provide a notebook directory or --server/--session", file=sys.stderr)
+        return None
+    return _open_local_ops(args.notebook_dir)
+
+
 def _emit_json(data: object) -> None:
     print(json.dumps(data, indent=2, default=str))
 
@@ -838,12 +872,12 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     sub = parser.add_subparsers(dest="cell_command", metavar="<action>")
 
     list_p = sub.add_parser("list", help="List cells (id, name, status)")
-    list_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    _add_target_args(list_p)
     list_p.add_argument("--format", choices=["human", "json"], default="json")
     list_p.set_defaults(func=cell_list_main)
 
     show_p = sub.add_parser("show", help="Show one cell: source, status, outputs, console")
-    show_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    _add_target_args(show_p)
     show_p.add_argument("cell_id", help="Cell id to show")
     show_p.add_argument("--format", choices=["human", "json"], default="json")
     show_p.set_defaults(func=cell_show_main)
@@ -912,7 +946,7 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def cell_list_main(args: argparse.Namespace) -> int:
-    ops = _open_local_ops(args.notebook_dir)
+    ops = _open_read_ops(args)
     if ops is None:
         return 2
     cells = ops.list_cells()
@@ -925,7 +959,7 @@ def cell_list_main(args: argparse.Namespace) -> int:
 
 
 def cell_show_main(args: argparse.Namespace) -> int:
-    ops = _open_local_ops(args.notebook_dir)
+    ops = _open_read_ops(args)
     if ops is None:
         return 2
     from strata.notebook.ops import NotebookOpsError
@@ -1204,12 +1238,12 @@ async def _cell_test_async(args: argparse.Namespace) -> int:
 
 
 def add_dag_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("notebook_dir", help="Path to the notebook directory")
+    _add_target_args(parser)
     parser.add_argument("--format", choices=["human", "json"], default="json")
 
 
 def dag_main(args: argparse.Namespace) -> int:
-    ops = _open_local_ops(args.notebook_dir)
+    ops = _open_read_ops(args)
     if ops is None:
         return 2
     dag = ops.dag()
@@ -1223,12 +1257,12 @@ def dag_main(args: argparse.Namespace) -> int:
 
 
 def add_status_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("notebook_dir", help="Path to the notebook directory")
+    _add_target_args(parser)
     parser.add_argument("--format", choices=["human", "json"], default="json")
 
 
 def status_main(args: argparse.Namespace) -> int:
-    ops = _open_local_ops(args.notebook_dir)
+    ops = _open_read_ops(args)
     if ops is None:
         return 2
     status = ops.status()
