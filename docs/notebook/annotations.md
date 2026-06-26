@@ -14,6 +14,8 @@ classifier.fit(x, y)
 
 Annotations are parsed from the **first contiguous block** of `#`-prefixed lines. Once a non-comment, non-blank line is encountered, parsing stops. Each annotation is one line in the format `# @key value`.
 
+In the editor you type them directly into the cell. From a script or agent you can either write them into the source you pass to `strata cell add/edit`, or splice a single directive without touching the body: `strata cell annotate <notebook_dir> <cell_id> --set worker=gpu-box --unset timeout` (see the [CLI](cli.md#authoring-cells-and-dependencies-cell-addeditrmmv-dep)).
+
 ---
 
 ## @name

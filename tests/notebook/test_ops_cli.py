@@ -227,6 +227,49 @@ def test_cli_cell_add_then_rm(chain_nb, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out) == {"removed": new["id"]}
 
 
+def test_cli_cell_annotate_set_and_unset(chain_nb, capsys):
+    # Set two annotations on cell `a`; the @name is reflected back in the view.
+    rc = main(
+        [
+            "cell",
+            "annotate",
+            str(chain_nb),
+            "a",
+            "--set",
+            "name=loader",
+            "--set",
+            "worker=gpu",
+            "--format",
+            "json",
+        ]
+    )
+    assert rc == 0
+    cell = json.loads(capsys.readouterr().out)
+    assert cell["name"] == "loader"
+    assert "# @worker gpu" in cell["source"] and cell["source"].endswith("x = 1")
+
+    # Unset worker; it persists to disk and the body survives.
+    assert (
+        main(["cell", "annotate", str(chain_nb), "a", "--unset", "worker", "--format", "json"]) == 0
+    )
+    from strata.notebook.ops import LocalNotebookOps
+
+    reopened = LocalNotebookOps(chain_nb).get_cell("a")
+    assert reopened.name == "loader" and "# @worker" not in reopened.source
+
+
+def test_cli_cell_annotate_requires_an_op(chain_nb, capsys):
+    rc = main(["cell", "annotate", str(chain_nb), "a", "--format", "json"])
+    assert rc == 2
+    assert "--set" in capsys.readouterr().err
+
+
+def test_cli_cell_annotate_bad_set_is_exit_2(chain_nb, capsys):
+    rc = main(["cell", "annotate", str(chain_nb), "a", "--set", "noequals", "--format", "json"])
+    assert rc == 2
+    assert "KEY=VALUE" in capsys.readouterr().err
+
+
 def test_cli_dag_and_status_json(chain_nb, capsys):
     assert main(["dag", str(chain_nb), "--format", "json"]) == 0
     dag = json.loads(capsys.readouterr().out)

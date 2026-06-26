@@ -328,3 +328,53 @@ class TestTableAnnotation:
         assert payload["tables"] == [
             {"name": "trips", "uri": "file:///wh#db.t", "snapshot_pin": None}
         ]
+
+
+class TestSpliceDirectives:
+    """Tests for set_annotation_directive / remove_annotation_directive."""
+
+    def _set(self, *args):
+        from strata.notebook.annotations import set_annotation_directive
+
+        return set_annotation_directive(*args)
+
+    def _rm(self, *args):
+        from strata.notebook.annotations import remove_annotation_directive
+
+        return remove_annotation_directive(*args)
+
+    def test_set_inserts_on_bare_cell(self):
+        out = self._set("x = 1\n", "worker", "gpu-box")
+        assert out == "# @worker gpu-box\nx = 1\n"
+        assert parse_annotations(out).worker == "gpu-box"
+
+    def test_set_groups_then_replaces_in_place(self):
+        out = self._set("x = 1\n", "worker", "gpu-box")
+        out = self._set(out, "name", "feat")  # inserted after the existing directive
+        assert out == "# @worker gpu-box\n# @name feat\nx = 1\n"
+        out = self._set(out, "worker", "cpu")  # replaced, not appended
+        assert out == "# @worker cpu\n# @name feat\nx = 1\n"
+
+    def test_set_preserves_body_and_plain_comments(self):
+        out = self._set("# header\nimport os\nx = 1\n", "name", "n")
+        assert "# header" in out and "import os" in out
+        assert parse_annotations(out).name == "n"
+
+    def test_set_empty_value_renders_flag(self):
+        assert self._set("x = 1\n", "output", "") == "# @output\nx = 1\n"
+
+    def test_set_collapses_duplicate_directives(self):
+        dup = "# @worker a\n# @worker b\nx = 1\n"
+        assert self._set(dup, "worker", "c") == "# @worker c\nx = 1\n"
+
+    def test_remove_drops_directive_keeps_rest(self):
+        src = "# @worker gpu\n# @name feat\nx = 1\n"
+        out = self._rm(src, "worker")
+        assert out == "# @name feat\nx = 1\n"
+        assert parse_annotations(out).worker is None
+
+    def test_remove_absent_key_is_noop(self):
+        assert self._rm("# @name feat\nx = 1\n", "worker") == "# @name feat\nx = 1\n"
+
+    def test_no_trailing_newline_preserved(self):
+        assert self._set("x = 1", "name", "n") == "# @name n\nx = 1"
