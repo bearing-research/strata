@@ -1777,6 +1777,19 @@ async def get_session(session_id: str, request: Request) -> JSONResponse:
     )
 
 
+async def _broadcast_state(notebook_id: str, session: Any) -> None:
+    """Push a full ``notebook_state`` to WS spectators after a REST mutation.
+
+    Mirrors a structural edit (add / edit / delete / reorder) to every watcher
+    (the TUI) so an agent driving the notebook over the CLI / MCP shows up live,
+    not just on the next resync poll. The driver gets the same frame Vue does on
+    its own REST mutations — idempotent and authoritative.
+    """
+    from strata.notebook.ws import broadcast_notebook_sync
+
+    await broadcast_notebook_sync(notebook_id, session)
+
+
 @router.put("/{notebook_id}/cells/reorder")
 async def reorder_notebook_cells(
     notebook_id: str, session: SessionDep, req: ReorderCellsRequest
@@ -1786,6 +1799,7 @@ async def reorder_notebook_cells(
     try:
         reorder_cells(session.path, req.cell_ids)
         session.reload()
+        await _broadcast_state(notebook_id, session)
         return {
             "notebook_id": session.notebook_state.id,
             "cells": session.serialize_cells(),
@@ -1858,6 +1872,7 @@ async def update_cell_source(
 
         # Return cell and updated DAG — include all cells so the
         # frontend can sync staleness/status changes.
+        await _broadcast_state(notebook_id, session)
         return {
             "cell": session.serialize_cell(cell),
             "dag": _format_dag(session),
@@ -2455,6 +2470,7 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
         if not cell:
             raise HTTPException(status_code=500, detail="Failed to create cell")
 
+        await _broadcast_state(notebook_id, session)
         return session.serialize_cell(cell)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc) or "Not found")
@@ -2490,6 +2506,7 @@ async def delete_cell(notebook_id: str, session: SessionDep, cell_id: str) -> di
         # stays consistent. Non-variant cells take the same code path
         # with no extra work.
         session.remove_cell(cell_id)
+        await _broadcast_state(notebook_id, session)
 
         # Return the refreshed variant_groups + serialized cells *and*
         # the DAG so the client can resync without a separate round-trip.
