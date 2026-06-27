@@ -2539,6 +2539,37 @@ class TestRuntimeConfigRegistryFlag:
 # ---------------------------------------------------------------------------
 
 
+def test_set_cell_tests_endpoint(client, tmp_path):
+    """PUT /cells/{id}/tests writes the test source and updates the session."""
+    notebook_dir = create_notebook(tmp_path, "SetTestsNb", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "feat", None, language="python")
+    write_cell(notebook_dir, "feat", "def double(x):\n    return x * 2\n")
+    session_id = open_session_id(client, notebook_dir)
+
+    src = "def test_double(cell):\n    assert cell.double(2) == 4\n"
+    resp = client.put(f"/v1/notebooks/{session_id}/cells/feat/tests", json={"source": src})
+    assert resp.status_code == 200, resp.text
+    # written to its committed sibling file …
+    assert (notebook_dir / "cells" / "feat.test.py").read_text() == src
+    # … and the in-memory session reflects it (the run endpoint no longer 400s).
+    assert resp.json().get("test_source") == src
+
+    # Unknown cell → 404; non-Python cell → 400.
+    assert (
+        client.put(
+            f"/v1/notebooks/{session_id}/cells/ghost/tests", json={"source": "x"}
+        ).status_code
+        == 404
+    )
+    add_cell_to_notebook(notebook_dir, "md", None, language="markdown")
+    # reopen so the session sees the markdown cell
+    session_id = open_session_id(client, notebook_dir)
+    assert (
+        client.put(f"/v1/notebooks/{session_id}/cells/md/tests", json={"source": "x"}).status_code
+        == 400
+    )
+
+
 def test_run_cell_tests_endpoint(client, tmp_path, monkeypatch):
     """POST /cells/{id}/tests runs the cell's tests and returns per-test outcomes."""
     from strata.notebook.models import CellTestCase, CellTestResult

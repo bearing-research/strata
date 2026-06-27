@@ -928,6 +928,10 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     _add_target_args(test_p)
     test_p.add_argument("cell_id", help="Cell id whose tests to run")
     test_p.add_argument(
+        "--file",
+        help="Set the cell's test source from this file (`-` for stdin) before running",
+    )
+    test_p.add_argument(
         "--no-sync", action="store_true", help="Skip `uv sync`; require an existing .venv"
     )
     test_p.add_argument("--format", choices=["human", "json"], default="json")
@@ -1313,6 +1317,18 @@ async def _cell_test_async(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
     try:
+        # --file authors the cell's test source before running it (the one
+        # cell-test affordance that was previously local-edit only).
+        if args.file is not None:
+            try:
+                test_source = _read_source_arg(args.file)
+            except OSError as exc:
+                print(f"error: cannot read --file: {exc}", file=sys.stderr)
+                return 2
+            try:
+                ops.set_cell_tests(args.cell_id, test_source)
+            except NotebookOpsError as exc:
+                return _emit_op_error(exc, args.format)
         if not is_remote:
             rc = await _prepare_env_for_ops(ops, args)
             if rc != 0:
