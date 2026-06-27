@@ -171,9 +171,9 @@ class HelpScreen(ModalScreen[None]):
         ("d", "Show the notebook DAG"),
         ("i", "Enlarge the selected cell's image output"),
         ("r", "Force an immediate resync (also auto-resyncs in the background)"),
-        ("ctrl+← / ctrl+→", "Resize the cell-list ↔ detail boundary"),
-        ("ctrl+↑ / ctrl+↓", "Resize the top ↔ bottom detail boundary"),
-        ("ctrl+x", "Reset the panel layout to defaults"),
+        ("[ / ]", "Resize the cell-list ↔ detail boundary (narrower / wider list)"),
+        ("- / =", "Resize the top ↔ bottom detail boundary (shorter / taller top)"),
+        ("\\", "Reset the panel layout to defaults"),
         ("?", "Show this help"),
         ("q", "Quit"),
     ]
@@ -238,12 +238,14 @@ class NotebookTUI(App[None]):
         Binding("5", "show_tab('tab-console')", "Console"),
         Binding("6", "show_tab('tab-agent')", "Agent"),
         Binding("7", "show_tab('tab-results')", "Results"),
-        # Resize the panel boundaries (no Textual splitter widget exists).
-        Binding("ctrl+right", "resize_cells(1)", "Wider list", show=False),
-        Binding("ctrl+left", "resize_cells(-1)", "Narrower list", show=False),
-        Binding("ctrl+down", "resize_top(1)", "Taller top", show=False),
-        Binding("ctrl+up", "resize_top(-1)", "Shorter top", show=False),
-        Binding("ctrl+x", "reset_layout", "Reset layout", show=False),
+        # Resize the panel boundaries (no Textual splitter widget exists). Plain
+        # printable keys — ctrl+arrows are reserved by macOS (Mission Control) so
+        # the terminal never sees them.
+        Binding("right_square_bracket", "resize_cells(1)", "Wider list", show=False),
+        Binding("left_square_bracket", "resize_cells(-1)", "Narrower list", show=False),
+        Binding("equals_sign", "resize_top(1)", "Taller top", show=False),
+        Binding("minus", "resize_top(-1)", "Shorter top", show=False),
+        Binding("backslash", "reset_layout", "Reset layout", show=False),
     ]
 
     # Tab id → (its TabbedContent group, the scroll region to focus). The top

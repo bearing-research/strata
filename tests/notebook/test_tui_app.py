@@ -576,21 +576,22 @@ async def test_panel_resize_keys_move_and_reset_boundaries(monkeypatch):
     app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
     async with app.run_test(size=(100, 40)) as pilot:
         assert (app._cells_pct, app._top_pct) == (38, 50)
+        await pilot.press("1")  # focus the cell list — resize must work from here too
 
-        await pilot.press("ctrl+right")  # widen the cell list
+        await pilot.press("]")  # widen the cell list
         await pilot.pause()
         assert app._cells_pct == 42
         assert "42" in str(app.query_one("#cells").styles.width)
 
         for _ in range(20):  # holds at the max — never runs away
-            await pilot.press("ctrl+right")
+            await pilot.press("]")
         await pilot.pause()
         assert app._cells_pct == _MAX_PCT
 
-        await pilot.press("ctrl+down")  # grow the top detail region
+        await pilot.press("=")  # grow the top detail region
         await pilot.pause()
         assert app._top_pct == 55
 
-        await pilot.press("ctrl+x")  # reset to defaults
+        await pilot.press("backslash")  # reset to defaults
         await pilot.pause()
         assert (app._cells_pct, app._top_pct) == (38, 50)
