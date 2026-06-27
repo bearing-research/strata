@@ -132,6 +132,20 @@ logger = logging.getLogger(__name__)
 # core scan timeout (``StrataConfig.scan_timeout_seconds``).
 DEFAULT_CELL_TIMEOUT_SECONDS = 300.0
 
+
+def cell_timeout_message(timeout_seconds: float) -> str:
+    """A timed-out-cell error that names the remedy.
+
+    A bare "timed out after Ns" is undiscoverable — the user has no way to know
+    the limit is configurable. Point at all three levers (per-cell annotation,
+    notebook default, one-off CLI flag).
+    """
+    return (
+        f"Cell execution timed out after {timeout_seconds}s. Raise the limit with a "
+        f"'# @timeout <seconds>' annotation on the cell, a 'timeout' key in "
+        f"notebook.toml, or 'strata run --timeout <seconds>' for a one-off run."
+    )
+
 # Well-known module → PyPI package name mappings where they differ.
 _MODULE_TO_PACKAGE: dict[str, str] = {
     "cv2": "opencv-python",
@@ -1361,7 +1375,7 @@ class CellExecutor:
                 cell_id=cell_id,
                 success=False,
                 duration_ms=duration_ms,
-                error=f"Cell execution timed out after {timeout_seconds}s",
+                error=cell_timeout_message(timeout_seconds),
             ).apply_remote_metadata(**remote_metadata)
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, timeout_result)
@@ -1909,7 +1923,7 @@ class CellExecutor:
                     ) as response:
                         if response.status_code == 408:
                             raise RemoteExecutionError(
-                                f"Cell execution timed out after {timeout_seconds}s",
+                                cell_timeout_message(timeout_seconds),
                                 remote_error_code="TIMEOUT",
                             )
                         if response.status_code != 200:
@@ -1946,7 +1960,7 @@ class CellExecutor:
                                 f.write(chunk)
             except httpx.TimeoutException as exc:
                 raise RemoteExecutionError(
-                    f"Cell execution timed out after {timeout_seconds}s",
+                    cell_timeout_message(timeout_seconds),
                     remote_error_code="TIMEOUT",
                 ) from exc
             except httpx.HTTPError as exc:
@@ -2125,7 +2139,7 @@ class CellExecutor:
         except httpx.TimeoutException as exc:
             _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
             raise RemoteExecutionError(
-                f"Cell execution timed out after {timeout_seconds}s",
+                cell_timeout_message(timeout_seconds),
                 remote_build_state="failed",
                 remote_error_code="TIMEOUT",
             ) from exc
@@ -2151,7 +2165,7 @@ class CellExecutor:
             if response.status_code == 408:
                 _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
                 raise RemoteExecutionError(
-                    f"Cell execution timed out after {timeout_seconds}s",
+                    cell_timeout_message(timeout_seconds),
                     remote_build_state="failed",
                     remote_error_code="TIMEOUT",
                 )
@@ -3915,10 +3929,7 @@ class CellExecutor:
                 timed_out_result = BatchCellResult(
                     cell_id=timed_out_id,
                     status="cell_error",
-                    error=(
-                        f"Cell execution timed out after "
-                        f"{watchdog_state['active_timeout']}s (per-cell watchdog)"
-                    ),
+                    error=cell_timeout_message(watchdog_state["active_timeout"]),
                 )
                 cell_results[timed_out_id] = timed_out_result
                 if on_cell_event is not None:
