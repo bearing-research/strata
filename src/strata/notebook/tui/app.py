@@ -171,6 +171,9 @@ class HelpScreen(ModalScreen[None]):
         ("d", "Show the notebook DAG"),
         ("i", "Enlarge the selected cell's image output"),
         ("r", "Force an immediate resync (also auto-resyncs in the background)"),
+        ("ctrl+← / ctrl+→", "Resize the cell-list ↔ detail boundary"),
+        ("ctrl+↑ / ctrl+↓", "Resize the top ↔ bottom detail boundary"),
+        ("ctrl+x", "Reset the panel layout to defaults"),
         ("?", "Show this help"),
         ("q", "Quit"),
     ]
@@ -184,6 +187,22 @@ class HelpScreen(ModalScreen[None]):
             table.add_row(key, action)
         with VerticalScroll(id="help-box"):
             yield Static(table, id="help-art")
+
+
+# Panel split defaults + bounds (percent of the column width / detail height).
+# Textual ships no splitter widget (verified on 8.2.x), so the boundaries are
+# driven from these and nudged with ctrl+arrows.
+_DEFAULT_CELLS_PCT = 38
+_DEFAULT_TOP_PCT = 50
+_MIN_PCT = 20
+_MAX_PCT = 75
+_CELLS_STEP = 4
+_TOP_STEP = 5
+
+
+def _nudge(pct: int, delta: int) -> int:
+    """Clamp a split percentage to the resizable range ``[_MIN_PCT, _MAX_PCT]``."""
+    return max(_MIN_PCT, min(_MAX_PCT, pct + delta))
 
 
 class NotebookTUI(App[None]):
@@ -219,6 +238,12 @@ class NotebookTUI(App[None]):
         Binding("5", "show_tab('tab-console')", "Console"),
         Binding("6", "show_tab('tab-agent')", "Agent"),
         Binding("7", "show_tab('tab-results')", "Results"),
+        # Resize the panel boundaries (no Textual splitter widget exists).
+        Binding("ctrl+right", "resize_cells(1)", "Wider list", show=False),
+        Binding("ctrl+left", "resize_cells(-1)", "Narrower list", show=False),
+        Binding("ctrl+down", "resize_top(1)", "Taller top", show=False),
+        Binding("ctrl+up", "resize_top(-1)", "Shorter top", show=False),
+        Binding("ctrl+x", "reset_layout", "Reset layout", show=False),
     ]
 
     # Tab id → (its TabbedContent group, the scroll region to focus). The top
@@ -258,6 +283,12 @@ class NotebookTUI(App[None]):
         # Follow mode: auto-select the cell that goes running so the detail
         # panels track the action (an agent / run-all moving through the notebook).
         self._follow = True
+
+        # Adjustable split ratios (percent). The cell-list ↔ detail boundary and
+        # the top ↔ bottom detail boundary; nudged with ctrl+arrows. Textual has
+        # no splitter widget, so we drive the panels' styles from these.
+        self._cells_pct = _DEFAULT_CELLS_PCT
+        self._top_pct = _DEFAULT_TOP_PCT
 
     # -- layout --------------------------------------------------------------
 
@@ -303,6 +334,31 @@ class NotebookTUI(App[None]):
         # periodically. The rebuild is a no-op when nothing changed (see
         # _rebuild_cells), so this stays cheap and never disturbs the selection.
         self.set_interval(2.5, self._send_sync)
+
+    # -- layout resize -------------------------------------------------------
+
+    def _apply_split(self) -> None:
+        """Drive the panel boundaries from the current split ratios."""
+        self.query_one("#cells").styles.width = f"{self._cells_pct}%"
+        self.query_one("#detail").styles.width = f"{100 - self._cells_pct}%"
+        self.query_one("#detail-top").styles.height = f"{self._top_pct}%"
+        self.query_one("#detail-bottom").styles.height = f"{100 - self._top_pct}%"
+
+    def action_resize_cells(self, direction: int) -> None:
+        """Move the cell-list ↔ detail boundary (ctrl+left / ctrl+right)."""
+        self._cells_pct = _nudge(self._cells_pct, direction * _CELLS_STEP)
+        self._apply_split()
+
+    def action_resize_top(self, direction: int) -> None:
+        """Move the top ↔ bottom detail boundary (ctrl+up / ctrl+down)."""
+        self._top_pct = _nudge(self._top_pct, direction * _TOP_STEP)
+        self._apply_split()
+
+    def action_reset_layout(self) -> None:
+        """Restore the default split ratios (ctrl+x)."""
+        self._cells_pct = _DEFAULT_CELLS_PCT
+        self._top_pct = _DEFAULT_TOP_PCT
+        self._apply_split()
 
     async def _bootstrap(self) -> None:
         try:
