@@ -517,3 +517,76 @@ def test_cli_cell_add_routes_to_remote(monkeypatch, tmp_path, capsys):
     )
     assert rc == 0
     assert json.loads(capsys.readouterr().out)["id"] == "new1"
+
+
+def test_remote_set_cell_tests():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "PUT"
+        assert request.url.path == "/v1/notebooks/s1/cells/c1/tests"
+        assert json.loads(request.content) == {"source": "def test_x(cell): pass"}
+        return httpx.Response(200, json=_wire_cell("c1", "x = 1"))
+
+    cell = _exec_remote(handler).set_cell_tests("c1", "def test_x(cell): pass")
+    assert cell.id == "c1"
+
+
+def test_cli_cell_test_file_sets_then_runs(monkeypatch, tmp_path, capsys):
+    from strata.notebook.ops import TestCaseView, TestRunResult
+
+    calls: list[str] = []
+
+    class _FakeRemote:
+        def __init__(self, base_url, session_id, **_):
+            pass
+
+        def set_cell_tests(self, cell_id, test_source):
+            calls.append(f"set:{cell_id}:{test_source.strip()}")
+            return CellView(
+                id=cell_id,
+                name="",
+                language="python",
+                status="ready",
+                source="x = 1",
+                staleness_reasons=[],
+                upstream_ids=[],
+                downstream_ids=[],
+                outputs=[],
+                console_stdout="",
+                console_stderr="",
+            )
+
+        async def run_tests(self, cell_id):
+            calls.append(f"run:{cell_id}")
+            return TestRunResult(
+                cell_id=cell_id,
+                passed=1,
+                failed=0,
+                errored=0,
+                skipped=0,
+                pytest_unavailable=False,
+                cases=[TestCaseView(name="test_x", outcome="passed")],
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("strata.notebook.ops.RemoteNotebookOps", _FakeRemote)
+    tf = tmp_path / "t.py"
+    tf.write_text("def test_x(cell): pass")
+    rc = main(
+        [
+            "cell",
+            "test",
+            "--server",
+            "http://srv",
+            "--session",
+            "s1",
+            "c1",
+            "--file",
+            str(tf),
+            "--format",
+            "json",
+        ]
+    )
+    assert rc == 0
+    assert calls == ["set:c1:def test_x(cell): pass", "run:c1"]  # set first, then run
