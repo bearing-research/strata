@@ -2584,3 +2584,44 @@ def test_execute_cell_unknown_mode_is_400(client, tmp_path):
 
     response = client.post(f"/v1/notebooks/{session_id}/cells/c1/execute", params={"mode": "bogus"})
     assert response.status_code == 400, response.text
+
+
+def test_rest_execute_broadcasts_to_ws_spectators(client, tmp_path, monkeypatch):
+    """A REST/CLI-driven run mirrors live frames to WS spectators (the TUI).
+
+    The live-mirror contract: an agent driving via REST (`cell run --server …`)
+    produces the same broadcast frames a Vue WS-driven run does, so a watcher
+    sees the cell go running and the result land — not just a poll catch-up.
+    """
+    import strata.notebook.ws as ws_module
+    from strata.notebook.executor import CellExecutionResult
+
+    notebook_dir = create_notebook(tmp_path, "MirrorNb", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1", None, language="python")
+    write_cell(notebook_dir, "c1", "x = 1\n")
+    session_id = open_session_id(client, notebook_dir)
+
+    async def _fake_exec(self, cell_id, source):
+        return CellExecutionResult(
+            cell_id=cell_id, success=True, duration_ms=1.0, execution_method="cold"
+        )
+
+    monkeypatch.setattr("strata.notebook.executor.CellExecutor.execute_cell", _fake_exec)
+
+    sent: list[str] = []
+
+    class _FakeSpectator:
+        async def send_text(self, text):
+            sent.append(text)
+
+    ws_module._notebook_connections.setdefault(session_id, []).append(_FakeSpectator())
+    try:
+        resp = client.post(f"/v1/notebooks/{session_id}/cells/c1/execute")
+        assert resp.status_code == 200, resp.text
+    finally:
+        ws_module._notebook_connections.pop(session_id, None)
+
+    types = [json.loads(t)["type"] for t in sent]
+    # The spectator saw the cell go running plus at least one post-run frame.
+    assert "cell_status" in types
+    assert len(sent) >= 2

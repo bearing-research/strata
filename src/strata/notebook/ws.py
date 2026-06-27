@@ -822,9 +822,7 @@ async def _handle_cell_execute(
             notebook_id,
             cell_id,
             seq,
-            lambda: _execute_cell_directly(
-                websocket, session, cell_id, execution_state, notebook_id
-            ),
+            lambda: execute_cell_and_broadcast(session, cell_id, execution_state, notebook_id),
         )
         if not scheduled:
             await _release_execution_request(execution_state, cell_id)
@@ -1128,8 +1126,8 @@ async def _handle_cell_execute_force(
         notebook_id,
         cell_id,
         seq,
-        lambda: _execute_cell_directly(
-            websocket, session, cell_id, execution_state, notebook_id, mode="force"
+        lambda: execute_cell_and_broadcast(
+            session, cell_id, execution_state, notebook_id, mode="force"
         ),
     )
     if not scheduled:
@@ -1220,8 +1218,8 @@ async def _handle_cell_execute_rerun(
             notebook_id,
             cell_id,
             seq,
-            lambda: _execute_cell_directly(
-                websocket, session, cell_id, execution_state, notebook_id, mode="rerun"
+            lambda: execute_cell_and_broadcast(
+                session, cell_id, execution_state, notebook_id, mode="rerun"
             ),
         )
     if not scheduled:
@@ -1749,15 +1747,21 @@ def _make_executor_with_progress(
     return executor
 
 
-async def _execute_cell_directly(
-    websocket: WebSocket,
+async def execute_cell_and_broadcast(
     session: NotebookSession,
     cell_id: str,
     execution_state: NotebookExecutionState,
     notebook_id: str,
     mode: Literal["normal", "force", "rerun"] = "normal",
-) -> None:
-    """Execute a cell directly (not part of cascade).
+) -> CellExecutionResult | None:
+    """Execute a cell and broadcast the live frames to every spectator.
+
+    The single execute path shared by the WS drive (Vue) and the REST drive
+    (the agent CLI / MCP via ``RemoteNotebookOps``), so a cell run produces the
+    same ``cell_status`` → result → staleness frame sequence on a session's WS
+    spectators no matter which transport triggered it. Returns the execution
+    result (``success`` True or False), or ``None`` when the cell is missing or
+    the executor raised unexpectedly.
 
     ``mode`` selects the executor entry point:
 
@@ -1766,13 +1770,12 @@ async def _execute_cell_directly(
     - ``rerun``  — cache-off, but still materialize upstreams (force the
       target cell only against the current valid upstream graph).
     """
-    del websocket
     seq = execution_state.next_sequence()
 
     # Find cell
     cell = session.notebook_state.get_cell(cell_id)
     if not cell:
-        return
+        return None
 
     # Mark as running — update backend state AND broadcast
     execution_state.running_cell = cell_id
@@ -1827,6 +1830,8 @@ async def _execute_cell_directly(
             )
             await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
 
+        return result
+
     except asyncio.CancelledError:
         await _set_cell_idle(session, notebook_id, execution_state.next_sequence(), cell_id)
         raise
@@ -1844,6 +1849,7 @@ async def _execute_cell_directly(
             _make_message(MessageType.CELL_STATUS, seq, cell_status_payload(cell_id, "error")),
         )
         await _broadcast_downstream_stale(notebook_id, seq, downstream_stale)
+        return None
     finally:
         execution_state.running_cell = None
 
@@ -2816,7 +2822,7 @@ def _execution_result_payload(cell_id: str, result: CellExecutionResult) -> dict
     """Build the payload for ``cell_output`` (success) or ``cell_error`` (failure).
 
     Single source of truth for the post-execution payload shape —
-    previously inlined four times (``_execute_cell_directly``,
+    previously inlined four times (``execute_cell_and_broadcast``,
     ``_execute_cascade``, ``_execute_run_all``, ``execute_cell_for_agent``)
     with ~30 lines of ``**({"key": value} if value else {})`` spreads.
     Adding a field to ``CellExecutionResult`` used to require touching
@@ -2883,7 +2889,7 @@ async def _broadcast_execution_result(
     2. ``cell_console`` for stderr (if any)
     3. ``cell_output`` (success) or ``cell_error`` (failure)
 
-    All four execution-driving handlers (``_execute_cell_directly``,
+    All four execution-driving handlers (``execute_cell_and_broadcast``,
     ``_execute_cascade``, ``_execute_run_all``,
     ``execute_cell_for_agent``) used to inline this block. The cascade
     path was already drifting — it skipped the stderr broadcast.

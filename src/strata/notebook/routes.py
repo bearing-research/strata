@@ -13,7 +13,7 @@ import tomllib
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -2841,37 +2841,27 @@ async def execute_cell(
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
-    try:
-        # Execute the cell — go through controlled session setters so
-        # this path agrees with WS direct/cascade/run_all on how
-        # cell.status transitions through running → ready/error.
-        session.mark_cell_running(cell_id)
-        executor = CellExecutor(session, session.warm_pool)
-        if mode == "rerun":
-            result = await executor.execute_cell_rerun(cell_id, cell.source)
-        elif mode == "force":
-            result = await executor.execute_cell_force(cell_id, cell.source)
-        else:
-            result = await executor.execute_cell(cell_id, cell.source)
-        session.record_execution(cell_id, result.duration_ms, result.cache_hit)
-        session.apply_execution_result_metadata(cell_id, result)
-        if result.success:
-            session.compute_staleness()
-            session.mark_executed_ready(cell_id)
-        else:
-            session.mark_cell_error(cell_id)
+    # Go through the one shared execute path so a CLI/MCP-driven run broadcasts
+    # the same live frames to WS spectators (the TUI) that a Vue WS-driven run
+    # does — and so REST and WS agree on the running → ready/error transitions.
+    from strata.notebook.ws import _ensure_execution_state, execute_cell_and_broadcast
 
-        return result.to_dict()
-    except ValueError as exc:
-        session.mark_cell_error(cell_id)
-        raise HTTPException(status_code=400, detail=str(exc))
-    except FileNotFoundError as exc:
-        session.mark_cell_error(cell_id)
-        raise HTTPException(status_code=404, detail=str(exc) or "Not found")
+    execution_state = _ensure_execution_state(notebook_id)
+    try:
+        result = await execute_cell_and_broadcast(
+            session,
+            cell_id,
+            execution_state,
+            notebook_id,
+            mode=cast(Literal["normal", "force", "rerun"], mode),  # validated above
+        )
     except Exception:
         session.mark_cell_error(cell_id)
         logger.exception("Cell execution failed")
         raise HTTPException(status_code=500, detail="Execution failed")
+    if result is None:
+        raise HTTPException(status_code=500, detail="Execution failed")
+    return result.to_dict()
 
 
 @router.post("/{notebook_id}/cells/{cell_id}/tests")

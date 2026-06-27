@@ -1987,7 +1987,7 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
     the final result as stale (PR #111 review finding)."""
     from strata.notebook import ws as ws_module
     from strata.notebook.executor import CellExecutionResult
-    from strata.notebook.ws import _ensure_execution_state, _execute_cell_directly
+    from strata.notebook.ws import _ensure_execution_state, execute_cell_and_broadcast
 
     _, session = notebook_session
     broadcasts: list[dict] = []
@@ -2020,8 +2020,7 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
     # draws delta seqs from.
     execution_state = _ensure_execution_state("nb-seq-test")
     try:
-        await _execute_cell_directly(
-            cast(WebSocket, None),
+        await execute_cell_and_broadcast(
             session,
             "root",
             execution_state,
