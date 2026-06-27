@@ -148,9 +148,7 @@ class TestExecutionFlow:
             seen[cell_id] = timeout_seconds
             return _make_result(cell_id, success=True)
 
-        with patch(
-            "strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell
-        ):
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
             run_main([str(notebook_with_chain), "--no-sync", "--timeout", "999"])
 
         assert seen == {"c1": 999.0, "c2": 999.0}  # --timeout reaches every cell
@@ -174,9 +172,7 @@ class TestExecutionFlow:
                 cell_id=cell_id, success=True, duration_ms=5, mutation_warnings=warns
             )
 
-        with patch(
-            "strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell
-        ):
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
             rc = run_main([str(notebook_with_chain), "--no-sync", "--format", "json"])
         assert rc == 0
         payload = json.loads(capsys.readouterr().out)
@@ -198,9 +194,7 @@ class TestExecutionFlow:
                 cell_id=cell_id, success=True, duration_ms=5, mutation_warnings=warns
             )
 
-        with patch(
-            "strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell
-        ):
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
             run_main([str(notebook_with_chain), "--no-sync"])
         assert "mutated in place" in capsys.readouterr().out
 

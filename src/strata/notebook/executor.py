@@ -146,6 +146,7 @@ def cell_timeout_message(timeout_seconds: float) -> str:
         f"notebook.toml, or 'strata run --timeout <seconds>' for a one-off run."
     )
 
+
 # Well-known module → PyPI package name mappings where they differ.
 _MODULE_TO_PACKAGE: dict[str, str] = {
     "cv2": "opencv-python",
