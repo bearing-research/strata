@@ -553,3 +553,44 @@ async def test_d_opens_dag_screen(monkeypatch):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, DagScreen)
+
+
+def test_nudge_clamps_to_range():
+    from strata.notebook.tui.app import _MAX_PCT, _MIN_PCT, _nudge
+
+    assert _nudge(38, 4) == 42
+    assert _nudge(38, -4) == 34
+    assert _nudge(_MIN_PCT, -10) == _MIN_PCT  # clamped low
+    assert _nudge(_MAX_PCT, 10) == _MAX_PCT  # clamped high
+
+
+@pytest.mark.asyncio
+async def test_panel_resize_keys_move_and_reset_boundaries(monkeypatch):
+    from strata.notebook.tui.app import _MAX_PCT
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(100, 40)) as pilot:
+        assert (app._cells_pct, app._top_pct) == (38, 50)
+
+        await pilot.press("ctrl+right")  # widen the cell list
+        await pilot.pause()
+        assert app._cells_pct == 42
+        assert "42" in str(app.query_one("#cells").styles.width)
+
+        for _ in range(20):  # holds at the max — never runs away
+            await pilot.press("ctrl+right")
+        await pilot.pause()
+        assert app._cells_pct == _MAX_PCT
+
+        await pilot.press("ctrl+down")  # grow the top detail region
+        await pilot.pause()
+        assert app._top_pct == 55
+
+        await pilot.press("ctrl+x")  # reset to defaults
+        await pilot.pause()
+        assert (app._cells_pct, app._top_pct) == (38, 50)
