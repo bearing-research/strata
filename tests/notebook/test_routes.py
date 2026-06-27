@@ -1346,6 +1346,51 @@ def test_add_cell_bad_after_is_400(client, tmp_path):
     assert response.status_code == 400, response.text
 
 
+def test_rest_cell_crud_broadcasts_to_ws_spectators(client, tmp_path):
+    """REST structural edits mirror to WS spectators (the TUI sees agent edits live).
+
+    add / edit / reorder / delete each push a full ``notebook_state`` frame to a
+    connected watcher, so an agent driving via REST/CLI/MCP shows up live.
+    """
+    import strata.notebook.ws as ws_module
+
+    notebook_dir = create_notebook(tmp_path, "CrudMirrorNb", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1", None, language="python")
+    write_cell(notebook_dir, "c1", "x = 1\n")
+    session_id = open_session_id(client, notebook_dir)
+
+    sent: list[str] = []
+
+    class _FakeSpectator:
+        async def send_text(self, text):
+            sent.append(text)
+
+    ws_module._notebook_connections.setdefault(session_id, []).append(_FakeSpectator())
+    try:
+        created = client.post(f"/v1/notebooks/{session_id}/cells", json={})
+        assert created.status_code == 200, created.text
+        new_id = created.json()["id"]
+        assert (
+            client.put(
+                f"/v1/notebooks/{session_id}/cells/{new_id}", json={"source": "y = 2\n"}
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                f"/v1/notebooks/{session_id}/cells/reorder", json={"cell_ids": [new_id, "c1"]}
+            ).status_code
+            == 200
+        )
+        assert client.delete(f"/v1/notebooks/{session_id}/cells/{new_id}").status_code == 200
+    finally:
+        ws_module._notebook_connections.pop(session_id, None)
+
+    types = [json.loads(t)["type"] for t in sent]
+    # one full-state frame per structural edit (add, edit, reorder, delete).
+    assert types.count("notebook_state") >= 4
+
+
 def test_reorder_cells(client, tmp_path):
     """PUT /v1/notebooks/{id}/cells/reorder reorders cells in-place."""
     notebook_dir = create_notebook(tmp_path, "Reorder Test")
