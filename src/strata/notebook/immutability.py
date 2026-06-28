@@ -16,6 +16,7 @@ import collections.abc
 import copy
 import hashlib
 import sys
+import types
 from dataclasses import dataclass
 from typing import Any, NamedTuple, TypedDict
 
@@ -88,7 +89,9 @@ def snapshot_inputs(namespace: dict[str, Any], input_names: list[str]) -> list[I
 
 
 def detect_mutations(
-    namespace: dict[str, Any], snapshots: list[InputSnapshot]
+    namespace: dict[str, Any],
+    snapshots: list[InputSnapshot],
+    exported_names: set[str] | None = None,
 ) -> list[MutationWarning]:
     """Detect mutations by comparing current state against snapshots.
 
@@ -137,6 +140,13 @@ def detect_mutations(
         if current_id != snapshot.identity:
             continue
 
+        # If the cell also exported this variable, downstream cells receive the
+        # mutated value — it's a *published* mutation, not the dangerous silent
+        # one. Only warn when a mutated input was NOT exported (→ downstream gets
+        # the pre-mutation value).
+        if exported_names is not None and snapshot.var_name in exported_names:
+            continue
+
         # Same identity — check if the object was mutated
         mutation_detected = _check_object_mutation(current_value, snapshot)
 
@@ -177,9 +187,11 @@ def _check_object_mutation(value: Any, snapshot: InputSnapshot) -> tuple[str, st
     if _content_fingerprint(value) == snapshot.content_hash:
         return None
     return (
-        f"'{snapshot.var_name}' was mutated in place (no reassignment)",
-        "If a downstream cell needs the original, copy it before mutating "
-        "(e.g. x = x.copy()) or reassign instead of mutating in place.",
+        f"'{snapshot.var_name}' was mutated in place (no reassignment); a "
+        "downstream cell will see the pre-mutation value unless this cell "
+        "exports it",
+        "Reassign it (x = …), copy before mutating (x = x.copy()), or keep the "
+        "producer and the mutation in one cell.",
     )
 
 
@@ -207,17 +219,44 @@ class _FingerprintRule(NamedTuple):
     fingerprint: collections.abc.Callable[[Any], str | None]
 
 
-def _content_fingerprint(value: Any) -> str | None:
-    """Return a sampled content digest for *value*, or ``None`` if unknown.
+# Types that can't be mutated in place — identity-only is correct, and
+# fingerprinting them is wasted work (a str/int can't change under your feet).
+_IMMUTABLE_SCALARS = (str, bytes, int, float, bool, complex, type(None))
 
-    Walks :data:`_FINGERPRINT_RULES` in order; the first rule whose ``matches``
-    accepts the value produces the digest. Unknown types yield ``None``
-    (identity-only tracking).
+
+def _general_fingerprint(value: Any) -> str | None:
+    """Serializer-based fallback fingerprint for any picklable object.
+
+    The :data:`_FINGERPRINT_RULES` above are *performance* optimizations for hot
+    types (sampled digests). This is the *general* path that makes mutation
+    detection cover arbitrary objects — ``torch.nn.Module``, sklearn estimators,
+    custom classes — with **no per-type rule**, by hashing the same bytes Strata
+    would store the value as. Immutable scalars are skipped; an unpicklable value
+    falls back to identity-only (``None``).
+    """
+    if isinstance(value, _IMMUTABLE_SCALARS):
+        return None
+    try:
+        import cloudpickle
+
+        return hashlib.sha256(cloudpickle.dumps(value, protocol=5)).hexdigest()
+    except Exception:
+        # Unpicklable or non-deterministic to serialize → can't content-check.
+        return None
+
+
+def _content_fingerprint(value: Any) -> str | None:
+    """Return a content digest for *value*, or ``None`` if it can't be checked.
+
+    Walks :data:`_FINGERPRINT_RULES` (fast sampled digests for hot types) in
+    order; the first match wins. Anything else falls back to a general
+    serializer-based hash — so mutation detection isn't limited to a
+    hand-written type registry.
     """
     for rule in _FINGERPRINT_RULES:
         if rule.matches(value):
             return rule.fingerprint(value)
-    return None
+    return _general_fingerprint(value)
 
 
 def _is_pandas(value: Any) -> bool:
@@ -417,3 +456,119 @@ def apply_defensive_copy(value: Any, content_type: str) -> Any:
         return copy.deepcopy(value)
     # arrow/ipc (fresh on deserialize) or unknown — return as-is.
     return value
+
+
+# ---------------------------------------------------------------------------
+# Shared-mutable-object detection across a cell's outputs
+#
+# Strata stores each output variable as an independent artifact. If two outputs
+# share a mutable object by identity — the classic case being an optimizer that
+# holds a model's parameter tensors — storing them separately *decouples* them:
+# downstream they're independent copies, so mutating one no longer affects the
+# other. That silently breaks split model/optimizer training. Detection rides a
+# bounded object-graph walk (no per-library rule); arrays/tensors are recorded
+# as mutable leaves but not traversed into.
+# ---------------------------------------------------------------------------
+
+
+# Shared by nature (imports, defs) and never the "decoupling-relevant" state we
+# care about — skip recording and traversing them, or two outputs that both
+# reference numpy would look like they "share" the module.
+_SHARED_BY_NATURE = (
+    types.ModuleType,
+    types.FunctionType,
+    types.MethodType,
+    types.BuiltinFunctionType,
+    type,
+)
+
+
+def _is_opaque_leaf(value: Any) -> bool:
+    """A mutable object we record but don't traverse into (huge buffers)."""
+    return _is_numpy(value) or _is_torch(value) or _is_pandas(value)
+
+
+def _reachable_mutable_ids(
+    root: Any, *, max_nodes: int = 20000, max_depth: int = 8
+) -> dict[int, type]:
+    """Map ``id -> type`` for mutable objects reachable from *root* (bounded).
+
+    Immutable scalars are ignored; immutable containers (tuple/frozenset) are
+    traversed but not recorded; arrays/tensors are recorded but not traversed
+    into. Only ``__dict__`` is followed on custom objects — never ``__slots__``
+    descriptors, which could trigger side effects.
+    """
+    found: dict[int, type] = {}
+    visited: set[int] = set()
+    stack: list[tuple[Any, int]] = [(root, 0)]
+    while stack and len(visited) < max_nodes:
+        obj, depth = stack.pop()
+        oid = id(obj)
+        if oid in visited or depth > max_depth:
+            continue
+        visited.add(oid)
+        if isinstance(obj, (_IMMUTABLE_SCALARS, _SHARED_BY_NATURE)):
+            continue
+        if isinstance(obj, (tuple, frozenset)):
+            for child in obj:
+                stack.append((child, depth + 1))
+            continue
+        found[oid] = type(obj)
+        if _is_opaque_leaf(obj):
+            continue
+        try:
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    stack.append((key, depth + 1))
+                    stack.append((value, depth + 1))
+            elif isinstance(obj, (list, set)):
+                for child in obj:
+                    stack.append((child, depth + 1))
+            else:
+                obj_dict = getattr(obj, "__dict__", None)
+                if isinstance(obj_dict, dict):
+                    for value in obj_dict.values():
+                        stack.append((value, depth + 1))
+        except Exception:
+            # Exotic container / proxy whose iteration raised — stop descending
+            # this branch rather than abort the whole walk.
+            continue
+    return found
+
+
+def detect_shared_mutable_outputs(outputs: dict[str, Any]) -> list[MutationWarning]:
+    """Warn when two of a cell's outputs share a mutable object by identity.
+
+    Such outputs decouple once stored as separate artifacts (see the module
+    note above). General — no per-type rule — it walks each output's object
+    graph and reports the first shared mutable object per output pair.
+    """
+    owners: dict[int, str] = {}
+    reported: set[frozenset[str]] = set()
+    warnings: list[MutationWarning] = []
+    for var_name, value in outputs.items():
+        for oid, typ in _reachable_mutable_ids(value).items():
+            prev = owners.get(oid)
+            if prev is None:
+                owners[oid] = var_name
+            elif prev != var_name:
+                pair = frozenset((prev, var_name))
+                if pair in reported:
+                    continue
+                reported.add(pair)
+                warnings.append(
+                    MutationWarning(
+                        var_name=prev,
+                        message=(
+                            f"outputs '{prev}' and '{var_name}' share a mutable "
+                            f"{typ.__name__} object; stored as separate artifacts "
+                            "they become independent copies downstream"
+                        ),
+                        suggestion=(
+                            "If they must stay linked (e.g. an optimizer over a "
+                            f"model's parameters), keep '{prev}' and '{var_name}' "
+                            "in the same cell."
+                        ),
+                    )
+                )
+    return warnings
