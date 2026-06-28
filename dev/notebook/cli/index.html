@@ -2139,6 +2139,10 @@ invocation opens its own <code>NotebookSession</code>, runs the cells, and exits
 <td>Skip <code>uv sync</code>; require <code>.venv/</code> to already exist</td>
 </tr>
 <tr>
+<td><code>--timeout</code></td>
+<td>Per-cell timeout (seconds) for this run, overriding the 300s default; a per-cell <code># @timeout</code> or notebook.toml <code>timeout</code> still wins. For compute-heavy cells (model training, feature extraction).</td>
+</tr>
+<tr>
 <td><code>--format</code></td>
 <td><code>human</code> (default) or <code>json</code> — both write to stdout</td>
 </tr>

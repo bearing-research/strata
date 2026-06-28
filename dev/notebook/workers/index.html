@@ -923,6 +923,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#device-and-tensor-placement-pytorch-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Device and tensor placement (PyTorch / GPU)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2031,6 +2042,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#device-and-tensor-placement-pytorch-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Device and tensor placement (PyTorch / GPU)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2421,6 +2443,28 @@
 <li>Cell-level worker override (from the cell's stored config)</li>
 <li>Notebook-level worker default (from the Workers panel)</li>
 </ol>
+<h3 id="device-and-tensor-placement-pytorch-gpu">Device and tensor placement (PyTorch / GPU)<a class="headerlink" href="#device-and-tensor-placement-pytorch-gpu" title="Permanent link">&para;</a></h3>
+<p>Each cell runs in an isolated process and exchanges <strong>values</strong> (pickled
+artifacts), not a shared Python kernel. That has a consequence specific to
+device-bound objects like <code>torch.device</code> and CUDA tensors when a DAG mixes a
+<strong>local CPU</strong> machine with a <strong>remote GPU</strong> <code>@worker</code>:</p>
+<ul>
+<li><strong>Don't share a resolved <code>device</code> across the boundary.</strong> A cell that does
+  <code>device = "cuda" if torch.cuda.is_available() else "cpu"</code> and exports <code>device</code>
+  resolves it <em>where that cell ran</em>. If it runs locally (no CUDA), the value is
+  <code>"cpu"</code>, and a GPU <code>@worker</code> cell consuming it will train on <strong>CPU on the GPU
+  box</strong>. Resolve the device <strong>at point of use, inside each cell</strong>, rather than
+  passing one <code>device</code> artifact downstream.</li>
+<li><strong>Save/load model weights with explicit <code>map_location</code>.</strong> A CUDA tensor or a
+  CUDA-resident model pickled on the worker fails to deserialize on a CPU-only
+  host (<code>torch.cuda.is_available()</code> is <code>False</code> there). Move tensors to CPU
+  before they become a cross-boundary artifact (<code>state = model.cpu().state_dict()</code>),
+  or load with <code>torch.load(path, map_location="cpu")</code>.</li>
+<li><strong>Prefer passing a state_dict / checkpoint path</strong> between a training cell and
+  downstream analysis cells, rather than a live CUDA model object.</li>
+</ul>
+<p>This is partly notebook design — Strata can't know your placement intent — but
+the isolation boundary makes it a footgun worth designing around explicitly.</p>
 <h2 id="caching-and-provenance">Caching and provenance<a class="headerlink" href="#caching-and-provenance" title="Permanent link">&para;</a></h2>
 <p>Remote execution results are cached identically to local cells. The provenance hash includes the worker's <code>runtime_id</code>, so:</p>
 <ul>
