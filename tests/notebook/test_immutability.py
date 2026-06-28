@@ -9,6 +9,7 @@ from strata.notebook.immutability import (
     InputSnapshot,
     apply_defensive_copy,
     detect_mutations,
+    detect_shared_mutable_outputs,
     snapshot_inputs,
 )
 
@@ -350,3 +351,59 @@ class TestTorchFingerprint:
         snapshots = snapshot_inputs({"v": fake_torch.Tensor([1, 2, 3])}, ["v"])
         assert snapshots[0].content_hash is not None
         assert isinstance(sys.modules["torch"], type(fake_torch))
+
+
+class TestSharedMutableOutputs:
+    """Phase 2b — two outputs sharing a mutable object decouple once stored as
+    separate artifacts (the optimizer↔model footgun). General, no per-type rule."""
+
+    def test_two_outputs_sharing_a_list_flagged(self):
+        shared = [1, 2, 3]
+        warnings = detect_shared_mutable_outputs({"a": {"data": shared}, "b": {"ref": shared}})
+        assert len(warnings) == 1
+        assert "'a'" in warnings[0]["message"]
+        assert "'b'" in warnings[0]["message"]
+
+    def test_independent_outputs_not_flagged(self):
+        # Equal but not identical — no shared identity, no decoupling risk.
+        assert detect_shared_mutable_outputs({"a": {"d": [1, 2]}, "b": {"d": [1, 2]}}) == []
+
+    def test_optimizer_model_analog_flagged(self):
+        class Param:
+            def __init__(self):
+                self.v = 0.0
+
+        params = [Param(), Param()]
+
+        class Model:
+            def __init__(self, p):
+                self._params = p
+
+        class Optimizer:
+            def __init__(self, p):
+                self.param_groups = [{"params": p}]
+
+        # Optimizer holds the *same* Param objects as the model (by identity).
+        warnings = detect_shared_mutable_outputs(
+            {"model": Model(params), "optimizer": Optimizer(params)}
+        )
+        assert len(warnings) == 1
+        assert "model" in warnings[0]["message"]
+        assert "optimizer" in warnings[0]["message"]
+
+    def test_shared_immutable_not_flagged(self):
+        s = "config"
+        assert detect_shared_mutable_outputs({"a": {"name": s}, "b": {"name": s}}) == []
+
+    def test_single_output_no_pair(self):
+        assert detect_shared_mutable_outputs({"a": [1, 2, 3]}) == []
+
+    def test_shared_module_or_function_not_flagged(self):
+        """Imports/defs are shared by nature — never flagged."""
+        import numpy as np
+
+        def helper():
+            return 1
+
+        outputs = {"a": {"mod": np, "fn": helper}, "b": {"mod": np, "fn": helper}}
+        assert detect_shared_mutable_outputs(outputs) == []

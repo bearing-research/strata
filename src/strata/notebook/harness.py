@@ -266,6 +266,9 @@ def execute_cell(
         mutation_warnings = list(
             _immut.detect_mutations(namespace, input_snapshots, exported_names=set(new_vars))
         )
+        # Warn when two outputs share a mutable object (they decouple once stored
+        # as separate artifacts — e.g. an optimizer over a model's parameters).
+        mutation_warnings.extend(_immut.detect_shared_mutable_outputs(new_vars))
         return (
             new_vars,
             display_values,
@@ -460,6 +463,13 @@ def _run_one_batched_cell(
                 # static analyzer couldn't see (aliases, helper-fn mutation,
                 # bare mutators). Parity with single-cell / pool detection.
                 mutation_warnings = list(_immut.detect_mutations(namespace, input_snapshots))
+                # Shared-mutable-object detection across this cell's outputs
+                # (parity with single-cell) — see detect_shared_mutable_outputs.
+                mutation_warnings.extend(
+                    _immut.detect_shared_mutable_outputs(
+                        {vn: namespace[vn] for vn in consumed_vars if vn in namespace}
+                    )
+                )
 
                 # Success: serialize consumed vars + displays.
                 #

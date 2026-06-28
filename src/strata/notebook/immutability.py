@@ -16,6 +16,7 @@ import collections.abc
 import copy
 import hashlib
 import sys
+import types
 from dataclasses import dataclass
 from typing import Any, NamedTuple, TypedDict
 
@@ -455,3 +456,119 @@ def apply_defensive_copy(value: Any, content_type: str) -> Any:
         return copy.deepcopy(value)
     # arrow/ipc (fresh on deserialize) or unknown — return as-is.
     return value
+
+
+# ---------------------------------------------------------------------------
+# Shared-mutable-object detection across a cell's outputs
+#
+# Strata stores each output variable as an independent artifact. If two outputs
+# share a mutable object by identity — the classic case being an optimizer that
+# holds a model's parameter tensors — storing them separately *decouples* them:
+# downstream they're independent copies, so mutating one no longer affects the
+# other. That silently breaks split model/optimizer training. Detection rides a
+# bounded object-graph walk (no per-library rule); arrays/tensors are recorded
+# as mutable leaves but not traversed into.
+# ---------------------------------------------------------------------------
+
+
+# Shared by nature (imports, defs) and never the "decoupling-relevant" state we
+# care about — skip recording and traversing them, or two outputs that both
+# reference numpy would look like they "share" the module.
+_SHARED_BY_NATURE = (
+    types.ModuleType,
+    types.FunctionType,
+    types.MethodType,
+    types.BuiltinFunctionType,
+    type,
+)
+
+
+def _is_opaque_leaf(value: Any) -> bool:
+    """A mutable object we record but don't traverse into (huge buffers)."""
+    return _is_numpy(value) or _is_torch(value) or _is_pandas(value)
+
+
+def _reachable_mutable_ids(
+    root: Any, *, max_nodes: int = 20000, max_depth: int = 8
+) -> dict[int, type]:
+    """Map ``id -> type`` for mutable objects reachable from *root* (bounded).
+
+    Immutable scalars are ignored; immutable containers (tuple/frozenset) are
+    traversed but not recorded; arrays/tensors are recorded but not traversed
+    into. Only ``__dict__`` is followed on custom objects — never ``__slots__``
+    descriptors, which could trigger side effects.
+    """
+    found: dict[int, type] = {}
+    visited: set[int] = set()
+    stack: list[tuple[Any, int]] = [(root, 0)]
+    while stack and len(visited) < max_nodes:
+        obj, depth = stack.pop()
+        oid = id(obj)
+        if oid in visited or depth > max_depth:
+            continue
+        visited.add(oid)
+        if isinstance(obj, (_IMMUTABLE_SCALARS, _SHARED_BY_NATURE)):
+            continue
+        if isinstance(obj, (tuple, frozenset)):
+            for child in obj:
+                stack.append((child, depth + 1))
+            continue
+        found[oid] = type(obj)
+        if _is_opaque_leaf(obj):
+            continue
+        try:
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    stack.append((key, depth + 1))
+                    stack.append((value, depth + 1))
+            elif isinstance(obj, (list, set)):
+                for child in obj:
+                    stack.append((child, depth + 1))
+            else:
+                obj_dict = getattr(obj, "__dict__", None)
+                if isinstance(obj_dict, dict):
+                    for value in obj_dict.values():
+                        stack.append((value, depth + 1))
+        except Exception:
+            # Exotic container / proxy whose iteration raised — stop descending
+            # this branch rather than abort the whole walk.
+            continue
+    return found
+
+
+def detect_shared_mutable_outputs(outputs: dict[str, Any]) -> list[MutationWarning]:
+    """Warn when two of a cell's outputs share a mutable object by identity.
+
+    Such outputs decouple once stored as separate artifacts (see the module
+    note above). General — no per-type rule — it walks each output's object
+    graph and reports the first shared mutable object per output pair.
+    """
+    owners: dict[int, str] = {}
+    reported: set[frozenset[str]] = set()
+    warnings: list[MutationWarning] = []
+    for var_name, value in outputs.items():
+        for oid, typ in _reachable_mutable_ids(value).items():
+            prev = owners.get(oid)
+            if prev is None:
+                owners[oid] = var_name
+            elif prev != var_name:
+                pair = frozenset((prev, var_name))
+                if pair in reported:
+                    continue
+                reported.add(pair)
+                warnings.append(
+                    MutationWarning(
+                        var_name=prev,
+                        message=(
+                            f"outputs '{prev}' and '{var_name}' share a mutable "
+                            f"{typ.__name__} object; stored as separate artifacts "
+                            "they become independent copies downstream"
+                        ),
+                        suggestion=(
+                            "If they must stay linked (e.g. an optimizer over a "
+                            f"model's parameters), keep '{prev}' and '{var_name}' "
+                            "in the same cell."
+                        ),
+                    )
+                )
+    return warnings

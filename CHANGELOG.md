@@ -77,6 +77,18 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   list / set / torch tensor received from upstream — are detected (statically
   recaptured into the DAG and verified at runtime via a fingerprint registry),
   so provenance stays correct when a cell mutates a value it didn't define.
+- **General mutation detection for stateful (ML) workloads.** Runtime mutation
+  detection is no longer limited to a hand-written type registry — it falls back
+  to a serializer-based fingerprint, so an in-place mutation of *any* serializable
+  object (a `torch.nn.Module` trained via `optimizer.step()`, an sklearn
+  estimator, a custom class) is caught with no per-library rule. A cell that
+  mutates an input in place **but doesn't export it** now warns (downstream would
+  otherwise read the pre-mutation value), and `strata run` surfaces those
+  warnings in both human and JSON output. Strata also warns when two of a cell's
+  outputs **share a mutable object** (the optimizer-over-a-model footgun: stored
+  as separate artifacts they decouple downstream). New
+  [Stateful objects & value semantics](https://bearing-research.github.io/strata/notebook/concepts/)
+  docs cover the one-cell training pattern.
 
 ### Changed
 
