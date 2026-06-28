@@ -383,6 +383,30 @@ When multiple levels define a worker, the most specific wins:
 2. Cell-level worker override (from the cell's stored config)
 3. Notebook-level worker default (from the Workers panel)
 
+### Device and tensor placement (PyTorch / GPU)
+
+Each cell runs in an isolated process and exchanges **values** (pickled
+artifacts), not a shared Python kernel. That has a consequence specific to
+device-bound objects like `torch.device` and CUDA tensors when a DAG mixes a
+**local CPU** machine with a **remote GPU** `@worker`:
+
+- **Don't share a resolved `device` across the boundary.** A cell that does
+  `device = "cuda" if torch.cuda.is_available() else "cpu"` and exports `device`
+  resolves it *where that cell ran*. If it runs locally (no CUDA), the value is
+  `"cpu"`, and a GPU `@worker` cell consuming it will train on **CPU on the GPU
+  box**. Resolve the device **at point of use, inside each cell**, rather than
+  passing one `device` artifact downstream.
+- **Save/load model weights with explicit `map_location`.** A CUDA tensor or a
+  CUDA-resident model pickled on the worker fails to deserialize on a CPU-only
+  host (`torch.cuda.is_available()` is `False` there). Move tensors to CPU
+  before they become a cross-boundary artifact (`state = model.cpu().state_dict()`),
+  or load with `torch.load(path, map_location="cpu")`.
+- **Prefer passing a state_dict / checkpoint path** between a training cell and
+  downstream analysis cells, rather than a live CUDA model object.
+
+This is partly notebook design — Strata can't know your placement intent — but
+the isolation boundary makes it a footgun worth designing around explicitly.
+
 ## Caching and provenance
 
 Remote execution results are cached identically to local cells. The provenance hash includes the worker's `runtime_id`, so:
