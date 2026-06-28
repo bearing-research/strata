@@ -261,7 +261,11 @@ def execute_cell(
 
         display_values = display_capture.resolve(_display_value)
 
-        mutation_warnings = list(_immut.detect_mutations(namespace, input_snapshots))
+        # Only warn for inputs mutated in place AND not exported — an exported
+        # (re-captured) mutation reaches downstream correctly.
+        mutation_warnings = list(
+            _immut.detect_mutations(namespace, input_snapshots, exported_names=set(new_vars))
+        )
         return (
             new_vars,
             display_values,

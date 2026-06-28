@@ -216,9 +216,9 @@ class TestFingerprintRegistry:
     def test_set_add_detected_via_sized_fallback(self):
         assert self._warned({1, 2, 3}, lambda s: s.add(9))
 
-    def test_unknown_type_is_identity_only(self):
-        """A type with no fingerprint isn't content-checked — mutating an
-        attribute in place produces no warning (and no snapshot hash)."""
+    def test_opaque_object_mutation_detected_via_general_fingerprint(self):
+        """An arbitrary picklable object is content-checked via the general
+        serializer fallback — no per-type rule needed (the Phase 2a fix)."""
 
         class Opaque:
             def __init__(self):
@@ -226,15 +226,48 @@ class TestFingerprintRegistry:
 
         namespace = {"v": Opaque()}
         snapshots = snapshot_inputs(namespace, ["v"])
-        assert snapshots[0].content_hash is None
+        assert snapshots[0].content_hash is not None  # general fingerprint applies
         namespace["v"].x = 2
+        assert len(detect_mutations(namespace, snapshots)) == 1
+
+    def test_opaque_object_no_mutation_not_flagged(self):
+        class Opaque:
+            def __init__(self):
+                self.x = 1
+
+        namespace = {"v": Opaque()}
+        snapshots = snapshot_inputs(namespace, ["v"])
+        _ = namespace["v"].x  # read only, no mutation
+        assert detect_mutations(namespace, snapshots) == []
+
+    def test_unpicklable_object_is_identity_only_no_crash(self):
+        """A value the serializer can't handle falls back to identity-only."""
+        namespace = {"v": lambda: 1}  # lambdas aren't cloudpickle-stable here
+        snapshots = snapshot_inputs(namespace, ["v"])
+        # Either fingerprinted or not, mutation detection must not raise.
         assert detect_mutations(namespace, snapshots) == []
 
     def test_string_input_is_not_fingerprinted(self):
-        """str is immutable — excluded from the sized fallback, identity-only."""
+        """str is immutable — skipped by the general fallback, identity-only."""
         namespace = {"v": "hello"}
         snapshots = snapshot_inputs(namespace, ["v"])
         assert snapshots[0].content_hash is None
+
+    def test_exported_mutation_is_not_warned(self):
+        """A mutated input the cell also exported reaches downstream correctly —
+        only the *unexported* mutation (silent-stale) warns."""
+
+        class Opaque:
+            def __init__(self):
+                self.x = 1
+
+        namespace = {"v": Opaque()}
+        snapshots = snapshot_inputs(namespace, ["v"])
+        namespace["v"].x = 2
+        # Not exported → warns.
+        assert len(detect_mutations(namespace, snapshots)) == 1
+        # Exported (re-captured) → silent.
+        assert detect_mutations(namespace, snapshots, exported_names={"v"}) == []
 
 
 @pytest.fixture

@@ -88,7 +88,9 @@ def snapshot_inputs(namespace: dict[str, Any], input_names: list[str]) -> list[I
 
 
 def detect_mutations(
-    namespace: dict[str, Any], snapshots: list[InputSnapshot]
+    namespace: dict[str, Any],
+    snapshots: list[InputSnapshot],
+    exported_names: set[str] | None = None,
 ) -> list[MutationWarning]:
     """Detect mutations by comparing current state against snapshots.
 
@@ -137,6 +139,13 @@ def detect_mutations(
         if current_id != snapshot.identity:
             continue
 
+        # If the cell also exported this variable, downstream cells receive the
+        # mutated value — it's a *published* mutation, not the dangerous silent
+        # one. Only warn when a mutated input was NOT exported (→ downstream gets
+        # the pre-mutation value).
+        if exported_names is not None and snapshot.var_name in exported_names:
+            continue
+
         # Same identity — check if the object was mutated
         mutation_detected = _check_object_mutation(current_value, snapshot)
 
@@ -177,9 +186,11 @@ def _check_object_mutation(value: Any, snapshot: InputSnapshot) -> tuple[str, st
     if _content_fingerprint(value) == snapshot.content_hash:
         return None
     return (
-        f"'{snapshot.var_name}' was mutated in place (no reassignment)",
-        "If a downstream cell needs the original, copy it before mutating "
-        "(e.g. x = x.copy()) or reassign instead of mutating in place.",
+        f"'{snapshot.var_name}' was mutated in place (no reassignment); a "
+        "downstream cell will see the pre-mutation value unless this cell "
+        "exports it",
+        "Reassign it (x = …), copy before mutating (x = x.copy()), or keep the "
+        "producer and the mutation in one cell.",
     )
 
 
@@ -207,17 +218,44 @@ class _FingerprintRule(NamedTuple):
     fingerprint: collections.abc.Callable[[Any], str | None]
 
 
-def _content_fingerprint(value: Any) -> str | None:
-    """Return a sampled content digest for *value*, or ``None`` if unknown.
+# Types that can't be mutated in place — identity-only is correct, and
+# fingerprinting them is wasted work (a str/int can't change under your feet).
+_IMMUTABLE_SCALARS = (str, bytes, int, float, bool, complex, type(None))
 
-    Walks :data:`_FINGERPRINT_RULES` in order; the first rule whose ``matches``
-    accepts the value produces the digest. Unknown types yield ``None``
-    (identity-only tracking).
+
+def _general_fingerprint(value: Any) -> str | None:
+    """Serializer-based fallback fingerprint for any picklable object.
+
+    The :data:`_FINGERPRINT_RULES` above are *performance* optimizations for hot
+    types (sampled digests). This is the *general* path that makes mutation
+    detection cover arbitrary objects — ``torch.nn.Module``, sklearn estimators,
+    custom classes — with **no per-type rule**, by hashing the same bytes Strata
+    would store the value as. Immutable scalars are skipped; an unpicklable value
+    falls back to identity-only (``None``).
+    """
+    if isinstance(value, _IMMUTABLE_SCALARS):
+        return None
+    try:
+        import cloudpickle
+
+        return hashlib.sha256(cloudpickle.dumps(value, protocol=5)).hexdigest()
+    except Exception:
+        # Unpicklable or non-deterministic to serialize → can't content-check.
+        return None
+
+
+def _content_fingerprint(value: Any) -> str | None:
+    """Return a content digest for *value*, or ``None`` if it can't be checked.
+
+    Walks :data:`_FINGERPRINT_RULES` (fast sampled digests for hot types) in
+    order; the first match wins. Anything else falls back to a general
+    serializer-based hash — so mutation detection isn't limited to a
+    hand-written type registry.
     """
     for rule in _FINGERPRINT_RULES:
         if rule.matches(value):
             return rule.fingerprint(value)
-    return None
+    return _general_fingerprint(value)
 
 
 def _is_pandas(value: Any) -> bool:
