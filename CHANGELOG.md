@@ -130,6 +130,14 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   interactive/bulk limiter pools now track the configured and adaptively-tuned
   slot counts instead of drifting from them.
 
+- **No more error-level log spam for re-importable module inputs.** A cell that
+  uses an `import numpy as np` from an upstream cell would log an error-level
+  "artifact still missing" line per module when that binding wasn't materialised
+  (e.g. a producer running on a remote `@worker` that doesn't ship module blobs
+  back). Module bindings are re-importable by name, so the consuming cell just
+  re-imports them — that case now logs at debug; a genuinely missing *data*
+  artifact still logs at error.
+
 - **GC tracker no longer self-deadlocks.** The GC callback took a non-reentrant
   lock that a GC pause triggered during the callback could re-enter; it's now
   non-blocking, removing a rare hang.
