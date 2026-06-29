@@ -67,6 +67,7 @@ import httpx
 from strata.artifact_store import TransformSpec as ArtifactTransformSpec
 from strata.artifact_store import get_artifact_store
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
 from strata.notebook.immutability import MutationWarning
@@ -2859,14 +2860,28 @@ class CellExecutor:
                         artifact_id,
                     )
                     if artifact is None:
-                        # Should not happen after _materialize_upstreams,
-                        # but guard defensively.
-                        logger.error(
-                            "Artifact %s still missing after upstream "
-                            "materialisation — skipping variable '%s'.",
-                            artifact_id,
-                            var_name,
-                        )
+                        # A re-importable module binding (``import numpy as np``)
+                        # isn't always materialised as an artifact — notably when
+                        # the producer ran on a remote @worker that doesn't ship
+                        # module/import blobs back. The consuming cell re-imports
+                        # it, so this is expected and harmless; log at debug.
+                        # Any *other* missing var is a real materialisation gap
+                        # ("should not happen" after _materialize_upstreams) and
+                        # stays at error.
+                        if var_name in imported_names(upstream_cell.source):
+                            logger.debug(
+                                "Module-typed upstream '%s' has no artifact "
+                                "(producer cell %s); the consuming cell re-imports it.",
+                                var_name,
+                                upstream_id,
+                            )
+                        else:
+                            logger.error(
+                                "Artifact %s still missing after upstream "
+                                "materialisation — skipping variable '%s'.",
+                                artifact_id,
+                                var_name,
+                            )
                         continue
 
                     blob_data = artifact_mgr.load_artifact_data(
