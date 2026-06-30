@@ -138,6 +138,14 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   re-imports them — that case now logs at debug; a genuinely missing *data*
   artifact still logs at error.
 
+- **Actionable error when `uv` isn't on PATH.** A headless `strata run` (ssh,
+  cron) where uv's install dir (`~/.local/bin`) isn't on PATH failed *every*
+  Python cell with a bare `[Errno 2] No such file or directory: 'uv'`. uv is now
+  resolved via `shutil.which` with a fallback probe of the standard installer
+  dirs (`~/.local/bin`, `~/.cargo/bin`), and if it still can't be found, cells
+  fail with an actionable message ("uv not found on PATH. Install uv … or add it
+  to PATH …") — matching the existing `Rscript not found` guard.
+
 - **GC tracker no longer self-deadlocks.** The GC callback took a non-reentrant
   lock that a GC pause triggered during the callback could re-enter; it's now
   non-blocking, removing a rare hang.

@@ -69,6 +69,7 @@ from strata.artifact_store import get_artifact_store
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
+from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import (
@@ -3196,8 +3197,20 @@ class CellExecutor:
         timeout_seconds: float,
     ) -> dict[str, Any]:
         """Run the harness script via uv."""
+        uv = resolve_uv()
+        if uv is None:
+            # Without this, every cell dies with a bare ``[Errno 2] … 'uv'``
+            # — common headless (ssh/cron) where ~/.local/bin isn't on PATH.
+            # Mirror the Rscript guard in _run_r_harness.
+            return {
+                "success": False,
+                "error": UV_NOT_FOUND_MESSAGE,
+                "stderr": "",
+                "stdout": "",
+                "variables": {},
+            }
         cmd = [
-            "uv",
+            uv,
             "run",
             "--directory",
             str(self.session.path),
