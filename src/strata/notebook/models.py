@@ -291,9 +291,29 @@ class VariantGroupConfig(BaseModel):
     )
     active: str = Field(
         ...,
-        description="Active variant name within the group",
-        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+        description=(
+            "Active variant name within the group (ignored in sweep mode). "
+            "Empty means 'first variant in source order' — the same fallback "
+            "used when a group has no toml entry."
+        ),
+        pattern=r"^([a-zA-Z_][a-zA-Z0-9_]*)?$",
     )
+    # No strict pattern: an unknown value must not crash notebook parsing.
+    # Execution treats anything other than ``"sweep"`` as switch mode, and
+    # ``annotation_validation`` surfaces a ``variant_mode_invalid`` diagnostic.
+    mode: str = Field(
+        "switch",
+        description=(
+            "Group execution mode: 'switch' (exactly one active variant) or "
+            "'sweep' (all variants run; downstream consumes a {variant: value} "
+            "dict). Unknown values are treated as 'switch'."
+        ),
+    )
+
+    @property
+    def is_sweep(self) -> bool:
+        """Whether the group runs in sweep mode (fail-safe: only exact 'sweep')."""
+        return self.mode == "sweep"
 
 
 class VariantMember(BaseModel):
@@ -814,6 +834,15 @@ class NotebookState(BaseModel):
             "Raw {group: active_name} selections from notebook.toml's "
             "[[variant_group]] entries. Populated by the parser; consumed "
             "by session DAG build to resolve into ``variant_groups``."
+        ),
+    )
+    variant_modes: dict[str, str] = Field(
+        default_factory=dict,
+        exclude=True,
+        description=(
+            "Raw {group: mode} ('switch' | 'sweep') from notebook.toml's "
+            "[[variant_group]] entries. Populated by the parser; consumed by "
+            "the DAG build (sweep → all variants run) and annotation validation."
         ),
     )
     path: Path | None = Field(

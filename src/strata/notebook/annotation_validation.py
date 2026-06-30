@@ -698,10 +698,45 @@ def _validate_variant_annotation(
                 )
                 break
 
+    # variant_mode_invalid — mode is neither "switch" nor "sweep". Execution
+    # treats the unknown value as switch; flag it so the user isn't surprised.
+    mode = notebook_state.variant_modes.get(group_id, "switch")
+    if mode not in ("switch", "sweep"):
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="variant_mode_invalid",
+                message=(
+                    f"notebook.toml sets mode `{mode}` for variant group `{group_id}`, "
+                    "but only `switch` and `sweep` are valid. Treating it as `switch`."
+                ),
+                line=variant_line,
+            )
+        )
+
+    # variant_active_redundant — `active` is set in a sweep-mode group, where
+    # it's ignored (all variants run). Info-level: harmless, just confusing.
+    if mode == "sweep":
+        active = notebook_state.variant_active_selections.get(group_id)
+        if active:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.INFO,
+                    code="variant_active_redundant",
+                    message=(
+                        f'Group `{group_id}` is in sweep mode, so `active = "{active}"` '
+                        "is ignored — every variant runs and downstream consumes a "
+                        "{variant: value} dict."
+                    ),
+                    line=variant_line,
+                )
+            )
+
     # variant_active_unknown — toml selects a variant that doesn't exist
     # in this group. Surface on every member so the user sees it on
-    # whichever variant they're looking at.
-    selected = notebook_state.variant_active_selections.get(group_id)
+    # whichever variant they're looking at. Skipped in sweep mode, where the
+    # active pointer is intentionally ignored.
+    selected = notebook_state.variant_active_selections.get(group_id) if mode != "sweep" else None
     if selected is not None:
         all_members = [annotations.variant.name] + [s.variant_name for s in siblings]
         if selected not in all_members:

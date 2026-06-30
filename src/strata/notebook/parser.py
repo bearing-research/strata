@@ -289,6 +289,7 @@ def parse_notebook(directory: Path) -> NotebookState:
         r=dict(notebook_toml.r),
         cells=cell_states,
         variant_active_selections={vg.group: vg.active for vg in notebook_toml.variant_groups},
+        variant_modes={vg.group: vg.mode for vg in notebook_toml.variant_groups},
         path=directory,
         created_at=notebook_toml.created_at,
         updated_at=notebook_toml.updated_at,
@@ -312,7 +313,11 @@ def _parse_variant_groups(toml_data: dict) -> list[VariantGroupConfig]:
             continue
         try:
             out.append(
-                VariantGroupConfig(group=entry.get("group", ""), active=entry.get("active", ""))
+                VariantGroupConfig(
+                    group=entry.get("group", ""),
+                    active=entry.get("active", ""),
+                    mode=entry.get("mode", "switch"),
+                )
             )
         except Exception:
             continue
