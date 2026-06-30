@@ -119,6 +119,9 @@ export interface VariantGroup {
   group: string
   activeName: string
   activeCellId: CellId
+  // 'switch' (one active member) or 'sweep' (all members run; downstream gets a
+  // {variant: value} dict). In sweep mode tab clicks are display-only.
+  mode: string
   members: VariantMember[]
 }
 
