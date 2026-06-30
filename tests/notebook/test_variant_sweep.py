@@ -340,3 +340,83 @@ def test_sweep_cells_are_not_batchable(tmp_path):
     assert is_cell_batchable(executor, consumer) is False
     # plain cell still delegates (not forced False by sweep logic)
     assert is_cell_batchable(executor, plain) is not False or plain.references == ["other"]
+
+
+class TestSweepApi:
+    """session.set_variant_mode + the mode surfaced on VariantGroupState."""
+
+    def _session(self, tmp_path):
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        nb = create_notebook(tmp_path, "Api", initialize_environment=False)
+        for cid, src, after in [
+            ("load", "X = 1\n", None),
+            ("va", "# @variant model a\npreds = X\n", "load"),
+            ("vb", "# @variant model b\npreds = X + 1\n", "va"),
+            ("ev", "r = preds\n", "vb"),
+        ]:
+            add_cell_to_notebook(nb, cid, after, language="python")
+            write_cell(nb, cid, src)
+        return nb, NotebookSession(parse_notebook(nb), nb)
+
+    def test_set_variant_mode_rebuilds_dag_and_state(self, tmp_path):
+        from strata.notebook.dag import SweepProducer
+
+        _nb, s = self._session(tmp_path)
+        # switch (default): a single producing cell, one inactive member
+        assert isinstance(s.dag.variable_producer["preds"], str)
+        assert len(s.dag.inactive_cells) == 1
+
+        s.set_variant_mode("model", "sweep")
+        assert s.notebook_state.variant_modes["model"] == "sweep"
+        assert isinstance(s.dag.variable_producer["preds"], SweepProducer)
+        assert s.dag.inactive_cells == set()
+        grp = next(g for g in s.notebook_state.variant_groups if g.group == "model")
+        assert grp.mode == "sweep"  # surfaced for the frontend
+
+        # toggle back to switch
+        s.set_variant_mode("model", "switch")
+        assert isinstance(s.dag.variable_producer["preds"], str)
+        grp = next(g for g in s.notebook_state.variant_groups if g.group == "model")
+        assert grp.mode == "switch"
+
+
+class TestSweepRestEndpoint:
+    """PUT /variant-groups/{group} accepts `mode`."""
+
+    def _build(self, tmp_path):
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        nb = create_notebook(tmp_path, "RestApi", initialize_environment=False)
+        for cid, src, after in [
+            ("load", "X = 1\n", None),
+            ("va", "# @variant model a\npreds = X\n", "load"),
+            ("vb", "# @variant model b\npreds = X + 1\n", "va"),
+            ("ev", "r = preds\n", "vb"),
+        ]:
+            add_cell_to_notebook(nb, cid, after, language="python")
+            write_cell(nb, cid, src)
+        return nb
+
+    def test_put_mode_sweep(self, tmp_path):
+        from fastapi.testclient import TestClient
+
+        from tests.notebook.e2e_fixtures import create_test_app, open_notebook_session
+
+        nb = self._build(tmp_path)
+        client = TestClient(create_test_app())
+        with open_notebook_session(client, nb) as (sid, _session):
+            resp = client.put(f"/v1/notebooks/{sid}/variant-groups/model", json={"mode": "sweep"})
+            assert resp.status_code == 200, resp.text
+            groups = {g["group"]: g for g in resp.json()["variant_groups"]}
+            assert groups["model"]["mode"] == "sweep"
+
+            # empty body (no active, no mode) → 400
+            empty = client.put(f"/v1/notebooks/{sid}/variant-groups/model", json={})
+            assert empty.status_code == 400
+
+            # invalid mode → 422 (request validation)
+            bad = client.put(f"/v1/notebooks/{sid}/variant-groups/model", json={"mode": "nope"})
+            assert bad.status_code == 422

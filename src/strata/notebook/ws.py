@@ -1557,6 +1557,12 @@ async def _handle_variant_set_active(
         )
         return
 
+    # In sweep mode the active pointer is ignored (every variant runs); tab
+    # clicks are display-only on the frontend. Treat a stray set-active as a
+    # silent no-op rather than churning notebook.toml or restalening downstream.
+    if session.notebook_state.variant_modes.get(group) == "sweep":
+        return
+
     seq = execution_state.next_sequence()
 
     try:

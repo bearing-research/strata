@@ -494,6 +494,40 @@ A `variant_active_unknown` diagnostic surfaces in the UI when the
 selection drifts (e.g. you renamed a variant in source without updating
 the toml entry).
 
+### Sweep mode — compare all variants at once
+
+Switch mode answers "which model do I pick?". **Sweep mode** answers
+"how do all three compare on the same downstream pipeline?" — it runs
+**every** variant on each group execution and hands a downstream cell the
+whole set as a `{variant_name: value}` dict.
+
+```toml
+[[variant_group]]
+group = "classifier"
+mode = "sweep"        # default is "switch"; `active` is ignored in sweep
+```
+
+The variant cells are **unchanged** — same `# @variant <group> <name>`
+annotation, same defines contract. Only the consumer changes: instead of
+seeing one `model`, a downstream cell receives a dict keyed by variant
+name and can compare them in one pass:
+
+```python
+# downstream cell — `preds` is {"logreg": ..., "rf": ..., "gbm": ...}
+scores = {name: accuracy(p, y_test) for name, p in preds.items()}
+```
+
+Migrating switch → sweep is a one-line toml edit (no cell changes). In
+the UI, the tab strip becomes a **display selector** (clicking a tab just
+shows that variant's source; it no longer changes what runs), with a
+group-level status rollup. Provenance includes the sorted
+variant→artifact map, so **adding a variant only runs that one** and
+renaming/removing a variant restalens the downstream as expected.
+
+Caveats worth knowing: a variant that fails is simply dropped from the
+dict (the downstream still runs once with the partial set), and a sweep
+group of one is legal but pointless — you'd get a one-key dict.
+
 ### Defines contract
 
 All variants in a group must produce the same set of top-level
