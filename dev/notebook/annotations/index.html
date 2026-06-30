@@ -989,6 +989,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#sweep-mode-compare-all-variants-at-once" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sweep mode — compare all variants at once
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#defines-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2436,6 +2447,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#sweep-mode-compare-all-variants-at-once" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sweep mode — compare all variants at once
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#defines-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2926,6 +2948,31 @@ provides, the DAG falls back to the <strong>first variant in source order</stron
 A <code>variant_active_unknown</code> diagnostic surfaces in the UI when the
 selection drifts (e.g. you renamed a variant in source without updating
 the toml entry).</p>
+<h3 id="sweep-mode-compare-all-variants-at-once">Sweep mode — compare all variants at once<a class="headerlink" href="#sweep-mode-compare-all-variants-at-once" title="Permanent link">&para;</a></h3>
+<p>Switch mode answers "which model do I pick?". <strong>Sweep mode</strong> answers
+"how do all three compare on the same downstream pipeline?" — it runs
+<strong>every</strong> variant on each group execution and hands a downstream cell the
+whole set as a <code>{variant_name: value}</code> dict.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="k">[[variant_group]]</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;classifier&quot;</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;sweep&quot;</span><span class="w">        </span><span class="c1"># default is &quot;switch&quot;; `active` is ignored in sweep</span>
+</code></pre></div>
+<p>The variant cells are <strong>unchanged</strong> — same <code># @variant &lt;group&gt; &lt;name&gt;</code>
+annotation, same defines contract. Only the consumer changes: instead of
+seeing one <code>model</code>, a downstream cell receives a dict keyed by variant
+name and can compare them in one pass:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="c1"># downstream cell — `preds` is {&quot;logreg&quot;: ..., &quot;rf&quot;: ..., &quot;gbm&quot;: ...}</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="n">scores</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">accuracy</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">y_test</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">preds</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+</code></pre></div>
+<p>Migrating switch → sweep is a one-line toml edit (no cell changes). In
+the UI, the tab strip becomes a <strong>display selector</strong> (clicking a tab just
+shows that variant's source; it no longer changes what runs), with a
+group-level status rollup. Provenance includes the sorted
+variant→artifact map, so <strong>adding a variant only runs that one</strong> and
+renaming/removing a variant restalens the downstream as expected.</p>
+<p>Caveats worth knowing: a variant that fails is simply dropped from the
+dict (the downstream still runs once with the partial set), and a sweep
+group of one is legal but pointless — you'd get a one-key dict.</p>
 <h3 id="defines-contract">Defines contract<a class="headerlink" href="#defines-contract" title="Permanent link">&para;</a></h3>
 <p>All variants in a group must produce the same set of top-level
 bindings. The validator compares each variant's <code>defines</code> against its
@@ -2966,9 +3013,9 @@ exist.)</p>
 dependency is on a side effect, e.g. a SQL <code>seed</code> cell creates the database
 state that subsequent SQL cells query, and no Python variable flows
 between them.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
-<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
 </code></pre></div>
 <p>Multiple <code>@after</code> lines stack; each cell ID adds one edge. Whitespace-
 separated IDs on a single line work too: <code># @after seed migrate</code>. Self-
@@ -3046,9 +3093,9 @@ doesn't affect per-variable provenance hashes.</p>
 <p>Environment variables with names containing KEY, SECRET, TOKEN, PASSWORD, or CREDENTIAL have their values blanked from <code>notebook.toml</code> when saving. The key names are preserved as a "which vars are configured" reminder <em>only</em> when something real is configured alongside them. A notebook whose <code>[env]</code> would contain nothing but blanked sensitive slots is persisted without an <code>[env]</code> block at all, so typing an API key in the Runtime panel doesn't churn the committed notebook.</p>
 </div>
 <p>Notebook env vars are stored in the <code>[env]</code> section of <code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="k">[env]</span>
-<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="n">DATABASE_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;postgres://localhost/mydb&quot;</span>
-<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">  </span><span class="c1"># value blanked; name kept because DATABASE_URL above is real config</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="k">[env]</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="n">DATABASE_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;postgres://localhost/mydb&quot;</span>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">  </span><span class="c1"># value blanked; name kept because DATABASE_URL above is real config</span>
 </code></pre></div>
 
 
