@@ -2796,6 +2796,8 @@ def _format_dag(session) -> dict:
     Returns:
         DAG data as dict
     """
+    from strata.notebook.dag import producer_cell_label
+
     if not session.dag:
         return {
             "edges": [],
@@ -2817,7 +2819,9 @@ def _format_dag(session) -> dict:
         "topological_order": session.dag.topological_order,
         "leaves": list(session.dag.leaves),
         "roots": list(session.dag.roots),
-        "variable_producer": session.dag.variable_producer,
+        "variable_producer": {
+            v: producer_cell_label(p) for v, p in session.dag.variable_producer.items()
+        },
     }
 
 

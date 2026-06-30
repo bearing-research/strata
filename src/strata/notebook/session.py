@@ -518,6 +518,7 @@ class NotebookSession:
             self.dag = NotebookDag.from_cells(
                 cell_analyses,
                 variant_active_selections=self.notebook_state.variant_active_selections,
+                variant_modes=self.notebook_state.variant_modes,
             )
 
             # Update cells with DAG information

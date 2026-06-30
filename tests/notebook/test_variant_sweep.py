@@ -142,3 +142,75 @@ class TestSweepValidation:
         # In sweep mode the active pointer is ignored, so no drift warning.
         nb = self._nb(modes={"model": "sweep"}, selections={"model": "ghost"})
         assert "variant_active_unknown" not in _codes(nb.cells[0], nb)
+
+
+class TestSweepDag:
+    """DAG resolution in sweep mode: all variants run; downstream fans in."""
+
+    def _cells(self):
+        from strata.notebook.dag import CellAnalysisWithId
+
+        return [
+            CellAnalysisWithId(id="load", defines=["X"], references=[]),
+            CellAnalysisWithId(
+                id="m_logreg",
+                defines=["preds"],
+                references=["X"],
+                variant_group="model",
+                variant_name="logreg",
+            ),
+            CellAnalysisWithId(
+                id="m_rf",
+                defines=["preds"],
+                references=["X"],
+                variant_group="model",
+                variant_name="rf",
+            ),
+            CellAnalysisWithId(id="eval", defines=["score"], references=["preds"]),
+        ]
+
+    def _sweep_dag(self):
+        from strata.notebook.dag import NotebookDag
+
+        return NotebookDag.from_cells(self._cells(), variant_modes={"model": "sweep"})
+
+    def test_no_inactive_members(self):
+        dag = self._sweep_dag()
+        assert dag.inactive_cells == set()
+        # all four cells participate in the executable graph
+        assert set(dag.topological_order) == {"load", "m_logreg", "m_rf", "eval"}
+
+    def test_producer_is_sweep_producer(self):
+        from strata.notebook.dag import SweepProducer, producer_cell_label
+
+        dag = self._sweep_dag()
+        prod = dag.variable_producer["preds"]
+        assert isinstance(prod, SweepProducer)
+        assert prod.group == "model"
+        assert prod.variants == (("logreg", "m_logreg"), ("rf", "m_rf"))
+        assert producer_cell_label(prod) == "sweep:model"
+
+    def test_downstream_fans_in_to_all_members(self):
+        dag = self._sweep_dag()
+        assert set(dag.cell_upstream["eval"]) == {"m_logreg", "m_rf"}
+        assert "eval" in dag.cell_downstream["m_logreg"]
+        assert "eval" in dag.cell_downstream["m_rf"]
+
+    def test_each_member_consumes_the_var(self):
+        dag = self._sweep_dag()
+        assert "preds" in dag.consumed_variables["m_logreg"]
+        assert "preds" in dag.consumed_variables["m_rf"]
+
+    def test_group_resolution_marked_sweep(self):
+        dag = self._sweep_dag()
+        res = next(r for r in dag.variant_groups if r.group == "model")
+        assert res.mode == "sweep"
+        assert len(res.members) == 2
+
+    def test_switch_mode_still_excludes_inactive(self):
+        from strata.notebook.dag import NotebookDag
+
+        dag = NotebookDag.from_cells(self._cells(), variant_active_selections={"model": "rf"})
+        assert dag.inactive_cells == {"m_logreg"}
+        assert dag.cell_upstream["eval"] == ["m_rf"]
+        assert dag.variable_producer["preds"] == "m_rf"
