@@ -2778,6 +2778,15 @@ cell.featurize(cell.trips)…</code> — <code>cell.X</code> is any def or input
   artifact still logs at error.</p>
 </li>
 <li>
+<p><strong>Actionable error when <code>uv</code> isn't on PATH.</strong> A headless <code>strata run</code> (ssh,
+  cron) where uv's install dir (<code>~/.local/bin</code>) isn't on PATH failed <em>every</em>
+  Python cell with a bare <code>[Errno 2] No such file or directory: 'uv'</code>. uv is now
+  resolved via <code>shutil.which</code> with a fallback probe of the standard installer
+  dirs (<code>~/.local/bin</code>, <code>~/.cargo/bin</code>), and if it still can't be found, cells
+  fail with an actionable message ("uv not found on PATH. Install uv … or add it
+  to PATH …") — matching the existing <code>Rscript not found</code> guard.</p>
+</li>
+<li>
 <p><strong>GC tracker no longer self-deadlocks.</strong> The GC callback took a non-reentrant
   lock that a GC pause triggered during the callback could re-enter; it's now
   non-blocking, removing a rare hang.</p>
