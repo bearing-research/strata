@@ -397,7 +397,14 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         **(
             {
                 "variant_group": [
-                    {"group": vg.group, "active": vg.active} for vg in toml.variant_groups
+                    {
+                        "group": vg.group,
+                        "active": vg.active,
+                        # Emit ``mode`` only when non-default so existing
+                        # switch-mode notebooks don't churn.
+                        **({"mode": vg.mode} if vg.mode != "switch" else {}),
+                    }
+                    for vg in toml.variant_groups
                 ]
             }
             if toml.variant_groups
@@ -1255,6 +1262,42 @@ def set_variant_active(
                 toml_data["variant_group"] = entries
                 return True
         entries.append({"group": group, "active": variant_name})
+        toml_data["variant_group"] = entries
+        return True
+
+    _apply_notebook_toml_update(notebook_dir, mutate)
+
+
+def set_variant_mode(notebook_dir: Path, group: str, mode: str) -> None:
+    """Set the execution ``mode`` ('switch' | 'sweep') for ``group``.
+
+    Mirrors :func:`set_variant_active` — updates the matching
+    ``[[variant_group]]`` entry or appends one. ``"switch"`` is the default,
+    so it's written by *removing* the ``mode`` key (keeps switch notebooks
+    clean); ``"sweep"`` is written explicitly. A freshly-created entry carries
+    an empty ``active`` ("first variant in source order"), which sweep ignores
+    anyway. Bumps ``updated_at`` (mode is a structural change).
+    """
+
+    def mutate(toml_data: dict[str, Any]) -> bool:
+        entries = toml_data.get("variant_group", [])
+        if not isinstance(entries, list):
+            entries = []
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("group") == group:
+                current = entry.get("mode", "switch")
+                if current == mode:
+                    return False
+                if mode == "switch":
+                    entry.pop("mode", None)
+                else:
+                    entry["mode"] = mode
+                toml_data["variant_group"] = entries
+                return True
+        if mode == "switch":
+            # No entry and switch is the default — nothing to persist.
+            return False
+        entries.append({"group": group, "active": "", "mode": mode})
         toml_data["variant_group"] = entries
         return True
 

@@ -466,8 +466,15 @@ def resolve_variable_to_cell_id(
     variable_name: str,
 ) -> str | None:
     """Resolve a variable name to the cell ID that defines it."""
+    from strata.notebook.dag import SweepProducer
+
     if session.dag and variable_name in session.dag.variable_producer:
-        return session.dag.variable_producer[variable_name]
+        producer = session.dag.variable_producer[variable_name]
+        # A sweep group has many producing cells; return the first member as a
+        # representative (the agent only needs *a* defining cell to point at).
+        if isinstance(producer, SweepProducer):
+            return producer.variants[0][1] if producer.variants else None
+        return producer
     for cell in session.notebook_state.cells:
         if variable_name in cell.defines:
             return cell.id

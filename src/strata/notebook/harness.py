@@ -60,33 +60,58 @@ def load_manifest(manifest_path: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _deserialize_one(var_name: str, spec: dict, output_dir: Path) -> Any:
+    """Deserialize a single ``{content_type, file}`` spec into a value.
+
+    Raises ``KeyError``-style ``_Skip`` via returning the sentinel ``_MISSING``
+    when the file path is absent/missing (caller decides what to do).
+    """
+    file_name = spec.get("file", "")
+    if not file_name:
+        print(f"Warning: no file path for input {var_name}", file=sys.stderr)
+        return _MISSING
+    full_path = output_dir / file_name
+    if not full_path.exists():
+        print(f"Warning: input file not found: {full_path}", file=sys.stderr)
+        return _MISSING
+    try:
+        return _ser.deserialize_value(spec.get("content_type", ""), full_path)
+    except _ser.StrataRArtifactError as e:
+        # R-only payload from an upstream R cell. Re-raise with the variable
+        # name attached so the cell fails loudly instead of leaving the name
+        # undefined and triggering an unhelpful NameError further down.
+        raise _ser.StrataRArtifactError(e.file_path, variable_name=var_name) from e
+    except Exception as e:
+        print(f"Error deserializing {var_name}: {e}", file=sys.stderr)
+        return _MISSING
+
+
+_MISSING = object()
+
+
 def deserialize_inputs(manifest: dict) -> dict[str, Any]:
-    """Deserialize input variables listed in the manifest."""
+    """Deserialize input variables listed in the manifest.
+
+    A normal input is a single ``{content_type, file}`` spec. A sweep-group
+    input is ``{"kind": "sweep_dict", "variants": {name: spec}}`` and binds to a
+    ``{variant_name: value}`` dict.
+    """
     output_dir = Path(manifest.get("output_dir", "/tmp/strata_output"))
-    inputs = {}
+    inputs: dict[str, Any] = {}
 
     for var_name, spec in manifest.get("inputs", {}).items():
-        content_type = spec.get("content_type", "")
-        file_name = spec.get("file", "")
-        if not file_name:
-            print(f"Warning: no file path for input {var_name}", file=sys.stderr)
+        if isinstance(spec, dict) and spec.get("kind") == "sweep_dict":
+            bundle: dict[str, Any] = {}
+            for variant_name, variant_spec in spec.get("variants", {}).items():
+                value = _deserialize_one(var_name, variant_spec, output_dir)
+                if value is not _MISSING:
+                    bundle[variant_name] = value
+            inputs[var_name] = bundle
             continue
 
-        full_path = output_dir / file_name
-        if not full_path.exists():
-            print(f"Warning: input file not found: {full_path}", file=sys.stderr)
-            continue
-
-        try:
-            inputs[var_name] = _ser.deserialize_value(content_type, full_path)
-        except _ser.StrataRArtifactError as e:
-            # R-only payload from an upstream R cell. Re-raise with the
-            # variable name attached so the cell fails loudly instead
-            # of silently leaving `var_name` undefined and triggering
-            # an unhelpful NameError further down.
-            raise _ser.StrataRArtifactError(e.file_path, variable_name=var_name) from e
-        except Exception as e:
-            print(f"Error deserializing {var_name}: {e}", file=sys.stderr)
+        value = _deserialize_one(var_name, spec, output_dir)
+        if value is not _MISSING:
+            inputs[var_name] = value
 
     return inputs
 

@@ -932,6 +932,8 @@ def _status_row(cell: CellState) -> CellStatusRow:
 
 
 def _dag_view(dag: NotebookDag | None) -> DagView:
+    from strata.notebook.dag import producer_cell_label
+
     if dag is None:
         return DagView(
             edges=[],
@@ -952,5 +954,5 @@ def _dag_view(dag: NotebookDag | None) -> DagView:
         topological_order=list(dag.topological_order),
         leaves=list(dag.leaves),
         roots=list(dag.roots),
-        variable_producer=dict(dag.variable_producer),
+        variable_producer={v: producer_cell_label(p) for v, p in dag.variable_producer.items()},
     )

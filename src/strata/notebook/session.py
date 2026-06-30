@@ -518,6 +518,7 @@ class NotebookSession:
             self.dag = NotebookDag.from_cells(
                 cell_analyses,
                 variant_active_selections=self.notebook_state.variant_active_selections,
+                variant_modes=self.notebook_state.variant_modes,
             )
 
             # Update cells with DAG information
@@ -1532,33 +1533,67 @@ class NotebookSession:
         return cached_outputs
 
     def _collect_input_hashes(self, cell_id: str) -> list[str]:
-        """Read provenance hashes from upstream artifacts for staleness checks."""
+        """Provenance hashes from upstream artifacts (sweep refs grouped).
+
+        The single source of truth for input-hash collection: the executor's
+        provenance computation and causality explanations both delegate here, so
+        a sweep downstream's *stored* hash and its *staleness recheck* agree. A
+        reference sourced from a sweep group collapses to one deterministic
+        ``sweep:<var>:<name>=<hash>;…`` string (otherwise the stored grouped hash
+        would never match an ungrouped recompute → perpetual staleness).
+        """
+        from strata.notebook.dag import SweepProducer
+
         cell = self.notebook_state.get_cell(cell_id)
         if cell is None or not cell.upstream_ids:
             return []
 
+        dag = self.dag
         hashes: list[str] = []
+        sweep_buckets: dict[str, list[tuple[str, str]]] = {}
+
+        def _hash_from_uri(uri: str) -> str | None:
+            try:
+                tail = uri.split("/")[-1]
+                artifact_id = tail.split("@")[0]
+                version = int(tail.split("@v=")[1])
+            except (IndexError, ValueError):
+                return None
+            artifact = self.artifact_manager.artifact_store.get_artifact(artifact_id, version)
+            return artifact.provenance_hash if artifact else None
+
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
 
-            uris = list(upstream_cell.artifact_uris.values())
-            if not uris and upstream_cell.artifact_uri:
-                uris = [upstream_cell.artifact_uri]
+            uri_items: list[tuple[str | None, str]] = list(upstream_cell.artifact_uris.items())
+            if not uri_items and upstream_cell.artifact_uri:
+                uri_items = [(None, upstream_cell.artifact_uri)]
 
-            for uri in sorted(uris):
-                try:
-                    parts = uri.split("/")
-                    artifact_id = parts[-1].split("@")[0]
-                    version = int(parts[-1].split("@v=")[1])
-                    artifact = self.artifact_manager.artifact_store.get_artifact(
-                        artifact_id, version
+            for var_name, uri in uri_items:
+                provenance_hash = _hash_from_uri(uri)
+                if provenance_hash is None:
+                    continue
+                if var_name is None:
+                    hashes.append(provenance_hash)
+                    continue
+                producer = dag.variable_producer.get(var_name) if dag else None
+                if isinstance(producer, SweepProducer):
+                    variant_name = next(
+                        (name for name, cid in producer.variants if cid == upstream_id),
+                        None,
                     )
-                    if artifact:
-                        hashes.append(artifact.provenance_hash)
-                except (IndexError, ValueError):
-                    pass
+                    if variant_name is not None:
+                        sweep_buckets.setdefault(var_name, []).append(
+                            (variant_name, provenance_hash)
+                        )
+                        continue
+                hashes.append(provenance_hash)
+
+        for var_name, pairs in sweep_buckets.items():
+            joined = ";".join(f"{name}={h}" for name, h in sorted(pairs))
+            hashes.append(f"sweep:{var_name}:{joined}")
 
         return hashes
 
