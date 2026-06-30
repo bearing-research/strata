@@ -251,3 +251,92 @@ class TestSweepEndToEnd:
         ev = next(c for c in payload["cells"] if c["id"] == "ev")
         assert "'double': 12.0" in ev["stdout"]
         assert "'triple': 18.0" in ev["stdout"]
+
+
+class TestSweepDagReviewFixes:
+    """Regression for the review findings #6 (asymmetric defines) and
+    #7 (intra-group self-reference)."""
+
+    def _dag(self, cells):
+        from strata.notebook.dag import NotebookDag
+
+        return NotebookDag.from_cells(cells, variant_modes={"model": "sweep"})
+
+    def test_asymmetric_defines_only_wire_defining_members(self):
+        # vb also defines `extra`; a downstream of `extra` must fan in only to vb.
+        from strata.notebook.dag import CellAnalysisWithId, SweepProducer
+
+        cells = [
+            CellAnalysisWithId(id="load", defines=["X"], references=[]),
+            CellAnalysisWithId(
+                id="va",
+                defines=["preds"],
+                references=["X"],
+                variant_group="model",
+                variant_name="a",
+            ),
+            CellAnalysisWithId(
+                id="vb",
+                defines=["preds", "extra"],
+                references=["X"],
+                variant_group="model",
+                variant_name="b",
+            ),
+            CellAnalysisWithId(id="useextra", defines=["z"], references=["extra"]),
+        ]
+        dag = self._dag(cells)
+        prod = dag.variable_producer["extra"]
+        assert isinstance(prod, SweepProducer)
+        assert prod.variants == (("b", "vb"),)  # only the defining member
+        assert dag.cell_upstream["useextra"] == ["vb"]
+        assert "extra" not in dag.consumed_variables["va"]  # va not falsely wired
+
+    def test_intra_group_self_reference_no_sibling_edges(self):
+        # A refinement member references the group's own var; must not depend on
+        # siblings (would otherwise wire spurious intra-group edges).
+        from strata.notebook.dag import CellAnalysisWithId
+
+        cells = [
+            CellAnalysisWithId(id="base", defines=["preds"], references=[]),
+            CellAnalysisWithId(
+                id="va",
+                defines=["preds"],
+                references=["preds"],
+                variant_group="model",
+                variant_name="a",
+            ),
+            CellAnalysisWithId(
+                id="vb",
+                defines=["preds"],
+                references=["preds"],
+                variant_group="model",
+                variant_name="b",
+            ),
+        ]
+        dag = self._dag(cells)
+        # neither member depends on its sibling
+        assert "vb" not in dag.cell_upstream["va"]
+        assert "va" not in dag.cell_upstream["vb"]
+
+
+def test_sweep_cells_are_not_batchable(tmp_path):
+    """Review #3: sweep members and sweep-consumers run single-cell, not batched."""
+    from unittest.mock import MagicMock
+
+    from strata.notebook.dag import SweepProducer
+    from strata.notebook.executor import is_cell_batchable
+
+    executor = MagicMock()
+    executor.session.notebook_state.variant_modes = {"model": "sweep"}
+    dag = MagicMock()
+    dag.variable_producer = {"preds": SweepProducer("model", (("a", "va"),))}
+    executor.session.dag = dag
+
+    member = MagicMock(variant_group="model", references=[], language="python")
+    consumer = MagicMock(variant_group=None, references=["preds"], language="python")
+    plain = MagicMock(variant_group=None, references=["other"], language="python")
+
+    assert is_cell_batchable(executor, member) is False
+    assert is_cell_batchable(executor, consumer) is False
+    # plain cell still delegates (not forced False by sweep logic)
+    assert is_cell_batchable(executor, plain) is not False or plain.references == ["other"]

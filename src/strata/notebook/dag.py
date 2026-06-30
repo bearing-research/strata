@@ -197,19 +197,30 @@ class NotebookDag:
         )
         inactive = dag.inactive_cells
 
-        # Sweep groups: a SweepProducer (all members) per group, keyed for the
-        # defines pass and the reference fan-out below.
-        sweep_producers: dict[str, SweepProducer] = {}
+        # Sweep groups: one SweepProducer *per produced variable*, containing
+        # only the members that actually define it — variant define-sets can
+        # diverge (``variant_contract_mismatch`` is a warning, not a block), and
+        # fanning a downstream onto a member that doesn't produce the var would
+        # wire a phantom consumed-variable and fail _store_outputs.
+        cell_by_id = {c.id: c for c in cells}
+        sweep_producer_for_var: dict[str, SweepProducer] = {}
         sweep_member_group: dict[str, str] = {}
         for res in dag.variant_groups:
             if res.mode != "sweep":
                 continue
-            sweep_producers[res.group] = SweepProducer(
-                group=res.group,
-                variants=tuple(sorted((name, cid) for cid, name in res.members)),
-            )
             for cid, _ in res.members:
                 sweep_member_group[cid] = res.group
+            var_members: dict[str, list[tuple[str, str]]] = {}
+            for cid, name in res.members:
+                member = cell_by_id.get(cid)
+                if member is None:
+                    continue
+                for var in member.defines:
+                    var_members.setdefault(var, []).append((name, cid))
+            for var, members in var_members.items():
+                sweep_producer_for_var[var] = SweepProducer(
+                    group=res.group, variants=tuple(sorted(members))
+                )
 
         # Initialize structures (every cell gets entries — even inactive ones,
         # so the frontend can index into the maps without special-casing).
@@ -245,13 +256,18 @@ class NotebookDag:
                     # raise NameError which is the right signal.
                     continue
                 if isinstance(producer, SweepProducer):
+                    member_ids = {cid for _, cid in producer.variants}
+                    if cell.id in member_ids:
+                        # A member referencing its own group's sweep var (a
+                        # refinement like ``preds = f(preds)``) must not depend on
+                        # its siblings — same self-reference skip as switch mode.
+                        continue
                     # Sweep group: fan out to one edge per variant member, all
                     # flowing into this cell. Each member's output is consumed
                     # (stored) so the harness can assemble the {variant: value}
                     # dict; topological order then requires all members first.
                     for _name, member_id in producer.variants:
-                        if member_id != cell.id:
-                            _wire_variable_edge(dag, member_id, cell.id, var)
+                        _wire_variable_edge(dag, member_id, cell.id, var)
                 else:
                     _wire_variable_edge(dag, producer, cell.id, var)
 
@@ -276,17 +292,16 @@ class NotebookDag:
                     dag.cell_downstream[upstream_id].append(cell.id)
 
             # Now apply this cell's defines so later cells see it as the
-            # producer. Shadow warnings still fire when a later cell
-            # overwrites a prior producer.
-            # A sweep variant member produces the group's SweepProducer (all
-            # members), not itself — so every sibling sets the same value and
-            # downstream sees the whole group. Setting the same value for each
-            # sibling is idempotent and doesn't trip the shadow check.
-            group_for_cell = sweep_member_group.get(cell.id)
-            new_producer: str | SweepProducer = (
-                sweep_producers[group_for_cell] if group_for_cell is not None else cell.id
-            )
+            # producer. A sweep variant member produces, for each var it defines,
+            # that var's SweepProducer (the members that define it) — so every
+            # sibling sets the same value and downstream sees the whole group.
+            # Setting the same value per sibling is idempotent (no shadow).
+            is_sweep_member = cell.id in sweep_member_group
             for var in cell.defines:
+                if is_sweep_member and var in sweep_producer_for_var:
+                    new_producer: str | SweepProducer = sweep_producer_for_var[var]
+                else:
+                    new_producer = cell.id
                 previous_producer = dag.variable_producer.get(var)
                 if previous_producer is not None and previous_producer != new_producer:
                     short_id = (

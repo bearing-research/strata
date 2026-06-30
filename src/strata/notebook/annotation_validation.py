@@ -737,7 +737,9 @@ def _validate_variant_annotation(
     # whichever variant they're looking at. Skipped in sweep mode, where the
     # active pointer is intentionally ignored.
     selected = notebook_state.variant_active_selections.get(group_id) if mode != "sweep" else None
-    if selected is not None:
+    # Truthy check, not ``is not None``: an empty ``active = ""`` means "first in
+    # source order" (e.g. after a sweep→switch toggle) and isn't an unknown name.
+    if selected:
         all_members = [annotations.variant.name] + [s.variant_name for s in siblings]
         if selected not in all_members:
             diagnostics.append(

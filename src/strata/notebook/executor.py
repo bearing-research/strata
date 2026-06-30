@@ -2786,75 +2786,14 @@ class CellExecutor:
     # ------------------------------------------------------------------
 
     def _collect_input_hashes(self, cell_id: str) -> list[str]:
-        """Read provenance hashes from upstream artifacts.
+        """Provenance hashes from upstream artifacts (called after
+        ``_materialize_upstreams``).
 
-        Called *after* ``_materialize_upstreams`` so every upstream
-        artifact is populated. Uses per-variable ``artifact_uris`` dict
-        when available, falling back to the legacy ``artifact_uri`` field.
+        Delegates to ``session._collect_input_hashes`` — the single source of
+        truth — so the hash stored here matches the one ``compute_staleness``
+        recomputes later (sweep refs are grouped identically on both sides).
         """
-        cell = self.session.notebook_state.get_cell(cell_id)
-        if cell is None or not cell.upstream_ids:
-            return []
-
-        artifact_mgr = self.session.get_artifact_manager()
-        dag = self.session.dag
-        hashes: list[str] = []
-        # var_name -> [(variant_name, provenance_hash)] for sweep-sourced refs.
-        sweep_buckets: dict[str, list[tuple[str, str]]] = {}
-
-        def _hash_from_uri(uri: str) -> str | None:
-            try:
-                tail = uri.split("/")[-1]
-                artifact_id = tail.split("@")[0]
-                version = int(tail.split("@v=")[1])
-            except (IndexError, ValueError):
-                return None
-            artifact = artifact_mgr.artifact_store.get_artifact(artifact_id, version)
-            return artifact.provenance_hash if artifact else None
-
-        for upstream_id in cell.upstream_ids:
-            upstream_cell = self.session.notebook_state.get_cell(upstream_id)
-            if upstream_cell is None:
-                continue
-
-            # Per-variable URIs (var_name -> uri); fall back to the legacy
-            # single-URI field (no variable name available there).
-            uri_items: list[tuple[str | None, str]] = list(upstream_cell.artifact_uris.items())
-            if not uri_items and upstream_cell.artifact_uri:
-                uri_items = [(None, upstream_cell.artifact_uri)]
-
-            for var_name, uri in uri_items:
-                provenance_hash = _hash_from_uri(uri)
-                if provenance_hash is None:
-                    continue
-                if var_name is None:
-                    # Legacy single-URI field — no variable name, never sweep.
-                    hashes.append(provenance_hash)
-                    continue
-                producer = dag.variable_producer.get(var_name) if dag else None
-                if isinstance(producer, SweepProducer):
-                    # Collapse all variants of a sweep ref into one deterministic
-                    # string keyed by variant name — so adding/removing/renaming a
-                    # variant restalens downstream (the names become dict keys,
-                    # and `# @variant` is a comment the source hash strips).
-                    variant_name = next(
-                        (name for name, cid in producer.variants if cid == upstream_id),
-                        None,
-                    )
-                    if variant_name is not None:
-                        sweep_buckets.setdefault(var_name, []).append(
-                            (variant_name, provenance_hash)
-                        )
-                        continue
-                hashes.append(provenance_hash)
-
-        # compute_provenance_hash re-sorts the full list, so the order here is
-        # irrelevant; the grouped sweep strings just need to be deterministic.
-        for var_name, pairs in sweep_buckets.items():
-            joined = ";".join(f"{name}={h}" for name, h in sorted(pairs))
-            hashes.append(f"sweep:{var_name}:{joined}")
-
-        return hashes
+        return self.session._collect_input_hashes(cell_id)
 
     # ------------------------------------------------------------------
     # ④-a Load input blobs (guaranteed to exist after step ①)
@@ -2883,15 +2822,6 @@ class CellExecutor:
         input_specs: dict[str, Any] = {}
         dag = self.session.dag
 
-        _ext_map = {
-            "arrow/ipc": ".arrow",
-            "json/object": ".json",
-            "pickle/object": ".pickle",
-            "module/import": ".module.json",
-            "module/cell": ".cell_module.json",
-            "module/cell-instance": ".cell_instance.pickle",
-        }
-
         def _load_artifact_spec(artifact_id: str, file_stem: str) -> dict[str, str] | None:
             """Write one artifact's blob to *file_stem* and return its manifest
             spec, or ``None`` if the artifact doesn't exist."""
@@ -2902,13 +2832,11 @@ class CellExecutor:
             content_type = "pickle/object"
             if artifact.transform_spec:
                 try:
-                    spec = json.loads(artifact.transform_spec)
-                    ct = spec.get("params", {}).get("content_type")
-                    if ct:
-                        content_type = ct
-                except (ValueError, KeyError):
-                    pass
-            ext = _ext_map.get(content_type, ".pickle")
+                    params = json.loads(artifact.transform_spec).get("params", {})
+                except ValueError:
+                    params = {}  # malformed transform_spec → default content type
+                content_type = params.get("content_type") or content_type
+            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
             input_file = output_dir / f"{file_stem}{ext}"
             with open(input_file, "wb") as f:
                 f.write(blob_data)
@@ -4546,8 +4474,25 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     adapter runs the full check (worker resolution, no ``# @loop``,
     no explicit timeout at any level, no rw mount at any level); other
     languages return ``False`` unconditionally.
+
+    Sweep cells are never batchable: in a batch's shared namespace, sibling
+    variants overwrite each other, and the ``{variant: value}`` dict — built
+    per-cell from artifacts — never forms. A sweep-group member and any cell
+    consuming a sweep variable run single-cell instead, where the dict is built
+    correctly.
     """
+    from strata.notebook.dag import SweepProducer
     from strata.notebook.languages import get_language_executor
+
+    dag = executor.session.dag
+    if dag is not None:
+        modes = executor.session.notebook_state.variant_modes
+        if cell.variant_group and modes.get(cell.variant_group) == "sweep":
+            return False
+        if any(
+            isinstance(dag.variable_producer.get(ref), SweepProducer) for ref in cell.references
+        ):
+            return False
 
     return get_language_executor(cell.language).is_batchable(cell, executor)
 
