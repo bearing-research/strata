@@ -69,6 +69,7 @@ from strata.artifact_store import get_artifact_store
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
+from strata.notebook.dag import SweepProducer
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
 from strata.notebook.immutability import MutationWarning
@@ -2796,31 +2797,62 @@ class CellExecutor:
             return []
 
         artifact_mgr = self.session.get_artifact_manager()
+        dag = self.session.dag
         hashes: list[str] = []
+        # var_name -> [(variant_name, provenance_hash)] for sweep-sourced refs.
+        sweep_buckets: dict[str, list[tuple[str, str]]] = {}
+
+        def _hash_from_uri(uri: str) -> str | None:
+            try:
+                tail = uri.split("/")[-1]
+                artifact_id = tail.split("@")[0]
+                version = int(tail.split("@v=")[1])
+            except (IndexError, ValueError):
+                return None
+            artifact = artifact_mgr.artifact_store.get_artifact(artifact_id, version)
+            return artifact.provenance_hash if artifact else None
 
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
 
-            # Collect URIs: prefer per-variable dict, fall back to single URI
-            uris = list(upstream_cell.artifact_uris.values())
-            if not uris and upstream_cell.artifact_uri:
-                uris = [upstream_cell.artifact_uri]
+            # Per-variable URIs (var_name -> uri); fall back to the legacy
+            # single-URI field (no variable name available there).
+            uri_items: list[tuple[str | None, str]] = list(upstream_cell.artifact_uris.items())
+            if not uri_items and upstream_cell.artifact_uri:
+                uri_items = [(None, upstream_cell.artifact_uri)]
 
-            for uri in sorted(uris):  # sorted for deterministic ordering
-                try:
-                    parts = uri.split("/")
-                    artifact_id = parts[-1].split("@")[0]
-                    version = int(parts[-1].split("@v=")[1])
-                    artifact = artifact_mgr.artifact_store.get_artifact(
-                        artifact_id,
-                        version,
+            for var_name, uri in uri_items:
+                provenance_hash = _hash_from_uri(uri)
+                if provenance_hash is None:
+                    continue
+                if var_name is None:
+                    # Legacy single-URI field — no variable name, never sweep.
+                    hashes.append(provenance_hash)
+                    continue
+                producer = dag.variable_producer.get(var_name) if dag else None
+                if isinstance(producer, SweepProducer):
+                    # Collapse all variants of a sweep ref into one deterministic
+                    # string keyed by variant name — so adding/removing/renaming a
+                    # variant restalens downstream (the names become dict keys,
+                    # and `# @variant` is a comment the source hash strips).
+                    variant_name = next(
+                        (name for name, cid in producer.variants if cid == upstream_id),
+                        None,
                     )
-                    if artifact:
-                        hashes.append(artifact.provenance_hash)
-                except (IndexError, ValueError):
-                    pass
+                    if variant_name is not None:
+                        sweep_buckets.setdefault(var_name, []).append(
+                            (variant_name, provenance_hash)
+                        )
+                        continue
+                hashes.append(provenance_hash)
+
+        # compute_provenance_hash re-sorts the full list, so the order here is
+        # irrelevant; the grouped sweep strings just need to be deterministic.
+        for var_name, pairs in sweep_buckets.items():
+            joined = ";".join(f"{name}={h}" for name, h in sorted(pairs))
+            hashes.append(f"sweep:{var_name}:{joined}")
 
         return hashes
 
@@ -2832,7 +2864,7 @@ class CellExecutor:
         self,
         cell_id: str,
         output_dir: Path,
-    ) -> dict[str, dict[str, str]]:
+    ) -> dict[str, Any]:
         """Load upstream variable blobs from the artifact store.
 
         All upstream artifacts are guaranteed to exist because
@@ -2845,7 +2877,46 @@ class CellExecutor:
 
         artifact_mgr = self.session.get_artifact_manager()
         notebook_id = self.session.notebook_state.id
-        input_specs: dict[str, dict[str, str]] = {}
+        # ``dict[str, Any]``: a value is either a single-artifact spec
+        # (``{content_type, file, uri}``) or a sweep bundle
+        # (``{kind: "sweep_dict", variants: {name: spec}}``).
+        input_specs: dict[str, Any] = {}
+        dag = self.session.dag
+
+        _ext_map = {
+            "arrow/ipc": ".arrow",
+            "json/object": ".json",
+            "pickle/object": ".pickle",
+            "module/import": ".module.json",
+            "module/cell": ".cell_module.json",
+            "module/cell-instance": ".cell_instance.pickle",
+        }
+
+        def _load_artifact_spec(artifact_id: str, file_stem: str) -> dict[str, str] | None:
+            """Write one artifact's blob to *file_stem* and return its manifest
+            spec, or ``None`` if the artifact doesn't exist."""
+            artifact = artifact_mgr.artifact_store.get_latest_version(artifact_id)
+            if artifact is None:
+                return None
+            blob_data = artifact_mgr.load_artifact_data(artifact_id, artifact.version)
+            content_type = "pickle/object"
+            if artifact.transform_spec:
+                try:
+                    spec = json.loads(artifact.transform_spec)
+                    ct = spec.get("params", {}).get("content_type")
+                    if ct:
+                        content_type = ct
+                except (ValueError, KeyError):
+                    pass
+            ext = _ext_map.get(content_type, ".pickle")
+            input_file = output_dir / f"{file_stem}{ext}"
+            with open(input_file, "wb") as f:
+                f.write(blob_data)
+            return {
+                "content_type": content_type,
+                "file": f"{file_stem}{ext}",
+                "uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
+            }
 
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.session.notebook_state.get_cell(upstream_id)
@@ -2855,20 +2926,43 @@ class CellExecutor:
             referenced_vars = [v for v in cell.references if v in upstream_cell.defines]
 
             for var_name in referenced_vars:
+                producer = dag.variable_producer.get(var_name) if dag else None
                 artifact_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{var_name}"
                 try:
-                    artifact = artifact_mgr.artifact_store.get_latest_version(
-                        artifact_id,
-                    )
-                    if artifact is None:
+                    if isinstance(producer, SweepProducer):
+                        # ``upstream_id`` is one member of the sweep group;
+                        # accumulate it into a {variant: spec} bundle keyed by
+                        # variant name (the harness binds it as a dict).
+                        variant_name = next(
+                            (name for name, cid in producer.variants if cid == upstream_id),
+                            None,
+                        )
+                        if variant_name is None:
+                            continue
+                        spec = _load_artifact_spec(artifact_id, f"{var_name}__{variant_name}")
+                        if spec is None:
+                            # A failed/missing variant is dropped from the dict
+                            # (partial-set policy); downstream still runs once.
+                            logger.error(
+                                "Sweep variant '%s' of '%s' has no artifact — "
+                                "dropping it from the dict.",
+                                variant_name,
+                                var_name,
+                            )
+                            continue
+                        bundle = input_specs.setdefault(
+                            var_name, {"kind": "sweep_dict", "variants": {}}
+                        )
+                        bundle["variants"][variant_name] = spec
+                        continue
+
+                    spec = _load_artifact_spec(artifact_id, var_name)
+                    if spec is None:
                         # A re-importable module binding (``import numpy as np``)
-                        # isn't always materialised as an artifact — notably when
-                        # the producer ran on a remote @worker that doesn't ship
-                        # module/import blobs back. The consuming cell re-imports
-                        # it, so this is expected and harmless; log at debug.
-                        # Any *other* missing var is a real materialisation gap
-                        # ("should not happen" after _materialize_upstreams) and
-                        # stays at error.
+                        # isn't always materialised — notably from a remote
+                        # @worker that doesn't ship module/import blobs back. The
+                        # consuming cell re-imports it, so log at debug. Any other
+                        # missing var is a real gap and stays at error.
                         if var_name in imported_names(upstream_cell.source):
                             logger.debug(
                                 "Module-typed upstream '%s' has no artifact "
@@ -2885,47 +2979,11 @@ class CellExecutor:
                             )
                         continue
 
-                    blob_data = artifact_mgr.load_artifact_data(
-                        artifact_id,
-                        artifact.version,
-                    )
-
-                    # Determine content type.
-                    content_type = "pickle/object"
-                    if artifact.transform_spec:
-                        try:
-                            spec = json.loads(artifact.transform_spec)
-                            ct = spec.get("params", {}).get("content_type")
-                            if ct:
-                                content_type = ct
-                        except (ValueError, KeyError):
-                            pass
-
-                    ext_map = {
-                        "arrow/ipc": ".arrow",
-                        "json/object": ".json",
-                        "pickle/object": ".pickle",
-                        "module/import": ".module.json",
-                        "module/cell": ".cell_module.json",
-                        "module/cell-instance": ".cell_instance.pickle",
-                    }
-                    ext = ext_map.get(content_type, ".pickle")
-                    input_file = output_dir / f"{var_name}{ext}"
-                    with open(input_file, "wb") as f:
-                        f.write(blob_data)
-
-                    input_specs[var_name] = {
-                        "content_type": content_type,
-                        "file": f"{var_name}{ext}",
-                        "uri": (f"strata://artifact/{artifact.id}@v={artifact.version}"),
-                    }
+                    input_specs[var_name] = spec
                     logger.info(
-                        "Loaded input %s from artifact store (%s@v=%d, %d bytes, %s)",
+                        "Loaded input %s from artifact store (%s)",
                         var_name,
                         artifact_id,
-                        artifact.version,
-                        len(blob_data),
-                        content_type,
                     )
                 except Exception:
                     logger.exception(

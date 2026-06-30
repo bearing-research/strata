@@ -214,3 +214,40 @@ class TestSweepDag:
         assert dag.inactive_cells == {"m_logreg"}
         assert dag.cell_upstream["eval"] == ["m_rf"]
         assert dag.variable_producer["preds"] == "m_rf"
+
+
+class TestSweepEndToEnd:
+    """A sweep group executes all variants and the downstream cell receives a
+    {variant: value} dict — driven through ``strata run`` (real harness)."""
+
+    def test_downstream_receives_variant_dict(self, tmp_path, capsys):
+        import json as _json
+
+        from strata.notebook.cli import run_main
+        from strata.notebook.writer import (
+            add_cell_to_notebook,
+            create_notebook,
+            set_variant_mode,
+            write_cell,
+        )
+
+        nb = create_notebook(tmp_path, "Sweep", initialize_environment=False)
+        (nb / ".venv").mkdir(exist_ok=True)  # --no-sync placeholder
+        cells = [
+            ("load", "X = [1.0, 2.0, 3.0]\n", None),
+            ("vdouble", "# @variant model double\npreds = [v * 2 for v in X]\n", "load"),
+            ("vtriple", "# @variant model triple\npreds = [v * 3 for v in X]\n", "vdouble"),
+            ("ev", 'print("SWEEP", {n: sum(p) for n, p in preds.items()})\n', "vtriple"),
+        ]
+        for cid, src, after in cells:
+            add_cell_to_notebook(nb, cid, after, language="python")
+            write_cell(nb, cid, src)
+        set_variant_mode(nb, "model", "sweep")
+
+        code = run_main([str(nb), "--no-sync", "--force", "--format", "json"])
+        assert code == 0
+        payload = _json.loads(capsys.readouterr().out)
+        assert {c["status"] for c in payload["cells"]} == {"ok"}
+        ev = next(c for c in payload["cells"] if c["id"] == "ev")
+        assert "'double': 12.0" in ev["stdout"]
+        assert "'triple': 18.0" in ev["stdout"]
