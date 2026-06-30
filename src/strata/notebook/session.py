@@ -335,6 +335,21 @@ class NotebookSession:
         _set_variant_active(self.path, group, variant_name)
         self.reload()
 
+    def set_variant_mode(self, group: str, mode: str) -> None:
+        """Switch a variant group between ``"switch"`` and ``"sweep"`` mode.
+
+        Persists to ``notebook.toml`` and reloads so the DAG rebuilds (sweep →
+        all members run, the producer fans out) and downstream staleness
+        recomputes — switch→sweep changes a downstream's input set from one
+        artifact to the grouped variant map, so consumers restalen in the usual
+        way. ``mode`` is validated by the caller; unknown values persist but are
+        treated as ``"switch"`` at execution time.
+        """
+        from strata.notebook.writer import set_variant_mode as _set_variant_mode
+
+        _set_variant_mode(self.path, group, mode)
+        self.reload()
+
     def remove_cell(self, cell_id: str) -> None:
         """Delete a cell, with variant-aware cleanup.
 
@@ -534,6 +549,7 @@ class NotebookSession:
                     group=group.group,
                     active_name=group.active_name,
                     active_cell_id=group.active_cell_id,
+                    mode=group.mode,
                     members=[
                         VariantMember(
                             cell_id=cid,

@@ -652,9 +652,15 @@ class TimeoutConfigRequest(BaseModel):
 
 
 class VariantActiveRequest(BaseModel):
-    """Request to switch the active variant in a group."""
+    """Request to switch the active variant and/or the mode of a group.
 
-    active: str = Field(..., pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+    Both fields are optional so a caller can change just the mode
+    (``{"mode": "sweep"}``) or just the active variant. At least one must be
+    present.
+    """
+
+    active: str | None = Field(None, pattern=r"^([a-zA-Z_][a-zA-Z0-9_]*)?$")
+    mode: str | None = Field(None, pattern=r"^(switch|sweep)$")
 
 
 class EnvConfigRequest(BaseModel):
@@ -2277,8 +2283,15 @@ async def set_variant_active_endpoint(
     the first variant in source order.
     """
 
+    if req.mode is None and not req.active:
+        raise HTTPException(status_code=400, detail="Provide `active` and/or `mode`.")
     try:
-        session.set_variant_active(group_id, req.active)
+        # Mode first: switch→sweep drops the active pointer's relevance, and
+        # ``active`` is ignored in sweep mode anyway.
+        if req.mode is not None:
+            session.set_variant_mode(group_id, req.mode)
+        if req.active:
+            session.set_variant_active(group_id, req.active)
         return {
             "variant_groups": [vg.model_dump() for vg in session.notebook_state.variant_groups],
             "cells": session.serialize_cells(),

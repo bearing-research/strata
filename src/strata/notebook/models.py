@@ -335,6 +335,14 @@ class VariantGroupState(BaseModel):
     group: str = Field(..., description="Variant group identifier")
     active_name: str = Field(..., description="Active variant name")
     active_cell_id: str = Field(..., description="Active variant's cell ID")
+    mode: str = Field(
+        "switch",
+        description=(
+            "Group mode: 'switch' (one active member; tab clicks switch active) "
+            "or 'sweep' (all members run; tab clicks are display-only and "
+            "downstream consumes a {variant: value} dict)."
+        ),
+    )
     members: list[VariantMember] = Field(
         default_factory=list,
         description="All members of this group, in source order",
