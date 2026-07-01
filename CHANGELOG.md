@@ -5,7 +5,7 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## 0.4.0 — 2026-06-24
+## 0.4.0 — 2026-07-01
 
 0.4.0 is a **consolidation and hardening** cycle. The headlines are a new
 **read-only terminal viewer** for notebooks and a **full agent-facing notebook
@@ -90,6 +90,24 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   [Stateful objects & value semantics](https://bearing-research.github.io/strata/notebook/concepts/)
   docs cover the one-cell training pattern.
 
+- **Variant sweep mode.** A variant group can now run in **sweep mode**
+  (`mode = "sweep"` in `notebook.toml`): instead of only the active variant
+  executing, *every* variant of the group runs on each execution and the
+  downstream cell receives the group's variable as a `{variant_name: value}`
+  dict — for comparing alternatives (models, hyperparameters, prompts) side by
+  side in one downstream cell. The default stays **switch mode** (one active
+  variant, single value). Per-variant input hashes are grouped into the
+  provenance key so caching stays correct across the fan-out. In the UI the
+  group renders as a tab strip with a **sweep** badge, a run-all button, and a
+  readiness rollup; clicking a tab shows that variant's source while all still
+  run. The CLI and WebSocket protocol expose the mode toggle. See the
+  `model_variants_sweep` example.
+
+- **Live-mirror: REST/CLI notebook edits stream to spectators.** Cell edits and
+  runs driven over REST — e.g. by the agent CLI — are now broadcast to connected
+  WebSocket clients, so a human watching in the TUI or the web UI sees an agent's
+  changes appear live without a manual refresh.
+
 ### Changed
 
 - **Server internals decomposed (gates-first).** `server.py` went from a
@@ -118,6 +136,15 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   Wire shapes are unchanged (one stale doc field, `cascade_prompt.steps` →
   `cells_to_run`, was corrected to match what's actually sent).
 
+- **Runs on CPython 3.14; notebook server uses the sans-I/O WebSocket backend.**
+  The server now drives uvicorn with `ws="websockets-sansio"` and raises the
+  uvicorn floor to `>=0.35.0` (the first release with `WebSocketsSansIOProtocol`).
+  This replaces uvicorn's deprecated legacy-asyncio WebSocket protocol, whose
+  `_drain_helper` trips an `AssertionError` on CPython 3.14 the first time the
+  server sends a frame — which broke the notebook WebSocket entirely on 3.14. No
+  new dependency (`websockets` was already required); 3.14 is now in the tested
+  and classified matrix.
+
 ### Fixed
 
 - **QoS slots no longer leak when a request is cancelled.** Two admission paths
@@ -145,6 +172,15 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   dirs (`~/.local/bin`, `~/.cargo/bin`), and if it still can't be found, cells
   fail with an actionable message ("uv not found on PATH. Install uv … or add it
   to PATH …") — matching the existing `Rscript not found` guard.
+
+- **Terminal viewer no longer storms on image-heavy notebooks.** The TUI's
+  WebSocket client used the `websockets` default 1 MiB frame cap; a
+  `notebook_state` frame carrying base64 plot/image outputs exceeds that, so the
+  client rejected the first frame and wedged in a fast reconnect loop
+  (`ConnectionClosedError` in the status pill). It now connects with no
+  frame-size cap, matching the browser client. The `[tui]` extra also declares
+  `Pillow` explicitly, so `uv tool install "strata-notebook[tui]"` launches
+  instead of failing with `ModuleNotFoundError: No module named 'PIL'`.
 
 - **GC tracker no longer self-deadlocks.** The GC callback took a non-reentrant
   lock that a GC pause triggered during the callback could re-enter; it's now

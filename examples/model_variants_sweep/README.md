@@ -29,4 +29,4 @@ Flip `mode = "sweep"` to `mode = "switch"` (or drop the line) in
 `notebook.toml` and only the active variant runs; `compare` would then see a
 single `preds` value instead of the dict. Sweep is for *comparing* variants on
 a shared downstream; switch is for *picking* one. See
-[Variant Cells → Sweep mode](../../docs/notebook/annotations.md#sweep-mode--compare-all-variants-at-once).
+[Variant Cells → Sweep mode](https://bearing-research.github.io/strata/notebook/annotations/#sweep-mode--compare-all-variants-at-once).
