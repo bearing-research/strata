@@ -2010,8 +2010,9 @@ environment-job progress, and an AI agent's activity — as they happen.</p>
 the web UI (or let an AI agent drive it), and follow along in a terminal — a
 second pane, an SSH session, or a tmux window beside your editor.</p>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
-<p>The viewer ships behind the <code>tui</code> extra (it pulls in <code>textual</code> and <code>grandalf</code>;
-<code>httpx</code> and <code>websockets</code> are already core dependencies):</p>
+<p>The viewer ships behind the <code>tui</code> extra (it pulls in <code>textual</code> and <code>grandalf</code>,
+plus <code>textual-image</code> and <code>Pillow</code> for inline image rendering; <code>httpx</code> and
+<code>websockets</code> are already core dependencies):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;strata-notebook[tui]&quot;</span><span class="w">      </span><span class="c1"># global: strata-notebook, strata-notebook-tui, strata, strata-worker</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># or, inside a project venv:</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;strata-notebook[tui]&quot;</span>
@@ -2187,7 +2188,7 @@ otherwise.</p>
 </tr>
 <tr>
 <td><code>--server URL</code></td>
-<td>Base URL of the server (default: <code>$STRATA_TUI_SERVER</code> or <code>http://127.0.0.1:8765</code>).</td>
+<td>Base URL of the server (default: <code>$STRATA_TUI_SERVER</code> or <code>http://localhost:8765</code>).</td>
 </tr>
 <tr>
 <td><code>--user-header NAME</code></td>
