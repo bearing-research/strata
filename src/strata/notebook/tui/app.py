@@ -435,8 +435,17 @@ class NotebookTUI(App[None]):
         backoff = 1.0
         while True:
             try:
+                # max_size=None: notebook_state / cell_output frames carry
+                # display outputs (base64 PNG plots, large tables) that routinely
+                # exceed the websockets client default of 1 MiB. Without this the
+                # client rejects the first oversized frame and closes with 1009,
+                # the reconnect loop re-opens, the server re-sends the same frame,
+                # and the TUI wedges in a reconnect storm. The browser client has
+                # no such cap; match it.
                 async with websockets.connect(
-                    url, additional_headers=self._client.auth_headers or None
+                    url,
+                    additional_headers=self._client.auth_headers or None,
+                    max_size=None,
                 ) as ws:
                     self._ws = ws
                     backoff = 1.0
