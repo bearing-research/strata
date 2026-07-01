@@ -1,0 +1,18 @@
+notebook_id = "17091547-115a-4c2f-8fe2-c14145529e73"
+name = "Model Variants Sweep"
+created_at = 2026-07-01 00:45:49.228501+00:00
+updated_at = 2026-07-01 00:45:49.228501+00:00
+cells = [
+    { id = "data", file = "data.py", language = "python", order = 0 },
+    { id = "baseline", file = "baseline.py", language = "python", order = 1 },
+    { id = "alternating", file = "alternating.py", language = "python", order = 2 },
+    { id = "majority", file = "majority.py", language = "python", order = 3 },
+    { id = "compare", file = "compare.py", language = "python", order = 4 },
+]
+workers = []
+mounts = []
+
+[[variant_group]]
+group = "model"
+active = ""
+mode = "sweep"
