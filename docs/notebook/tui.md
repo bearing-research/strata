@@ -12,8 +12,9 @@ second pane, an SSH session, or a tmux window beside your editor.
 
 ## Install
 
-The viewer ships behind the `tui` extra (it pulls in `textual` and `grandalf`;
-`httpx` and `websockets` are already core dependencies):
+The viewer ships behind the `tui` extra (it pulls in `textual` and `grandalf`,
+plus `textual-image` and `Pillow` for inline image rendering; `httpx` and
+`websockets` are already core dependencies):
 
 ```bash
 uv tool install "strata-notebook[tui]"      # global: strata-notebook, strata-notebook-tui, strata, strata-worker
@@ -134,7 +135,7 @@ strata-notebook-tui [--session ID | --notebook PATH] [--server URL] [--user-head
 | --- | --- |
 | `--session ID` | Attach to a specific running session id (skips the picker). |
 | `--notebook PATH` | Open / reuse a session for a notebook directory path (the path must exist on the server's filesystem). |
-| `--server URL` | Base URL of the server (default: `$STRATA_TUI_SERVER` or `http://127.0.0.1:8765`). |
+| `--server URL` | Base URL of the server (default: `$STRATA_TUI_SERVER` or `http://localhost:8765`). |
 | `--user-header NAME` | Identity header name, matching the server's `personal_mode_user_header`. |
 | `--user VALUE` | Identity header value — needed to attach to an owned notebook. |
 
