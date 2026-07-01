@@ -2231,14 +2231,16 @@ class NotebookSession:
         """Apply a dependency mutation without blocking the event loop."""
         from strata.notebook.dependencies import add_dependency, remove_dependency
 
+        # add_dependency and remove_dependency have different keyword-only params,
+        # so a shared `op` variable narrows to a union callable that ty won't pass
+        # to asyncio.to_thread. Dispatch at the call site so each to_thread sees a
+        # single concrete signature (both accept (path, package) positionally).
         if action == "add":
-            op = add_dependency
+            result = await asyncio.to_thread(add_dependency, self.path, package)
         elif action == "remove":
-            op = remove_dependency
+            result = await asyncio.to_thread(remove_dependency, self.path, package)
         else:
             raise ValueError(f"Unknown dependency action: {action}")
-
-        result = await asyncio.to_thread(op, self.path, package)
 
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):
