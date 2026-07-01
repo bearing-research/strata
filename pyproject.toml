@@ -35,6 +35,10 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn>=0.32.0",
     "websockets>=13.0",
+    # WebSocket protocol backend for uvicorn. Selected explicitly (ws="wsproto"
+    # in server.main) instead of the default websockets *legacy* asyncio
+    # protocol, whose _drain_helper assertion breaks on CPython 3.14+.
+    "wsproto>=1.2.0",
     "httpx>=0.28.0",
     "duckdb>=1.1.0",
     "python-multipart>=0.0.9", # Required for executor multipart form handling
@@ -106,8 +110,12 @@ tui = [
     # Pure-Python Sugiyama layered layout for the ASCII DAG view.
     "grandalf>=0.8",
     # Inline image rendering — terminal graphics protocol (kitty/iTerm/Sixel)
-    # with a Unicode half-block fallback. Pulls in Pillow.
+    # with a Unicode half-block fallback.
     "textual-image>=0.13",
+    # tui/app.py imports PIL at module load; declare Pillow explicitly rather
+    # than rely on textual-image to pull it, so `[tui]` alone (the documented
+    # install) launches instead of ModuleNotFoundError: No module named 'PIL'.
+    "pillow>=10.0.0",
 ]
 
 [dependency-groups]
