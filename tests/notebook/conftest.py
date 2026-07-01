@@ -238,6 +238,10 @@ def notebook_executor_server(monkeypatch):
         host="127.0.0.1",
         port=port,
         log_level="warning",
+        # Match production (server.main): default ws="auto" imports uvicorn's
+        # legacy websockets backend (DeprecationWarning; broken on CPython 3.14).
+        # These notebook fixtures serve the live WS surface, so use sans-I/O.
+        ws="websockets-sansio",
     )
     server = uvicorn.Server(server_config)
     thread = threading.Thread(target=server.run, daemon=True)
@@ -287,6 +291,10 @@ def notebook_build_server(tmp_path: Path):
         host="127.0.0.1",
         port=port,
         log_level="warning",
+        # Match production (server.main): default ws="auto" imports uvicorn's
+        # legacy websockets backend (DeprecationWarning; broken on CPython 3.14).
+        # These notebook fixtures serve the live WS surface, so use sans-I/O.
+        ws="websockets-sansio",
     )
     server = uvicorn.Server(server_config)
     thread = threading.Thread(target=server.run, daemon=True)
@@ -337,6 +345,10 @@ def notebook_personal_server(tmp_path: Path):
         host="127.0.0.1",
         port=port,
         log_level="warning",
+        # Match production (server.main): default ws="auto" imports uvicorn's
+        # legacy websockets backend (DeprecationWarning; broken on CPython 3.14).
+        # These notebook fixtures serve the live WS surface, so use sans-I/O.
+        ws="websockets-sansio",
     )
     server = uvicorn.Server(server_config)
     thread = threading.Thread(target=server.run, daemon=True)

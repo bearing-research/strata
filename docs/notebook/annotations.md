@@ -526,7 +526,12 @@ renaming/removing a variant restalens the downstream as expected.
 
 Caveats worth knowing: a variant that fails is simply dropped from the
 dict (the downstream still runs once with the partial set), and a sweep
-group of one is legal but pointless — you'd get a one-key dict.
+group of one is legal but pointless — you'd get a one-key dict. Sweep-group
+members and their downstream consumers always run as **single-cell**
+executions — they're excluded from run-all's shared-namespace batching, so a
+sweep notebook doesn't get that speedup. This is deliberate: batching would let
+one variant's in-namespace state leak into a sibling's, corrupting its
+provenance, so sweep trades the batch speedup for per-variant isolation.
 
 ### Defines contract
 
