@@ -594,3 +594,32 @@ async def test_panel_resize_keys_move_and_reset_boundaries(monkeypatch):
         await pilot.press("ctrl+x")  # reset to defaults
         await pilot.pause()
         assert (app._cells_pct, app._top_pct) == (38, 50)
+
+
+@pytest.mark.asyncio
+async def test_ws_connect_disables_frame_size_cap(monkeypatch):
+    """The WS client must pass ``max_size=None`` to ``websockets.connect``.
+
+    notebook_state / cell_output frames carry display outputs (base64 PNG plots,
+    large tables) that routinely exceed the websockets client default of 1 MiB.
+    Without ``max_size=None`` the client rejects the first oversized frame, closes
+    the connection, and the reconnect loop wedges into a storm (a real regression
+    against notebooks with image outputs).
+    """
+    import asyncio
+
+    captured: dict[str, object] = {}
+
+    def fake_connect(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        raise asyncio.CancelledError  # break out of the connect loop immediately
+
+    monkeypatch.setattr("strata.notebook.tui.app.websockets.connect", fake_connect)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    with pytest.raises(asyncio.CancelledError):
+        await app._ws_loop("sid-1")
+
+    assert "max_size" in captured, "websockets.connect was not called with max_size"
+    assert captured["max_size"] is None
