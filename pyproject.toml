@@ -33,12 +33,11 @@ dependencies = [
     "pyiceberg[sql-sqlite,sql-postgres]>=0.8.0",
     "pyarrow>=18.0.0",
     "fastapi>=0.115.0",
-    "uvicorn>=0.32.0",
+    # 0.35.0 is the first release with the sans-io WebSocket implementation
+    # (WebSocketsSansIOProtocol); server.main selects ws="websockets-sansio" to
+    # avoid the deprecated legacy asyncio protocol that breaks on CPython 3.14+.
+    "uvicorn>=0.35.0",
     "websockets>=13.0",
-    # WebSocket protocol backend for uvicorn. Selected explicitly (ws="wsproto"
-    # in server.main) instead of the default websockets *legacy* asyncio
-    # protocol, whose _drain_helper assertion breaks on CPython 3.14+.
-    "wsproto>=1.2.0",
     "httpx>=0.28.0",
     "duckdb>=1.1.0",
     "python-multipart>=0.0.9", # Required for executor multipart form handling
