@@ -2972,7 +2972,12 @@ variant→artifact map, so <strong>adding a variant only runs that one</strong> 
 renaming/removing a variant restalens the downstream as expected.</p>
 <p>Caveats worth knowing: a variant that fails is simply dropped from the
 dict (the downstream still runs once with the partial set), and a sweep
-group of one is legal but pointless — you'd get a one-key dict.</p>
+group of one is legal but pointless — you'd get a one-key dict. Sweep-group
+members and their downstream consumers always run as <strong>single-cell</strong>
+executions — they're excluded from run-all's shared-namespace batching, so a
+sweep notebook doesn't get that speedup. This is deliberate: batching would let
+one variant's in-namespace state leak into a sibling's, corrupting its
+provenance, so sweep trades the batch speedup for per-variant isolation.</p>
 <h3 id="defines-contract">Defines contract<a class="headerlink" href="#defines-contract" title="Permanent link">&para;</a></h3>
 <p>All variants in a group must produce the same set of top-level
 bindings. The validator compares each variant's <code>defines</code> against its
