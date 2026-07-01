@@ -77,6 +77,20 @@ function onVariantTabClick(member: { cellId: string; name: string }): void {
   }
 }
 
+// Sweep-group rollup: resolve each member to its cell for a status count, and a
+// run-all that runs every variant (each emits `run`, same as the per-cell path).
+const variantMemberCells = computed(() =>
+  (variantGroup.value?.members ?? [])
+    .map((m) => notebook.cells.find((c) => c.id === m.cellId))
+    .filter((c): c is (typeof notebook.cells)[number] => Boolean(c)),
+)
+const variantGroupReadyCount = computed(
+  () => variantMemberCells.value.filter((c) => c.status === 'ready').length,
+)
+function runVariantGroup(): void {
+  for (const m of variantGroup.value?.members ?? []) emit('run', m.cellId)
+}
+
 const isInspecting = computed(() => storeIsInspecting(props.cell.id))
 
 function toggleInspect() {
@@ -782,14 +796,31 @@ function outputKey(output: CellOutput, index: number): string {
         <span class="variant-group-label" :title="`Variant group: ${variantGroup.group}`">
           {{ variantGroup.group }}
         </span>
-        <span
-          v-if="isSweepVariant"
-          class="variant-sweep-badge"
-          data-testid="variant-sweep-badge"
-          title="Sweep mode: every variant runs; downstream cells receive a {variant: value} dict"
-        >
-          sweep
-        </span>
+        <template v-if="isSweepVariant">
+          <span
+            class="variant-sweep-badge"
+            data-testid="variant-sweep-badge"
+            title="Sweep mode: every variant runs; downstream cells receive a {variant: value} dict"
+          >
+            sweep
+          </span>
+          <span
+            class="variant-group-rollup"
+            data-testid="variant-group-rollup"
+            :title="`${variantGroupReadyCount} of ${variantGroup.members.length} variants ready`"
+          >
+            {{ variantGroupReadyCount }}/{{ variantGroup.members.length }} ready
+          </span>
+          <button
+            class="variant-tab variant-run-all"
+            data-testid="variant-run-all"
+            title="Run all variants in this group"
+            :disabled="!connected || environmentMutationActive"
+            @click="runVariantGroup"
+          >
+            ▶ all
+          </button>
+        </template>
       </div>
       <div class="cell-meta">
         <!-- Line 1: identity — name, defines, reads -->
@@ -1573,6 +1604,16 @@ function outputKey(output: CellOutput, index: number): string {
   border-radius: 8px;
   background: var(--accent-soft, rgba(99, 102, 241, 0.15));
   color: var(--accent, #6366f1);
+}
+
+.variant-group-rollup {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.variant-run-all {
+  font-size: 10px;
+  padding: 1px 6px;
 }
 
 .cell-meta {
