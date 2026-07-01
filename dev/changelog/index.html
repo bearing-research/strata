@@ -482,15 +482,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#040-2026-06-24" class="md-nav__link">
+  <a href="#040-2026-07-01" class="md-nav__link">
     <span class="md-ellipsis">
       
-        0.4.0 — 2026-06-24
+        0.4.0 — 2026-07-01
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="0.4.0 — 2026-06-24">
+    <nav class="md-nav" aria-label="0.4.0 — 2026-07-01">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2189,15 +2189,15 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#040-2026-06-24" class="md-nav__link">
+  <a href="#040-2026-07-01" class="md-nav__link">
     <span class="md-ellipsis">
       
-        0.4.0 — 2026-06-24
+        0.4.0 — 2026-07-01
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="0.4.0 — 2026-06-24">
+    <nav class="md-nav" aria-label="0.4.0 — 2026-07-01">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2634,7 +2634,7 @@
 <p>Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.</p>
 <p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
-<h2 id="040-2026-06-24">0.4.0 — 2026-06-24<a class="headerlink" href="#040-2026-06-24" title="Permanent link">&para;</a></h2>
+<h2 id="040-2026-07-01">0.4.0 — 2026-07-01<a class="headerlink" href="#040-2026-07-01" title="Permanent link">&para;</a></h2>
 <p>0.4.0 is a <strong>consolidation and hardening</strong> cycle. The headlines are a new
 <strong>read-only terminal viewer</strong> for notebooks and a <strong>full agent-facing notebook
 CLI</strong>, alongside an internal restructuring of the server, per-cell unit tests,
@@ -2710,7 +2710,8 @@ cell.featurize(cell.trips)…</code> — <code>cell.X</code> is any def or input
   recaptured into the DAG and verified at runtime via a fingerprint registry),
   so provenance stays correct when a cell mutates a value it didn't define.</p>
 </li>
-<li><strong>General mutation detection for stateful (ML) workloads.</strong> Runtime mutation
+<li>
+<p><strong>General mutation detection for stateful (ML) workloads.</strong> Runtime mutation
   detection is no longer limited to a hand-written type registry — it falls back
   to a serializer-based fingerprint, so an in-place mutation of <em>any</em> serializable
   object (a <code>torch.nn.Module</code> trained via <code>optimizer.step()</code>, an sklearn
@@ -2721,7 +2722,28 @@ cell.featurize(cell.trips)…</code> — <code>cell.X</code> is any def or input
   outputs <strong>share a mutable object</strong> (the optimizer-over-a-model footgun: stored
   as separate artifacts they decouple downstream). New
   <a href="../notebook/concepts/">Stateful objects &amp; value semantics</a> docs cover the
-  one-cell training pattern.</li>
+  one-cell training pattern.</p>
+</li>
+<li>
+<p><strong>Variant sweep mode.</strong> A variant group can now run in <strong>sweep mode</strong>
+  (<code>mode = "sweep"</code> in <code>notebook.toml</code>): instead of only the active variant
+  executing, <em>every</em> variant of the group runs on each execution and the
+  downstream cell receives the group's variable as a <code>{variant_name: value}</code>
+  dict — for comparing alternatives (models, hyperparameters, prompts) side by
+  side in one downstream cell. The default stays <strong>switch mode</strong> (one active
+  variant, single value). Per-variant input hashes are grouped into the
+  provenance key so caching stays correct across the fan-out. In the UI the
+  group renders as a tab strip with a <strong>sweep</strong> badge, a run-all button, and a
+  readiness rollup; clicking a tab shows that variant's source while all still
+  run. The CLI and WebSocket protocol expose the mode toggle. See the
+  <code>model_variants_sweep</code> example.</p>
+</li>
+<li>
+<p><strong>Live-mirror: REST/CLI notebook edits stream to spectators.</strong> Cell edits and
+  runs driven over REST — e.g. by the agent CLI — are now broadcast to connected
+  WebSocket clients, so a human watching in the TUI or the web UI sees an agent's
+  changes appear live without a manual refresh.</p>
+</li>
 </ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -2752,6 +2774,16 @@ cell.featurize(cell.trips)…</code> — <code>cell.X</code> is any def or input
   clients. A few low-traffic frames remain inline and follow in later cycles.
   Wire shapes are unchanged (one stale doc field, <code>cascade_prompt.steps</code> →
   <code>cells_to_run</code>, was corrected to match what's actually sent).</p>
+</li>
+<li>
+<p><strong>Runs on CPython 3.14; notebook server uses the sans-I/O WebSocket backend.</strong>
+  The server now drives uvicorn with <code>ws="websockets-sansio"</code> and raises the
+  uvicorn floor to <code>&gt;=0.35.0</code> (the first release with <code>WebSocketsSansIOProtocol</code>).
+  This replaces uvicorn's deprecated legacy-asyncio WebSocket protocol, whose
+  <code>_drain_helper</code> trips an <code>AssertionError</code> on CPython 3.14 the first time the
+  server sends a frame — which broke the notebook WebSocket entirely on 3.14. No
+  new dependency (<code>websockets</code> was already required); 3.14 is now in the tested
+  and classified matrix.</p>
 </li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
@@ -2785,6 +2817,16 @@ cell.featurize(cell.trips)…</code> — <code>cell.X</code> is any def or input
   dirs (<code>~/.local/bin</code>, <code>~/.cargo/bin</code>), and if it still can't be found, cells
   fail with an actionable message ("uv not found on PATH. Install uv … or add it
   to PATH …") — matching the existing <code>Rscript not found</code> guard.</p>
+</li>
+<li>
+<p><strong>Terminal viewer no longer storms on image-heavy notebooks.</strong> The TUI's
+  WebSocket client used the <code>websockets</code> default 1 MiB frame cap; a
+  <code>notebook_state</code> frame carrying base64 plot/image outputs exceeds that, so the
+  client rejected the first frame and wedged in a fast reconnect loop
+  (<code>ConnectionClosedError</code> in the status pill). It now connects with no
+  frame-size cap, matching the browser client. The <code>[tui]</code> extra also declares
+  <code>Pillow</code> explicitly, so <code>uv tool install "strata-notebook[tui]"</code> launches
+  instead of failing with <code>ModuleNotFoundError: No module named 'PIL'</code>.</p>
 </li>
 <li>
 <p><strong>GC tracker no longer self-deadlocks.</strong> The GC callback took a non-reentrant
