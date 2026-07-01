@@ -2577,6 +2577,13 @@ def main(argv: list[str] | None = None):
         host=config.host,
         port=config.port,
         log_level="info",
+        # Drive WebSockets through wsproto, not uvicorn's default ``ws="auto"``
+        # (the deprecated ``websockets`` *legacy* asyncio protocol). That legacy
+        # protocol's ``_drain_helper`` asserts against asyncio internals that
+        # changed in CPython 3.14, so notebook WebSockets die on data transfer
+        # there. wsproto is a pure sans-io implementation with no such coupling,
+        # works across every supported uvicorn version, and fixes 3.14+.
+        ws="wsproto",
     )
 
 
