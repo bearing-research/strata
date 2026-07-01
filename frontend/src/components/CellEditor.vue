@@ -45,6 +45,8 @@ const {
   addDependencyAction,
   addRPackageAction,
   setVariantActive,
+  selectVariantDisplay,
+  variantDisplayCellId,
   addVariant,
   cancelCellWebSocket,
 } = useNotebook()
@@ -53,6 +55,27 @@ const variantGroup = computed(() => {
   if (!props.cell.variantGroup) return null
   return notebook.variantGroups.find((g) => g.group === props.cell.variantGroup) ?? null
 })
+
+// In sweep mode every member runs; the tab strip is a display selector and the
+// "active" highlight follows the locally-selected display cell, not the backend
+// active pointer. In switch mode they coincide.
+const isSweepVariant = computed(() => variantGroup.value?.mode === 'sweep')
+const variantSelectedCellId = computed(() =>
+  variantGroup.value
+    ? isSweepVariant.value
+      ? variantDisplayCellId(variantGroup.value)
+      : variantGroup.value.activeCellId
+    : '',
+)
+
+function onVariantTabClick(member: { cellId: string; name: string }): void {
+  if (!variantGroup.value) return
+  if (isSweepVariant.value) {
+    selectVariantDisplay(variantGroup.value.group, member.cellId)
+  } else {
+    setVariantActive(variantGroup.value.group, member.name)
+  }
+}
 
 const isInspecting = computed(() => storeIsInspecting(props.cell.id))
 
@@ -735,14 +758,16 @@ function outputKey(output: CellOutput, index: number): string {
           v-for="member in variantGroup.members"
           :key="member.cellId"
           class="variant-tab"
-          :class="{ active: member.cellId === variantGroup.activeCellId }"
+          :class="{ active: member.cellId === variantSelectedCellId }"
           :title="
-            member.cellId === variantGroup.activeCellId
-              ? `Active variant: ${member.name}`
-              : `Switch to ${member.name}`
+            isSweepVariant
+              ? `Show ${member.name} (all variants run in sweep mode)`
+              : member.cellId === variantSelectedCellId
+                ? `Active variant: ${member.name}`
+                : `Switch to ${member.name}`
           "
           :data-variant-name="member.name"
-          @click="setVariantActive(variantGroup.group, member.name)"
+          @click="onVariantTabClick(member)"
         >
           {{ member.name }}
         </button>
@@ -756,6 +781,14 @@ function outputKey(output: CellOutput, index: number): string {
         </button>
         <span class="variant-group-label" :title="`Variant group: ${variantGroup.group}`">
           {{ variantGroup.group }}
+        </span>
+        <span
+          v-if="isSweepVariant"
+          class="variant-sweep-badge"
+          data-testid="variant-sweep-badge"
+          title="Sweep mode: every variant runs; downstream cells receive a {variant: value} dict"
+        >
+          sweep
         </span>
       </div>
       <div class="cell-meta">
@@ -1530,6 +1563,16 @@ function outputKey(output: CellOutput, index: number): string {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
+}
+
+.variant-sweep-badge {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--accent-soft, rgba(99, 102, 241, 0.15));
+  color: var(--accent, #6366f1);
 }
 
 .cell-meta {

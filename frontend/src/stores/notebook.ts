@@ -778,6 +778,7 @@ function parseBackendVariantGroups(raw: any): VariantGroup[] {
     const activeName = typeof entry.active_name === 'string' ? entry.active_name : ''
     const activeCellId = typeof entry.active_cell_id === 'string' ? entry.active_cell_id : ''
     if (!group || !activeName || !activeCellId) continue
+    const mode = entry.mode === 'sweep' ? 'sweep' : 'switch'
     const members: VariantMember[] = []
     if (Array.isArray(entry.members)) {
       for (const m of entry.members) {
@@ -788,7 +789,7 @@ function parseBackendVariantGroups(raw: any): VariantGroup[] {
         members.push({ cellId, name, isActive: Boolean(m.is_active) })
       }
     }
-    out.push({ group, activeName, activeCellId, members })
+    out.push({ group, activeName, activeCellId, mode, members })
   }
   return out
 }
@@ -2541,6 +2542,19 @@ function cleanupWebSocket() {
   }
 }
 
+// Session-only display selection for sweep variant groups (group → cellId).
+// In sweep mode every member is "active", so the tab strip picks which member's
+// source is shown in the single collapsed editor slot; switch groups ignore it.
+const variantDisplaySelection = ref<Record<string, string>>({})
+
+function variantDisplayCellId(group: VariantGroup): string {
+  return variantDisplaySelection.value[group.group] || group.activeCellId
+}
+
+function selectVariantDisplay(group: string, cellId: string): void {
+  variantDisplaySelection.value = { ...variantDisplaySelection.value, [group]: cellId }
+}
+
 function setVariantActive(group: string, name: string): void {
   if (!wsInstance) return
   wsInstance.setVariantActive(group, name)
@@ -3779,6 +3793,8 @@ export function useNotebook() {
     cancelCellWebSocket,
     updateSourceWebSocket,
     setVariantActive,
+    selectVariantDisplay,
+    variantDisplayCellId,
     addVariant,
     // v1.1: Impact Preview, Profiling
     currentImpactPreview,
