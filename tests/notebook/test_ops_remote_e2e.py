@@ -133,3 +133,14 @@ def test_e2e_add_cell_bad_after_is_ops_error(remote):
     ops, _ = remote
     with pytest.raises(NotebookOpsError):
         ops.add_cell("q = 1\n", after="ghost")
+
+
+def test_e2e_set_cell_tests(remote):
+    ops, _ = remote
+    # Author a cell's test source over the wire (the gap the live demo exposed):
+    # the round-trip writes cells/a.test.py and returns the cell.
+    src = "def test_x(cell):\n    assert cell.x == 1\n"
+    cell = ops.set_cell_tests("a", src)
+    assert cell.id == "a"
+    with pytest.raises(NotebookOpsError):
+        ops.set_cell_tests("ghost", src)
