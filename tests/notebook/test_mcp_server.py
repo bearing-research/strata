@@ -12,10 +12,14 @@ from __future__ import annotations
 import pytest
 
 from strata.notebook.mcp_server import (
+    _add_cell,
     _dag,
+    _edit_cell,
     _get_cell,
     _get_notebook,
     _list_notebooks,
+    _move_cell,
+    _remove_cell,
     _run_cell,
     _run_tests,
     _status,
@@ -185,6 +189,49 @@ async def test_run_tests_maps_outcomes(sm_with_session, monkeypatch):
     result = await _run_tests(sm, session_id, "a")
     assert result["passed"] == 1 and result["failed"] == 1
     assert [c["name"] for c in result["cases"]] == ["t_ok", "t_bad"]
+
+
+@pytest.mark.asyncio
+async def test_authoring_add_edit_move_remove_and_broadcast(sm_with_session, monkeypatch):
+    sm, session_id, _ = sm_with_session
+    broadcasts = []
+
+    async def fake_sync(notebook_id, session):
+        broadcasts.append(notebook_id)
+
+    # Each mutation should push a live state sync to the session's spectators.
+    monkeypatch.setattr("strata.notebook.ws.broadcast_notebook_sync", fake_sync)
+
+    added = await _add_cell(sm, session_id, "z = 9", after="a", language="python")
+    assert added["source"] == "z = 9"
+    new_id = added["id"]
+    assert _get_cell(sm, session_id, new_id)["source"] == "z = 9"
+
+    edited = await _edit_cell(sm, session_id, new_id, "z = 10")
+    assert edited["source"] == "z = 10"
+    assert _get_cell(sm, session_id, new_id)["source"] == "z = 10"
+
+    order = await _move_cell(sm, session_id, new_id, 0)
+    assert order["cells"][0]["id"] == new_id
+
+    removed = await _remove_cell(sm, session_id, new_id)
+    assert removed == {"removed": new_id}
+    with pytest.raises(NotebookOpsError):
+        _get_cell(sm, session_id, new_id)
+
+    # add, edit, move, remove → four live syncs, all for this session.
+    assert broadcasts == [session_id] * 4
+
+
+@pytest.mark.asyncio
+async def test_authoring_errors(sm_with_session):
+    sm, session_id, _ = sm_with_session
+    with pytest.raises(ValueError, match="no open notebook session"):
+        await _add_cell(sm, "nope", "x = 1")
+    with pytest.raises(NotebookOpsError):
+        await _edit_cell(sm, session_id, "ghost", "x = 1")
+    with pytest.raises(NotebookOpsError):
+        await _remove_cell(sm, session_id, "ghost")
 
 
 def test_build_mcp_app_returns_mountable_app(sm_with_session):
