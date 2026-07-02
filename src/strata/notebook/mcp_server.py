@@ -23,28 +23,22 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from strata.notebook.ops import LocalNotebookOps
+
 if TYPE_CHECKING:
     from starlette.applications import Starlette
 
     from strata.notebook.session import SessionManager
 
 
-def _resolve_ops(session_manager: SessionManager, session_id: str):
+def _resolve_ops(session_manager: SessionManager, session_id: str) -> LocalNotebookOps:
     """Wrap the server's warm session for *session_id* in ``LocalNotebookOps``.
 
     Raises ``ValueError`` (surfaced to the agent as a tool error) when no such
     session is open — MCP operates on sessions the UI/CLI already opened, not
     arbitrary paths.
     """
-    from strata.notebook.ops import LocalNotebookOps
-
-    session = session_manager.get_session(session_id)
-    if session is None:
-        raise ValueError(
-            f"no open notebook session {session_id!r}; call list_notebooks to see "
-            "the sessions currently open on the server"
-        )
-    return LocalNotebookOps.from_session(session)
+    return LocalNotebookOps.from_session(_live_session(session_manager, session_id))
 
 
 def _list_notebooks(session_manager: SessionManager) -> list[dict[str, Any]]:
@@ -137,6 +131,84 @@ async def _run_tests(
     return result.model_dump(mode="json")
 
 
+async def _broadcast_notebook(session_id: str, session: Any) -> None:
+    """Push a full notebook_state to the session's WS spectators after a mutation.
+
+    Authoring over MCP is a file mutation the offline ``LocalNotebookOps`` verbs
+    do not broadcast; sending the state sync (as the REST CRUD routes do) is what
+    makes an agent's edits appear live in an attached browser / TUI.
+    """
+    from strata.notebook.ws import broadcast_notebook_sync
+
+    await broadcast_notebook_sync(session_id, session)
+
+
+def _live_session(session_manager: SessionManager, session_id: str):
+    """Return the server's warm session for *session_id*, or raise ``ValueError``."""
+    session = session_manager.get_session(session_id)
+    if session is None:
+        raise ValueError(f"no open notebook session {session_id!r}; call list_notebooks first")
+    return session
+
+
+async def _sync_and_broadcast(session_id: str, session: Any) -> None:
+    """Reload the live session from disk after a file mutation, then broadcast.
+
+    The ``LocalNotebookOps`` authoring verbs write ``cells/*.py`` + ``notebook.toml``
+    and reload a *detached* copy — they never mutate the server's live session
+    (that is fine for the offline CLI). So we ``reload()`` the live session in
+    place (the same call the REST CRUD routes make: re-parse, rebuild the DAG,
+    restore execution history, recompute staleness) and broadcast the result, so
+    the server's warm state and any attached viewer reflect the edit.
+    """
+    session.reload()
+    await _broadcast_notebook(session_id, session)
+
+
+async def _add_cell(
+    session_manager: SessionManager,
+    session_id: str,
+    source: str,
+    after: str | None = None,
+    language: str = "python",
+) -> dict[str, Any]:
+    """Add a new cell (backend-minted id), then sync + broadcast the new state."""
+    session = _live_session(session_manager, session_id)
+    view = LocalNotebookOps.from_session(session).add_cell(source, after=after, language=language)
+    await _sync_and_broadcast(session_id, session)
+    return view.model_dump(mode="json")
+
+
+async def _edit_cell(
+    session_manager: SessionManager, session_id: str, cell_id: str, source: str
+) -> dict[str, Any]:
+    """Replace a cell's source, then sync + broadcast the new state."""
+    session = _live_session(session_manager, session_id)
+    view = LocalNotebookOps.from_session(session).edit_cell(cell_id, source)
+    await _sync_and_broadcast(session_id, session)
+    return view.model_dump(mode="json")
+
+
+async def _remove_cell(
+    session_manager: SessionManager, session_id: str, cell_id: str
+) -> dict[str, Any]:
+    """Delete a cell (and its source / test files), then sync + broadcast."""
+    session = _live_session(session_manager, session_id)
+    LocalNotebookOps.from_session(session).remove_cell(cell_id)
+    await _sync_and_broadcast(session_id, session)
+    return {"removed": cell_id}
+
+
+async def _move_cell(
+    session_manager: SessionManager, session_id: str, cell_id: str, index: int
+) -> dict[str, Any]:
+    """Move a cell to ``index`` in notebook order, then sync + broadcast."""
+    session = _live_session(session_manager, session_id)
+    cells = LocalNotebookOps.from_session(session).move_cell(cell_id, index)
+    await _sync_and_broadcast(session_id, session)
+    return {"cells": [cell.model_dump(mode="json") for cell in cells]}
+
+
 def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     """Build the streamable-HTTP MCP ASGI app, or ``None`` if ``[mcp]`` is absent.
 
@@ -226,5 +298,39 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         the cell has no test file.
         """
         return await _run_tests(session_manager, session_id, cell_id)
+
+    @mcp.tool()
+    async def add_cell(
+        session_id: str,
+        source: str,
+        after: str | None = None,
+        language: str = "python",
+    ) -> dict[str, Any]:
+        """Add a new cell and return it (the server mints the cell id).
+
+        ``after`` inserts the cell after that cell id (omit to append at the
+        end). ``language`` is one of python, markdown, sql, r, prompt. The new
+        cell appears live in any attached viewer.
+        """
+        return await _add_cell(session_manager, session_id, source, after, language)
+
+    @mcp.tool()
+    async def edit_cell(session_id: str, cell_id: str, source: str) -> dict[str, Any]:
+        """Replace a cell's source and return the updated cell.
+
+        Downstream cells that consumed the old output become stale; use status /
+        run_cell to re-materialize them.
+        """
+        return await _edit_cell(session_manager, session_id, cell_id, source)
+
+    @mcp.tool()
+    async def remove_cell(session_id: str, cell_id: str) -> dict[str, Any]:
+        """Delete a cell and its source / test files. Returns the removed id."""
+        return await _remove_cell(session_manager, session_id, cell_id)
+
+    @mcp.tool()
+    async def move_cell(session_id: str, cell_id: str, index: int) -> dict[str, Any]:
+        """Move a cell to a new 0-based position and return the new cell order."""
+        return await _move_cell(session_manager, session_id, cell_id, index)
 
     return mcp.streamable_http_app()
