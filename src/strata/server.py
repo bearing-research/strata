@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from starlette.applications import Starlette
+
     from strata.adaptive_concurrency import AdaptiveConcurrencyController
 
 import pyarrow as pa
@@ -717,6 +719,11 @@ async def _graceful_shutdown(state: ServerState) -> None:
     state._fetch_executor.shutdown(wait=False)
 
 
+# The mounted MCP ASGI app, or None when the endpoint is disabled / the [mcp]
+# extra is absent. Set at import by ``_mount_mcp_if_enabled``; read by lifespan.
+_mcp_app: Starlette | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize server state on startup, graceful shutdown on exit."""
@@ -946,7 +953,14 @@ async def lifespan(app: FastAPI):
         build_qos_enabled=build_qos is not None,
     )
 
-    yield
+    # When the MCP endpoint is mounted, its streamable-HTTP session manager runs
+    # for the life of the server. A mounted sub-app's lifespan is not started by
+    # the parent automatically, so enter it here around the yield.
+    if _mcp_app is not None:
+        async with _mcp_app.router.lifespan_context(_mcp_app):
+            yield
+    else:
+        yield
 
     # Reset build QoS
     from strata.transforms.build_qos import reset_build_qos
@@ -1240,6 +1254,44 @@ app.include_router(artifacts_router)
 app.include_router(names_router)
 app.include_router(builds_router)
 app.include_router(materialize_router)
+
+
+def _mount_mcp_if_enabled() -> None:
+    """Mount the MCP endpoint at ``/mcp`` when configured (personal mode only).
+
+    The decision is process-level (env / pyproject), read once at import — the
+    endpoint is not toggled per request. Gated three ways: ``mcp_enabled`` set,
+    ``deployment_mode == 'personal'`` (service-mode is rejected earlier by
+    ``validate_mode_coherence``; this is defense in depth), and the ``[mcp]``
+    extra installed (``build_mcp_app`` returns ``None`` otherwise, so the server
+    still boots without the dependency).
+    """
+    global _mcp_app
+
+    config = _state.config if _state is not None else StrataConfig.load()
+    if not config.mcp_enabled or config.deployment_mode != "personal":
+        return
+
+    from strata.notebook.mcp_server import build_mcp_app
+    from strata.notebook.routes import get_session_manager
+
+    mcp_app = build_mcp_app(get_session_manager())
+    if mcp_app is None:
+        logger.warning(
+            "mcp_enabled_without_extra",
+            detail=(
+                "mcp_enabled=True but the [mcp] extra is not installed; the /mcp "
+                "endpoint was not mounted. Install strata-notebook[mcp]."
+            ),
+        )
+        return
+
+    app.mount("/mcp", mcp_app)
+    _mcp_app = mcp_app
+    logger.info("mcp_endpoint_mounted", path="/mcp")
+
+
+_mount_mcp_if_enabled()
 
 
 def _require_notebook_worker_admin_access() -> ServerState:
