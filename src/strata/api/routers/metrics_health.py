@@ -188,7 +188,7 @@ async def metrics():
     # Add resource utilization info
     stats["resource_limits"] = {
         "max_concurrent_scans": state.config.max_concurrent_scans,
-        "active_scans": state._active_scans,
+        "active_scans": state.qos.active_scans,
         "max_tasks_per_scan": state.config.max_tasks_per_scan,
         "plan_timeout_seconds": state.config.plan_timeout_seconds,
         "scan_timeout_seconds": state.config.scan_timeout_seconds,
@@ -314,7 +314,7 @@ async def metrics_prometheus():
         "",
         "# HELP strata_active_scans Current number of active scans",
         "# TYPE strata_active_scans gauge",
-        f"strata_active_scans {state._active_scans}",
+        f"strata_active_scans {state.qos.active_scans}",
         "",
         "# HELP strata_max_concurrent_scans Maximum allowed concurrent scans",
         "# TYPE strata_max_concurrent_scans gauge",
