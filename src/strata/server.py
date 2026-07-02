@@ -633,6 +633,12 @@ async def lifespan(app: FastAPI):
     # Configure structured logging first
     configure_logging()
 
+    # Install the in-memory log ring buffer that backs GET /v1/logs (server-side
+    # only, so CLI / harness processes never pay for it).
+    from strata.log_buffer import install_ring_buffer
+
+    install_ring_buffer()
+
     # Initialize OpenTelemetry tracing (no-op if not installed/configured)
     tracing_enabled = init_tracing()
 
@@ -1089,6 +1095,7 @@ from strata.api.routers.artifacts import router as artifacts_router  # noqa: E40
 from strata.api.routers.builds import router as builds_router  # noqa: E402
 from strata.api.routers.cache import router as cache_router  # noqa: E402
 from strata.api.routers.debug import router as debug_router  # noqa: E402
+from strata.api.routers.logs import router as logs_router  # noqa: E402
 from strata.api.routers.materialize import router as materialize_router  # noqa: E402
 from strata.api.routers.metadata import router as metadata_router  # noqa: E402
 from strata.api.routers.metrics_health import router as metrics_health_router  # noqa: E402
@@ -1101,6 +1108,7 @@ app.include_router(notebook_router)
 app.include_router(notebook_ws_router)
 app.include_router(cache_router)
 app.include_router(debug_router)
+app.include_router(logs_router)
 app.include_router(registry_router)
 app.include_router(metadata_router)
 app.include_router(metrics_health_router)
