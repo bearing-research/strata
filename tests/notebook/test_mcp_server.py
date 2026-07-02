@@ -13,6 +13,7 @@ import pytest
 
 from strata.notebook.mcp_server import (
     _add_cell,
+    _add_dependency,
     _dag,
     _edit_cell,
     _get_cell,
@@ -20,6 +21,7 @@ from strata.notebook.mcp_server import (
     _list_notebooks,
     _move_cell,
     _remove_cell,
+    _remove_dependency,
     _run_cell,
     _run_tests,
     _status,
@@ -232,6 +234,45 @@ async def test_authoring_errors(sm_with_session):
         await _edit_cell(sm, session_id, "ghost", "x = 1")
     with pytest.raises(NotebookOpsError):
         await _remove_cell(sm, session_id, "ghost")
+
+
+@pytest.mark.asyncio
+async def test_add_and_remove_dependency_and_broadcast(sm_with_session, monkeypatch):
+    from types import SimpleNamespace
+
+    sm, session_id, _ = sm_with_session
+    broadcasts = []
+
+    async def fake_sync(notebook_id, session):
+        broadcasts.append(notebook_id)
+
+    monkeypatch.setattr("strata.notebook.ws.broadcast_notebook_sync", fake_sync)
+
+    async def fake_mutate(package, *, action):
+        result = SimpleNamespace(
+            package=package, action=action, success=True, lockfile_changed=True, error=None
+        )
+        return SimpleNamespace(result=result, staleness_map={})
+
+    # No real `uv add` — stub the session's dependency mutation.
+    monkeypatch.setattr(sm.get_session(session_id), "mutate_dependency", fake_mutate)
+
+    added = await _add_dependency(sm, session_id, "polars")
+    assert added["package"] == "polars"
+    assert added["action"] == "add"
+    assert added["success"] is True and added["lockfile_changed"] is True
+
+    removed = await _remove_dependency(sm, session_id, "polars")
+    assert removed["action"] == "remove"
+
+    assert broadcasts == [session_id, session_id]
+
+
+@pytest.mark.asyncio
+async def test_dependency_missing_session_raises(sm_with_session):
+    sm, _, _ = sm_with_session
+    with pytest.raises(ValueError, match="no open notebook session"):
+        await _add_dependency(sm, "nope", "polars")
 
 
 def test_build_mcp_app_returns_mountable_app(sm_with_session):

@@ -209,6 +209,30 @@ async def _move_cell(
     return {"cells": [cell.model_dump(mode="json") for cell in cells]}
 
 
+async def _add_dependency(
+    session_manager: SessionManager, session_id: str, package: str
+) -> dict[str, Any]:
+    """Add a Python dependency (``uv add``) to the warm session, then broadcast.
+
+    ``mutate_dependency`` updates the live session in place (re-sync + staleness
+    recompute — no detached reload), so only a broadcast is needed to surface it.
+    """
+    session = _live_session(session_manager, session_id)
+    result = await LocalNotebookOps.from_session(session).add_dependency(package)
+    await _broadcast_notebook(session_id, session)
+    return result.model_dump(mode="json")
+
+
+async def _remove_dependency(
+    session_manager: SessionManager, session_id: str, package: str
+) -> dict[str, Any]:
+    """Remove a Python dependency (``uv remove``) from the warm session, then broadcast."""
+    session = _live_session(session_manager, session_id)
+    result = await LocalNotebookOps.from_session(session).remove_dependency(package)
+    await _broadcast_notebook(session_id, session)
+    return result.model_dump(mode="json")
+
+
 def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     """Build the streamable-HTTP MCP ASGI app, or ``None`` if ``[mcp]`` is absent.
 
@@ -332,5 +356,20 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     async def move_cell(session_id: str, cell_id: str, index: int) -> dict[str, Any]:
         """Move a cell to a new 0-based position and return the new cell order."""
         return await _move_cell(session_manager, session_id, cell_id, index)
+
+    @mcp.tool()
+    async def add_dependency(session_id: str, package: str) -> dict[str, Any]:
+        """Add a Python dependency to the notebook (runs ``uv add``).
+
+        ``package`` is a uv/pip requirement (e.g. ``polars`` or ``polars>=1.0``).
+        Returns whether the lockfile changed; cells that import the package can
+        then be run. May take a few seconds while the environment resolves.
+        """
+        return await _add_dependency(session_manager, session_id, package)
+
+    @mcp.tool()
+    async def remove_dependency(session_id: str, package: str) -> dict[str, Any]:
+        """Remove a Python dependency from the notebook (runs ``uv remove``)."""
+        return await _remove_dependency(session_manager, session_id, package)
 
     return mcp.streamable_http_app()
