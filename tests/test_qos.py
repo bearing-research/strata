@@ -8,6 +8,8 @@ These tests verify that the QoS mechanism:
 5. Releases tier semaphores properly on completion/error/disconnect
 """
 
+import time
+
 import httpx
 import pyarrow as pa
 import pytest
@@ -558,3 +560,106 @@ class TestQoSFastFail:
                 # Check that rejection metrics are present
                 assert "strata_qos_interactive_rejected_total" in content
                 assert "strata_qos_bulk_rejected_total" in content
+
+
+# The QoS admission accounting is being lifted out of server.py into a
+# QoSAdmission collaborator (#302 phase 3). These two tests pin the observable
+# contract BEFORE that move, so the extraction is proven behaviour-identical:
+#   1. the full /metrics["qos"] key set (counter-drift guard), and
+#   2. no slot leak when a client disconnects mid-stream (the #238 property).
+# They characterise current behaviour — they must stay green through the
+# extraction unchanged.
+
+
+# Every key the ``qos`` block of ``/metrics`` exposes today. The extraction
+# moves these fields behind ``QoSAdmission.qos_metrics()``; dropping or renaming
+# one would silently break the observability dashboard, so pin the exact set.
+_EXPECTED_QOS_METRIC_KEYS = {
+    "interactive_slots",
+    "interactive_active",
+    "interactive_available",
+    "interactive_rejected",
+    "interactive_queue_timeout_seconds",
+    "interactive_queue_wait_avg_ms",
+    "interactive_queue_wait_total_ms",
+    "interactive_queue_wait_count",
+    "bulk_slots",
+    "bulk_active",
+    "bulk_available",
+    "bulk_rejected",
+    "bulk_queue_timeout_seconds",
+    "bulk_queue_wait_avg_ms",
+    "bulk_queue_wait_total_ms",
+    "bulk_queue_wait_count",
+    "per_client_interactive",
+    "per_client_bulk",
+    "client_rejected",
+    "tracked_clients",
+    "per_tenant",
+}
+
+
+class TestQoSCharacterization:
+    """Characterization tests pinning QoS behaviour ahead of the #302 extraction."""
+
+    def test_qos_metrics_golden_shape(self, qos_warehouse, tmp_path):
+        """The ``/metrics`` qos block exposes exactly the documented key set."""
+        port = find_free_port()
+        config = StrataConfig(
+            host="127.0.0.1",
+            port=port,
+            cache_dir=tmp_path / "cache",
+            deployment_mode="personal",
+        )
+        with run_server(config) as base_url:
+            with httpx.Client(timeout=10.0) as client:
+                qos = client.get(f"{base_url}/metrics").json()["qos"]
+        assert set(qos.keys()) == _EXPECTED_QOS_METRIC_KEYS
+        # per_tenant is a nested map; the rest are scalars.
+        assert isinstance(qos["per_tenant"], dict)
+
+    def test_no_qos_slot_active_after_abandoned_stream(self, qos_warehouse, tmp_path):
+        """After a client abandons a stream, no tier slot stays active.
+
+        End-state guard: open a pass-through stream (service mode, no
+        artifact_dir), read one chunk, drop the connection, and confirm both tier
+        slots return to free. It pins "an abandoned reader leaves nothing active".
+
+        NOTE: forcing a deterministic *mid-flight* disconnect over HTTP is racy —
+        a small response is fully buffered before the client reads, so the server
+        completes normally. The precise #238 property (limiter + client-semaphore
+        released when the acquire/serve path is *cancelled*) is locked by a
+        direct unit test of ``Admission.release()`` in the extraction PR, where
+        the release closure becomes independently callable.
+        """
+        port = find_free_port()
+        config = StrataConfig(
+            host="127.0.0.1",
+            port=port,
+            cache_dir=tmp_path / "cache",
+            deployment_mode="service",  # no artifact_dir → pass-through streaming
+        )
+        with run_server(config) as base_url:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.post(
+                    f"{base_url}/v1/materialize",
+                    json=build_materialize_request(qos_warehouse["large_table_uri"]),
+                )
+                assert resp.status_code == 200
+                stream_url = resp.json()["stream_url"]
+
+                with client.stream("GET", f"{base_url}{stream_url}") as stream:
+                    for _ in stream.iter_bytes():
+                        break  # take one chunk, then abandon the connection
+
+                # Release may land when the server observes the dropped reader;
+                # poll briefly rather than assume it's instant.
+                deadline = time.monotonic() + 10.0
+                qos = client.get(f"{base_url}/metrics").json()["qos"]
+                while (qos["interactive_active"] or qos["bulk_active"]) and (
+                    time.monotonic() < deadline
+                ):
+                    time.sleep(0.1)
+                    qos = client.get(f"{base_url}/metrics").json()["qos"]
+                assert qos["interactive_active"] == 0, "interactive slot left active"
+                assert qos["bulk_active"] == 0, "bulk slot left active"
