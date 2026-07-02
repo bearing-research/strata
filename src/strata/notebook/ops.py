@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
     from strata.notebook.dag import NotebookDag
     from strata.notebook.models import CellState
+    from strata.notebook.session import NotebookSession
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +362,26 @@ class LocalNotebookOps:
         state = parse_notebook(notebook_dir)
         self._session = NotebookSession(state, notebook_dir)
         self._executor: object | None = None
+
+    @classmethod
+    def from_session(cls, session: NotebookSession) -> LocalNotebookOps:
+        """Wrap an already-open ``NotebookSession`` instead of opening a new one.
+
+        The CLI constructs one offline session per invocation; the in-process
+        MCP server instead reuses the server's warm live session (its populated
+        artifact cache, current cell state) so tools see exactly what the UI
+        sees. ``notebook_dir`` is taken from the live session's path.
+
+        Parameters
+        ----------
+        session : NotebookSession
+            An open session, typically from the server's ``SessionManager``.
+        """
+        ops = cls.__new__(cls)
+        ops.notebook_dir = session.path
+        ops._session = session
+        ops._executor = None
+        return ops
 
     def list_cells(self) -> list[CellView]:
         """List every cell in order (see :meth:`NotebookOps.list_cells`)."""
