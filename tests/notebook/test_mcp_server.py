@@ -16,6 +16,8 @@ from strata.notebook.mcp_server import (
     _get_cell,
     _get_notebook,
     _list_notebooks,
+    _run_cell,
+    _run_tests,
     _status,
     build_mcp_app,
 )
@@ -97,6 +99,92 @@ def test_from_session_reuses_the_live_session(sm_with_session):
     # Same underlying session object — the warm state, not an offline reopen.
     assert ops._session is live
     assert ops.notebook_dir == live.path
+
+
+@pytest.mark.asyncio
+async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
+    sm, session_id, _ = sm_with_session
+    seen = {}
+
+    async def fake_broadcast(session, cell_id, execution_state, notebook_id, mode="normal"):
+        seen["args"] = (cell_id, notebook_id, mode)
+
+        class _Result:
+            def to_dict(self):
+                return {
+                    "cell_id": cell_id,
+                    "status": "ready",
+                    "cache_hit": False,
+                    "execution_method": "subprocess",
+                    "duration_ms": 12.0,
+                    "stdout": "hi\n",
+                    "stderr": "",
+                    "error": None,
+                }
+
+        return _Result()
+
+    # Patch the shared broadcast path — _run_cell imports it at call time, so
+    # patching the source module is enough. No subprocess, no real WS.
+    monkeypatch.setattr("strata.notebook.ws.execute_cell_and_broadcast", fake_broadcast)
+    # A directly-built test session has no synced venv, so the env-ready guard
+    # would refuse; a UI/CLI-opened session in production is ready. Simulate that.
+    monkeypatch.setattr(
+        sm.get_session(session_id), "environment_execution_block_message", lambda: None
+    )
+
+    result = await _run_cell(sm, session_id, "a", mode="rerun")
+    assert result["cell_id"] == "a"
+    assert result["status"] == "ok"  # "ready" → "ok"
+    assert result["stdout"] == "hi\n"
+    # The live session id is threaded through as the broadcast notebook_id.
+    assert seen["args"] == ("a", session_id, "rerun")
+
+
+@pytest.mark.asyncio
+async def test_run_cell_rejects_bad_mode_missing_cell_and_session(sm_with_session):
+    sm, session_id, _ = sm_with_session
+    with pytest.raises(ValueError, match="unknown run mode"):
+        await _run_cell(sm, session_id, "a", mode="bogus")
+    with pytest.raises(NotebookOpsError):
+        await _run_cell(sm, session_id, "ghost")
+    with pytest.raises(ValueError, match="no open notebook session"):
+        await _run_cell(sm, "nope", "a")
+
+
+@pytest.mark.asyncio
+async def test_run_cell_refuses_when_env_not_ready(sm_with_session):
+    sm, session_id, _ = sm_with_session
+    # A freshly-built session has no synced venv → run_cell refuses with a clear
+    # message rather than running into a broken environment.
+    with pytest.raises(ValueError, match="environment"):
+        await _run_cell(sm, session_id, "a")
+
+
+@pytest.mark.asyncio
+async def test_run_tests_maps_outcomes(sm_with_session, monkeypatch):
+    sm, session_id, _ = sm_with_session
+    from strata.notebook.models import CellTestCase, CellTestResult
+
+    async def fake_run_cell_tests(self, cell_id, test_source):
+        return CellTestResult(
+            passed=1,
+            failed=1,
+            tests=[
+                CellTestCase(name="t_ok", outcome="passed"),
+                CellTestCase(name="t_bad", outcome="failed", message="assert 1 == 2"),
+            ],
+        )
+
+    monkeypatch.setattr("strata.notebook.executor.CellExecutor.run_cell_tests", fake_run_cell_tests)
+    # run_tests refuses a cell with no test file.
+    with pytest.raises(NotebookOpsError):
+        await _run_tests(sm, session_id, "a")
+    # Give cell 'a' a test source, then it maps the executor's result.
+    sm.get_session(session_id).notebook_state.get_cell("a").test_source = "def test_x(cell): pass"
+    result = await _run_tests(sm, session_id, "a")
+    assert result["passed"] == 1 and result["failed"] == 1
+    assert [c["name"] for c in result["cases"]] == ["t_ok", "t_bad"]
 
 
 def test_build_mcp_app_returns_mountable_app(sm_with_session):
