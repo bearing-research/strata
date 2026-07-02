@@ -494,6 +494,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#fixed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -522,7 +533,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added" class="md-nav__link">
+  <a href="#added_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -594,7 +605,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#added_1" class="md-nav__link">
+  <a href="#added_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -644,7 +655,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_2" class="md-nav__link">
+  <a href="#added_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -788,7 +799,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_3" class="md-nav__link">
+  <a href="#added_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -1399,6 +1410,34 @@
     
   
     Authoring Programmatically
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebook/mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Server
   
 
     
@@ -2229,6 +2268,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#fixed" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2257,7 +2307,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added" class="md-nav__link">
+  <a href="#added_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2329,7 +2379,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#added_1" class="md-nav__link">
+  <a href="#added_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2379,7 +2429,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_2" class="md-nav__link">
+  <a href="#added_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2523,7 +2573,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_3" class="md-nav__link">
+  <a href="#added_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2691,6 +2741,20 @@
 exhaustive commit history.</p>
 <p>The authoritative copy of this file lives at <a href="https://github.com/bearing-research/strata/blob/main/CHANGELOG.md"><code>CHANGELOG.md</code></a> in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
+<h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>An MCP server for driving a live notebook from a coding agent.</strong> Enable
+  <code>mcp_enabled</code> (personal mode only, behind the <code>[mcp]</code> extra) and Strata mounts
+  a Model Context Protocol endpoint at <code>/mcp</code> — <code>claude mcp add --transport http
+  strata http://localhost:8765/mcp</code>. An external agent (Claude Code, any MCP
+  client) gets the same operations the <code>strata</code> CLI drives — read
+  (<code>list_notebooks</code> / <code>get_notebook</code> / <code>get_cell</code> / <code>dag</code> / <code>status</code>), run
+  (<code>run_cell</code> / <code>run_tests</code>), author (<code>add_cell</code> / <code>edit_cell</code> / <code>remove_cell</code> /
+  <code>move_cell</code>), and dependencies (<code>add_dependency</code> / <code>remove_dependency</code>) —
+  against a <strong>warm session</strong>, not an offline copy. Because the tools reuse
+  Strata's broadcasting execution paths, the browser UI and the terminal viewer
+  become a live view of the agent at work. (#117)</li>
+</ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Downstream cells now read "stale", not "idle", when an upstream changes.</strong>
@@ -2707,7 +2771,7 @@ exhaustive commit history.</p>
 CLI</strong>, alongside an internal restructuring of the server, per-cell unit tests,
 broader value serialization with in-place mutation tracking, concurrency-bug
 fixes, and CI hardening. No breaking changes.</p>
-<h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
+<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
 <p><strong>A terminal viewer for notebooks (<code>strata-notebook-tui</code>).</strong> A read-only,
@@ -2940,7 +3004,7 @@ cell.featurize(cell.trips)…</code> — <code>cell.X</code> is any def or input
   service mode; personal mode (single operator) is unaffected.</p>
 </li>
 </ul>
-<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
+<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong><code>strata-client</code>: a slim, independent client distribution.</strong> Using Strata as
   a library no longer means installing the whole server. The new <code>strata-client</code>
@@ -3299,7 +3363,7 @@ yields byte-identical output for notebooks without one (every existing
 Python-only notebook). The WS protocol gained reconnect + MessageType
 frames; external WS clients that ignore unknown frame types are
 unaffected. No Python API surface removed.</p>
-<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
+<h3 id="added_3">Added<a class="headerlink" href="#added_3" title="Permanent link">&para;</a></h3>
 <h4 id="r-cells">R cells<a class="headerlink" href="#r-cells" title="Permanent link">&para;</a></h4>
 <p>R is a first-class notebook language alongside Python: cells execute
 end-to-end, cross-language Arrow exchange works, provenance/caching is
@@ -3530,7 +3594,7 @@ install</code> into a hand-rolled <code>python -m venv</code> is rejected by the
 startup guard. The notebook app boots via <code>strata-notebook</code> (or
 <code>python -m strata</code>); <code>strata-worker</code> boots a remote worker; and
 <code>strata run | export | import</code> covers headless notebook tooling.</p>
-<h3 id="added_3">Added<a class="headerlink" href="#added_3" title="Permanent link">&para;</a></h3>
+<h3 id="added_4">Added<a class="headerlink" href="#added_4" title="Permanent link">&para;</a></h3>
 <h4 id="notebook-ui-and-lifecycle">Notebook UI and lifecycle<a class="headerlink" href="#notebook-ui-and-lifecycle" title="Permanent link">&para;</a></h4>
 <ul>
 <li>notebook home / create / open flows with recent-notebook tracking</li>
