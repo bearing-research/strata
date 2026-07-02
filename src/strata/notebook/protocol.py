@@ -87,6 +87,12 @@ class MessageType(StrEnum):
     AGENT_CONFIRM_REQUEST = "agent_confirm_request"
     AGENT_PROGRESS = "agent_progress"
     AGENT_DONE = "agent_done"
+    # An external agent driving via MCP (or the CLI) narrating an action or a
+    # note into the Agent panel. The built-in loop streams its reasoning as
+    # agent_text_delta; an external agent's reasoning lives in its own client,
+    # so we surface its tool actions (source="mcp") and any explicit narration
+    # (source="agent") as discrete notes instead.
+    AGENT_NOTE = "agent_note"
 
 
 __all__ = ["MessageType"]

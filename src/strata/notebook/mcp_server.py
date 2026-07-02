@@ -119,7 +119,9 @@ async def _run_cell(
     )
     if result is None:
         raise NotebookOpsError(f"cell {cell_id!r} could not be executed")
-    return _run_result_from_wire(result.to_dict()).model_dump(mode="json")
+    run = _run_result_from_wire(result.to_dict()).model_dump(mode="json")
+    await _agent_note(session_id, "mcp", f"ran cell {cell_id} → {run['status']}")
+    return run
 
 
 async def _run_tests(
@@ -128,6 +130,11 @@ async def _run_tests(
     """Run a cell's unit tests in the warm session and return per-test outcomes."""
     ops = _resolve_ops(session_manager, session_id)
     result = await ops.run_tests(cell_id)
+    await _agent_note(
+        session_id,
+        "mcp",
+        f"ran tests for {cell_id} → {result.passed} passed, {result.failed} failed",
+    )
     return result.model_dump(mode="json")
 
 
@@ -141,6 +148,29 @@ async def _broadcast_notebook(session_id: str, session: Any) -> None:
     from strata.notebook.ws import broadcast_notebook_sync
 
     await broadcast_notebook_sync(session_id, session)
+
+
+async def _agent_note(session_id: str, source: str, text: str) -> None:
+    """Surface a one-line note in the Agent panel of any attached viewer (#393).
+
+    The built-in agent streams its reasoning as ``agent_text_delta``. An external
+    agent driving via MCP has no such channel — its reasoning stays in its own
+    client — so we narrate its tool actions (``source="mcp"``) and any explicit
+    notes it pushes via the ``note`` tool (``source="agent"``) as discrete
+    ``agent_note`` frames, which the TUI folds into the same Agent feed. A no-op
+    when nothing is attached (``_broadcast_message`` returns early).
+    """
+    from strata.notebook.protocol import MessageType
+    from strata.notebook.ws import _broadcast_message
+
+    await _broadcast_message(
+        session_id,
+        {
+            "type": MessageType.AGENT_NOTE,
+            "seq": 0,
+            "payload": {"source": source, "text": text},
+        },
+    )
 
 
 def _live_session(session_manager: SessionManager, session_id: str):
@@ -176,6 +206,7 @@ async def _add_cell(
     session = _live_session(session_manager, session_id)
     view = LocalNotebookOps.from_session(session).add_cell(source, after=after, language=language)
     await _sync_and_broadcast(session_id, session)
+    await _agent_note(session_id, "mcp", f"added {language} cell {view.id}")
     return view.model_dump(mode="json")
 
 
@@ -186,6 +217,7 @@ async def _edit_cell(
     session = _live_session(session_manager, session_id)
     view = LocalNotebookOps.from_session(session).edit_cell(cell_id, source)
     await _sync_and_broadcast(session_id, session)
+    await _agent_note(session_id, "mcp", f"edited cell {cell_id}")
     return view.model_dump(mode="json")
 
 
@@ -196,6 +228,7 @@ async def _remove_cell(
     session = _live_session(session_manager, session_id)
     LocalNotebookOps.from_session(session).remove_cell(cell_id)
     await _sync_and_broadcast(session_id, session)
+    await _agent_note(session_id, "mcp", f"removed cell {cell_id}")
     return {"removed": cell_id}
 
 
@@ -206,6 +239,7 @@ async def _move_cell(
     session = _live_session(session_manager, session_id)
     cells = LocalNotebookOps.from_session(session).move_cell(cell_id, index)
     await _sync_and_broadcast(session_id, session)
+    await _agent_note(session_id, "mcp", f"moved cell {cell_id} to position {index}")
     return {"cells": [cell.model_dump(mode="json") for cell in cells]}
 
 
@@ -220,6 +254,7 @@ async def _add_dependency(
     session = _live_session(session_manager, session_id)
     result = await LocalNotebookOps.from_session(session).add_dependency(package)
     await _broadcast_notebook(session_id, session)
+    await _agent_note(session_id, "mcp", f"added dependency {package}")
     return result.model_dump(mode="json")
 
 
@@ -230,7 +265,15 @@ async def _remove_dependency(
     session = _live_session(session_manager, session_id)
     result = await LocalNotebookOps.from_session(session).remove_dependency(package)
     await _broadcast_notebook(session_id, session)
+    await _agent_note(session_id, "mcp", f"removed dependency {package}")
     return result.model_dump(mode="json")
+
+
+async def _note(session_manager: SessionManager, session_id: str, message: str) -> dict[str, Any]:
+    """Push an explicit narration line into the session's Agent panel."""
+    _live_session(session_manager, session_id)  # validate the session exists
+    await _agent_note(session_id, "agent", message)
+    return {"ok": True}
 
 
 def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
@@ -371,5 +414,16 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     async def remove_dependency(session_id: str, package: str) -> dict[str, Any]:
         """Remove a Python dependency from the notebook (runs ``uv remove``)."""
         return await _remove_dependency(session_manager, session_id, package)
+
+    @mcp.tool()
+    async def note(session_id: str, message: str) -> dict[str, Any]:
+        """Post a short note into the notebook's Agent panel for the human watching.
+
+        Your own actions (running / editing cells, etc.) already appear there
+        automatically. Use this to narrate your reasoning or plan — e.g. "About
+        to refactor featurize into two cells" — so the person watching the
+        notebook in the browser or terminal can follow what you're doing.
+        """
+        return await _note(session_manager, session_id, message)
 
     return mcp.streamable_http_app()
