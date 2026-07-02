@@ -20,6 +20,7 @@ from strata.notebook.mcp_server import (
     _get_notebook,
     _list_notebooks,
     _move_cell,
+    _note,
     _remove_cell,
     _remove_dependency,
     _run_cell,
@@ -138,6 +139,13 @@ async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
     monkeypatch.setattr(
         sm.get_session(session_id), "environment_execution_block_message", lambda: None
     )
+    # Capture the agent_note the run narrates into the Agent panel (#393).
+    notes = []
+
+    async def fake_note_broadcast(notebook_id, message):
+        notes.append(message)
+
+    monkeypatch.setattr("strata.notebook.ws._broadcast_message", fake_note_broadcast)
 
     result = await _run_cell(sm, session_id, "a", mode="rerun")
     assert result["cell_id"] == "a"
@@ -145,6 +153,13 @@ async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
     assert result["stdout"] == "hi\n"
     # The live session id is threaded through as the broadcast notebook_id.
     assert seen["args"] == ("a", session_id, "rerun")
+    # The run auto-narrates an mcp-sourced agent_note.
+    assert any(
+        m["type"] == "agent_note"
+        and m["payload"]["source"] == "mcp"
+        and "ran cell a" in m["payload"]["text"]
+        for m in notes
+    )
 
 
 @pytest.mark.asyncio
@@ -273,6 +288,32 @@ async def test_dependency_missing_session_raises(sm_with_session):
     sm, _, _ = sm_with_session
     with pytest.raises(ValueError, match="no open notebook session"):
         await _add_dependency(sm, "nope", "polars")
+
+
+@pytest.mark.asyncio
+async def test_note_tool_broadcasts_agent_frame(sm_with_session, monkeypatch):
+    sm, session_id, _ = sm_with_session
+    frames = []
+
+    async def fake_broadcast(notebook_id, message):
+        frames.append((notebook_id, message))
+
+    monkeypatch.setattr("strata.notebook.ws._broadcast_message", fake_broadcast)
+
+    result = await _note(sm, session_id, "about to refactor featurize")
+    assert result == {"ok": True}
+    assert len(frames) == 1
+    notebook_id, message = frames[0]
+    assert notebook_id == session_id
+    assert message["type"] == "agent_note"
+    assert message["payload"] == {"source": "agent", "text": "about to refactor featurize"}
+
+
+@pytest.mark.asyncio
+async def test_note_missing_session_raises(sm_with_session):
+    sm, _, _ = sm_with_session
+    with pytest.raises(ValueError, match="no open notebook session"):
+        await _note(sm, "nope", "hello")
 
 
 def test_build_mcp_app_returns_mountable_app(sm_with_session):

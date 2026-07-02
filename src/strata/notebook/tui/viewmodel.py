@@ -162,6 +162,7 @@ class NotebookViewModel:
             "agent_progress",
             "agent_confirm_request",
             "agent_done",
+            "agent_note",
         ):
             self._apply_agent_frame(msg_type, payload)
             return set()
@@ -244,6 +245,16 @@ class NotebookViewModel:
             self.agent_feed.append(_agent_done_line(payload))
             self.agent_status = "done"
             self.banner = "🤖 agent: done"
+        elif msg_type == "agent_note":
+            # An external agent (driving via MCP/CLI) narrating an action
+            # (source="mcp") or an explicit note (source="agent"). "↹" marks an
+            # auto-narrated tool action; "✎" an explicit note (#393).
+            source = str(payload.get("source") or "agent")
+            text = str(payload.get("text") or "")
+            glyph = "✎" if source == "agent" else "↹"
+            self.agent_feed.append(f"{glyph} {text}")
+            self.agent_status = source
+            self.banner = f"🤖 {source}: {text}"
 
 
 def _test_badge(payload: dict[str, Any]) -> str:

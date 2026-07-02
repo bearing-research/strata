@@ -63,11 +63,22 @@ The typical loop:
 | `move_cell(session_id, cell_id, index)` | Reorder a cell. |
 | `add_dependency(session_id, package)` | `uv add` a dependency. |
 | `remove_dependency(session_id, package)` | `uv remove` a dependency. |
+| `note(session_id, message)` | Post a line into the Agent panel for the human watching. |
 
 `run_cell` modes match the UI and CLI: `normal` uses the cache and re-runs stale
 upstreams first; `rerun` bypasses the target's cache but still refreshes
 upstreams; `force` ("run this only") runs against whatever upstream artifacts
 already exist.
+
+## Watching the agent
+
+The built-in AI panel streams its own reasoning into the **Agent panel**. An
+external agent's reasoning lives in its own client, so instead its **tool
+actions are narrated there automatically** — "ran cell abc → ok", "added python
+cell def", "added dependency polars" — as it works. It can also call the `note`
+tool to post an explicit line of narration ("about to refactor featurize into
+two cells"). Open the notebook in the browser or the
+[terminal viewer](tui.md) and you can follow along in real time.
 
 ## Relationship to the CLI
 

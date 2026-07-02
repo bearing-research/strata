@@ -327,6 +327,18 @@ def test_agent_done_summarizes():
     assert "claude" in vm.agent_feed[-1] and "100+50" in vm.agent_feed[-1]
 
 
+def test_agent_note_renders_mcp_action_and_explicit_note():
+    vm = NotebookViewModel()
+    vm.apply_notebook_state(_state({"id": "a"}))
+    # An auto-narrated MCP tool action (source="mcp") → "↹" glyph.
+    vm.apply_frame("agent_note", {"source": "mcp", "text": "ran cell a → ok"})
+    assert vm.agent_feed[-1] == "↹ ran cell a → ok"
+    # An explicit note the external agent pushed (source="agent") → "✎" glyph.
+    vm.apply_frame("agent_note", {"source": "agent", "text": "refactoring featurize"})
+    assert vm.agent_feed[-1] == "✎ refactoring featurize"
+    assert vm.agent_status == "agent"
+
+
 def test_agent_frames_are_notebook_level():
     vm = NotebookViewModel()
     vm.apply_notebook_state(_state({"id": "a"}))
