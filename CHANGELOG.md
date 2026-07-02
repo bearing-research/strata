@@ -7,6 +7,20 @@ exhaustive commit history.
 
 ## Unreleased
 
+### Added
+
+- **An MCP server for driving a live notebook from a coding agent.** Enable
+  `mcp_enabled` (personal mode only, behind the `[mcp]` extra) and Strata mounts
+  a Model Context Protocol endpoint at `/mcp` — `claude mcp add --transport http
+  strata http://localhost:8765/mcp`. An external agent (Claude Code, any MCP
+  client) gets the same operations the `strata` CLI drives — read
+  (`list_notebooks` / `get_notebook` / `get_cell` / `dag` / `status`), run
+  (`run_cell` / `run_tests`), author (`add_cell` / `edit_cell` / `remove_cell` /
+  `move_cell`), and dependencies (`add_dependency` / `remove_dependency`) —
+  against a **warm session**, not an offline copy. Because the tools reuse
+  Strata's broadcasting execution paths, the browser UI and the terminal viewer
+  become a live view of the agent at work. (#117)
+
 ### Fixed
 
 - **Downstream cells now read "stale", not "idle", when an upstream changes.**
