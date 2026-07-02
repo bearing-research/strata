@@ -45,6 +45,7 @@ from strata.notebook.models import (
     CellState,
     CellStatus,
     NotebookState,
+    StalenessReason,
     VariantGroupState,
     VariantMember,
 )
@@ -746,13 +747,27 @@ class NotebookSession:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 continue
 
-            # If ANY upstream cell is stale, this cell is also stale —
-            # its inputs will change once the upstream re-runs, so its
-            # cached artifact (based on old inputs) is invalid.
+            # If ANY upstream cell is stale, this cell's inputs will change
+            # once the upstream re-runs, so it too is out of date and must
+            # re-run before it can be trusted. How we surface that depends
+            # on whether this cell already holds a result (#361):
+            #   - it ran before (``last_provenance_hash`` set) → STALE with
+            #     an UPSTREAM reason, so the UI reads "stale · upstream
+            #     changed" rather than a bare IDLE (matches how a user
+            #     watching a cascade thinks about it).
+            #   - it never ran (fresh notebook) → IDLE: there is no cached
+            #     result to invalidate, and it can't be evaluated until the
+            #     upstream produces its inputs.
+            # Either way it propagates: downstream cells are out of date too.
             has_stale_upstream = any(uid in stale_cells for uid in cell.upstream_ids)
 
             if has_stale_upstream:
-                staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
+                if cell.last_provenance_hash is not None:
+                    staleness_map[cell_id] = CellStaleness(
+                        status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM]
+                    )
+                else:
+                    staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
                 continue
 

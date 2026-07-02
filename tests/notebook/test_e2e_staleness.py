@@ -120,8 +120,11 @@ class TestStalenessDetection:
                 assert resp.status_code == 200
 
                 data = resp.json()
-                c2_status = next(cell["status"] for cell in data["cells"] if cell["id"] == "c2")
-                assert c2_status == "idle"
+                c2 = next(cell for cell in data["cells"] if cell["id"] == "c2")
+                # c2 ran, so it holds a result that the c1 edit invalidated →
+                # STALE with an UPSTREAM reason (#361), not a bare idle.
+                assert c2["status"] == "stale"
+                assert "upstream" in c2.get("staleness_reasons", [])
 
                 ws.clear()
                 updated = execute_cell_and_wait(ws, "c2")

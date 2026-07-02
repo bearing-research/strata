@@ -176,7 +176,9 @@ class TestMountInvalidation:
                 state = ws.sync()
                 cells = state["payload"]["cells"]
                 assert _cell(cells, "c1")["status"] == "idle"
-                assert _cell(cells, "c2")["status"] == "idle"
+                # c2 ran; repointing c1's mount invalidated c2's cached result
+                # via its stale upstream → STALE, not idle (#361).
+                assert _cell(cells, "c2")["status"] == "stale"
 
                 ws.clear()
                 rerun = execute_cell_and_wait(ws, "c2")
