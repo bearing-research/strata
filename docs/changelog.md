@@ -7,6 +7,18 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
+## Unreleased
+
+### Fixed
+
+- **Downstream cells now read "stale", not "idle", when an upstream changes.**
+  When you edit an upstream cell (or its inputs, mount, or environment change),
+  a downstream cell that already holds a result is now marked **stale** with an
+  "upstream changed" reason, instead of a bare "idle" with no explanation. The
+  web UI surfaces this as `stale · upstream changed` and the terminal viewer
+  shows the stale glyph. A never-run downstream stays **idle** — there is no
+  cached result to invalidate until its upstream produces inputs. (#361)
+
 ## 0.4.0 — 2026-07-01
 
 0.4.0 is a **consolidation and hardening** cycle. The headlines are a new

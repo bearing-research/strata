@@ -535,8 +535,13 @@ async def test_cell_execute_refreshes_downstream_staleness(temp_notebook):
 
     status_updates = [f["payload"] for f in fake.frames_of("cell_status")]
     assert any(p["cell_id"] == "root" and p["status"] == "ready" for p in status_updates)
+    # After root re-runs, its direct downstream `middle` can recompute its own
+    # provenance (root is ready) → plain cache miss → idle. `leaf`, whose
+    # upstream `middle` is still stale, held a prior result, so it surfaces as
+    # STALE with an upstream reason (#361) rather than a bare idle. Both mean
+    # "needs re-run"; the point of this test is that neither stays ready.
     assert any(p["cell_id"] == "middle" and p["status"] == "idle" for p in status_updates)
-    assert any(p["cell_id"] == "leaf" and p["status"] == "idle" for p in status_updates)
+    assert any(p["cell_id"] == "leaf" and p["status"] == "stale" for p in status_updates)
 
 
 @pytest.mark.asyncio

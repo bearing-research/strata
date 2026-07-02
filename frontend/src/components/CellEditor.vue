@@ -3,7 +3,7 @@ import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
 import { useCodemirror } from '../composables/useCodemirror'
 import { useNotebook } from '../stores/notebook'
 import CellArtifactStrip from './CellArtifactStrip.vue'
-import type { Cell, CellOutput } from '../types/notebook'
+import type { Cell, CellOutput, StalenessReason } from '../types/notebook'
 import {
   resolveEffectiveWorkerEntry,
   summarizeRemoteExecutionState,
@@ -231,6 +231,25 @@ const statusLabel = computed(() => {
     case 'error':
       return '\u2715'
   }
+})
+
+// Human-readable staleness reasons for the status-dot tooltip, so a
+// stale cell reads "stale · upstream changed" rather than a bare "stale"
+// (#361 — a downstream of a changed upstream is STALE with reason UPSTREAM).
+const STALENESS_REASON_LABELS: Record<StalenessReason, string> = {
+  self: 'source changed',
+  upstream: 'upstream changed',
+  env: 'environment changed',
+  forced: 'forced re-run',
+}
+
+const statusTitle = computed(() => {
+  const reasons = props.cell.stalenessReasons
+  if (props.cell.status === 'stale' && reasons?.length) {
+    const detail = reasons.map((r) => STALENESS_REASON_LABELS[r] ?? r).join(', ')
+    return `stale · ${detail}`
+  }
+  return props.cell.status
 })
 
 const durationLabel = computed(() => {
@@ -706,7 +725,7 @@ function outputKey(output: CellOutput, index: number): string {
   >
     <!-- Left gutter -->
     <div class="cell-gutter">
-      <span class="status-dot" :title="cell.status">{{ statusLabel }}</span>
+      <span class="status-dot" :title="statusTitle">{{ statusLabel }}</span>
       <div class="cell-actions">
         <button
           v-if="cell.language !== 'markdown' && cell.status !== 'running'"

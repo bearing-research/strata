@@ -602,7 +602,10 @@ class TestDependencyRESTEndpoints:
             assert "cells" in data
             statuses = {cell["id"]: cell["status"] for cell in data["cells"]}
             assert statuses["c1"] == "idle"
-            assert statuses["c2"] == "idle"
+            # c2 ran; the new dependency changed the env for the whole graph,
+            # so c2's cached result is invalid via its stale upstream c1 →
+            # STALE, not idle (#361).
+            assert statuses["c2"] == "stale"
 
     def test_remove_dependency_rest(self, setup):
         """DELETE /dependencies/{package} removes a package."""
