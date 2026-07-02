@@ -1019,6 +1019,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#watching-the-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Watching the agent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#relationship-to-the-cli" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1876,6 +1887,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#watching-the-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Watching the agent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#relationship-to-the-cli" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2003,12 +2025,24 @@ The typical loop:</p>
 <td><code>remove_dependency(session_id, package)</code></td>
 <td><code>uv remove</code> a dependency.</td>
 </tr>
+<tr>
+<td><code>note(session_id, message)</code></td>
+<td>Post a line into the Agent panel for the human watching.</td>
+</tr>
 </tbody>
 </table>
 <p><code>run_cell</code> modes match the UI and CLI: <code>normal</code> uses the cache and re-runs stale
 upstreams first; <code>rerun</code> bypasses the target's cache but still refreshes
 upstreams; <code>force</code> ("run this only") runs against whatever upstream artifacts
 already exist.</p>
+<h2 id="watching-the-agent">Watching the agent<a class="headerlink" href="#watching-the-agent" title="Permanent link">&para;</a></h2>
+<p>The built-in AI panel streams its own reasoning into the <strong>Agent panel</strong>. An
+external agent's reasoning lives in its own client, so instead its <strong>tool
+actions are narrated there automatically</strong> — "ran cell abc → ok", "added python
+cell def", "added dependency polars" — as it works. It can also call the <code>note</code>
+tool to post an explicit line of narration ("about to refactor featurize into
+two cells"). Open the notebook in the browser or the
+<a href="../tui/">terminal viewer</a> and you can follow along in real time.</p>
 <h2 id="relationship-to-the-cli">Relationship to the CLI<a class="headerlink" href="#relationship-to-the-cli" title="Permanent link">&para;</a></h2>
 <p>The MCP tools and the <code>strata</code> CLI share one operation contract
 (<a href="../agent-authoring/"><code>NotebookOps</code></a>) and return the same curated views. The CLI
