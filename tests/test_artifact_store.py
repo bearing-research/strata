@@ -1095,6 +1095,38 @@ class TestTagAndNameLookups:
         assert store.list_artifacts_by_tag("nb_cell", "cellY") == [("a2", 1)]
         assert store.list_artifacts_by_tag("nb_cell", "absent") == []
 
+
+class TestListArtifactsSortAndSince:
+    """The since / sort / order filters that back the artifacts dashboard (B2)."""
+
+    @staticmethod
+    def _add(store, aid, byte_size):
+        store.create_artifact(aid, f"{aid}-hash")
+        store.finalize_artifact(aid, 1, "{}", 0, byte_size)
+
+    def test_sort_by_byte_size(self, store):
+        self._add(store, "small", 100)
+        self._add(store, "big", 300)
+        self._add(store, "mid", 200)
+        asc = [a.id for a in store.list_artifacts(sort="byte_size", order="asc")]
+        assert asc == ["small", "mid", "big"]
+        desc = [a.id for a in store.list_artifacts(sort="byte_size", order="desc")]
+        assert desc == ["big", "mid", "small"]
+
+    def test_unknown_sort_falls_back_safely(self, store):
+        # A non-whitelisted sort (or an injection attempt) falls back to
+        # created_at rather than reaching the SQL.
+        self._add(store, "a", 1)
+        result = store.list_artifacts(sort="; DROP TABLE artifact_versions;--")
+        assert [a.id for a in result] == ["a"]
+
+    def test_since_filter(self, store):
+        import time
+
+        self._add(store, "a", 1)
+        assert len(store.list_artifacts(since=0)) == 1
+        assert store.list_artifacts(since=time.time() + 3600) == []
+
     def test_names_for_artifact(self, store):
         store.create_artifact("a1", "h1")
         store.finalize_artifact("a1", 1, "{}", 0, 0)
