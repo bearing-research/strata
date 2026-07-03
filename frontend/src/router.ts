@@ -24,6 +24,11 @@ const router = createRouter({
       name: 'logs',
       component: () => import('./views/LogsPage.vue'),
     },
+    {
+      path: '/artifacts',
+      name: 'artifacts',
+      component: () => import('./views/ArtifactsPage.vue'),
+    },
   ],
 })
 

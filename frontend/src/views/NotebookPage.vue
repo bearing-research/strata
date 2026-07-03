@@ -519,6 +519,14 @@ function goHome() {
         />
       </div>
       <div class="header-right">
+        <router-link
+          to="/artifacts"
+          class="header-logs-link"
+          data-testid="nav-artifacts"
+          title="Artifact store"
+        >
+          Artifacts
+        </router-link>
         <router-link to="/logs" class="header-logs-link" data-testid="nav-logs" title="Server logs">
           Logs
         </router-link>

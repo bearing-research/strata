@@ -1417,6 +1417,76 @@ async function getLogs(query: LogQuery = {}): Promise<LogsResponse> {
 }
 
 // ---------------------------------------------------------------------------
+// Artifacts (observability)
+// ---------------------------------------------------------------------------
+
+export interface ArtifactStats {
+  total_versions: number
+  ready_versions: number
+  building_versions: number
+  failed_versions: number
+  total_bytes: number
+  total_rows: number
+  name_count: number
+}
+
+export interface ArtifactRow {
+  artifact_uri: string
+  artifact_id: string
+  version: number
+  state: string
+  row_count: number | null
+  byte_size: number | null
+  created_at: number | null
+}
+
+export interface ArtifactQuery {
+  limit?: number
+  offset?: number
+  state?: string
+  namePrefix?: string
+  since?: number
+  sort?: 'created_at' | 'byte_size' | 'row_count'
+  order?: 'asc' | 'desc'
+}
+
+export interface ArtifactListResponse {
+  artifacts: ArtifactRow[]
+  limit: number
+  offset: number
+}
+
+async function getArtifactStats(): Promise<ArtifactStats> {
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/artifacts/stats`)
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to fetch artifact stats')
+  }
+  return readJson<ArtifactStats>(resp)
+}
+
+async function getArtifacts(query: ArtifactQuery = {}): Promise<ArtifactListResponse> {
+  const params = new URLSearchParams()
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.offset !== undefined) params.set('offset', String(query.offset))
+  if (query.state) params.set('state', query.state)
+  if (query.namePrefix) params.set('name_prefix', query.namePrefix)
+  if (query.since !== undefined) params.set('since', String(query.since))
+  if (query.sort) params.set('sort', query.sort)
+  if (query.order) params.set('order', query.order)
+  const qs = params.toString()
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/artifacts${qs ? `?${qs}` : ''}`)
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to fetch artifacts')
+  }
+  const data = await readJson<Partial<ArtifactListResponse>>(resp)
+  return {
+    artifacts: data.artifacts ?? [],
+    limit: data.limit ?? query.limit ?? 100,
+    offset: data.offset ?? query.offset ?? 0,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // LLM Assistant
 // ---------------------------------------------------------------------------
 
@@ -1686,6 +1756,8 @@ export function useStrata() {
     listSessions,
     getSession,
     getLogs,
+    getArtifactStats,
+    getArtifacts,
     getLlmStatus,
     getLlmModels,
     updateLlmModel,
