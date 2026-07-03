@@ -519,6 +519,9 @@ function goHome() {
         />
       </div>
       <div class="header-right">
+        <router-link to="/logs" class="header-logs-link" data-testid="nav-logs" title="Server logs">
+          Logs
+        </router-link>
         <ThemeToggle />
         <span
           v-if="!loading && notebook.id"
@@ -760,6 +763,20 @@ function goHome() {
 
 .add-prompt-btn:hover {
   border-color: var(--accent-primary);
+}
+
+.header-logs-link {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.header-logs-link:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
 }
 
 .mode-badge {

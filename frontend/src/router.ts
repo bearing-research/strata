@@ -19,6 +19,11 @@ const router = createRouter({
       component: loadNotebookPage,
       props: true,
     },
+    {
+      path: '/logs',
+      name: 'logs',
+      component: () => import('./views/LogsPage.vue'),
+    },
   ],
 })
 
