@@ -367,6 +367,14 @@ function formatTime(ts: number): string {
 <template>
   <div class="home" data-testid="home-page">
     <div class="home-theme-slot">
+      <router-link
+        to="/artifacts"
+        class="nav-link"
+        data-testid="nav-artifacts"
+        title="Artifact store"
+      >
+        Artifacts
+      </router-link>
       <router-link to="/logs" class="nav-link" data-testid="nav-logs" title="Server logs">
         Logs
       </router-link>
