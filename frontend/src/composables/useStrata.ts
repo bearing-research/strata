@@ -1372,6 +1372,51 @@ async function getSession(sessionId: string): Promise<NotebookSessionPayload> {
 }
 
 // ---------------------------------------------------------------------------
+// Logs (observability)
+// ---------------------------------------------------------------------------
+
+export interface LogEntry {
+  cursor: number
+  timestamp?: string
+  level?: string
+  logger?: string
+  message?: string
+  notebook_id?: string
+  // Structured logging flattens arbitrary kwargs onto the record, so keep the
+  // door open for extra fields the UI renders in the expandable detail row.
+  [key: string]: unknown
+}
+
+export interface LogQuery {
+  since?: number
+  level?: string
+  notebook?: string
+  regex?: string
+  limit?: number
+}
+
+export interface LogsResponse {
+  entries: LogEntry[]
+  cursor: number
+}
+
+async function getLogs(query: LogQuery = {}): Promise<LogsResponse> {
+  const params = new URLSearchParams()
+  if (query.since !== undefined) params.set('since', String(query.since))
+  if (query.level) params.set('level', query.level)
+  if (query.notebook) params.set('notebook', query.notebook)
+  if (query.regex) params.set('regex', query.regex)
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  const qs = params.toString()
+  const resp = await fetchWithTimeout(`${STRATA_BASE}/v1/logs${qs ? `?${qs}` : ''}`)
+  if (!resp.ok) {
+    await throwApiError(resp, 'Failed to fetch logs')
+  }
+  const data = await readJson<Partial<LogsResponse>>(resp)
+  return { entries: data.entries ?? [], cursor: data.cursor ?? 0 }
+}
+
+// ---------------------------------------------------------------------------
 // LLM Assistant
 // ---------------------------------------------------------------------------
 
@@ -1640,6 +1685,7 @@ export function useStrata() {
     importEnvironmentYaml,
     listSessions,
     getSession,
+    getLogs,
     getLlmStatus,
     getLlmModels,
     updateLlmModel,
