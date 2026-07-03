@@ -26,6 +26,7 @@ from strata.api.dependencies import (
     authorize_table_access,
     resolve_input_version,
 )
+from strata.artifact_uris import LATEST_VERSION, parse_artifact_uri, parse_name_uri
 from strata.auth import (
     AuthError,
     get_principal,
@@ -1699,47 +1700,6 @@ _ACTIVE_BUILD_STATES = ("pending", "building", "running")
 # ``BuildTransportStore`` / ``RequiredBuildStore`` dependencies wrap them.
 
 
-def _parse_artifact_uri(uri: str) -> tuple[str, int] | None:
-    """Parse artifact URI to (artifact_id, version).
-
-    Formats:
-        strata://artifact/{id}@v={version}
-        strata://artifact/{id}  (resolves to latest)
-
-    Returns:
-        Tuple of (artifact_id, version) or None if not an artifact URI
-    """
-    import re
-
-    # Match strata://artifact/{id}@v={version}
-    match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", uri)
-    if match:
-        return (match.group(1), int(match.group(2)))
-
-    # Match strata://artifact/{id} (latest version)
-    match = re.match(r"^strata://artifact/([^@]+)$", uri)
-    if match:
-        return (match.group(1), -1)  # -1 indicates "latest"
-
-    return None
-
-
-def _parse_name_uri(uri: str) -> str | None:
-    """Parse name URI to name.
-
-    Format: strata://name/{name}
-
-    Returns:
-        Name string or None if not a name URI
-    """
-    import re
-
-    match = re.match(r"^strata://name/(.+)$", uri)
-    if match:
-        return match.group(1)
-    return None
-
-
 def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
     """Resolve URI to artifact (id, version).
 
@@ -1762,10 +1722,10 @@ def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
         return None
 
     # Try artifact URI
-    result = _parse_artifact_uri(uri)
+    result = parse_artifact_uri(uri)
     if result is not None:
         artifact_id, version = result
-        if version == -1:
+        if version == LATEST_VERSION:
             # Resolve to latest
             latest = store.get_latest_version(artifact_id)
             if latest is not None:
@@ -1774,7 +1734,7 @@ def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
         return result
 
     # Try name URI
-    name = _parse_name_uri(uri)
+    name = parse_name_uri(uri)
     if name is not None:
         artifact = store.resolve_name(name, tenant=_get_artifact_request_tenant())
         if artifact is not None:
