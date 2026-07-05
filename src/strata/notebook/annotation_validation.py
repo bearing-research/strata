@@ -34,8 +34,10 @@ def validate_cell_annotations(
     # Variant validation is language-agnostic: any cell language can be
     # a variant member, so the cross-sibling checks run before language
     # dispatch.
-    variant_diagnostics = _validate_variant_annotation(
-        cell, parse_annotations(cell.source), notebook_state
+    _cell_annotations = parse_annotations(cell.source)
+    variant_diagnostics = _validate_variant_annotation(cell, _cell_annotations, notebook_state)
+    variant_diagnostics = variant_diagnostics + _validate_per_variant_annotation(
+        cell, _cell_annotations, notebook_state
     )
     if cell.language == CellLanguage.PROMPT:
         return variant_diagnostics + _validate_prompt_cell_annotations(cell)
@@ -754,6 +756,138 @@ def _validate_variant_annotation(
                     line=variant_line,
                 )
             )
+
+    return diagnostics
+
+
+def _sweep_groups_read_by(
+    cell: CellState,
+    notebook_state: NotebookState,
+) -> dict[str, int]:
+    """Return ``{group: member_count}`` for sweep groups this cell reads from.
+
+    A variable is *sweep-sourced* when it's defined by a cell whose variant
+    group is in sweep mode. This mirrors the DAG's producer resolution using
+    only ``notebook_state`` (defines/references + variant_modes), so validation
+    stays independent of a rebuilt DAG.
+    """
+    refs = set(cell.references)
+    groups: dict[str, int] = {}
+    for group_id, mode in notebook_state.variant_modes.items():
+        if mode != "sweep":
+            continue
+        members = [
+            c
+            for c in notebook_state.cells
+            if c.variant_group == group_id and c.variant_name is not None
+        ]
+        if any(refs & set(member.defines) for member in members):
+            groups[group_id] = len(members)
+    return groups
+
+
+def _validate_per_variant_annotation(
+    cell: CellState,
+    annotations,
+    notebook_state: NotebookState,
+) -> list[AnnotationDiagnostic]:
+    """Validate ``# @per_variant [group]`` fan-out membership.
+
+    - ``per_variant_on_variant_member`` — a cell can't both *be* a variant and
+      fan *out* over one.
+    - ``per_variant_no_sweep_source`` — the cell references no sweep-sourced
+      variable, so there's nothing to fan out over.
+    - ``per_variant_ambiguous_group`` — bare ``@per_variant`` but the cell reads
+      from ≥2 sweep groups; the user must name one.
+    - ``per_variant_unknown_group`` — a named group the cell doesn't read as a
+      sweep source.
+    - ``per_variant_group_of_one`` — the fan-out group has a single variant, so
+      the annotation runs the cell once (info; harmless).
+    """
+    if not annotations.per_variant:
+        return []
+
+    diagnostics: list[AnnotationDiagnostic] = []
+    line = _find_annotation_line(cell.source, "per_variant")
+
+    # Mutually exclusive with @variant membership.
+    if annotations.variant is not None:
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="per_variant_on_variant_member",
+                message=(
+                    "`@per_variant` can't be combined with `@variant`: a cell "
+                    "can't both be a variant and fan out over a sweep group."
+                ),
+                line=line,
+            )
+        )
+        return diagnostics
+
+    sweep_groups = _sweep_groups_read_by(cell, notebook_state)
+    named = annotations.per_variant_group
+
+    if named is not None:
+        if named not in sweep_groups:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="per_variant_unknown_group",
+                    message=(
+                        f"`@per_variant {named}` names a group this cell doesn't "
+                        "read from in sweep mode. Reference a variable produced "
+                        "by a sweep-mode variant group."
+                    ),
+                    line=line,
+                )
+            )
+            return diagnostics
+        effective_group = named
+    else:
+        if not sweep_groups:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="per_variant_no_sweep_source",
+                    message=(
+                        "`@per_variant` requires the cell to reference a variable "
+                        "from a sweep-mode variant group; none were found."
+                    ),
+                    line=line,
+                )
+            )
+            return diagnostics
+        if len(sweep_groups) > 1:
+            names = ", ".join(sorted(sweep_groups))
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="per_variant_ambiguous_group",
+                    message=(
+                        f"`@per_variant` is ambiguous: this cell reads from "
+                        f"multiple sweep groups ({names}). Name one explicitly: "
+                        "`# @per_variant <group>`."
+                    ),
+                    line=line,
+                )
+            )
+            return diagnostics
+        effective_group = next(iter(sweep_groups))
+
+    if sweep_groups.get(effective_group) == 1:
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.INFO,
+                code="per_variant_group_of_one",
+                message=(
+                    f"Group `{effective_group}` has a single variant, so "
+                    "`@per_variant` runs this cell once. The annotation is "
+                    "harmless but unnecessary here."
+                ),
+                line=line,
+            )
+        )
 
     return diagnostics
 
