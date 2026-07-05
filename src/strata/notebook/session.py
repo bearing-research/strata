@@ -518,6 +518,8 @@ class NotebookSession:
                     after=list(annotations.after),
                     variant_group=variant_group,
                     variant_name=variant_name,
+                    per_variant=annotations.per_variant,
+                    per_variant_group=annotations.per_variant_group,
                 )
             )
             # Update cell with analysis results
