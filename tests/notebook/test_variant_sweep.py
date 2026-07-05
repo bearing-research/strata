@@ -537,3 +537,130 @@ class TestPerVariantValidation:
         consumer = _consumer("# @per_variant\nscore = ev(preds)\n", ["preds"])
         codes = _codes(consumer, self._nb(members, consumer, {"model": "sweep"}))
         assert "per_variant_group_of_one" in codes
+
+
+class TestPerVariantDag:
+    """DAG fan-out: a @per_variant cell's outputs become a fan-out SweepProducer."""
+
+    def _cells(self, *, per_variant_group=None, eval_refs=("preds",), extra=()):
+        from strata.notebook.dag import CellAnalysisWithId
+
+        cells = [
+            CellAnalysisWithId(id="load", defines=["X"], references=[]),
+            CellAnalysisWithId(
+                id="m_logreg",
+                defines=["preds"],
+                references=["X"],
+                variant_group="model",
+                variant_name="logreg",
+            ),
+            CellAnalysisWithId(
+                id="m_rf",
+                defines=["preds"],
+                references=["X"],
+                variant_group="model",
+                variant_name="rf",
+            ),
+            CellAnalysisWithId(
+                id="eval",
+                defines=["score"],
+                references=list(eval_refs),
+                per_variant=True,
+                per_variant_group=per_variant_group,
+            ),
+            *extra,
+        ]
+        return cells
+
+    def _dag(self, **kw):
+        from strata.notebook.dag import NotebookDag
+
+        return NotebookDag.from_cells(self._cells(**kw), variant_modes={"model": "sweep"})
+
+    def test_output_is_fanout_producer(self):
+        from strata.notebook.dag import SweepProducer, producer_cell_label
+
+        prod = self._dag().variable_producer["score"]
+        assert isinstance(prod, SweepProducer)
+        assert prod.fanout_cell == "eval"
+        assert prod.group == "model"
+        assert prod.variants == (("logreg", "eval"), ("rf", "eval"))
+        assert producer_cell_label(prod) == "fanout:model"
+
+    def test_fanout_cell_still_fans_in_to_members(self):
+        dag = self._dag()
+        assert set(dag.cell_upstream["eval"]) == {"m_logreg", "m_rf"}
+
+    def test_named_group_resolves(self):
+        from strata.notebook.dag import SweepProducer
+
+        prod = self._dag(per_variant_group="model").variable_producer["score"]
+        assert isinstance(prod, SweepProducer)
+        assert prod.fanout_cell == "eval"
+
+    def test_no_sweep_ref_stays_plain_producer(self):
+        # @per_variant but reads no sweep var → ordinary producer (validation warns).
+        prod = self._dag(eval_refs=("other",)).variable_producer["score"]
+        assert prod == "eval"
+
+    def test_ambiguous_two_groups_stays_plain(self):
+        from strata.notebook.dag import CellAnalysisWithId, NotebookDag
+
+        cells = [
+            CellAnalysisWithId(id="load", defines=["X"], references=[]),
+            CellAnalysisWithId(
+                id="m_lr",
+                defines=["preds"],
+                references=["X"],
+                variant_group="model",
+                variant_name="lr",
+            ),
+            CellAnalysisWithId(
+                id="s_a",
+                defines=["scaled"],
+                references=["X"],
+                variant_group="scaler",
+                variant_name="a",
+            ),
+            CellAnalysisWithId(
+                id="eval",
+                defines=["score"],
+                references=["preds", "scaled"],
+                per_variant=True,
+            ),
+        ]
+        dag = NotebookDag.from_cells(cells, variant_modes={"model": "sweep", "scaler": "sweep"})
+        # Bare @per_variant with two sweep groups is ambiguous → no fan-out.
+        assert dag.variable_producer["score"] == "eval"
+
+    def test_collapse_consumer_sees_one_edge(self):
+        from strata.notebook.dag import CellAnalysisWithId
+
+        dag = self._dag(
+            extra=(CellAnalysisWithId(id="compare", defines=["report"], references=["score"]),)
+        )
+        # A non-@per_variant downstream collapses the fan-out to a dict input:
+        # it depends on the fan-out cell once, and score is a consumed output.
+        assert dag.cell_upstream["compare"] == ["eval"]
+        assert "score" in dag.consumed_variables["eval"]
+
+    def test_chained_fanout_zips_through(self):
+        from strata.notebook.dag import CellAnalysisWithId, SweepProducer
+
+        dag = self._dag(
+            extra=(
+                CellAnalysisWithId(
+                    id="refine",
+                    defines=["score2"],
+                    references=["score"],
+                    per_variant=True,
+                    per_variant_group="model",
+                ),
+            )
+        )
+        prod2 = dag.variable_producer["score2"]
+        assert isinstance(prod2, SweepProducer)
+        assert prod2.fanout_cell == "refine"
+        assert prod2.group == "model"
+        # refine depends only on the upstream fan-out cell.
+        assert dag.cell_upstream["refine"] == ["eval"]

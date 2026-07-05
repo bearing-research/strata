@@ -58,16 +58,25 @@ class VariantGroupResolution:
 
 @dataclass(frozen=True)
 class SweepProducer:
-    """Producer-map entry for a variable produced by a *sweep* variant group.
+    """Producer-map entry for a variable produced across a set of variants.
 
-    In switch mode a variable maps to a single producing cell id. In sweep mode
-    every variant produces the same name, so the variable maps to this — the
-    group plus all ``(variant_name, cell_id)`` members (sorted, so it's a stable
-    value) — and a downstream reference fans out to one edge per member.
+    Two shapes share this type:
+
+    - **Sweep group** (``fanout_cell is None``): each variant is a distinct
+      variant-member cell, so ``variants`` maps ``variant_name -> member_cell_id``
+      and a downstream reference fans out to one edge per member.
+    - **Fan-out cell** (``fanout_cell`` set): a ``# @per_variant`` cell runs once
+      per variant of an upstream sweep group. Every instance shares the same
+      producing cell (``fanout_cell``), so all ``variants`` entries point at it;
+      the executor derives per-instance artifacts via an ``@variant=<name>``
+      subkey. Downstream collapse/chaining reuses the same edge machinery.
+
+    ``variants`` is sorted so the value is stable/hashable.
     """
 
     group: str
     variants: tuple[tuple[str, str], ...]  # sorted ((variant_name, cell_id), ...)
+    fanout_cell: str | None = None
 
 
 @dataclass
@@ -98,6 +107,11 @@ class CellAnalysisWithId:
     after: list[str] = field(default_factory=list)
     variant_group: str | None = None
     variant_name: str | None = None
+    # ``# @per_variant [group]`` fan-out (sweep v2). When ``per_variant`` is set,
+    # this cell's outputs become a fan-out ``SweepProducer`` over ``per_variant_group``
+    # (or the single sweep group it reads, when the group is None/inferred).
+    per_variant: bool = False
+    per_variant_group: str | None = None
 
 
 class VariantNameCollisionError(ValueError):
@@ -222,6 +236,22 @@ class NotebookDag:
                     group=res.group, variants=tuple(sorted(members))
                 )
 
+        # @per_variant fan-out (sweep v2). A ``# @per_variant`` cell runs once per
+        # variant of one upstream sweep group; its outputs become a fan-out
+        # SweepProducer over that group's variant names. ``var_to_sweep_group``
+        # maps a sweep-sourced variable to its group — seeded from sweep members
+        # and *extended in the main loop* with fan-out outputs, so a chained
+        # ``@per_variant`` reading a prior fan-out cell resolves too. Group choice
+        # mirrors annotation-validation: named group, else the single sweep group
+        # the cell reads; unresolvable (zero/ambiguous) keeps ordinary producer
+        # semantics (validation warns).
+        var_to_sweep_group = {var: sp.group for var, sp in sweep_producer_for_var.items()}
+        sweep_group_variant_names: dict[str, tuple[str, ...]] = {
+            res.group: tuple(sorted(name for _, name in res.members))
+            for res in dag.variant_groups
+            if res.mode == "sweep"
+        }
+
         # Initialize structures (every cell gets entries — even inactive ones,
         # so the frontend can index into the maps without special-casing).
         for cell_id in cell_ids:
@@ -297,9 +327,35 @@ class NotebookDag:
             # sibling sets the same value and downstream sees the whole group.
             # Setting the same value per sibling is idempotent (no shadow).
             is_sweep_member = cell.id in sweep_member_group
+            # Resolve this cell's fan-out group from sweep vars known so far
+            # (includes upstream fan-out outputs → chained @per_variant works).
+            fanout_group: str | None = None
+            if cell.per_variant:
+                read_groups = {
+                    var_to_sweep_group[ref] for ref in cell.references if ref in var_to_sweep_group
+                }
+                named = cell.per_variant_group
+                if named is not None:
+                    fanout_group = named if named in read_groups else None
+                else:
+                    fanout_group = next(iter(read_groups)) if len(read_groups) == 1 else None
             for var in cell.defines:
                 if is_sweep_member and var in sweep_producer_for_var:
                     new_producer: str | SweepProducer = sweep_producer_for_var[var]
+                elif fanout_group is not None:
+                    # Fan-out cell: its outputs are per-variant instances of this
+                    # one cell, keyed by the upstream group's variant names. Register
+                    # the output as sweep-sourced so a chained @per_variant resolves.
+                    new_producer = SweepProducer(
+                        group=fanout_group,
+                        variants=tuple(
+                            sorted(
+                                (name, cell.id) for name in sweep_group_variant_names[fanout_group]
+                            )
+                        ),
+                        fanout_cell=cell.id,
+                    )
+                    var_to_sweep_group[var] = fanout_group
                 else:
                     new_producer = cell.id
                 previous_producer = dag.variable_producer.get(var)
@@ -491,6 +547,8 @@ def producer_cell_label(producer: str | SweepProducer) -> str:
     renders as ``"sweep:<group>"``.
     """
     if isinstance(producer, SweepProducer):
+        if producer.fanout_cell is not None:
+            return f"fanout:{producer.group}"
         return f"sweep:{producer.group}"
     return producer
 
