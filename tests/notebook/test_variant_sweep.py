@@ -420,3 +420,120 @@ class TestSweepRestEndpoint:
             # invalid mode → 422 (request validation)
             bad = client.put(f"/v1/notebooks/{sid}/variant-groups/model", json={"mode": "nope"})
             assert bad.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# v2: @per_variant fan-out — Phase 1 (annotation parsing + validation only)
+# ---------------------------------------------------------------------------
+
+
+class TestPerVariantParsing:
+    def test_bare_sets_flag_no_group(self):
+        from strata.notebook.annotations import parse_annotations
+
+        ann = parse_annotations("# @per_variant\nscore = ev(preds)\n")
+        assert ann.per_variant is True
+        assert ann.per_variant_group is None
+
+    def test_named_group(self):
+        from strata.notebook.annotations import parse_annotations
+
+        ann = parse_annotations("# @per_variant model\nscore = ev(preds)\n")
+        assert ann.per_variant is True
+        assert ann.per_variant_group == "model"
+
+    def test_absent(self):
+        from strata.notebook.annotations import parse_annotations
+
+        ann = parse_annotations("score = ev(preds)\n")
+        assert ann.per_variant is False
+        assert ann.per_variant_group is None
+
+
+def _sweep_member(group: str, name: str, var: str = "preds") -> CellState:
+    cell = CellState(id=f"{group}_{name}", source=f"# @variant {group} {name}\n{var} = run()\n")
+    cell.defines = [var]
+    cell.variant_group = group
+    cell.variant_name = name
+    return cell
+
+
+def _consumer(source: str, references: list[str], cell_id: str = "eval") -> CellState:
+    cell = CellState(id=cell_id, source=source)
+    cell.references = list(references)
+    cell.defines = ["score"]
+    return cell
+
+
+class TestPerVariantValidation:
+    def _nb(self, members: list[CellState], consumer: CellState, modes: dict) -> NotebookState:
+        nb = NotebookState(id="nb", name="t", cells=[*members, consumer])
+        nb.variant_modes = dict(modes)
+        return nb
+
+    def test_bare_single_group_valid(self):
+        members = [_sweep_member("model", "logreg"), _sweep_member("model", "rf")]
+        consumer = _consumer("# @per_variant\nscore = ev(preds)\n", ["preds"])
+        codes = _codes(consumer, self._nb(members, consumer, {"model": "sweep"}))
+        assert not any(c.startswith("per_variant_") for c in codes)
+
+    def test_no_sweep_source(self):
+        members = [_sweep_member("model", "logreg"), _sweep_member("model", "rf")]
+        # References a name not produced by any sweep member.
+        consumer = _consumer("# @per_variant\nscore = ev(other)\n", ["other"])
+        codes = _codes(consumer, self._nb(members, consumer, {"model": "sweep"}))
+        assert "per_variant_no_sweep_source" in codes
+
+    def test_switch_group_is_not_a_sweep_source(self):
+        # A group in switch mode doesn't count as a fan-out source.
+        members = [_sweep_member("model", "logreg"), _sweep_member("model", "rf")]
+        consumer = _consumer("# @per_variant\nscore = ev(preds)\n", ["preds"])
+        codes = _codes(consumer, self._nb(members, consumer, {"model": "switch"}))
+        assert "per_variant_no_sweep_source" in codes
+
+    def test_ambiguous_two_groups(self):
+        members = [
+            _sweep_member("model", "logreg", var="preds"),
+            _sweep_member("scaler", "std", var="scaled"),
+        ]
+        consumer = _consumer("# @per_variant\nscore = ev(preds, scaled)\n", ["preds", "scaled"])
+        nb = self._nb(members, consumer, {"model": "sweep", "scaler": "sweep"})
+        assert "per_variant_ambiguous_group" in _codes(consumer, nb)
+
+    def test_named_group_disambiguates(self):
+        members = [
+            _sweep_member("model", "logreg", var="preds"),
+            _sweep_member("scaler", "std", var="scaled"),
+        ]
+        consumer = _consumer(
+            "# @per_variant model\nscore = ev(preds, scaled)\n", ["preds", "scaled"]
+        )
+        nb = self._nb(members, consumer, {"model": "sweep", "scaler": "sweep"})
+        codes = _codes(consumer, nb)
+        assert "per_variant_ambiguous_group" not in codes
+        assert "per_variant_unknown_group" not in codes
+
+    def test_unknown_named_group(self):
+        members = [_sweep_member("model", "logreg"), _sweep_member("model", "rf")]
+        consumer = _consumer("# @per_variant ghost\nscore = ev(preds)\n", ["preds"])
+        codes = _codes(consumer, self._nb(members, consumer, {"model": "sweep"}))
+        assert "per_variant_unknown_group" in codes
+
+    def test_on_variant_member_rejected(self):
+        # A cell that is itself a variant can't also fan out.
+        cell = CellState(
+            id="m_x",
+            source="# @variant model x\n# @per_variant\npreds = run()\n",
+        )
+        cell.defines = ["preds"]
+        cell.variant_group = "model"
+        cell.variant_name = "x"
+        nb = NotebookState(id="nb", name="t", cells=[cell])
+        nb.variant_modes = {"model": "sweep"}
+        assert "per_variant_on_variant_member" in _codes(cell, nb)
+
+    def test_group_of_one_info(self):
+        members = [_sweep_member("model", "only")]
+        consumer = _consumer("# @per_variant\nscore = ev(preds)\n", ["preds"])
+        codes = _codes(consumer, self._nb(members, consumer, {"model": "sweep"}))
+        assert "per_variant_group_of_one" in codes
