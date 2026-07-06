@@ -974,6 +974,21 @@ function outputKey(output: CellOutput, index: number): string {
             &#x21BB; {{ loopProgressLabel }}
           </span>
           <span
+            v-for="v in cell.variantProgress"
+            :key="v.variant"
+            class="variant-progress-chip"
+            :class="{ failed: !v.success }"
+            :title="
+              v.error
+                ? `${v.variant} failed: ${v.error}`
+                : `variant ${v.variant} (${v.index + 1}/${v.total})` +
+                  (typeof v.durationMs === 'number' ? ` · ${Math.round(v.durationMs)}ms` : '')
+            "
+            data-testid="variant-progress-chip"
+          >
+            {{ v.success ? '✓' : '✗' }} {{ v.variant }}
+          </span>
+          <span
             v-if="cell.status === 'running' && !loopProgressLabel"
             class="running-badge"
             data-testid="running-elapsed"
@@ -1710,6 +1725,21 @@ function outputKey(output: CellOutput, index: number): string {
 .loop-progress-badge.done {
   background: var(--tint-success);
   color: var(--accent-success);
+}
+.variant-progress-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--tint-success);
+  color: var(--accent-success);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.variant-progress-chip.failed {
+  background: var(--tint-danger);
+  color: var(--accent-danger);
 }
 .loop-spinner {
   display: inline-block;

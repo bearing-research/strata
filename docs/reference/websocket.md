@@ -106,6 +106,7 @@ All messages are JSON with this shape:
 | `cell_console`            | `{ "cell_id": "...", "stream": "stdout", "text": "..." }`                                                                | Incremental output                               |
 | `cell_error`              | `{ "cell_id": "...", "error": "..." }`                                                                                   | Execution error                                  |
 | `cell_iteration_progress` | `{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "duration_ms": 128 }` | Per-iteration update from a `@loop` cell         |
+| `cell_variant_progress`   | `{ "cell_id": "...", "variant": "rf", "index": 1, "total": 3, "success": true, "duration_ms": 128, "error": null }`        | Per-variant update from a `# @per_variant` fan-out cell |
 | `cell_test_status`        | `{ "cell_id": "...", "status": "running" }`                                                                              | Test run lifecycle: `running` → `ready` / `error` (mirrors `cell_status`) |
 | `cell_test_results`       | `{ "cell_id": "...", "passed": 2, "failed": 1, "errored": 0, "skipped": 0, "tests": [{ "name": "...", "nodeid": "...", "outcome": "passed", "message": "..." }], "stale": false, "pytest_unavailable": false, "ran_at": 1718000000000 }` | Per-test outcomes + totals from a `cell_run_tests`. `outcome` ∈ `passed`/`failed`/`error`/`skipped`; `message` carries the rewritten-assert diff for failures. `stale` flags the result against a since-changed cell/test/input. |
 
@@ -179,7 +180,7 @@ Disconnects happen — proxy timeouts, network drops, server restarts, tab sleep
 3. **Client sends `notebook_sync`** as its first message after reconnecting. The server responds with `notebook_state` containing the full current state (cells, DAG, cell statuses, latest display outputs).
 4. **Client replaces local state** with the synced payload and resumes listening.
 
-There is **no replay** of missed messages — events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_output_delta` for a streaming prompt cell, `cell_iteration_progress` for a `@loop` cell, `cascade_progress`) are not.
+There is **no replay** of missed messages — events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_output_delta` for a streaming prompt cell, `cell_iteration_progress` for a `@loop` cell, `cell_variant_progress` for a `# @per_variant` fan-out cell, `cascade_progress`) are not.
 
 ### Cancel-on-disconnect grace window
 
