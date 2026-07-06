@@ -633,6 +633,7 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         *,
         source_hash="",
         env_hash="",
+        variant=None,
     ):
         return True
 
