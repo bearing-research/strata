@@ -8,6 +8,8 @@ cells = [
     { id = "alternating", file = "alternating.py", language = "python", order = 2 },
     { id = "majority", file = "majority.py", language = "python", order = 3 },
     { id = "compare", file = "compare.py", language = "python", order = 4 },
+    { id = "score", file = "score.py", language = "python", order = 5 },
+    { id = "best", file = "best.py", language = "python", order = 6 },
 ]
 workers = []
 mounts = []

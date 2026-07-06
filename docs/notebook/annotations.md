@@ -533,6 +533,46 @@ sweep notebook doesn't get that speedup. This is deliberate: batching would let
 one variant's in-namespace state leak into a sibling's, corrupting its
 provenance, so sweep trades the batch speedup for per-variant isolation.
 
+### Fan-out — run a downstream cell once per variant
+
+Sweep mode hands a downstream cell the whole `{variant: value}` dict. Sometimes
+you'd rather run the *downstream work itself* once per variant — score each
+model on its own, tune each independently, dispatch each to its own GPU worker.
+That's `# @per_variant`:
+
+```python
+# @per_variant
+# Runs once per model variant. `preds` is bound to THAT variant's list
+# (a scalar), not the whole dict — so this cell computes one accuracy.
+accuracy = sum(p == t for p, t in zip(preds, y_true)) / len(y_true)
+```
+
+The cell runs N times (once per variant of its upstream sweep group), each
+instance with the variant's scalar value bound. Its own output becomes
+per-variant too, so a **downstream cell decides how to consume it**:
+
+- Another `# @per_variant` cell continues the fan-out, zipping by variant name
+  (instance `logreg` reads the upstream `logreg` value).
+- A plain cell **collapses** it back to a `{variant: value}` dict — the same v1
+  sweep machinery:
+
+```python
+# plain downstream — `accuracy` is {"logreg": 0.9, "rf": 0.88, ...}
+best = max(accuracy, key=accuracy.get)
+```
+
+Each instance is an independent `materialize`: its own provenance, its own
+cache entry, its own worker dispatch — so `# @per_variant` + `# @worker gpu`
+fans out to N independent jobs, and adding a variant only runs the new instance.
+
+**Choosing the group.** Bare `# @per_variant` infers the group when the cell
+reads from exactly one sweep group. If it reads from two or more, name the one
+to fan out over — `# @per_variant model` — and the others collapse to dicts. A
+cell fans out over **one** group; comparing across two groups (cartesian) isn't
+supported. The validator flags the mistakes: `per_variant_no_sweep_source`
+(nothing to fan out over), `per_variant_ambiguous_group` (bare form, ≥2 groups),
+`per_variant_on_variant_member` (a cell can't both be a variant and fan out).
+
 ### Defines contract
 
 All variants in a group must produce the same set of top-level
