@@ -42,6 +42,7 @@ from strata.notebook.ws_payloads import (
     CellOutputDeltaPayload,
     CellTestResultsPayload,
     CellTestStatusPayload,
+    CellVariantProgressPayload,
     cell_status_payload,
     dag_update_payload,
     impact_preview_payload,
@@ -619,6 +620,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     - cell_console              Incremental stdout/stderr
     - cell_error                Execution failed
     - cell_iteration_progress   Loop-cell iteration update
+    - cell_variant_progress     @per_variant fan-out per-variant update
     - dag_update                DAG changed
     - cascade_prompt            Cascade needed
     - cascade_progress          Progress during cascade
@@ -1748,8 +1750,17 @@ def _make_executor_with_progress(
             _make_message(MessageType.CELL_OUTPUT_DELTA, seq, typed),
         )
 
+    async def _broadcast_variant_progress(progress: dict[str, Any]) -> None:
+        seq = next_notebook_sequence(notebook_id)
+        payload = CellVariantProgressPayload(**progress).model_dump(mode="json")
+        await _broadcast_message(
+            notebook_id,
+            _make_message(MessageType.CELL_VARIANT_PROGRESS, seq, payload),
+        )
+
     executor.on_iteration_complete = _broadcast_iteration_progress
     executor.on_prompt_delta = _broadcast_prompt_delta
+    executor.on_variant_complete = _broadcast_variant_progress
     return executor
 
 

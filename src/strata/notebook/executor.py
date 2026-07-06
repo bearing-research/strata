@@ -487,6 +487,10 @@ class CellExecutor:
         # (CELL_OUTPUT_DELTA payload). Same wiring pattern: set by the
         # WS handler, unset for REST / CLI callers (issue #110).
         self.on_prompt_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None
+        # Optional callback fired after each variant of a @per_variant fan-out
+        # cell completes (CELL_VARIANT_PROGRESS payload). Same wiring pattern:
+        # set by the WS handler, unset for REST / CLI callers.
+        self.on_variant_complete: Callable[[dict[str, Any]], Awaitable[None]] | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -1479,7 +1483,9 @@ class CellExecutor:
             await self._materialize_upstreams(cell_id)
 
         results: list[tuple[str, CellExecutionResult]] = []
-        for name in variant_names:
+        total = len(variant_names)
+        for index, name in enumerate(variant_names):
+            variant_start = time.time()
             res = await self._execute_python_cell(
                 cell_id,
                 source,
@@ -1491,6 +1497,25 @@ class CellExecutor:
                 fanout_variant=name,
             )
             results.append((name, res))
+            if self.on_variant_complete is not None:
+                try:
+                    await self.on_variant_complete(
+                        {
+                            "cell_id": cell_id,
+                            "variant": name,
+                            "index": index,
+                            "total": total,
+                            "success": res.success,
+                            "duration_ms": int((time.time() - variant_start) * 1000),
+                            "error": res.error,
+                        }
+                    )
+                except Exception:
+                    logger.exception(
+                        "on_variant_complete callback failed for cell %s variant %s",
+                        cell_id,
+                        name,
+                    )
 
         duration_ms = (time.time() - start_time) * 1000
         failures = [(name, r) for name, r in results if not r.success]

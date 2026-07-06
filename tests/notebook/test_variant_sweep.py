@@ -296,6 +296,67 @@ class TestPerVariantEndToEnd:
         assert "'triple': 18.0" in report["stdout"]
 
 
+class TestPerVariantProgressFrames:
+    """The fan-out orchestrator fires on_variant_complete per variant (the
+    WS layer forwards it as cell_variant_progress). Sweep v2 phase 4."""
+
+    def test_on_variant_complete_fires_per_variant(self, tmp_path):
+        import asyncio
+
+        from strata.notebook.executor import CellExecutionResult, CellExecutor
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        nb = create_notebook(tmp_path, "Fanout", initialize_environment=False)
+        add_cell_to_notebook(nb, "ev", None, language="python")
+        write_cell(nb, "ev", "# @per_variant\nscore = 1\n")
+        session = NotebookSession(parse_notebook(nb), nb)
+        executor = CellExecutor(session)
+
+        # Stub the per-variant run so no harness subprocess is needed; the
+        # signature must mirror the real one (see the monkeypatch-sweep lesson).
+        async def fake_run(
+            self,
+            cell_id,
+            source,
+            timeout_seconds,
+            start_time,
+            *,
+            materialize_upstreams,
+            use_cache,
+            fanout_group=None,
+            fanout_variant=None,
+        ):
+            return CellExecutionResult(cell_id=cell_id, success=True)
+
+        executor._execute_python_cell = fake_run.__get__(executor, CellExecutor)
+
+        seen: list[dict] = []
+
+        async def collect(progress):
+            seen.append(progress)
+
+        executor.on_variant_complete = collect
+
+        result = asyncio.run(
+            executor._execute_fanout_cell(
+                "ev",
+                "# @per_variant\nscore = 1\n",
+                10.0,
+                0.0,
+                materialize_upstreams=False,
+                use_cache=False,
+                group="model",
+                variant_names=("logreg", "rf"),
+            )
+        )
+
+        assert result.success is True
+        assert [p["variant"] for p in seen] == ["logreg", "rf"]
+        assert all(p["success"] and p["total"] == 2 for p in seen)
+        assert [p["index"] for p in seen] == [0, 1]
+
+
 class TestSweepDagReviewFixes:
     """Regression for the review findings #6 (asymmetric defines) and
     #7 (intra-group self-reference)."""

@@ -11,6 +11,7 @@ import type {
   DependencyInfo,
   EnvironmentImportPreview,
   LoopProgress,
+  VariantProgress,
   Notebook,
   WsMessage,
   ImpactPreview,
@@ -2102,6 +2103,25 @@ function initializeWebSocket() {
           typeof p.duration_ms === 'number' ? p.duration_ms : Number(p.duration_ms) || undefined,
       }
       cell.loopProgress = progress
+    })
+
+    wsInstance.onMessage('cell_variant_progress', (msg: WsMessage) => {
+      const p = msg.payload as Record<string, any>
+      const cellId = p.cell_id as CellId
+      const cell = cellMap.value.get(cellId)
+      if (!cell) return
+      const entry: VariantProgress = {
+        variant: String(p.variant),
+        index: Number(p.index),
+        total: Number(p.total),
+        success: Boolean(p.success),
+        durationMs:
+          typeof p.duration_ms === 'number' ? p.duration_ms : Number(p.duration_ms) || undefined,
+        error: typeof p.error === 'string' ? p.error : undefined,
+      }
+      // index 0 begins a fresh fan-out run; later frames accumulate.
+      const existing = entry.index === 0 ? [] : (cell.variantProgress ?? [])
+      cell.variantProgress = [...existing.filter((e) => e.variant !== entry.variant), entry]
     })
 
     wsInstance.onMessage('cell_console', (msg: WsMessage) => {
