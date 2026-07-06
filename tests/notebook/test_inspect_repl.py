@@ -62,7 +62,7 @@ async def test_inspect_repl_uses_session_python(monkeypatch, tmp_path):
     async def fake_materialize_upstreams(self, cell_id):
         return None
 
-    def fake_load_input_blobs(self, cell_id, output_dir):
+    def fake_load_input_blobs(self, cell_id, output_dir, *, fanout_group=None, fanout_variant=None):
         return {}
 
     spawned: list[str] = []

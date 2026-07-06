@@ -1152,7 +1152,6 @@ class CellExecutor:
             # sessions (same SQLite DB, different notebook_id).  We must
             # verify the LOCAL canonical artifact exists AND has the
             # expected provenance hash — not just that it exists.
-            notebook_id = self.session.notebook_state.id
             if use_cache and cached_artifact is not None and consumed_vars:
                 for var_name in consumed_vars:
                     canonical_id = artifact_mgr.cell_artifact_id(
