@@ -2645,6 +2645,11 @@
 <td>Per-iteration update from a <code>@loop</code> cell</td>
 </tr>
 <tr>
+<td><code>cell_variant_progress</code></td>
+<td><code>{ "cell_id": "...", "variant": "rf", "index": 1, "total": 3, "success": true, "duration_ms": 128, "error": null }</code></td>
+<td>Per-variant update from a <code># @per_variant</code> fan-out cell</td>
+</tr>
+<tr>
 <td><code>cell_test_status</code></td>
 <td><code>{ "cell_id": "...", "status": "running" }</code></td>
 <td>Test run lifecycle: <code>running</code> → <code>ready</code> / <code>error</code> (mirrors <code>cell_status</code>)</td>
@@ -2836,7 +2841,7 @@
 <li><strong>Client sends <code>notebook_sync</code></strong> as its first message after reconnecting. The server responds with <code>notebook_state</code> containing the full current state (cells, DAG, cell statuses, latest display outputs).</li>
 <li><strong>Client replaces local state</strong> with the synced payload and resumes listening.</li>
 </ol>
-<p>There is <strong>no replay</strong> of missed messages — events emitted while the client was disconnected are lost. State persisted to the artifact store (<code>cell_output</code>, finished cell statuses) is recovered via <code>notebook_sync</code>; transient progress events (<code>cell_console</code> mid-stream, <code>cell_output_delta</code> for a streaming prompt cell, <code>cell_iteration_progress</code> for a <code>@loop</code> cell, <code>cascade_progress</code>) are not.</p>
+<p>There is <strong>no replay</strong> of missed messages — events emitted while the client was disconnected are lost. State persisted to the artifact store (<code>cell_output</code>, finished cell statuses) is recovered via <code>notebook_sync</code>; transient progress events (<code>cell_console</code> mid-stream, <code>cell_output_delta</code> for a streaming prompt cell, <code>cell_iteration_progress</code> for a <code>@loop</code> cell, <code>cell_variant_progress</code> for a <code># @per_variant</code> fan-out cell, <code>cascade_progress</code>) are not.</p>
 <h3 id="cancel-on-disconnect-grace-window">Cancel-on-disconnect grace window<a class="headerlink" href="#cancel-on-disconnect-grace-window" title="Permanent link">&para;</a></h3>
 <p>When the <strong>last</strong> WebSocket for a notebook drops, the handler schedules a teardown task instead of running it immediately. Any incoming upgrade for the same <code>session_id</code> within ~60 seconds cancels the pending task and resumes against the preserved execution and inspect state. Past the window, the running execution is cancelled and inspect REPLs are closed.</p>
 <p>This is the trade-off Vue's close-tab-to-cancel semantics make with TUI-style transients: closing a tab still cancels (just after a ~60s delay), but a tmux detach or a network blip won't kill a long-running cell. The grace constant lives at <code>_GRACE_CANCEL_SECONDS</code> in <code>src/strata/notebook/ws.py</code> if you need to tune it for your deployment.</p>
