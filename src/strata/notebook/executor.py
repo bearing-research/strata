@@ -1009,9 +1009,17 @@ class CellExecutor:
         *,
         materialize_upstreams: bool,
         use_cache: bool,
+        fanout_group: str | None = None,
+        fanout_variant: str | None = None,
     ) -> CellExecutionResult:
         """Python cell pipeline: provenance → upstream → cache check →
         subprocess harness → persist.
+
+        Sweep v2: a top-level call (``fanout_variant is None``) on a
+        ``# @per_variant`` cell is redirected to :meth:`_execute_fanout_cell`,
+        which invokes this pipeline once per variant with ``fanout_variant``
+        set. In a per-variant run the provenance, cache lookup, input binding,
+        and stored artifacts are all scoped to that variant.
 
         Extracted from the previous ``_materialize_cell`` body so the
         dispatch surface stays small. The body is unchanged — the only
@@ -1027,6 +1035,23 @@ class CellExecutor:
             # cache-check / persist / artifact-store calls and the
             # variable used to be in scope from the wrapper's top.
             cell = self.session.notebook_state.get_cell(cell_id)
+
+            # Sweep v2: a @per_variant cell fans out — redirect a top-level call
+            # to the per-variant orchestrator (which re-enters this pipeline once
+            # per variant with fanout_variant set).
+            if fanout_variant is None:
+                fanout = self._fanout_info(cell_id)
+                if fanout is not None:
+                    return await self._execute_fanout_cell(
+                        cell_id,
+                        source,
+                        timeout_seconds,
+                        start_time,
+                        materialize_upstreams=materialize_upstreams,
+                        use_cache=use_cache,
+                        group=fanout[0],
+                        variant_names=fanout[1],
+                    )
 
             # ① Materialise every upstream cell whose artifact is missing.
             #   This is the recursive ``materialize`` call — each upstream
@@ -1047,6 +1072,11 @@ class CellExecutor:
             mount_specs = prov.mount_specs
             mount_fingerprints = prov.mount_fingerprints
             provenance_hash = prov.provenance_hash
+
+            # Per-variant fan-out instance: scope the cell provenance to this
+            # variant so each instance caches / restalens independently.
+            if fanout_variant is not None:
+                provenance_hash = derive_subkey(provenance_hash, f"variant={fanout_variant}")
 
             # RW mounts make the cell non-cacheable (side effects).
             if prov.has_rw_mount:
@@ -1125,7 +1155,9 @@ class CellExecutor:
             notebook_id = self.session.notebook_state.id
             if use_cache and cached_artifact is not None and consumed_vars:
                 for var_name in consumed_vars:
-                    canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+                    canonical_id = artifact_mgr.cell_artifact_id(
+                        cell_id, var_name, variant=fanout_variant
+                    )
                     var_prov = derive_subkey(provenance_hash, var_name)
                     canonical_art = artifact_mgr.artifact_store.get_latest_version(
                         canonical_id,
@@ -1169,7 +1201,9 @@ class CellExecutor:
                     )
                     # Populate per-variable URIs from canonical artifacts
                     for var_name in consumed_vars:
-                        canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+                        canonical_id = artifact_mgr.cell_artifact_id(
+                            cell_id, var_name, variant=fanout_variant
+                        )
                         canonical_art = artifact_mgr.artifact_store.get_latest_version(
                             canonical_id,
                         )
@@ -1223,7 +1257,12 @@ class CellExecutor:
                 # Load upstream blobs into output_dir for the harness.
                 # Force execution may intentionally skip upstream materialization,
                 # so missing inputs are allowed to surface at execution time.
-                input_specs = self._load_input_blobs(cell_id, output_dir)
+                input_specs = self._load_input_blobs(
+                    cell_id,
+                    output_dir,
+                    fanout_group=fanout_group,
+                    fanout_variant=fanout_variant,
+                )
 
                 venv_path = self.session.venv_python or Path("python")
 
@@ -1293,6 +1332,7 @@ class CellExecutor:
                         input_hashes,
                         source_hash=source_hash,
                         env_hash=env_hash,
+                        variant=fanout_variant,
                     )
                     if not stored_ok:
                         logger.error(
@@ -1395,6 +1435,90 @@ class CellExecutor:
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, error_result)
             return error_result
+
+    def _fanout_info(self, cell_id: str) -> tuple[str, tuple[str, ...]] | None:
+        """Return ``(group, variant_names)`` if ``cell_id`` is a @per_variant
+        fan-out cell, else ``None``.
+
+        A fan-out cell is one whose outputs the DAG resolved to a
+        ``SweepProducer`` with ``fanout_cell == cell_id`` (see sweep-v2 phase 2).
+        """
+        dag = self.session.dag
+        if dag is None:
+            return None
+        for producer in dag.variable_producer.values():
+            if isinstance(producer, SweepProducer) and producer.fanout_cell == cell_id:
+                return producer.group, tuple(name for name, _ in producer.variants)
+        return None
+
+    async def _execute_fanout_cell(
+        self,
+        cell_id: str,
+        source: str,
+        timeout_seconds: float,
+        start_time: float,
+        *,
+        materialize_upstreams: bool,
+        use_cache: bool,
+        group: str,
+        variant_names: tuple[str, ...],
+    ) -> CellExecutionResult:
+        """Run a ``# @per_variant`` cell once per variant of its fan-out group.
+
+        Each instance re-enters :meth:`_execute_python_cell` with
+        ``fanout_variant`` set, so its inputs bind the scalar for that variant,
+        its provenance/cache are variant-scoped, and its outputs are stored
+        under ``@variant={name}`` artifacts. A downstream (non-fan-out) consumer
+        then collapses those per-variant artifacts back into a ``{variant:
+        value}`` dict via the existing v1 machinery.
+
+        The aggregate result is success iff every variant succeeded; failures
+        are surfaced with the offending variant's error. Upstreams are
+        materialised once up front, not per variant.
+        """
+        if materialize_upstreams:
+            await self._materialize_upstreams(cell_id)
+
+        results: list[tuple[str, CellExecutionResult]] = []
+        for name in variant_names:
+            res = await self._execute_python_cell(
+                cell_id,
+                source,
+                timeout_seconds,
+                start_time,
+                materialize_upstreams=False,
+                use_cache=use_cache,
+                fanout_group=group,
+                fanout_variant=name,
+            )
+            results.append((name, res))
+
+        duration_ms = (time.time() - start_time) * 1000
+        failures = [(name, r) for name, r in results if not r.success]
+        stdout = "\n".join(f"[variant={name}]\n{r.stdout}" for name, r in results if r.stdout)
+        stderr = "\n".join(f"[variant={name}]\n{r.stderr}" for name, r in results if r.stderr)
+        if failures:
+            first_name, first = failures[0]
+            aggregate = CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                stdout=stdout,
+                stderr=stderr,
+                duration_ms=duration_ms,
+                error=f"Fan-out variant '{first_name}' failed: {first.error}",
+                execution_method="fanout",
+            )
+        else:
+            aggregate = CellExecutionResult(
+                cell_id=cell_id,
+                success=True,
+                stdout=stdout,
+                stderr=stderr,
+                duration_ms=duration_ms,
+                execution_method="fanout",
+            )
+        self.session.apply_execution_result_metadata(cell_id, aggregate)
+        return aggregate
 
     async def _execute_r_cell(
         self,
@@ -2803,12 +2927,24 @@ class CellExecutor:
         self,
         cell_id: str,
         output_dir: Path,
+        *,
+        fanout_group: str | None = None,
+        fanout_variant: str | None = None,
     ) -> dict[str, Any]:
         """Load upstream variable blobs from the artifact store.
 
         All upstream artifacts are guaranteed to exist because
         ``_materialize_upstreams`` has already run.  This method simply
         reads blobs and writes them to *output_dir* for the harness.
+
+        Sweep v2: when ``fanout_variant`` is set, this call builds the inputs
+        for one instance of a ``# @per_variant`` cell — a reference sourced
+        from the cell's own fan-out group (``fanout_group``) binds only that
+        variant's member as a *scalar* rather than the whole ``{variant:
+        value}`` dict. Other sweep groups still collapse to a dict. A reference
+        sourced from an upstream fan-out cell (a ``SweepProducer`` with
+        ``fanout_cell`` set) is always collapsed to a dict via its
+        ``@variant=`` artifacts.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
@@ -2858,15 +2994,52 @@ class CellExecutor:
                 artifact_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{var_name}"
                 try:
                     if isinstance(producer, SweepProducer):
-                        # ``upstream_id`` is one member of the sweep group;
-                        # accumulate it into a {variant: spec} bundle keyed by
-                        # variant name (the harness binds it as a dict).
+                        if producer.fanout_cell is not None:
+                            # Upstream is a @per_variant fan-out cell: its outputs
+                            # live under ``@variant=`` subkeys of one cell.
+                            if fanout_variant is not None and producer.group == fanout_group:
+                                # Chained fan-out: this instance zips to the upstream
+                                # instance of the same variant (scalar bind).
+                                vid = artifact_mgr.cell_artifact_id(
+                                    producer.fanout_cell, var_name, variant=fanout_variant
+                                )
+                                spec = _load_artifact_spec(vid, var_name)
+                                if spec is not None:
+                                    input_specs[var_name] = spec
+                                continue
+                            # Collapse consumer: gather all variants into a dict
+                            # (partial set on any missing variant).
+                            bundle = input_specs.setdefault(
+                                var_name, {"kind": "sweep_dict", "variants": {}}
+                            )
+                            for vname, _cid in producer.variants:
+                                vid = artifact_mgr.cell_artifact_id(
+                                    producer.fanout_cell, var_name, variant=vname
+                                )
+                                vspec = _load_artifact_spec(vid, f"{var_name}__{vname}")
+                                if vspec is not None:
+                                    bundle["variants"][vname] = vspec
+                            continue
+
+                        # ``upstream_id`` is one member of a variant group.
                         variant_name = next(
                             (name for name, cid in producer.variants if cid == upstream_id),
                             None,
                         )
                         if variant_name is None:
                             continue
+
+                        if fanout_variant is not None and producer.group == fanout_group:
+                            # This cell fans out over this group: bind only its own
+                            # variant as a SCALAR (not the whole dict). Chained
+                            # fan-out zips by variant name.
+                            if variant_name != fanout_variant:
+                                continue
+                            spec = _load_artifact_spec(artifact_id, var_name)
+                            if spec is not None:
+                                input_specs[var_name] = spec
+                            continue
+
                         spec = _load_artifact_spec(artifact_id, f"{var_name}__{variant_name}")
                         if spec is None:
                             # A failed/missing variant is dropped from the dict
@@ -2934,10 +3107,13 @@ class CellExecutor:
         *,
         source_hash: str = "",
         env_hash: str = "",
+        variant: str | None = None,
     ) -> bool:
         """Persist consumed output variables as artifacts.
 
         Returns True if every consumed variable was stored, False otherwise.
+        When ``variant`` is set (sweep-v2 fan-out), each artifact id is suffixed
+        with ``@variant={name}`` so per-variant instances don't collide.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or self.session.dag is None:
@@ -3009,6 +3185,7 @@ class CellExecutor:
                             input_versions={h: h for h in input_hashes},
                             source_hash=source_hash,
                             env_hash=env_hash,
+                            variant=variant,
                         )
                         uri = (
                             f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"

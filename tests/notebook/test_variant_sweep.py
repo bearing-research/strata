@@ -253,6 +253,49 @@ class TestSweepEndToEnd:
         assert "'triple': 18.0" in ev["stdout"]
 
 
+class TestPerVariantEndToEnd:
+    """A @per_variant cell runs once per variant (scalar-bound), and a
+    downstream collapse consumer receives the {variant: value} dict — driven
+    through ``strata run`` (real harness). Sweep v2 phase 3."""
+
+    def test_fanout_then_collapse(self, tmp_path, capsys):
+        import json as _json
+
+        from strata.notebook.cli import run_main
+        from strata.notebook.writer import (
+            add_cell_to_notebook,
+            create_notebook,
+            set_variant_mode,
+            write_cell,
+        )
+
+        nb = create_notebook(tmp_path, "Fanout", initialize_environment=False)
+        (nb / ".venv").mkdir(exist_ok=True)
+        cells = [
+            ("load", "X = [1.0, 2.0, 3.0]\n", None),
+            ("vdouble", "# @variant model double\npreds = [v * 2 for v in X]\n", "load"),
+            ("vtriple", "# @variant model triple\npreds = [v * 3 for v in X]\n", "vdouble"),
+            # Fan-out: runs once per variant with `preds` bound to that variant's
+            # list (a scalar, not the dict) — `sum` over a dict would raise.
+            ("ev", "# @per_variant\nscore = sum(preds)\n", "vtriple"),
+            # Collapse consumer: `score` arrives as {variant: value}.
+            ("report", 'print("REPORT", {n: s for n, s in score.items()})\n', "ev"),
+        ]
+        for cid, src, after in cells:
+            add_cell_to_notebook(nb, cid, after, language="python")
+            write_cell(nb, cid, src)
+        set_variant_mode(nb, "model", "sweep")
+
+        code = run_main([str(nb), "--no-sync", "--force", "--format", "json"])
+        assert code == 0
+        payload = _json.loads(capsys.readouterr().out)
+        assert {c["status"] for c in payload["cells"]} == {"ok"}
+        report = next(c for c in payload["cells"] if c["id"] == "report")
+        # double: sum([2,4,6]) = 12; triple: sum([3,6,9]) = 18.
+        assert "'double': 12.0" in report["stdout"]
+        assert "'triple': 18.0" in report["stdout"]
+
+
 class TestSweepDagReviewFixes:
     """Regression for the review findings #6 (asymmetric defines) and
     #7 (intra-group self-reference)."""
