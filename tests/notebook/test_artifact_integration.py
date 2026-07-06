@@ -358,3 +358,85 @@ class TestPublishedArtifactsDashboard:
 
         result = asyncio.run(list_notebook_published_artifacts("sess-1", self._session(["c1"])))
         assert result == {"cells": {}}
+
+
+class TestVariantArtifacts:
+    """Sweep-v2 fan-out artifact identity (``@variant={name}`` suffix)."""
+
+    def _blob(self, manager, artifact_id):
+        latest = manager.artifact_store.get_latest_version(artifact_id)
+        if latest is None:
+            return None
+        return manager.artifact_store.blob_store.read_blob(artifact_id, latest.version)
+
+    def test_variant_artifact_id_has_suffix(self, manager):
+        assert (
+            manager.cell_artifact_id("c1", "score", variant="logreg")
+            == "nb_nb1_cell_c1_var_score@variant=logreg"
+        )
+
+    def test_iter_precedes_variant_when_both_given(self, manager):
+        # A cell is never both loop and fan-out, but the ordering is pinned.
+        assert (
+            manager.cell_artifact_id("c1", "score", iteration=2, variant="rf")
+            == "nb_nb1_cell_c1_var_score@iter=2@variant=rf"
+        )
+
+    def test_variants_are_independent_artifacts(self, manager):
+        for name in ("logreg", "rf", "gbm"):
+            manager.store_cell_output(
+                cell_id="c1",
+                variable_name="score",
+                blob_data=f"{name}-bytes".encode(),
+                content_type="pickle/object",
+                provenance_hash=f"prov-{name}",
+                variant=name,
+            )
+        for name in ("logreg", "rf", "gbm"):
+            aid = manager.cell_artifact_id("c1", "score", variant=name)
+            assert self._blob(manager, aid) == f"{name}-bytes".encode()
+
+    def test_variant_does_not_collide_with_regular(self, manager):
+        manager.store_cell_output(
+            cell_id="c1",
+            variable_name="score",
+            blob_data=b"one-shot",
+            content_type="pickle/object",
+            provenance_hash="prov-one-shot",
+        )
+        manager.store_cell_output(
+            cell_id="c1",
+            variable_name="score",
+            blob_data=b"logreg-bytes",
+            content_type="pickle/object",
+            provenance_hash="prov-logreg",
+            variant="logreg",
+        )
+        assert self._blob(manager, manager.cell_artifact_id("c1", "score")) == b"one-shot"
+        assert (
+            self._blob(manager, manager.cell_artifact_id("c1", "score", variant="logreg"))
+            == b"logreg-bytes"
+        )
+
+    def test_list_variants_returns_sorted_pairs(self, manager):
+        for name in ("rf", "logreg", "gbm"):
+            manager.store_cell_output(
+                cell_id="c1",
+                variable_name="score",
+                blob_data=f"{name}".encode(),
+                content_type="pickle/object",
+                provenance_hash=f"prov-{name}",
+                variant=name,
+            )
+        pairs = manager.list_variants("c1", "score")
+        assert [name for name, _ in pairs] == ["gbm", "logreg", "rf"]
+
+    def test_list_variants_skips_regular_artifact(self, manager):
+        manager.store_cell_output(
+            cell_id="c1",
+            variable_name="score",
+            blob_data=b"one-shot",
+            content_type="pickle/object",
+            provenance_hash="prov-one-shot",
+        )
+        assert manager.list_variants("c1", "score") == []

@@ -72,6 +72,7 @@ class NotebookArtifactManager:
         cell_id: str,
         variable_name: str,
         iteration: int | None = None,
+        variant: str | None = None,
     ) -> str:
         """Canonical artifact id for a notebook cell's variable.
 
@@ -81,11 +82,19 @@ class NotebookArtifactManager:
             iteration: Optional iteration index. When supplied, the id is
                 suffixed with ``@iter={k}`` so loop iterations can be
                 stored and retrieved independently.
+            variant: Optional sweep-v2 fan-out variant name. When supplied,
+                the id is suffixed with ``@variant={name}`` so each
+                ``# @per_variant`` instance is stored independently. A cell is
+                never both a loop and a fan-out cell, so the two suffixes do
+                not co-occur in practice; if both are given, ``@iter`` precedes
+                ``@variant`` for a stable ordering.
         """
         base = f"nb_{self.notebook_id}_cell_{cell_id}_var_{variable_name}"
-        if iteration is None:
-            return base
-        return f"{base}@iter={iteration}"
+        if iteration is not None:
+            base = f"{base}@iter={iteration}"
+        if variant is not None:
+            base = f"{base}@variant={variant}"
+        return base
 
     def load_iteration_blob(
         self,
@@ -141,6 +150,30 @@ class NotebookArtifactManager:
         results.sort(key=lambda pair: pair[0])
         return results
 
+    def list_variants(
+        self,
+        cell_id: str,
+        variable_name: str,
+    ) -> list[tuple[str, ArtifactVersion]]:
+        """Return ``(variant_name, ArtifactVersion)`` for every stored fan-out
+        instance of ``cell_id``'s ``variable_name``, sorted by variant name.
+
+        The sweep-v2 counterpart of :meth:`list_iterations`: a
+        ``# @per_variant`` cell stores one artifact per variant under the
+        ``@variant={name}`` suffix. A collapse consumer (or the frontend
+        per-variant panel) uses this to enumerate the produced variants
+        without probing each name.
+        """
+        prefix = self.cell_artifact_id(cell_id, variable_name) + "@variant="
+        artifacts = self.artifact_store.list_latest_by_id_prefix(prefix)
+        results: list[tuple[str, ArtifactVersion]] = []
+        for artifact in artifacts:
+            variant = artifact.id[len(prefix) :]
+            if variant:
+                results.append((variant, artifact))
+        results.sort(key=lambda pair: pair[0])
+        return results
+
     def store_cell_output(
         self,
         cell_id: str,
@@ -154,6 +187,7 @@ class NotebookArtifactManager:
         source_hash: str = "",
         env_hash: str = "",
         iteration: int | None = None,
+        variant: str | None = None,
     ) -> ArtifactVersion:
         """Store a cell output as an artifact.
 
@@ -171,11 +205,14 @@ class NotebookArtifactManager:
             iteration: Optional loop iteration index. When set, the artifact
                 id is suffixed with ``@iter={k}`` so each loop iteration is
                 stored as its own artifact.
+            variant: Optional sweep-v2 fan-out variant name. When set, the
+                artifact id is suffixed with ``@variant={name}`` so each
+                ``# @per_variant`` instance is stored as its own artifact.
 
         Returns:
             The created ArtifactVersion
         """
-        artifact_id = self.cell_artifact_id(cell_id, variable_name, iteration)
+        artifact_id = self.cell_artifact_id(cell_id, variable_name, iteration, variant)
 
         # Create transform spec (for notebook cells, executor is "notebook/cell@v1")
         params: dict[str, str] = {
@@ -185,6 +222,8 @@ class NotebookArtifactManager:
         }
         if iteration is not None:
             params["iteration"] = str(iteration)
+        if variant is not None:
+            params["variant"] = variant
         if source_hash:
             params["source_hash"] = source_hash
         if env_hash:
