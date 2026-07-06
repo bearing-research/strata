@@ -1000,6 +1000,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#fan-out-run-a-downstream-cell-once-per-variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fan-out — run a downstream cell once per variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#defines-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2486,6 +2497,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#fan-out-run-a-downstream-cell-once-per-variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fan-out — run a downstream cell once per variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#defines-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3006,6 +3028,38 @@ executions — they're excluded from run-all's shared-namespace batching, so a
 sweep notebook doesn't get that speedup. This is deliberate: batching would let
 one variant's in-namespace state leak into a sibling's, corrupting its
 provenance, so sweep trades the batch speedup for per-variant isolation.</p>
+<h3 id="fan-out-run-a-downstream-cell-once-per-variant">Fan-out — run a downstream cell once per variant<a class="headerlink" href="#fan-out-run-a-downstream-cell-once-per-variant" title="Permanent link">&para;</a></h3>
+<p>Sweep mode hands a downstream cell the whole <code>{variant: value}</code> dict. Sometimes
+you'd rather run the <em>downstream work itself</em> once per variant — score each
+model on its own, tune each independently, dispatch each to its own GPU worker.
+That's <code># @per_variant</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="c1"># @per_variant</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="c1"># Runs once per model variant. `preds` is bound to THAT variant&#39;s list</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="c1"># (a scalar), not the whole dict — so this cell computes one accuracy.</span>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="n">accuracy</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">==</span> <span class="n">t</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">preds</span><span class="p">,</span> <span class="n">y_true</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
+</code></pre></div>
+<p>The cell runs N times (once per variant of its upstream sweep group), each
+instance with the variant's scalar value bound. Its own output becomes
+per-variant too, so a <strong>downstream cell decides how to consume it</strong>:</p>
+<ul>
+<li>Another <code># @per_variant</code> cell continues the fan-out, zipping by variant name
+  (instance <code>logreg</code> reads the upstream <code>logreg</code> value).</li>
+<li>A plain cell <strong>collapses</strong> it back to a <code>{variant: value}</code> dict — the same v1
+  sweep machinery:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="c1"># plain downstream — `accuracy` is {&quot;logreg&quot;: 0.9, &quot;rf&quot;: 0.88, ...}</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="n">best</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">accuracy</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">accuracy</span><span class="o">.</span><span class="n">get</span><span class="p">)</span>
+</code></pre></div>
+<p>Each instance is an independent <code>materialize</code>: its own provenance, its own
+cache entry, its own worker dispatch — so <code># @per_variant</code> + <code># @worker gpu</code>
+fans out to N independent jobs, and adding a variant only runs the new instance.</p>
+<p><strong>Choosing the group.</strong> Bare <code># @per_variant</code> infers the group when the cell
+reads from exactly one sweep group. If it reads from two or more, name the one
+to fan out over — <code># @per_variant model</code> — and the others collapse to dicts. A
+cell fans out over <strong>one</strong> group; comparing across two groups (cartesian) isn't
+supported. The validator flags the mistakes: <code>per_variant_no_sweep_source</code>
+(nothing to fan out over), <code>per_variant_ambiguous_group</code> (bare form, ≥2 groups),
+<code>per_variant_on_variant_member</code> (a cell can't both be a variant and fan out).</p>
 <h3 id="defines-contract">Defines contract<a class="headerlink" href="#defines-contract" title="Permanent link">&para;</a></h3>
 <p>All variants in a group must produce the same set of top-level
 bindings. The validator compares each variant's <code>defines</code> against its
@@ -3046,9 +3100,9 @@ exist.)</p>
 dependency is on a side effect, e.g. a SQL <code>seed</code> cell creates the database
 state that subsequent SQL cells query, and no Python variable flows
 between them.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
-<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
 </code></pre></div>
 <p>Multiple <code>@after</code> lines stack; each cell ID adds one edge. Whitespace-
 separated IDs on a single line work too: <code># @after seed migrate</code>. Self-
@@ -3126,9 +3180,9 @@ doesn't affect per-variable provenance hashes.</p>
 <p>Environment variables with names containing KEY, SECRET, TOKEN, PASSWORD, or CREDENTIAL have their values blanked from <code>notebook.toml</code> when saving. The key names are preserved as a "which vars are configured" reminder <em>only</em> when something real is configured alongside them. A notebook whose <code>[env]</code> would contain nothing but blanked sensitive slots is persisted without an <code>[env]</code> block at all, so typing an API key in the Runtime panel doesn't churn the committed notebook.</p>
 </div>
 <p>Notebook env vars are stored in the <code>[env]</code> section of <code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="k">[env]</span>
-<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="n">DATABASE_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;postgres://localhost/mydb&quot;</span>
-<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">  </span><span class="c1"># value blanked; name kept because DATABASE_URL above is real config</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="k">[env]</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="n">DATABASE_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;postgres://localhost/mydb&quot;</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">  </span><span class="c1"># value blanked; name kept because DATABASE_URL above is real config</span>
 </code></pre></div>
 
 
