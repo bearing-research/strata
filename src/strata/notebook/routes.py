@@ -2703,6 +2703,75 @@ async def get_cell_iterations(
     }
 
 
+@router.get("/{notebook_id}/cells/{cell_id}/data")
+async def get_cell_data_page(
+    notebook_id: str,
+    session: SessionDep,
+    cell_id: str,
+    artifact_uri: str,
+    offset: int = 0,
+    limit: int = 100,
+    sort_by: str | None = None,
+    sort_dir: str = "asc",
+) -> dict:
+    """Return a paginated (and optionally sorted) window of a cell output's
+    cached DataFrame, for the interactive data viewer.
+
+    The inline cell preview is capped at 20 rows; this endpoint reads the
+    full Arrow artifact named by ``artifact_uri`` (the ``strata://artifact/
+    {id}@v={version}`` URI the frontend already carries on the display
+    output) and returns a slice. Only table-shaped Arrow outputs are
+    pageable — for anything else (tensors, scalars, JSON-fallback blobs)
+    ``pageable`` is ``False`` and the frontend keeps the inline preview.
+    """
+    from strata.notebook.serializer import read_table_page
+
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        raise HTTPException(status_code=404, detail="Cell not found")
+    if sort_dir not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="sort_dir must be 'asc' or 'desc'")
+    prefix = "strata://artifact/"
+    if not artifact_uri.startswith(prefix) or "@v=" not in artifact_uri:
+        raise HTTPException(status_code=400, detail="Malformed artifact_uri")
+    artifact_id, _, version_str = artifact_uri[len(prefix) :].rpartition("@v=")
+    try:
+        version = int(version_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Malformed artifact_uri version") from None
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+
+    artifact_mgr = session.get_artifact_manager()
+    try:
+        blob = artifact_mgr.load_artifact_data(artifact_id, version)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Artifact not found") from None
+
+    page = read_table_page(blob, offset=offset, limit=limit, sort_by=sort_by, sort_dir=sort_dir)
+    if page is None:
+        return {
+            "cell_id": cell_id,
+            "artifact_uri": artifact_uri,
+            "pageable": False,
+            "offset": offset,
+            "limit": limit,
+        }
+
+    return {
+        "cell_id": cell_id,
+        "artifact_uri": artifact_uri,
+        "pageable": True,
+        "columns": page["columns"],
+        "rows": page["rows"],
+        "total": page["total"],
+        "offset": offset,
+        "limit": limit,
+        "sort_by": sort_by,
+        "sort_dir": sort_dir,
+    }
+
+
 @router.get("/{notebook_id}/dependencies")
 async def get_dependencies(notebook_id: str, session: SessionDep) -> dict:
     """List current dependencies for a notebook.

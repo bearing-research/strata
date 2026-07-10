@@ -20,6 +20,7 @@ from strata.notebook.serializer import (
     ContentType,
     StrataRArtifactError,
     deserialize_value,
+    read_table_page,
     serialize_value,
 )
 
@@ -1083,3 +1084,73 @@ class TestArrowTypeRegistry:
         for rule in serializer_module._ARROW_TYPE_RULES:
             assert callable(rule.matches)
             assert callable(rule.to_table)
+
+
+def _arrow_blob(value, name="v"):
+    """Serialize *value* the way the harness does and return the raw blob bytes."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        meta = serialize_value(value, Path(tmpdir), name)
+        return (Path(tmpdir) / meta["file"]).read_bytes()
+
+
+class TestReadTablePage:
+    """read_table_page backs the interactive data viewer's lazy paging."""
+
+    def test_paging_slices_and_reports_total(self):
+        df = pd.DataFrame({"a": list(range(100)), "b": [x * 2 for x in range(100)]})
+        blob = _arrow_blob(df)
+
+        page = read_table_page(blob, offset=10, limit=5)
+
+        assert page is not None
+        assert page["total"] == 100
+        assert page["columns"] == ["a", "b"]
+        assert page["rows"] == [[10, 20], [11, 22], [12, 24], [13, 26], [14, 28]]
+
+    def test_offset_past_end_returns_empty_page(self):
+        blob = _arrow_blob(pd.DataFrame({"a": [1, 2, 3]}))
+
+        page = read_table_page(blob, offset=999, limit=10)
+
+        assert page is not None
+        assert page["total"] == 3
+        assert page["rows"] == []
+
+    def test_sort_descending_orders_whole_table_before_slicing(self):
+        df = pd.DataFrame({"a": [3, 1, 2, 5, 4], "b": ["c", "a", "b", "e", "d"]})
+        blob = _arrow_blob(df)
+
+        page = read_table_page(blob, offset=0, limit=2, sort_by="a", sort_dir="desc")
+
+        # Global order is 5,4,3,2,1 — the first page must be the two largest.
+        assert page is not None
+        assert page["rows"] == [[5, "e"], [4, "d"]]
+
+    def test_unknown_sort_column_is_ignored(self):
+        blob = _arrow_blob(pd.DataFrame({"a": [2, 1, 3]}))
+
+        page = read_table_page(blob, sort_by="nope")
+
+        assert page is not None
+        assert page["rows"] == [[2], [1], [3]]
+
+    def test_datetime_values_are_json_safe(self):
+        df = pd.DataFrame({"t": pd.to_datetime(["2026-01-01", "2026-01-02"])})
+        blob = _arrow_blob(df)
+
+        page = read_table_page(blob)
+
+        assert page is not None
+        assert all(isinstance(row[0], str) for row in page["rows"])
+        json.dumps(page["rows"])  # must not raise
+
+    def test_scalar_shape_is_not_pageable(self):
+        # A numpy scalar serializes as arrow shape=scalar — not a table.
+        import numpy as np
+
+        page = read_table_page(_arrow_blob(np.int64(7)))
+
+        assert page is None
+
+    def test_non_arrow_blob_returns_none(self):
+        assert read_table_page(b"not arrow at all") is None

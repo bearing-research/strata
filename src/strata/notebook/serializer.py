@@ -1178,6 +1178,51 @@ def deserialize_value(
     return handler.deserialize(Path(file_path))
 
 
+def read_table_page(
+    blob: bytes,
+    *,
+    offset: int = 0,
+    limit: int = 100,
+    sort_by: str | None = None,
+    sort_dir: str = "asc",
+) -> dict[str, Any] | None:
+    """Decode an Arrow IPC *blob* into a JSON-safe page of table rows.
+
+    Powers the interactive data viewer: the frontend requests a window of
+    the full cached DataFrame instead of being limited to the 20-row inline
+    preview. Sorting is applied to the whole table before slicing, so the
+    page reflects a global order, not a per-page one.
+
+    Returns ``None`` when *blob* is not a table-shaped Arrow IPC stream
+    (tensor/scalar shapes, or a JSON-fallback blob) — the caller keeps the
+    inline preview rather than paging.
+    """
+    import pyarrow as pa
+
+    try:
+        reader = pa.ipc.open_stream(pa.BufferReader(blob))
+        table = reader.read_all()
+    except (pa.ArrowInvalid, OSError):
+        return None
+
+    meta = table.schema.metadata or {}
+    if meta.get(_META_SHAPE, _SHAPE_TABLE) != _SHAPE_TABLE:
+        return None
+
+    total = table.num_rows
+    if sort_by and sort_by in table.column_names:
+        order = "descending" if sort_dir == "desc" else "ascending"
+        table = table.sort_by([(sort_by, order)])
+
+    page = table.slice(max(0, offset), max(0, limit))
+    columns = list(page.column_names)
+    pydict = page.to_pydict()
+    rows = [
+        [to_serialization_safe(pydict[col][i]) for col in columns] for i in range(page.num_rows)
+    ]
+    return {"columns": columns, "rows": rows, "total": total}
+
+
 def _deserialize_arrow(file_path: Path) -> Any:
     """Read an Arrow IPC stream.
 

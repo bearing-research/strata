@@ -713,6 +713,51 @@ export interface CellIterationInfo {
   createdAt: number | null
 }
 
+interface CellDataPage {
+  pageable: boolean
+  columns: string[]
+  rows: unknown[][]
+  total: number
+  offset: number
+  limit: number
+  sortBy: string | null
+  sortDir: 'asc' | 'desc'
+}
+
+async function getCellData(
+  notebookId: string,
+  cellId: string,
+  artifactUri: string,
+  opts: { offset?: number; limit?: number; sortBy?: string | null; sortDir?: 'asc' | 'desc' } = {},
+): Promise<CellDataPage> {
+  const url = new URL(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/cells/${cellId}/data`,
+    window.location.origin,
+  )
+  url.searchParams.set('artifact_uri', artifactUri)
+  url.searchParams.set('offset', String(opts.offset ?? 0))
+  url.searchParams.set('limit', String(opts.limit ?? 100))
+  if (opts.sortBy) {
+    url.searchParams.set('sort_by', opts.sortBy)
+    url.searchParams.set('sort_dir', opts.sortDir ?? 'asc')
+  }
+  const resp = await fetchWithTimeout(url.toString())
+  if (!resp.ok) {
+    throw new Error(`Failed to load table page: ${resp.status}`)
+  }
+  const raw = await readJson<Record<string, unknown>>(resp)
+  return {
+    pageable: Boolean(raw.pageable),
+    columns: Array.isArray(raw.columns) ? raw.columns.map((c) => String(c)) : [],
+    rows: Array.isArray(raw.rows) ? (raw.rows as unknown[][]) : [],
+    total: Number(raw.total ?? 0),
+    offset: Number(raw.offset ?? 0),
+    limit: Number(raw.limit ?? 0),
+    sortBy: raw.sort_by === null || raw.sort_by === undefined ? null : String(raw.sort_by),
+    sortDir: raw.sort_dir === 'desc' ? 'desc' : 'asc',
+  }
+}
+
 async function listCellIterations(
   notebookId: string,
   cellId: string,
@@ -1720,6 +1765,7 @@ export function useStrata() {
     removeCell,
     downloadExport,
     reorderCells,
+    getCellData,
     listCellIterations,
     updateNotebookMounts,
     listNotebookConnections,

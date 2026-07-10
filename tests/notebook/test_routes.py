@@ -2670,3 +2670,116 @@ def test_rest_execute_broadcasts_to_ws_spectators(client, tmp_path, monkeypatch)
     # The spectator saw the cell go running plus at least one post-run frame.
     assert "cell_status" in types
     assert len(sent) >= 2
+
+
+# ---------------------------------------------------------------------------
+# GET /{id}/cells/{cell_id}/data — interactive data-viewer paging
+# ---------------------------------------------------------------------------
+
+
+def _store_table_artifact(session, cell_id, dataframe):
+    """Serialize *dataframe* and store it as a cell-output artifact.
+
+    Returns the ``strata://artifact/...`` URI the data endpoint resolves.
+    """
+    import tempfile
+
+    from strata.notebook.serializer import serialize_value
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        meta = serialize_value(dataframe, Path(tmpdir), "df")
+        blob = (Path(tmpdir) / meta["file"]).read_bytes()
+    artifact = session.get_artifact_manager().store_cell_output(
+        cell_id=cell_id,
+        variable_name="df",
+        blob_data=blob,
+        content_type=meta["content_type"],
+        row_count=meta["rows"],
+        provenance_hash=f"prov-{cell_id}",
+    )
+    return f"strata://artifact/{artifact.id}@v={artifact.version}"
+
+
+def _open_with_table(client, tmp_path, dataframe):
+    """Create+open a one-cell notebook and stash *dataframe* as its output."""
+    notebook_dir = create_notebook(tmp_path, "Data Viewer")
+    add_cell_to_notebook(notebook_dir, "cell-1")
+    write_cell(notebook_dir, "cell-1", "df = ...")
+    session_id = open_session_id(client, notebook_dir)
+    session = get_session_manager().get_session(session_id)
+    assert session is not None
+    uri = _store_table_artifact(session, "cell-1", dataframe)
+    return session_id, uri
+
+
+def test_cell_data_page_slices_and_reports_total(client, tmp_path):
+    import pandas as pd
+
+    df = pd.DataFrame({"a": list(range(50)), "b": [x * 2 for x in range(50)]})
+    session_id, uri = _open_with_table(client, tmp_path, df)
+
+    response = client.get(
+        f"/v1/notebooks/{session_id}/cells/cell-1/data",
+        params={"artifact_uri": uri, "offset": 5, "limit": 3},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["pageable"] is True
+    assert data["total"] == 50
+    assert data["columns"] == ["a", "b"]
+    assert data["rows"] == [[5, 10], [6, 12], [7, 14]]
+
+
+def test_cell_data_page_sorts_globally_before_slicing(client, tmp_path):
+    import pandas as pd
+
+    df = pd.DataFrame({"a": [3, 1, 2, 5, 4]})
+    session_id, uri = _open_with_table(client, tmp_path, df)
+
+    response = client.get(
+        f"/v1/notebooks/{session_id}/cells/cell-1/data",
+        params={"artifact_uri": uri, "limit": 2, "sort_by": "a", "sort_dir": "desc"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["rows"] == [[5], [4]]
+
+
+def test_cell_data_page_rejects_bad_sort_dir(client, tmp_path):
+    import pandas as pd
+
+    session_id, uri = _open_with_table(client, tmp_path, pd.DataFrame({"a": [1]}))
+
+    response = client.get(
+        f"/v1/notebooks/{session_id}/cells/cell-1/data",
+        params={"artifact_uri": uri, "sort_dir": "sideways"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_cell_data_page_missing_cell_is_404(client, tmp_path):
+    import pandas as pd
+
+    session_id, uri = _open_with_table(client, tmp_path, pd.DataFrame({"a": [1]}))
+
+    response = client.get(
+        f"/v1/notebooks/{session_id}/cells/nope/data",
+        params={"artifact_uri": uri},
+    )
+
+    assert response.status_code == 404
+
+
+def test_cell_data_page_malformed_uri_is_400(client, tmp_path):
+    import pandas as pd
+
+    session_id, _ = _open_with_table(client, tmp_path, pd.DataFrame({"a": [1]}))
+
+    response = client.get(
+        f"/v1/notebooks/{session_id}/cells/cell-1/data",
+        params={"artifact_uri": "not-a-strata-uri"},
+    )
+
+    assert response.status_code == 400
