@@ -44,6 +44,11 @@ _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
 
+# Harness-injected names that are NOT user inputs — excluded from mutation
+# fingerprinting. The ``display`` helper accumulates captured values, so it
+# "changes" every run and would otherwise be reported as an in-place mutation.
+_AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
+
 
 # ---------------------------------------------------------------------------
 # Manifest I/O
@@ -263,7 +268,9 @@ def execute_cell(
 
         namespace_before = set(namespace.keys())
         input_identities = {name: id(namespace[name]) for name in namespace_before}
-        input_snapshots = _immut.snapshot_inputs(namespace, list(namespace_before))
+        input_snapshots = _immut.snapshot_inputs(
+            namespace, [n for n in namespace_before if n not in _AMBIENT_NAMES]
+        )
 
         with display_capture.capture_side_effects():
             _display_value = _exec_with_display(source, namespace)
@@ -452,7 +459,7 @@ def _run_one_batched_cell(
             # process. In batch mode, namespace persists across cells; clear
             # the per-cell display keys so the new capture's handlers actually
             # install.
-            for _display_key in ("display", "Markdown"):
+            for _display_key in _display.DISPLAY_HELPER_NAMES:
                 namespace.pop(_display_key, None)
             display_capture = _display.DisplayCapture()
             display_capture.install(namespace)

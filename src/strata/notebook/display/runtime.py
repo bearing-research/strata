@@ -30,6 +30,12 @@ class Markdown:
         return self.text
 
 
+# Names ``DisplayCapture.install`` injects into the cell namespace. Callers
+# exclude these from mutation fingerprinting (the ``display`` helper accumulates
+# captured values, so it "changes" every run) and clear them between batch cells.
+DISPLAY_HELPER_NAMES = ("display", "Markdown")
+
+
 class DisplayCapture:
     """Capture explicit display-side effects during cell execution.
 

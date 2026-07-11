@@ -68,6 +68,11 @@ _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
 
+# Harness-injected names that are NOT user inputs — excluded from mutation
+# fingerprinting (the ``display`` helper's buffer grows every run, which would
+# otherwise read as an in-place mutation).
+_AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
+
 
 # ---------------------------------------------------------------------------
 # Warm-up helpers
@@ -281,7 +286,9 @@ def execute_harness(manifest: dict) -> dict:
 
         namespace_before = set(namespace.keys())
         input_identities = {name: id(namespace[name]) for name in namespace_before}
-        input_snapshots = _immut.snapshot_inputs(namespace, list(namespace_before))
+        input_snapshots = _immut.snapshot_inputs(
+            namespace, [n for n in namespace_before if n not in _AMBIENT_NAMES]
+        )
         mutation_set = set(manifest.get("mutation_defines") or [])
 
         sys.stdout = stdout_buf
