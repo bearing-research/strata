@@ -4,13 +4,12 @@ Implementation lives in ``strata.notebook.languages.r``; the package
 imports its submodules at module-load time so the analyzer registers
 itself against the ``LanguageAnalyzer`` registry from #54.
 
-R support is being landed incrementally per #53:
+R support landed incrementally across #53:
 
 - **#56** — ``RLanguageAnalyzer`` (DAG defines/references via shelled-out
-  ``Rscript``). Lets R cells participate in the DAG before they can execute.
+  ``Rscript``), so R cells participate in the DAG.
 - **#55** — renv per-notebook environment.
-- **#57 (this PR)** — ``harness.R`` + ``LanguageExecutor`` adapter so R cells
-  actually run.
+- **#57** — ``harness.R`` + ``LanguageExecutor`` adapter so R cells run.
 - **#58** — Arrow/RDS serialization tiers for cross-language exchange.
 - **#59** — integration tests.
 """
