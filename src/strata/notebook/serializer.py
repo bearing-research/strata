@@ -48,7 +48,7 @@ import sys
 from collections.abc import Callable
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, NamedTuple, NotRequired, Protocol, TypedDict
+from typing import Any, NamedTuple, NotRequired, Protocol, TypedDict, cast
 
 logger = logging.getLogger(__name__)
 
@@ -1178,24 +1178,12 @@ def deserialize_value(
     return handler.deserialize(Path(file_path))
 
 
-def read_table_page(
-    blob: bytes,
-    *,
-    offset: int = 0,
-    limit: int = 100,
-    sort_by: str | None = None,
-    sort_dir: str = "asc",
-) -> dict[str, Any] | None:
-    """Decode an Arrow IPC *blob* into a JSON-safe page of table rows.
+def _load_arrow_table(blob: bytes) -> Any | None:
+    """Open a table-shaped Arrow IPC *blob* into a chunk-consolidated Table.
 
-    Powers the interactive data viewer: the frontend requests a window of
-    the full cached DataFrame instead of being limited to the 20-row inline
-    preview. Sorting is applied to the whole table before slicing, so the
-    page reflects a global order, not a per-page one.
-
-    Returns ``None`` when *blob* is not a table-shaped Arrow IPC stream
-    (tensor/scalar shapes, or a JSON-fallback blob) — the caller keeps the
-    inline preview rather than paging.
+    Returns ``None`` for non-table shapes (tensor/scalar), JSON-fallback
+    blobs, or anything that isn't a readable Arrow IPC stream — the data
+    viewer only operates on tables.
     """
     import pyarrow as pa
 
@@ -1208,11 +1196,183 @@ def read_table_page(
     meta = table.schema.metadata or {}
     if meta.get(_META_SHAPE, _SHAPE_TABLE) != _SHAPE_TABLE:
         return None
+    return table.combine_chunks()
 
-    total = table.num_rows
+
+def _coerce_filter_scalar(value: Any, arrow_type: Any) -> Any | None:
+    """Coerce a JSON filter *value* to a pyarrow scalar of *arrow_type*.
+
+    Returns ``None`` when the value can't be represented in the column's
+    type (e.g. non-numeric text against an int column) so the caller can
+    skip the filter instead of erroring.
+    """
+    import pyarrow as pa
+
+    try:
+        return pa.scalar(value, type=arrow_type)
+    except (pa.ArrowInvalid, pa.ArrowTypeError, ValueError, TypeError):
+        pass
+    if pa.types.is_integer(arrow_type) or pa.types.is_floating(arrow_type):
+        try:
+            number = float(value)
+        except (ValueError, TypeError):
+            return None
+        cast = number if pa.types.is_floating(arrow_type) else int(number)
+        try:
+            return pa.scalar(cast, type=arrow_type)
+        except (pa.ArrowInvalid, ValueError, TypeError):
+            return None
+    if pa.types.is_timestamp(arrow_type) or pa.types.is_date(arrow_type):
+        import pandas as pd
+
+        try:
+            stamp = pd.Timestamp(value)
+        except (ValueError, TypeError):
+            return None
+        try:
+            return pa.scalar(stamp.to_pydatetime(), type=arrow_type)
+        except (pa.ArrowInvalid, ValueError, TypeError):
+            return None
+    return None
+
+
+def _apply_filters(table: Any, filters: list[dict[str, Any]] | None) -> Any:
+    """AND together per-column filter predicates and filter the table.
+
+    Each filter is ``{col, op, value, value2}``. Unknown columns/ops and
+    uncoercible values are skipped (treated as no-ops) rather than raising,
+    so a half-typed filter never 500s the viewer.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as _pc
+
+    # pyarrow.compute registers its functions at runtime, so ty's stubs don't
+    # know members like ``equal``/``match_substring``. Cast through Any.
+    pc = cast(Any, _pc)
+
+    if not filters:
+        return table
+
+    mask = None
+    for spec in filters:
+        col = spec.get("col")
+        op = str(spec.get("op") or "")
+        if col not in table.column_names:
+            continue
+        column = table[col]
+        ftype = table.schema.field(col).type
+
+        if op == "is_null":
+            predicate = pc.is_null(column)
+        elif op == "not_null":
+            predicate = pc.is_valid(column)
+        elif op == "contains":
+            try:
+                as_str = pc.cast(column, pa.string())
+            except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+                continue
+            predicate = pc.match_substring(as_str, str(spec.get("value", "")), ignore_case=True)
+        elif op == "between":
+            low = _coerce_filter_scalar(spec.get("value"), ftype)
+            high = _coerce_filter_scalar(spec.get("value2"), ftype)
+            if low is None or high is None:
+                continue
+            predicate = pc.and_(pc.greater_equal(column, low), pc.less_equal(column, high))
+        else:
+            scalar = _coerce_filter_scalar(spec.get("value"), ftype)
+            if scalar is None:
+                continue
+            comparators = {
+                "eq": pc.equal,
+                "ne": pc.not_equal,
+                "gt": pc.greater,
+                "ge": pc.greater_equal,
+                "lt": pc.less,
+                "le": pc.less_equal,
+            }
+            fn = comparators.get(op)
+            if fn is None:
+                continue
+            predicate = fn(column, scalar)
+
+        mask = predicate if mask is None else pc.and_(mask, predicate)
+
+    return table if mask is None else table.filter(mask)
+
+
+def _apply_search(table: Any, search: str | None) -> Any:
+    """Keep rows where *search* appears (case-insensitive) in any column.
+
+    Every column is cast to string for the match; columns that can't be
+    cast (nested types) simply don't contribute matches.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as _pc
+
+    pc = cast(Any, _pc)  # see _apply_filters: pyarrow.compute members are runtime-registered
+
+    if not search:
+        return table
+
+    mask = None
+    for col in table.column_names:
+        try:
+            as_str = pc.cast(table[col], pa.string())
+        except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+            continue
+        hit = pc.match_substring(as_str, search, ignore_case=True)
+        mask = hit if mask is None else pc.or_(mask, hit)
+
+    if mask is None:
+        return table
+    # match_substring yields null for null cells; treat those as non-matches.
+    return table.filter(pc.fill_null(mask, False))
+
+
+def _filter_search_sort(
+    table: Any,
+    filters: list[dict[str, Any]] | None,
+    search: str | None,
+    sort_by: str | None,
+    sort_dir: str,
+) -> Any:
+    """Apply filters, then global search, then a global sort — in that order."""
+    table = _apply_filters(table, filters)
+    table = _apply_search(table, search)
     if sort_by and sort_by in table.column_names:
         order = "descending" if sort_dir == "desc" else "ascending"
         table = table.sort_by([(sort_by, order)])
+    return table
+
+
+def read_table_page(
+    blob: bytes,
+    *,
+    offset: int = 0,
+    limit: int = 100,
+    sort_by: str | None = None,
+    sort_dir: str = "asc",
+    search: str | None = None,
+    filters: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Decode an Arrow IPC *blob* into a JSON-safe page of table rows.
+
+    Powers the interactive data viewer: the frontend requests a window of
+    the full cached DataFrame instead of being limited to the 20-row inline
+    preview. Filters + search + sort apply to the whole table before
+    slicing, so ``total`` reflects the filtered row count and the page
+    reflects a global order.
+
+    Returns ``None`` when *blob* is not a table-shaped Arrow IPC stream
+    (tensor/scalar shapes, or a JSON-fallback blob) — the caller keeps the
+    inline preview rather than paging.
+    """
+    table = _load_arrow_table(blob)
+    if table is None:
+        return None
+
+    table = _filter_search_sort(table, filters, search, sort_by, sort_dir)
+    total = table.num_rows
 
     page = table.slice(max(0, offset), max(0, limit))
     columns = list(page.column_names)
@@ -1221,6 +1381,82 @@ def read_table_page(
         [to_serialization_safe(pydict[col][i]) for col in columns] for i in range(page.num_rows)
     ]
     return {"columns": columns, "rows": rows, "total": total}
+
+
+def read_table_summary(blob: bytes) -> dict[str, Any] | None:
+    """Per-column summary of a table-shaped Arrow *blob* for the viewer header.
+
+    Each column reports its dtype, null count, and distinct count; numeric
+    and temporal columns additionally report min/max. ``None`` for
+    non-table blobs.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as _pc
+
+    pc = cast(Any, _pc)  # see _apply_filters: pyarrow.compute members are runtime-registered
+
+    table = _load_arrow_table(blob)
+    if table is None:
+        return None
+
+    columns: list[dict[str, Any]] = []
+    for name in table.column_names:
+        column = table[name]
+        ftype = table.schema.field(name).type
+        info: dict[str, Any] = {
+            "name": name,
+            "dtype": str(ftype),
+            "nulls": column.null_count,
+            "distinct": pc.count_distinct(column).as_py(),
+            "min": None,
+            "max": None,
+        }
+        orderable = (
+            pa.types.is_integer(ftype)
+            or pa.types.is_floating(ftype)
+            or pa.types.is_temporal(ftype)
+            or pa.types.is_decimal(ftype)
+        )
+        if orderable and column.null_count < len(column):
+            info["min"] = to_serialization_safe(pc.min(column).as_py())
+            info["max"] = to_serialization_safe(pc.max(column).as_py())
+        columns.append(info)
+
+    return {"columns": columns, "total": table.num_rows}
+
+
+def write_table_export(
+    blob: bytes,
+    fmt: str,
+    *,
+    sort_by: str | None = None,
+    sort_dir: str = "asc",
+    search: str | None = None,
+    filters: list[dict[str, Any]] | None = None,
+) -> bytes | None:
+    """Serialize a table-shaped Arrow *blob* to CSV or Parquet bytes.
+
+    The same filters/search/sort as the viewer are applied, so a download
+    matches what's on screen. ``None`` for non-table blobs or an
+    unsupported *fmt*.
+    """
+    table = _load_arrow_table(blob)
+    if table is None:
+        return None
+
+    table = _filter_search_sort(table, filters, search, sort_by, sort_dir)
+    buffer = io.BytesIO()
+    if fmt == "csv":
+        import pyarrow.csv as pacsv
+
+        pacsv.write_csv(table, buffer)
+    elif fmt == "parquet":
+        import pyarrow.parquet as papq
+
+        papq.write_table(table, buffer)
+    else:
+        return None
+    return buffer.getvalue()
 
 
 def _deserialize_arrow(file_path: Path) -> Any:

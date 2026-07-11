@@ -2783,3 +2783,93 @@ def test_cell_data_page_malformed_uri_is_400(client, tmp_path):
     )
 
     assert response.status_code == 400
+
+
+def test_cell_data_page_search_and_filter(client, tmp_path):
+    import pandas as pd
+
+    df = pd.DataFrame({"id": [1, 2, 3], "region": ["North", "South", "north"], "v": [10, 200, 30]})
+    session_id, uri = _open_with_table(client, tmp_path, df)
+
+    search = client.get(
+        f"/v1/notebooks/{session_id}/cells/cell-1/data",
+        params={"artifact_uri": uri, "search": "north"},
+    )
+    assert search.status_code == 200, search.text
+    assert search.json()["total"] == 2
+
+    filtered = client.get(
+        f"/v1/notebooks/{session_id}/cells/cell-1/data",
+        params={"artifact_uri": uri, "filters": '[{"col": "v", "op": "gt", "value": 50}]'},
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["rows"][0][0] == 2
+
+
+def test_cell_data_page_bad_filters_json_is_400(client, tmp_path):
+    import pandas as pd
+
+    session_id, uri = _open_with_table(client, tmp_path, pd.DataFrame({"a": [1]}))
+
+    response = client.get(
+        f"/v1/notebooks/{session_id}/cells/cell-1/data",
+        params={"artifact_uri": uri, "filters": "{not json"},
+    )
+    assert response.status_code == 400
+
+
+def test_cell_data_summary(client, tmp_path):
+    import pandas as pd
+
+    df = pd.DataFrame({"n": [1, 2, 2], "label": ["a", "b", "a"]})
+    session_id, uri = _open_with_table(client, tmp_path, df)
+
+    response = client.get(
+        f"/v1/notebooks/{session_id}/cells/cell-1/data/summary",
+        params={"artifact_uri": uri},
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["pageable"] is True
+    by_name = {c["name"]: c for c in data["columns"]}
+    assert by_name["n"]["distinct"] == 2
+    assert by_name["n"]["min"] == 1
+    assert by_name["n"]["max"] == 2
+
+
+def test_cell_data_export_csv(client, tmp_path):
+    import io
+
+    import pandas as pd
+
+    df = pd.DataFrame({"id": [1, 2, 3], "v": [10, 200, 30]})
+    session_id, uri = _open_with_table(client, tmp_path, df)
+
+    response = client.get(
+        f"/v1/notebooks/{session_id}/cells/cell-1/data/export",
+        params={
+            "artifact_uri": uri,
+            "fmt": "csv",
+            "filters": '[{"col": "v", "op": "gt", "value": 50}]',
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+    out = pd.read_csv(io.BytesIO(response.content))
+    assert out["id"].tolist() == [2]
+
+
+def test_cell_data_export_rejects_bad_format(client, tmp_path):
+    import pandas as pd
+
+    session_id, uri = _open_with_table(client, tmp_path, pd.DataFrame({"a": [1]}))
+
+    response = client.get(
+        f"/v1/notebooks/{session_id}/cells/cell-1/data/export",
+        params={"artifact_uri": uri, "fmt": "xlsx"},
+    )
+    assert response.status_code == 400

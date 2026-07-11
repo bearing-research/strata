@@ -713,6 +713,13 @@ export interface CellIterationInfo {
   createdAt: number | null
 }
 
+interface DataFilterSpec {
+  col: string
+  op: string
+  value?: unknown
+  value2?: unknown
+}
+
 interface CellDataPage {
   pageable: boolean
   columns: string[]
@@ -724,11 +731,42 @@ interface CellDataPage {
   sortDir: 'asc' | 'desc'
 }
 
+interface CellDataColumnSummary {
+  name: string
+  dtype: string
+  nulls: number
+  distinct: number
+  min: unknown
+  max: unknown
+}
+
+interface CellDataQuery {
+  offset?: number
+  limit?: number
+  sortBy?: string | null
+  sortDir?: 'asc' | 'desc'
+  search?: string | null
+  filters?: DataFilterSpec[]
+}
+
+function applyDataQueryParams(url: URL, opts: CellDataQuery): void {
+  if (opts.sortBy) {
+    url.searchParams.set('sort_by', opts.sortBy)
+    url.searchParams.set('sort_dir', opts.sortDir ?? 'asc')
+  }
+  if (opts.search) {
+    url.searchParams.set('search', opts.search)
+  }
+  if (opts.filters && opts.filters.length) {
+    url.searchParams.set('filters', JSON.stringify(opts.filters))
+  }
+}
+
 async function getCellData(
   notebookId: string,
   cellId: string,
   artifactUri: string,
-  opts: { offset?: number; limit?: number; sortBy?: string | null; sortDir?: 'asc' | 'desc' } = {},
+  opts: CellDataQuery = {},
 ): Promise<CellDataPage> {
   const url = new URL(
     `${STRATA_BASE}/v1/notebooks/${notebookId}/cells/${cellId}/data`,
@@ -737,10 +775,7 @@ async function getCellData(
   url.searchParams.set('artifact_uri', artifactUri)
   url.searchParams.set('offset', String(opts.offset ?? 0))
   url.searchParams.set('limit', String(opts.limit ?? 100))
-  if (opts.sortBy) {
-    url.searchParams.set('sort_by', opts.sortBy)
-    url.searchParams.set('sort_dir', opts.sortDir ?? 'asc')
-  }
+  applyDataQueryParams(url, opts)
   const resp = await fetchWithTimeout(url.toString())
   if (!resp.ok) {
     throw new Error(`Failed to load table page: ${resp.status}`)
@@ -756,6 +791,49 @@ async function getCellData(
     sortBy: raw.sort_by === null || raw.sort_by === undefined ? null : String(raw.sort_by),
     sortDir: raw.sort_dir === 'desc' ? 'desc' : 'asc',
   }
+}
+
+async function getCellDataSummary(
+  notebookId: string,
+  cellId: string,
+  artifactUri: string,
+): Promise<CellDataColumnSummary[]> {
+  const url = new URL(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/cells/${cellId}/data/summary`,
+    window.location.origin,
+  )
+  url.searchParams.set('artifact_uri', artifactUri)
+  const resp = await fetchWithTimeout(url.toString())
+  if (!resp.ok) {
+    throw new Error(`Failed to load column summary: ${resp.status}`)
+  }
+  const raw = await readJson<Record<string, unknown>>(resp)
+  const cols = Array.isArray(raw.columns) ? (raw.columns as Record<string, unknown>[]) : []
+  return cols.map((c) => ({
+    name: String(c.name),
+    dtype: String(c.dtype),
+    nulls: Number(c.nulls ?? 0),
+    distinct: Number(c.distinct ?? 0),
+    min: c.min ?? null,
+    max: c.max ?? null,
+  }))
+}
+
+function cellDataExportUrl(
+  notebookId: string,
+  cellId: string,
+  artifactUri: string,
+  fmt: 'csv' | 'parquet',
+  opts: CellDataQuery = {},
+): string {
+  const url = new URL(
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/cells/${cellId}/data/export`,
+    window.location.origin,
+  )
+  url.searchParams.set('artifact_uri', artifactUri)
+  url.searchParams.set('fmt', fmt)
+  applyDataQueryParams(url, opts)
+  return url.toString()
 }
 
 async function listCellIterations(
@@ -1766,6 +1844,8 @@ export function useStrata() {
     downloadExport,
     reorderCells,
     getCellData,
+    getCellDataSummary,
+    cellDataExportUrl,
     listCellIterations,
     updateNotebookMounts,
     listNotebookConnections,

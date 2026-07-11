@@ -121,6 +121,8 @@ EXPECTED_ROUTES = [
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}", "DELETE", 0),
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}", "PUT", 0),
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}/data", "GET", 0),
+    ("/v1/notebooks/{notebook_id}/cells/{cell_id}/data/export", "GET", 0),
+    ("/v1/notebooks/{notebook_id}/cells/{cell_id}/data/summary", "GET", 0),
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}/execute", "POST", 0),
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}/iterations", "GET", 0),
     ("/v1/notebooks/{notebook_id}/cells/{cell_id}/tests", "POST", 0),
