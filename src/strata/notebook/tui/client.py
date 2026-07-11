@@ -39,12 +39,63 @@ class TuiClient:
         base = self.server_url.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
         return f"{base}/v1/notebooks/ws/{session_id}"
 
+    async def get_cell_data_page(
+        self,
+        notebook_id: str,
+        cell_id: str,
+        artifact_uri: str,
+        *,
+        offset: int = 0,
+        limit: int = 50,
+        sort_by: str | None = None,
+        sort_dir: str = "asc",
+    ) -> dict[str, Any]:
+        """Fetch one page of a cell output's cached DataFrame (data viewer)."""
+        params: dict[str, str] = {
+            "artifact_uri": artifact_uri,
+            "offset": str(offset),
+            "limit": str(limit),
+        }
+        if sort_by:
+            params["sort_by"] = sort_by
+            params["sort_dir"] = sort_dir
+        return await self._get(f"/v1/notebooks/{notebook_id}/cells/{cell_id}/data", params)
+
+    async def export_cell_data(
+        self,
+        notebook_id: str,
+        cell_id: str,
+        artifact_uri: str,
+        *,
+        fmt: str = "csv",
+        sort_by: str | None = None,
+        sort_dir: str = "asc",
+    ) -> bytes:
+        """Download a cell output's DataFrame as raw CSV/Parquet bytes."""
+        params: dict[str, str] = {"artifact_uri": artifact_uri, "fmt": fmt}
+        if sort_by:
+            params["sort_by"] = sort_by
+            params["sort_dir"] = sort_dir
+        path = f"/v1/notebooks/{notebook_id}/cells/{cell_id}/data/export"
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                response = await client.get(
+                    self.server_url + path, params=params, headers=self.auth_headers
+                )
+            except httpx.HTTPError as exc:
+                raise TuiClientError(f"cannot reach {self.server_url}: {exc}") from exc
+            if response.is_error:
+                raise TuiClientError(f"export failed ({response.status_code})")
+            return response.content
+
     # -- internals -----------------------------------------------------------
 
-    async def _get(self, path: str) -> dict[str, Any]:
+    async def _get(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                response = await client.get(self.server_url + path, headers=self.auth_headers)
+                response = await client.get(
+                    self.server_url + path, params=params, headers=self.auth_headers
+                )
             except httpx.HTTPError as exc:
                 raise TuiClientError(f"cannot reach {self.server_url}: {exc}") from exc
             return _json_or_error(response)

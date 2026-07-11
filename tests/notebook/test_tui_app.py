@@ -11,10 +11,68 @@ from __future__ import annotations
 import json
 
 import pytest
-from textual.widgets import Static
+from textual.widgets import DataTable, Static
 
 from strata.notebook.tui.app import NotebookTUI
 from strata.notebook.tui.client import TuiClient
+from strata.notebook.tui.viewmodel import CellView
+
+
+class _FakeDataClient:
+    """Stand-in for TuiClient that serves canned data-viewer pages."""
+
+    def __init__(self) -> None:
+        self.exported: tuple[str, str | None, str] | None = None
+
+    async def get_cell_data_page(
+        self, notebook_id, cell_id, artifact_uri, *, offset, limit, sort_by, sort_dir
+    ):
+        rows = [[i, i * 2] for i in range(offset, min(offset + limit, 2000))]
+        return {
+            "pageable": True,
+            "columns": ["id", "v"],
+            "rows": rows,
+            "total": 2000,
+            "offset": offset,
+            "limit": limit,
+            "sort_by": sort_by,
+            "sort_dir": sort_dir,
+        }
+
+    async def export_cell_data(
+        self, notebook_id, cell_id, artifact_uri, *, fmt, sort_by, sort_dir
+    ) -> bytes:
+        self.exported = (fmt, sort_by, sort_dir)
+        return b"id,v\n1,2\n"
+
+
+async def _wait(pilot, cond, tries=40) -> None:
+    for _ in range(tries):
+        await pilot.pause(0.05)
+        if cond():
+            return
+
+
+def _table_cell() -> CellView:
+    return CellView(
+        id="c1",
+        display_outputs=[
+            {
+                "content_type": "arrow/ipc",
+                "columns": ["id", "v"],
+                "preview": [[0, 0]],
+                "rows": 2000,
+                "artifact_uri": "strata://artifact/a@v=1",
+            }
+        ],
+    )
+
+
+def _select(app: NotebookTUI, cell: CellView) -> None:
+    app.vm.cells[cell.id] = cell
+    app.vm.cell_order = [cell.id]
+    app._selected = cell.id
+    app._show_detail(cell.id)
 
 
 @pytest.mark.asyncio
@@ -623,3 +681,95 @@ async def test_ws_connect_disables_frame_size_cap(monkeypatch):
 
     assert "max_size" in captured, "websockets.connect was not called with max_size"
     assert captured["max_size"] is None
+
+
+@pytest.mark.asyncio
+async def test_data_viewer_pages_sorts_and_exports(monkeypatch, tmp_path):
+    """A tabular output with a backing artifact drives the interactive viewer."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+    monkeypatch.chdir(tmp_path)  # export writes {cell_id}.csv to cwd
+
+    fake = _FakeDataClient()
+    app = NotebookTUI(client=fake, session_id="s1")
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        _select(app, _table_cell())
+        await _wait(pilot, lambda: app._table_view is not None and app._table_view.total > 0)
+
+        dt = app.query_one("#output-table", DataTable)
+        assert dt.display is True
+        assert app._table_view.total == 2000
+        assert dt.row_count == 50
+        assert "of 2,000 rows" in str(dt.border_title)
+
+        # Paging advances / rewinds the window.
+        app.action_table_next()
+        await _wait(pilot, lambda: app._table_view.offset == 50)
+        assert app._table_view.offset == 50
+        app.action_table_prev()
+        await _wait(pilot, lambda: app._table_view.offset == 0)
+        assert app._table_view.offset == 0
+
+        # Sorting the focused column cycles asc → desc → cleared.
+        dt.move_cursor(column=1)
+        app.action_table_sort()
+        await _wait(pilot, lambda: app._table_view.sort_by == "v")
+        assert app._table_view.sort_dir == "asc"
+        app.action_table_sort()
+        await _wait(pilot, lambda: app._table_view.sort_dir == "desc")
+        app.action_table_sort()
+        await _wait(pilot, lambda: app._table_view.sort_by is None)
+
+        # Export writes a CSV to the cwd, carrying the active sort.
+        dt.move_cursor(column=1)
+        app.action_table_sort()
+        await _wait(pilot, lambda: app._table_view.sort_by == "v")
+        app.action_table_export()
+        await _wait(pilot, lambda: fake.exported is not None)
+        assert fake.exported == ("csv", "v", "asc")
+        assert (tmp_path / "c1.csv").exists()
+
+
+@pytest.mark.asyncio
+async def test_data_viewer_hidden_for_non_table_output(monkeypatch):
+    """Markdown / non-table outputs keep the static area; the table stays hidden."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+    app = NotebookTUI(client=_FakeDataClient(), session_id="s1")
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        cell = CellView(
+            id="c1",
+            display_outputs=[{"content_type": "text/markdown", "markdown_text": "# Hi"}],
+        )
+        _select(app, cell)
+        await pilot.pause()
+
+        assert app.query_one("#output-table", DataTable).display is False
+        assert app._table_view is None
+
+
+@pytest.mark.asyncio
+async def test_data_viewer_ignores_keys_when_hidden(monkeypatch):
+    """The n/p/s/e actions are no-ops unless a table is the visible output."""
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+    app = NotebookTUI(client=_FakeDataClient(), session_id="s1")
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause()
+        # No cell selected → no table view; actions must not raise.
+        app.action_table_next()
+        app.action_table_sort()
+        app.action_table_export()
+        await pilot.pause()
+        assert app._table_view is None
