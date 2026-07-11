@@ -97,6 +97,9 @@ in the terminal.
 | `2` / `3` | Top group: Source / Tests source |
 | `4` / `5` / `6` / `7` | Bottom group: Output / Console / Agent / Results |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End` | Scroll the focused pane |
+| `n` / `p` | **Data viewer:** next / previous page of a large table |
+| `s` | **Data viewer:** sort by the focused column (asc → desc → off) |
+| `e` | **Data viewer:** export the table to a CSV in the current directory |
 | `f` | Toggle **follow mode** (auto-select the running cell) |
 | `d` | Show the notebook **DAG** (layered ASCII; `Esc`/`d`/`q` to close) |
 | `i` | Enlarge the selected cell's **image** output to full screen (`Esc`/`i`/`q` to close) |
@@ -109,7 +112,9 @@ in the terminal.
 
 The tabs render richly: source is **syntax-highlighted** by cell language,
 markdown cells and markdown outputs render as formatted markdown, a single DataFrame / table output
-renders as a real table with a row-count caption, and image outputs (e.g.
+renders in an **interactive data viewer** — a scrollable table you can page (`n`/`p`),
+sort by the focused column (`s`), and export to CSV (`e`), backed by the full
+cached artifact rather than the 20-row preview — and image outputs (e.g.
 matplotlib figures) render **inline** — using the terminal's graphics protocol
 (kitty / iTerm2 / Sixel) where available, degrading to Unicode half-blocks
 otherwise.
