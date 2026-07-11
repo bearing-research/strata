@@ -103,6 +103,20 @@ class TestHarness:
         assert result["variables"]["df"]["content_type"] == "arrow/ipc"
         assert result["variables"]["df"]["rows"] == 3
 
+    def test_harness_bare_expression_no_display_mutation_warning(self, harness_script):
+        """A bare trailing expression is captured by the injected ``display``
+        helper, growing its value buffer. That must NOT be reported as an
+        in-place mutation of ``display`` (regression for the false positive
+        that fired on every cell ending in a bare expression)."""
+        manifest = {"source": "x = 5\nx", "inputs": {}}
+
+        result = run_harness(harness_script, manifest)
+
+        assert result["success"] is True
+        warned = {w.get("var_name") for w in result.get("mutation_warnings", [])}
+        assert "display" not in warned
+        assert "Markdown" not in warned
+
     def test_harness_multiple_outputs(self, harness_script):
         """Test harness with multiple outputs."""
         manifest = {
