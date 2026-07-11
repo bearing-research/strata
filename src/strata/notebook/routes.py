@@ -2703,6 +2703,179 @@ async def get_cell_iterations(
     }
 
 
+def _load_cell_data_blob(session, cell_id: str, artifact_uri: str) -> bytes:
+    """Resolve ``strata://artifact/{id}@v={version}`` to its blob for a cell.
+
+    Shared by the data page / summary / export endpoints. Raises
+    ``HTTPException`` for an unknown cell, a malformed URI, or a missing
+    artifact.
+    """
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None:
+        raise HTTPException(status_code=404, detail="Cell not found")
+    prefix = "strata://artifact/"
+    if not artifact_uri.startswith(prefix) or "@v=" not in artifact_uri:
+        raise HTTPException(status_code=400, detail="Malformed artifact_uri")
+    artifact_id, _, version_str = artifact_uri[len(prefix) :].rpartition("@v=")
+    try:
+        version = int(version_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Malformed artifact_uri version") from None
+    try:
+        return session.get_artifact_manager().load_artifact_data(artifact_id, version)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Artifact not found") from None
+
+
+def _parse_data_filters(filters: str | None) -> list[dict] | None:
+    """Parse the ``filters`` query param (a JSON array of predicates)."""
+    if not filters:
+        return None
+    try:
+        parsed = json.loads(filters)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="filters must be valid JSON") from None
+    if not isinstance(parsed, list):
+        raise HTTPException(status_code=400, detail="filters must be a JSON array")
+    return parsed
+
+
+@router.get("/{notebook_id}/cells/{cell_id}/data")
+async def get_cell_data_page(
+    notebook_id: str,
+    session: SessionDep,
+    cell_id: str,
+    artifact_uri: str,
+    offset: int = 0,
+    limit: int = 100,
+    sort_by: str | None = None,
+    sort_dir: str = "asc",
+    search: str | None = None,
+    filters: str | None = None,
+) -> dict:
+    """Return a paginated window of a cell output's cached DataFrame, with
+    optional global search, per-column filters, and sort.
+
+    The inline cell preview is capped at 20 rows; this endpoint reads the
+    full Arrow artifact named by ``artifact_uri`` (the ``strata://artifact/
+    {id}@v={version}`` URI the frontend already carries on the display
+    output). ``filters`` is a JSON array of ``{col, op, value, value2}``.
+    Only table-shaped Arrow outputs are pageable — for anything else
+    ``pageable`` is ``False`` and the frontend keeps the inline preview.
+    """
+    from strata.notebook.serializer import read_table_page
+
+    if sort_dir not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="sort_dir must be 'asc' or 'desc'")
+    parsed_filters = _parse_data_filters(filters)
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+
+    blob = _load_cell_data_blob(session, cell_id, artifact_uri)
+    page = read_table_page(
+        blob,
+        offset=offset,
+        limit=limit,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        search=search,
+        filters=parsed_filters,
+    )
+    if page is None:
+        return {
+            "cell_id": cell_id,
+            "artifact_uri": artifact_uri,
+            "pageable": False,
+            "offset": offset,
+            "limit": limit,
+        }
+
+    return {
+        "cell_id": cell_id,
+        "artifact_uri": artifact_uri,
+        "pageable": True,
+        "columns": page["columns"],
+        "rows": page["rows"],
+        "total": page["total"],
+        "offset": offset,
+        "limit": limit,
+        "sort_by": sort_by,
+        "sort_dir": sort_dir,
+    }
+
+
+@router.get("/{notebook_id}/cells/{cell_id}/data/summary")
+async def get_cell_data_summary(
+    notebook_id: str,
+    session: SessionDep,
+    cell_id: str,
+    artifact_uri: str,
+) -> dict:
+    """Per-column summary (dtype, nulls, distinct, min/max) of a cell's
+    cached DataFrame, for the viewer's column headers."""
+    from strata.notebook.serializer import read_table_summary
+
+    blob = _load_cell_data_blob(session, cell_id, artifact_uri)
+    summary = read_table_summary(blob)
+    if summary is None:
+        return {"cell_id": cell_id, "artifact_uri": artifact_uri, "pageable": False}
+    return {
+        "cell_id": cell_id,
+        "artifact_uri": artifact_uri,
+        "pageable": True,
+        "columns": summary["columns"],
+        "total": summary["total"],
+    }
+
+
+@router.get("/{notebook_id}/cells/{cell_id}/data/export")
+async def export_cell_data(
+    notebook_id: str,
+    session: SessionDep,
+    cell_id: str,
+    artifact_uri: str,
+    fmt: str = "csv",
+    sort_by: str | None = None,
+    sort_dir: str = "asc",
+    search: str | None = None,
+    filters: str | None = None,
+):
+    """Download a cell's cached DataFrame as CSV or Parquet.
+
+    The same filters/search/sort as the on-screen view are applied so the
+    download matches what the user sees.
+    """
+    from fastapi import Response
+
+    from strata.notebook.serializer import write_table_export
+
+    if fmt not in ("csv", "parquet"):
+        raise HTTPException(status_code=400, detail="fmt must be 'csv' or 'parquet'")
+    if sort_dir not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="sort_dir must be 'asc' or 'desc'")
+    parsed_filters = _parse_data_filters(filters)
+
+    blob = _load_cell_data_blob(session, cell_id, artifact_uri)
+    data = write_table_export(
+        blob,
+        fmt,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        search=search,
+        filters=parsed_filters,
+    )
+    if data is None:
+        raise HTTPException(status_code=400, detail="Output is not an exportable table")
+
+    media_type = "text/csv" if fmt == "csv" else "application/vnd.apache.parquet"
+    filename = f"{cell_id}.{fmt}"
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/{notebook_id}/dependencies")
 async def get_dependencies(notebook_id: str, session: SessionDep) -> dict:
     """List current dependencies for a notebook.

@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
 import { useCodemirror } from '../composables/useCodemirror'
 import { useNotebook } from '../stores/notebook'
 import CellArtifactStrip from './CellArtifactStrip.vue'
+import DataTable from './DataTable.vue'
 import type { Cell, CellOutput, StalenessReason } from '../types/notebook'
 import {
   resolveEffectiveWorkerEntry,
@@ -103,6 +104,15 @@ function toggleInspect() {
 
 // Cell unit tests — Python cells only. The toolbar button doubles as a health
 // badge so test status is readable without opening the panel.
+const notebookId = computed(() => (notebook as { sessionId?: string }).sessionId)
+
+/** The 20-row preview arrives as column-keyed dicts; the data grid renders
+ * positional rows to match the paging endpoint. Convert once per output. */
+function previewArraysFor(output: CellOutput): unknown[][] {
+  const cols = output.columns ?? []
+  return (output.rows ?? []).map((row) => cols.map((col) => (row as Record<string, unknown>)[col]))
+}
+
 const isPythonCell = computed(() => props.cell.language === 'python')
 const isTesting = computed(() => storeIsTesting(props.cell.id))
 
@@ -1233,23 +1243,15 @@ function outputKey(output: CellOutput, index: number): string {
             :key="outputKey(output, index)"
             class="output-block"
           >
-            <div v-if="output.rows?.length" class="output-table-wrap">
-              <table class="output-table">
-                <thead>
-                  <tr>
-                    <th v-for="col in output.columns" :key="col">{{ col }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(row, rowIndex) in output.rows?.slice(0, 50)" :key="rowIndex">
-                    <td v-for="col in output.columns" :key="col">{{ row[col] }}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <div v-if="(output.rowCount ?? 0) > 50" class="row-count">
-                showing 50 of {{ output.rowCount?.toLocaleString() }} rows
-              </div>
-            </div>
+            <DataTable
+              v-if="output.rows?.length && output.columns?.length"
+              :notebook-id="notebookId"
+              :cell-id="cell.id"
+              :artifact-uri="output.artifactUri || ''"
+              :columns="output.columns"
+              :preview-rows="previewArraysFor(output)"
+              :total="output.rowCount ?? output.rows.length"
+            />
             <div
               v-else-if="output.contentType === 'image/png' && output.inlineDataUrl"
               class="output-image"
@@ -2174,11 +2176,6 @@ function outputKey(output: CellOutput, index: number): string {
 .install-complete-hint code {
   color: var(--text-primary);
 }
-.output-table-wrap {
-  overflow-x: auto;
-  max-height: 400px;
-  overflow-y: auto;
-}
 .output-image {
   overflow-x: auto;
 }
@@ -2265,35 +2262,6 @@ function outputKey(output: CellOutput, index: number): string {
 .output-markdown :deep(th) {
   color: var(--accent-primary);
   background: var(--bg-surface);
-}
-.output-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 12px;
-}
-.output-table th {
-  text-align: left;
-  padding: 4px 12px;
-  color: var(--accent-primary);
-  border-bottom: 1px solid var(--bg-input);
-  font-weight: 600;
-  position: sticky;
-  top: 0;
-  background: var(--bg-elevated);
-}
-.output-table td {
-  padding: 3px 12px;
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--bg-elevated);
-}
-.output-table tr:hover td {
-  background: var(--bg-input);
-}
-.row-count {
-  color: var(--text-muted);
-  font-size: 11px;
-  margin-top: 4px;
 }
 
 .output-scalar pre {
