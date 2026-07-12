@@ -1065,6 +1065,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#app-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App view
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2789,6 +2800,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#app-view" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        App view
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3727,6 +3749,16 @@ on <strong>⚡ Live</strong> (a <code># @live</code> annotation on the widget ce
 expensive (over a cost threshold) are left stale rather than re-run on every
 drag — so a slider feeding a quick plot updates live, while one feeding a long
 training cell waits for a manual run.</p>
+<h3 id="app-view">App view<a class="headerlink" href="#app-view" title="Permanent link">&para;</a></h3>
+<p>Click <strong>App</strong> in the notebook header (or visit <code>/app/&lt;sessionId&gt;</code>) to open the
+notebook as a <strong>read-only interactive app</strong>: only widget control panels,
+markdown, and display outputs render — no editor, DAG, or toolbars. The
+connection is read-only (edits and arbitrary cell runs are rejected server-side),
+but viewers can still drive widgets — combined with <strong>⚡ Live</strong> that's the
+"tweak a parameter, see the result" dashboard you hand to a stakeholder.</p>
+<p>Add <code># @app hide</code> to a cell to keep it out of the app view (e.g. a setup cell
+whose output is noise). Run the notebook's cells once in the editor so the app
+has outputs to show, then share the app link.</p>
 <hr />
 <h2 id="markdown-cells">Markdown Cells<a class="headerlink" href="#markdown-cells" title="Permanent link">&para;</a></h2>
 <p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG — they don't produce artifacts, don't participate in cascade execution, and don't have an <code>id</code> / variable that downstream cells can reference. They survive saves and exports verbatim.</p>
