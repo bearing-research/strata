@@ -704,6 +704,11 @@ class CellState(BaseModel):
         exclude=True,
         description="Runtime-only environment hash from the last successful execution",
     )
+    widget_values: dict[str, Any] = Field(
+        default_factory=dict,
+        exclude=True,
+        description="Runtime-only current values of a widget cell's controls",
+    )
 
     def serialize(self) -> dict[str, Any]:
         """Return the cell-only wire view of this cell.

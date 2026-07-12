@@ -4,6 +4,7 @@ import { useCodemirror } from '../composables/useCodemirror'
 import { useNotebook } from '../stores/notebook'
 import CellArtifactStrip from './CellArtifactStrip.vue'
 import DataTable from './DataTable.vue'
+import WidgetCell from './WidgetCell.vue'
 import type { Cell, CellOutput, StalenessReason } from '../types/notebook'
 import {
   resolveEffectiveWorkerEntry,
@@ -1100,8 +1101,15 @@ function outputKey(output: CellOutput, index: number): string {
         v-html="renderedMarkdownSource || '<p class=\'placeholder\'>(empty markdown cell)</p>'"
       ></div>
 
+      <!-- Widget cells render their control panel in place of the editor. -->
+      <WidgetCell v-if="!folded && cell.language === 'widget'" :cell="cell" />
+
       <div
-        v-show="!folded && !(cell.language === 'markdown' && isMarkdownPreviewing)"
+        v-show="
+          !folded &&
+          cell.language !== 'widget' &&
+          !(cell.language === 'markdown' && isMarkdownPreviewing)
+        "
         ref="editorEl"
         class="editor-container"
         @focusout="

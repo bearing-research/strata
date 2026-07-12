@@ -2,7 +2,7 @@
 
 export type CellId = string
 
-export type CellLanguage = 'python' | 'prompt' | 'markdown' | 'sql' | 'r'
+export type CellLanguage = 'python' | 'prompt' | 'markdown' | 'sql' | 'r' | 'widget'
 export type MountMode = 'ro' | 'rw'
 export type WorkerBackend = 'local' | 'executor'
 export type WorkerHealth = 'healthy' | 'unknown' | 'unavailable' | 'warming'
@@ -196,11 +196,27 @@ export interface CellOutput {
   error?: string
 }
 
+/** One control declared by a widget cell (from the backend `widget` block). */
+export interface WidgetDescriptor {
+  name: string
+  kind: 'slider' | 'number' | 'dropdown' | 'text' | 'checkbox'
+  params: Record<string, unknown>
+  default: unknown
+}
+
+/** A widget cell's controls + their current values. */
+export interface WidgetSpec {
+  descriptors: WidgetDescriptor[]
+  values: Record<string, unknown>
+}
+
 export interface Cell {
   id: CellId
   /** Source code */
   source: string
   language: CellLanguage
+  /** Widget cell control panel (only present when language === 'widget') */
+  widget?: WidgetSpec
   /** Display order in the notebook */
   order: number
   /** Execution state */
@@ -755,6 +771,7 @@ export type WsClientMessageType =
   | 'agent_confirm_response' // User approved/declined a destructive tool call
   | 'variant_set_active' // Switch the active variant in a group
   | 'variant_add' // Add a new sibling variant to a group (clones active)
+  | 'widget_update' // Set widget control value(s) (debounced on slider drag)
 
 /** WebSocket message types: server → client */
 export type WsServerMessageType =

@@ -32,6 +32,7 @@ import type {
   WorkerHealth,
   WorkerHealthHistoryEntry,
   WorkerSpec,
+  WidgetSpec,
 } from '../types/notebook'
 import { useStrata } from '../composables/useStrata'
 import type {
@@ -972,6 +973,7 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
   localCell.shadowWarnings = Array.isArray(serverCell.shadow_warnings)
     ? serverCell.shadow_warnings
     : undefined
+  localCell.widget = parseWidgetSpec(serverCell.widget)
   applyDisplayOutputsToCell(
     localCell,
     serverCell.display_outputs,
@@ -1208,6 +1210,19 @@ function finishEnvironmentOperation(
   }
 }
 
+function parseWidgetSpec(raw: any): WidgetSpec | undefined {
+  if (!raw || !Array.isArray(raw.descriptors)) return undefined
+  return {
+    descriptors: raw.descriptors.map((d: any) => ({
+      name: String(d.name),
+      kind: d.kind,
+      params: d.params && typeof d.params === 'object' ? d.params : {},
+      default: d.default,
+    })),
+    values: raw.values && typeof raw.values === 'object' ? raw.values : {},
+  }
+}
+
 function parseBackendCellPayload(raw: any): Cell {
   const cell: Cell = {
     id: raw.id,
@@ -1243,6 +1258,7 @@ function parseBackendCellPayload(raw: any): Cell {
     variantGroup: typeof raw.variant_group === 'string' ? raw.variant_group : null,
     variantName: typeof raw.variant_name === 'string' ? raw.variant_name : null,
     variantActive: raw.variant_active !== false,
+    widget: parseWidgetSpec(raw.widget),
   }
 
   applyDisplayOutputsToCell(
@@ -2585,6 +2601,17 @@ function addVariant(group: string): void {
   wsInstance.addVariant(group)
 }
 
+function updateWidgetValues(cellId: CellId, values: Record<string, unknown>): void {
+  if (!wsInstance) return
+  // Optimistic local update so the control reflects the change immediately;
+  // the backend re-materializes + broadcasts staleness for downstream cells.
+  const cell = notebook.cells.find((c) => c.id === cellId)
+  if (cell?.widget) {
+    cell.widget = { ...cell.widget, values: { ...cell.widget.values, ...values } }
+  }
+  wsInstance.sendWidgetUpdate(cellId, values)
+}
+
 async function executeCellWebSocket(cellId: CellId) {
   if (environmentMutationActive.value) {
     environmentError.value =
@@ -3813,6 +3840,7 @@ export function useNotebook() {
     cancelCellWebSocket,
     updateSourceWebSocket,
     setVariantActive,
+    updateWidgetValues,
     selectVariantDisplay,
     variantDisplayCellId,
     addVariant,

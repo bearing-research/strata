@@ -106,3 +106,23 @@ def test_persist_cell_widget_values_merges(tmp_path):
 
     assert merged == {"alpha": 0.25, "mode": "a"}
     assert load_runtime_state(tmp_path).cells["c1"].widget_values == {"alpha": 0.25, "mode": "a"}
+
+
+def test_serialize_cell_emits_widget_block(widget_session):
+    """serialize_cell attaches descriptors + current values for widget cells."""
+    controls = widget_session.notebook_state.get_cell("controls")
+    controls.widget_values = {"alpha": 0.25}
+
+    data = widget_session.serialize_cell(controls)
+
+    assert "widget" in data
+    by_name = {d["name"]: d for d in data["widget"]["descriptors"]}
+    assert set(by_name) == {"alpha", "mode"}
+    assert by_name["alpha"]["kind"] == "slider"
+    assert by_name["mode"]["params"]["options"] == ["a", "b"]
+    assert data["widget"]["values"] == {"alpha": 0.25}
+
+
+def test_serialize_cell_no_widget_block_for_python(widget_session):
+    data = widget_session.serialize_cell(widget_session.notebook_state.get_cell("consume"))
+    assert "widget" not in data
