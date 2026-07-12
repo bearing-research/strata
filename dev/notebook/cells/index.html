@@ -1054,6 +1054,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#live-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live mode
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2767,6 +2778,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#live-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live mode
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3698,6 +3720,13 @@ control's current value is stored as a content-addressed artifact, so:</p>
 <p>In the web UI a widget cell shows its controls in place of the code editor;
 click <strong>✎ Edit controls</strong> to edit the declaration. Widget cells render in the
 web UI (the CLI and read-only TUI show them as their declaration).</p>
+<h3 id="live-mode">Live mode<a class="headerlink" href="#live-mode" title="Permanent link">&para;</a></h3>
+<p>By default a control change marks downstream cells stale and you run them. Turn
+on <strong>⚡ Live</strong> (a <code># @live</code> annotation on the widget cell) and changing a control
+<strong>auto-runs</strong> the cheap downstream cells instead. Cells whose last run was
+expensive (over a cost threshold) are left stale rather than re-run on every
+drag — so a slider feeding a quick plot updates live, while one feeding a long
+training cell waits for a manual run.</p>
 <hr />
 <h2 id="markdown-cells">Markdown Cells<a class="headerlink" href="#markdown-cells" title="Permanent link">&para;</a></h2>
 <p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG — they don't produce artifacts, don't participate in cascade execution, and don't have an <code>id</code> / variable that downstream cells can reference. They survive saves and exports verbatim.</p>
