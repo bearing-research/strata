@@ -331,6 +331,14 @@ export function useWebSocket(notebookId: string) {
   }
 
   /**
+   * Set one or more of a widget cell's control values. The backend persists
+   * them, re-materializes the widget artifacts, and stales downstream cells.
+   */
+  function sendWidgetUpdate(cellId: string, values: Record<string, unknown>): void {
+    send('widget_update', { cell_id: cellId, values })
+  }
+
+  /**
    * Add a new variant to an existing group; the backend auto-names it
    * and switches it to active.
    */
@@ -422,5 +430,6 @@ export function useWebSocket(notebookId: string) {
     removeDependency,
     setVariantActive,
     addVariant,
+    sendWidgetUpdate,
   }
 }

@@ -1,0 +1,4 @@
+# @name Controls
+alpha = slider(0, 1, step=0.05, default=0.5)
+n     = number(default=20, min=5, max=100)
+curve = dropdown(["linear", "sqrt", "square"], default="linear")
