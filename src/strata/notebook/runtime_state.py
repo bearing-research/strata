@@ -35,6 +35,10 @@ class CellRuntime:
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     display: dict[str, Any] | None = None
     test_result: dict[str, Any] | None = None
+    # Current values of a widget cell's controls, keyed by variable name. The
+    # committed source declares the controls + defaults; the user-set value is
+    # runtime state (a slider drag must not churn ``notebook.toml``).
+    widget_values: dict[str, Any] = field(default_factory=dict)
 
     def is_empty(self) -> bool:
         """Whether this entry carries no useful state.
@@ -48,6 +52,7 @@ class CellRuntime:
             or self.display_outputs
             or self.display
             or self.test_result
+            or self.widget_values
         )
 
 

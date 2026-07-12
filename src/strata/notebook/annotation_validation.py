@@ -345,7 +345,9 @@ def _validate_widget_descriptor(descriptor, line: int | None) -> list[Annotation
                 AnnotationDiagnostic(
                     severity=DiagnosticSeverity.WARN,
                     code="widget_bad_range",
-                    message=f"`{descriptor.name}`: slider min ({low}) must be less than max ({high}).",
+                    message=(
+                        f"`{descriptor.name}`: slider min ({low}) must be less than max ({high})."
+                    ),
                     line=line,
                 )
             )
