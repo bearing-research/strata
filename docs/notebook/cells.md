@@ -621,6 +621,19 @@ expensive (over a cost threshold) are left stale rather than re-run on every
 drag — so a slider feeding a quick plot updates live, while one feeding a long
 training cell waits for a manual run.
 
+### App view
+
+Click **App** in the notebook header (or visit `/app/<sessionId>`) to open the
+notebook as a **read-only interactive app**: only widget control panels,
+markdown, and display outputs render — no editor, DAG, or toolbars. The
+connection is read-only (edits and arbitrary cell runs are rejected server-side),
+but viewers can still drive widgets — combined with **⚡ Live** that's the
+"tweak a parameter, see the result" dashboard you hand to a stakeholder.
+
+Add `# @app hide` to a cell to keep it out of the app view (e.g. a setup cell
+whose output is noise). Run the notebook's cells once in the editor so the app
+has outputs to show, then share the app link.
+
 ---
 
 ## Markdown Cells
