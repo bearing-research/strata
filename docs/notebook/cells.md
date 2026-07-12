@@ -612,6 +612,15 @@ In the web UI a widget cell shows its controls in place of the code editor;
 click **✎ Edit controls** to edit the declaration. Widget cells render in the
 web UI (the CLI and read-only TUI show them as their declaration).
 
+### Live mode
+
+By default a control change marks downstream cells stale and you run them. Turn
+on **⚡ Live** (a `# @live` annotation on the widget cell) and changing a control
+**auto-runs** the cheap downstream cells instead. Cells whose last run was
+expensive (over a cost threshold) are left stale rather than re-run on every
+drag — so a slider feeding a quick plot updates live, while one feeding a long
+training cell waits for a manual run.
+
 ---
 
 ## Markdown Cells
