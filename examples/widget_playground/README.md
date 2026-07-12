@@ -44,3 +44,10 @@ Open `examples/widget_playground` from the Strata home page.
 
 Widget cells render in the web UI. Edit the control declaration with the
 **✎ Edit controls** toggle on the cell.
+
+## Open as an app
+
+Click **App** in the notebook header to open this notebook as a read-only
+interactive app — just the controls + the table, no editor. Turn on the
+widget cell's **⚡ Live** toggle first, and dragging `alpha` in the app updates
+the table live.

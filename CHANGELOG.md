@@ -9,6 +9,13 @@ exhaustive commit history.
 
 ### Added
 
+- **App view — open a notebook as a read-only interactive app.** Click **App**
+  in the notebook header (or visit `/app/<sessionId>`) to render just the widget
+  control panels + display outputs — no editor, DAG, or toolbars. The connection
+  is read-only (edits and cell runs are rejected server-side); viewers can still
+  drive widgets, so with a widget's **⚡ Live** toggle on it's an interactive
+  "tweak a parameter, see the result" dashboard. `# @app hide` keeps a cell out
+  of the view.
 - **Interactive widget cells.** A new `widget` cell kind is a declarative
   control panel — one control per line (`alpha = slider(0, 1, default=0.5)`,
   plus `number` / `dropdown` / `checkbox` / `text`). Each control defines a

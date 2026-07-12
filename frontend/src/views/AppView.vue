@@ -38,13 +38,18 @@ onUnmounted(() => {
 const notebookName = computed(() => notebook.name || 'Notebook')
 
 // Cells worth showing in an app: widget panels, markdown prose, and anything
-// with a display output. Bare compute cells with no output are hidden.
+// with a display output. Bare compute cells with no output — and cells the
+// author marked `# @app hide` — are hidden.
+function isAppHidden(source: string): boolean {
+  return source.split('\n').some((line) => /^#\s*@app\s+hide\b/.test(line.trim()))
+}
 const appCells = computed(() =>
   orderedCells.value.filter(
     (c) =>
-      c.language === 'widget' ||
-      c.language === 'markdown' ||
-      (c.displayOutputs && c.displayOutputs.length > 0),
+      !isAppHidden(c.source) &&
+      (c.language === 'widget' ||
+        c.language === 'markdown' ||
+        (c.displayOutputs && c.displayOutputs.length > 0)),
   ),
 )
 
