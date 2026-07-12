@@ -14,7 +14,7 @@ from strata.notebook.languages.analyzer import (
     get_language_analyzer,
 )
 from strata.notebook.models import CellLanguage, CellState
-from strata.notebook.widget_analyzer import analyze_widget_cell
+from strata.notebook.widget_analyzer import analyze_widget_cell, coerce_widget_values
 
 
 class TestAnalyzeWidgetCell:
@@ -110,3 +110,37 @@ class TestWidgetDagParticipation:
         assert "use" in dag.cell_downstream["controls"]
         assert "controls" in dag.cell_upstream["use"]
         assert "alpha" in dag.consumed_variables["controls"]
+
+
+class TestCoerceWidgetValues:
+    """Incoming WS values are validated + clamped against the descriptors."""
+
+    def _descriptors(self):
+        return analyze_widget_cell(
+            "a = slider(0, 1, step=0.01, default=0.5)\n"
+            "n = number(default=10, min=1, max=200)\n"
+            "m = dropdown(['x', 'y'], default='x')\n"
+            "flag = checkbox(default=False)\n"
+        ).descriptors
+
+    def test_slider_clamps_to_range(self):
+        d = self._descriptors()
+        assert coerce_widget_values(d, {"a": 5}) == {"a": 1.0}
+        assert coerce_widget_values(d, {"a": -3}) == {"a": 0.0}
+        assert coerce_widget_values(d, {"a": 0.3}) == {"a": 0.3}
+
+    def test_number_preserves_int_when_default_is_int(self):
+        assert coerce_widget_values(self._descriptors(), {"n": 42}) == {"n": 42}
+        assert isinstance(coerce_widget_values(self._descriptors(), {"n": 42})["n"], int)
+
+    def test_dropdown_rejects_value_not_in_options(self):
+        assert coerce_widget_values(self._descriptors(), {"m": "z"}) == {}
+        assert coerce_widget_values(self._descriptors(), {"m": "y"}) == {"m": "y"}
+
+    def test_checkbox_coerces_to_bool(self):
+        assert coerce_widget_values(self._descriptors(), {"flag": 1}) == {"flag": True}
+
+    def test_unknown_names_and_bad_values_dropped(self):
+        d = self._descriptors()
+        assert coerce_widget_values(d, {"nope": 1}) == {}
+        assert coerce_widget_values(d, {"a": "not-a-number"}) == {}

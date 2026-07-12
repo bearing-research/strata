@@ -146,6 +146,60 @@ def analyze_widget_cell(source: str) -> WidgetAnalysis:
     return result
 
 
+def _coerce_one(descriptor: WidgetDescriptor, value: Any) -> Any:
+    """Coerce/clamp one incoming value to a control's type + bounds.
+
+    Returns ``None`` when the value can't be represented (non-numeric for a
+    slider, an option not in a dropdown) so the caller drops it and keeps the
+    prior value.
+    """
+    kind = descriptor.kind
+    if kind in ("slider", "number"):
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return None
+        low, high = descriptor.params.get("min"), descriptor.params.get("max")
+        if isinstance(low, int | float) and num < low:
+            num = float(low)
+        if isinstance(high, int | float) and num > high:
+            num = float(high)
+        # Preserve int-ness when the control's default is an int, so setting an
+        # integer control to its default is a cache hit (10 == 10, not 10.0).
+        if isinstance(descriptor.default, int) and not isinstance(descriptor.default, bool):
+            if num.is_integer():
+                return int(num)
+        return num
+    if kind == "checkbox":
+        return bool(value)
+    if kind == "dropdown":
+        options = descriptor.params.get("options") or []
+        return value if value in options else None
+    if kind == "text":
+        return str(value)
+    return None
+
+
+def coerce_widget_values(
+    descriptors: list[WidgetDescriptor], values: dict[str, Any]
+) -> dict[str, Any]:
+    """Validate + coerce incoming control values against the cell's descriptors.
+
+    Unknown names and uncoercible values are dropped (the control keeps its
+    prior value); sliders/numbers are clamped to their range.
+    """
+    by_name = {d.name: d for d in descriptors}
+    clean: dict[str, Any] = {}
+    for name, value in values.items():
+        descriptor = by_name.get(name)
+        if descriptor is None:
+            continue
+        coerced = _coerce_one(descriptor, value)
+        if coerced is not None:
+            clean[name] = coerced
+    return clean
+
+
 def descriptor_provenance(descriptor: WidgetDescriptor, value: object) -> str:
     """Content hash for one control at a given value.
 

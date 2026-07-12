@@ -2977,6 +2977,78 @@ async def _broadcast_message(notebook_id: str, message: dict[str, Any]) -> None:
 #
 # Maps every client-to-server message type to its handler. Each handler
 # declares only the dispatch args it actually consumes -- e.g.
+async def _handle_widget_update(
+    websocket: WebSocket,
+    session: NotebookSession,
+    payload: dict[str, Any],
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+) -> None:
+    """Handle a widget_update: persist new control values, re-materialize the
+    widget cell's value artifacts (force), and broadcast downstream staleness.
+
+    A widget value change is "an upstream producer's artifact changed" — the
+    same signal as an edited upstream source. Re-running the widget cell in
+    force mode re-stores its value artifacts at the new values; the shared
+    ``execute_cell_and_broadcast`` path then recomputes + broadcasts the
+    downstream staleness (Tier 0 — the user runs the stale cells).
+    """
+    cell_id = payload.get("cell_id")
+    values = payload.get("values")
+    if not cell_id or not isinstance(values, dict):
+        await _send_error_message(websocket, execution_state.sequence, "Missing cell_id or values")
+        return
+
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None or cell.language != CellLanguage.WIDGET:
+        await _send_error_message(
+            websocket, execution_state.sequence, f"Cell {cell_id} is not a widget cell"
+        )
+        return
+
+    from strata.notebook.runtime_state import persist_cell_widget_values
+    from strata.notebook.widget_analyzer import analyze_widget_cell, coerce_widget_values
+
+    coerced = coerce_widget_values(analyze_widget_cell(cell.source).descriptors, values)
+    if not coerced:
+        await _send_error_message(
+            websocket, execution_state.sequence, "No valid widget values in update"
+        )
+        return
+
+    persist_cell_widget_values(session.path, cell_id, coerced)
+
+    seq = execution_state.next_sequence()
+    busy_cell = await _reserve_execution_request(execution_state, cell_id)
+    if busy_cell is not None:
+        await _send_error_message(
+            websocket,
+            seq,
+            (
+                f"Notebook is already executing cell {busy_cell}"
+                if busy_cell
+                else "Notebook is already executing another cell"
+            ),
+        )
+        return
+
+    # Re-materialize the widget cell at the new values (force = cache-off, no
+    # upstream materialization — widgets have none). The shared path broadcasts
+    # the widget cell's status + the downstream staleness changes.
+    scheduled = await _schedule_execution(
+        websocket,
+        execution_state,
+        notebook_id,
+        cell_id,
+        seq,
+        lambda: execute_cell_and_broadcast(
+            session, cell_id, execution_state, notebook_id, mode="force"
+        ),
+    )
+    if not scheduled:
+        await _release_execution_request(execution_state, cell_id)
+
+
 # ``_handle_agent_cancel`` takes ``(notebook_id)``, ``_handle_notebook_sync``
 # takes ``(websocket, session, notebook_id)``. The dispatch loop introspects
 # the handler signature at registration time (cached) and passes a kwargs
@@ -3017,6 +3089,7 @@ _C2S_HANDLERS: dict[str, _C2SHandler] = {
     MessageType.DEPENDENCY_REMOVE: _handle_dependency_remove,
     MessageType.VARIANT_SET_ACTIVE: _handle_variant_set_active,
     MessageType.VARIANT_ADD: _handle_variant_add,
+    MessageType.WIDGET_UPDATE: _handle_widget_update,
     MessageType.AGENT_CANCEL: _handle_agent_cancel,
     MessageType.AGENT_CONFIRM_RESPONSE: _handle_agent_confirm_response,
 }

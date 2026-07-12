@@ -96,3 +96,13 @@ async def test_downstream_python_cell_consumes_widget_values(widget_session):
     # beta = alpha * 2 = 1.0; chosen = mode = "b".
     assert result.outputs["beta"]["preview"] == 1.0
     assert result.outputs["chosen"]["preview"] == "b"
+
+
+def test_persist_cell_widget_values_merges(tmp_path):
+    from strata.notebook.runtime_state import load_runtime_state, persist_cell_widget_values
+
+    persist_cell_widget_values(tmp_path, "c1", {"alpha": 0.5, "mode": "a"})
+    merged = persist_cell_widget_values(tmp_path, "c1", {"alpha": 0.25})  # partial update
+
+    assert merged == {"alpha": 0.25, "mode": "a"}
+    assert load_runtime_state(tmp_path).cells["c1"].widget_values == {"alpha": 0.25, "mode": "a"}

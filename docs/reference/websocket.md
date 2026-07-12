@@ -86,6 +86,7 @@ All messages are JSON with this shape:
 | -------------------- | ------------------------------------ | ------------------------------------------ |
 | `variant_set_active` | `{ "group": "...", "name": "..." }`  | Switch the active variant in a group       |
 | `variant_add`        | `{ "group": "..." }`                 | Add a new variant cell, cloning the active |
+| `widget_update`      | `{ "cell_id": "...", "values": { "<name>": <value> } }` | Set widget control value(s); re-materializes + stales downstream |
 
 ### AI Agent (client → server)
 

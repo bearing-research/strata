@@ -2044,3 +2044,73 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
     assert len(deltas) == 2
     assert all(d["seq"] > running["seq"] for d in deltas)
     assert output["seq"] > max(d["seq"] for d in deltas)
+
+
+@pytest.mark.asyncio
+async def test_widget_update_persists_value_and_stales_downstream(tmp_path):
+    """widget_update: persist the new value, re-materialize the widget artifact,
+    and flip the downstream consumer to STALE (P3, Tier 0)."""
+    from strata.notebook.models import CellLanguage, CellStatus
+    from strata.notebook.runtime_state import load_runtime_state
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.ws import _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Widget WS")
+    add_cell_to_notebook(nb, "controls", None)
+    add_cell_to_notebook(nb, "consume", "controls")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
+    session.notebook_state.get_cell("controls").source = "alpha = slider(0, 1, default=0.5)"
+    session.notebook_state.get_cell("consume").source = "beta = alpha * 2\nbeta"
+    session._analyze_and_build_dag()
+    session.environment_sync_state = "ready"  # unblock the WS execute gate
+
+    # Run the consumer to READY — cascades the widget cell (alpha=0.5) first.
+    await _run_cell_to_terminal(session, "consume")
+    assert session.notebook_state.get_cell("consume").status == CellStatus.READY
+
+    # Drag alpha to 0.25.
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "controls", "values": {"alpha": 0.25}},
+        execution_state,
+        session.id,
+    )
+    await _drain_execution(execution_state)
+
+    # Value persisted to runtime.json (not notebook.toml).
+    assert load_runtime_state(session.path).cells["controls"].widget_values == {"alpha": 0.25}
+
+    # The widget's value artifact now holds 0.25.
+    mgr = session.get_artifact_manager()
+    art = mgr.artifact_store.get_latest_version(
+        f"nb_{session.notebook_state.id}_cell_controls_var_alpha"
+    )
+    assert json.loads(mgr.load_artifact_data(art.id, art.version)) == 0.25
+
+    # Downstream consumer flipped STALE (its input changed).
+    assert session.notebook_state.get_cell("consume").status == CellStatus.STALE
+
+
+@pytest.mark.asyncio
+async def test_widget_update_rejects_non_widget_cell(tmp_path):
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.ws import _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Not Widget")
+    add_cell_to_notebook(nb, "py", None)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("py").source = "x = 1"
+    session._analyze_and_build_dag()
+
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "py", "values": {"x": 1}},
+        execution_state,
+        session.id,
+    )
+    assert fake.frames_of("error")
