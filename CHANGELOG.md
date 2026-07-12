@@ -9,6 +9,19 @@ exhaustive commit history.
 
 ### Added
 
+- **Interactive widget cells.** A new `widget` cell kind is a declarative
+  control panel — one control per line (`alpha = slider(0, 1, default=0.5)`,
+  plus `number` / `dropdown` / `checkbox` / `text`). Each control defines a
+  variable downstream cells consume; dragging a control marks those cells stale
+  (run them, or opt into auto-run later). Values are content-addressed, so
+  returning a slider to a prior value is a cache hit. Add one from the **+**
+  menu; see [Widget Cells](docs/notebook/cells.md) and the
+  `examples/widget_playground` notebook. (#420–#423)
+- **An interactive data viewer for DataFrame outputs.** Table cell outputs now
+  render in a scrollable grid you can page, sort (click a header), search, and
+  filter per column — backed by the full cached artifact, not a 20-row preview —
+  with CSV / Parquet export. The terminal viewer (TUI) gains the same paging /
+  sort / CSV-export over the grid. (#416, #417)
 - **An MCP server for driving a live notebook from a coding agent.** Enable
   `mcp_enabled` (personal mode only, behind the `[mcp]` extra) and Strata mounts
   a Model Context Protocol endpoint at `/mcp` — `claude mcp add --transport http
@@ -23,6 +36,11 @@ exhaustive commit history.
 
 ### Fixed
 
+- **No more spurious `display` mutation warning.** Any cell whose last line was
+  a bare expression (e.g. a trailing `df` to show it) emitted a false
+  "'display' was mutated in place" warning — the harness's own injected display
+  helper being flagged. Injected/ambient names are now excluded from mutation
+  detection. (#418)
 - **Downstream cells now read "stale", not "idle", when an upstream changes.**
   When you edit an upstream cell (or its inputs, mount, or environment change),
   a downstream cell that already holds a result is now marked **stale** with an

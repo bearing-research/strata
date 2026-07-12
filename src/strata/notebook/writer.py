@@ -850,14 +850,20 @@ def add_cell_to_notebook(
     # for ``.md``, R-aware editors for ``.r``, etc.). Python is the
     # fallback for anything else (SQL cells use ``.py`` historically;
     # the cell harness reads source text by content, not extension).
-    extension_by_language = {"markdown": "md", "r": "r"}
+    extension_by_language = {"markdown": "md", "r": "r", "widget": "widget"}
     extension = extension_by_language.get(language, "py")
     cell_filename = f"{cell_id}.{extension}"
     cells_dir = notebook_dir / "cells"
     cells_dir.mkdir(exist_ok=True)
 
+    # Widget cells seed a starter control so a freshly-added one is usable
+    # immediately (its declaration is editable via the cell's "Edit controls"
+    # toggle). Every other language starts empty.
+    starter_source = (
+        "alpha = slider(0, 1, step=0.01, default=0.5)\n" if language == "widget" else ""
+    )
     with open(cells_dir / cell_filename, "w", encoding="utf-8") as f:
-        f.write("")
+        f.write(starter_source)
 
     # Add to cells list
     cells_data.append(
