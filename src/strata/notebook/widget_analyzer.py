@@ -80,7 +80,8 @@ def _build_descriptor(name: str, kind: str, call: ast.Call) -> WidgetDescriptor 
 
     for index, arg in enumerate(call.args):
         if index >= len(positional_names):
-            return f"`{name} = {kind}(...)` takes at most {len(positional_names)} positional argument(s)"
+            allowed = len(positional_names)
+            return f"`{name} = {kind}(...)` takes at most {allowed} positional argument(s)"
         try:
             params[positional_names[index]] = ast.literal_eval(arg)
         except (ValueError, SyntaxError):
@@ -143,3 +144,20 @@ def analyze_widget_cell(source: str) -> WidgetAnalysis:
         result.defines.append(name)
 
     return result
+
+
+def descriptor_provenance(descriptor: WidgetDescriptor, value: object) -> str:
+    """Content hash for one control at a given value.
+
+    Combines the control's *declaration* (kind + params) with its *current
+    value*, so changing either re-provenances the artifact — and returning a
+    slider to a prior value reproduces the same hash (a cache hit downstream).
+    """
+    import hashlib
+    import json
+
+    descriptor_json = json.dumps(
+        {"kind": descriptor.kind, "params": descriptor.params}, sort_keys=True, default=str
+    )
+    value_json = json.dumps(value, sort_keys=True, default=str)
+    return hashlib.sha256(f"{descriptor_json}\x00{value_json}".encode()).hexdigest()

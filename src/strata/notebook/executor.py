@@ -2884,6 +2884,49 @@ class CellExecutor:
             mutation_warnings=result_dict.get("mutation_warnings", []),
         )
 
+    async def _execute_widget_cell(
+        self,
+        cell_id: str,
+        source: str,
+        start_time: float,
+        *,
+        materialize_upstreams: bool,
+        use_cache: bool,
+    ) -> CellExecutionResult:
+        """Execute a widget cell — materialize each control's value artifact.
+
+        Widgets have no upstream (``materialize_upstreams`` is a no-op here),
+        no subprocess, and use the per-value cache scheme; like prompt/SQL we
+        persist the generic provenance triplet so ``compute_staleness`` keeps
+        the cell READY when its values are unchanged.
+        """
+        del materialize_upstreams  # widgets have no upstream inputs
+
+        from strata.notebook.widget_executor import execute_widget_cell
+
+        result_dict = execute_widget_cell(self.session, cell_id, source, use_cache=use_cache)
+
+        if result_dict.get("success"):
+            prov = await self._compute_cell_provenance(cell_id, source)
+            self.session.record_successful_execution_provenance(
+                cell_id,
+                prov.provenance_hash,
+                prov.source_hash,
+                prov.env_hash,
+            )
+
+        return CellExecutionResult(
+            cell_id=cell_id,
+            success=result_dict["success"],
+            outputs=result_dict.get("outputs", {}),
+            display_outputs=result_dict.get("display_outputs") or [],
+            error=result_dict.get("error"),
+            cache_hit=result_dict.get("cache_hit", False),
+            duration_ms=int((time.time() - start_time) * 1000),
+            execution_method=result_dict.get("execution_method", "widget"),
+            artifact_uri=result_dict.get("artifact_uri"),
+        )
+
     # ------------------------------------------------------------------
     # ① Materialise upstream cells
     # ------------------------------------------------------------------

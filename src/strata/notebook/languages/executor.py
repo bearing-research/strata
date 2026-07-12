@@ -296,12 +296,43 @@ class _MarkdownExecutor:
         return False
 
 
+class _WidgetExecutor:
+    """Adapter that delegates to ``CellExecutor._execute_widget_cell``."""
+
+    skips_execution_provenance = False
+    has_alternate_cache_scheme = True  # per-value hash via descriptor_provenance
+
+    async def execute(
+        self,
+        executor: CellExecutor,
+        cell_id: str,
+        source: str,
+        start_time: float,
+        *,
+        timeout_seconds: float,
+        materialize_upstreams: bool,
+        use_cache: bool,
+    ) -> CellExecutionResult:
+        del timeout_seconds  # widget cells do no timed work.
+        return await executor._execute_widget_cell(
+            cell_id,
+            source,
+            start_time,
+            materialize_upstreams=materialize_upstreams,
+            use_cache=use_cache,
+        )
+
+    def is_batchable(self, cell: CellState, executor: CellExecutor) -> bool:
+        return False
+
+
 # Built-in registrations — performed at import time so the registry is
 # populated by the time any dispatch site runs.
 register_language_executor(CellLanguage.PYTHON, _PythonExecutor())
 register_language_executor(CellLanguage.PROMPT, _PromptExecutor())
 register_language_executor(CellLanguage.SQL, _SqlExecutor())
 register_language_executor(CellLanguage.MARKDOWN, _MarkdownExecutor())
+register_language_executor(CellLanguage.WIDGET, _WidgetExecutor())
 
 
 # Re-export ``Any`` so the package-level ``__init__`` doesn't need a
