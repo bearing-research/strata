@@ -223,6 +223,11 @@ class CellLanguage(StrEnum):
     # is the right shape (loud failure, not silent fallthrough to
     # Python).
     R = "r"
+    # Interactive widget cells (P1: analyzer + DAG participation only). A
+    # widget cell is declarative — it produces value artifacts from
+    # user-set controls with no subprocess. The executor lands in P2; until
+    # then, executing one raises ``UnknownLanguageError`` (loud, not silent).
+    WIDGET = "widget"
 
 
 class DiagnosticSeverity(StrEnum):

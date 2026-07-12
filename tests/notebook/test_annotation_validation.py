@@ -522,3 +522,37 @@ class TestTableAnnotationValidation:
             "# @table trips file:///wh#a.trips\n# @table trips file:///wh#b.trips\nx = trips"
         )
         assert "table_duplicate_name" in _codes(cell, _nb())
+
+
+class TestWidgetCellValidation:
+    """Widget cells surface structural + semantic diagnostics (advisory)."""
+
+    @staticmethod
+    def _widget(source: str) -> CellState:
+        return CellState(id="w1", source=source, language="widget")
+
+    def test_clean_widget_cell_has_no_diagnostics(self):
+        cell = self._widget("alpha = slider(0, 1, step=0.1, default=0.5)")
+        assert _codes(cell, _nb()) == []
+
+    def test_unknown_control_flagged(self):
+        cell = self._widget("x = frobnicate(1)")
+        assert "widget_invalid" in _codes(cell, _nb())
+
+    def test_slider_bad_range_flagged(self):
+        cell = self._widget("x = slider(10, 1)")
+        assert "widget_bad_range" in _codes(cell, _nb())
+
+    def test_default_out_of_range_flagged(self):
+        cell = self._widget("x = slider(0, 10, default=50)")
+        assert "widget_default_out_of_range" in _codes(cell, _nb())
+
+    def test_dropdown_default_not_an_option_flagged(self):
+        cell = self._widget('x = dropdown(["a", "b"], default="c")')
+        assert "widget_default_not_an_option" in _codes(cell, _nb())
+
+    def test_widget_cell_skips_python_worker_checks(self):
+        # A '@worker' line in a widget cell must not trigger the Python
+        # worker_unknown check — widget cells take the widget validation path.
+        cell = self._widget("# @worker gpu\nalpha = slider(0, 1)")
+        assert "worker_unknown" not in _codes(cell, _nb())
