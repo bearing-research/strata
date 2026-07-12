@@ -2189,3 +2189,55 @@ async def test_live_cost_gate_leaves_expensive_downstream_stale(tmp_path):
 
     # The expensive cell was NOT auto-run — it stays STALE for a manual run.
     assert session.notebook_state.get_cell("consume").status == CellStatus.STALE
+
+
+@pytest.mark.asyncio
+async def test_read_only_viewer_rejects_mutations_but_allows_widget_update(tmp_path):
+    """A `?role=viewer` (app-mode) connection can drive widgets + sync, but every
+    mutation frame is rejected with a `read_only` error."""
+    from strata.notebook.ws import notebook_websocket
+
+    notebook_dir = create_notebook(tmp_path, "App View")
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+    session = open_session(notebook_dir)
+
+    # Viewer sends a source edit (mutation) then a widget_update.
+    viewer = FakeNotebookWebSocket(
+        inbound=[
+            _envelope("cell_source_update", {"cell_id": "c1", "source": "y = 2"}),
+            _envelope("widget_update", {"cell_id": "c1", "values": {"a": 1}}),
+        ],
+        query_params={"role": "viewer"},
+    )
+    await notebook_websocket(cast(WebSocket, viewer), session.id)
+
+    errors = [f for f in viewer.sent if f["type"] == "error"]
+    codes = [f["payload"].get("code") for f in errors]
+    # The mutation was rejected read-only …
+    assert "read_only" in codes
+    # … but widget_update passed the gate (it errors only because c1 isn't a
+    # widget cell — not a read_only rejection).
+    assert any(
+        e["payload"].get("code") != "read_only" and "widget" in e["payload"].get("error", "")
+        for e in errors
+    )
+
+
+@pytest.mark.asyncio
+async def test_editor_connection_allows_mutations(tmp_path):
+    """A normal (no role) connection is not read-only — mutations pass the gate."""
+    from strata.notebook.ws import notebook_websocket
+
+    notebook_dir = create_notebook(tmp_path, "Editor")
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+    session = open_session(notebook_dir)
+
+    editor = FakeNotebookWebSocket(
+        inbound=[_envelope("cell_source_update", {"cell_id": "c1", "source": "x = 2"})],
+    )
+    await notebook_websocket(cast(WebSocket, editor), session.id)
+
+    codes = [f["payload"].get("code") for f in editor.sent if f["type"] == "error"]
+    assert "read_only" not in codes

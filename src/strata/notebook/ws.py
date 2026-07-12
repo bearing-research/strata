@@ -588,6 +588,18 @@ def _ws_owner_allowed(owner: str | None, caller: str | None) -> bool:
     return owner == caller
 
 
+# App-mode (read-only viewer) connections may only drive widgets + request
+# state — never edit, run arbitrary cells, change deps, or open an inspect
+# REPL. A viewer connects with ``?role=viewer``; every other C→S frame is
+# rejected so a served app can't be mutated by a client.
+_VIEWER_ALLOWED_FRAMES = frozenset(
+    {
+        MessageType.WIDGET_UPDATE,
+        MessageType.NOTEBOOK_SYNC,
+    }
+)
+
+
 @router.websocket("/ws/{notebook_id}")
 async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     """WebSocket endpoint for real-time notebook updates.
@@ -656,6 +668,11 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     # Accept connection
     await websocket.accept()
 
+    # App-mode viewers connect read-only (``?role=viewer``): they render the
+    # widgets + outputs and may drive controls, but cannot edit or run the
+    # notebook. Enforced per-frame in the dispatch loop below.
+    read_only = websocket.query_params.get("role") == "viewer"
+
     # If a previous client disconnected within the grace window and the
     # cell is still running, abort the pending teardown so we keep the
     # execution alive for this reconnect.
@@ -687,6 +704,20 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                             MessageType.ERROR,
                             execution_state.sequence,
                             {"error": f"Unknown message type: {msg_type}"},
+                        )
+                    )
+                )
+                continue
+            if read_only and msg_type not in _VIEWER_ALLOWED_FRAMES:
+                await websocket.send_text(
+                    _json_encode(
+                        _make_message(
+                            MessageType.ERROR,
+                            execution_state.sequence,
+                            {
+                                "error": f"'{msg_type}' is not allowed in read-only app view",
+                                "code": "read_only",
+                            },
                         )
                     )
                 )
