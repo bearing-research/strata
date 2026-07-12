@@ -42,6 +42,11 @@ class MessageType(StrEnum):
     DEPENDENCY_REMOVE = "dependency_remove"
     VARIANT_SET_ACTIVE = "variant_set_active"
     VARIANT_ADD = "variant_add"
+    # A widget cell's control value(s) changed. Payload: ``{cell_id, values:
+    # {name: value}}`` (partial updates allowed). The server persists the value
+    # to runtime.json, re-materializes the widget's value artifacts, and marks
+    # downstream cells stale (Tier 0 — the user then runs them).
+    WIDGET_UPDATE = "widget_update"
     AGENT_CANCEL = "agent_cancel"
     AGENT_CONFIRM_RESPONSE = "agent_confirm_response"
 

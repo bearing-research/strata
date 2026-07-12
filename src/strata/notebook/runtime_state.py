@@ -197,6 +197,25 @@ def persist_cell_provenance(
     save_runtime_state(notebook_dir, state)
 
 
+def persist_cell_widget_values(
+    notebook_dir: Path,
+    cell_id: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge *values* into a widget cell's persisted control values.
+
+    Partial updates are allowed — only the named controls change. The current
+    value of a widget control is runtime state (a slider drag must not churn
+    ``notebook.toml``), keyed off the committed declaration + default. Returns
+    the merged value map.
+    """
+    state = load_runtime_state(notebook_dir)
+    entry = state.get_or_create_cell(cell_id)
+    entry.widget_values = {**entry.widget_values, **values}
+    save_runtime_state(notebook_dir, state)
+    return dict(entry.widget_values)
+
+
 def persist_cell_test_result(
     notebook_dir: Path,
     cell_id: str,
