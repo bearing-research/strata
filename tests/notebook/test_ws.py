@@ -2135,8 +2135,14 @@ async def test_live_widget_auto_cascades_cheap_downstream(tmp_path):
     session._analyze_and_build_dag()
     session.environment_sync_state = "ready"
 
+    from strata.notebook.session import ExecutionSample
+
     await _run_cell_to_terminal(session, "consume")
     assert session.notebook_state.get_cell("consume").status == CellStatus.READY
+    # Pin the recorded duration below the auto-run cost gate so the assertion
+    # doesn't depend on the harness subprocess's real speed (which can exceed
+    # the threshold under a loaded full-suite run — the source of a flake).
+    session.execution_history["consume"] = [ExecutionSample(duration_ms=1.0, cache_hit=False)]
 
     fake, execution_state = _make_fake_ws(session)
     await _handle_widget_update(
