@@ -55,9 +55,11 @@ class FakeNotebookWebSocket:
         *,
         inbound: list[str] | None = None,
         headers: dict[str, str] | None = None,
+        query_params: dict[str, str] | None = None,
     ) -> None:
         self.inbound: deque[str] = deque(inbound or [])
         self.headers: dict[str, str] = headers or {}
+        self.query_params: dict[str, str] = query_params or {}
         self.raw_sent: list[str] = []
         self.accepted = False
         self.closed: tuple[int, str] | None = None
