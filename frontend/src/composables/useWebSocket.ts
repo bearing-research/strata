@@ -38,7 +38,7 @@ interface MessageHandler {
   (msg: WsMessage): void
 }
 
-export function useWebSocket(notebookId: string) {
+export function useWebSocket(notebookId: string, options: { role?: string } = {}) {
   const connection = shallowRef<WebSocket | null>(null)
   const state = ref<WsConnectionState>('disconnected')
   const error = ref<string | null>(null)
@@ -63,7 +63,10 @@ export function useWebSocket(notebookId: string) {
     state.value = 'connecting'
     error.value = null
 
-    const wsUrl = `${STRATA_WS_URL}/v1/notebooks/ws/${notebookId}`
+    // App-view (read-only) connections declare `?role=viewer` so the server
+    // rejects mutation frames.
+    const roleQuery = options.role ? `?role=${encodeURIComponent(options.role)}` : ''
+    const wsUrl = `${STRATA_WS_URL}/v1/notebooks/ws/${notebookId}${roleQuery}`
 
     try {
       const ws = new WebSocket(wsUrl)

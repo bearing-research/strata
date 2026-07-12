@@ -1940,12 +1940,20 @@ const agentAutoApprove = ref(false)
 
 let wsInstance: ReturnType<typeof useWebSocket> | null = null
 
+// App-view (read-only) mode: when true, the WS connects with `?role=viewer`
+// so the server rejects any mutation frame. Set before opening the session.
+const viewerMode = ref(false)
+
+function setViewerMode(on: boolean) {
+  viewerMode.value = on
+}
+
 function initializeWebSocket() {
   if (!wsInstance) {
     const notebookId = (notebook as any).sessionId
     if (!notebookId) return
 
-    wsInstance = useWebSocket(notebookId)
+    wsInstance = useWebSocket(notebookId, { role: viewerMode.value ? 'viewer' : undefined })
 
     wsInstance.onMessage('cell_status', (msg: WsMessage) => {
       const p = msg.payload as Record<string, any>
@@ -3841,6 +3849,7 @@ export function useNotebook() {
     updateSourceWebSocket,
     setVariantActive,
     updateWidgetValues,
+    setViewerMode,
     selectVariantDisplay,
     variantDisplayCellId,
     addVariant,

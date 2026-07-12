@@ -20,6 +20,12 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/app/:sessionId',
+      name: 'app',
+      component: () => import('./views/AppView.vue'),
+      props: true,
+    },
+    {
       path: '/logs',
       name: 'logs',
       component: () => import('./views/LogsPage.vue'),
