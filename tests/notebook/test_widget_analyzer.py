@@ -47,6 +47,32 @@ class TestAnalyzeWidgetCell:
         defaults = {d.name: d.default for d in result.descriptors}
         assert defaults == {"a": 2, "b": "x", "c": False, "d": ""}
 
+    def test_slider_step_defaulted_from_range(self):
+        # Omitting step fills in a ~100-tick, 1/2/5 x 10^n increment; explicit
+        # step is left untouched. slider(0, 1) keeps the historic 0.01.
+        steps = {}
+        for src in (
+            "u = slider(0, 1)",
+            "h = slider(0, 100)",
+            "m = slider(0, 1000000)",
+            "t = slider(0, 10)",
+            "w = slider(1, 200)",
+        ):
+            d = analyze_widget_cell(src).descriptors[0]
+            steps[d.name] = d.params["step"]
+        assert steps == {"u": 0.01, "h": 1, "m": 10000, "t": 0.1, "w": 2}
+        # Integer bounds yield an integer step (no 1.0 float creeping in).
+        assert isinstance(steps["h"], int)
+
+    def test_explicit_step_is_not_overridden(self):
+        d = analyze_widget_cell("a = slider(0, 1, step=0.05)").descriptors[0]
+        assert d.params["step"] == 0.05
+
+    def test_no_step_for_degenerate_or_nonnumeric_range(self):
+        # Bad ranges are left for advisory validation, not silently patched.
+        assert "step" not in analyze_widget_cell("a = slider(0, 0)").descriptors[0].params
+        assert "step" not in analyze_widget_cell("a = slider(5, 2)").descriptors[0].params
+
     def test_ignores_non_control_lines(self):
         # Blank lines and non-assignment statements are skipped, not errors.
         result = analyze_widget_cell("\nalpha = slider(0, 1)\n")

@@ -593,7 +593,10 @@ report
 | `text` | string | `text(default=)` |
 
 Arguments must be literals. Omit `default=` and it's inferred (a slider's `min`,
-a dropdown's first option, `False`, `""`).
+a dropdown's first option, `False`, `""`). Omit a slider's `step=` and it's
+derived from the range — roughly `(max - min) / 100`, snapped to a readable
+`1`/`2`/`5` × 10ⁿ increment (so `slider(0, 1)` steps by `0.01`, `slider(0, 100)`
+by `1`). Pass `step=` explicitly to override.
 
 ### How it works
 
