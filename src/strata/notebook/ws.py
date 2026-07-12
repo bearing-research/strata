@@ -2977,6 +2977,60 @@ async def _broadcast_message(notebook_id: str, message: dict[str, Any]) -> None:
 #
 # Maps every client-to-server message type to its handler. Each handler
 # declares only the dispatch args it actually consumes -- e.g.
+# Live-mode cost gate: a downstream cell whose last run took longer than this
+# stays STALE (and short-circuits the cascade past it) rather than auto-running
+# on every control change. Configurable via reactive-on-save's cost model later.
+_LIVE_COST_THRESHOLD_MS = 2000.0
+
+
+async def _run_live_cascade(
+    session: NotebookSession,
+    widget_cell_id: str,
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+) -> None:
+    """Auto-run the cheap downstream cells after a @live widget change.
+
+    Walks the widget cell's transitive downstream in topological order and runs
+    each currently-stale cell in **force** mode (against the fresh upstream
+    artifacts, no upstream re-materialization). A cell whose last run exceeded
+    the cost threshold — or any cell downstream of a skipped/failed one — is
+    left STALE, so an expensive tail doesn't re-run on every drag.
+    """
+    dag = session.dag
+    if dag is None:
+        return
+
+    reachable: set[str] = set()
+    queue = list(dag.cell_downstream.get(widget_cell_id, []))
+    while queue:
+        cid = queue.pop()
+        if cid in reachable:
+            continue
+        reachable.add(cid)
+        queue.extend(dag.cell_downstream.get(cid, []))
+
+    blocked: set[str] = set()
+    for cid in dag.topological_order:
+        if cid not in reachable:
+            continue
+        cell = session.notebook_state.get_cell(cid)
+        if cell is None or cell.status != CellStatus.STALE:
+            continue
+        if any(up in blocked for up in dag.cell_upstream.get(cid, [])):
+            blocked.add(cid)  # a stale input can't be produced — don't run
+            continue
+        samples = session.execution_history.get(cid) or []
+        if samples and samples[-1].duration_ms > _LIVE_COST_THRESHOLD_MS:
+            blocked.add(cid)  # too expensive to auto-run; leave it stale
+            continue
+        result = await execute_cell_and_broadcast(
+            session, cid, execution_state, notebook_id, mode="force"
+        )
+        if result is None or not result.success:
+            blocked.add(cid)
+
+
 async def _handle_widget_update(
     websocket: WebSocket,
     session: NotebookSession,
@@ -3032,18 +3086,24 @@ async def _handle_widget_update(
         )
         return
 
+    from strata.notebook.annotations import parse_annotations
+
+    is_live = parse_annotations(cell.source).live
+
     # Re-materialize the widget cell at the new values (force = cache-off, no
     # upstream materialization — widgets have none). The shared path broadcasts
-    # the widget cell's status + the downstream staleness changes.
-    scheduled = await _schedule_execution(
-        websocket,
-        execution_state,
-        notebook_id,
-        cell_id,
-        seq,
-        lambda: execute_cell_and_broadcast(
+    # the widget cell's status + the downstream staleness changes. When the cell
+    # is `# @live`, chain the cost-gated auto-cascade so cheap downstream cells
+    # re-run on the change (Tier 1) instead of waiting for a manual run.
+    async def _operation() -> None:
+        await execute_cell_and_broadcast(
             session, cell_id, execution_state, notebook_id, mode="force"
-        ),
+        )
+        if is_live:
+            await _run_live_cascade(session, cell_id, execution_state, notebook_id)
+
+    scheduled = await _schedule_execution(
+        websocket, execution_state, notebook_id, cell_id, seq, _operation
     )
     if not scheduled:
         await _release_execution_request(execution_state, cell_id)

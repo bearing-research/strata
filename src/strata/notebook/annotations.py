@@ -299,6 +299,11 @@ class CellAnnotations:
     # Loop cell annotations
     loop: LoopAnnotation | None = None
 
+    # Widget live mode. ``# @live`` on a widget cell auto-runs the (cheap)
+    # downstream cells when a control changes, instead of leaving them stale
+    # for a manual run. ``# @live off`` disables it.
+    live: bool = False
+
     # SQL cell annotations
     sql: SqlAnnotation | None = None
     cache: CachePolicy | None = None
@@ -442,6 +447,10 @@ def parse_annotations(source: str) -> CellAnnotations:
             variant = _parse_variant_annotation(value)
             if variant is not None:
                 result.variant = variant
+
+        elif key == "live":
+            # ``# @live`` (on) or ``# @live off`` — auto-run downstream on change.
+            result.live = value.strip().lower() not in ("off", "false", "no", "0")
 
         elif key == "per_variant":
             # ``# @per_variant`` (infer the group) or ``# @per_variant <group>``.

@@ -10,9 +10,27 @@ import type { Cell, WidgetDescriptor } from '../types/notebook'
  * the value artifact and stales downstream cells.
  */
 const props = defineProps<{ cell: Cell }>()
-const { updateWidgetValues } = useNotebook()
+const { updateWidgetValues, updateSource, flushCellSource } = useNotebook()
 
 const descriptors = computed<WidgetDescriptor[]>(() => props.cell.widget?.descriptors ?? [])
+
+// Live mode: whether the cell source carries a `# @live` annotation. When on,
+// changing a control auto-runs the cheap downstream cells (backend cost-gated).
+const isLive = computed(() =>
+  props.cell.source.split('\n').some((line) => {
+    const match = /^#\s*@live\b\s*(\w+)?/.exec(line.trim())
+    return Boolean(match) && !['off', 'false', 'no', '0'].includes((match?.[1] ?? '').toLowerCase())
+  }),
+)
+
+function toggleLive() {
+  const lines = props.cell.source.split('\n')
+  const idx = lines.findIndex((line) => /^#\s*@live\b/.test(line.trim()))
+  const next =
+    idx >= 0 ? lines.filter((_, i) => i !== idx).join('\n') : `# @live\n${props.cell.source}`
+  updateSource(props.cell.id, next)
+  flushCellSource(props.cell.id)
+}
 
 function currentValue(d: WidgetDescriptor): unknown {
   const v = props.cell.widget?.values?.[d.name]
@@ -54,6 +72,21 @@ function onCheckbox(d: WidgetDescriptor, e: Event) {
 
 <template>
   <div class="widget-cell">
+    <div class="widget-toolbar">
+      <button
+        type="button"
+        class="live-toggle"
+        :class="{ on: isLive }"
+        :title="
+          isLive
+            ? 'Live: control changes auto-run downstream cells'
+            : 'Off: control changes mark downstream stale (run manually)'
+        "
+        @click="toggleLive"
+      >
+        ⚡ Live{{ isLive ? ' on' : ' off' }}
+      </button>
+    </div>
     <div v-if="!descriptors.length" class="widget-empty">
       No controls. Declare one per line, e.g. <code>alpha = slider(0, 1, default=0.5)</code>.
     </div>
@@ -116,6 +149,23 @@ function onCheckbox(d: WidgetDescriptor, e: Event) {
   flex-direction: column;
   gap: 10px;
   padding: 12px;
+}
+.widget-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+.live-toggle {
+  background: var(--bg-input);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.live-toggle.on {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
 }
 .widget-empty {
   color: var(--text-muted);

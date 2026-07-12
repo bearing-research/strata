@@ -2114,3 +2114,78 @@ async def test_widget_update_rejects_non_widget_cell(tmp_path):
         session.id,
     )
     assert fake.frames_of("error")
+
+
+@pytest.mark.asyncio
+async def test_live_widget_auto_cascades_cheap_downstream(tmp_path):
+    """A `# @live` widget cell auto-runs cheap downstream cells on a value change."""
+    from strata.notebook.models import CellLanguage, CellStatus
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.ws import _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Live Widget")
+    add_cell_to_notebook(nb, "controls", None)
+    add_cell_to_notebook(nb, "consume", "controls")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
+    session.notebook_state.get_cell(
+        "controls"
+    ).source = "# @live\nalpha = slider(0, 1, default=0.5)"
+    session.notebook_state.get_cell("consume").source = "beta = alpha * 2\nbeta"
+    session._analyze_and_build_dag()
+    session.environment_sync_state = "ready"
+
+    await _run_cell_to_terminal(session, "consume")
+    assert session.notebook_state.get_cell("consume").status == CellStatus.READY
+
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "controls", "values": {"alpha": 0.25}},
+        execution_state,
+        session.id,
+    )
+    await _drain_execution(execution_state)
+
+    # Live mode re-ran the downstream cell — it's READY again, not left STALE.
+    assert session.notebook_state.get_cell("consume").status == CellStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_live_cost_gate_leaves_expensive_downstream_stale(tmp_path):
+    """A downstream cell whose last run was expensive stays STALE under live mode."""
+    from strata.notebook.models import CellLanguage, CellStatus
+    from strata.notebook.session import ExecutionSample, NotebookSession
+    from strata.notebook.ws import _LIVE_COST_THRESHOLD_MS, _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Live Cost Gate")
+    add_cell_to_notebook(nb, "controls", None)
+    add_cell_to_notebook(nb, "consume", "controls")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
+    session.notebook_state.get_cell(
+        "controls"
+    ).source = "# @live\nalpha = slider(0, 1, default=0.5)"
+    session.notebook_state.get_cell("consume").source = "beta = alpha * 2\nbeta"
+    session._analyze_and_build_dag()
+    session.environment_sync_state = "ready"
+
+    await _run_cell_to_terminal(session, "consume")
+    # Pretend the consumer's last run was very slow — over the auto-run gate.
+    session.execution_history["consume"] = [
+        ExecutionSample(duration_ms=_LIVE_COST_THRESHOLD_MS + 1000, cache_hit=False)
+    ]
+
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "controls", "values": {"alpha": 0.25}},
+        execution_state,
+        session.id,
+    )
+    await _drain_execution(execution_state)
+
+    # The expensive cell was NOT auto-run — it stays STALE for a manual run.
+    assert session.notebook_state.get_cell("consume").status == CellStatus.STALE
