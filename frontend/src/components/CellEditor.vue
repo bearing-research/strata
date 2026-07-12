@@ -115,6 +115,9 @@ function previewArraysFor(output: CellOutput): unknown[][] {
 }
 
 const isPythonCell = computed(() => props.cell.language === 'python')
+// Widget cells render their control panel in place of the editor; this toggles
+// the source editor so the control *declaration* can still be edited in the UI.
+const widgetShowSource = ref(false)
 const isTesting = computed(() => storeIsTesting(props.cell.id))
 
 interface TestBadge {
@@ -1101,13 +1104,19 @@ function outputKey(output: CellOutput, index: number): string {
         v-html="renderedMarkdownSource || '<p class=\'placeholder\'>(empty markdown cell)</p>'"
       ></div>
 
-      <!-- Widget cells render their control panel in place of the editor. -->
-      <WidgetCell v-if="!folded && cell.language === 'widget'" :cell="cell" />
+      <!-- Widget cells render their control panel in place of the editor, with
+           a toggle to reveal the declaration source for editing. -->
+      <div v-if="!folded && cell.language === 'widget'" class="widget-source-toggle">
+        <button type="button" @click="widgetShowSource = !widgetShowSource">
+          {{ widgetShowSource ? '✓ Done editing controls' : '✎ Edit controls' }}
+        </button>
+      </div>
+      <WidgetCell v-if="!folded && cell.language === 'widget' && !widgetShowSource" :cell="cell" />
 
       <div
         v-show="
           !folded &&
-          cell.language !== 'widget' &&
+          (cell.language !== 'widget' || widgetShowSource) &&
           !(cell.language === 'markdown' && isMarkdownPreviewing)
         "
         ref="editorEl"
@@ -2090,6 +2099,22 @@ function outputKey(output: CellOutput, index: number): string {
   /* CodeMirror auto-sizes to content; a forced min-height left ~18px of
      dead space below 1-line cells. The cell-gutter padding (8px top +
      bottom) already guarantees a visible click target on empty cells. */
+}
+.widget-source-toggle {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px 0;
+}
+.widget-source-toggle button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.widget-source-toggle button:hover {
+  color: var(--accent-primary);
 }
 
 .cell-output {

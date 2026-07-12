@@ -158,6 +158,7 @@ def test_add_cell_picks_extension_by_language():
             ("sql-cell", "sql", "py"),  # SQL keeps .py historically.
             ("prompt-cell", "prompt", "py"),
             ("r-cell", "r", "r"),
+            ("widget-cell", "widget", "widget"),
         ]
         for cell_id, language, expected_ext in cases:
             add_cell_to_notebook(notebook_dir, cell_id, language=language)
@@ -170,6 +171,10 @@ def test_add_cell_picks_extension_by_language():
         by_id = {cell.id: cell.language for cell in notebook_state.cells}
         assert by_id["r-cell"].value == "r"
         assert by_id["md-cell"].value == "markdown"
+        assert by_id["widget-cell"].value == "widget"
+        # Widget cells seed a starter control so they're usable immediately.
+        widget_source = next(c.source for c in notebook_state.cells if c.id == "widget-cell")
+        assert "slider(" in widget_source
 
 
 def test_add_cell_after():

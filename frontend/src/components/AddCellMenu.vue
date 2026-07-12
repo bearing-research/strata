@@ -12,6 +12,7 @@ const CELL_TYPES: CellTypeOption[] = [
   { language: 'sql', label: 'SQL', description: 'Query a connected database' },
   { language: 'r', label: 'R', description: 'R cell — stats and tidyverse' },
   { language: 'prompt', label: 'Prompt', description: 'LLM-powered template' },
+  { language: 'widget', label: 'Widget', description: 'Interactive control panel' },
   { language: 'markdown', label: 'Markdown', description: 'Documentation / prose' },
 ]
 
