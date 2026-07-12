@@ -43,6 +43,8 @@ def validate_cell_annotations(
         return variant_diagnostics + _validate_prompt_cell_annotations(cell)
     if cell.language == CellLanguage.SQL:
         return variant_diagnostics + _validate_sql_cell_annotations(cell, notebook_state)
+    if cell.language == CellLanguage.WIDGET:
+        return variant_diagnostics + _validate_widget_cell_annotations(cell)
     if cell.language == CellLanguage.MARKDOWN:
         # Markdown cells are pure prose; ``# @worker`` etc. would be a
         # markdown heading, not an annotation. No validation applies.
@@ -296,6 +298,96 @@ def _validate_prompt_cell_annotations(cell: CellState) -> list[AnnotationDiagnos
             )
         )
     return diagnostics
+
+
+def _validate_widget_cell_annotations(cell: CellState) -> list[AnnotationDiagnostic]:
+    """Surface widget-cell errors: structural (unknown control, non-literal
+    argument, duplicate variable) plus semantic (slider range, default bounds).
+
+    Called only for ``language == "widget"`` cells. Advisory only — like every
+    diagnostic here, these never block execution.
+    """
+    from strata.notebook.widget_analyzer import analyze_widget_cell
+
+    analysis = analyze_widget_cell(cell.source)
+    diagnostics: list[AnnotationDiagnostic] = []
+
+    for message in analysis.errors:
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="widget_invalid",
+                message=message,
+                line=None,
+            )
+        )
+
+    for descriptor in analysis.descriptors:
+        line = _find_widget_line(cell.source, descriptor.name)
+        diagnostics.extend(_validate_widget_descriptor(descriptor, line))
+
+    return diagnostics
+
+
+def _validate_widget_descriptor(descriptor, line: int | None) -> list[AnnotationDiagnostic]:
+    """Semantic checks for one control: ranges + defaults in bounds."""
+    diagnostics: list[AnnotationDiagnostic] = []
+    params = descriptor.params
+    low, high = params.get("min"), params.get("max")
+
+    if (
+        descriptor.kind == "slider"
+        and isinstance(low, int | float)
+        and isinstance(high, int | float)
+    ):
+        if low >= high:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="widget_bad_range",
+                    message=f"`{descriptor.name}`: slider min ({low}) must be less than max ({high}).",
+                    line=line,
+                )
+            )
+
+    default = descriptor.default
+    if descriptor.kind in ("slider", "number") and isinstance(default, int | float):
+        if isinstance(low, int | float) and default < low:
+            diagnostics.append(_default_oob(descriptor.name, default, line))
+        elif isinstance(high, int | float) and default > high:
+            diagnostics.append(_default_oob(descriptor.name, default, line))
+
+    if descriptor.kind == "dropdown":
+        options = params.get("options")
+        if isinstance(options, list) and default is not None and default not in options:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="widget_default_not_an_option",
+                    message=f"`{descriptor.name}`: default {default!r} is not one of the options.",
+                    line=line,
+                )
+            )
+
+    return diagnostics
+
+
+def _default_oob(name: str, default, line: int | None) -> AnnotationDiagnostic:
+    return AnnotationDiagnostic(
+        severity=DiagnosticSeverity.WARN,
+        code="widget_default_out_of_range",
+        message=f"`{name}`: default {default} is outside the control's min/max range.",
+        line=line,
+    )
+
+
+def _find_widget_line(source: str, name: str) -> int | None:
+    """1-based line of the ``name = control(...)`` declaration, if found."""
+    for index, raw in enumerate(source.splitlines(), start=1):
+        stripped = raw.lstrip()
+        if stripped.startswith(f"{name} ") or stripped.startswith(f"{name}="):
+            return index
+    return None
 
 
 def _validate_referenced_connection(

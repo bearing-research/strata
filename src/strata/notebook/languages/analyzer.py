@@ -171,6 +171,21 @@ class _MarkdownAnalyzer:
         return AnalyzedCell()
 
 
+class _WidgetAnalyzer:
+    """Adapter over ``strata.notebook.widget_analyzer.analyze_widget_cell``.
+
+    A widget cell is a pure producer: each declared control is a
+    ``defines`` variable downstream cells consume, and it has no upstream
+    (``references`` is always empty).
+    """
+
+    def analyze(self, cell: CellState, session: NotebookSession) -> AnalyzedCell:
+        from strata.notebook.widget_analyzer import analyze_widget_cell
+
+        result = analyze_widget_cell(cell.source)
+        return AnalyzedCell(defines=list(result.defines), references=[])
+
+
 # Built-in registrations. Performed at import time so the registry is
 # populated by the time any ``session.py`` dispatch runs. New languages
 # (R, Lean) register similarly from their own modules.
@@ -178,3 +193,4 @@ register_language_analyzer(CellLanguage.PYTHON, _PythonAnalyzer())
 register_language_analyzer(CellLanguage.PROMPT, _PromptAnalyzer())
 register_language_analyzer(CellLanguage.SQL, _SqlAnalyzer())
 register_language_analyzer(CellLanguage.MARKDOWN, _MarkdownAnalyzer())
+register_language_analyzer(CellLanguage.WIDGET, _WidgetAnalyzer())
