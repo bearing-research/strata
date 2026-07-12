@@ -520,6 +520,14 @@ function goHome() {
       </div>
       <div class="header-right">
         <router-link
+          :to="`/app/${sessionId}`"
+          class="header-logs-link"
+          data-testid="nav-app"
+          title="Open as read-only app (widgets + outputs)"
+        >
+          App
+        </router-link>
+        <router-link
           to="/artifacts"
           class="header-logs-link"
           data-testid="nav-artifacts"
