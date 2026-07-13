@@ -28,6 +28,30 @@ class CellAnalysis:
     error: str | None = None
 
 
+def imported_names(source: str) -> set[str]:
+    """Top-level names bound by ``import`` statements in *source*.
+
+    These bindings are re-importable by name in any cell sharing the venv, so
+    a consuming cell that's missing one can simply re-import it — unlike a data
+    artifact, whose absence is a real materialisation gap. Used to pick the log
+    level when an upstream variable's artifact is unexpectedly absent. Matches
+    the binding rule in :meth:`VariableAnalyzer.visit_Import` (``asname`` or the
+    imported name); star imports contribute nothing.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                names.add(alias.asname or alias.name)
+    return names
+
+
 def _collect_name_targets(target: ast.expr, out: set[str]) -> None:
     """Recursively collect Name ids from an assignment target.
 

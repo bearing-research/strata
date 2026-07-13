@@ -764,3 +764,35 @@ class TestAnalyzerGlobalWrites:
         result = analyze_cell("def f():\n    x = 1\n    return x\n")
         assert "x" not in result.defines
         assert result.defines == ["f"]
+
+
+class TestImportedNames:
+    """imported_names — re-importable bindings, used to pick the log level when
+    an upstream variable's artifact is unexpectedly absent."""
+
+    def test_plain_and_aliased_imports(self):
+        from strata.notebook.analyzer import imported_names
+
+        names = imported_names("import numpy as np\nimport math\nimport matplotlib.pyplot as plt\n")
+        assert names == {"np", "math", "plt"}
+
+    def test_from_imports(self):
+        from strata.notebook.analyzer import imported_names
+
+        assert imported_names("from os import path, getcwd as cwd\n") == {"path", "cwd"}
+
+    def test_star_import_contributes_nothing(self):
+        from strata.notebook.analyzer import imported_names
+
+        assert imported_names("from os import *\n") == set()
+
+    def test_non_imports_excluded(self):
+        from strata.notebook.analyzer import imported_names
+
+        # Regular assignments / defs are not import bindings.
+        assert imported_names("x = 1\ndef f():\n    import json\n    return json\n") == set()
+
+    def test_syntax_error_is_empty(self):
+        from strata.notebook.analyzer import imported_names
+
+        assert imported_names("import (((") == set()

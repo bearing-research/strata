@@ -234,6 +234,27 @@ class TestModeCoherence:
             )
         assert "require_tenant_header" in str(exc_info.value)
 
+    def test_service_with_mcp_enabled_rejected(self, tmp_path):
+        """Service mode + mcp_enabled=True is incoherent (MCP has no per-request auth)."""
+        with pytest.raises(ValueError) as exc_info:
+            StrataConfig(
+                cache_dir=tmp_path / "cache",
+                deployment_mode="service",
+                artifact_dir=tmp_path / "artifacts",
+                mcp_enabled=True,
+            )
+        assert "mcp_enabled" in str(exc_info.value)
+
+    def test_personal_with_mcp_enabled_allowed(self, tmp_path):
+        """Personal mode + mcp_enabled=True is coherent — the supported combination."""
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            deployment_mode="personal",
+            artifact_dir=tmp_path / "artifacts",
+            mcp_enabled=True,
+        )
+        assert config.mcp_enabled is True
+
     def test_personal_with_multiple_conflicts_lists_all(self, tmp_path):
         """When several service-mode flags leak into personal, all are listed."""
         with pytest.raises(ValueError) as exc_info:

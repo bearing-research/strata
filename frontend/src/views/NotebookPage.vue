@@ -37,6 +37,7 @@ const { record, remove, findBySessionId } = useRecentNotebooks()
 const {
   notebook,
   orderedCells,
+  variantDisplayCellId,
   connected,
   connectError,
   environmentMutationActive,
@@ -71,12 +72,23 @@ function selectBottomTab(tab: 'execution' | 'registry') {
 const editingName = ref(false)
 const nameInput = ref<HTMLInputElement | null>(null)
 
-// Variant cells: only the active variant of each group renders. The
-// CellEditor for the active cell shows the tab strip; switching variants
-// re-renders this list with a different cell visible.
-const renderedCells = computed(() =>
-  orderedCells.value.filter((cell) => cell.variantActive !== false),
-)
+// Variant cells render in a single slot per group. Switch mode: only the
+// active member is `variantActive`, so the filter below keeps just it. Sweep
+// mode: every member is active and runs, but the editor still shows one slot —
+// the display-selected member (the tab strip swaps which), so collapse the rest.
+const renderedCells = computed(() => {
+  const sweepDisplay = new Map<string, string>()
+  for (const g of notebook.variantGroups) {
+    if (g.mode === 'sweep') sweepDisplay.set(g.group, variantDisplayCellId(g))
+  }
+  return orderedCells.value.filter((cell) => {
+    if (cell.variantActive === false) return false
+    if (cell.variantGroup && sweepDisplay.has(cell.variantGroup)) {
+      return cell.id === sweepDisplay.get(cell.variantGroup)
+    }
+    return true
+  })
+})
 const nameDraft = ref('')
 const loading = ref(true)
 const renamingNotebook = ref(false)
@@ -507,6 +519,25 @@ function goHome() {
         />
       </div>
       <div class="header-right">
+        <router-link
+          :to="`/app/${sessionId}`"
+          class="header-logs-link"
+          data-testid="nav-app"
+          title="Open as read-only app (widgets + outputs)"
+        >
+          App
+        </router-link>
+        <router-link
+          to="/artifacts"
+          class="header-logs-link"
+          data-testid="nav-artifacts"
+          title="Artifact store"
+        >
+          Artifacts
+        </router-link>
+        <router-link to="/logs" class="header-logs-link" data-testid="nav-logs" title="Server logs">
+          Logs
+        </router-link>
         <ThemeToggle />
         <span
           v-if="!loading && notebook.id"
@@ -748,6 +779,20 @@ function goHome() {
 
 .add-prompt-btn:hover {
   border-color: var(--accent-primary);
+}
+
+.header-logs-link {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.header-logs-link:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
 }
 
 .mode-badge {

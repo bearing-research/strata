@@ -67,7 +67,10 @@ import httpx
 from strata.artifact_store import TransformSpec as ArtifactTransformSpec
 from strata.artifact_store import get_artifact_store
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
+from strata.notebook.dag import SweepProducer
+from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import (
@@ -131,6 +134,21 @@ logger = logging.getLogger(__name__)
 # still killed at this wall, and the UI can interrupt sooner. Mirrors the
 # core scan timeout (``StrataConfig.scan_timeout_seconds``).
 DEFAULT_CELL_TIMEOUT_SECONDS = 300.0
+
+
+def cell_timeout_message(timeout_seconds: float) -> str:
+    """A timed-out-cell error that names the remedy.
+
+    A bare "timed out after Ns" is undiscoverable — the user has no way to know
+    the limit is configurable. Point at all three levers (per-cell annotation,
+    notebook default, one-off CLI flag).
+    """
+    return (
+        f"Cell execution timed out after {timeout_seconds}s. Raise the limit with a "
+        f"'# @timeout <seconds>' annotation on the cell, a 'timeout' key in "
+        f"notebook.toml, or 'strata run --timeout <seconds>' for a one-off run."
+    )
+
 
 # Well-known module → PyPI package name mappings where they differ.
 _MODULE_TO_PACKAGE: dict[str, str] = {
@@ -469,6 +487,10 @@ class CellExecutor:
         # (CELL_OUTPUT_DELTA payload). Same wiring pattern: set by the
         # WS handler, unset for REST / CLI callers (issue #110).
         self.on_prompt_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None
+        # Optional callback fired after each variant of a @per_variant fan-out
+        # cell completes (CELL_VARIANT_PROGRESS payload). Same wiring pattern:
+        # set by the WS handler, unset for REST / CLI callers.
+        self.on_variant_complete: Callable[[dict[str, Any]], Awaitable[None]] | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -991,9 +1013,17 @@ class CellExecutor:
         *,
         materialize_upstreams: bool,
         use_cache: bool,
+        fanout_group: str | None = None,
+        fanout_variant: str | None = None,
     ) -> CellExecutionResult:
         """Python cell pipeline: provenance → upstream → cache check →
         subprocess harness → persist.
+
+        Sweep v2: a top-level call (``fanout_variant is None``) on a
+        ``# @per_variant`` cell is redirected to :meth:`_execute_fanout_cell`,
+        which invokes this pipeline once per variant with ``fanout_variant``
+        set. In a per-variant run the provenance, cache lookup, input binding,
+        and stored artifacts are all scoped to that variant.
 
         Extracted from the previous ``_materialize_cell`` body so the
         dispatch surface stays small. The body is unchanged — the only
@@ -1009,6 +1039,23 @@ class CellExecutor:
             # cache-check / persist / artifact-store calls and the
             # variable used to be in scope from the wrapper's top.
             cell = self.session.notebook_state.get_cell(cell_id)
+
+            # Sweep v2: a @per_variant cell fans out — redirect a top-level call
+            # to the per-variant orchestrator (which re-enters this pipeline once
+            # per variant with fanout_variant set).
+            if fanout_variant is None:
+                fanout = self._fanout_info(cell_id)
+                if fanout is not None:
+                    return await self._execute_fanout_cell(
+                        cell_id,
+                        source,
+                        timeout_seconds,
+                        start_time,
+                        materialize_upstreams=materialize_upstreams,
+                        use_cache=use_cache,
+                        group=fanout[0],
+                        variant_names=fanout[1],
+                    )
 
             # ① Materialise every upstream cell whose artifact is missing.
             #   This is the recursive ``materialize`` call — each upstream
@@ -1029,6 +1076,11 @@ class CellExecutor:
             mount_specs = prov.mount_specs
             mount_fingerprints = prov.mount_fingerprints
             provenance_hash = prov.provenance_hash
+
+            # Per-variant fan-out instance: scope the cell provenance to this
+            # variant so each instance caches / restalens independently.
+            if fanout_variant is not None:
+                provenance_hash = derive_subkey(provenance_hash, f"variant={fanout_variant}")
 
             # RW mounts make the cell non-cacheable (side effects).
             if prov.has_rw_mount:
@@ -1104,10 +1156,11 @@ class CellExecutor:
             # sessions (same SQLite DB, different notebook_id).  We must
             # verify the LOCAL canonical artifact exists AND has the
             # expected provenance hash — not just that it exists.
-            notebook_id = self.session.notebook_state.id
             if use_cache and cached_artifact is not None and consumed_vars:
                 for var_name in consumed_vars:
-                    canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+                    canonical_id = artifact_mgr.cell_artifact_id(
+                        cell_id, var_name, variant=fanout_variant
+                    )
                     var_prov = derive_subkey(provenance_hash, var_name)
                     canonical_art = artifact_mgr.artifact_store.get_latest_version(
                         canonical_id,
@@ -1151,7 +1204,9 @@ class CellExecutor:
                     )
                     # Populate per-variable URIs from canonical artifacts
                     for var_name in consumed_vars:
-                        canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{var_name}"
+                        canonical_id = artifact_mgr.cell_artifact_id(
+                            cell_id, var_name, variant=fanout_variant
+                        )
                         canonical_art = artifact_mgr.artifact_store.get_latest_version(
                             canonical_id,
                         )
@@ -1205,7 +1260,12 @@ class CellExecutor:
                 # Load upstream blobs into output_dir for the harness.
                 # Force execution may intentionally skip upstream materialization,
                 # so missing inputs are allowed to surface at execution time.
-                input_specs = self._load_input_blobs(cell_id, output_dir)
+                input_specs = self._load_input_blobs(
+                    cell_id,
+                    output_dir,
+                    fanout_group=fanout_group,
+                    fanout_variant=fanout_variant,
+                )
 
                 venv_path = self.session.venv_python or Path("python")
 
@@ -1275,6 +1335,7 @@ class CellExecutor:
                         input_hashes,
                         source_hash=source_hash,
                         env_hash=env_hash,
+                        variant=fanout_variant,
                     )
                     if not stored_ok:
                         logger.error(
@@ -1361,7 +1422,7 @@ class CellExecutor:
                 cell_id=cell_id,
                 success=False,
                 duration_ms=duration_ms,
-                error=f"Cell execution timed out after {timeout_seconds}s",
+                error=cell_timeout_message(timeout_seconds),
             ).apply_remote_metadata(**remote_metadata)
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, timeout_result)
@@ -1377,6 +1438,111 @@ class CellExecutor:
             self.session.persist_display_output(cell_id, None)
             self.session.apply_execution_result_metadata(cell_id, error_result)
             return error_result
+
+    def _fanout_info(self, cell_id: str) -> tuple[str, tuple[str, ...]] | None:
+        """Return ``(group, variant_names)`` if ``cell_id`` is a @per_variant
+        fan-out cell, else ``None``.
+
+        A fan-out cell is one whose outputs the DAG resolved to a
+        ``SweepProducer`` with ``fanout_cell == cell_id`` (see sweep-v2 phase 2).
+        """
+        dag = self.session.dag
+        if dag is None:
+            return None
+        for producer in dag.variable_producer.values():
+            if isinstance(producer, SweepProducer) and producer.fanout_cell == cell_id:
+                return producer.group, tuple(name for name, _ in producer.variants)
+        return None
+
+    async def _execute_fanout_cell(
+        self,
+        cell_id: str,
+        source: str,
+        timeout_seconds: float,
+        start_time: float,
+        *,
+        materialize_upstreams: bool,
+        use_cache: bool,
+        group: str,
+        variant_names: tuple[str, ...],
+    ) -> CellExecutionResult:
+        """Run a ``# @per_variant`` cell once per variant of its fan-out group.
+
+        Each instance re-enters :meth:`_execute_python_cell` with
+        ``fanout_variant`` set, so its inputs bind the scalar for that variant,
+        its provenance/cache are variant-scoped, and its outputs are stored
+        under ``@variant={name}`` artifacts. A downstream (non-fan-out) consumer
+        then collapses those per-variant artifacts back into a ``{variant:
+        value}`` dict via the existing v1 machinery.
+
+        The aggregate result is success iff every variant succeeded; failures
+        are surfaced with the offending variant's error. Upstreams are
+        materialised once up front, not per variant.
+        """
+        if materialize_upstreams:
+            await self._materialize_upstreams(cell_id)
+
+        results: list[tuple[str, CellExecutionResult]] = []
+        total = len(variant_names)
+        for index, name in enumerate(variant_names):
+            variant_start = time.time()
+            res = await self._execute_python_cell(
+                cell_id,
+                source,
+                timeout_seconds,
+                start_time,
+                materialize_upstreams=False,
+                use_cache=use_cache,
+                fanout_group=group,
+                fanout_variant=name,
+            )
+            results.append((name, res))
+            if self.on_variant_complete is not None:
+                try:
+                    await self.on_variant_complete(
+                        {
+                            "cell_id": cell_id,
+                            "variant": name,
+                            "index": index,
+                            "total": total,
+                            "success": res.success,
+                            "duration_ms": int((time.time() - variant_start) * 1000),
+                            "error": res.error,
+                        }
+                    )
+                except Exception:
+                    logger.exception(
+                        "on_variant_complete callback failed for cell %s variant %s",
+                        cell_id,
+                        name,
+                    )
+
+        duration_ms = (time.time() - start_time) * 1000
+        failures = [(name, r) for name, r in results if not r.success]
+        stdout = "\n".join(f"[variant={name}]\n{r.stdout}" for name, r in results if r.stdout)
+        stderr = "\n".join(f"[variant={name}]\n{r.stderr}" for name, r in results if r.stderr)
+        if failures:
+            first_name, first = failures[0]
+            aggregate = CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                stdout=stdout,
+                stderr=stderr,
+                duration_ms=duration_ms,
+                error=f"Fan-out variant '{first_name}' failed: {first.error}",
+                execution_method="fanout",
+            )
+        else:
+            aggregate = CellExecutionResult(
+                cell_id=cell_id,
+                success=True,
+                stdout=stdout,
+                stderr=stderr,
+                duration_ms=duration_ms,
+                execution_method="fanout",
+            )
+        self.session.apply_execution_result_metadata(cell_id, aggregate)
+        return aggregate
 
     async def _execute_r_cell(
         self,
@@ -1909,7 +2075,7 @@ class CellExecutor:
                     ) as response:
                         if response.status_code == 408:
                             raise RemoteExecutionError(
-                                f"Cell execution timed out after {timeout_seconds}s",
+                                cell_timeout_message(timeout_seconds),
                                 remote_error_code="TIMEOUT",
                             )
                         if response.status_code != 200:
@@ -1946,7 +2112,7 @@ class CellExecutor:
                                 f.write(chunk)
             except httpx.TimeoutException as exc:
                 raise RemoteExecutionError(
-                    f"Cell execution timed out after {timeout_seconds}s",
+                    cell_timeout_message(timeout_seconds),
                     remote_error_code="TIMEOUT",
                 ) from exc
             except httpx.HTTPError as exc:
@@ -2125,7 +2291,7 @@ class CellExecutor:
         except httpx.TimeoutException as exc:
             _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
             raise RemoteExecutionError(
-                f"Cell execution timed out after {timeout_seconds}s",
+                cell_timeout_message(timeout_seconds),
                 remote_build_state="failed",
                 remote_error_code="TIMEOUT",
             ) from exc
@@ -2151,7 +2317,7 @@ class CellExecutor:
             if response.status_code == 408:
                 _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
                 raise RemoteExecutionError(
-                    f"Cell execution timed out after {timeout_seconds}s",
+                    cell_timeout_message(timeout_seconds),
                     remote_build_state="failed",
                     remote_error_code="TIMEOUT",
                 )
@@ -2718,6 +2884,49 @@ class CellExecutor:
             mutation_warnings=result_dict.get("mutation_warnings", []),
         )
 
+    async def _execute_widget_cell(
+        self,
+        cell_id: str,
+        source: str,
+        start_time: float,
+        *,
+        materialize_upstreams: bool,
+        use_cache: bool,
+    ) -> CellExecutionResult:
+        """Execute a widget cell — materialize each control's value artifact.
+
+        Widgets have no upstream (``materialize_upstreams`` is a no-op here),
+        no subprocess, and use the per-value cache scheme; like prompt/SQL we
+        persist the generic provenance triplet so ``compute_staleness`` keeps
+        the cell READY when its values are unchanged.
+        """
+        del materialize_upstreams  # widgets have no upstream inputs
+
+        from strata.notebook.widget_executor import execute_widget_cell
+
+        result_dict = execute_widget_cell(self.session, cell_id, source, use_cache=use_cache)
+
+        if result_dict.get("success"):
+            prov = await self._compute_cell_provenance(cell_id, source)
+            self.session.record_successful_execution_provenance(
+                cell_id,
+                prov.provenance_hash,
+                prov.source_hash,
+                prov.env_hash,
+            )
+
+        return CellExecutionResult(
+            cell_id=cell_id,
+            success=result_dict["success"],
+            outputs=result_dict.get("outputs", {}),
+            display_outputs=result_dict.get("display_outputs") or [],
+            error=result_dict.get("error"),
+            cache_hit=result_dict.get("cache_hit", False),
+            duration_ms=int((time.time() - start_time) * 1000),
+            execution_method=result_dict.get("execution_method", "widget"),
+            artifact_uri=result_dict.get("artifact_uri"),
+        )
+
     # ------------------------------------------------------------------
     # ① Materialise upstream cells
     # ------------------------------------------------------------------
@@ -2768,44 +2977,14 @@ class CellExecutor:
     # ------------------------------------------------------------------
 
     def _collect_input_hashes(self, cell_id: str) -> list[str]:
-        """Read provenance hashes from upstream artifacts.
+        """Provenance hashes from upstream artifacts (called after
+        ``_materialize_upstreams``).
 
-        Called *after* ``_materialize_upstreams`` so every upstream
-        artifact is populated. Uses per-variable ``artifact_uris`` dict
-        when available, falling back to the legacy ``artifact_uri`` field.
+        Delegates to ``session._collect_input_hashes`` — the single source of
+        truth — so the hash stored here matches the one ``compute_staleness``
+        recomputes later (sweep refs are grouped identically on both sides).
         """
-        cell = self.session.notebook_state.get_cell(cell_id)
-        if cell is None or not cell.upstream_ids:
-            return []
-
-        artifact_mgr = self.session.get_artifact_manager()
-        hashes: list[str] = []
-
-        for upstream_id in cell.upstream_ids:
-            upstream_cell = self.session.notebook_state.get_cell(upstream_id)
-            if upstream_cell is None:
-                continue
-
-            # Collect URIs: prefer per-variable dict, fall back to single URI
-            uris = list(upstream_cell.artifact_uris.values())
-            if not uris and upstream_cell.artifact_uri:
-                uris = [upstream_cell.artifact_uri]
-
-            for uri in sorted(uris):  # sorted for deterministic ordering
-                try:
-                    parts = uri.split("/")
-                    artifact_id = parts[-1].split("@")[0]
-                    version = int(parts[-1].split("@v=")[1])
-                    artifact = artifact_mgr.artifact_store.get_artifact(
-                        artifact_id,
-                        version,
-                    )
-                    if artifact:
-                        hashes.append(artifact.provenance_hash)
-                except (IndexError, ValueError):
-                    pass
-
-        return hashes
+        return self.session._collect_input_hashes(cell_id)
 
     # ------------------------------------------------------------------
     # ④-a Load input blobs (guaranteed to exist after step ①)
@@ -2815,12 +2994,24 @@ class CellExecutor:
         self,
         cell_id: str,
         output_dir: Path,
-    ) -> dict[str, dict[str, str]]:
+        *,
+        fanout_group: str | None = None,
+        fanout_variant: str | None = None,
+    ) -> dict[str, Any]:
         """Load upstream variable blobs from the artifact store.
 
         All upstream artifacts are guaranteed to exist because
         ``_materialize_upstreams`` has already run.  This method simply
         reads blobs and writes them to *output_dir* for the harness.
+
+        Sweep v2: when ``fanout_variant`` is set, this call builds the inputs
+        for one instance of a ``# @per_variant`` cell — a reference sourced
+        from the cell's own fan-out group (``fanout_group``) binds only that
+        variant's member as a *scalar* rather than the whole ``{variant:
+        value}`` dict. Other sweep groups still collapse to a dict. A reference
+        sourced from an upstream fan-out cell (a ``SweepProducer`` with
+        ``fanout_cell`` set) is always collapsed to a dict via its
+        ``@variant=`` artifacts.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None:
@@ -2828,7 +3019,35 @@ class CellExecutor:
 
         artifact_mgr = self.session.get_artifact_manager()
         notebook_id = self.session.notebook_state.id
-        input_specs: dict[str, dict[str, str]] = {}
+        # ``dict[str, Any]``: a value is either a single-artifact spec
+        # (``{content_type, file, uri}``) or a sweep bundle
+        # (``{kind: "sweep_dict", variants: {name: spec}}``).
+        input_specs: dict[str, Any] = {}
+        dag = self.session.dag
+
+        def _load_artifact_spec(artifact_id: str, file_stem: str) -> dict[str, str] | None:
+            """Write one artifact's blob to *file_stem* and return its manifest
+            spec, or ``None`` if the artifact doesn't exist."""
+            artifact = artifact_mgr.artifact_store.get_latest_version(artifact_id)
+            if artifact is None:
+                return None
+            blob_data = artifact_mgr.load_artifact_data(artifact_id, artifact.version)
+            content_type = "pickle/object"
+            if artifact.transform_spec:
+                try:
+                    params = json.loads(artifact.transform_spec).get("params", {})
+                except ValueError:
+                    params = {}  # malformed transform_spec → default content type
+                content_type = params.get("content_type") or content_type
+            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
+            input_file = output_dir / f"{file_stem}{ext}"
+            with open(input_file, "wb") as f:
+                f.write(blob_data)
+            return {
+                "content_type": content_type,
+                "file": f"{file_stem}{ext}",
+                "uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
+            }
 
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.session.notebook_state.get_cell(upstream_id)
@@ -2838,63 +3057,101 @@ class CellExecutor:
             referenced_vars = [v for v in cell.references if v in upstream_cell.defines]
 
             for var_name in referenced_vars:
+                producer = dag.variable_producer.get(var_name) if dag else None
                 artifact_id = f"nb_{notebook_id}_cell_{upstream_id}_var_{var_name}"
                 try:
-                    artifact = artifact_mgr.artifact_store.get_latest_version(
-                        artifact_id,
-                    )
-                    if artifact is None:
-                        # Should not happen after _materialize_upstreams,
-                        # but guard defensively.
-                        logger.error(
-                            "Artifact %s still missing after upstream "
-                            "materialisation — skipping variable '%s'.",
-                            artifact_id,
-                            var_name,
+                    if isinstance(producer, SweepProducer):
+                        if producer.fanout_cell is not None:
+                            # Upstream is a @per_variant fan-out cell: its outputs
+                            # live under ``@variant=`` subkeys of one cell.
+                            if fanout_variant is not None and producer.group == fanout_group:
+                                # Chained fan-out: this instance zips to the upstream
+                                # instance of the same variant (scalar bind).
+                                vid = artifact_mgr.cell_artifact_id(
+                                    producer.fanout_cell, var_name, variant=fanout_variant
+                                )
+                                spec = _load_artifact_spec(vid, var_name)
+                                if spec is not None:
+                                    input_specs[var_name] = spec
+                                continue
+                            # Collapse consumer: gather all variants into a dict
+                            # (partial set on any missing variant).
+                            bundle = input_specs.setdefault(
+                                var_name, {"kind": "sweep_dict", "variants": {}}
+                            )
+                            for vname, _cid in producer.variants:
+                                vid = artifact_mgr.cell_artifact_id(
+                                    producer.fanout_cell, var_name, variant=vname
+                                )
+                                vspec = _load_artifact_spec(vid, f"{var_name}__{vname}")
+                                if vspec is not None:
+                                    bundle["variants"][vname] = vspec
+                            continue
+
+                        # ``upstream_id`` is one member of a variant group.
+                        variant_name = next(
+                            (name for name, cid in producer.variants if cid == upstream_id),
+                            None,
                         )
+                        if variant_name is None:
+                            continue
+
+                        if fanout_variant is not None and producer.group == fanout_group:
+                            # This cell fans out over this group: bind only its own
+                            # variant as a SCALAR (not the whole dict). Chained
+                            # fan-out zips by variant name.
+                            if variant_name != fanout_variant:
+                                continue
+                            spec = _load_artifact_spec(artifact_id, var_name)
+                            if spec is not None:
+                                input_specs[var_name] = spec
+                            continue
+
+                        spec = _load_artifact_spec(artifact_id, f"{var_name}__{variant_name}")
+                        if spec is None:
+                            # A failed/missing variant is dropped from the dict
+                            # (partial-set policy); downstream still runs once.
+                            logger.error(
+                                "Sweep variant '%s' of '%s' has no artifact — "
+                                "dropping it from the dict.",
+                                variant_name,
+                                var_name,
+                            )
+                            continue
+                        bundle = input_specs.setdefault(
+                            var_name, {"kind": "sweep_dict", "variants": {}}
+                        )
+                        bundle["variants"][variant_name] = spec
                         continue
 
-                    blob_data = artifact_mgr.load_artifact_data(
-                        artifact_id,
-                        artifact.version,
-                    )
+                    spec = _load_artifact_spec(artifact_id, var_name)
+                    if spec is None:
+                        # A re-importable module binding (``import numpy as np``)
+                        # isn't always materialised — notably from a remote
+                        # @worker that doesn't ship module/import blobs back. The
+                        # consuming cell re-imports it, so log at debug. Any other
+                        # missing var is a real gap and stays at error.
+                        if var_name in imported_names(upstream_cell.source):
+                            logger.debug(
+                                "Module-typed upstream '%s' has no artifact "
+                                "(producer cell %s); the consuming cell re-imports it.",
+                                var_name,
+                                upstream_id,
+                            )
+                        else:
+                            logger.error(
+                                "Artifact %s still missing after upstream "
+                                "materialisation — skipping variable '%s'.",
+                                artifact_id,
+                                var_name,
+                            )
+                        continue
 
-                    # Determine content type.
-                    content_type = "pickle/object"
-                    if artifact.transform_spec:
-                        try:
-                            spec = json.loads(artifact.transform_spec)
-                            ct = spec.get("params", {}).get("content_type")
-                            if ct:
-                                content_type = ct
-                        except (ValueError, KeyError):
-                            pass
-
-                    ext_map = {
-                        "arrow/ipc": ".arrow",
-                        "json/object": ".json",
-                        "pickle/object": ".pickle",
-                        "module/import": ".module.json",
-                        "module/cell": ".cell_module.json",
-                        "module/cell-instance": ".cell_instance.pickle",
-                    }
-                    ext = ext_map.get(content_type, ".pickle")
-                    input_file = output_dir / f"{var_name}{ext}"
-                    with open(input_file, "wb") as f:
-                        f.write(blob_data)
-
-                    input_specs[var_name] = {
-                        "content_type": content_type,
-                        "file": f"{var_name}{ext}",
-                        "uri": (f"strata://artifact/{artifact.id}@v={artifact.version}"),
-                    }
+                    input_specs[var_name] = spec
                     logger.info(
-                        "Loaded input %s from artifact store (%s@v=%d, %d bytes, %s)",
+                        "Loaded input %s from artifact store (%s)",
                         var_name,
                         artifact_id,
-                        artifact.version,
-                        len(blob_data),
-                        content_type,
                     )
                 except Exception:
                     logger.exception(
@@ -2917,10 +3174,13 @@ class CellExecutor:
         *,
         source_hash: str = "",
         env_hash: str = "",
+        variant: str | None = None,
     ) -> bool:
         """Persist consumed output variables as artifacts.
 
         Returns True if every consumed variable was stored, False otherwise.
+        When ``variant`` is set (sweep-v2 fan-out), each artifact id is suffixed
+        with ``@variant={name}`` so per-variant instances don't collide.
         """
         cell = self.session.notebook_state.get_cell(cell_id)
         if cell is None or self.session.dag is None:
@@ -2992,6 +3252,7 @@ class CellExecutor:
                             input_versions={h: h for h in input_hashes},
                             source_hash=source_hash,
                             env_hash=env_hash,
+                            variant=variant,
                         )
                         uri = (
                             f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
@@ -3166,8 +3427,20 @@ class CellExecutor:
         timeout_seconds: float,
     ) -> dict[str, Any]:
         """Run the harness script via uv."""
+        uv = resolve_uv()
+        if uv is None:
+            # Without this, every cell dies with a bare ``[Errno 2] … 'uv'``
+            # — common headless (ssh/cron) where ~/.local/bin isn't on PATH.
+            # Mirror the Rscript guard in _run_r_harness.
+            return {
+                "success": False,
+                "error": UV_NOT_FOUND_MESSAGE,
+                "stderr": "",
+                "stdout": "",
+                "variables": {},
+            }
         cmd = [
-            "uv",
+            uv,
             "run",
             "--directory",
             str(self.session.path),
@@ -3915,10 +4188,7 @@ class CellExecutor:
                 timed_out_result = BatchCellResult(
                     cell_id=timed_out_id,
                     status="cell_error",
-                    error=(
-                        f"Cell execution timed out after "
-                        f"{watchdog_state['active_timeout']}s (per-cell watchdog)"
-                    ),
+                    error=cell_timeout_message(watchdog_state["active_timeout"]),
                 )
                 cell_results[timed_out_id] = timed_out_result
                 if on_cell_event is not None:
@@ -4448,8 +4718,25 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     adapter runs the full check (worker resolution, no ``# @loop``,
     no explicit timeout at any level, no rw mount at any level); other
     languages return ``False`` unconditionally.
+
+    Sweep cells are never batchable: in a batch's shared namespace, sibling
+    variants overwrite each other, and the ``{variant: value}`` dict — built
+    per-cell from artifacts — never forms. A sweep-group member and any cell
+    consuming a sweep variable run single-cell instead, where the dict is built
+    correctly.
     """
+    from strata.notebook.dag import SweepProducer
     from strata.notebook.languages import get_language_executor
+
+    dag = executor.session.dag
+    if dag is not None:
+        modes = executor.session.notebook_state.variant_modes
+        if cell.variant_group and modes.get(cell.variant_group) == "sweep":
+            return False
+        if any(
+            isinstance(dag.variable_producer.get(ref), SweepProducer) for ref in cell.references
+        ):
+            return False
 
     return get_language_executor(cell.language).is_batchable(cell, executor)
 

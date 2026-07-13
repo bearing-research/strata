@@ -155,27 +155,10 @@ def compute_causality_on_staleness(
             # meaningful cached provenance explanation.
             continue
 
-        # Compute current provenance — use per-variable artifact_uris
-        input_hashes: list[str] = []
-        for upstream_id in cell.upstream_ids:
-            upstream = session.notebook_state.get_cell(upstream_id)
-            if upstream is None:
-                continue
-            uris = list(upstream.artifact_uris.values())
-            if not uris and upstream.artifact_uri:
-                uris = [upstream.artifact_uri]
-            for uri in sorted(uris):
-                try:
-                    parts = uri.split("/")
-                    artifact_id = parts[-1].split("@")[0]
-                    version = int(parts[-1].split("@v=")[1])
-                    artifact = session.artifact_manager.artifact_store.get_artifact(
-                        artifact_id, version
-                    )
-                    if artifact:
-                        input_hashes.append(artifact.provenance_hash)
-                except (IndexError, ValueError):
-                    pass
+        # Use the session's single source of truth so sweep refs are grouped
+        # the same way the executor stored them (else a sweep downstream would
+        # always look stale here).
+        input_hashes = session._collect_input_hashes(cell_id)
 
         provenance_hash = compute_provenance_hash(
             input_hashes + mount_fingerprints, source_hash, env_hash

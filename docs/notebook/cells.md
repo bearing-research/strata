@@ -556,6 +556,86 @@ See [Cell Annotations][a] for the full reference.
 
 ---
 
+## Widget Cells
+
+A **widget cell** is a declarative control panel — one control per line — that
+feeds values into the DAG. Drag a slider or pick from a dropdown, and the cells
+that read that value go stale; run them to see the result. Add one with the
+**+** menu (**Widget**), or declare `language = "widget"` in `notebook.toml`.
+
+```
+# @name Controls
+alpha = slider(0, 1, step=0.01, default=0.5)
+epochs = number(default=10, min=1, max=200)
+optimizer = dropdown(["adam", "sgd"], default="adam")
+augment = checkbox(default=False)
+label = text(default="baseline")
+```
+
+Each line `name = control(...)` **defines a variable** downstream cells consume,
+exactly like a Python cell's output:
+
+```python
+# @name Train
+model = train(data, lr=alpha, epochs=epochs, optimizer=optimizer)
+report = evaluate(model)
+report
+```
+
+### Controls
+
+| Control | Value | Signature |
+|---|---|---|
+| `slider` | number | `slider(min, max, step=, default=)` |
+| `number` | number | `number(default=, min=, max=)` |
+| `dropdown` | string | `dropdown([...options], default=)` |
+| `checkbox` | bool | `checkbox(default=)` |
+| `text` | string | `text(default=)` |
+
+Arguments must be literals. Omit `default=` and it's inferred (a slider's `min`,
+a dropdown's first option, `False`, `""`).
+
+### How it works
+
+A widget cell runs **no code and no subprocess** — it's declarative. Each
+control's current value is stored as a content-addressed artifact, so:
+
+- **Changing a control** re-materializes its value and marks downstream cells
+  **stale** — the same signal as editing an upstream cell. Run the stale cells
+  (or accept the cascade) to propagate the change.
+- **Returning a control to a previous value is a cache hit** — downstream cells
+  that already computed for that value don't recompute.
+- The **declaration** (`slider(0, 1, …)`) is committed to `notebook.toml`; the
+  **current value** is runtime state (a drag never churns the committed file).
+
+In the web UI a widget cell shows its controls in place of the code editor;
+click **✎ Edit controls** to edit the declaration. Widget cells render in the
+web UI (the CLI and read-only TUI show them as their declaration).
+
+### Live mode
+
+By default a control change marks downstream cells stale and you run them. Turn
+on **⚡ Live** (a `# @live` annotation on the widget cell) and changing a control
+**auto-runs** the cheap downstream cells instead. Cells whose last run was
+expensive (over a cost threshold) are left stale rather than re-run on every
+drag — so a slider feeding a quick plot updates live, while one feeding a long
+training cell waits for a manual run.
+
+### App view
+
+Click **App** in the notebook header (or visit `/app/<sessionId>`) to open the
+notebook as a **read-only interactive app**: only widget control panels,
+markdown, and display outputs render — no editor, DAG, or toolbars. The
+connection is read-only (edits and arbitrary cell runs are rejected server-side),
+but viewers can still drive widgets — combined with **⚡ Live** that's the
+"tweak a parameter, see the result" dashboard you hand to a stakeholder.
+
+Add `# @app hide` to a cell to keep it out of the app view (e.g. a setup cell
+whose output is noise). Run the notebook's cells once in the editor so the app
+has outputs to show, then share the app link.
+
+---
+
 ## Markdown Cells
 
 Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG — they don't produce artifacts, don't participate in cascade execution, and don't have an `id` / variable that downstream cells can reference. They survive saves and exports verbatim.

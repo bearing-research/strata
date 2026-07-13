@@ -34,13 +34,17 @@ def validate_cell_annotations(
     # Variant validation is language-agnostic: any cell language can be
     # a variant member, so the cross-sibling checks run before language
     # dispatch.
-    variant_diagnostics = _validate_variant_annotation(
-        cell, parse_annotations(cell.source), notebook_state
+    _cell_annotations = parse_annotations(cell.source)
+    variant_diagnostics = _validate_variant_annotation(cell, _cell_annotations, notebook_state)
+    variant_diagnostics = variant_diagnostics + _validate_per_variant_annotation(
+        cell, _cell_annotations, notebook_state
     )
     if cell.language == CellLanguage.PROMPT:
         return variant_diagnostics + _validate_prompt_cell_annotations(cell)
     if cell.language == CellLanguage.SQL:
         return variant_diagnostics + _validate_sql_cell_annotations(cell, notebook_state)
+    if cell.language == CellLanguage.WIDGET:
+        return variant_diagnostics + _validate_widget_cell_annotations(cell)
     if cell.language == CellLanguage.MARKDOWN:
         # Markdown cells are pure prose; ``# @worker`` etc. would be a
         # markdown heading, not an annotation. No validation applies.
@@ -294,6 +298,98 @@ def _validate_prompt_cell_annotations(cell: CellState) -> list[AnnotationDiagnos
             )
         )
     return diagnostics
+
+
+def _validate_widget_cell_annotations(cell: CellState) -> list[AnnotationDiagnostic]:
+    """Surface widget-cell errors: structural (unknown control, non-literal
+    argument, duplicate variable) plus semantic (slider range, default bounds).
+
+    Called only for ``language == "widget"`` cells. Advisory only — like every
+    diagnostic here, these never block execution.
+    """
+    from strata.notebook.widget_analyzer import analyze_widget_cell
+
+    analysis = analyze_widget_cell(cell.source)
+    diagnostics: list[AnnotationDiagnostic] = []
+
+    for message in analysis.errors:
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="widget_invalid",
+                message=message,
+                line=None,
+            )
+        )
+
+    for descriptor in analysis.descriptors:
+        line = _find_widget_line(cell.source, descriptor.name)
+        diagnostics.extend(_validate_widget_descriptor(descriptor, line))
+
+    return diagnostics
+
+
+def _validate_widget_descriptor(descriptor, line: int | None) -> list[AnnotationDiagnostic]:
+    """Semantic checks for one control: ranges + defaults in bounds."""
+    diagnostics: list[AnnotationDiagnostic] = []
+    params = descriptor.params
+    low, high = params.get("min"), params.get("max")
+
+    if (
+        descriptor.kind == "slider"
+        and isinstance(low, int | float)
+        and isinstance(high, int | float)
+    ):
+        if low >= high:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="widget_bad_range",
+                    message=(
+                        f"`{descriptor.name}`: slider min ({low}) must be less than max ({high})."
+                    ),
+                    line=line,
+                )
+            )
+
+    default = descriptor.default
+    if descriptor.kind in ("slider", "number") and isinstance(default, int | float):
+        if isinstance(low, int | float) and default < low:
+            diagnostics.append(_default_oob(descriptor.name, default, line))
+        elif isinstance(high, int | float) and default > high:
+            diagnostics.append(_default_oob(descriptor.name, default, line))
+
+    if descriptor.kind == "dropdown":
+        options = params.get("options")
+        if isinstance(options, list) and default is not None and default not in options:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="widget_default_not_an_option",
+                    message=f"`{descriptor.name}`: default {default!r} is not one of the options.",
+                    line=line,
+                )
+            )
+
+    return diagnostics
+
+
+def _default_oob(name: str, default, line: int | None) -> AnnotationDiagnostic:
+    return AnnotationDiagnostic(
+        severity=DiagnosticSeverity.WARN,
+        code="widget_default_out_of_range",
+        message=f"`{name}`: default {default} is outside the control's min/max range.",
+        line=line,
+    )
+
+
+def _find_widget_line(source: str, name: str) -> int | None:
+    """1-based line of the ``name = control(...)`` declaration, if found."""
+    for index, raw in enumerate(source.splitlines(), start=1):
+        stripped = raw.lstrip()
+        if stripped.startswith(f"{name} ") or stripped.startswith(f"{name}="):
+            return index
+    return None
 
 
 def _validate_referenced_connection(
@@ -698,11 +794,48 @@ def _validate_variant_annotation(
                 )
                 break
 
+    # variant_mode_invalid — mode is neither "switch" nor "sweep". Execution
+    # treats the unknown value as switch; flag it so the user isn't surprised.
+    mode = notebook_state.variant_modes.get(group_id, "switch")
+    if mode not in ("switch", "sweep"):
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="variant_mode_invalid",
+                message=(
+                    f"notebook.toml sets mode `{mode}` for variant group `{group_id}`, "
+                    "but only `switch` and `sweep` are valid. Treating it as `switch`."
+                ),
+                line=variant_line,
+            )
+        )
+
+    # variant_active_redundant — `active` is set in a sweep-mode group, where
+    # it's ignored (all variants run). Info-level: harmless, just confusing.
+    if mode == "sweep":
+        active = notebook_state.variant_active_selections.get(group_id)
+        if active:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.INFO,
+                    code="variant_active_redundant",
+                    message=(
+                        f'Group `{group_id}` is in sweep mode, so `active = "{active}"` '
+                        "is ignored — every variant runs and downstream consumes a "
+                        "{variant: value} dict."
+                    ),
+                    line=variant_line,
+                )
+            )
+
     # variant_active_unknown — toml selects a variant that doesn't exist
     # in this group. Surface on every member so the user sees it on
-    # whichever variant they're looking at.
-    selected = notebook_state.variant_active_selections.get(group_id)
-    if selected is not None:
+    # whichever variant they're looking at. Skipped in sweep mode, where the
+    # active pointer is intentionally ignored.
+    selected = notebook_state.variant_active_selections.get(group_id) if mode != "sweep" else None
+    # Truthy check, not ``is not None``: an empty ``active = ""`` means "first in
+    # source order" (e.g. after a sweep→switch toggle) and isn't an unknown name.
+    if selected:
         all_members = [annotations.variant.name] + [s.variant_name for s in siblings]
         if selected not in all_members:
             diagnostics.append(
@@ -717,6 +850,138 @@ def _validate_variant_annotation(
                     line=variant_line,
                 )
             )
+
+    return diagnostics
+
+
+def _sweep_groups_read_by(
+    cell: CellState,
+    notebook_state: NotebookState,
+) -> dict[str, int]:
+    """Return ``{group: member_count}`` for sweep groups this cell reads from.
+
+    A variable is *sweep-sourced* when it's defined by a cell whose variant
+    group is in sweep mode. This mirrors the DAG's producer resolution using
+    only ``notebook_state`` (defines/references + variant_modes), so validation
+    stays independent of a rebuilt DAG.
+    """
+    refs = set(cell.references)
+    groups: dict[str, int] = {}
+    for group_id, mode in notebook_state.variant_modes.items():
+        if mode != "sweep":
+            continue
+        members = [
+            c
+            for c in notebook_state.cells
+            if c.variant_group == group_id and c.variant_name is not None
+        ]
+        if any(refs & set(member.defines) for member in members):
+            groups[group_id] = len(members)
+    return groups
+
+
+def _validate_per_variant_annotation(
+    cell: CellState,
+    annotations,
+    notebook_state: NotebookState,
+) -> list[AnnotationDiagnostic]:
+    """Validate ``# @per_variant [group]`` fan-out membership.
+
+    - ``per_variant_on_variant_member`` — a cell can't both *be* a variant and
+      fan *out* over one.
+    - ``per_variant_no_sweep_source`` — the cell references no sweep-sourced
+      variable, so there's nothing to fan out over.
+    - ``per_variant_ambiguous_group`` — bare ``@per_variant`` but the cell reads
+      from ≥2 sweep groups; the user must name one.
+    - ``per_variant_unknown_group`` — a named group the cell doesn't read as a
+      sweep source.
+    - ``per_variant_group_of_one`` — the fan-out group has a single variant, so
+      the annotation runs the cell once (info; harmless).
+    """
+    if not annotations.per_variant:
+        return []
+
+    diagnostics: list[AnnotationDiagnostic] = []
+    line = _find_annotation_line(cell.source, "per_variant")
+
+    # Mutually exclusive with @variant membership.
+    if annotations.variant is not None:
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.WARN,
+                code="per_variant_on_variant_member",
+                message=(
+                    "`@per_variant` can't be combined with `@variant`: a cell "
+                    "can't both be a variant and fan out over a sweep group."
+                ),
+                line=line,
+            )
+        )
+        return diagnostics
+
+    sweep_groups = _sweep_groups_read_by(cell, notebook_state)
+    named = annotations.per_variant_group
+
+    if named is not None:
+        if named not in sweep_groups:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="per_variant_unknown_group",
+                    message=(
+                        f"`@per_variant {named}` names a group this cell doesn't "
+                        "read from in sweep mode. Reference a variable produced "
+                        "by a sweep-mode variant group."
+                    ),
+                    line=line,
+                )
+            )
+            return diagnostics
+        effective_group = named
+    else:
+        if not sweep_groups:
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="per_variant_no_sweep_source",
+                    message=(
+                        "`@per_variant` requires the cell to reference a variable "
+                        "from a sweep-mode variant group; none were found."
+                    ),
+                    line=line,
+                )
+            )
+            return diagnostics
+        if len(sweep_groups) > 1:
+            names = ", ".join(sorted(sweep_groups))
+            diagnostics.append(
+                AnnotationDiagnostic(
+                    severity=DiagnosticSeverity.WARN,
+                    code="per_variant_ambiguous_group",
+                    message=(
+                        f"`@per_variant` is ambiguous: this cell reads from "
+                        f"multiple sweep groups ({names}). Name one explicitly: "
+                        "`# @per_variant <group>`."
+                    ),
+                    line=line,
+                )
+            )
+            return diagnostics
+        effective_group = next(iter(sweep_groups))
+
+    if sweep_groups.get(effective_group) == 1:
+        diagnostics.append(
+            AnnotationDiagnostic(
+                severity=DiagnosticSeverity.INFO,
+                code="per_variant_group_of_one",
+                message=(
+                    f"Group `{effective_group}` has a single variant, so "
+                    "`@per_variant` runs this cell once. The annotation is "
+                    "harmless but unnecessary here."
+                ),
+                line=line,
+            )
+        )
 
     return diagnostics
 

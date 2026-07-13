@@ -35,6 +35,10 @@ class CellRuntime:
     display_outputs: list[dict[str, Any]] = field(default_factory=list)
     display: dict[str, Any] | None = None
     test_result: dict[str, Any] | None = None
+    # Current values of a widget cell's controls, keyed by variable name. The
+    # committed source declares the controls + defaults; the user-set value is
+    # runtime state (a slider drag must not churn ``notebook.toml``).
+    widget_values: dict[str, Any] = field(default_factory=dict)
 
     def is_empty(self) -> bool:
         """Whether this entry carries no useful state.
@@ -48,6 +52,7 @@ class CellRuntime:
             or self.display_outputs
             or self.display
             or self.test_result
+            or self.widget_values
         )
 
 
@@ -190,6 +195,25 @@ def persist_cell_provenance(
     entry.last_source_hash = last_source_hash or None
     entry.last_env_hash = last_env_hash or None
     save_runtime_state(notebook_dir, state)
+
+
+def persist_cell_widget_values(
+    notebook_dir: Path,
+    cell_id: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge *values* into a widget cell's persisted control values.
+
+    Partial updates are allowed — only the named controls change. The current
+    value of a widget control is runtime state (a slider drag must not churn
+    ``notebook.toml``), keyed off the committed declaration + default. Returns
+    the merged value map.
+    """
+    state = load_runtime_state(notebook_dir)
+    entry = state.get_or_create_cell(cell_id)
+    entry.widget_values = {**entry.widget_values, **values}
+    save_runtime_state(notebook_dir, state)
+    return dict(entry.widget_values)
 
 
 def persist_cell_test_result(

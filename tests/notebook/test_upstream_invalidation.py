@@ -18,7 +18,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from strata.notebook.executor import CellExecutor
-from strata.notebook.models import CellMeta, MountMode, MountSpec, NotebookToml
+from strata.notebook.models import (
+    CellMeta,
+    MountMode,
+    MountSpec,
+    NotebookToml,
+    StalenessReason,
+)
 from strata.notebook.parser import parse_notebook
 from strata.notebook.session import NotebookSession
 from strata.notebook.writer import (
@@ -120,7 +126,10 @@ class TestUpstreamInvalidation:
 
         staleness = session.compute_staleness()
         assert staleness["c1"].status == "idle"
-        assert staleness["c2"].status == "idle"
+        # c2 ran and holds a result that c1's changed mount invalidated →
+        # STALE with an upstream reason (#361), not a bare idle.
+        assert staleness["c2"].status == "stale"
+        assert StalenessReason.UPSTREAM in staleness["c2"].reasons
 
     @pytest.mark.asyncio
     async def test_multi_output_upstream_stays_ready_when_unchanged(self, tmp_path):
@@ -247,7 +256,10 @@ class TestUpstreamInvalidation:
         session.compute_staleness()
 
         staleness = session.compute_staleness()
-        assert staleness["c2"].status == "idle"
+        # c2 ran and its cached result is now invalid because c1's exported
+        # function changed → STALE with an upstream reason (#361).
+        assert staleness["c2"].status == "stale"
+        assert StalenessReason.UPSTREAM in staleness["c2"].reasons
 
         rerun = await executor.execute_cell("c2", "result = add(2, 3)")
         assert rerun.success
@@ -289,7 +301,7 @@ class TestUpstreamInvalidation:
         assert any(detail.type == "input_changed" for detail in session.causality_map["c2"].details)
 
     @pytest.mark.asyncio
-    async def test_missing_one_multi_output_artifact_marks_downstream_idle(self, tmp_path):
+    async def test_missing_one_multi_output_artifact_marks_downstream_stale(self, tmp_path):
         """Staleness must validate every consumed output, not just the first one."""
         notebook_dir = create_notebook(tmp_path, "missing_output")
 
@@ -319,7 +331,10 @@ class TestUpstreamInvalidation:
         staleness = session.compute_staleness()
 
         assert staleness["c1"].status == "idle"
-        assert staleness["c2"].status == "idle"
+        # c2 ran; deleting one of c1's consumed artifacts invalidates c2's
+        # cached result → STALE with an upstream reason (#361), not idle.
+        assert staleness["c2"].status == "stale"
+        assert StalenessReason.UPSTREAM in staleness["c2"].reasons
 
     @pytest.mark.asyncio
     async def test_edit_upstream_produces_correct_value(self, pipeline_notebook):

@@ -19,6 +19,22 @@ const router = createRouter({
       component: loadNotebookPage,
       props: true,
     },
+    {
+      path: '/app/:sessionId',
+      name: 'app',
+      component: () => import('./views/AppView.vue'),
+      props: true,
+    },
+    {
+      path: '/logs',
+      name: 'logs',
+      component: () => import('./views/LogsPage.vue'),
+    },
+    {
+      path: '/artifacts',
+      name: 'artifacts',
+      component: () => import('./views/ArtifactsPage.vue'),
+    },
   ],
 })
 

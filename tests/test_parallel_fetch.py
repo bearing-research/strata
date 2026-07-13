@@ -107,6 +107,9 @@ class TestPrometheusMetrics:
                 "host": config.host,
                 "port": config.port,
                 "log_level": "error",
+                # Avoid uvicorn's legacy websockets backend (default ws="auto"),
+                # which emits a DeprecationWarning and breaks on CPython 3.14.
+                "ws": "websockets-sansio",
             },
             daemon=True,
         )

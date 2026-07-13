@@ -33,7 +33,10 @@ dependencies = [
     "pyiceberg[sql-sqlite,sql-postgres]>=0.8.0",
     "pyarrow>=18.0.0",
     "fastapi>=0.115.0",
-    "uvicorn>=0.32.0",
+    # 0.35.0 is the first release with the sans-io WebSocket implementation
+    # (WebSocketsSansIOProtocol); server.main selects ws="websockets-sansio" to
+    # avoid the deprecated legacy asyncio protocol that breaks on CPython 3.14+.
+    "uvicorn>=0.35.0",
     "websockets>=13.0",
     "httpx>=0.28.0",
     "duckdb>=1.1.0",
@@ -106,8 +109,19 @@ tui = [
     # Pure-Python Sugiyama layered layout for the ASCII DAG view.
     "grandalf>=0.8",
     # Inline image rendering — terminal graphics protocol (kitty/iTerm/Sixel)
-    # with a Unicode half-block fallback. Pulls in Pillow.
+    # with a Unicode half-block fallback.
     "textual-image>=0.13",
+    # tui/app.py imports PIL at module load; declare Pillow explicitly rather
+    # than rely on textual-image to pull it, so `[tui]` alone (the documented
+    # install) launches instead of ModuleNotFoundError: No module named 'PIL'.
+    "pillow>=10.0.0",
+]
+# MCP server: exposes the live notebook session to an external coding agent
+# (Claude Code, etc.) over streamable HTTP at `/mcp`. FastMCP ships in the
+# official `mcp` package. Gated import — the server runs without this extra;
+# install it (and run in personal mode) to turn the endpoint on.
+mcp = [
+    "mcp>=1.9.0",
 ]
 
 [dependency-groups]

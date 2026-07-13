@@ -128,6 +128,19 @@ class CellIterationProgressPayload(WsPayload):
     duration_ms: int
 
 
+class CellVariantProgressPayload(WsPayload):
+    """``cell_variant_progress`` — one completed variant of a ``# @per_variant``
+    fan-out cell."""
+
+    cell_id: str
+    variant: str
+    index: int
+    total: int
+    success: bool
+    duration_ms: int
+    error: str | None = None
+
+
 class CascadePromptPayload(WsPayload):
     """``cascade_prompt`` — upstream cells must run before the requested cell.
 

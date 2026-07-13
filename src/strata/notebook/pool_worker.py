@@ -61,9 +61,17 @@ def _load_local_module(filename: str, module_name: str):
 
 
 _ser = _load_local_module("serializer.py", "_nb_serializer")
+
+# Sentinel for "input could not be deserialized" (distinct from a real None).
+_MISSING = object()
 _immut = _load_local_module("immutability.py", "_nb_immutability")
 _display = _load_local_module("display/runtime.py", "_nb_display_runtime")
 _client_mod = _load_local_module("notebook_client.py", "_nb_client")
+
+# Harness-injected names that are NOT user inputs — excluded from mutation
+# fingerprinting (the ``display`` helper's buffer grows every run, which would
+# otherwise read as an in-place mutation).
+_AMBIENT_NAMES = frozenset({"strata", *_display.DISPLAY_HELPER_NAMES})
 
 
 # ---------------------------------------------------------------------------
@@ -239,20 +247,37 @@ def execute_harness(manifest: dict) -> dict:
         # any other failure — previously this loop ran outside the
         # try and a swallowed RDS error regressed to ``NameError: fit``
         # once the cell body ran.
-        for var_name, spec in inputs.items():
-            content_type = spec.get("content_type", "")
+        def _deser_one(spec: dict, var_name: str) -> Any:
+            """Deserialize one ``{content_type, file}`` spec, or ``_MISSING``."""
             file_name = spec.get("file", "")
             if not file_name:
-                continue
+                return _MISSING
             full_path = output_dir / file_name
             if not full_path.exists():
-                continue
+                return _MISSING
             try:
-                namespace[var_name] = _ser.deserialize_value(content_type, full_path)
+                return _ser.deserialize_value(spec.get("content_type", ""), full_path)
             except _ser.StrataRArtifactError as exc:
                 raise _ser.StrataRArtifactError(exc.file_path, variable_name=var_name) from exc
             except Exception as exc:
                 print(f"Error deserializing {var_name}: {exc}", file=sys.stderr)
+                return _MISSING
+
+        for var_name, spec in inputs.items():
+            # Sweep-group input → {variant_name: value} dict (parity with
+            # harness.deserialize_inputs; a pooled @worker cell would otherwise
+            # never bind the var and crash with NameError).
+            if isinstance(spec, dict) and spec.get("kind") == "sweep_dict":
+                bundle: dict[str, Any] = {}
+                for variant_name, variant_spec in spec.get("variants", {}).items():
+                    value = _deser_one(variant_spec, var_name)
+                    if value is not _MISSING:
+                        bundle[variant_name] = value
+                namespace[var_name] = bundle
+                continue
+            value = _deser_one(spec, var_name)
+            if value is not _MISSING:
+                namespace[var_name] = value
 
         _inject_mounts(manifest, namespace)
         _inject_tables(manifest, namespace)
@@ -261,7 +286,9 @@ def execute_harness(manifest: dict) -> dict:
 
         namespace_before = set(namespace.keys())
         input_identities = {name: id(namespace[name]) for name in namespace_before}
-        input_snapshots = _immut.snapshot_inputs(namespace, list(namespace_before))
+        input_snapshots = _immut.snapshot_inputs(
+            namespace, [n for n in namespace_before if n not in _AMBIENT_NAMES]
+        )
         mutation_set = set(manifest.get("mutation_defines") or [])
 
         sys.stdout = stdout_buf

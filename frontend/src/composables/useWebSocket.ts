@@ -38,7 +38,7 @@ interface MessageHandler {
   (msg: WsMessage): void
 }
 
-export function useWebSocket(notebookId: string) {
+export function useWebSocket(notebookId: string, options: { role?: string } = {}) {
   const connection = shallowRef<WebSocket | null>(null)
   const state = ref<WsConnectionState>('disconnected')
   const error = ref<string | null>(null)
@@ -63,7 +63,10 @@ export function useWebSocket(notebookId: string) {
     state.value = 'connecting'
     error.value = null
 
-    const wsUrl = `${STRATA_WS_URL}/v1/notebooks/ws/${notebookId}`
+    // App-view (read-only) connections declare `?role=viewer` so the server
+    // rejects mutation frames.
+    const roleQuery = options.role ? `?role=${encodeURIComponent(options.role)}` : ''
+    const wsUrl = `${STRATA_WS_URL}/v1/notebooks/ws/${notebookId}${roleQuery}`
 
     try {
       const ws = new WebSocket(wsUrl)
@@ -331,6 +334,14 @@ export function useWebSocket(notebookId: string) {
   }
 
   /**
+   * Set one or more of a widget cell's control values. The backend persists
+   * them, re-materializes the widget artifacts, and stales downstream cells.
+   */
+  function sendWidgetUpdate(cellId: string, values: Record<string, unknown>): void {
+    send('widget_update', { cell_id: cellId, values })
+  }
+
+  /**
    * Add a new variant to an existing group; the backend auto-names it
    * and switches it to active.
    */
@@ -422,5 +433,6 @@ export function useWebSocket(notebookId: string) {
     removeDependency,
     setVariantActive,
     addVariant,
+    sendWidgetUpdate,
   }
 }

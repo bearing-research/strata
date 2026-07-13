@@ -602,7 +602,10 @@ class TestDependencyRESTEndpoints:
             assert "cells" in data
             statuses = {cell["id"]: cell["status"] for cell in data["cells"]}
             assert statuses["c1"] == "idle"
-            assert statuses["c2"] == "idle"
+            # c2 ran; the new dependency changed the env for the whole graph,
+            # so c2's cached result is invalid via its stale upstream c1 →
+            # STALE, not idle (#361).
+            assert statuses["c2"] == "stale"
 
     def test_remove_dependency_rest(self, setup):
         """DELETE /dependencies/{package} removes a package."""
@@ -1351,3 +1354,39 @@ class TestRenvAdd:
         assert "exit 1" in (result.error or "")
         assert result.operation_log is not None
         assert "not available" in result.operation_log.stderr
+
+
+class TestResolveUv:
+    """resolve_uv: PATH first, then uv's installer dirs (~/.local/bin etc.) —
+    so headless shells without ~/.local/bin on PATH still find uv."""
+
+    def test_found_on_path(self):
+        from strata.notebook import dependencies
+
+        with patch.object(dependencies.shutil, "which", return_value="/usr/bin/uv"):
+            assert dependencies.resolve_uv() == "/usr/bin/uv"
+
+    def test_falls_back_to_local_bin(self, tmp_path, monkeypatch):
+        from strata.notebook import dependencies
+
+        fake_uv = tmp_path / "uv"
+        fake_uv.write_text("")  # presence is enough; is_file() check
+        monkeypatch.setattr(dependencies.shutil, "which", lambda _: None)
+        monkeypatch.setattr(dependencies.Path, "expanduser", lambda self: tmp_path, raising=False)
+        assert dependencies.resolve_uv() == str(fake_uv)
+
+    def test_missing_everywhere_returns_none(self, monkeypatch):
+        from strata.notebook import dependencies
+
+        monkeypatch.setattr(dependencies.shutil, "which", lambda _: None)
+        # Point the probe dirs at a path with no uv.
+        monkeypatch.setattr(
+            dependencies.Path, "expanduser", lambda self: Path("/nonexistent-xyz"), raising=False
+        )
+        assert dependencies.resolve_uv() is None
+
+    def test_message_is_actionable(self):
+        from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE
+
+        assert "uv not found on PATH" in UV_NOT_FOUND_MESSAGE
+        assert "~/.local/bin" in UV_NOT_FOUND_MESSAGE

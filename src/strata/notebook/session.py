@@ -45,6 +45,7 @@ from strata.notebook.models import (
     CellState,
     CellStatus,
     NotebookState,
+    StalenessReason,
     VariantGroupState,
     VariantMember,
 )
@@ -335,6 +336,21 @@ class NotebookSession:
         _set_variant_active(self.path, group, variant_name)
         self.reload()
 
+    def set_variant_mode(self, group: str, mode: str) -> None:
+        """Switch a variant group between ``"switch"`` and ``"sweep"`` mode.
+
+        Persists to ``notebook.toml`` and reloads so the DAG rebuilds (sweep →
+        all members run, the producer fans out) and downstream staleness
+        recomputes — switch→sweep changes a downstream's input set from one
+        artifact to the grouped variant map, so consumers restalen in the usual
+        way. ``mode`` is validated by the caller; unknown values persist but are
+        treated as ``"switch"`` at execution time.
+        """
+        from strata.notebook.writer import set_variant_mode as _set_variant_mode
+
+        _set_variant_mode(self.path, group, mode)
+        self.reload()
+
     def remove_cell(self, cell_id: str) -> None:
         """Delete a cell, with variant-aware cleanup.
 
@@ -502,6 +518,8 @@ class NotebookSession:
                     after=list(annotations.after),
                     variant_group=variant_group,
                     variant_name=variant_name,
+                    per_variant=annotations.per_variant,
+                    per_variant_group=annotations.per_variant_group,
                 )
             )
             # Update cell with analysis results
@@ -518,6 +536,7 @@ class NotebookSession:
             self.dag = NotebookDag.from_cells(
                 cell_analyses,
                 variant_active_selections=self.notebook_state.variant_active_selections,
+                variant_modes=self.notebook_state.variant_modes,
             )
 
             # Update cells with DAG information
@@ -533,6 +552,7 @@ class NotebookSession:
                     group=group.group,
                     active_name=group.active_name,
                     active_cell_id=group.active_cell_id,
+                    mode=group.mode,
                     members=[
                         VariantMember(
                             cell_id=cid,
@@ -587,6 +607,7 @@ class NotebookSession:
             cell.last_provenance_hash = previous.last_provenance_hash
             cell.last_source_hash = previous.last_source_hash
             cell.last_env_hash = previous.last_env_hash
+            cell.widget_values = dict(previous.widget_values)
 
     def _restore_ready_runtime_state(
         self,
@@ -729,13 +750,27 @@ class NotebookSession:
                 staleness_map[cell_id] = CellStaleness(status=CellStatus.READY, reasons=[])
                 continue
 
-            # If ANY upstream cell is stale, this cell is also stale —
-            # its inputs will change once the upstream re-runs, so its
-            # cached artifact (based on old inputs) is invalid.
+            # If ANY upstream cell is stale, this cell's inputs will change
+            # once the upstream re-runs, so it too is out of date and must
+            # re-run before it can be trusted. How we surface that depends
+            # on whether this cell already holds a result (#361):
+            #   - it ran before (``last_provenance_hash`` set) → STALE with
+            #     an UPSTREAM reason, so the UI reads "stale · upstream
+            #     changed" rather than a bare IDLE (matches how a user
+            #     watching a cascade thinks about it).
+            #   - it never ran (fresh notebook) → IDLE: there is no cached
+            #     result to invalidate, and it can't be evaluated until the
+            #     upstream produces its inputs.
+            # Either way it propagates: downstream cells are out of date too.
             has_stale_upstream = any(uid in stale_cells for uid in cell.upstream_ids)
 
             if has_stale_upstream:
-                staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
+                if cell.last_provenance_hash is not None:
+                    staleness_map[cell_id] = CellStaleness(
+                        status=CellStatus.STALE, reasons=[StalenessReason.UPSTREAM]
+                    )
+                else:
+                    staleness_map[cell_id] = CellStaleness(status=CellStatus.IDLE, reasons=[])
                 stale_cells.add(cell_id)
                 continue
 
@@ -1020,6 +1055,21 @@ class NotebookSession:
             data["causality"] = asdict(causality, dict_factory=skip_none)
         if self.dag and cell.id in self.dag.shadow_warnings:
             data["shadow_warnings"] = self.dag.shadow_warnings[cell.id]
+        from strata.notebook.models import CellLanguage
+
+        if cell.language == CellLanguage.WIDGET:
+            # Controls (parsed from source) + their current runtime values, so the
+            # frontend can render the panel without a separate round-trip.
+            from strata.notebook.widget_analyzer import analyze_widget_cell
+
+            descriptors = analyze_widget_cell(cell.source).descriptors
+            data["widget"] = {
+                "descriptors": [
+                    {"name": d.name, "kind": d.kind, "params": d.params, "default": d.default}
+                    for d in descriptors
+                ],
+                "values": dict(cell.widget_values),
+            }
         return data
 
     def persist_display_outputs(
@@ -1532,33 +1582,67 @@ class NotebookSession:
         return cached_outputs
 
     def _collect_input_hashes(self, cell_id: str) -> list[str]:
-        """Read provenance hashes from upstream artifacts for staleness checks."""
+        """Provenance hashes from upstream artifacts (sweep refs grouped).
+
+        The single source of truth for input-hash collection: the executor's
+        provenance computation and causality explanations both delegate here, so
+        a sweep downstream's *stored* hash and its *staleness recheck* agree. A
+        reference sourced from a sweep group collapses to one deterministic
+        ``sweep:<var>:<name>=<hash>;…`` string (otherwise the stored grouped hash
+        would never match an ungrouped recompute → perpetual staleness).
+        """
+        from strata.notebook.dag import SweepProducer
+
         cell = self.notebook_state.get_cell(cell_id)
         if cell is None or not cell.upstream_ids:
             return []
 
+        dag = self.dag
         hashes: list[str] = []
+        sweep_buckets: dict[str, list[tuple[str, str]]] = {}
+
+        def _hash_from_uri(uri: str) -> str | None:
+            try:
+                tail = uri.split("/")[-1]
+                artifact_id = tail.split("@")[0]
+                version = int(tail.split("@v=")[1])
+            except (IndexError, ValueError):
+                return None
+            artifact = self.artifact_manager.artifact_store.get_artifact(artifact_id, version)
+            return artifact.provenance_hash if artifact else None
+
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
                 continue
 
-            uris = list(upstream_cell.artifact_uris.values())
-            if not uris and upstream_cell.artifact_uri:
-                uris = [upstream_cell.artifact_uri]
+            uri_items: list[tuple[str | None, str]] = list(upstream_cell.artifact_uris.items())
+            if not uri_items and upstream_cell.artifact_uri:
+                uri_items = [(None, upstream_cell.artifact_uri)]
 
-            for uri in sorted(uris):
-                try:
-                    parts = uri.split("/")
-                    artifact_id = parts[-1].split("@")[0]
-                    version = int(parts[-1].split("@v=")[1])
-                    artifact = self.artifact_manager.artifact_store.get_artifact(
-                        artifact_id, version
+            for var_name, uri in uri_items:
+                provenance_hash = _hash_from_uri(uri)
+                if provenance_hash is None:
+                    continue
+                if var_name is None:
+                    hashes.append(provenance_hash)
+                    continue
+                producer = dag.variable_producer.get(var_name) if dag else None
+                if isinstance(producer, SweepProducer):
+                    variant_name = next(
+                        (name for name, cid in producer.variants if cid == upstream_id),
+                        None,
                     )
-                    if artifact:
-                        hashes.append(artifact.provenance_hash)
-                except (IndexError, ValueError):
-                    pass
+                    if variant_name is not None:
+                        sweep_buckets.setdefault(var_name, []).append(
+                            (variant_name, provenance_hash)
+                        )
+                        continue
+                hashes.append(provenance_hash)
+
+        for var_name, pairs in sweep_buckets.items():
+            joined = ";".join(f"{name}={h}" for name, h in sorted(pairs))
+            hashes.append(f"sweep:{var_name}:{joined}")
 
         return hashes
 
@@ -2180,14 +2264,16 @@ class NotebookSession:
         """Apply a dependency mutation without blocking the event loop."""
         from strata.notebook.dependencies import add_dependency, remove_dependency
 
+        # add_dependency and remove_dependency have different keyword-only params,
+        # so a shared `op` variable narrows to a union callable that ty won't pass
+        # to asyncio.to_thread. Dispatch at the call site so each to_thread sees a
+        # single concrete signature (both accept (path, package) positionally).
         if action == "add":
-            op = add_dependency
+            result = await asyncio.to_thread(add_dependency, self.path, package)
         elif action == "remove":
-            op = remove_dependency
+            result = await asyncio.to_thread(remove_dependency, self.path, package)
         else:
             raise ValueError(f"Unknown dependency action: {action}")
-
-        result = await asyncio.to_thread(op, self.path, package)
 
         staleness_map: dict[str, CellStaleness] = {}
         if getattr(result, "success", False) and getattr(result, "lockfile_changed", False):

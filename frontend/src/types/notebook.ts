@@ -2,7 +2,7 @@
 
 export type CellId = string
 
-export type CellLanguage = 'python' | 'prompt' | 'markdown' | 'sql' | 'r'
+export type CellLanguage = 'python' | 'prompt' | 'markdown' | 'sql' | 'r' | 'widget'
 export type MountMode = 'ro' | 'rw'
 export type WorkerBackend = 'local' | 'executor'
 export type WorkerHealth = 'healthy' | 'unknown' | 'unavailable' | 'warming'
@@ -119,6 +119,9 @@ export interface VariantGroup {
   group: string
   activeName: string
   activeCellId: CellId
+  // 'switch' (one active member) or 'sweep' (all members run; downstream gets a
+  // {variant: value} dict). In sweep mode tab clicks are display-only.
+  mode: string
   members: VariantMember[]
 }
 
@@ -193,11 +196,27 @@ export interface CellOutput {
   error?: string
 }
 
+/** One control declared by a widget cell (from the backend `widget` block). */
+export interface WidgetDescriptor {
+  name: string
+  kind: 'slider' | 'number' | 'dropdown' | 'text' | 'checkbox'
+  params: Record<string, unknown>
+  default: unknown
+}
+
+/** A widget cell's controls + their current values. */
+export interface WidgetSpec {
+  descriptors: WidgetDescriptor[]
+  values: Record<string, unknown>
+}
+
 export interface Cell {
   id: CellId
   /** Source code */
   source: string
   language: CellLanguage
+  /** Widget cell control panel (only present when language === 'widget') */
+  widget?: WidgetSpec
   /** Display order in the notebook */
   order: number
   /** Execution state */
@@ -279,6 +298,9 @@ export interface Cell {
   annotationDiagnostics?: AnnotationDiagnostic[]
   /** Live loop-cell progress — hydrated from WS ``cell_iteration_progress`` messages */
   loopProgress?: LoopProgress
+  /** Live @per_variant fan-out progress — accumulated from WS
+   * ``cell_variant_progress`` frames, reset when the cell starts running. */
+  variantProgress?: VariantProgress[]
   /** Live streamed partial output (prompt cells) — hydrated from WS
    * ``cell_output_delta`` frames. Ephemeral display state: cleared by the
    * final ``cell_output`` / ``cell_error`` frame and never persisted. */
@@ -361,6 +383,23 @@ export interface LoopProgress {
   untilReached: boolean
   /** Duration of the most recent iteration in ms */
   iterDurationMs?: number
+}
+
+/** One completed variant of a ``# @per_variant`` fan-out cell — hydrated from
+ * WS ``cell_variant_progress`` frames. */
+export interface VariantProgress {
+  /** Variant name (the upstream sweep group's member name) */
+  variant: string
+  /** 0-based position in the fan-out run */
+  index: number
+  /** Total variants in the fan-out */
+  total: number
+  /** Whether this variant's instance succeeded */
+  success: boolean
+  /** Instance duration in ms */
+  durationMs?: number
+  /** Error message when the instance failed */
+  error?: string
 }
 
 /** Causality chain — explains why a cell is stale */
@@ -732,6 +771,7 @@ export type WsClientMessageType =
   | 'agent_confirm_response' // User approved/declined a destructive tool call
   | 'variant_set_active' // Switch the active variant in a group
   | 'variant_add' // Add a new sibling variant to a group (clones active)
+  | 'widget_update' // Set widget control value(s) (debounced on slider drag)
 
 /** WebSocket message types: server → client */
 export type WsServerMessageType =
@@ -742,6 +782,7 @@ export type WsServerMessageType =
   | 'cell_error' // Cell execution failed
   | 'cell_assertions' // Assertion results from cell execution
   | 'cell_iteration_progress' // Loop cell completed one iteration
+  | 'cell_variant_progress' // @per_variant fan-out completed one variant
   | 'cell_test_status' // Cell unit-test run lifecycle (running/ready/error)
   | 'cell_test_results' // Cell unit-test per-test outcomes + totals
   | 'dag_update' // Authoritative DAG from backend AST analysis

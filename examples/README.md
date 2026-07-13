@@ -43,6 +43,8 @@ strata run examples/iris_classification
 | Notebook | What it shows |
 |---|---|
 | [`markdown_showcase/`](markdown_showcase/) | Markdown cells, prose-and-code interleaving. |
+| [`data_viewer/`](data_viewer/) | Interactive DataFrame viewer — paging + click-to-sort over a 2,000-row frame. |
+| [`widget_playground/`](widget_playground/) | `# widget` cell — a slider/number/dropdown control panel driving a DataFrame. |
 | [`library_cells/`](library_cells/) | A cell exports `def`s/`class`es as a shared library across the notebook. |
 | [`model_variants/`](model_variants/) | `# @variant` annotation — A/B comparison of two model configurations. |
 | [`loop_hill_climb/`](loop_hill_climb/) | `# @loop` annotation — iterative refinement with carried state. |

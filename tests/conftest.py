@@ -275,6 +275,9 @@ def run_server(config: StrataConfig, reset_caches: bool = False) -> Iterator[str
         host=config.host,
         port=config.port,
         log_level="error",
+        # Match production (server.main): default ws="auto" imports uvicorn's
+        # legacy websockets backend (DeprecationWarning; broken on CPython 3.14).
+        ws="websockets-sansio",
     )
     server_instance = uvicorn.Server(server_config)
     server_thread = threading.Thread(target=server_instance.run, daemon=True)
@@ -358,6 +361,9 @@ def run_server_with_context(
         host="127.0.0.1",
         port=port,
         log_level="warning",
+        # Match production (server.main): default ws="auto" imports uvicorn's
+        # legacy websockets backend (DeprecationWarning; broken on CPython 3.14).
+        ws="websockets-sansio",
     )
     server_instance = uvicorn.Server(server_config)
     thread = threading.Thread(target=server_instance.run, daemon=True)
@@ -493,6 +499,9 @@ def server_with_client(temp_warehouse, tmp_path):
         host=config.host,
         port=config.port,
         log_level="error",
+        # Match production (server.main): default ws="auto" imports uvicorn's
+        # legacy websockets backend (DeprecationWarning; broken on CPython 3.14).
+        ws="websockets-sansio",
     )
     server_instance = uvicorn.Server(server_config)
     server_thread = threading.Thread(target=server_instance.run, daemon=True)

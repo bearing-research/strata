@@ -1,0 +1,12 @@
+[project]
+name = "model-variants-sweep"
+version = "0.1.0"
+description = ""
+requires-python = "==3.14.*"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+]
+
+[tool.uv]

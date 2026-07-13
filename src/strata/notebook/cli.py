@@ -199,7 +199,7 @@ async def _run_async(args: argparse.Namespace) -> int:
         return 2
 
     # Late imports so --help / path errors don't pay heavy import cost.
-    from strata.notebook.executor import CellExecutor
+    from strata.notebook.executor import DEFAULT_CELL_TIMEOUT_SECONDS, CellExecutor
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
 
@@ -338,10 +338,20 @@ async def _run_async(args: argparse.Namespace) -> int:
             continue
 
         try:
+            # --timeout raises the fallback per-cell limit for this run; a
+            # per-cell `# @timeout` / notebook.toml `timeout` still takes
+            # precedence (see CellExecutor._resolve_effective_timeout).
+            cell_timeout = (
+                args.timeout if args.timeout is not None else DEFAULT_CELL_TIMEOUT_SECONDS
+            )
             if args.force:
-                result = await executor.execute_cell_force(cell_id, cell.source)
+                result = await executor.execute_cell_force(
+                    cell_id, cell.source, timeout_seconds=cell_timeout
+                )
             else:
-                result = await executor.execute_cell(cell_id, cell.source)
+                result = await executor.execute_cell(
+                    cell_id, cell.source, timeout_seconds=cell_timeout
+                )
         except Exception as exc:
             entry = {
                 "id": cell_id,
@@ -357,7 +367,7 @@ async def _run_async(args: argparse.Namespace) -> int:
                 _print_cell_line(entry)
             continue
 
-        entry = {
+        entry: dict[str, Any] = {
             "id": cell_id,
             "label": _cell_label(cell.source),
             "status": "ok" if result.success else "error",
@@ -374,12 +384,20 @@ async def _run_async(args: argparse.Namespace) -> int:
             entry["stdout"] = _truncate_console(result.stdout)
         if result.stderr:
             entry["stderr"] = _truncate_console(result.stderr)
+        # In-place mutation of an input is otherwise silent in headless runs (the
+        # warning only reached the WS/UI path). Surface it: a cell that mutates an
+        # input without exporting it means downstream cells see the stale value.
+        if result.mutation_warnings:
+            entry["mutation_warnings"] = [dict(w) for w in result.mutation_warnings]
         if not result.success:
             entry["error"] = result.error or "cell failed"
             failed_cells.add(cell_id)
         results.append(entry)
         if args.format == "human" and not args.quiet:
             _print_cell_line(entry)
+            for w in result.mutation_warnings:
+                tail = f" {w['suggestion']}" if w.get("suggestion") else ""
+                print(f"      {_yellow('⚠')} {w['message']}{tail}")
 
     total_ms = int((time.monotonic() - start) * 1000)
     any_failed = any(r["status"] == "error" for r in results)
@@ -414,6 +432,17 @@ def add_run_arguments(parser: argparse.ArgumentParser) -> None:
         "--no-sync",
         action="store_true",
         help="Skip `uv sync`; require .venv/ to already exist",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "Per-cell timeout for this run, overriding the 300s default "
+            "(a per-cell `# @timeout` or notebook.toml `timeout` still wins). "
+            "Use for compute-heavy cells like model training."
+        ),
     )
     parser.add_argument(
         "--format",

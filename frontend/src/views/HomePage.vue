@@ -367,6 +367,17 @@ function formatTime(ts: number): string {
 <template>
   <div class="home" data-testid="home-page">
     <div class="home-theme-slot">
+      <router-link
+        to="/artifacts"
+        class="nav-link"
+        data-testid="nav-artifacts"
+        title="Artifact store"
+      >
+        Artifacts
+      </router-link>
+      <router-link to="/logs" class="nav-link" data-testid="nav-logs" title="Server logs">
+        Logs
+      </router-link>
       <ThemeToggle />
     </div>
     <div class="home-container">
@@ -643,6 +654,23 @@ function formatTime(ts: number): string {
   top: 16px;
   right: 16px;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nav-link {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.nav-link:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
 }
 
 .logo {

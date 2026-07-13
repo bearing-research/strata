@@ -494,6 +494,85 @@ A `variant_active_unknown` diagnostic surfaces in the UI when the
 selection drifts (e.g. you renamed a variant in source without updating
 the toml entry).
 
+### Sweep mode — compare all variants at once
+
+Switch mode answers "which model do I pick?". **Sweep mode** answers
+"how do all three compare on the same downstream pipeline?" — it runs
+**every** variant on each group execution and hands a downstream cell the
+whole set as a `{variant_name: value}` dict.
+
+```toml
+[[variant_group]]
+group = "classifier"
+mode = "sweep"        # default is "switch"; `active` is ignored in sweep
+```
+
+The variant cells are **unchanged** — same `# @variant <group> <name>`
+annotation, same defines contract. Only the consumer changes: instead of
+seeing one `model`, a downstream cell receives a dict keyed by variant
+name and can compare them in one pass:
+
+```python
+# downstream cell — `preds` is {"logreg": ..., "rf": ..., "gbm": ...}
+scores = {name: accuracy(p, y_test) for name, p in preds.items()}
+```
+
+Migrating switch → sweep is a one-line toml edit (no cell changes). In
+the UI, the tab strip becomes a **display selector** (clicking a tab just
+shows that variant's source; it no longer changes what runs), with a
+group-level status rollup. Provenance includes the sorted
+variant→artifact map, so **adding a variant only runs that one** and
+renaming/removing a variant restalens the downstream as expected.
+
+Caveats worth knowing: a variant that fails is simply dropped from the
+dict (the downstream still runs once with the partial set), and a sweep
+group of one is legal but pointless — you'd get a one-key dict. Sweep-group
+members and their downstream consumers always run as **single-cell**
+executions — they're excluded from run-all's shared-namespace batching, so a
+sweep notebook doesn't get that speedup. This is deliberate: batching would let
+one variant's in-namespace state leak into a sibling's, corrupting its
+provenance, so sweep trades the batch speedup for per-variant isolation.
+
+### Fan-out — run a downstream cell once per variant
+
+Sweep mode hands a downstream cell the whole `{variant: value}` dict. Sometimes
+you'd rather run the *downstream work itself* once per variant — score each
+model on its own, tune each independently, dispatch each to its own GPU worker.
+That's `# @per_variant`:
+
+```python
+# @per_variant
+# Runs once per model variant. `preds` is bound to THAT variant's list
+# (a scalar), not the whole dict — so this cell computes one accuracy.
+accuracy = sum(p == t for p, t in zip(preds, y_true)) / len(y_true)
+```
+
+The cell runs N times (once per variant of its upstream sweep group), each
+instance with the variant's scalar value bound. Its own output becomes
+per-variant too, so a **downstream cell decides how to consume it**:
+
+- Another `# @per_variant` cell continues the fan-out, zipping by variant name
+  (instance `logreg` reads the upstream `logreg` value).
+- A plain cell **collapses** it back to a `{variant: value}` dict — the same v1
+  sweep machinery:
+
+```python
+# plain downstream — `accuracy` is {"logreg": 0.9, "rf": 0.88, ...}
+best = max(accuracy, key=accuracy.get)
+```
+
+Each instance is an independent `materialize`: its own provenance, its own
+cache entry, its own worker dispatch — so `# @per_variant` + `# @worker gpu`
+fans out to N independent jobs, and adding a variant only runs the new instance.
+
+**Choosing the group.** Bare `# @per_variant` infers the group when the cell
+reads from exactly one sweep group. If it reads from two or more, name the one
+to fan out over — `# @per_variant model` — and the others collapse to dicts. A
+cell fans out over **one** group; comparing across two groups (cartesian) isn't
+supported. The validator flags the mistakes: `per_variant_no_sweep_source`
+(nothing to fan out over), `per_variant_ambiguous_group` (bare form, ≥2 groups),
+`per_variant_on_variant_member` (a cell can't both be a variant and fan out).
+
 ### Defines contract
 
 All variants in a group must produce the same set of top-level

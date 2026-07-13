@@ -20,6 +20,7 @@ from strata.notebook.serializer import (
     ContentType,
     StrataRArtifactError,
     deserialize_value,
+    read_table_page,
     serialize_value,
 )
 
@@ -1083,3 +1084,204 @@ class TestArrowTypeRegistry:
         for rule in serializer_module._ARROW_TYPE_RULES:
             assert callable(rule.matches)
             assert callable(rule.to_table)
+
+
+def _arrow_blob(value, name="v"):
+    """Serialize *value* the way the harness does and return the raw blob bytes."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        meta = serialize_value(value, Path(tmpdir), name)
+        return (Path(tmpdir) / meta["file"]).read_bytes()
+
+
+class TestReadTablePage:
+    """read_table_page backs the interactive data viewer's lazy paging."""
+
+    def test_paging_slices_and_reports_total(self):
+        df = pd.DataFrame({"a": list(range(100)), "b": [x * 2 for x in range(100)]})
+        blob = _arrow_blob(df)
+
+        page = read_table_page(blob, offset=10, limit=5)
+
+        assert page is not None
+        assert page["total"] == 100
+        assert page["columns"] == ["a", "b"]
+        assert page["rows"] == [[10, 20], [11, 22], [12, 24], [13, 26], [14, 28]]
+
+    def test_offset_past_end_returns_empty_page(self):
+        blob = _arrow_blob(pd.DataFrame({"a": [1, 2, 3]}))
+
+        page = read_table_page(blob, offset=999, limit=10)
+
+        assert page is not None
+        assert page["total"] == 3
+        assert page["rows"] == []
+
+    def test_sort_descending_orders_whole_table_before_slicing(self):
+        df = pd.DataFrame({"a": [3, 1, 2, 5, 4], "b": ["c", "a", "b", "e", "d"]})
+        blob = _arrow_blob(df)
+
+        page = read_table_page(blob, offset=0, limit=2, sort_by="a", sort_dir="desc")
+
+        # Global order is 5,4,3,2,1 — the first page must be the two largest.
+        assert page is not None
+        assert page["rows"] == [[5, "e"], [4, "d"]]
+
+    def test_unknown_sort_column_is_ignored(self):
+        blob = _arrow_blob(pd.DataFrame({"a": [2, 1, 3]}))
+
+        page = read_table_page(blob, sort_by="nope")
+
+        assert page is not None
+        assert page["rows"] == [[2], [1], [3]]
+
+    def test_datetime_values_are_json_safe(self):
+        df = pd.DataFrame({"t": pd.to_datetime(["2026-01-01", "2026-01-02"])})
+        blob = _arrow_blob(df)
+
+        page = read_table_page(blob)
+
+        assert page is not None
+        assert all(isinstance(row[0], str) for row in page["rows"])
+        json.dumps(page["rows"])  # must not raise
+
+    def test_scalar_shape_is_not_pageable(self):
+        # A numpy scalar serializes as arrow shape=scalar — not a table.
+        import numpy as np
+
+        page = read_table_page(_arrow_blob(np.int64(7)))
+
+        assert page is None
+
+    def test_non_arrow_blob_returns_none(self):
+        assert read_table_page(b"not arrow at all") is None
+
+
+class TestReadTablePageFiltering:
+    """Filter + search narrow the frame before paging; total reflects it."""
+
+    def _blob(self):
+        df = pd.DataFrame(
+            {
+                "id": [1, 2, 3, 4, 5],
+                "region": ["North", "South", "north", "East", "West"],
+                "revenue": [10.0, 250.0, 99.0, 5.0, 300.0],
+            }
+        )
+        return _arrow_blob(df)
+
+    def test_global_search_is_case_insensitive_across_columns(self):
+        page = read_table_page(self._blob(), search="north")
+
+        assert page["total"] == 2  # "North" and "north"
+        assert {row[1] for row in page["rows"]} == {"North", "north"}
+
+    def test_search_matches_numeric_columns_cast_to_string(self):
+        page = read_table_page(self._blob(), search="250")
+
+        assert page["total"] == 1
+        assert page["rows"][0][0] == 2
+
+    def test_filter_greater_than_on_numeric_column(self):
+        page = read_table_page(self._blob(), filters=[{"col": "revenue", "op": "gt", "value": 100}])
+
+        assert page["total"] == 2
+        assert sorted(row[0] for row in page["rows"]) == [2, 5]
+
+    def test_filter_between_inclusive(self):
+        page = read_table_page(
+            self._blob(),
+            filters=[{"col": "revenue", "op": "between", "value": 10, "value2": 99}],
+        )
+
+        assert sorted(row[0] for row in page["rows"]) == [1, 3]
+
+    def test_filter_contains_on_string_column(self):
+        page = read_table_page(
+            self._blob(), filters=[{"col": "region", "op": "contains", "value": "th"}]
+        )
+
+        # "North", "South", "north" all contain "th" (case-insensitive)
+        assert page["total"] == 3
+
+    def test_filters_and_search_compose(self):
+        page = read_table_page(
+            self._blob(),
+            filters=[{"col": "revenue", "op": "gt", "value": 50}],
+            search="north",
+        )
+
+        assert page["total"] == 1
+        assert page["rows"][0][0] == 3  # "north", revenue 99
+
+    def test_uncoercible_filter_value_is_skipped(self):
+        # "abc" can't coerce to the int column — filter is a no-op, not a 500.
+        page = read_table_page(self._blob(), filters=[{"col": "id", "op": "eq", "value": "abc"}])
+
+        assert page["total"] == 5
+
+    def test_unknown_column_filter_is_skipped(self):
+        page = read_table_page(self._blob(), filters=[{"col": "nope", "op": "eq", "value": 1}])
+
+        assert page["total"] == 5
+
+
+class TestReadTableSummary:
+    def test_summary_reports_dtype_nulls_distinct_and_extent(self):
+        from strata.notebook.serializer import read_table_summary
+
+        df = pd.DataFrame(
+            {
+                "n": [1, 2, 2, None],
+                "label": ["a", "b", "a", "c"],
+            }
+        )
+        summary = read_table_summary(_arrow_blob(df))
+
+        assert summary["total"] == 4
+        by_name = {c["name"]: c for c in summary["columns"]}
+        assert by_name["n"]["nulls"] == 1
+        assert by_name["n"]["distinct"] == 2  # {1, 2}
+        assert by_name["n"]["min"] == 1
+        assert by_name["n"]["max"] == 2
+        # String columns get null/distinct but no min/max.
+        assert by_name["label"]["distinct"] == 3
+        assert by_name["label"]["min"] is None
+
+    def test_summary_none_for_non_table(self):
+        import numpy as np
+
+        from strata.notebook.serializer import read_table_summary
+
+        assert read_table_summary(_arrow_blob(np.int64(3))) is None
+
+
+class TestWriteTableExport:
+    def test_csv_export_roundtrips_and_respects_filter(self):
+        import io
+
+        from strata.notebook.serializer import write_table_export
+
+        df = pd.DataFrame({"id": [1, 2, 3], "v": [10, 200, 30]})
+        blob = _arrow_blob(df)
+
+        raw = write_table_export(blob, "csv", filters=[{"col": "v", "op": "gt", "value": 50}])
+        out = pd.read_csv(io.BytesIO(raw))
+
+        assert list(out.columns) == ["id", "v"]
+        assert out["id"].tolist() == [2]
+
+    def test_parquet_export_roundtrips(self):
+        import io
+
+        from strata.notebook.serializer import write_table_export
+
+        df = pd.DataFrame({"id": [1, 2], "v": [10, 20]})
+        raw = write_table_export(_arrow_blob(df), "parquet")
+        out = pd.read_parquet(io.BytesIO(raw))
+
+        assert out["id"].tolist() == [1, 2]
+
+    def test_unknown_format_returns_none(self):
+        from strata.notebook.serializer import write_table_export
+
+        assert write_table_export(_arrow_blob(pd.DataFrame({"a": [1]})), "xlsx") is None

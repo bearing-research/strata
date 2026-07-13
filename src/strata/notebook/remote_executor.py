@@ -350,11 +350,15 @@ def create_notebook_executor_app() -> FastAPI:
                     await mount_resolver.sync_back(resolved_mounts)
             except TimeoutError:
                 shutil.rmtree(tmpdir, ignore_errors=True)
+                # Lazy import: keep the heavy executor module out of the worker's
+                # module-load; this is a rare error path.
+                from strata.notebook.executor import cell_timeout_message
+
                 return JSONResponse(
                     status_code=408,
                     content={
                         "success": False,
-                        "error": f"Cell execution timed out after {timeout_seconds}s",
+                        "error": cell_timeout_message(timeout_seconds),
                     },
                 )
             except Exception as exc:

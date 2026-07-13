@@ -535,8 +535,13 @@ async def test_cell_execute_refreshes_downstream_staleness(temp_notebook):
 
     status_updates = [f["payload"] for f in fake.frames_of("cell_status")]
     assert any(p["cell_id"] == "root" and p["status"] == "ready" for p in status_updates)
+    # After root re-runs, its direct downstream `middle` can recompute its own
+    # provenance (root is ready) → plain cache miss → idle. `leaf`, whose
+    # upstream `middle` is still stale, held a prior result, so it surfaces as
+    # STALE with an upstream reason (#361) rather than a bare idle. Both mean
+    # "needs re-run"; the point of this test is that neither stays ready.
     assert any(p["cell_id"] == "middle" and p["status"] == "idle" for p in status_updates)
-    assert any(p["cell_id"] == "leaf" and p["status"] == "idle" for p in status_updates)
+    assert any(p["cell_id"] == "leaf" and p["status"] == "stale" for p in status_updates)
 
 
 @pytest.mark.asyncio
@@ -628,6 +633,7 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         *,
         source_hash="",
         env_hash="",
+        variant=None,
     ):
         return True
 
@@ -2038,3 +2044,206 @@ async def test_final_output_seq_is_newer_than_streamed_deltas(notebook_session, 
     assert len(deltas) == 2
     assert all(d["seq"] > running["seq"] for d in deltas)
     assert output["seq"] > max(d["seq"] for d in deltas)
+
+
+@pytest.mark.asyncio
+async def test_widget_update_persists_value_and_stales_downstream(tmp_path):
+    """widget_update: persist the new value, re-materialize the widget artifact,
+    and flip the downstream consumer to STALE (P3, Tier 0)."""
+    from strata.notebook.models import CellLanguage, CellStatus
+    from strata.notebook.runtime_state import load_runtime_state
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.ws import _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Widget WS")
+    add_cell_to_notebook(nb, "controls", None)
+    add_cell_to_notebook(nb, "consume", "controls")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
+    session.notebook_state.get_cell("controls").source = "alpha = slider(0, 1, default=0.5)"
+    session.notebook_state.get_cell("consume").source = "beta = alpha * 2\nbeta"
+    session._analyze_and_build_dag()
+    session.environment_sync_state = "ready"  # unblock the WS execute gate
+
+    # Run the consumer to READY — cascades the widget cell (alpha=0.5) first.
+    await _run_cell_to_terminal(session, "consume")
+    assert session.notebook_state.get_cell("consume").status == CellStatus.READY
+
+    # Drag alpha to 0.25.
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "controls", "values": {"alpha": 0.25}},
+        execution_state,
+        session.id,
+    )
+    await _drain_execution(execution_state)
+
+    # Value persisted to runtime.json (not notebook.toml).
+    assert load_runtime_state(session.path).cells["controls"].widget_values == {"alpha": 0.25}
+
+    # The widget's value artifact now holds 0.25.
+    mgr = session.get_artifact_manager()
+    art = mgr.artifact_store.get_latest_version(
+        f"nb_{session.notebook_state.id}_cell_controls_var_alpha"
+    )
+    assert json.loads(mgr.load_artifact_data(art.id, art.version)) == 0.25
+
+    # Downstream consumer flipped STALE (its input changed).
+    assert session.notebook_state.get_cell("consume").status == CellStatus.STALE
+
+
+@pytest.mark.asyncio
+async def test_widget_update_rejects_non_widget_cell(tmp_path):
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.ws import _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Not Widget")
+    add_cell_to_notebook(nb, "py", None)
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("py").source = "x = 1"
+    session._analyze_and_build_dag()
+
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "py", "values": {"x": 1}},
+        execution_state,
+        session.id,
+    )
+    assert fake.frames_of("error")
+
+
+@pytest.mark.asyncio
+async def test_live_widget_auto_cascades_cheap_downstream(tmp_path):
+    """A `# @live` widget cell auto-runs cheap downstream cells on a value change."""
+    from strata.notebook.models import CellLanguage, CellStatus
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.ws import _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Live Widget")
+    add_cell_to_notebook(nb, "controls", None)
+    add_cell_to_notebook(nb, "consume", "controls")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
+    session.notebook_state.get_cell(
+        "controls"
+    ).source = "# @live\nalpha = slider(0, 1, default=0.5)"
+    session.notebook_state.get_cell("consume").source = "beta = alpha * 2\nbeta"
+    session._analyze_and_build_dag()
+    session.environment_sync_state = "ready"
+
+    from strata.notebook.session import ExecutionSample
+
+    await _run_cell_to_terminal(session, "consume")
+    assert session.notebook_state.get_cell("consume").status == CellStatus.READY
+    # Pin the recorded duration below the auto-run cost gate so the assertion
+    # doesn't depend on the harness subprocess's real speed (which can exceed
+    # the threshold under a loaded full-suite run — the source of a flake).
+    session.execution_history["consume"] = [ExecutionSample(duration_ms=1.0, cache_hit=False)]
+
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "controls", "values": {"alpha": 0.25}},
+        execution_state,
+        session.id,
+    )
+    await _drain_execution(execution_state)
+
+    # Live mode re-ran the downstream cell — it's READY again, not left STALE.
+    assert session.notebook_state.get_cell("consume").status == CellStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_live_cost_gate_leaves_expensive_downstream_stale(tmp_path):
+    """A downstream cell whose last run was expensive stays STALE under live mode."""
+    from strata.notebook.models import CellLanguage, CellStatus
+    from strata.notebook.session import ExecutionSample, NotebookSession
+    from strata.notebook.ws import _LIVE_COST_THRESHOLD_MS, _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Live Cost Gate")
+    add_cell_to_notebook(nb, "controls", None)
+    add_cell_to_notebook(nb, "consume", "controls")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
+    session.notebook_state.get_cell(
+        "controls"
+    ).source = "# @live\nalpha = slider(0, 1, default=0.5)"
+    session.notebook_state.get_cell("consume").source = "beta = alpha * 2\nbeta"
+    session._analyze_and_build_dag()
+    session.environment_sync_state = "ready"
+
+    await _run_cell_to_terminal(session, "consume")
+    # Pretend the consumer's last run was very slow — over the auto-run gate.
+    session.execution_history["consume"] = [
+        ExecutionSample(duration_ms=_LIVE_COST_THRESHOLD_MS + 1000, cache_hit=False)
+    ]
+
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "controls", "values": {"alpha": 0.25}},
+        execution_state,
+        session.id,
+    )
+    await _drain_execution(execution_state)
+
+    # The expensive cell was NOT auto-run — it stays STALE for a manual run.
+    assert session.notebook_state.get_cell("consume").status == CellStatus.STALE
+
+
+@pytest.mark.asyncio
+async def test_read_only_viewer_rejects_mutations_but_allows_widget_update(tmp_path):
+    """A `?role=viewer` (app-mode) connection can drive widgets + sync, but every
+    mutation frame is rejected with a `read_only` error."""
+    from strata.notebook.ws import notebook_websocket
+
+    notebook_dir = create_notebook(tmp_path, "App View")
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+    session = open_session(notebook_dir)
+
+    # Viewer sends a source edit (mutation) then a widget_update.
+    viewer = FakeNotebookWebSocket(
+        inbound=[
+            _envelope("cell_source_update", {"cell_id": "c1", "source": "y = 2"}),
+            _envelope("widget_update", {"cell_id": "c1", "values": {"a": 1}}),
+        ],
+        query_params={"role": "viewer"},
+    )
+    await notebook_websocket(cast(WebSocket, viewer), session.id)
+
+    errors = [f for f in viewer.sent if f["type"] == "error"]
+    codes = [f["payload"].get("code") for f in errors]
+    # The mutation was rejected read-only …
+    assert "read_only" in codes
+    # … but widget_update passed the gate (it errors only because c1 isn't a
+    # widget cell — not a read_only rejection).
+    assert any(
+        e["payload"].get("code") != "read_only" and "widget" in e["payload"].get("error", "")
+        for e in errors
+    )
+
+
+@pytest.mark.asyncio
+async def test_editor_connection_allows_mutations(tmp_path):
+    """A normal (no role) connection is not read-only — mutations pass the gate."""
+    from strata.notebook.ws import notebook_websocket
+
+    notebook_dir = create_notebook(tmp_path, "Editor")
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+    session = open_session(notebook_dir)
+
+    editor = FakeNotebookWebSocket(
+        inbound=[_envelope("cell_source_update", {"cell_id": "c1", "source": "x = 2"})],
+    )
+    await notebook_websocket(cast(WebSocket, editor), session.id)
+
+    codes = [f["payload"].get("code") for f in editor.sent if f["type"] == "error"]
+    assert "read_only" not in codes

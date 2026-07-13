@@ -3,7 +3,9 @@ import { computed, defineAsyncComponent, onUnmounted, ref, watch } from 'vue'
 import { useCodemirror } from '../composables/useCodemirror'
 import { useNotebook } from '../stores/notebook'
 import CellArtifactStrip from './CellArtifactStrip.vue'
-import type { Cell, CellOutput } from '../types/notebook'
+import DataTable from './DataTable.vue'
+import WidgetCell from './WidgetCell.vue'
+import type { Cell, CellOutput, StalenessReason } from '../types/notebook'
 import {
   resolveEffectiveWorkerEntry,
   summarizeRemoteExecutionState,
@@ -45,6 +47,8 @@ const {
   addDependencyAction,
   addRPackageAction,
   setVariantActive,
+  selectVariantDisplay,
+  variantDisplayCellId,
   addVariant,
   cancelCellWebSocket,
 } = useNotebook()
@@ -53,6 +57,41 @@ const variantGroup = computed(() => {
   if (!props.cell.variantGroup) return null
   return notebook.variantGroups.find((g) => g.group === props.cell.variantGroup) ?? null
 })
+
+// In sweep mode every member runs; the tab strip is a display selector and the
+// "active" highlight follows the locally-selected display cell, not the backend
+// active pointer. In switch mode they coincide.
+const isSweepVariant = computed(() => variantGroup.value?.mode === 'sweep')
+const variantSelectedCellId = computed(() =>
+  variantGroup.value
+    ? isSweepVariant.value
+      ? variantDisplayCellId(variantGroup.value)
+      : variantGroup.value.activeCellId
+    : '',
+)
+
+function onVariantTabClick(member: { cellId: string; name: string }): void {
+  if (!variantGroup.value) return
+  if (isSweepVariant.value) {
+    selectVariantDisplay(variantGroup.value.group, member.cellId)
+  } else {
+    setVariantActive(variantGroup.value.group, member.name)
+  }
+}
+
+// Sweep-group rollup: resolve each member to its cell for a status count, and a
+// run-all that runs every variant (each emits `run`, same as the per-cell path).
+const variantMemberCells = computed(() =>
+  (variantGroup.value?.members ?? [])
+    .map((m) => notebook.cells.find((c) => c.id === m.cellId))
+    .filter((c): c is (typeof notebook.cells)[number] => Boolean(c)),
+)
+const variantGroupReadyCount = computed(
+  () => variantMemberCells.value.filter((c) => c.status === 'ready').length,
+)
+function runVariantGroup(): void {
+  for (const m of variantGroup.value?.members ?? []) emit('run', m.cellId)
+}
 
 const isInspecting = computed(() => storeIsInspecting(props.cell.id))
 
@@ -66,7 +105,19 @@ function toggleInspect() {
 
 // Cell unit tests — Python cells only. The toolbar button doubles as a health
 // badge so test status is readable without opening the panel.
+const notebookId = computed(() => (notebook as { sessionId?: string }).sessionId)
+
+/** The 20-row preview arrives as column-keyed dicts; the data grid renders
+ * positional rows to match the paging endpoint. Convert once per output. */
+function previewArraysFor(output: CellOutput): unknown[][] {
+  const cols = output.columns ?? []
+  return (output.rows ?? []).map((row) => cols.map((col) => (row as Record<string, unknown>)[col]))
+}
+
 const isPythonCell = computed(() => props.cell.language === 'python')
+// Widget cells render their control panel in place of the editor; this toggles
+// the source editor so the control *declaration* can still be edited in the UI.
+const widgetShowSource = ref(false)
 const isTesting = computed(() => storeIsTesting(props.cell.id))
 
 interface TestBadge {
@@ -194,6 +245,25 @@ const statusLabel = computed(() => {
     case 'error':
       return '\u2715'
   }
+})
+
+// Human-readable staleness reasons for the status-dot tooltip, so a
+// stale cell reads "stale · upstream changed" rather than a bare "stale"
+// (#361 — a downstream of a changed upstream is STALE with reason UPSTREAM).
+const STALENESS_REASON_LABELS: Record<StalenessReason, string> = {
+  self: 'source changed',
+  upstream: 'upstream changed',
+  env: 'environment changed',
+  forced: 'forced re-run',
+}
+
+const statusTitle = computed(() => {
+  const reasons = props.cell.stalenessReasons
+  if (props.cell.status === 'stale' && reasons?.length) {
+    const detail = reasons.map((r) => STALENESS_REASON_LABELS[r] ?? r).join(', ')
+    return `stale · ${detail}`
+  }
+  return props.cell.status
 })
 
 const durationLabel = computed(() => {
@@ -669,7 +739,7 @@ function outputKey(output: CellOutput, index: number): string {
   >
     <!-- Left gutter -->
     <div class="cell-gutter">
-      <span class="status-dot" :title="cell.status">{{ statusLabel }}</span>
+      <span class="status-dot" :title="statusTitle">{{ statusLabel }}</span>
       <div class="cell-actions">
         <button
           v-if="cell.language !== 'markdown' && cell.status !== 'running'"
@@ -735,14 +805,16 @@ function outputKey(output: CellOutput, index: number): string {
           v-for="member in variantGroup.members"
           :key="member.cellId"
           class="variant-tab"
-          :class="{ active: member.cellId === variantGroup.activeCellId }"
+          :class="{ active: member.cellId === variantSelectedCellId }"
           :title="
-            member.cellId === variantGroup.activeCellId
-              ? `Active variant: ${member.name}`
-              : `Switch to ${member.name}`
+            isSweepVariant
+              ? `Show ${member.name} (all variants run in sweep mode)`
+              : member.cellId === variantSelectedCellId
+                ? `Active variant: ${member.name}`
+                : `Switch to ${member.name}`
           "
           :data-variant-name="member.name"
-          @click="setVariantActive(variantGroup.group, member.name)"
+          @click="onVariantTabClick(member)"
         >
           {{ member.name }}
         </button>
@@ -757,6 +829,31 @@ function outputKey(output: CellOutput, index: number): string {
         <span class="variant-group-label" :title="`Variant group: ${variantGroup.group}`">
           {{ variantGroup.group }}
         </span>
+        <template v-if="isSweepVariant">
+          <span
+            class="variant-sweep-badge"
+            data-testid="variant-sweep-badge"
+            title="Sweep mode: every variant runs; downstream cells receive a {variant: value} dict"
+          >
+            sweep
+          </span>
+          <span
+            class="variant-group-rollup"
+            data-testid="variant-group-rollup"
+            :title="`${variantGroupReadyCount} of ${variantGroup.members.length} variants ready`"
+          >
+            {{ variantGroupReadyCount }}/{{ variantGroup.members.length }} ready
+          </span>
+          <button
+            class="variant-tab variant-run-all"
+            data-testid="variant-run-all"
+            title="Run all variants in this group"
+            :disabled="!connected || environmentMutationActive"
+            @click="runVariantGroup"
+          >
+            ▶ all
+          </button>
+        </template>
       </div>
       <div class="cell-meta">
         <!-- Line 1: identity — name, defines, reads -->
@@ -891,6 +988,21 @@ function outputKey(output: CellOutput, index: number): string {
             &#x21BB; {{ loopProgressLabel }}
           </span>
           <span
+            v-for="v in cell.variantProgress"
+            :key="v.variant"
+            class="variant-progress-chip"
+            :class="{ failed: !v.success }"
+            :title="
+              v.error
+                ? `${v.variant} failed: ${v.error}`
+                : `variant ${v.variant} (${v.index + 1}/${v.total})` +
+                  (typeof v.durationMs === 'number' ? ` · ${Math.round(v.durationMs)}ms` : '')
+            "
+            data-testid="variant-progress-chip"
+          >
+            {{ v.success ? '✓' : '✗' }} {{ v.variant }}
+          </span>
+          <span
             v-if="cell.status === 'running' && !loopProgressLabel"
             class="running-badge"
             data-testid="running-elapsed"
@@ -992,8 +1104,21 @@ function outputKey(output: CellOutput, index: number): string {
         v-html="renderedMarkdownSource || '<p class=\'placeholder\'>(empty markdown cell)</p>'"
       ></div>
 
+      <!-- Widget cells render their control panel in place of the editor, with
+           a toggle to reveal the declaration source for editing. -->
+      <div v-if="!folded && cell.language === 'widget'" class="widget-source-toggle">
+        <button type="button" @click="widgetShowSource = !widgetShowSource">
+          {{ widgetShowSource ? '✓ Done editing controls' : '✎ Edit controls' }}
+        </button>
+      </div>
+      <WidgetCell v-if="!folded && cell.language === 'widget' && !widgetShowSource" :cell="cell" />
+
       <div
-        v-show="!folded && !(cell.language === 'markdown' && isMarkdownPreviewing)"
+        v-show="
+          !folded &&
+          (cell.language !== 'widget' || widgetShowSource) &&
+          !(cell.language === 'markdown' && isMarkdownPreviewing)
+        "
         ref="editorEl"
         class="editor-container"
         @focusout="
@@ -1135,23 +1260,15 @@ function outputKey(output: CellOutput, index: number): string {
             :key="outputKey(output, index)"
             class="output-block"
           >
-            <div v-if="output.rows?.length" class="output-table-wrap">
-              <table class="output-table">
-                <thead>
-                  <tr>
-                    <th v-for="col in output.columns" :key="col">{{ col }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(row, rowIndex) in output.rows?.slice(0, 50)" :key="rowIndex">
-                    <td v-for="col in output.columns" :key="col">{{ row[col] }}</td>
-                  </tr>
-                </tbody>
-              </table>
-              <div v-if="(output.rowCount ?? 0) > 50" class="row-count">
-                showing 50 of {{ output.rowCount?.toLocaleString() }} rows
-              </div>
-            </div>
+            <DataTable
+              v-if="output.rows?.length && output.columns?.length"
+              :notebook-id="notebookId"
+              :cell-id="cell.id"
+              :artifact-uri="output.artifactUri || ''"
+              :columns="output.columns"
+              :preview-rows="previewArraysFor(output)"
+              :total="output.rowCount ?? output.rows.length"
+            />
             <div
               v-else-if="output.contentType === 'image/png' && output.inlineDataUrl"
               class="output-image"
@@ -1532,6 +1649,26 @@ function outputKey(output: CellOutput, index: number): string {
   color: var(--text-muted);
 }
 
+.variant-sweep-badge {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--accent-soft, rgba(99, 102, 241, 0.15));
+  color: var(--accent, #6366f1);
+}
+
+.variant-group-rollup {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.variant-run-all {
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
 .cell-meta {
   display: flex;
   flex-direction: column;
@@ -1607,6 +1744,21 @@ function outputKey(output: CellOutput, index: number): string {
 .loop-progress-badge.done {
   background: var(--tint-success);
   color: var(--accent-success);
+}
+.variant-progress-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--tint-success);
+  color: var(--accent-success);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.variant-progress-chip.failed {
+  background: var(--tint-danger);
+  color: var(--accent-danger);
 }
 .loop-spinner {
   display: inline-block;
@@ -1948,6 +2100,22 @@ function outputKey(output: CellOutput, index: number): string {
      dead space below 1-line cells. The cell-gutter padding (8px top +
      bottom) already guarantees a visible click target on empty cells. */
 }
+.widget-source-toggle {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px 0;
+}
+.widget-source-toggle button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.widget-source-toggle button:hover {
+  color: var(--accent-primary);
+}
 
 .cell-output {
   border-top: 1px solid var(--border-subtle);
@@ -2041,11 +2209,6 @@ function outputKey(output: CellOutput, index: number): string {
 .install-complete-hint code {
   color: var(--text-primary);
 }
-.output-table-wrap {
-  overflow-x: auto;
-  max-height: 400px;
-  overflow-y: auto;
-}
 .output-image {
   overflow-x: auto;
 }
@@ -2132,35 +2295,6 @@ function outputKey(output: CellOutput, index: number): string {
 .output-markdown :deep(th) {
   color: var(--accent-primary);
   background: var(--bg-surface);
-}
-.output-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 12px;
-}
-.output-table th {
-  text-align: left;
-  padding: 4px 12px;
-  color: var(--accent-primary);
-  border-bottom: 1px solid var(--bg-input);
-  font-weight: 600;
-  position: sticky;
-  top: 0;
-  background: var(--bg-elevated);
-}
-.output-table td {
-  padding: 3px 12px;
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--bg-elevated);
-}
-.output-table tr:hover td {
-  background: var(--bg-input);
-}
-.row-count {
-  color: var(--text-muted);
-  font-size: 11px;
-  margin-top: 4px;
 }
 
 .output-scalar pre {

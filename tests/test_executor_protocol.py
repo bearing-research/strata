@@ -420,6 +420,9 @@ def executor_server():
         host="127.0.0.1",
         port=port,
         log_level="warning",
+        # Avoid uvicorn's legacy websockets backend (default ws="auto"), which
+        # emits a DeprecationWarning and is broken on CPython 3.14.
+        ws="websockets-sansio",
     )
     server_instance = uvicorn.Server(server_config)
     thread = threading.Thread(target=server_instance.run, daemon=True)

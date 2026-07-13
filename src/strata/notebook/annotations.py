@@ -299,12 +299,25 @@ class CellAnnotations:
     # Loop cell annotations
     loop: LoopAnnotation | None = None
 
+    # Widget live mode. ``# @live`` on a widget cell auto-runs the (cheap)
+    # downstream cells when a control changes, instead of leaving them stale
+    # for a manual run. ``# @live off`` disables it.
+    live: bool = False
+
     # SQL cell annotations
     sql: SqlAnnotation | None = None
     cache: CachePolicy | None = None
 
     # Variant grouping
     variant: VariantAnnotation | None = None
+
+    # Sweep fan-out (v2). ``# @per_variant [group]`` marks a downstream cell
+    # to run once per variant of an upstream sweep group, with the scalar
+    # value bound (rather than consuming the whole ``{variant: value}`` dict).
+    # ``per_variant_group`` is the explicitly-named group, or None to infer
+    # the single sweep group the cell reads from.
+    per_variant: bool = False
+    per_variant_group: str | None = None
 
     # Explicit ordering dependencies. ``# @after <cell-id>`` adds a DAG
     # edge from ``<cell-id>`` to this cell without requiring a shared
@@ -434,6 +447,18 @@ def parse_annotations(source: str) -> CellAnnotations:
             variant = _parse_variant_annotation(value)
             if variant is not None:
                 result.variant = variant
+
+        elif key == "live":
+            # ``# @live`` (on) or ``# @live off`` — auto-run downstream on change.
+            result.live = value.strip().lower() not in ("off", "false", "no", "0")
+
+        elif key == "per_variant":
+            # ``# @per_variant`` (infer the group) or ``# @per_variant <group>``.
+            # First token is the group; extras are ignored (validation flags a
+            # malformed group name separately if needed).
+            result.per_variant = True
+            tokens = value.split()
+            result.per_variant_group = tokens[0] if tokens else None
 
         elif key == "after":
             # ``# @after <cell-id>`` declares an ordering dependency

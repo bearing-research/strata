@@ -42,6 +42,11 @@ class MessageType(StrEnum):
     DEPENDENCY_REMOVE = "dependency_remove"
     VARIANT_SET_ACTIVE = "variant_set_active"
     VARIANT_ADD = "variant_add"
+    # A widget cell's control value(s) changed. Payload: ``{cell_id, values:
+    # {name: value}}`` (partial updates allowed). The server persists the value
+    # to runtime.json, re-materializes the widget's value artifacts, and marks
+    # downstream cells stale (Tier 0 — the user then runs them).
+    WIDGET_UPDATE = "widget_update"
     AGENT_CANCEL = "agent_cancel"
     AGENT_CONFIRM_RESPONSE = "agent_confirm_response"
 
@@ -61,6 +66,10 @@ class MessageType(StrEnum):
     CELL_CONSOLE = "cell_console"
     CELL_ERROR = "cell_error"
     CELL_ITERATION_PROGRESS = "cell_iteration_progress"
+    # One completed variant of a ``# @per_variant`` fan-out cell. Payload:
+    # ``{cell_id, variant, index, total, success, duration_ms, error?}`` —
+    # lets the frontend show per-variant progress as the fan-out runs.
+    CELL_VARIANT_PROGRESS = "cell_variant_progress"
     # Cell unit-test lifecycle. CELL_TEST_STATUS mirrors CELL_STATUS for the
     # running spinner ({cell_id, status: running|ready|error}); CELL_TEST_RESULTS
     # carries the per-test outcomes + totals + staleness flag.
@@ -87,6 +96,12 @@ class MessageType(StrEnum):
     AGENT_CONFIRM_REQUEST = "agent_confirm_request"
     AGENT_PROGRESS = "agent_progress"
     AGENT_DONE = "agent_done"
+    # An external agent driving via MCP (or the CLI) narrating an action or a
+    # note into the Agent panel. The built-in loop streams its reasoning as
+    # agent_text_delta; an external agent's reasoning lives in its own client,
+    # so we surface its tool actions (source="mcp") and any explicit narration
+    # (source="agent") as discrete notes instead.
+    AGENT_NOTE = "agent_note"
 
 
 __all__ = ["MessageType"]

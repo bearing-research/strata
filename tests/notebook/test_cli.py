@@ -141,6 +141,63 @@ class TestExecutionFlow:
         assert c2["cache_hit"] is True
         assert c2["status"] == "ok"
 
+    def test_timeout_flag_threads_to_executor(self, notebook_with_chain):
+        seen: dict[str, float] = {}
+
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=300.0):
+            seen[cell_id] = timeout_seconds
+            return _make_result(cell_id, success=True)
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            run_main([str(notebook_with_chain), "--no-sync", "--timeout", "999"])
+
+        assert seen == {"c1": 999.0, "c2": 999.0}  # --timeout reaches every cell
+
+    def test_mutation_warnings_surface_in_run(self, notebook_with_chain, capsys):
+        from strata.notebook.executor import CellExecutionResult
+
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=300.0):
+            warns = (
+                [
+                    {
+                        "var_name": "df",
+                        "message": "'df' was mutated in place (no reassignment)",
+                        "suggestion": "(e.g. x = x.copy())",
+                    }
+                ]
+                if cell_id == "c2"
+                else []
+            )
+            return CellExecutionResult(
+                cell_id=cell_id, success=True, duration_ms=5, mutation_warnings=warns
+            )
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            rc = run_main([str(notebook_with_chain), "--no-sync", "--format", "json"])
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        c2 = next(c for c in payload["cells"] if c["id"] == "c2")
+        assert c2["mutation_warnings"][0]["var_name"] == "df"
+        c1 = next(c for c in payload["cells"] if c["id"] == "c1")
+        assert "mutation_warnings" not in c1  # only emitted when present
+
+    def test_mutation_warnings_print_in_human_output(self, notebook_with_chain, capsys):
+        from strata.notebook.executor import CellExecutionResult
+
+        async def fake_execute_cell(self, cell_id, source, timeout_seconds=300.0):
+            warns = (
+                [{"var_name": "df", "message": "'df' was mutated in place", "suggestion": None}]
+                if cell_id == "c2"
+                else []
+            )
+            return CellExecutionResult(
+                cell_id=cell_id, success=True, duration_ms=5, mutation_warnings=warns
+            )
+
+        with patch("strata.notebook.executor.CellExecutor.execute_cell", new=fake_execute_cell):
+            run_main([str(notebook_with_chain), "--no-sync"])
+        assert "mutated in place" in capsys.readouterr().out
+
     def test_cell_failure_returns_1_and_skips_downstream(self, notebook_with_chain, capsys):
         async def fake_execute_cell(self, cell_id, source, timeout_seconds=30):
             if cell_id == "c1":
@@ -575,3 +632,14 @@ class TestRunJsonConsoleOutput:
         payload = json.loads(capsys.readouterr().out)
         assert "stdout" not in payload["cells"][0]
         assert "stderr" not in payload["cells"][0]
+
+
+def test_cell_timeout_message_names_the_remedy():
+    from strata.notebook.executor import cell_timeout_message
+
+    msg = cell_timeout_message(300.0)
+    assert "300.0s" in msg
+    # names all three levers so the limit is discoverable from the error alone
+    assert "@timeout" in msg
+    assert "notebook.toml" in msg
+    assert "--timeout" in msg

@@ -42,6 +42,7 @@ from strata.notebook.ws_payloads import (
     CellOutputDeltaPayload,
     CellTestResultsPayload,
     CellTestStatusPayload,
+    CellVariantProgressPayload,
     cell_status_payload,
     dag_update_payload,
     impact_preview_payload,
@@ -587,6 +588,18 @@ def _ws_owner_allowed(owner: str | None, caller: str | None) -> bool:
     return owner == caller
 
 
+# App-mode (read-only viewer) connections may only drive widgets + request
+# state — never edit, run arbitrary cells, change deps, or open an inspect
+# REPL. A viewer connects with ``?role=viewer``; every other C→S frame is
+# rejected so a served app can't be mutated by a client.
+_VIEWER_ALLOWED_FRAMES = frozenset(
+    {
+        MessageType.WIDGET_UPDATE,
+        MessageType.NOTEBOOK_SYNC,
+    }
+)
+
+
 @router.websocket("/ws/{notebook_id}")
 async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     """WebSocket endpoint for real-time notebook updates.
@@ -619,6 +632,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     - cell_console              Incremental stdout/stderr
     - cell_error                Execution failed
     - cell_iteration_progress   Loop-cell iteration update
+    - cell_variant_progress     @per_variant fan-out per-variant update
     - dag_update                DAG changed
     - cascade_prompt            Cascade needed
     - cascade_progress          Progress during cascade
@@ -654,6 +668,11 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     # Accept connection
     await websocket.accept()
 
+    # App-mode viewers connect read-only (``?role=viewer``): they render the
+    # widgets + outputs and may drive controls, but cannot edit or run the
+    # notebook. Enforced per-frame in the dispatch loop below.
+    read_only = websocket.query_params.get("role") == "viewer"
+
     # If a previous client disconnected within the grace window and the
     # cell is still running, abort the pending teardown so we keep the
     # execution alive for this reconnect.
@@ -685,6 +704,20 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                             MessageType.ERROR,
                             execution_state.sequence,
                             {"error": f"Unknown message type: {msg_type}"},
+                        )
+                    )
+                )
+                continue
+            if read_only and msg_type not in _VIEWER_ALLOWED_FRAMES:
+                await websocket.send_text(
+                    _json_encode(
+                        _make_message(
+                            MessageType.ERROR,
+                            execution_state.sequence,
+                            {
+                                "error": f"'{msg_type}' is not allowed in read-only app view",
+                                "code": "read_only",
+                            },
                         )
                     )
                 )
@@ -1557,6 +1590,12 @@ async def _handle_variant_set_active(
         )
         return
 
+    # In sweep mode the active pointer is ignored (every variant runs); tab
+    # clicks are display-only on the frontend. Treat a stray set-active as a
+    # silent no-op rather than churning notebook.toml or restalening downstream.
+    if session.notebook_state.variant_modes.get(group) == "sweep":
+        return
+
     seq = execution_state.next_sequence()
 
     try:
@@ -1742,8 +1781,17 @@ def _make_executor_with_progress(
             _make_message(MessageType.CELL_OUTPUT_DELTA, seq, typed),
         )
 
+    async def _broadcast_variant_progress(progress: dict[str, Any]) -> None:
+        seq = next_notebook_sequence(notebook_id)
+        payload = CellVariantProgressPayload(**progress).model_dump(mode="json")
+        await _broadcast_message(
+            notebook_id,
+            _make_message(MessageType.CELL_VARIANT_PROGRESS, seq, payload),
+        )
+
     executor.on_iteration_complete = _broadcast_iteration_progress
     executor.on_prompt_delta = _broadcast_prompt_delta
+    executor.on_variant_complete = _broadcast_variant_progress
     return executor
 
 
@@ -2960,6 +3008,138 @@ async def _broadcast_message(notebook_id: str, message: dict[str, Any]) -> None:
 #
 # Maps every client-to-server message type to its handler. Each handler
 # declares only the dispatch args it actually consumes -- e.g.
+# Live-mode cost gate: a downstream cell whose last run took longer than this
+# stays STALE (and short-circuits the cascade past it) rather than auto-running
+# on every control change. Configurable via reactive-on-save's cost model later.
+_LIVE_COST_THRESHOLD_MS = 2000.0
+
+
+async def _run_live_cascade(
+    session: NotebookSession,
+    widget_cell_id: str,
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+) -> None:
+    """Auto-run the cheap downstream cells after a @live widget change.
+
+    Walks the widget cell's transitive downstream in topological order and runs
+    each currently-stale cell in **force** mode (against the fresh upstream
+    artifacts, no upstream re-materialization). A cell whose last run exceeded
+    the cost threshold — or any cell downstream of a skipped/failed one — is
+    left STALE, so an expensive tail doesn't re-run on every drag.
+    """
+    dag = session.dag
+    if dag is None:
+        return
+
+    reachable: set[str] = set()
+    queue = list(dag.cell_downstream.get(widget_cell_id, []))
+    while queue:
+        cid = queue.pop()
+        if cid in reachable:
+            continue
+        reachable.add(cid)
+        queue.extend(dag.cell_downstream.get(cid, []))
+
+    blocked: set[str] = set()
+    for cid in dag.topological_order:
+        if cid not in reachable:
+            continue
+        cell = session.notebook_state.get_cell(cid)
+        if cell is None or cell.status != CellStatus.STALE:
+            continue
+        if any(up in blocked for up in dag.cell_upstream.get(cid, [])):
+            blocked.add(cid)  # a stale input can't be produced — don't run
+            continue
+        samples = session.execution_history.get(cid) or []
+        if samples and samples[-1].duration_ms > _LIVE_COST_THRESHOLD_MS:
+            blocked.add(cid)  # too expensive to auto-run; leave it stale
+            continue
+        result = await execute_cell_and_broadcast(
+            session, cid, execution_state, notebook_id, mode="force"
+        )
+        if result is None or not result.success:
+            blocked.add(cid)
+
+
+async def _handle_widget_update(
+    websocket: WebSocket,
+    session: NotebookSession,
+    payload: dict[str, Any],
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+) -> None:
+    """Handle a widget_update: persist new control values, re-materialize the
+    widget cell's value artifacts (force), and broadcast downstream staleness.
+
+    A widget value change is "an upstream producer's artifact changed" — the
+    same signal as an edited upstream source. Re-running the widget cell in
+    force mode re-stores its value artifacts at the new values; the shared
+    ``execute_cell_and_broadcast`` path then recomputes + broadcasts the
+    downstream staleness (Tier 0 — the user runs the stale cells).
+    """
+    cell_id = payload.get("cell_id")
+    values = payload.get("values")
+    if not cell_id or not isinstance(values, dict):
+        await _send_error_message(websocket, execution_state.sequence, "Missing cell_id or values")
+        return
+
+    cell = session.notebook_state.get_cell(cell_id)
+    if cell is None or cell.language != CellLanguage.WIDGET:
+        await _send_error_message(
+            websocket, execution_state.sequence, f"Cell {cell_id} is not a widget cell"
+        )
+        return
+
+    from strata.notebook.runtime_state import persist_cell_widget_values
+    from strata.notebook.widget_analyzer import analyze_widget_cell, coerce_widget_values
+
+    coerced = coerce_widget_values(analyze_widget_cell(cell.source).descriptors, values)
+    if not coerced:
+        await _send_error_message(
+            websocket, execution_state.sequence, "No valid widget values in update"
+        )
+        return
+
+    persist_cell_widget_values(session.path, cell_id, coerced)
+
+    seq = execution_state.next_sequence()
+    busy_cell = await _reserve_execution_request(execution_state, cell_id)
+    if busy_cell is not None:
+        await _send_error_message(
+            websocket,
+            seq,
+            (
+                f"Notebook is already executing cell {busy_cell}"
+                if busy_cell
+                else "Notebook is already executing another cell"
+            ),
+        )
+        return
+
+    from strata.notebook.annotations import parse_annotations
+
+    is_live = parse_annotations(cell.source).live
+
+    # Re-materialize the widget cell at the new values (force = cache-off, no
+    # upstream materialization — widgets have none). The shared path broadcasts
+    # the widget cell's status + the downstream staleness changes. When the cell
+    # is `# @live`, chain the cost-gated auto-cascade so cheap downstream cells
+    # re-run on the change (Tier 1) instead of waiting for a manual run.
+    async def _operation() -> None:
+        await execute_cell_and_broadcast(
+            session, cell_id, execution_state, notebook_id, mode="force"
+        )
+        if is_live:
+            await _run_live_cascade(session, cell_id, execution_state, notebook_id)
+
+    scheduled = await _schedule_execution(
+        websocket, execution_state, notebook_id, cell_id, seq, _operation
+    )
+    if not scheduled:
+        await _release_execution_request(execution_state, cell_id)
+
+
 # ``_handle_agent_cancel`` takes ``(notebook_id)``, ``_handle_notebook_sync``
 # takes ``(websocket, session, notebook_id)``. The dispatch loop introspects
 # the handler signature at registration time (cached) and passes a kwargs
@@ -3000,6 +3180,7 @@ _C2S_HANDLERS: dict[str, _C2SHandler] = {
     MessageType.DEPENDENCY_REMOVE: _handle_dependency_remove,
     MessageType.VARIANT_SET_ACTIVE: _handle_variant_set_active,
     MessageType.VARIANT_ADD: _handle_variant_add,
+    MessageType.WIDGET_UPDATE: _handle_widget_update,
     MessageType.AGENT_CANCEL: _handle_agent_cancel,
     MessageType.AGENT_CONFIRM_RESPONSE: _handle_agent_confirm_response,
 }

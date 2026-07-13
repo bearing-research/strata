@@ -177,6 +177,21 @@ z = [1, 2, 3]
         assert result.outputs["z"]["preview"] == [1, 2, 3]
 
     @pytest.mark.asyncio
+    async def test_shared_mutable_outputs_warns_through_real_execution(self, sample_notebook):
+        """Phase 2b end-to-end: two outputs sharing a mutable object surface a
+        warning all the way through real subprocess execution into
+        ``result.mutation_warnings`` (the flow `strata run` then prints)."""
+        executor = CellExecutor(sample_notebook)
+
+        # params and trainer share the same list object → decouple once stored.
+        source = "params = [1.0, 2.0, 3.0]\ntrainer = {'params': params}"
+        result = await executor.execute_cell("cell1", source)
+
+        assert result.success is True
+        messages = [w["message"] for w in result.mutation_warnings]
+        assert any("share a mutable" in m for m in messages), messages
+
+    @pytest.mark.asyncio
     async def test_execute_dict_output(self, sample_notebook):
         """Test executing a cell that creates a dict."""
         executor = CellExecutor(sample_notebook)

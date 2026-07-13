@@ -397,7 +397,14 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         **(
             {
                 "variant_group": [
-                    {"group": vg.group, "active": vg.active} for vg in toml.variant_groups
+                    {
+                        "group": vg.group,
+                        "active": vg.active,
+                        # Emit ``mode`` only when non-default so existing
+                        # switch-mode notebooks don't churn.
+                        **({"mode": vg.mode} if vg.mode != "switch" else {}),
+                    }
+                    for vg in toml.variant_groups
                 ]
             }
             if toml.variant_groups
@@ -843,14 +850,20 @@ def add_cell_to_notebook(
     # for ``.md``, R-aware editors for ``.r``, etc.). Python is the
     # fallback for anything else (SQL cells use ``.py`` historically;
     # the cell harness reads source text by content, not extension).
-    extension_by_language = {"markdown": "md", "r": "r"}
+    extension_by_language = {"markdown": "md", "r": "r", "widget": "widget"}
     extension = extension_by_language.get(language, "py")
     cell_filename = f"{cell_id}.{extension}"
     cells_dir = notebook_dir / "cells"
     cells_dir.mkdir(exist_ok=True)
 
+    # Widget cells seed a starter control so a freshly-added one is usable
+    # immediately (its declaration is editable via the cell's "Edit controls"
+    # toggle). Every other language starts empty.
+    starter_source = (
+        "alpha = slider(0, 1, step=0.01, default=0.5)\n" if language == "widget" else ""
+    )
     with open(cells_dir / cell_filename, "w", encoding="utf-8") as f:
-        f.write("")
+        f.write(starter_source)
 
     # Add to cells list
     cells_data.append(
@@ -1255,6 +1268,42 @@ def set_variant_active(
                 toml_data["variant_group"] = entries
                 return True
         entries.append({"group": group, "active": variant_name})
+        toml_data["variant_group"] = entries
+        return True
+
+    _apply_notebook_toml_update(notebook_dir, mutate)
+
+
+def set_variant_mode(notebook_dir: Path, group: str, mode: str) -> None:
+    """Set the execution ``mode`` ('switch' | 'sweep') for ``group``.
+
+    Mirrors :func:`set_variant_active` — updates the matching
+    ``[[variant_group]]`` entry or appends one. ``"switch"`` is the default,
+    so it's written by *removing* the ``mode`` key (keeps switch notebooks
+    clean); ``"sweep"`` is written explicitly. A freshly-created entry carries
+    an empty ``active`` ("first variant in source order"), which sweep ignores
+    anyway. Bumps ``updated_at`` (mode is a structural change).
+    """
+
+    def mutate(toml_data: dict[str, Any]) -> bool:
+        entries = toml_data.get("variant_group", [])
+        if not isinstance(entries, list):
+            entries = []
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("group") == group:
+                current = entry.get("mode", "switch")
+                if current == mode:
+                    return False
+                if mode == "switch":
+                    entry.pop("mode", None)
+                else:
+                    entry["mode"] = mode
+                toml_data["variant_group"] = entries
+                return True
+        if mode == "switch":
+            # No entry and switch is the default — nothing to persist.
+            return False
+        entries.append({"group": group, "active": "", "mode": mode})
         toml_data["variant_group"] = entries
         return True
 

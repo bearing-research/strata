@@ -314,6 +314,13 @@ class StrataConfig(BaseSettings):
     # operators get clear errors if anything's misconfigured.
     deployment_mode: Literal["service", "personal"] = "personal"
     allow_remote_clients_in_personal: bool = False
+    # Mount the MCP server at ``/mcp`` so an external coding agent (Claude Code,
+    # etc.) can drive the live notebook session over streamable HTTP. Opt-in and
+    # PERSONAL MODE ONLY — it exposes the same warm-session read/run/author
+    # surface the loopback REST API does, with no per-request auth, so service
+    # deployments must not turn it on (enforced in ``validate_mode_coherence``).
+    # Requires the ``[mcp]`` extra; without it the flag warns and no-ops.
+    mcp_enabled: bool = False
     # Optional request header that identifies the calling user when a personal
     # mode deployment is fronted by an authenticating proxy (Cloudflare Access,
     # Pomerium, etc.). When set, notebooks are stamped with the caller's
@@ -618,6 +625,17 @@ class StrataConfig(BaseSettings):
                 conflicts.append(
                     "transforms enabled without artifact_dir (builds persist "
                     "artifacts and require an artifact store; set artifact_dir)"
+                )
+
+            # The MCP endpoint exposes the warm-session read/run/author surface
+            # with no per-request auth — safe only behind a loopback personal
+            # deployment. In service mode it would hand every reachable client
+            # full notebook control, so refuse the combination outright.
+            if self.mcp_enabled:
+                conflicts.append(
+                    "mcp_enabled=True with deployment_mode='service' (the MCP "
+                    "endpoint has no per-request auth and grants full session "
+                    "control; it is personal-mode only)"
                 )
 
             if conflicts:

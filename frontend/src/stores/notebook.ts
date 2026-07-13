@@ -11,6 +11,7 @@ import type {
   DependencyInfo,
   EnvironmentImportPreview,
   LoopProgress,
+  VariantProgress,
   Notebook,
   WsMessage,
   ImpactPreview,
@@ -31,6 +32,7 @@ import type {
   WorkerHealth,
   WorkerHealthHistoryEntry,
   WorkerSpec,
+  WidgetSpec,
 } from '../types/notebook'
 import { useStrata } from '../composables/useStrata'
 import type {
@@ -778,6 +780,7 @@ function parseBackendVariantGroups(raw: any): VariantGroup[] {
     const activeName = typeof entry.active_name === 'string' ? entry.active_name : ''
     const activeCellId = typeof entry.active_cell_id === 'string' ? entry.active_cell_id : ''
     if (!group || !activeName || !activeCellId) continue
+    const mode = entry.mode === 'sweep' ? 'sweep' : 'switch'
     const members: VariantMember[] = []
     if (Array.isArray(entry.members)) {
       for (const m of entry.members) {
@@ -788,7 +791,7 @@ function parseBackendVariantGroups(raw: any): VariantGroup[] {
         members.push({ cellId, name, isActive: Boolean(m.is_active) })
       }
     }
-    out.push({ group, activeName, activeCellId, members })
+    out.push({ group, activeName, activeCellId, mode, members })
   }
   return out
 }
@@ -970,6 +973,7 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
   localCell.shadowWarnings = Array.isArray(serverCell.shadow_warnings)
     ? serverCell.shadow_warnings
     : undefined
+  localCell.widget = parseWidgetSpec(serverCell.widget)
   applyDisplayOutputsToCell(
     localCell,
     serverCell.display_outputs,
@@ -1206,6 +1210,19 @@ function finishEnvironmentOperation(
   }
 }
 
+function parseWidgetSpec(raw: any): WidgetSpec | undefined {
+  if (!raw || !Array.isArray(raw.descriptors)) return undefined
+  return {
+    descriptors: raw.descriptors.map((d: any) => ({
+      name: String(d.name),
+      kind: d.kind,
+      params: d.params && typeof d.params === 'object' ? d.params : {},
+      default: d.default,
+    })),
+    values: raw.values && typeof raw.values === 'object' ? raw.values : {},
+  }
+}
+
 function parseBackendCellPayload(raw: any): Cell {
   const cell: Cell = {
     id: raw.id,
@@ -1241,6 +1258,7 @@ function parseBackendCellPayload(raw: any): Cell {
     variantGroup: typeof raw.variant_group === 'string' ? raw.variant_group : null,
     variantName: typeof raw.variant_name === 'string' ? raw.variant_name : null,
     variantActive: raw.variant_active !== false,
+    widget: parseWidgetSpec(raw.widget),
   }
 
   applyDisplayOutputsToCell(
@@ -1922,12 +1940,20 @@ const agentAutoApprove = ref(false)
 
 let wsInstance: ReturnType<typeof useWebSocket> | null = null
 
+// App-view (read-only) mode: when true, the WS connects with `?role=viewer`
+// so the server rejects any mutation frame. Set before opening the session.
+const viewerMode = ref(false)
+
+function setViewerMode(on: boolean) {
+  viewerMode.value = on
+}
+
 function initializeWebSocket() {
   if (!wsInstance) {
     const notebookId = (notebook as any).sessionId
     if (!notebookId) return
 
-    wsInstance = useWebSocket(notebookId)
+    wsInstance = useWebSocket(notebookId, { role: viewerMode.value ? 'viewer' : undefined })
 
     wsInstance.onMessage('cell_status', (msg: WsMessage) => {
       const p = msg.payload as Record<string, any>
@@ -2101,6 +2127,25 @@ function initializeWebSocket() {
           typeof p.duration_ms === 'number' ? p.duration_ms : Number(p.duration_ms) || undefined,
       }
       cell.loopProgress = progress
+    })
+
+    wsInstance.onMessage('cell_variant_progress', (msg: WsMessage) => {
+      const p = msg.payload as Record<string, any>
+      const cellId = p.cell_id as CellId
+      const cell = cellMap.value.get(cellId)
+      if (!cell) return
+      const entry: VariantProgress = {
+        variant: String(p.variant),
+        index: Number(p.index),
+        total: Number(p.total),
+        success: Boolean(p.success),
+        durationMs:
+          typeof p.duration_ms === 'number' ? p.duration_ms : Number(p.duration_ms) || undefined,
+        error: typeof p.error === 'string' ? p.error : undefined,
+      }
+      // index 0 begins a fresh fan-out run; later frames accumulate.
+      const existing = entry.index === 0 ? [] : (cell.variantProgress ?? [])
+      cell.variantProgress = [...existing.filter((e) => e.variant !== entry.variant), entry]
     })
 
     wsInstance.onMessage('cell_console', (msg: WsMessage) => {
@@ -2541,6 +2586,19 @@ function cleanupWebSocket() {
   }
 }
 
+// Session-only display selection for sweep variant groups (group → cellId).
+// In sweep mode every member is "active", so the tab strip picks which member's
+// source is shown in the single collapsed editor slot; switch groups ignore it.
+const variantDisplaySelection = ref<Record<string, string>>({})
+
+function variantDisplayCellId(group: VariantGroup): string {
+  return variantDisplaySelection.value[group.group] || group.activeCellId
+}
+
+function selectVariantDisplay(group: string, cellId: string): void {
+  variantDisplaySelection.value = { ...variantDisplaySelection.value, [group]: cellId }
+}
+
 function setVariantActive(group: string, name: string): void {
   if (!wsInstance) return
   wsInstance.setVariantActive(group, name)
@@ -2549,6 +2607,17 @@ function setVariantActive(group: string, name: string): void {
 function addVariant(group: string): void {
   if (!wsInstance) return
   wsInstance.addVariant(group)
+}
+
+function updateWidgetValues(cellId: CellId, values: Record<string, unknown>): void {
+  if (!wsInstance) return
+  // Optimistic local update so the control reflects the change immediately;
+  // the backend re-materializes + broadcasts staleness for downstream cells.
+  const cell = notebook.cells.find((c) => c.id === cellId)
+  if (cell?.widget) {
+    cell.widget = { ...cell.widget, values: { ...cell.widget.values, ...values } }
+  }
+  wsInstance.sendWidgetUpdate(cellId, values)
 }
 
 async function executeCellWebSocket(cellId: CellId) {
@@ -3779,6 +3848,10 @@ export function useNotebook() {
     cancelCellWebSocket,
     updateSourceWebSocket,
     setVariantActive,
+    updateWidgetValues,
+    setViewerMode,
+    selectVariantDisplay,
+    variantDisplayCellId,
     addVariant,
     // v1.1: Impact Preview, Profiling
     currentImpactPreview,

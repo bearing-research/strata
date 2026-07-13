@@ -12,8 +12,9 @@ second pane, an SSH session, or a tmux window beside your editor.
 
 ## Install
 
-The viewer ships behind the `tui` extra (it pulls in `textual` and `grandalf`;
-`httpx` and `websockets` are already core dependencies):
+The viewer ships behind the `tui` extra (it pulls in `textual` and `grandalf`,
+plus `textual-image` and `Pillow` for inline image rendering; `httpx` and
+`websockets` are already core dependencies):
 
 ```bash
 uv tool install "strata-notebook[tui]"      # global: strata-notebook, strata-notebook-tui, strata, strata-worker
@@ -96,16 +97,24 @@ in the terminal.
 | `2` / `3` | Top group: Source / Tests source |
 | `4` / `5` / `6` / `7` | Bottom group: Output / Console / Agent / Results |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End` | Scroll the focused pane |
+| `n` / `p` | **Data viewer:** next / previous page of a large table |
+| `s` | **Data viewer:** sort by the focused column (asc → desc → off) |
+| `e` | **Data viewer:** export the table to a CSV in the current directory |
 | `f` | Toggle **follow mode** (auto-select the running cell) |
 | `d` | Show the notebook **DAG** (layered ASCII; `Esc`/`d`/`q` to close) |
 | `i` | Enlarge the selected cell's **image** output to full screen (`Esc`/`i`/`q` to close) |
 | `r` | Force an immediate resync (the viewer also auto-resyncs in the background) |
+| `Ctrl`+`←` / `Ctrl`+`→` | Resize the **cell-list ↔ detail** boundary |
+| `Ctrl`+`↑` / `Ctrl`+`↓` | Resize the **top ↔ bottom** detail boundary |
+| `Ctrl`+`x` | Reset the panel layout to defaults |
 | `?` | Show the keybinding reference (`Esc`/`?`/`q` to close) |
 | `q` | Quit |
 
 The tabs render richly: source is **syntax-highlighted** by cell language,
 markdown cells and markdown outputs render as formatted markdown, a single DataFrame / table output
-renders as a real table with a row-count caption, and image outputs (e.g.
+renders in an **interactive data viewer** — a scrollable table you can page (`n`/`p`),
+sort by the focused column (`s`), and export to CSV (`e`), backed by the full
+cached artifact rather than the 20-row preview — and image outputs (e.g.
 matplotlib figures) render **inline** — using the terminal's graphics protocol
 (kitty / iTerm2 / Sixel) where available, degrading to Unicode half-blocks
 otherwise.
@@ -131,7 +140,7 @@ strata-notebook-tui [--session ID | --notebook PATH] [--server URL] [--user-head
 | --- | --- |
 | `--session ID` | Attach to a specific running session id (skips the picker). |
 | `--notebook PATH` | Open / reuse a session for a notebook directory path (the path must exist on the server's filesystem). |
-| `--server URL` | Base URL of the server (default: `$STRATA_TUI_SERVER` or `http://127.0.0.1:8765`). |
+| `--server URL` | Base URL of the server (default: `$STRATA_TUI_SERVER` or `http://localhost:8765`). |
 | `--user-header NAME` | Identity header name, matching the server's `personal_mode_user_header`. |
 | `--user VALUE` | Identity header value — needed to attach to an owned notebook. |
 

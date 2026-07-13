@@ -55,9 +55,11 @@ class FakeNotebookWebSocket:
         *,
         inbound: list[str] | None = None,
         headers: dict[str, str] | None = None,
+        query_params: dict[str, str] | None = None,
     ) -> None:
         self.inbound: deque[str] = deque(inbound or [])
         self.headers: dict[str, str] = headers or {}
+        self.query_params: dict[str, str] = query_params or {}
         self.raw_sent: list[str] = []
         self.accepted = False
         self.closed: tuple[int, str] | None = None
@@ -293,6 +295,7 @@ def execute_cell_and_wait(
     """
     helper.execute_cell(cell_id)
     saw_running = False
+    saw_error = False
     terminal_message: dict[str, Any] | None = None
 
     # Collect messages until we see cell_status(ready) or cell_status(error)
@@ -305,16 +308,27 @@ def execute_cell_and_wait(
             helper.execute_cascade(cell_id, plan_id)
             continue
 
+        if msg["type"] == "cell_error":
+            saw_error = True
+
         if msg["type"] == "cell_status":
             p = msg["payload"]
+            if p.get("status") == "error":
+                saw_error = True
             if p.get("cell_id") == cell_id and p.get("status") == "running":
                 saw_running = True
-            # "stale" means this cell was skipped because an upstream cell
-            # errored mid-cascade. Treat it as a terminal state.
-            if p.get("cell_id") == cell_id and p.get("status") in ("ready", "error", "stale"):
+            if p.get("cell_id") == cell_id and p.get("status") in ("ready", "error"):
                 terminal_message = msg
-                if saw_running or p.get("status") in ("error", "stale"):
+                if saw_running or p.get("status") == "error":
                     break
+            # A target cell can be STALE for two reasons now: it was
+            # skipped mid-cascade because an upstream errored (terminal —
+            # it will never run), or it is simply out of date and about to
+            # cascade-and-run (#361 — not terminal). Only the skip case is
+            # terminal, and it's distinguished by an error having occurred.
+            if p.get("cell_id") == cell_id and p.get("status") == "stale" and saw_error:
+                terminal_message = msg
+                break
 
     # Find the output/error message for this cell
     for m in reversed(helper.messages):

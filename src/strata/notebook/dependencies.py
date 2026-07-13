@@ -202,6 +202,32 @@ def _format_command_for_ui(command: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in command)
 
 
+UV_NOT_FOUND_MESSAGE = (
+    "uv not found on PATH. Install uv "
+    "(https://docs.astral.sh/uv/getting-started/installation/) or add it to PATH "
+    "— the installer puts uv in ~/.local/bin, which a non-login shell "
+    "(ssh, cron) often doesn't include."
+)
+
+
+def resolve_uv() -> str | None:
+    """Locate the ``uv`` executable: PATH first, then uv's installer dirs.
+
+    A non-login shell (``ssh host 'strata run …'``, cron) frequently has neither
+    ``~/.local/bin`` nor ``~/.cargo/bin`` on PATH, so a bare ``uv`` spawn dies
+    with ``[Errno 2] No such file or directory: 'uv'`` — once per cell. Probe the
+    standard install locations before giving up so headless runs just work.
+    """
+    found = shutil.which("uv")
+    if found:
+        return found
+    for base in ("~/.local/bin", "~/.cargo/bin"):
+        candidate = Path(base).expanduser() / "uv"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def _run_uv_command(
     notebook_dir: Path,
     args: list[str],
@@ -210,9 +236,20 @@ def _run_uv_command(
     display_name: str,
 ) -> _UvCommandResult:
     """Run a uv command and capture bounded UI logs."""
-    command = ["uv", *args]
     started = time.perf_counter()
-    formatted_command = _format_command_for_ui(command)
+    uv = resolve_uv()
+    if uv is None:
+        return _UvCommandResult(
+            success=False,
+            error=UV_NOT_FOUND_MESSAGE,
+            operation_log=EnvironmentOperationLog(
+                command=_format_command_for_ui(["uv", *args]),
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            ),
+        )
+    command = [uv, *args]
+    # Display the friendly ``uv …`` form, not the resolved absolute path.
+    formatted_command = _format_command_for_ui(["uv", *args])
 
     try:
         completed = subprocess.run(

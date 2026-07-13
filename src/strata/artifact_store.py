@@ -2489,6 +2489,10 @@ class ArtifactStore:
     # Lifecycle Management
     # -----------------------------------------------------------------------
 
+    # Whitelisted sort columns — ORDER BY can't be parameterized, so restrict it
+    # to a known set to keep the query injection-safe.
+    _SORT_COLUMNS = {"created_at": "created_at", "byte_size": "byte_size", "row_count": "row_count"}
+
     def list_artifacts(
         self,
         limit: int = 100,
@@ -2496,6 +2500,9 @@ class ArtifactStore:
         state: str | None = None,
         name_prefix: str | None = None,
         tenant: str | None = None,
+        since: float | None = None,
+        sort: str = "created_at",
+        order: str = "desc",
     ) -> list[ArtifactVersion]:
         """List artifacts with optional filtering.
 
@@ -2506,10 +2513,16 @@ class ArtifactStore:
             name_prefix: Filter by artifacts that have a name starting with prefix
             tenant: Optional tenant filter. When provided, includes legacy
                 tenantless artifacts for backwards compatibility.
+            since: Only artifacts created at or after this epoch timestamp.
+            sort: Sort column — one of ``created_at`` / ``byte_size`` /
+                ``row_count`` (anything else falls back to ``created_at``).
+            order: ``asc`` or ``desc`` (default ``desc``).
 
         Returns:
             List of ArtifactVersion entries
         """
+        sort_col = self._SORT_COLUMNS.get(sort, "created_at")
+        order_sql = "ASC" if str(order).lower() == "asc" else "DESC"
         conn = self._get_connection()
         try:
             if name_prefix is not None:
@@ -2535,7 +2548,11 @@ class ArtifactStore:
                     query += " AND av.state = ?"
                     params.append(state)
 
-                query += " ORDER BY av.created_at DESC LIMIT ? OFFSET ?"
+                if since is not None:
+                    query += " AND av.created_at >= ?"
+                    params.append(since)
+
+                query += f" ORDER BY av.{sort_col} {order_sql} LIMIT ? OFFSET ?"
                 params.extend([limit, offset])
             else:
                 query = """
@@ -2553,11 +2570,14 @@ class ArtifactStore:
                 if state is not None:
                     conditions.append("state = ?")
                     params.append(state)
+                if since is not None:
+                    conditions.append("created_at >= ?")
+                    params.append(since)
 
                 if conditions:
                     query += " WHERE " + " AND ".join(conditions)
 
-                query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+                query += f" ORDER BY {sort_col} {order_sql} LIMIT ? OFFSET ?"
                 params.extend([limit, offset])
 
             cursor = conn.execute(query, params)

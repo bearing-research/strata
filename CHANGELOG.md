@@ -5,7 +5,58 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## 0.4.0 — 2026-06-24
+## Unreleased
+
+### Added
+
+- **App view — open a notebook as a read-only interactive app.** Click **App**
+  in the notebook header (or visit `/app/<sessionId>`) to render just the widget
+  control panels + display outputs — no editor, DAG, or toolbars. The connection
+  is read-only (edits and cell runs are rejected server-side); viewers can still
+  drive widgets, so with a widget's **⚡ Live** toggle on it's an interactive
+  "tweak a parameter, see the result" dashboard. `# @app hide` keeps a cell out
+  of the view.
+- **Interactive widget cells.** A new `widget` cell kind is a declarative
+  control panel — one control per line (`alpha = slider(0, 1, default=0.5)`,
+  plus `number` / `dropdown` / `checkbox` / `text`). Each control defines a
+  variable downstream cells consume; dragging a control marks those cells stale
+  (run them, or opt into auto-run later). Values are content-addressed, so
+  returning a slider to a prior value is a cache hit. Add one from the **+**
+  menu; see [Widget Cells](docs/notebook/cells.md) and the
+  `examples/widget_playground` notebook. (#420–#423)
+- **An interactive data viewer for DataFrame outputs.** Table cell outputs now
+  render in a scrollable grid you can page, sort (click a header), search, and
+  filter per column — backed by the full cached artifact, not a 20-row preview —
+  with CSV / Parquet export. The terminal viewer (TUI) gains the same paging /
+  sort / CSV-export over the grid. (#416, #417)
+- **An MCP server for driving a live notebook from a coding agent.** Enable
+  `mcp_enabled` (personal mode only, behind the `[mcp]` extra) and Strata mounts
+  a Model Context Protocol endpoint at `/mcp` — `claude mcp add --transport http
+  strata http://localhost:8765/mcp`. An external agent (Claude Code, any MCP
+  client) gets the same operations the `strata` CLI drives — read
+  (`list_notebooks` / `get_notebook` / `get_cell` / `dag` / `status`), run
+  (`run_cell` / `run_tests`), author (`add_cell` / `edit_cell` / `remove_cell` /
+  `move_cell`), and dependencies (`add_dependency` / `remove_dependency`) —
+  against a **warm session**, not an offline copy. Because the tools reuse
+  Strata's broadcasting execution paths, the browser UI and the terminal viewer
+  become a live view of the agent at work. (#117)
+
+### Fixed
+
+- **No more spurious `display` mutation warning.** Any cell whose last line was
+  a bare expression (e.g. a trailing `df` to show it) emitted a false
+  "'display' was mutated in place" warning — the harness's own injected display
+  helper being flagged. Injected/ambient names are now excluded from mutation
+  detection. (#418)
+- **Downstream cells now read "stale", not "idle", when an upstream changes.**
+  When you edit an upstream cell (or its inputs, mount, or environment change),
+  a downstream cell that already holds a result is now marked **stale** with an
+  "upstream changed" reason, instead of a bare "idle" with no explanation. The
+  web UI surfaces this as `stale · upstream changed` and the terminal viewer
+  shows the stale glyph. A never-run downstream stays **idle** — there is no
+  cached result to invalidate until its upstream produces inputs. (#361)
+
+## 0.4.0 — 2026-07-01
 
 0.4.0 is a **consolidation and hardening** cycle. The headlines are a new
 **read-only terminal viewer** for notebooks and a **full agent-facing notebook
@@ -77,6 +128,36 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   list / set / torch tensor received from upstream — are detected (statically
   recaptured into the DAG and verified at runtime via a fingerprint registry),
   so provenance stays correct when a cell mutates a value it didn't define.
+- **General mutation detection for stateful (ML) workloads.** Runtime mutation
+  detection is no longer limited to a hand-written type registry — it falls back
+  to a serializer-based fingerprint, so an in-place mutation of *any* serializable
+  object (a `torch.nn.Module` trained via `optimizer.step()`, an sklearn
+  estimator, a custom class) is caught with no per-library rule. A cell that
+  mutates an input in place **but doesn't export it** now warns (downstream would
+  otherwise read the pre-mutation value), and `strata run` surfaces those
+  warnings in both human and JSON output. Strata also warns when two of a cell's
+  outputs **share a mutable object** (the optimizer-over-a-model footgun: stored
+  as separate artifacts they decouple downstream). New
+  [Stateful objects & value semantics](https://bearing-research.github.io/strata/notebook/concepts/)
+  docs cover the one-cell training pattern.
+
+- **Variant sweep mode.** A variant group can now run in **sweep mode**
+  (`mode = "sweep"` in `notebook.toml`): instead of only the active variant
+  executing, *every* variant of the group runs on each execution and the
+  downstream cell receives the group's variable as a `{variant_name: value}`
+  dict — for comparing alternatives (models, hyperparameters, prompts) side by
+  side in one downstream cell. The default stays **switch mode** (one active
+  variant, single value). Per-variant input hashes are grouped into the
+  provenance key so caching stays correct across the fan-out. In the UI the
+  group renders as a tab strip with a **sweep** badge, a run-all button, and a
+  readiness rollup; clicking a tab shows that variant's source while all still
+  run. The CLI and WebSocket protocol expose the mode toggle. See the
+  `model_variants_sweep` example.
+
+- **Live-mirror: REST/CLI notebook edits stream to spectators.** Cell edits and
+  runs driven over REST — e.g. by the agent CLI — are now broadcast to connected
+  WebSocket clients, so a human watching in the TUI or the web UI sees an agent's
+  changes appear live without a manual refresh.
 
 ### Changed
 
@@ -106,6 +187,15 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
   Wire shapes are unchanged (one stale doc field, `cascade_prompt.steps` →
   `cells_to_run`, was corrected to match what's actually sent).
 
+- **Runs on CPython 3.14; notebook server uses the sans-I/O WebSocket backend.**
+  The server now drives uvicorn with `ws="websockets-sansio"` and raises the
+  uvicorn floor to `>=0.35.0` (the first release with `WebSocketsSansIOProtocol`).
+  This replaces uvicorn's deprecated legacy-asyncio WebSocket protocol, whose
+  `_drain_helper` trips an `AssertionError` on CPython 3.14 the first time the
+  server sends a frame — which broke the notebook WebSocket entirely on 3.14. No
+  new dependency (`websockets` was already required); 3.14 is now in the tested
+  and classified matrix.
+
 ### Fixed
 
 - **QoS slots no longer leak when a request is cancelled.** Two admission paths
@@ -117,6 +207,31 @@ cell.featurize(cell.trips)…` — `cell.X` is any def or input after the cell
 - **QoS admission limiters reconcile with config + adaptive sizing** (#185): the
   interactive/bulk limiter pools now track the configured and adaptively-tuned
   slot counts instead of drifting from them.
+
+- **No more error-level log spam for re-importable module inputs.** A cell that
+  uses an `import numpy as np` from an upstream cell would log an error-level
+  "artifact still missing" line per module when that binding wasn't materialised
+  (e.g. a producer running on a remote `@worker` that doesn't ship module blobs
+  back). Module bindings are re-importable by name, so the consuming cell just
+  re-imports them — that case now logs at debug; a genuinely missing *data*
+  artifact still logs at error.
+
+- **Actionable error when `uv` isn't on PATH.** A headless `strata run` (ssh,
+  cron) where uv's install dir (`~/.local/bin`) isn't on PATH failed *every*
+  Python cell with a bare `[Errno 2] No such file or directory: 'uv'`. uv is now
+  resolved via `shutil.which` with a fallback probe of the standard installer
+  dirs (`~/.local/bin`, `~/.cargo/bin`), and if it still can't be found, cells
+  fail with an actionable message ("uv not found on PATH. Install uv … or add it
+  to PATH …") — matching the existing `Rscript not found` guard.
+
+- **Terminal viewer no longer storms on image-heavy notebooks.** The TUI's
+  WebSocket client used the `websockets` default 1 MiB frame cap; a
+  `notebook_state` frame carrying base64 plot/image outputs exceeds that, so the
+  client rejected the first frame and wedged in a fast reconnect loop
+  (`ConnectionClosedError` in the status pill). It now connects with no
+  frame-size cap, matching the browser client. The `[tui]` extra also declares
+  `Pillow` explicitly, so `uv tool install "strata-notebook[tui]"` launches
+  instead of failing with `ModuleNotFoundError: No module named 'PIL'`.
 
 - **GC tracker no longer self-deadlocks.** The GC callback took a non-reentrant
   lock that a GC pause triggered during the callback could re-enter; it's now

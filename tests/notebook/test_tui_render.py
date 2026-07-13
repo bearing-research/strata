@@ -24,6 +24,7 @@ from strata.notebook.tui.app import (
     _single_image,
     _single_markdown,
     _single_table,
+    _single_table_uri,
     _source_preview,
     _source_renderable,
     _time_str,
@@ -202,6 +203,22 @@ def test_single_table_none_when_not_a_single_table():
     assert _single_table(CellView(id="a", outputs=[{"content_type": "json/object"}])) is None
     # Error/stream present → text path.
     assert _single_table(CellView(id="a", outputs=[_table_output()], error="x")) is None
+
+
+def test_single_table_uri_returns_backing_artifact():
+    out = _table_output()
+    out["artifact_uri"] = "strata://artifact/nb_x_cell_a_var___display__0@v=1"
+    cell = CellView(id="a", display_outputs=[out])
+    assert _single_table_uri(cell) == "strata://artifact/nb_x_cell_a_var___display__0@v=1"
+
+
+def test_single_table_uri_none_without_uri_or_single_table():
+    # Table output but no artifact_uri → nothing to page.
+    assert _single_table_uri(CellView(id="a", outputs=[_table_output()])) is None
+    # Two tables → not a single table.
+    out = _table_output()
+    out["artifact_uri"] = "strata://artifact/x@v=1"
+    assert _single_table_uri(CellView(id="a", outputs=[out, out])) is None
 
 
 def test_render_table_includes_columns_values_and_truncation_caption():

@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from starlette.applications import Starlette
+
     from strata.adaptive_concurrency import AdaptiveConcurrencyController
 
 import pyarrow as pa
@@ -20,11 +22,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from strata.adaptive_concurrency import ResizableLimiter
 from strata.api.dependencies import (
     authorize_table_access,
     resolve_input_version,
 )
+from strata.artifact_uris import LATEST_VERSION, parse_artifact_uri, parse_name_uri
 from strata.auth import (
     AuthError,
     get_principal,
@@ -55,11 +57,16 @@ from strata.rate_limiter import (
     init_rate_limiter,
 )
 from strata.services.build import build_service
-from strata.streaming import ScanBuildManager, StreamRegistry, StreamState
+from strata.streaming import (
+    QoSAdmission,
+    QoSRejected,
+    ScanBuildManager,
+    StreamRegistry,
+    StreamState,
+)
 from strata.tenant import (
     DEFAULT_TENANT_ID,
     clear_tenant_context,
-    get_tenant_id,
     set_tenant_id,
     validate_tenant_id,
 )
@@ -204,51 +211,21 @@ class ServerState:
         # start_prefetch,discard_prefetch,consume_prefetched_first,prefetch_metrics}.
         self.scan_builds = ScanBuildManager()
 
-        # QoS: Two-tier admission control. The actual admission limiters live in
-        # the tenant registry (per-tenant, acquired in the stream handler) and are
-        # configured from interactive_slots / bulk_slots at startup via
-        # init_tenant_registry. ServerState no longer holds its own global
-        # limiters — they were never acquired (issue #185).
-
-        # Track which tier each scan is using for proper cleanup
-        self._scan_tier: dict[str, str] = {}  # scan_id -> "interactive" | "bulk"
-        # Track per-client semaphore association for cleanup
-        # scan_id -> (client_id, semaphore_acquired)
-        self._scan_client: dict[str, tuple[str, bool]] = {}
+        # QoS: two-tier admission control (#302 phase 3). The per-scan tier/client
+        # tables, active/rejection/queue-wait counters, and per-client fairness
+        # semaphores live on QoSAdmission; the tenant limiters admission actually
+        # acquires live in the tenant registry (per-tenant — the global limiters
+        # were never acquired, #185). The stream handler drives it via
+        # ``state.qos.admit(...)`` → ``Admission.release()``.
+        self.qos = QoSAdmission(config)
 
         # Legacy semaphore kept for backwards compatibility in metrics
         # but no longer used for admission control
         self._scan_semaphore = asyncio.Semaphore(config.max_concurrent_scans)
 
-        # Approximate active scan counter for observability only.
-        # Note: This is not thread-safe in async context (+=/-= are not atomic).
-        # It's accurate enough for metrics/logging but should NOT be used for
-        # control flow decisions. For authoritative count, derive from semaphores.
-        self._active_scans = 0
-        self._active_interactive = 0
-        self._active_bulk = 0
-
         # Graceful shutdown state
         self._draining = False  # True when server is shutting down
         self._shutdown_event = asyncio.Event()  # Signaled when shutdown begins
-
-        # QoS rejection counters (when queue deadline exceeded)
-        self._interactive_rejected = 0  # Interactive queries rejected (429)
-        self._bulk_rejected = 0  # Bulk queries rejected (429)
-
-        # QoS queue wait tracking (for observability)
-        self._interactive_queue_wait_total_ms = 0.0  # Cumulative wait time
-        self._interactive_queue_wait_count = 0  # Number of requests that waited
-        self._bulk_queue_wait_total_ms = 0.0
-        self._bulk_queue_wait_count = 0
-
-        # Per-client fairness: prevent one client from monopolizing capacity
-        # Uses LRU dict of client_id -> Semaphore for each tier
-        # Clients must acquire their per-client semaphore BEFORE global semaphore
-        self._client_interactive_semaphores: dict[str, asyncio.Semaphore] = {}
-        self._client_bulk_semaphores: dict[str, asyncio.Semaphore] = {}
-        self._client_semaphore_max_entries = 10000  # LRU eviction threshold
-        self._client_rejected = 0  # Rejections due to per-client cap
 
         # Readiness tracking for capacity-based health checks
         # Track when each tier became saturated (no slots available)
@@ -420,132 +397,13 @@ def _get_active_scan_count() -> int:
     return i_in_use + b_in_use
 
 
-def _classify_query(plan) -> str:
-    """Classify a query as 'interactive' or 'bulk' based on its characteristics.
-
-    Interactive queries are small, fast dashboard-style queries:
-    - Estimated response size <= interactive_max_bytes (default 10MB)
-    - Number of columns <= interactive_max_columns (default 10)
-
-    Everything else is bulk (ETL, exports, analyst queries).
-    """
-    state = get_state()
-    config = state.config
-
-    # Check estimated response size
-    if plan.estimated_bytes > config.interactive_max_bytes:
-        return "bulk"
-
-    # Check column count (None means all columns = likely bulk)
-    if plan.columns is None:
-        return "bulk"
-    if len(plan.columns) > config.interactive_max_columns:
-        return "bulk"
-
-    return "interactive"
-
-
 def _get_qos_metrics(state: ServerState) -> dict:
-    """Get QoS tier metrics including queue wait times and per-tenant stats."""
-    # Top-line capacity/usage reflects the per-tenant admission limiters that
-    # stream admission actually acquires (aggregated across tracked tenants; a
-    # single-tenant deployment reduces to the _default tenant). Previously this
-    # read the never-acquired global limiters, so in_use was always 0 (#185).
-    i_in_use, i_avail, b_in_use, b_avail = get_tenant_registry().aggregate_limiter_usage()
-    interactive_stats = {"capacity": i_in_use + i_avail, "in_use": i_in_use, "available": i_avail}
-    bulk_stats = {"capacity": b_in_use + b_avail, "in_use": b_in_use, "available": b_avail}
+    """QoS tier metrics — delegates to ``state.qos`` (#302 phase 3 extraction).
 
-    # Calculate average queue wait times
-    interactive_avg_wait_ms = (
-        state._interactive_queue_wait_total_ms / state._interactive_queue_wait_count
-        if state._interactive_queue_wait_count > 0
-        else 0.0
-    )
-    bulk_avg_wait_ms = (
-        state._bulk_queue_wait_total_ms / state._bulk_queue_wait_count
-        if state._bulk_queue_wait_count > 0
-        else 0.0
-    )
-
-    # Per-tenant QoS metrics (only for tenants with active limiters)
-    tenant_registry = get_tenant_registry()
-    per_tenant_qos = {}
-    with tenant_registry._lock:
-        for tenant_id, quotas in tenant_registry._quotas.items():
-            interactive = quotas.interactive_limiter
-            bulk = quotas.bulk_limiter
-            if isinstance(interactive, ResizableLimiter) and isinstance(bulk, ResizableLimiter):
-                per_tenant_qos[tenant_id] = {
-                    "interactive_capacity": interactive.capacity,
-                    "interactive_in_use": interactive.in_use,
-                    "bulk_capacity": bulk.capacity,
-                    "bulk_in_use": bulk.in_use,
-                }
-
-    return {
-        "interactive_slots": interactive_stats["capacity"],
-        "interactive_active": interactive_stats["in_use"],
-        "interactive_available": interactive_stats["available"],
-        "interactive_rejected": state._interactive_rejected,
-        "interactive_queue_timeout_seconds": state.config.interactive_queue_timeout,
-        "interactive_queue_wait_avg_ms": round(interactive_avg_wait_ms, 2),
-        "interactive_queue_wait_total_ms": round(state._interactive_queue_wait_total_ms, 2),
-        "interactive_queue_wait_count": state._interactive_queue_wait_count,
-        "bulk_slots": bulk_stats["capacity"],
-        "bulk_active": bulk_stats["in_use"],
-        "bulk_available": bulk_stats["available"],
-        "bulk_rejected": state._bulk_rejected,
-        "bulk_queue_timeout_seconds": state.config.bulk_queue_timeout,
-        "bulk_queue_wait_avg_ms": round(bulk_avg_wait_ms, 2),
-        "bulk_queue_wait_total_ms": round(state._bulk_queue_wait_total_ms, 2),
-        "bulk_queue_wait_count": state._bulk_queue_wait_count,
-        # Per-client fairness metrics
-        "per_client_interactive": state.config.per_client_interactive,
-        "per_client_bulk": state.config.per_client_bulk,
-        "client_rejected": state._client_rejected,
-        "tracked_clients": len(state._client_interactive_semaphores),
-        # Per-tenant QoS metrics
-        "per_tenant": per_tenant_qos,
-    }
-
-
-def _get_client_semaphore(
-    state: ServerState, client_id: str, tier: str
-) -> asyncio.Semaphore | None:
-    """Get or create a per-client semaphore for the given tier.
-
-    Returns None if per-client caps are disabled (set to 0).
-    Uses simple LRU eviction when cache exceeds max entries.
+    Kept as a thin module-level shim so the metrics/health router (which imports
+    it from ``strata.server``) is unchanged by the extraction.
     """
-    if tier == "interactive":
-        max_concurrent = state.config.per_client_interactive
-        client_semaphores = state._client_interactive_semaphores
-    else:
-        max_concurrent = state.config.per_client_bulk
-        client_semaphores = state._client_bulk_semaphores
-
-    # 0 = disabled
-    if max_concurrent <= 0:
-        return None
-
-    # Get existing or create new semaphore
-    if client_id in client_semaphores:
-        # Move to end for LRU (dict maintains insertion order in Python 3.7+)
-        sem = client_semaphores.pop(client_id)
-        client_semaphores[client_id] = sem
-        return sem
-
-    # Create new semaphore
-    sem = asyncio.Semaphore(max_concurrent)
-    client_semaphores[client_id] = sem
-
-    # LRU eviction if too many clients tracked
-    while len(client_semaphores) > state._client_semaphore_max_entries:
-        # Remove oldest (first) entry
-        oldest_client = next(iter(client_semaphores))
-        del client_semaphores[oldest_client]
-
-    return sem
+    return state.qos.qos_metrics()
 
 
 def _get_cache_size_bytes(state: ServerState) -> int:
@@ -717,6 +575,11 @@ async def _graceful_shutdown(state: ServerState) -> None:
     state._fetch_executor.shutdown(wait=False)
 
 
+# The mounted MCP ASGI app, or None when the endpoint is disabled / the [mcp]
+# extra is absent. Set at import by ``_mount_mcp_if_enabled``; read by lifespan.
+_mcp_app: Starlette | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize server state on startup, graceful shutdown on exit."""
@@ -770,6 +633,12 @@ async def lifespan(app: FastAPI):
 
     # Configure structured logging first
     configure_logging()
+
+    # Install the in-memory log ring buffer that backs GET /v1/logs (server-side
+    # only, so CLI / harness processes never pay for it).
+    from strata.log_buffer import install_ring_buffer
+
+    install_ring_buffer()
 
     # Initialize OpenTelemetry tracing (no-op if not installed/configured)
     tracing_enabled = init_tracing()
@@ -946,7 +815,14 @@ async def lifespan(app: FastAPI):
         build_qos_enabled=build_qos is not None,
     )
 
-    yield
+    # When the MCP endpoint is mounted, its streamable-HTTP session manager runs
+    # for the life of the server. A mounted sub-app's lifespan is not started by
+    # the parent automatically, so enter it here around the yield.
+    if _mcp_app is not None:
+        async with _mcp_app.router.lifespan_context(_mcp_app):
+            yield
+    else:
+        yield
 
     # Reset build QoS
     from strata.transforms.build_qos import reset_build_qos
@@ -1220,6 +1096,7 @@ from strata.api.routers.artifacts import router as artifacts_router  # noqa: E40
 from strata.api.routers.builds import router as builds_router  # noqa: E402
 from strata.api.routers.cache import router as cache_router  # noqa: E402
 from strata.api.routers.debug import router as debug_router  # noqa: E402
+from strata.api.routers.logs import router as logs_router  # noqa: E402
 from strata.api.routers.materialize import router as materialize_router  # noqa: E402
 from strata.api.routers.metadata import router as metadata_router  # noqa: E402
 from strata.api.routers.metrics_health import router as metrics_health_router  # noqa: E402
@@ -1232,6 +1109,7 @@ app.include_router(notebook_router)
 app.include_router(notebook_ws_router)
 app.include_router(cache_router)
 app.include_router(debug_router)
+app.include_router(logs_router)
 app.include_router(registry_router)
 app.include_router(metadata_router)
 app.include_router(metrics_health_router)
@@ -1240,6 +1118,44 @@ app.include_router(artifacts_router)
 app.include_router(names_router)
 app.include_router(builds_router)
 app.include_router(materialize_router)
+
+
+def _mount_mcp_if_enabled() -> None:
+    """Mount the MCP endpoint at ``/mcp`` when configured (personal mode only).
+
+    The decision is process-level (env / pyproject), read once at import — the
+    endpoint is not toggled per request. Gated three ways: ``mcp_enabled`` set,
+    ``deployment_mode == 'personal'`` (service-mode is rejected earlier by
+    ``validate_mode_coherence``; this is defense in depth), and the ``[mcp]``
+    extra installed (``build_mcp_app`` returns ``None`` otherwise, so the server
+    still boots without the dependency).
+    """
+    global _mcp_app
+
+    config = _state.config if _state is not None else StrataConfig.load()
+    if not config.mcp_enabled or config.deployment_mode != "personal":
+        return
+
+    from strata.notebook.mcp_server import build_mcp_app
+    from strata.notebook.routes import get_session_manager
+
+    mcp_app = build_mcp_app(get_session_manager())
+    if mcp_app is None:
+        logger.warning(
+            "mcp_enabled_without_extra",
+            detail=(
+                "mcp_enabled=True but the [mcp] extra is not installed; the /mcp "
+                "endpoint was not mounted. Install strata-notebook[mcp]."
+            ),
+        )
+        return
+
+    app.mount("/mcp", mcp_app)
+    _mcp_app = mcp_app
+    logger.info("mcp_endpoint_mounted", path="/mcp")
+
+
+_mount_mcp_if_enabled()
 
 
 def _require_notebook_worker_admin_access() -> ServerState:
@@ -1784,47 +1700,6 @@ _ACTIVE_BUILD_STATES = ("pending", "building", "running")
 # ``BuildTransportStore`` / ``RequiredBuildStore`` dependencies wrap them.
 
 
-def _parse_artifact_uri(uri: str) -> tuple[str, int] | None:
-    """Parse artifact URI to (artifact_id, version).
-
-    Formats:
-        strata://artifact/{id}@v={version}
-        strata://artifact/{id}  (resolves to latest)
-
-    Returns:
-        Tuple of (artifact_id, version) or None if not an artifact URI
-    """
-    import re
-
-    # Match strata://artifact/{id}@v={version}
-    match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", uri)
-    if match:
-        return (match.group(1), int(match.group(2)))
-
-    # Match strata://artifact/{id} (latest version)
-    match = re.match(r"^strata://artifact/([^@]+)$", uri)
-    if match:
-        return (match.group(1), -1)  # -1 indicates "latest"
-
-    return None
-
-
-def _parse_name_uri(uri: str) -> str | None:
-    """Parse name URI to name.
-
-    Format: strata://name/{name}
-
-    Returns:
-        Name string or None if not a name URI
-    """
-    import re
-
-    match = re.match(r"^strata://name/(.+)$", uri)
-    if match:
-        return match.group(1)
-    return None
-
-
 def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
     """Resolve URI to artifact (id, version).
 
@@ -1847,10 +1722,10 @@ def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
         return None
 
     # Try artifact URI
-    result = _parse_artifact_uri(uri)
+    result = parse_artifact_uri(uri)
     if result is not None:
         artifact_id, version = result
-        if version == -1:
+        if version == LATEST_VERSION:
             # Resolve to latest
             latest = store.get_latest_version(artifact_id)
             if latest is not None:
@@ -1859,7 +1734,7 @@ def _resolve_artifact_uri(uri: str) -> tuple[str, int] | None:
         return result
 
     # Try name URI
-    name = _parse_name_uri(uri)
+    name = parse_name_uri(uri)
     if name is not None:
         artifact = store.resolve_name(name, tenant=_get_artifact_request_tenant())
         if artifact is not None:
@@ -2268,89 +2143,22 @@ async def get_stream(stream_id: str, request: Request):
     stream_state.started = True
     stream_state.started_at = time.time()
 
-    # QoS: Classify query and acquire appropriate tier limiter
-    tier = _classify_query(plan)
-    tenant_id = get_tenant_id()
-    tenant_registry = get_tenant_registry()
-    interactive_limiter, bulk_limiter = tenant_registry.get_or_create_limiters(tenant_id)
-
-    if tier == "interactive":
-        limiter = interactive_limiter
-        queue_timeout = state.config.interactive_queue_timeout
-    else:
-        limiter = bulk_limiter
-        queue_timeout = state.config.bulk_queue_timeout
-
-    # Per-client fairness
-    client_id = request.client.host if request.client else "unknown"
-    client_semaphore = _get_client_semaphore(state, client_id, tier)
-    client_semaphore_acquired = False
-
-    if client_semaphore is not None:
-        try:
-            await asyncio.wait_for(client_semaphore.acquire(), timeout=1.0)
-            client_semaphore_acquired = True
-        except TimeoutError:
-            state._client_rejected += 1
-            return JSONResponse(
-                status_code=429,
-                content={"error": "per_client_limit", "tier": tier},
-                headers={"Retry-After": "1"},
-            )
-
-    # Queue with deadline. If this acquire is cancelled (client disconnect /
-    # shutdown while queued for a tenant slot), release the per-client semaphore
-    # grabbed above before propagating — CancelledError is a BaseException, and
-    # the `if not acquired:` path below only handles the timeout (False) case,
-    # not a cancel, so the semaphore would otherwise leak that client a slot.
+    # QoS: acquire a tier slot for this scan (per-client semaphore → tenant
+    # limiter, cancel-safe #238). QoSAdmission owns the accounting; the handler
+    # holds the returned token and releases it in whichever exit path runs
+    # (429, build cancelled, build failed, or after the blob finishes).
     try:
-        acquired = await limiter.acquire(timeout=queue_timeout)
-    except BaseException:
-        if client_semaphore_acquired and client_semaphore is not None:
-            client_semaphore.release()
-        raise
-
-    if not acquired:
-        if client_semaphore_acquired and client_semaphore is not None:
-            client_semaphore.release()
+        admission = await state.qos.admit(plan, request, scan_id)
+    except QoSRejected as exc:
         return JSONResponse(
             status_code=429,
-            content={"error": "too_many_requests", "tier": tier},
-            headers={"Retry-After": str(max(1, int(queue_timeout / 2)))},
+            content={"error": exc.error, "tier": exc.tier},
+            headers={"Retry-After": str(exc.retry_after)},
         )
-
-    # Track tier for cleanup
-    state._scan_tier[scan_id] = tier
-    state._scan_client[scan_id] = (client_id, client_semaphore_acquired)
-
-    if tier == "interactive":
-        state._active_interactive += 1
-    else:
-        state._active_bulk += 1
-
-    # Release the QoS resources acquired above. Called exactly once per request,
-    # in whichever exit path runs (build cancelled, build failed, or after the
-    # blob has finished streaming).
-    async def _release_qos() -> None:
-        await limiter.release()
-        state._scan_tier.pop(scan_id, None)
-        scan_client = state._scan_client.pop(scan_id, None)
-        if scan_client is not None:
-            client_id_cleanup, client_sem_acquired = scan_client
-            if client_sem_acquired:
-                client_sem = _get_client_semaphore(state, client_id_cleanup, tier)
-                if client_sem is not None:
-                    client_sem.release()
-        if tier == "interactive":
-            state._active_interactive -= 1
-        else:
-            state._active_bulk -= 1
-        state._active_scans -= 1
 
     from strata.artifact_store import get_artifact_store
 
     store = get_artifact_store(state.config.artifact_dir)
-    state._active_scans += 1
 
     # Service mode (no artifact store): there's nothing to persist, so stream a
     # bounded pass-through straight from the fetcher. With no artifact to
@@ -2389,7 +2197,7 @@ async def get_stream(stream_id: str, request: Request):
                             yield tail
                 stream_state.completed = True
             finally:
-                await _release_qos()
+                await admission.release()
                 stream_state.completed_at = time.time()
                 state.streams.schedule_cleanup(stream_id, scan_id)
 
@@ -2417,7 +2225,7 @@ async def get_stream(stream_id: str, request: Request):
     try:
         await asyncio.shield(build_task)
     except asyncio.CancelledError:
-        await _release_qos()
+        await admission.release()
         stream_state.completed_at = time.time()
         state.streams.schedule_cleanup(stream_id, scan_id)
         raise
@@ -2428,7 +2236,7 @@ async def get_stream(stream_id: str, request: Request):
     # in the response generator's finally) means a client that vanished before
     # iteration can never strand the slot.
     artifact = store.get_artifact(stream_state.artifact_id, stream_state.artifact_version)
-    await _release_qos()
+    await admission.release()
     stream_state.completed = True
     stream_state.completed_at = time.time()
 
@@ -2577,6 +2385,13 @@ def main(argv: list[str] | None = None):
         host=config.host,
         port=config.port,
         log_level="info",
+        # Use the modern sans-io WebSocket implementation, not uvicorn's default
+        # ``ws="auto"`` (the deprecated ``websockets`` *legacy* asyncio
+        # protocol). That legacy protocol's ``_drain_helper`` asserts against
+        # asyncio internals that changed in CPython 3.14, so notebook WebSockets
+        # die on data transfer there. ``websockets-sansio`` drives the same
+        # ``websockets`` dependency through its new asyncio API (uvicorn >= 0.35).
+        ws="websockets-sansio",
     )
 
 

@@ -14,7 +14,9 @@ import base64
 import binascii
 import io
 import json
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import websockets
@@ -167,10 +169,16 @@ class HelpScreen(ModalScreen[None]):
         ("2 / 3", "Top: Source / Tests source"),
         ("4 / 5 / 6 / 7", "Bottom: Output / Console / Agent / Results"),
         ("↑ ↓ PgUp PgDn Home End", "Scroll the focused pane"),
+        ("n / p", "Data viewer: next / previous page (large tables)"),
+        ("s", "Data viewer: sort by the focused column (asc → desc → off)"),
+        ("e", "Data viewer: export the table to a CSV in the current dir"),
         ("f", "Toggle follow mode (auto-select the running cell)"),
         ("d", "Show the notebook DAG"),
         ("i", "Enlarge the selected cell's image output"),
         ("r", "Force an immediate resync (also auto-resyncs in the background)"),
+        ("ctrl+← / ctrl+→", "Resize the cell-list ↔ detail boundary"),
+        ("ctrl+↑ / ctrl+↓", "Resize the top ↔ bottom detail boundary"),
+        ("ctrl+x", "Reset the panel layout to defaults"),
         ("?", "Show this help"),
         ("q", "Quit"),
     ]
@@ -184,6 +192,22 @@ class HelpScreen(ModalScreen[None]):
             table.add_row(key, action)
         with VerticalScroll(id="help-box"):
             yield Static(table, id="help-art")
+
+
+# Panel split defaults + bounds (percent of the column width / detail height).
+# Textual ships no splitter widget (verified on 8.2.x), so the boundaries are
+# driven from these and nudged with ctrl+arrows.
+_DEFAULT_CELLS_PCT = 38
+_DEFAULT_TOP_PCT = 50
+_MIN_PCT = 20
+_MAX_PCT = 75
+_CELLS_STEP = 4
+_TOP_STEP = 5
+
+
+def _nudge(pct: int, delta: int) -> int:
+    """Clamp a split percentage to the resizable range ``[_MIN_PCT, _MAX_PCT]``."""
+    return max(_MIN_PCT, min(_MAX_PCT, pct + delta))
 
 
 class NotebookTUI(App[None]):
@@ -203,6 +227,9 @@ class NotebookTUI(App[None]):
     }
     #cells:focus, .scroll-panel:focus { background: $boost; }
     .panel-title { background: $primary; color: $text; padding: 0 1; }
+    /* Interactive data viewer — hidden until a pageable table output is shown. */
+    #output-table { display: none; height: 1fr; border: solid $primary; }
+    #output-table:focus { border: solid $accent; }
     """
 
     BINDINGS = [
@@ -219,6 +246,17 @@ class NotebookTUI(App[None]):
         Binding("5", "show_tab('tab-console')", "Console"),
         Binding("6", "show_tab('tab-agent')", "Agent"),
         Binding("7", "show_tab('tab-results')", "Results"),
+        # Data viewer (active only when a pageable table output is shown).
+        Binding("n", "table_next", "Next page", show=False),
+        Binding("p", "table_prev", "Prev page", show=False),
+        Binding("s", "table_sort", "Sort column", show=False),
+        Binding("e", "table_export", "Export CSV", show=False),
+        # Resize the panel boundaries (no Textual splitter widget exists).
+        Binding("ctrl+right", "resize_cells(1)", "Wider list", show=False),
+        Binding("ctrl+left", "resize_cells(-1)", "Narrower list", show=False),
+        Binding("ctrl+down", "resize_top(1)", "Taller top", show=False),
+        Binding("ctrl+up", "resize_top(-1)", "Shorter top", show=False),
+        Binding("ctrl+x", "reset_layout", "Reset layout", show=False),
     ]
 
     # Tab id → (its TabbedContent group, the scroll region to focus). The top
@@ -247,6 +285,9 @@ class NotebookTUI(App[None]):
         self.vm = NotebookViewModel()
         self._selected: str | None = None
         self._conn_state = "connecting…"
+        # State for the interactive data viewer (the #output-table DataTable):
+        # None when the current output isn't a server-backed table.
+        self._table_view: _TableView | None = None
         # The DataTable column keys (status / cell / time), captured from
         # add_columns so update_cell can target them — labels aren't keys.
         self._col_keys: list[Any] = []
@@ -258,6 +299,12 @@ class NotebookTUI(App[None]):
         # Follow mode: auto-select the cell that goes running so the detail
         # panels track the action (an agent / run-all moving through the notebook).
         self._follow = True
+
+        # Adjustable split ratios (percent). The cell-list ↔ detail boundary and
+        # the top ↔ bottom detail boundary; nudged with ctrl+arrows. Textual has
+        # no splitter widget, so we drive the panels' styles from these.
+        self._cells_pct = _DEFAULT_CELLS_PCT
+        self._top_pct = _DEFAULT_TOP_PCT
 
     # -- layout --------------------------------------------------------------
 
@@ -279,6 +326,9 @@ class NotebookTUI(App[None]):
                     with TabPane("Output", id="tab-output"):
                         with VerticalScroll(id="output-scroll", classes="scroll-panel"):
                             yield Static("", id="output")
+                        # Interactive viewer for large tabular outputs; shown in
+                        # place of the static preview when a backing artifact exists.
+                        yield DataTable(id="output-table", cursor_type="cell", zebra_stripes=True)
                     with TabPane("Console", id="tab-console"):
                         with VerticalScroll(id="console-scroll", classes="scroll-panel"):
                             yield Static("", id="console-body")
@@ -296,6 +346,8 @@ class NotebookTUI(App[None]):
         table = self.query_one("#cells", DataTable)
         # Keep the returned ColumnKeys — add_columns labels are NOT usable as keys.
         self._col_keys = list(table.add_columns(" ", "cell", "time"))
+        # The data viewer's table stays hidden until a pageable output selects it.
+        self.query_one("#output-table", DataTable).display = False
         self._set_connection("connecting…")
         self.run_worker(self._bootstrap(), name="bootstrap", exclusive=True)
         # Live frames stream status/output/console instantly, but source edits and
@@ -303,6 +355,31 @@ class NotebookTUI(App[None]):
         # periodically. The rebuild is a no-op when nothing changed (see
         # _rebuild_cells), so this stays cheap and never disturbs the selection.
         self.set_interval(2.5, self._send_sync)
+
+    # -- layout resize -------------------------------------------------------
+
+    def _apply_split(self) -> None:
+        """Drive the panel boundaries from the current split ratios."""
+        self.query_one("#cells").styles.width = f"{self._cells_pct}%"
+        self.query_one("#detail").styles.width = f"{100 - self._cells_pct}%"
+        self.query_one("#detail-top").styles.height = f"{self._top_pct}%"
+        self.query_one("#detail-bottom").styles.height = f"{100 - self._top_pct}%"
+
+    def action_resize_cells(self, direction: int) -> None:
+        """Move the cell-list ↔ detail boundary (ctrl+left / ctrl+right)."""
+        self._cells_pct = _nudge(self._cells_pct, direction * _CELLS_STEP)
+        self._apply_split()
+
+    def action_resize_top(self, direction: int) -> None:
+        """Move the top ↔ bottom detail boundary (ctrl+up / ctrl+down)."""
+        self._top_pct = _nudge(self._top_pct, direction * _TOP_STEP)
+        self._apply_split()
+
+    def action_reset_layout(self) -> None:
+        """Restore the default split ratios (ctrl+x)."""
+        self._cells_pct = _DEFAULT_CELLS_PCT
+        self._top_pct = _DEFAULT_TOP_PCT
+        self._apply_split()
 
     async def _bootstrap(self) -> None:
         try:
@@ -379,8 +456,17 @@ class NotebookTUI(App[None]):
         backoff = 1.0
         while True:
             try:
+                # max_size=None: notebook_state / cell_output frames carry
+                # display outputs (base64 PNG plots, large tables) that routinely
+                # exceed the websockets client default of 1 MiB. Without this the
+                # client rejects the first oversized frame and closes with 1009,
+                # the reconnect loop re-opens, the server re-sends the same frame,
+                # and the TUI wedges in a reconnect storm. The browser client has
+                # no such cap; match it.
                 async with websockets.connect(
-                    url, additional_headers=self._client.auth_headers or None
+                    url,
+                    additional_headers=self._client.auth_headers or None,
+                    max_size=None,
                 ) as ws:
                     self._ws = ws
                     backoff = 1.0
@@ -554,23 +640,156 @@ class NotebookTUI(App[None]):
             return
         self.query_one("#source", Static).update(_source_renderable(cell))
         self.query_one("#testsrc-body", Static).update(_test_source_renderable(cell))
-        # Render a pure-markdown output with Rich, a single tabular output as a
-        # real table, or a single image inline; otherwise the plain-text summary.
+        # Render a pure-markdown output with Rich, a single tabular output as an
+        # interactive (paged/sortable) DataTable when it has a backing artifact,
+        # a single image inline; otherwise the static preview / plain-text summary.
         output = self.query_one("#output", Static)
+        output_scroll = self.query_one("#output-scroll")
+        output_table = self.query_one("#output-table", DataTable)
         markdown = _single_markdown(cell)
         table = None if markdown is not None else _single_table(cell)
+        uri = _single_table_uri(cell) if table is not None else None
         image = None if (markdown is not None or table is not None) else _image_renderable(cell)
         self._current_image = image  # enable `i` to enlarge when there's an image
-        if markdown is not None:
-            output.update(Markdown(markdown))
-        elif table is not None:
-            output.update(_render_table(*table))
-        elif image is not None:
-            output.update(image)
+
+        if table is not None and uri is not None and self._session_id:
+            # Interactive viewer over the full cached artifact (paging + sort).
+            output_scroll.display = False
+            output_table.display = True
+            self._start_table_view(cid, uri, [str(c) for c in table[0]])
         else:
-            output.update(_render_outputs(cell))
+            output_scroll.display = True
+            output_table.display = False
+            self._table_view = None
+            if markdown is not None:
+                output.update(Markdown(markdown))
+            elif table is not None:
+                output.update(_render_table(*table))
+            elif image is not None:
+                output.update(image)
+            else:
+                output.update(_render_outputs(cell))
+
         self.query_one("#console-body", Static).update(cell.console or "(no console output)")
         self.query_one("#results-body", Static).update(_render_tests(cell))
+
+    # -- data viewer ---------------------------------------------------------
+
+    def _table_active(self) -> bool:
+        """True when the interactive table is the visible output (keys apply)."""
+        return self._table_view is not None and self.query_one("#output-table", DataTable).display
+
+    def _start_table_view(self, cell_id: str, uri: str, columns: list[str]) -> None:
+        """Begin a fresh windowed view of *uri* and fetch its first page."""
+        self._table_view = _TableView(cell_id=cell_id, artifact_uri=uri, columns=columns)
+        table = self.query_one("#output-table", DataTable)
+        table.clear(columns=True)
+        table.border_title = "loading…"
+        table.border_subtitle = "[n]ext [p]rev  [s]ort col  [e]xport csv"
+        self.run_worker(self._load_table_page(), group="table", exclusive=True)
+
+    async def _load_table_page(self) -> None:
+        view = self._table_view
+        if view is None or not self._session_id:
+            return
+        try:
+            page = await self._client.get_cell_data_page(
+                self._session_id,
+                view.cell_id,
+                view.artifact_uri,
+                offset=view.offset,
+                limit=view.limit,
+                sort_by=view.sort_by,
+                sort_dir=view.sort_dir,
+            )
+        except TuiClientError as exc:
+            self.notify(str(exc), severity="error", title="Data viewer")
+            return
+        # A cell switch may have replaced the view while the fetch was in flight.
+        if self._table_view is not view or not page.get("pageable"):
+            return
+        self._render_table_page(page)
+
+    def _render_table_page(self, page: dict[str, Any]) -> None:
+        view = self._table_view
+        if view is None:
+            return
+        columns = [str(c) for c in page.get("columns", [])]
+        rows = [r for r in (page.get("rows") or []) if isinstance(r, list)]
+        view.columns = columns
+        view.total = int(page.get("total") or 0)
+        view.offset = int(page.get("offset") or 0)
+        table = self.query_one("#output-table", DataTable)
+        table.clear(columns=True)
+        if columns:
+            table.add_columns(*columns)
+        for row in rows:
+            table.add_row(*[_cell_str(v) for v in row])
+        start = view.offset + 1 if rows else 0
+        end = view.offset + len(rows)
+        sort_note = f"  ·  sort {view.sort_by} {view.sort_dir}" if view.sort_by else ""
+        table.border_title = f"{start:,}–{end:,} of {view.total:,} rows{sort_note}"
+
+    def action_table_next(self) -> None:
+        view = self._table_view
+        if not self._table_active() or view is None:
+            return
+        if view.offset + view.limit >= view.total:
+            return
+        view.offset += view.limit
+        self.run_worker(self._load_table_page(), group="table", exclusive=True)
+
+    def action_table_prev(self) -> None:
+        view = self._table_view
+        if not self._table_active() or view is None or view.offset == 0:
+            return
+        view.offset = max(0, view.offset - view.limit)
+        self.run_worker(self._load_table_page(), group="table", exclusive=True)
+
+    def action_table_sort(self) -> None:
+        view = self._table_view
+        if not self._table_active() or view is None or not view.columns:
+            return
+        col_index = self.query_one("#output-table", DataTable).cursor_column
+        if col_index >= len(view.columns):
+            return
+        col = view.columns[col_index]
+        if view.sort_by != col:
+            view.sort_by, view.sort_dir = col, "asc"
+        elif view.sort_dir == "asc":
+            view.sort_dir = "desc"
+        else:
+            view.sort_by, view.sort_dir = None, "asc"  # third press clears the sort
+        view.offset = 0
+        self.run_worker(self._load_table_page(), group="table", exclusive=True)
+
+    def action_table_export(self) -> None:
+        if self._table_active():
+            self.run_worker(self._export_table(), group="table-export", exclusive=True)
+
+    async def _export_table(self) -> None:
+        view = self._table_view
+        if view is None or not self._session_id:
+            return
+        try:
+            data = await self._client.export_cell_data(
+                self._session_id,
+                view.cell_id,
+                view.artifact_uri,
+                fmt="csv",
+                sort_by=view.sort_by,
+                sort_dir=view.sort_dir,
+            )
+        except TuiClientError as exc:
+            self.notify(str(exc), severity="error", title="Export")
+            return
+        dest = Path.cwd() / f"{view.cell_id}.csv"
+        try:
+            dest.write_bytes(data)
+        except OSError as exc:
+            self.notify(f"write failed: {exc}", severity="error", title="Export")
+            return
+        self.notify(f"{len(data):,} bytes → {dest}", title="Exported CSV")
 
 
 def _test_source_renderable(cell: CellView):
@@ -665,6 +884,25 @@ def _time_str(cell: CellView) -> str:
     return f"{ms / 1000:.1f}s" if ms >= 1000 else f"{ms}ms"
 
 
+@dataclass
+class _TableView:
+    """Live state for the interactive data viewer (the #output-table DataTable).
+
+    A windowed view over the full cached artifact: paging and sorting are
+    server-side, so each move refetches. ``columns`` mirrors the last page so
+    the sort action can name the focused column.
+    """
+
+    cell_id: str
+    artifact_uri: str
+    offset: int = 0
+    limit: int = 50
+    total: int = 0
+    sort_by: str | None = None
+    sort_dir: str = "asc"
+    columns: list[str] = field(default_factory=list)
+
+
 def _is_table(output: dict[str, Any]) -> bool:
     """True for a tabular output (arrow/ipc with named columns + a row preview)."""
     return (
@@ -691,6 +929,23 @@ def _single_table(cell: CellView) -> tuple[list[str], list[Any], int | None] | N
         output["preview"],
         rows if isinstance(rows, int) else None,
     )
+
+
+def _single_table_uri(cell: CellView) -> str | None:
+    """The backing ``artifact_uri`` of the cell's single tabular output, if any.
+
+    Mirrors ``_single_table``'s candidate selection so the interactive viewer
+    pages the same output the static preview would have shown. ``None`` when
+    there's no single table or the output carries no artifact URI (e.g. an
+    in-memory preview with nothing to page).
+    """
+    if cell.error or cell.stream_text:
+        return None
+    candidates = [o for o in (*cell.display_outputs, *cell.outputs) if isinstance(o, dict)]
+    if len(candidates) != 1 or not _is_table(candidates[0]):
+        return None
+    uri = candidates[0].get("artifact_uri")
+    return uri if isinstance(uri, str) and uri else None
 
 
 # A terminal can't show a wide DataFrame's every column legibly — cap the count

@@ -336,6 +336,10 @@ class TestEndToEnd:
                 host=config.host,
                 port=config.port,
                 log_level="error",
+                # Match production (server.main): default ws="auto" imports
+                # uvicorn's legacy websockets backend (DeprecationWarning; broken
+                # on CPython 3.14). Use the sans-I/O backend.
+                ws="websockets-sansio",
             )
         )
         server_thread = threading.Thread(

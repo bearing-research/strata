@@ -352,6 +352,9 @@ async def list_artifacts(
     offset: int = 0,
     state: str | None = None,
     name_prefix: str | None = None,
+    since: float | None = None,
+    sort: str = "created_at",
+    order: str = "desc",
 ):
     """List artifacts with optional filtering (personal mode only).
 
@@ -360,6 +363,9 @@ async def list_artifacts(
         offset: Number of artifacts to skip for pagination
         state: Filter by state ("ready", "building", "failed")
         name_prefix: Filter by artifacts with names starting with prefix
+        since: Only artifacts created at or after this epoch timestamp
+        sort: Sort column — "created_at", "byte_size", or "row_count"
+        order: "asc" or "desc" (default "desc")
 
     Returns:
         List of artifact versions with their metadata
@@ -369,6 +375,15 @@ async def list_artifacts(
             status_code=400,
             detail=f"Invalid state filter: {state}. Must be 'ready', 'building', or 'failed'",
         )
+    if sort not in ("created_at", "byte_size", "row_count"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid sort: {sort}. Must be 'created_at', 'byte_size', or 'row_count'",
+        )
+    if order not in ("asc", "desc"):
+        raise HTTPException(
+            status_code=400, detail=f"Invalid order: {order}. Must be 'asc' or 'desc'"
+        )
 
     artifacts = store.list_artifacts(
         limit=limit,
@@ -376,6 +391,9 @@ async def list_artifacts(
         state=state,
         name_prefix=name_prefix,
         tenant=tenant_filter,
+        since=since,
+        sort=sort,
+        order=order,
     )
 
     return {
