@@ -40,6 +40,25 @@ exhaustive commit history.
   against a **warm session**, not an offline copy. Because the tools reuse
   Strata's broadcasting execution paths, the browser UI and the terminal viewer
   become a live view of the agent at work. (#117)
+- **Per-variant fan-out with `# @per_variant`.** A sweep group already runs
+  every variant and hands the whole `{variant: value}` dict to one downstream
+  cell (sweep mode). Annotate a downstream cell `# @per_variant` and it instead
+  **fans out** — running once per variant with the upstream value bound to
+  *that* variant's scalar, so each variant is computed independently: its own
+  artifact identity, its own cache entry, its own worker dispatch
+  (`# @per_variant` + `# @worker gpu` → N independent jobs, and adding a variant
+  only runs the new instance). A plain downstream cell collapses the fan-out
+  back to a `{variant: value}` dict. Bare `# @per_variant` infers the group when
+  the cell reads exactly one sweep group; name it (`# @per_variant model`) to
+  choose among several. The web UI and terminal viewer show per-variant progress
+  chips as the instances run. See [Annotations](docs/notebook/annotations.md)
+  and the `examples/model_variants_sweep` notebook. (#407, #408, #412, #413, #415)
+- **Logs and Artifacts pages in the web UI.** Two operator views: **Logs**
+  (`/logs`) renders the server-log stream with filters and a live SSE tail
+  (`GET /v1/logs`, `GET /v1/logs/stream`); **Artifacts** (`/artifacts`) lists
+  stored artifacts — sortable and filterable, with summary stats — over
+  `GET /v1/artifacts` (new `since` / sort / order filters) and
+  `GET /v1/artifacts/stats`. (#402–#405)
 
 ### Fixed
 
