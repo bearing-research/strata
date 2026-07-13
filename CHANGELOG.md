@@ -23,7 +23,9 @@ exhaustive commit history.
   (run them, or opt into auto-run later). Values are content-addressed, so
   returning a slider to a prior value is a cache hit. Add one from the **+**
   menu; see [Widget Cells](docs/notebook/cells.md) and the
-  `examples/widget_playground` notebook. (#420–#423)
+  `examples/widget_playground` notebook. (#420–#423) Omit a slider's `step=`
+  and a readable increment is derived from its range (`slider(0, 100)` → `1`,
+  `slider(0, 1)` → `0.01`); an explicit `step=` always wins. (#431)
 - **An interactive data viewer for DataFrame outputs.** Table cell outputs now
   render in a scrollable grid you can page, sort (click a header), search, and
   filter per column — backed by the full cached artifact, not a 20-row preview —
