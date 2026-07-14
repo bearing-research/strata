@@ -9,13 +9,13 @@ repos:
     hooks:
       - id: prettier
         # Pin to the same version the frontend uses (frontend/package.json
-        # "prettier": "^3.8.4"). Bare `npx prettier` resolves to the latest
+        # "prettier": "^3.9.5"). Bare `npx prettier` resolves to the latest
         # release, which formats some constructs (e.g. TS union types)
         # differently — so the hook and the frontend's own `prettier --check`
         # (npm run format:check, run in CI) would fight, and no file state
         # could satisfy both. Keep this in lockstep with the frontend pin.
         name: prettier
-        entry: npx prettier@3.8.4 --write --ignore-unknown
+        entry: npx prettier@3.9.5 --write --ignore-unknown
         language: system
         types_or: [javascript, jsx, ts, tsx, vue, css, json]
         # Serialize — parallel `npx prettier` invocations race on the
