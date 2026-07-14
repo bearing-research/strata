@@ -637,6 +637,36 @@ Add `# @app hide` to a cell to keep it out of the app view (e.g. a setup cell
 whose output is noise). Run the notebook's cells once in the editor so the app
 has outputs to show, then share the app link.
 
+#### Embedding the app view in another site
+
+The app view can be dropped into another page — a dashboard, wiki, or internal
+portal — as an `<iframe>`. Click **Embed** in the notebook header to copy a
+ready-to-paste snippet, or build it yourself:
+
+```html
+<iframe src="http://localhost:8765/#/app/<sessionId>?embed=1"
+        title="Strata notebook" style="width:100%;border:0"></iframe>
+<script>
+  addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'strata:embed:resize')
+      document.querySelector('iframe[title="Strata notebook"]').style.height =
+        e.data.height + 'px'
+  })
+</script>
+```
+
+`?embed=1` drops the standalone chrome (the title bar and **← Edit** link) so the
+view blends into the host page, and the embedded app posts its content height to
+the parent frame (`{ type: 'strata:embed:resize', height }`) so the optional
+listener above sizes the iframe with no inner scrollbar. Widgets stay live inside
+the frame, so with **⚡ Live** on it's a fully interactive embedded panel.
+
+**Cross-origin embedding is opt-in.** By default a notebook is framable only from
+its own origin (`Content-Security-Policy: frame-ancestors 'self'`). To embed on
+another host, list its origin in `embed_frame_ancestors` (env
+`STRATA_EMBED_FRAME_ANCESTORS`), e.g. `https://analytics.example.com`, or `*` to
+allow any host. Accepts a comma-separated list or a JSON array.
+
 ---
 
 ## Markdown Cells
