@@ -21,6 +21,7 @@ bounds — is surfaced as advisory diagnostics by
 from __future__ import annotations
 
 import ast
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -55,6 +56,53 @@ class WidgetAnalysis:
     references: list[str] = field(default_factory=list)  # always empty
     descriptors: list[WidgetDescriptor] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+
+
+def _nice_slider_step(low: float, high: float) -> float | int:
+    """Pick a readable slider increment for a ``[low, high]`` range.
+
+    Targets ~100 steps across the range, snapped to a 1/2/5 x 10^n value so the
+    tick size reads nicely (0.01, 0.02, 0.05, 0.1, …). Preserves int-ness when
+    both bounds are ints and the result is whole, so an all-integer slider steps
+    by whole numbers. ``slider(0, 1)`` lands on ``0.01`` — the historic default.
+    """
+    span = high - low
+    raw = span / 100.0
+    exponent = math.floor(math.log10(raw))
+    base = 10.0**exponent
+    fraction = raw / base
+    if fraction < 1.5:
+        nice = 1.0
+    elif fraction < 3.5:
+        nice = 2.0
+    elif fraction < 7.5:
+        nice = 5.0
+    else:
+        nice = 10.0
+    step = nice * base
+    if exponent < 0:  # trim binary-float noise on sub-integer steps
+        step = round(step, -exponent + 1)
+    if isinstance(low, int) and isinstance(high, int) and step.is_integer():
+        return int(step)
+    return step
+
+
+def _default_slider_step(params: dict[str, Any]) -> None:
+    """Fill in ``step`` for a slider when the source omits it (in place).
+
+    No-op unless ``min`` and ``max`` are both numeric and ``max > min`` — bad
+    ranges are left for advisory validation to flag, not silently patched.
+    """
+    if "step" in params:
+        return
+    low, high = params.get("min"), params.get("max")
+    if not isinstance(low, int | float) or isinstance(low, bool):
+        return
+    if not isinstance(high, int | float) or isinstance(high, bool):
+        return
+    if high <= low:
+        return
+    params["step"] = _nice_slider_step(low, high)
 
 
 def _resolve_default(kind: str, params: dict[str, Any]) -> Any:
@@ -94,6 +142,9 @@ def _build_descriptor(name: str, kind: str, call: ast.Call) -> WidgetDescriptor 
             params[keyword.arg] = ast.literal_eval(keyword.value)
         except (ValueError, SyntaxError):
             return f"`{name} = {kind}(...)` arguments must be literal values"
+
+    if kind == "slider":
+        _default_slider_step(params)
 
     return WidgetDescriptor(
         name=name, kind=kind, params=params, default=_resolve_default(kind, params)

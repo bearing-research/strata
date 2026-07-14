@@ -98,7 +98,7 @@ function onCheckbox(d: WidgetDescriptor, e: Event) {
           type="range"
           :min="num(d.params.min)"
           :max="num(d.params.max, 1)"
-          :step="num(d.params.step, 0.01) || 'any'"
+          :step="num(d.params.step, 1) || 'any'"
           :value="num(currentValue(d))"
           @input="onSliderInput(d, $event)"
           @change="onSliderCommit(d, $event)"
