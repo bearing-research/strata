@@ -2326,13 +2326,16 @@ you're watching locally).</p>
 <p>Beyond inspection, an agent can execute one cell at a time (not the whole
 notebook) and run a cell's unit tests, both with structured output:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>run<span class="w">  </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span><span class="o">[</span>--rerun<span class="w"> </span><span class="p">|</span><span class="w"> </span>--force<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-sync<span class="o">]</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>strata<span class="w"> </span>cell<span class="w"> </span><span class="nb">test</span><span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span><span class="o">[</span>--no-sync<span class="o">]</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>strata<span class="w"> </span>cell<span class="w"> </span><span class="nb">test</span><span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w"> </span><span class="o">[</span>--file<span class="w"> </span>tests.py<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-sync<span class="o">]</span>
 </code></pre></div>
 <p><code>cell run</code> materializes the cell (using the cache and re-running stale upstreams
 by default; <code>--rerun</code> bypasses the target's cache, <code>--force</code> runs against
 whatever upstream artifacts already exist). <code>cell test</code> runs the cell's
-<code>cells/{cell_id}.test.py</code> via pytest and reports per-test outcomes. Both <strong>sync
-the venv first</strong> (like <code>strata run</code>) unless you pass <code>--no-sync</code>.</p>
+<code>cells/{cell_id}.test.py</code> via pytest and reports per-test outcomes; pass
+<code>--file tests.py</code> (or <code>-</code> for stdin) to <strong>set</strong> the cell's test source first and
+then run it — the one cell-test affordance that previously required editing the
+file by hand. Both <strong>sync the venv first</strong> (like <code>strata run</code>) unless you pass
+<code>--no-sync</code>.</p>
 <p>Both also accept <code>--server &lt;url&gt; --session &lt;id&gt;</code> to run on a live session instead
 of a local directory (<code>strata cell run --server http://localhost:8765 --session
 $SID &lt;cell_id&gt; --rerun</code>). The server owns its venv, so the remote path never syncs
