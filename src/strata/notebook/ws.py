@@ -3010,8 +3010,11 @@ async def _broadcast_message(notebook_id: str, message: dict[str, Any]) -> None:
 # declares only the dispatch args it actually consumes -- e.g.
 # Live-mode cost gate: a downstream cell whose last run took longer than this
 # stays STALE (and short-circuits the cascade past it) rather than auto-running
-# on every control change. Configurable via reactive-on-save's cost model later.
-_LIVE_COST_THRESHOLD_MS = 2000.0
+# on every control change. Set high enough to clear normal interactive cells —
+# a single harness run already costs a few seconds of subprocess + import
+# overhead — so only genuinely batch-sized cells (a long query, model training)
+# are gated. Configurable via reactive-on-save's cost model later.
+_LIVE_COST_THRESHOLD_MS = 30_000.0
 
 
 async def _run_live_cascade(

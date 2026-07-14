@@ -1,7 +1,7 @@
 [project]
 name = "widget-playground"
 version = "0.1.0"
-description = "Interactive widget cell (slider/number/dropdown) driving a DataFrame"
+description = "Interactive widget cell (slider/number/dropdown) driving a DataFrame + plot"
 requires-python = "==3.12.*"
 dependencies = [
     "pyarrow>=18.0.0",
@@ -9,6 +9,7 @@ dependencies = [
     "cloudpickle>=3.0.0",
     "pandas>=2.0.0",
     "numpy>=2.0.0",
+    "matplotlib>=3.8.0",
 ]
 
 [tool.uv]

@@ -20,7 +20,8 @@ exhaustive commit history.
   control panel — one control per line (`alpha = slider(0, 1, default=0.5)`,
   plus `number` / `dropdown` / `checkbox` / `text`). Each control defines a
   variable downstream cells consume; dragging a control marks those cells stale
-  (run them, or opt into auto-run later). Values are content-addressed, so
+  (run them, or flip the widget's **⚡ Live** toggle to auto-run the cheap
+  downstream cells as you drag). Values are content-addressed, so
   returning a slider to a prior value is a cache hit. Add one from the **+**
   menu; see [Widget Cells](docs/notebook/cells.md) and the
   `examples/widget_playground` notebook. (#420–#423) Omit a slider's `step=`
