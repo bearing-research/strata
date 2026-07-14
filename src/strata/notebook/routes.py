@@ -598,6 +598,12 @@ class UpdateCellSourceRequest(BaseModel):
     source: str = Field(..., max_length=1_000_000)  # 1M characters (~1-4 MB UTF-8)
 
 
+class UpdateCellTestsRequest(BaseModel):
+    """Request to set a cell's unit-test source."""
+
+    source: str = Field(..., max_length=1_000_000)
+
+
 class AddCellRequest(BaseModel):
     """Request to add a new cell."""
 
@@ -3069,6 +3075,36 @@ async def execute_cell(
     if result is None:
         raise HTTPException(status_code=500, detail="Execution failed")
     return result.to_dict()
+
+
+@router.put("/{notebook_id}/cells/{cell_id}/tests")
+async def set_cell_tests_endpoint(
+    notebook_id: str, session: SessionDep, cell_id: str, req: UpdateCellTestsRequest
+) -> dict:
+    """Set a Python cell's unit-test source (the committed ``cells/{id}.test.py``).
+
+    The authoring twin of ``POST .../tests`` (which *runs* them): writes the test
+    file, updates the in-memory session so a subsequent run sees it, and mirrors
+    the change to WS spectators. Lets the CLI / MCP author tests on a live session
+    — previously tests could only be run, not set, over the wire.
+    """
+    cell = session.notebook_state.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+    if cell.language != CellLanguage.PYTHON:
+        raise HTTPException(
+            status_code=400, detail="Cell tests are only supported for Python cells"
+        )
+
+    from strata.notebook.writer import write_cell_tests
+
+    try:
+        write_cell_tests(session.path, cell_id, req.source)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc) or "Cell not found")
+    cell.test_source = req.source
+    await _broadcast_state(notebook_id, session)
+    return session.serialize_cell(cell)
 
 
 @router.post("/{notebook_id}/cells/{cell_id}/tests")

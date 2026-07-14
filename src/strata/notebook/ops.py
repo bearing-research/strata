@@ -279,6 +279,28 @@ class NotebookOps(Protocol):
         """
         ...
 
+    def set_cell_tests(self, cell_id: str, test_source: str) -> CellView:
+        """Set a Python cell's unit-test source (``cells/{id}.test.py``).
+
+        Parameters
+        ----------
+        cell_id : str
+            Identifier of the Python cell whose tests to set.
+        test_source : str
+            The pytest-style test source; empty clears the cell's tests.
+
+        Returns
+        -------
+        CellView
+            The updated cell.
+
+        Raises
+        ------
+        NotebookOpsError
+            If no such cell exists or it is not a Python cell.
+        """
+        ...
+
     def add_cell(
         self, source: str, *, after: str | None = None, language: str = "python"
     ) -> CellView:
@@ -473,6 +495,22 @@ class LocalNotebookOps:
                 for case in result.tests
             ],
         )
+
+    def set_cell_tests(self, cell_id: str, test_source: str) -> CellView:
+        """Set a cell's unit-test source (see :meth:`NotebookOps.set_cell_tests`)."""
+        from strata.notebook.writer import write_cell_tests
+
+        cell = self._session.notebook_state.get_cell(cell_id)
+        if cell is None:
+            raise NotebookOpsError(f"no cell with id {cell_id!r}")
+        if cell.language.value != "python":
+            raise NotebookOpsError(f"cell {cell_id!r} is not a Python cell")
+        try:
+            write_cell_tests(self.notebook_dir, cell_id, test_source)
+        except FileNotFoundError as exc:
+            raise NotebookOpsError(str(exc)) from exc
+        cell.test_source = test_source
+        return _cell_view(cell)
 
     async def aclose(self) -> None:
         """Release the warm process pool, if one was started (cleanup on exit)."""
@@ -722,6 +760,16 @@ class RemoteNotebookOps:
             cell_id=cell_id,
         )
         return _test_run_result_from_wire(data, cell_id)
+
+    def set_cell_tests(self, cell_id: str, test_source: str) -> CellView:
+        """Set a cell's unit-test source (see :meth:`NotebookOps.set_cell_tests`)."""
+        data = self._cell_op(
+            "PUT",
+            f"/v1/notebooks/{self._session_id}/cells/{cell_id}/tests",
+            cell_id=cell_id,
+            json={"source": test_source},
+        )
+        return _cell_view_from_wire(data)
 
     # -- authoring -----------------------------------------------------------
 

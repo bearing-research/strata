@@ -175,6 +175,18 @@ def test_add_cell_inserts_and_validates(chain_nb):
         ops.add_cell("x", language="cobol")
 
 
+def test_set_cell_tests_persists(chain_nb):
+    ops = LocalNotebookOps(chain_nb)
+    src = "def test_x(cell):\n    assert cell.x == 1\n"
+    cell = ops.set_cell_tests("a", src)
+    assert cell.id == "a"
+    # written to its committed sibling file + reflected in the live session
+    assert (chain_nb / "cells" / "a.test.py").read_text() == src
+    assert ops._session.notebook_state.get_cell("a").test_source == src
+    with pytest.raises(NotebookOpsError):
+        ops.set_cell_tests("ghost", "x")
+
+
 def test_edit_cell_persists(chain_nb):
     ops = LocalNotebookOps(chain_nb)
     updated = ops.edit_cell("a", "x = 999")

@@ -205,14 +205,17 @@ notebook) and run a cell's unit tests, both with structured output:
 
 ```bash
 strata cell run  <notebook_dir> <cell_id> [--rerun | --force] [--no-sync]
-strata cell test <notebook_dir> <cell_id> [--no-sync]
+strata cell test <notebook_dir> <cell_id> [--file tests.py] [--no-sync]
 ```
 
 `cell run` materializes the cell (using the cache and re-running stale upstreams
 by default; `--rerun` bypasses the target's cache, `--force` runs against
 whatever upstream artifacts already exist). `cell test` runs the cell's
-`cells/{cell_id}.test.py` via pytest and reports per-test outcomes. Both **sync
-the venv first** (like `strata run`) unless you pass `--no-sync`.
+`cells/{cell_id}.test.py` via pytest and reports per-test outcomes; pass
+`--file tests.py` (or `-` for stdin) to **set** the cell's test source first and
+then run it — the one cell-test affordance that previously required editing the
+file by hand. Both **sync the venv first** (like `strata run`) unless you pass
+`--no-sync`.
 
 Both also accept `--server <url> --session <id>` to run on a live session instead
 of a local directory (`strata cell run --server http://localhost:8765 --session
