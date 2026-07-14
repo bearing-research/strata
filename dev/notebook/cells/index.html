@@ -3726,7 +3726,10 @@ exactly like a Python cell's output:</p>
 </tbody>
 </table>
 <p>Arguments must be literals. Omit <code>default=</code> and it's inferred (a slider's <code>min</code>,
-a dropdown's first option, <code>False</code>, <code>""</code>).</p>
+a dropdown's first option, <code>False</code>, <code>""</code>). Omit a slider's <code>step=</code> and it's
+derived from the range — roughly <code>(max - min) / 100</code>, snapped to a readable
+<code>1</code>/<code>2</code>/<code>5</code> × 10ⁿ increment (so <code>slider(0, 1)</code> steps by <code>0.01</code>, <code>slider(0, 100)</code>
+by <code>1</code>). Pass <code>step=</code> explicitly to override.</p>
 <h3 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h3>
 <p>A widget cell runs <strong>no code and no subprocess</strong> — it's declarative. Each
 control's current value is stored as a content-addressed artifact, so:</p>
