@@ -28,11 +28,7 @@ function resolveStrataWsBase(): string {
 const STRATA_WS_URL = resolveStrataWsBase()
 
 export type WsConnectionState =
-  | 'disconnected'
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'error'
+  'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error'
 
 interface MessageHandler {
   (msg: WsMessage): void

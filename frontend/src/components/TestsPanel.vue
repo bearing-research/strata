@@ -127,8 +127,7 @@ function handleKeydown(e: KeyboardEvent) {
             <pre
               v-if="t.message && (t.outcome === 'failed' || t.outcome === 'error')"
               class="tests-message"
-              >{{ t.message }}</pre
-            >
+              >{{ t.message }}</pre>
           </li>
         </ul>
       </template>

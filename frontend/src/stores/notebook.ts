@@ -606,24 +606,22 @@ function parseWorkerCatalogEntry(raw: any): WorkerCatalogEntry {
   const transport = parseWorkerTransport(raw?.transport)
   const healthHistory: WorkerHealthHistoryEntry[] = Array.isArray(raw?.health_history)
     ? raw.health_history
-        .map(
-          (entry: Record<string, unknown>): WorkerHealthHistoryEntry => ({
-            checkedAt:
-              typeof entry?.checked_at === 'number' && Number.isFinite(entry.checked_at)
-                ? entry.checked_at
-                : 0,
-            health:
-              entry?.health === 'healthy' || entry?.health === 'unavailable'
-                ? entry.health
-                : 'unknown',
-            error:
-              typeof entry?.error === 'string' && entry.error.trim() ? String(entry.error) : null,
-            durationMs:
-              typeof entry?.duration_ms === 'number' && Number.isFinite(entry.duration_ms)
-                ? entry.duration_ms
-                : null,
-          }),
-        )
+        .map((entry: Record<string, unknown>): WorkerHealthHistoryEntry => ({
+          checkedAt:
+            typeof entry?.checked_at === 'number' && Number.isFinite(entry.checked_at)
+              ? entry.checked_at
+              : 0,
+          health:
+            entry?.health === 'healthy' || entry?.health === 'unavailable'
+              ? entry.health
+              : 'unknown',
+          error:
+            typeof entry?.error === 'string' && entry.error.trim() ? String(entry.error) : null,
+          durationMs:
+            typeof entry?.duration_ms === 'number' && Number.isFinite(entry.duration_ms)
+              ? entry.duration_ms
+              : null,
+        }))
         .filter((entry: WorkerHealthHistoryEntry) => entry.checkedAt > 0)
     : []
 
