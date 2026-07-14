@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 interface FormatOption {
   format: 'markdown' | 'html'
+  appView?: boolean
   label: string
   description: string
 }
@@ -18,6 +19,12 @@ const FORMATS: FormatOption[] = [
     label: 'HTML',
     description: 'Standalone file, syntax-highlighted',
   },
+  {
+    format: 'html',
+    appView: true,
+    label: 'App snapshot',
+    description: 'Widgets + outputs only, no code — a portable frozen dashboard',
+  },
 ]
 
 defineProps<{
@@ -25,7 +32,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'select', format: 'markdown' | 'html'): void
+  (e: 'select', format: 'markdown' | 'html', appView: boolean): void
 }>()
 
 const open = ref(false)
@@ -35,9 +42,9 @@ function toggle() {
   open.value = !open.value
 }
 
-function pick(format: 'markdown' | 'html') {
+function pick(opt: FormatOption) {
   open.value = false
-  emit('select', format)
+  emit('select', opt.format, Boolean(opt.appView))
 }
 
 function onDocumentClick(event: MouseEvent) {
@@ -84,12 +91,12 @@ onBeforeUnmount(() => {
     <div v-if="open" class="export-dropdown" role="menu" data-testid="export-menu-dropdown">
       <button
         v-for="opt in FORMATS"
-        :key="opt.format"
+        :key="opt.appView ? `${opt.format}-app` : opt.format"
         type="button"
         class="export-option"
         role="menuitem"
-        :data-testid="`export-option-${opt.format}`"
-        @click="pick(opt.format)"
+        :data-testid="`export-option-${opt.appView ? 'snapshot' : opt.format}`"
+        @click="pick(opt)"
       >
         <span class="option-label">{{ opt.label }}</span>
         <span class="option-description">{{ opt.description }}</span>

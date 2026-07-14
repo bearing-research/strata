@@ -705,6 +705,15 @@ def add_export_arguments(parser: argparse.ArgumentParser) -> None:
         help="Skip the per-cell console (stdout/stderr) snapshots",
     )
     parser.add_argument(
+        "--app-view",
+        action="store_true",
+        help=(
+            "App-view snapshot: render only what the app view shows (widgets, "
+            "markdown, display outputs) with no cell sources — a portable, "
+            "self-contained picture of the dashboard"
+        ),
+    )
+    parser.add_argument(
         "--max-output-bytes",
         type=int,
         default=None,
@@ -816,6 +825,7 @@ def export_main(args: argparse.Namespace) -> int:
         output_format=ExportFormat(args.output_format),
         include_inactive_variants=bool(args.include_inactive_variants),
         include_console=not bool(args.no_console),
+        app_view=bool(getattr(args, "app_view", False)),
     )
     if args.max_output_bytes is not None:
         options.max_output_bytes = int(args.max_output_bytes)

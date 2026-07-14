@@ -62,6 +62,14 @@ exhaustive commit history.
   stored artifacts — sortable and filterable, with summary stats — over
   `GET /v1/artifacts` (new `since` / sort / order filters) and
   `GET /v1/artifacts/stats`. (#402–#405)
+- **App-view snapshot export.** `strata export --app-view` (and **App snapshot**
+  in the notebook's Export menu) renders a **frozen, self-contained** picture of
+  the app view — widget panels as their current control values, markdown, and
+  display outputs, with **no cell sources** — to a single HTML/markdown file with
+  images baked in as `data:` URLs. It's the static counterpart to embedding the
+  live app view: portable to anywhere the server can't reach (email a report,
+  archive a run). `# @app hide` and prompt-response privacy are honored, matching
+  the live app view. See [Export](docs/notebook/export.md#app-view-snapshot---app-view).
 
 ### Fixed
 

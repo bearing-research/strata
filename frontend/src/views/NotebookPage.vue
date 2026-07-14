@@ -485,11 +485,11 @@ async function rerunAll() {
   await executeNotebookRerunAllWebSocket()
 }
 
-function exportNotebook(format: 'markdown' | 'html') {
+function exportNotebook(format: 'markdown' | 'html', appView = false) {
   const sid = (notebook as any).sessionId as string | undefined
   if (!sid) return
   const strata = useStrata()
-  strata.downloadExport(sid, format)
+  strata.downloadExport(sid, format, appView)
 }
 
 function goHome() {
