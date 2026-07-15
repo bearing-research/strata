@@ -120,6 +120,8 @@ exhaustive commit history.
   **Artifacts** pages gained a **← Back** button (they previously only linked to
   the notebook list, stranding you if you'd opened them from a notebook).
 
+## 0.4.0 — 2026-07-01
+
 0.4.0 is a **consolidation and hardening** cycle. The headlines are a new
 **read-only terminal viewer** for notebooks and a **full agent-facing notebook
 CLI**, alongside an internal restructuring of the server, per-cell unit tests,

@@ -92,7 +92,7 @@ and CLI binary are both named `strata`.
 | `uv run strata validate <notebook-dir>` | Static checks (schema, annotations, DAG) without executing. See [Headless Runner](../notebook/cli.md#strata-validate). |
 | `uv run strata new <name>` | Scaffold a notebook directory. See [Headless Runner](../notebook/cli.md#strata-new). |
 | `uv run strata cell <action>`, `strata dag`, `strata status`, `strata dep <action>` | Agent-facing notebook tooling: inspect (`cell list/show`, `dag`, `status`), execute (`cell run/test`), and author (`cell add/edit/rm/mv`, `dep add/rm`) — offline against a directory or `--server/--session` against a running server. See [Notebook CLI](../notebook/cli.md#inspecting-a-notebook-cell-dag-status). |
-| `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML. See [Export](../notebook/export.md). |
+| `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML (add `--app-view` for a frozen dashboard snapshot). See [Export](../notebook/export.md). |
 | `uv run strata import <ipynb-file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory. See [Import from Jupyter](../notebook/import.md). |
 | `uv run strata artifact <cmd> [dir]` | Inspect a local artifact store without a server: `list`, `show <ref>`, `lineage <ref>` (renders model ← features ← scan ← table @ snapshot), `pull <ref> --to FILE`, `audit [name]` (registry history), `pending` (approval queue), `verify`. `<ref>` is a name, `id@v=N`, or bare id. |
 | `uv run strata-notebook-tui` | Read-only terminal viewer that attaches to a running notebook session. Needs the `[tui]` extra. See [Terminal Viewer](../notebook/tui.md). |

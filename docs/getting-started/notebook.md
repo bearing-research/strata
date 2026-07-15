@@ -76,6 +76,7 @@ in the cell language picker.
 | **Python** | Regular Python code. Most cells. |
 | **Prompt** | LLM call as a DAG node. The body is a template with `{{ variable }}` substitution from upstream cells; the response is cached as an artifact like any other cell output. |
 | **SQL** | A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. |
+| **Widget** | A declarative control panel — one control per line (`alpha = slider(0, 1)`, plus number/dropdown/checkbox/text). Each control is an input downstream cells consume; with **⚡ Live** on, dragging one recomputes the cells that depend on it. |
 | **Markdown** | Prose between cells. Rendered as HTML; not part of the DAG. |
 | **Loop** | A Python cell that re-runs with a `carry` variable threaded across iterations. Annotate with `# @loop max_iter=N carry=state`. |
 | **Variant** | Multiple cells share one DAG slot (`# @variant group name`); only the active variant is in the DAG at any time. For A/B-ing different implementations of the same step. |
@@ -96,9 +97,11 @@ working. Wait for the banner to clear before running the first cell.
 
 !!! note "Display rendering"
     The output blocks below are shown as text for the doc. In the
-    UI, DataFrames render as scrollable tables, matplotlib figures
-    render as inline PNGs, prompt-cell responses render as
-    structured JSON (when `@output_schema` is set) or markdown.
+    UI, DataFrames render in an interactive grid (page, sort, filter,
+    and search over the full cached artifact, with CSV / Parquet
+    export), matplotlib figures render as inline PNGs, prompt-cell
+    responses render as structured JSON (when `@output_schema` is set)
+    or markdown.
 
 ### Load the data
 
@@ -253,7 +256,7 @@ cell, or call from `display()`:
 
 | Trailing expression | Renders as |
 | --- | --- |
-| pandas DataFrame / Series | Scrollable HTML table, truncated to ~20 preview rows. |
+| pandas DataFrame / Series | Interactive grid: page, sort, filter, and search over the full cached artifact, with CSV / Parquet export. |
 | matplotlib `Figure` | Inline PNG. |
 | PIL `Image` | Inline PNG. |
 | dict / list / primitive | Fenced JSON block. |
@@ -299,7 +302,7 @@ grouped by feature.
 ## What's next
 
 - [Concepts](../notebook/concepts.md) for how the DAG, caching, and cascade work
-- [Cell Types](../notebook/cells.md) for the full surface (Python, prompt, SQL, loop, variant, markdown)
+- [Cell Types](../notebook/cells.md) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
 - [Cell Annotations](../notebook/annotations.md) for `@worker`, `@mount`, `@loop`, and friends
 - [Distributed Workers](../notebook/workers.md) for `# @worker gpu-fly` and dispatching to remote compute
 - [Import from Jupyter](../notebook/import.md) for `strata import nb.ipynb`

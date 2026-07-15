@@ -1,16 +1,18 @@
 # Cell Types
 
-Strata Notebook has five cell kinds:
+Strata Notebook has seven cell kinds:
 
-| Kind       | What it runs                            | Created by                                                    |
-| ---------- | --------------------------------------- | ------------------------------------------------------------- |
-| **Python** | Python source in the notebook's venv    | The default, pick **Python** from the **+ Add cell** menu    |
-| **Prompt** | A text template sent to an AI model     | Pick **Prompt** from the **+ Add cell** menu                  |
-| **SQL**    | A query against a connected database    | Pick **SQL** from the **+ Add cell** menu                     |
-| **Loop**   | A Python cell executed N times in a row | Add a Python cell, then put a `# @loop` annotation at the top |
-| **R**      | R source via the system `Rscript`       | Pick **R** from the **+ Add cell** menu                      |
+| Kind         | What it runs                                     | Created by                                                    |
+| ------------ | ------------------------------------------------ | ------------------------------------------------------------- |
+| **Python**   | Python source in the notebook's venv             | The default, pick **Python** from the **+ Add cell** menu    |
+| **Prompt**   | A text template sent to an AI model              | Pick **Prompt** from the **+ Add cell** menu                  |
+| **SQL**      | A query against a connected database             | Pick **SQL** from the **+ Add cell** menu                     |
+| **R**        | R source via the system `Rscript`                | Pick **R** from the **+ Add cell** menu                      |
+| **Widget**   | A declarative control panel (slider, dropdown …) | Pick **Widget** from the **+ Add cell** menu                  |
+| **Markdown** | Prose between cells, rendered as markdown        | Pick **Markdown** from the **+ Add cell** menu                |
+| **Loop**     | A Python cell executed N times in a row          | Add a Python cell, then put a `# @loop` annotation at the top |
 
-All five participate in the DAG, cache by provenance hash, and can be routed to remote workers. Pick the kind that matches the shape of the computation, this page walks through each.
+Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation, this page walks through each.
 
 See [Concepts](concepts.md) for the execution model; see [Cell Annotations](annotations.md) for the full per-annotation reference.
 
@@ -640,8 +642,8 @@ has outputs to show, then share the app link.
 #### Embedding the app view in another site
 
 The app view can be dropped into another page — a dashboard, wiki, or internal
-portal — as an `<iframe>`. Click **Embed** in the notebook header to copy a
-ready-to-paste snippet, or build it yourself:
+portal — as an `<iframe>`. Pick **Embed** from the notebook's **Export** menu to
+copy a ready-to-paste snippet, or build it yourself:
 
 ```html
 <iframe src="http://localhost:8765/#/app/<sessionId>?embed=1"
