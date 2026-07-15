@@ -2179,10 +2179,21 @@ quickstart walks through a real three-cell pipeline, then surfaces
 the distinctive features (prompt cells, AI assistant, cascade,
 cache hits) on top of it.</p>
 <h2 id="1-start-the-server">1. Start the server<a class="headerlink" href="#1-start-the-server" title="Permanent link">&para;</a></h2>
-<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Docker</label><label for="__tabbed_1_2">From source (one-time setup)</label></div>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">uv (recommended)</label><label for="__tabbed_1_2">Docker</label><label for="__tabbed_1_3">From source (one-time setup)</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
+<p>Install the CLI from PyPI into a uv-managed tool environment, then
+run it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>strata-notebook
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>strata-notebook
+</code></pre></div>
+<p>Personal mode is the default (single-user, writes enabled); no
+config needed for a local run. Re-run <code>strata-notebook</code> to start it
+again on later sessions. Requires <a href="https://docs.astral.sh/uv/">uv</a>;
+plain <code>pip install</code> is not supported.</p>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
 </code></pre></div>
 <p>The compose file runs Strata in personal mode (single-user,
 writes enabled). See <a href="../../deployment/docker/">Docker deployment</a>
@@ -2190,12 +2201,12 @@ for details.</p>
 </div>
 <div class="tabbed-block">
 <p>Clone the repo, then build the Rust extension and the frontend:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>sync<span class="w">                      </span><span class="c1"># Python deps + Rust extension</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>ci<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>..
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>sync<span class="w">                      </span><span class="c1"># Python deps + Rust extension</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>ci<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>..
 </code></pre></div>
 <p>Run the server (this is the command you'll re-run on subsequent
 sessions):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>Personal mode is the default now; no env vars needed for a
 local single-user run. The npm step above is one-time setup,
@@ -2213,8 +2224,8 @@ a <code>cells/</code> folder, and an empty first cell ready to type into.</p>
 directory you launched from - so new notebooks land there regardless of
 your shell's working directory. To put them somewhere else (the current
 directory is a common choice), start the server with <code>--notebook-dir</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>.<span class="w">          </span><span class="c1"># current directory</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>~/work/nb<span class="w">  </span><span class="c1"># or any path</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>.<span class="w">          </span><span class="c1"># current directory</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>~/work/nb<span class="w">  </span><span class="c1"># or any path</span>
 </code></pre></div>
 <p>(or set <code>STRATA_NOTEBOOK_STORAGE_DIR</code>). The server prints the active
 location on startup.</p>
@@ -2284,54 +2295,54 @@ responses render as structured JSON (when <code>@output_schema</code> is set)
 or markdown.</p>
 </div>
 <h3 id="load-the-data">Load the data<a class="headerlink" href="#load-the-data" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.datasets</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_iris</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>  <span class="c1"># simulate the latency of a real fetch</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">iris</span> <span class="o">=</span> <span class="n">load_iris</span><span class="p">(</span><span class="n">as_frame</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">df</span> <span class="o">=</span> <span class="n">iris</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">df</span><span class="p">[</span><span class="s2">&quot;species&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Categorical</span><span class="o">.</span><span class="n">from_codes</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;target&quot;</span><span class="p">],</span> <span class="n">iris</span><span class="o">.</span><span class="n">target_names</span><span class="p">)</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">feature_names</span> <span class="o">=</span> <span class="n">iris</span><span class="o">.</span><span class="n">feature_names</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">()</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.datasets</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_iris</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>  <span class="c1"># simulate the latency of a real fetch</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">iris</span> <span class="o">=</span> <span class="n">load_iris</span><span class="p">(</span><span class="n">as_frame</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">df</span> <span class="o">=</span> <span class="n">iris</span><span class="o">.</span><span class="n">frame</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">df</span><span class="p">[</span><span class="s2">&quot;species&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">Categorical</span><span class="o">.</span><span class="n">from_codes</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;target&quot;</span><span class="p">],</span> <span class="n">iris</span><span class="o">.</span><span class="n">target_names</span><span class="p">)</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">feature_names</span> <span class="o">=</span> <span class="n">iris</span><span class="o">.</span><span class="n">feature_names</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">df</span><span class="o">.</span><span class="n">head</span><span class="p">()</span>
 </code></pre></div>
-<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>   sepal length (cm)  sepal width (cm)  petal length (cm)  petal width (cm)  target species
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>0                5.1               3.5                1.4               0.2       0  setosa
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>1                4.9               3.0                1.4               0.2       0  setosa
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>2                4.7               3.2                1.3               0.2       0  setosa
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>3                4.6               3.1                1.5               0.2       0  setosa
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>4                5.0               3.6                1.4               0.2       0  setosa
+<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>   sepal length (cm)  sepal width (cm)  petal length (cm)  petal width (cm)  target species
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>0                5.1               3.5                1.4               0.2       0  setosa
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>1                4.9               3.0                1.4               0.2       0  setosa
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>2                4.7               3.2                1.3               0.2       0  setosa
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>3                4.6               3.1                1.5               0.2       0  setosa
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>4                5.0               3.6                1.4               0.2       0  setosa
 </code></pre></div>
 <p>Press <span class="keys"><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-enter">Enter</kbd></span>. The first run pauses ~2 seconds (the simulated
 fetch) and the DataFrame preview renders below the cell.</p>
 <h3 id="summarize-by-species">Summarize by species<a class="headerlink" href="#summarize-by-species" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">stats</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;species&quot;</span><span class="p">,</span> <span class="n">observed</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span><span class="n">feature_names</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">stats</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">stats</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;species&quot;</span><span class="p">,</span> <span class="n">observed</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span><span class="n">feature_names</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="o">.</span><span class="n">round</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">stats</span>
 </code></pre></div>
-<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>            sepal length (cm)  sepal width (cm)  petal length (cm)  petal width (cm)
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>species
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>setosa                   5.01              3.43               1.46              0.25
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>versicolor               5.94              2.77               4.26              1.33
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>virginica                6.59              2.97               5.55              2.03
+<div class="highlight"><span class="filename">Output</span><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>            sepal length (cm)  sepal width (cm)  petal length (cm)  petal width (cm)
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>species
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>setosa                   5.01              3.43               1.46              0.25
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>versicolor               5.94              2.77               4.26              1.33
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>virginica                6.59              2.97               5.55              2.03
 </code></pre></div>
 <p>Strata reads this cell's AST, sees it references <code>df</code> and <code>feature_names</code>
 from the loader, and wires an edge. The DAG view in the sidebar
 shows the dependency.</p>
 <h3 id="plot">Plot<a class="headerlink" href="#plot" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="k">for</span> <span class="n">species</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;species&quot;</span><span class="p">,</span> <span class="n">observed</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>        <span class="n">group</span><span class="p">[</span><span class="s2">&quot;sepal length (cm)&quot;</span><span class="p">],</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>        <span class="n">group</span><span class="p">[</span><span class="s2">&quot;petal length (cm)&quot;</span><span class="p">],</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>        <span class="n">label</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">species</span><span class="p">),</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>        <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="p">)</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s2">&quot;Sepal length (cm)&quot;</span><span class="p">)</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;Petal length (cm)&quot;</span><span class="p">)</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="n">ax</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="n">fig</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="k">for</span> <span class="n">species</span><span class="p">,</span> <span class="n">group</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s2">&quot;species&quot;</span><span class="p">,</span> <span class="n">observed</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">ax</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>        <span class="n">group</span><span class="p">[</span><span class="s2">&quot;sepal length (cm)&quot;</span><span class="p">],</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>        <span class="n">group</span><span class="p">[</span><span class="s2">&quot;petal length (cm)&quot;</span><span class="p">],</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>        <span class="n">label</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">species</span><span class="p">),</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>        <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    <span class="p">)</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s2">&quot;Sepal length (cm)&quot;</span><span class="p">)</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s2">&quot;Petal length (cm)&quot;</span><span class="p">)</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="n">ax</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="n">fig</span>
 </code></pre></div>
 <p>The matplotlib figure renders inline as a PNG.</p>
 <h2 id="4-re-run-for-cache-hits">4. Re-run for cache hits<a class="headerlink" href="#4-re-run-for-cache-hits" title="Permanent link">&para;</a></h2>
@@ -2363,14 +2374,14 @@ The body is a template; the response is a cached DAG node like any
 other cell.</p>
 <p>In the cell menu, click <strong>+ Add cell</strong> and pick <strong>Prompt</strong>. Paste
 this in:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a># @model claude-sonnet-4-6
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a># @temperature 0.3
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a># @system You are a botanist describing distinguishing features of iris species.
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>Given these per-species feature means, write one sentence per
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>species describing its most distinguishing trait:
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>{{ stats }}
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a># @model claude-sonnet-4-6
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a># @temperature 0.3
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a># @system You are a botanist describing distinguishing features of iris species.
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>Given these per-species feature means, write one sentence per
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>species describing its most distinguishing trait:
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>{{ stats }}
 </code></pre></div>
 <p>Hit <span class="keys"><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-enter">Enter</kbd></span>. The <code>{{ stats }}</code> placeholder gets substituted
 with the upstream DataFrame, the prompt goes to the configured LLM,
@@ -2445,8 +2456,8 @@ the end, no <code>display()</code> needed: the harness auto-displays it.</p>
 <p>The repo ships ~12 example notebooks covering every cell type. To
 browse them in the UI, stop the running server first (Ctrl+C), then
 point the storage root at <code>examples/</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>./examples
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="c1"># equivalently: STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples uv run strata-notebook</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>strata-notebook<span class="w"> </span>--notebook-dir<span class="w"> </span>./examples
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="c1"># equivalently: STRATA_NOTEBOOK_STORAGE_DIR=$PWD/examples uv run strata-notebook</span>
 </code></pre></div>
 <p>(For Docker, edit <code>docker-compose.yml</code> to mount <code>./examples:/data/notebooks</code>
 and set the env var to that path.)</p>
