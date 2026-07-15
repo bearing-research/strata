@@ -82,6 +82,22 @@ context fields (request ID, tenant, principal where applicable).
 Pipe `docker compose logs strata` through `jq` for readable
 output.
 
+### Web UI: Logs & Artifacts pages
+
+The notebook UI ships two operator views, reachable from any notebook's header
+(**Logs** / **Artifacts**) and via a **← Back** button that returns to the
+notebook:
+
+- **Logs** (`/logs`) — the server-log stream with level / logger / search
+  filters and a **live tail**. Backed by an in-memory ring buffer:
+  `GET /v1/logs` (snapshot) and `GET /v1/logs/stream` (Server-Sent Events).
+- **Artifacts** (`/artifacts`) — a sortable, filterable list of stored
+  artifacts with summary stats. Backed by `GET /v1/artifacts` (with `since` /
+  sort / order filters) and `GET /v1/artifacts/stats`.
+
+These are convenience surfaces over the same data; use the Prometheus metrics
+and OTLP traces above for production monitoring and alerting.
+
 ## Grafana dashboards
 
 `observability/grafana/provisioning/` is mounted into the Grafana

@@ -672,6 +672,31 @@ Re-fetches secrets from the configured manager and merges them into env.
 Never returns 500 on fetch failure, the error surfaces in
 `env_fetch_error` so the UI can display it next to the Refresh button.
 
+## Observability
+
+### Server logs
+
+```
+GET /v1/logs
+GET /v1/logs/stream
+```
+
+`GET /v1/logs` returns a snapshot of the in-memory log ring buffer (most recent
+records first); `GET /v1/logs/stream` is a Server-Sent Events stream that tails
+new records live. Both accept optional `level` / `logger` filters. Powers the
+web UI **Logs** page.
+
+### Artifacts listing
+
+```
+GET /v1/artifacts
+GET /v1/artifacts/stats
+```
+
+`GET /v1/artifacts` lists stored artifacts with optional `since` (ISO timestamp),
+`sort`, and `order` query parameters; `GET /v1/artifacts/stats` returns summary
+counts and byte totals. Powers the web UI **Artifacts** page.
+
 ## Core API
 
 ### Materialize
