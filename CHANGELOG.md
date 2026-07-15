@@ -84,6 +84,13 @@ exhaustive commit history.
 
 ### Fixed
 
+- **Widget changes now actually re-run downstream cells.** A widget cell wasn't
+  publishing its per-control value artifacts onto the cell, so a downstream cell
+  that reads a control resolved *no* upstream input — its provenance never
+  reflected the control value and it cache-hit the stale output. Dragging a
+  slider (with **⚡ Live** on, or in the app view / an embed) now recomputes the
+  cells that depend on it, as intended. (widget cells now populate
+  `artifact_uris` like a Python cell's multi-output vars.)
 - **No more spurious `display` mutation warning.** Any cell whose last line was
   a bare expression (e.g. a trailing `df` to show it) emitted a false
   "'display' was mutated in place" warning — the harness's own injected display
