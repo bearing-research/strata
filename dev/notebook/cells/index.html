@@ -3081,7 +3081,7 @@
 
 
 <h1 id="cell-types">Cell Types<a class="headerlink" href="#cell-types" title="Permanent link">&para;</a></h1>
-<p>Strata Notebook has five cell kinds:</p>
+<p>Strata Notebook has seven cell kinds:</p>
 <table>
 <thead>
 <tr>
@@ -3107,18 +3107,28 @@
 <td>Pick <strong>SQL</strong> from the <strong>+ Add cell</strong> menu</td>
 </tr>
 <tr>
-<td><strong>Loop</strong></td>
-<td>A Python cell executed N times in a row</td>
-<td>Add a Python cell, then put a <code># @loop</code> annotation at the top</td>
-</tr>
-<tr>
 <td><strong>R</strong></td>
 <td>R source via the system <code>Rscript</code></td>
 <td>Pick <strong>R</strong> from the <strong>+ Add cell</strong> menu</td>
 </tr>
+<tr>
+<td><strong>Widget</strong></td>
+<td>A declarative control panel (slider, dropdown …)</td>
+<td>Pick <strong>Widget</strong> from the <strong>+ Add cell</strong> menu</td>
+</tr>
+<tr>
+<td><strong>Markdown</strong></td>
+<td>Prose between cells, rendered as markdown</td>
+<td>Pick <strong>Markdown</strong> from the <strong>+ Add cell</strong> menu</td>
+</tr>
+<tr>
+<td><strong>Loop</strong></td>
+<td>A Python cell executed N times in a row</td>
+<td>Add a Python cell, then put a <code># @loop</code> annotation at the top</td>
+</tr>
 </tbody>
 </table>
-<p>All five participate in the DAG, cache by provenance hash, and can be routed to remote workers. Pick the kind that matches the shape of the computation, this page walks through each.</p>
+<p>Compute cells participate in the DAG, cache by provenance hash, and can be routed to remote workers; widget and markdown cells are declarative (no subprocess). Pick the kind that matches the shape of the computation, this page walks through each.</p>
 <p>See <a href="../concepts/">Concepts</a> for the execution model; see <a href="../annotations/">Cell Annotations</a> for the full per-annotation reference.</p>
 <hr />
 <h2 id="python-cells">Python Cells<a class="headerlink" href="#python-cells" title="Permanent link">&para;</a></h2>
@@ -3798,8 +3808,8 @@ whose output is noise). Run the notebook's cells once in the editor so the app
 has outputs to show, then share the app link.</p>
 <h4 id="embedding-the-app-view-in-another-site">Embedding the app view in another site<a class="headerlink" href="#embedding-the-app-view-in-another-site" title="Permanent link">&para;</a></h4>
 <p>The app view can be dropped into another page — a dashboard, wiki, or internal
-portal — as an <code>&lt;iframe&gt;</code>. Click <strong>Embed</strong> in the notebook header to copy a
-ready-to-paste snippet, or build it yourself:</p>
+portal — as an <code>&lt;iframe&gt;</code>. Pick <strong>Embed</strong> from the notebook's <strong>Export</strong> menu to
+copy a ready-to-paste snippet, or build it yourself:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="p">&lt;</span><span class="nt">iframe</span> <span class="na">src</span><span class="o">=</span><span class="s">&quot;http://localhost:8765/#/app/&lt;sessionId&gt;?embed=1&quot;</span>
 <a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>        <span class="na">title</span><span class="o">=</span><span class="s">&quot;Strata notebook&quot;</span> <span class="na">style</span><span class="o">=</span><span class="s">&quot;width:100%;border:0&quot;</span><span class="p">&gt;&lt;/</span><span class="nt">iframe</span><span class="p">&gt;</span>
 <a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="p">&lt;</span><span class="nt">script</span><span class="p">&gt;</span>

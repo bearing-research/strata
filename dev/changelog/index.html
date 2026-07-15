@@ -2743,6 +2743,40 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>App view — open a notebook as a read-only interactive app.</strong> Click <strong>App</strong>
+  in the notebook header (or visit <code>/app/&lt;sessionId&gt;</code>) to render just the widget
+  control panels + display outputs — no editor, DAG, or toolbars. The connection
+  is read-only (edits and cell runs are rejected server-side); viewers can still
+  drive widgets, so with a widget's <strong>⚡ Live</strong> toggle on it's an interactive
+  "tweak a parameter, see the result" dashboard. <code># @app hide</code> keeps a cell out
+  of the view.</li>
+<li><strong>Embed the app view in another site.</strong> The read-only app view can be dropped
+  into a dashboard/wiki/portal as an <code>&lt;iframe&gt;</code> — pick <strong>Embed</strong> from the
+  notebook's <strong>Export</strong> menu to copy a ready-to-paste snippet. <code>?embed=1</code> strips the standalone chrome
+  and the embedded app posts its content height to the parent
+  (<code>strata:embed:resize</code>) so the host sizes the frame with no inner scrollbar;
+  widgets stay live inside the frame. Cross-origin embedding is opt-in and secure
+  by default — a notebook is framable only from its own origin
+  (<code>Content-Security-Policy: frame-ancestors 'self'</code>) until you list host origins
+  in <code>embed_frame_ancestors</code> (env <code>STRATA_EMBED_FRAME_ANCESTORS</code>), which also
+  closes the prior gap where no framing header was sent at all. See
+  <a href="../notebook/cells/">Cell Types → Embedding the app view</a>.</li>
+<li><strong>Interactive widget cells.</strong> A new <code>widget</code> cell kind is a declarative
+  control panel — one control per line (<code>alpha = slider(0, 1, default=0.5)</code>,
+  plus <code>number</code> / <code>dropdown</code> / <code>checkbox</code> / <code>text</code>). Each control defines a
+  variable downstream cells consume; dragging a control marks those cells stale
+  (run them, or flip the widget's <strong>⚡ Live</strong> toggle to auto-run the cheap
+  downstream cells as you drag). Values are content-addressed, so
+  returning a slider to a prior value is a cache hit. Add one from the <strong>+</strong>
+  menu; see <a href="../notebook/cells/">Widget Cells</a> and the
+  <code>examples/widget_playground</code> notebook. (#420–#423) Omit a slider's <code>step=</code>
+  and a readable increment is derived from its range (<code>slider(0, 100)</code> → <code>1</code>,
+  <code>slider(0, 1)</code> → <code>0.01</code>); an explicit <code>step=</code> always wins. (#431)</li>
+<li><strong>An interactive data viewer for DataFrame outputs.</strong> Table cell outputs now
+  render in a scrollable grid you can page, sort (click a header), search, and
+  filter per column — backed by the full cached artifact, not a 20-row preview —
+  with CSV / Parquet export. The terminal viewer (TUI) gains the same paging /
+  sort / CSV-export over the grid. (#416, #417)</li>
 <li><strong>An MCP server for driving a live notebook from a coding agent.</strong> Enable
   <code>mcp_enabled</code> (personal mode only, behind the <code>[mcp]</code> extra) and Strata mounts
   a Model Context Protocol endpoint at <code>/mcp</code> — <code>claude mcp add --transport http
@@ -2754,9 +2788,58 @@ exhaustive commit history.</p>
   against a <strong>warm session</strong>, not an offline copy. Because the tools reuse
   Strata's broadcasting execution paths, the browser UI and the terminal viewer
   become a live view of the agent at work. (#117)</li>
+<li><strong>Per-variant fan-out with <code># @per_variant</code>.</strong> A sweep group already runs
+  every variant and hands the whole <code>{variant: value}</code> dict to one downstream
+  cell (sweep mode). Annotate a downstream cell <code># @per_variant</code> and it instead
+  <strong>fans out</strong> — running once per variant with the upstream value bound to
+  <em>that</em> variant's scalar, so each variant is computed independently: its own
+  artifact identity, its own cache entry, its own worker dispatch
+  (<code># @per_variant</code> + <code># @worker gpu</code> → N independent jobs, and adding a variant
+  only runs the new instance). A plain downstream cell collapses the fan-out
+  back to a <code>{variant: value}</code> dict. Bare <code># @per_variant</code> infers the group when
+  the cell reads exactly one sweep group; name it (<code># @per_variant model</code>) to
+  choose among several. The web UI and terminal viewer show per-variant progress
+  chips as the instances run. See <a href="../notebook/annotations/">Annotations</a>
+  and the <code>examples/model_variants_sweep</code> notebook. (#407, #408, #412, #413, #415)</li>
+<li><strong>Logs and Artifacts pages in the web UI.</strong> Two operator views: <strong>Logs</strong>
+  (<code>/logs</code>) renders the server-log stream with filters and a live SSE tail
+  (<code>GET /v1/logs</code>, <code>GET /v1/logs/stream</code>); <strong>Artifacts</strong> (<code>/artifacts</code>) lists
+  stored artifacts — sortable and filterable, with summary stats — over
+  <code>GET /v1/artifacts</code> (new <code>since</code> / sort / order filters) and
+  <code>GET /v1/artifacts/stats</code>. (#402–#405)</li>
+<li><strong>App-view snapshot export.</strong> <code>strata export --app-view</code> (and <strong>App snapshot</strong>
+  in the notebook's Export menu) renders a <strong>frozen, self-contained</strong> picture of
+  the app view — widget panels as their current control values, markdown, and
+  display outputs, with <strong>no cell sources</strong> — to a single HTML/markdown file with
+  images baked in as <code>data:</code> URLs. It's the static counterpart to embedding the
+  live app view: portable to anywhere the server can't reach (email a report,
+  archive a run). <code># @app hide</code> and prompt-response privacy are honored, matching
+  the live app view. See <a href="../notebook/export/#app-view-snapshot---app-view">Export</a>.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Widget changes now actually re-run downstream cells.</strong> A widget cell wasn't
+  publishing its per-control value artifacts onto the cell, so a downstream cell
+  that reads a control resolved <em>no</em> upstream input — its provenance never
+  reflected the control value and it cache-hit the stale output. Dragging a
+  slider (with <strong>⚡ Live</strong> on, or in the app view / an embed) now recomputes the
+  cells that depend on it, as intended. (widget cells now populate
+  <code>artifact_uris</code> like a Python cell's multi-output vars.) The live cascade also
+  no longer skips <strong>sibling</strong> cells: with two outputs driven by the same control
+  (e.g. a table <em>and</em> a plot), both refresh, not just the first — the cascade
+  snapshots its target set up front so running one cell can't demote a
+  not-yet-run sibling to idle and skip it.</li>
+<li><strong>Consistent notebook-header buttons.</strong> The <strong>Add cell</strong> and <strong>Export</strong> menus
+  referenced CSS variables that don't exist (<code>--border-color</code>, <code>--bg-secondary</code>),
+  so they fell back to hardcoded light colors — an off-theme white island,
+  especially wrong in dark mode — and the <strong>Embed</strong> button didn't match its
+  sibling nav links. The header controls now share one theme-aware style in both
+  light and dark.</li>
+<li><strong>No more spurious <code>display</code> mutation warning.</strong> Any cell whose last line was
+  a bare expression (e.g. a trailing <code>df</code> to show it) emitted a false
+  "'display' was mutated in place" warning — the harness's own injected display
+  helper being flagged. Injected/ambient names are now excluded from mutation
+  detection. (#418)</li>
 <li><strong>Downstream cells now read "stale", not "idle", when an upstream changes.</strong>
   When you edit an upstream cell (or its inputs, mount, or environment change),
   a downstream cell that already holds a result is now marked <strong>stale</strong> with an
@@ -2764,6 +2847,12 @@ exhaustive commit history.</p>
   web UI surfaces this as <code>stale · upstream changed</code> and the terminal viewer
   shows the stale glyph. A never-run downstream stays <strong>idle</strong> — there is no
   cached result to invalidate until its upstream produces inputs. (#361)</li>
+<li><strong>Tidier notebook header + navigable operator pages.</strong> All the ways to get a
+  notebook <em>out</em> now live in one <strong>Export</strong> menu — Markdown, HTML, the app
+  snapshot, and the app <strong>Embed</strong> snippet — instead of a separate header pill, so
+  the header carries fewer, more consistent buttons. The <strong>Logs</strong> and
+  <strong>Artifacts</strong> pages gained a <strong>← Back</strong> button (they previously only linked to
+  the notebook list, stranding you if you'd opened them from a notebook).</li>
 </ul>
 <h2 id="040-2026-07-01">0.4.0 — 2026-07-01<a class="headerlink" href="#040-2026-07-01" title="Permanent link">&para;</a></h2>
 <p>0.4.0 is a <strong>consolidation and hardening</strong> cycle. The headlines are a new

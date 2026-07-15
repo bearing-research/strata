@@ -2247,6 +2247,10 @@ in the cell language picker.</p>
 <td>A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream.</td>
 </tr>
 <tr>
+<td><strong>Widget</strong></td>
+<td>A declarative control panel — one control per line (<code>alpha = slider(0, 1)</code>, plus number/dropdown/checkbox/text). Each control is an input downstream cells consume; with <strong>⚡ Live</strong> on, dragging one recomputes the cells that depend on it.</td>
+</tr>
+<tr>
 <td><strong>Markdown</strong></td>
 <td>Prose between cells. Rendered as HTML; not part of the DAG.</td>
 </tr>
@@ -2273,9 +2277,11 @@ working. Wait for the banner to clear before running the first cell.</p>
 <div class="admonition note">
 <p class="admonition-title">Display rendering</p>
 <p>The output blocks below are shown as text for the doc. In the
-UI, DataFrames render as scrollable tables, matplotlib figures
-render as inline PNGs, prompt-cell responses render as
-structured JSON (when <code>@output_schema</code> is set) or markdown.</p>
+UI, DataFrames render in an interactive grid (page, sort, filter,
+and search over the full cached artifact, with CSV / Parquet
+export), matplotlib figures render as inline PNGs, prompt-cell
+responses render as structured JSON (when <code>@output_schema</code> is set)
+or markdown.</p>
 </div>
 <h3 id="load-the-data">Load the data<a class="headerlink" href="#load-the-data" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">time</span>
@@ -2404,7 +2410,7 @@ cell, or call from <code>display()</code>:</p>
 <tbody>
 <tr>
 <td>pandas DataFrame / Series</td>
-<td>Scrollable HTML table, truncated to ~20 preview rows.</td>
+<td>Interactive grid: page, sort, filter, and search over the full cached artifact, with CSV / Parquet export.</td>
 </tr>
 <tr>
 <td>matplotlib <code>Figure</code></td>
@@ -2490,7 +2496,7 @@ grouped by feature.</p>
 <h2 id="whats-next">What's next<a class="headerlink" href="#whats-next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../../notebook/concepts/">Concepts</a> for how the DAG, caching, and cascade work</li>
-<li><a href="../../notebook/cells/">Cell Types</a> for the full surface (Python, prompt, SQL, loop, variant, markdown)</li>
+<li><a href="../../notebook/cells/">Cell Types</a> for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)</li>
 <li><a href="../../notebook/annotations/">Cell Annotations</a> for <code>@worker</code>, <code>@mount</code>, <code>@loop</code>, and friends</li>
 <li><a href="../../notebook/workers/">Distributed Workers</a> for <code># @worker gpu-fly</code> and dispatching to remote compute</li>
 <li><a href="../../notebook/import/">Import from Jupyter</a> for <code>strata import nb.ipynb</code></li>

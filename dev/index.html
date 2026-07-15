@@ -1925,6 +1925,7 @@ producing artifacts that flow through an auto-built DAG.</p>
 <li><strong>prompt cells:</strong> LLM calls are first-class DAG nodes, <code>{{ variable }}</code> interpolation from upstream cells, cached by template + inputs + model config</li>
 <li><strong>SQL cells:</strong> named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery</li>
 <li><strong>loop cells:</strong> <code># @loop max_iter=N carry=state</code> iterates a cell with explicit carry between steps — each iteration is its own artifact</li>
+<li><strong>interactive widgets + app view:</strong> a <code>widget</code> cell is a control panel (slider / dropdown / …) whose values downstream cells consume; with <strong>⚡ Live</strong> on, dragging a control recomputes the dependents. Open a notebook as a read-only <strong>app</strong>, <strong>embed</strong> it as an <code>&lt;iframe&gt;</code>, or export a frozen <strong>snapshot</strong></li>
 <li><strong>distributed:</strong> <code># @worker gpu-fly</code> dispatches a single cell to a remote box — bring your own compute</li>
 <li><strong>mounts:</strong> <code># @mount data s3://bucket/prefix ro</code> makes any S3 / GCS / Azure prefix a local <code>pathlib.Path</code></li>
 <li><strong>isolated envs:</strong> every notebook gets its own uv-managed <code>.venv/</code>, locked and reproducible</li>

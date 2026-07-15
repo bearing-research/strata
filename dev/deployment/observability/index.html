@@ -1810,6 +1810,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#web-ui-logs-artifacts-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web UI: Logs &amp; Artifacts pages
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1951,6 +1962,17 @@
     <span class="md-ellipsis">
       
         Logs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#web-ui-logs-artifacts-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web UI: Logs &amp; Artifacts pages
       
     </span>
   </a>
@@ -2117,6 +2139,20 @@ log record with <code>level</code>, <code>logger</code>, <code>message</code>, <
 context fields (request ID, tenant, principal where applicable).
 Pipe <code>docker compose logs strata</code> through <code>jq</code> for readable
 output.</p>
+<h3 id="web-ui-logs-artifacts-pages">Web UI: Logs &amp; Artifacts pages<a class="headerlink" href="#web-ui-logs-artifacts-pages" title="Permanent link">&para;</a></h3>
+<p>The notebook UI ships two operator views, reachable from any notebook's header
+(<strong>Logs</strong> / <strong>Artifacts</strong>) and via a <strong>← Back</strong> button that returns to the
+notebook:</p>
+<ul>
+<li><strong>Logs</strong> (<code>/logs</code>) — the server-log stream with level / logger / search
+  filters and a <strong>live tail</strong>. Backed by an in-memory ring buffer:
+  <code>GET /v1/logs</code> (snapshot) and <code>GET /v1/logs/stream</code> (Server-Sent Events).</li>
+<li><strong>Artifacts</strong> (<code>/artifacts</code>) — a sortable, filterable list of stored
+  artifacts with summary stats. Backed by <code>GET /v1/artifacts</code> (with <code>since</code> /
+  sort / order filters) and <code>GET /v1/artifacts/stats</code>.</li>
+</ul>
+<p>These are convenience surfaces over the same data; use the Prometheus metrics
+and OTLP traces above for production monitoring and alerting.</p>
 <h2 id="grafana-dashboards">Grafana dashboards<a class="headerlink" href="#grafana-dashboards" title="Permanent link">&para;</a></h2>
 <p><code>observability/grafana/provisioning/</code> is mounted into the Grafana
 container so the dashboard and the Prometheus datasource are
