@@ -34,9 +34,9 @@ const route = useRoute()
 const router = useRouter()
 const { record, remove, findBySessionId } = useRecentNotebooks()
 
-// "Embed" — copy a ready-to-paste iframe snippet (app view in embed mode) plus
-// the tiny auto-resize listener, so the notebook drops into another site.
-const embedCopied = ref(false)
+// "Embed" (in the Export menu) — copy a ready-to-paste iframe snippet (app view
+// in embed mode) plus the tiny auto-resize listener, so the notebook drops into
+// another site.
 function embedSnippet(): string {
   const url = `${window.location.origin}/#/app/${props.sessionId}?embed=1`
   return [
@@ -47,8 +47,7 @@ function embedSnippet(): string {
 }
 async function copyEmbedSnippet() {
   await navigator.clipboard.writeText(embedSnippet())
-  embedCopied.value = true
-  setTimeout(() => (embedCopied.value = false), 1800)
+  pushToast('Embed snippet copied to clipboard')
 }
 
 const {
@@ -76,6 +75,7 @@ const {
   registryEnabled,
   toasts,
   dismissToast,
+  pushToast,
 } = useNotebook()
 
 // Bottom drawer tab: the existing DAG/Notes/Profiling stack ('execution')
@@ -502,11 +502,21 @@ async function rerunAll() {
   await executeNotebookRerunAllWebSocket()
 }
 
-function exportNotebook(format: 'markdown' | 'html', appView = false) {
+function onExportSelect(option: {
+  key: string
+  format?: 'markdown' | 'html'
+  appView?: boolean
+  embed?: boolean
+}) {
+  if (option.embed) {
+    void copyEmbedSnippet()
+    return
+  }
+  if (!option.format) return
   const sid = (notebook as any).sessionId as string | undefined
   if (!sid) return
   const strata = useStrata()
-  strata.downloadExport(sid, format, appView)
+  strata.downloadExport(sid, option.format, Boolean(option.appView))
 }
 
 function goHome() {
@@ -544,15 +554,6 @@ function goHome() {
         >
           App
         </router-link>
-        <button
-          type="button"
-          class="header-logs-link"
-          data-testid="nav-embed"
-          :title="'Copy an <iframe> snippet to embed this app in another site'"
-          @click="copyEmbedSnippet"
-        >
-          {{ embedCopied ? 'Copied ✓' : 'Embed' }}
-        </button>
         <router-link
           to="/artifacts"
           class="header-logs-link"
@@ -605,7 +606,7 @@ function goHome() {
         <ExportMenu
           data-testid="notebook-export"
           :disabled="!notebook.id"
-          @select="exportNotebook"
+          @select="onExportSelect"
         />
         <button
           class="btn btn-danger"

@@ -17,8 +17,8 @@ exhaustive commit history.
   "tweak a parameter, see the result" dashboard. `# @app hide` keeps a cell out
   of the view.
 - **Embed the app view in another site.** The read-only app view can be dropped
-  into a dashboard/wiki/portal as an `<iframe>` — click **Embed** in the notebook
-  header to copy a ready-to-paste snippet. `?embed=1` strips the standalone chrome
+  into a dashboard/wiki/portal as an `<iframe>` — pick **Embed** from the
+  notebook's **Export** menu to copy a ready-to-paste snippet. `?embed=1` strips the standalone chrome
   and the embedded app posts its content height to the parent
   (`strata:embed:resize`) so the host sizes the frame with no inner scrollbar;
   widgets stay live inside the frame. Cross-origin embedding is opt-in and secure
@@ -109,8 +109,12 @@ exhaustive commit history.
   web UI surfaces this as `stale · upstream changed` and the terminal viewer
   shows the stale glyph. A never-run downstream stays **idle** — there is no
   cached result to invalidate until its upstream produces inputs. (#361)
-
-## 0.4.0 — 2026-07-01
+- **Tidier notebook header + navigable operator pages.** All the ways to get a
+  notebook *out* now live in one **Export** menu — Markdown, HTML, the app
+  snapshot, and the app **Embed** snippet — instead of a separate header pill, so
+  the header carries fewer, more consistent buttons. The **Logs** and
+  **Artifacts** pages gained a **← Back** button (they previously only linked to
+  the notebook list, stranding you if you'd opened them from a notebook).
 
 0.4.0 is a **consolidation and hardening** cycle. The headlines are a new
 **read-only terminal viewer** for notebooks and a **full agent-facing notebook

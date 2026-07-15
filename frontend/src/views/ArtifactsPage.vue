@@ -1,5 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+
+// A plain back control: return to wherever the user came from (usually the
+// notebook they opened Artifacts from), falling back to the home list.
+const router = useRouter()
+function goBack() {
+  if (window.history.length > 1) router.back()
+  else router.push('/')
+}
 import {
   useStrata,
   type ArtifactQuery,
@@ -138,6 +147,9 @@ onMounted(() => {
   <div class="artifacts" data-testid="artifacts-page">
     <div class="artifacts-header">
       <div class="artifacts-title">
+        <button type="button" class="nav-link back-btn" data-testid="page-back" @click="goBack">
+          ← Back
+        </button>
         <router-link to="/" class="back-link" title="Back to notebooks">◆ strata</router-link>
         <span class="crumb">/</span>
         <span class="page-name">artifacts</span>
@@ -316,6 +328,13 @@ onMounted(() => {
   padding: 4px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
+}
+/* .nav-link on a <button> (Back): reset the browser's default chrome. */
+.back-btn {
+  font-family: inherit;
+  line-height: 1.4;
+  background: transparent;
+  cursor: pointer;
 }
 
 .nav-link:hover {

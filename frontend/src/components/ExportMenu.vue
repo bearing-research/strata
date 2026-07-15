@@ -1,29 +1,43 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-interface FormatOption {
-  format: 'markdown' | 'html'
-  appView?: boolean
+interface ExportOption {
+  key: string
   label: string
   description: string
+  format?: 'markdown' | 'html'
+  appView?: boolean
+  embed?: boolean
 }
 
-const FORMATS: FormatOption[] = [
+// Every way to get a notebook *out*: file downloads (Markdown / HTML / the
+// frozen app snapshot) and the live embed snippet — one menu, since they're all
+// "export / share this notebook".
+const OPTIONS: ExportOption[] = [
   {
+    key: 'markdown',
     format: 'markdown',
     label: 'Markdown',
     description: 'Drops into GitHub, mkdocs, Confluence',
   },
   {
+    key: 'html',
     format: 'html',
     label: 'HTML',
     description: 'Standalone file, syntax-highlighted',
   },
   {
+    key: 'snapshot',
     format: 'html',
     appView: true,
     label: 'App snapshot',
     description: 'Widgets + outputs only, no code — a portable frozen dashboard',
+  },
+  {
+    key: 'embed',
+    embed: true,
+    label: 'Embed',
+    description: 'Copy an <iframe> snippet to embed the live app in another site',
   },
 ]
 
@@ -32,7 +46,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'select', format: 'markdown' | 'html', appView: boolean): void
+  (e: 'select', option: ExportOption): void
 }>()
 
 const open = ref(false)
@@ -42,9 +56,9 @@ function toggle() {
   open.value = !open.value
 }
 
-function pick(opt: FormatOption) {
+function pick(opt: ExportOption) {
   open.value = false
-  emit('select', opt.format, Boolean(opt.appView))
+  emit('select', opt)
 }
 
 function onDocumentClick(event: MouseEvent) {
@@ -81,7 +95,7 @@ onBeforeUnmount(() => {
       :aria-haspopup="true"
       :aria-expanded="open"
       data-testid="export-menu-trigger"
-      title="Export this notebook as a single file"
+      title="Export or share this notebook"
       @click="toggle"
     >
       <span class="trigger-label">Export</span>
@@ -90,12 +104,12 @@ onBeforeUnmount(() => {
 
     <div v-if="open" class="export-dropdown" role="menu" data-testid="export-menu-dropdown">
       <button
-        v-for="opt in FORMATS"
-        :key="opt.appView ? `${opt.format}-app` : opt.format"
+        v-for="opt in OPTIONS"
+        :key="opt.key"
         type="button"
         class="export-option"
         role="menuitem"
-        :data-testid="`export-option-${opt.appView ? 'snapshot' : opt.format}`"
+        :data-testid="`export-option-${opt.key}`"
         @click="pick(opt)"
       >
         <span class="option-label">{{ opt.label }}</span>
