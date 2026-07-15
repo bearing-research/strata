@@ -8,6 +8,21 @@ cache hits) on top of it.
 
 ## 1. Start the server
 
+=== "uv (recommended)"
+
+    Install the CLI from PyPI into a uv-managed tool environment, then
+    run it:
+
+    ```bash
+    uv tool install strata-notebook
+    strata-notebook
+    ```
+
+    Personal mode is the default (single-user, writes enabled); no
+    config needed for a local run. Re-run `strata-notebook` to start it
+    again on later sessions. Requires [uv](https://docs.astral.sh/uv/);
+    plain `pip install` is not supported.
+
 === "Docker"
 
     ```bash
