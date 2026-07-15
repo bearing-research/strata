@@ -2144,10 +2144,10 @@ output.</p>
 (<strong>Logs</strong> / <strong>Artifacts</strong>) and via a <strong>← Back</strong> button that returns to the
 notebook:</p>
 <ul>
-<li><strong>Logs</strong> (<code>/logs</code>) — the server-log stream with level / logger / search
+<li><strong>Logs</strong> (<code>/logs</code>) - the server-log stream with level / logger / search
   filters and a <strong>live tail</strong>. Backed by an in-memory ring buffer:
   <code>GET /v1/logs</code> (snapshot) and <code>GET /v1/logs/stream</code> (Server-Sent Events).</li>
-<li><strong>Artifacts</strong> (<code>/artifacts</code>) — a sortable, filterable list of stored
+<li><strong>Artifacts</strong> (<code>/artifacts</code>) - a sortable, filterable list of stored
   artifacts with summary stats. Backed by <code>GET /v1/artifacts</code> (with <code>since</code> /
   sort / order filters) and <code>GET /v1/artifacts/stats</code>.</li>
 </ul>
@@ -2156,13 +2156,13 @@ and OTLP traces above for production monitoring and alerting.</p>
 <h2 id="grafana-dashboards">Grafana dashboards<a class="headerlink" href="#grafana-dashboards" title="Permanent link">&para;</a></h2>
 <p><code>observability/grafana/provisioning/</code> is mounted into the Grafana
 container so the dashboard and the Prometheus datasource are
-provisioned on container start — no importing by hand.</p>
+provisioned on container start - no importing by hand.</p>
 <p>To open it:</p>
 <ol>
 <li>Bring up the stack (above) and go to
-   <a href="http://localhost:3000">http://localhost:3000</a> — log in with
+   <a href="http://localhost:3000">http://localhost:3000</a> - log in with
    <code>admin</code> / <code>admin</code>.</li>
-<li>Left nav → <strong>Dashboards</strong> → <strong>Strata — Iceberg Serving +
+<li>Left nav → <strong>Dashboards</strong> → <strong>Strata - Iceberg Serving +
    Observability</strong>.</li>
 <li>Panels stay flat until the server sees traffic. Send some load
    (see <a href="#generating-load">Generating load</a>) and they fill in within
@@ -2184,7 +2184,7 @@ provisioned on container start — no importing by hand.</p>
 <p>A test (<code>tests/test_observability_dashboard.py</code>) fails CI if a panel
 references a metric the server no longer exposes, so the dashboard
 can't silently drift out of sync with <code>/metrics/prometheus</code> again
-(it had — the QoS metrics were renamed and the panels went dark).</p>
+(it had - the QoS metrics were renamed and the panels went dark).</p>
 <p>To add more dashboards, drop the JSON into
 <code>observability/grafana/provisioning/dashboards/</code> and restart the
 Grafana container.</p>
@@ -2209,7 +2209,7 @@ ephemeral containers), wrap the scrape in your own sidecar.</p>
 <p>To use the bundled dashboard with your own Grafana, import
 <code>observability/grafana/provisioning/dashboards/strata.json</code> (Dashboards
 → New → Import) and pick your Prometheus from the dashboard's
-<strong>Datasource</strong> dropdown — it's a template variable, not hard-wired to
+<strong>Datasource</strong> dropdown - it's a template variable, not hard-wired to
 the compose stack.</p>
 <h2 id="generating-load">Generating load<a class="headerlink" href="#generating-load" title="Permanent link">&para;</a></h2>
 <p>A fresh stack is idle, so the Grafana panels and Jaeger are empty
@@ -2222,9 +2222,9 @@ sweep that hammers it with realistic Iceberg scans:</p>
 </code></pre></div>
 <p>After it runs:</p>
 <ul>
-<li><strong>Grafana</strong> (<a href="http://localhost:3000">:3000</a>) — the scan-rate,
+<li><strong>Grafana</strong> (<a href="http://localhost:3000">:3000</a>) - the scan-rate,
   cache, and QoS panels move within a scrape interval or two.</li>
-<li><strong>Jaeger</strong> (<a href="http://localhost:16686">:16686</a>) — a handful of
+<li><strong>Jaeger</strong> (<a href="http://localhost:16686">:16686</a>) - a handful of
   materialize spans with their full child waterfall.</li>
 </ul>
 <h2 id="health-endpoints">Health endpoints<a class="headerlink" href="#health-endpoints" title="Permanent link">&para;</a></h2>

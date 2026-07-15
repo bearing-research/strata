@@ -2032,10 +2032,10 @@
 <p><code>strata-notebook-tui</code> is a <strong>read-only terminal spectator</strong> for a live notebook
 session. It attaches to a running <code>strata-notebook</code> server over the same
 WebSocket protocol the web UI uses, then renders the notebook and streams every
-update — cell status changes, console output, results, cascade and
-environment-job progress, and an AI agent's activity — as they happen.</p>
+update - cell status changes, console output, results, cascade and
+environment-job progress, and an AI agent's activity - as they happen.</p>
 <p>It does not edit or run cells. Its purpose is <strong>watching</strong>: open a notebook in
-the web UI (or let an AI agent drive it), and follow along in a terminal — a
+the web UI (or let an AI agent drive it), and follow along in a terminal - a
 second pane, an SSH session, or a tmux window beside your editor.</p>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
 <p>The viewer ships behind the <code>tui</code> extra (it pulls in <code>textual</code> and <code>grandalf</code>,
@@ -2048,7 +2048,7 @@ plus <code>textual-image</code> and <code>Pillow</code> for inline image renderi
 <p>Plain <code>strata-notebook</code> (without <code>[tui]</code>) installs the server but not the
 viewer's dependencies, so <code>strata-notebook-tui</code> will fail to start.</p>
 <h2 id="workflow">Workflow<a class="headerlink" href="#workflow" title="Permanent link">&para;</a></h2>
-<p>The viewer is a client — you always have a <strong>server</strong>, a <strong>session</strong>, and the
+<p>The viewer is a client - you always have a <strong>server</strong>, a <strong>session</strong>, and the
 <strong>viewer watching it</strong>.</p>
 <h3 id="1-start-the-server">1. Start the server<a class="headerlink" href="#1-start-the-server" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>strata-notebook<span class="w">                </span><span class="c1"># serves http://127.0.0.1:8765 (web UI + REST + WS)</span>
@@ -2058,7 +2058,7 @@ viewer's dependencies, so <code>strata-notebook-tui</code> will fail to start.</
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>new<span class="w"> </span>my-notebook<span class="w">         </span><span class="c1"># creates ./my-notebook</span>
 </code></pre></div>
 <p>…or create / open one in the web UI at <code>:8765</code>. (<code>strata-notebook-tui</code> can open
-an existing notebook directory itself — see <code>--notebook</code> below — but it can't
+an existing notebook directory itself - see <code>--notebook</code> below - but it can't
 create one.)</p>
 <h3 id="3-watch-it">3. Watch it<a class="headerlink" href="#3-watch-it" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>strata-notebook-tui<span class="w"> </span>--notebook<span class="w"> </span>./my-notebook<span class="w">   </span><span class="c1"># open/reuse a session for that path, then attach</span>
@@ -2077,20 +2077,20 @@ in another terminal:</p>
 </ol>
 <p>The agent's reasoning streams into the Agent tab while cells flip status, the
 selection follows the running cell, and results render live. Agent
-confirmation prompts are shown as <em>"awaiting driver confirmation"</em> — the viewer
+confirmation prompts are shown as <em>"awaiting driver confirmation"</em> - the viewer
 is read-only, so the web UI (the driver) answers them.</p>
 <h2 id="layout-and-keys">Layout and keys<a class="headerlink" href="#layout-and-keys" title="Permanent link">&para;</a></h2>
 <p>The left pane lists the cells (status glyph, name, and last-run time); the right
-pane is split into two tab-groups for the selected cell — the <strong>code</strong> on top
+pane is split into two tab-groups for the selected cell - the <strong>code</strong> on top
 (Source, Tests source) and the <strong>runtime</strong> on the bottom (Output, Console, Agent,
 Results). A header line shows the connection state, follow mode, and any
 cascade / environment / agent activity.</p>
 <p>When the driver runs a cell's <a href="../testing/">unit tests</a>, the result shows as a
-badge on that cell in the list — <code>✓ 4/4</code> (green), <code>✗ 2/4</code> on failure, <code>·stale</code>
-when the cell changed since the run — and the header notes the test run. The
+badge on that cell in the list - <code>✓ 4/4</code> (green), <code>✗ 2/4</code> on failure, <code>·stale</code>
+when the cell changed since the run - and the header notes the test run. The
 top <strong>Tests</strong> tab (<code>3</code>) shows the test <em>source</em>; the bottom <strong>Results</strong> tab (<code>7</code>)
 shows the individual outcomes for the selected cell: each test as <code>✓</code>/<code>✗</code>/<code>⚠</code>/<code>○</code>
-with its failure message (the rewritten-assert diff) underneath — the pytest run,
+with its failure message (the rewritten-assert diff) underneath - the pytest run,
 in the terminal.</p>
 <table>
 <thead>
@@ -2168,10 +2168,10 @@ in the terminal.</p>
 </table>
 <p>The tabs render richly: source is <strong>syntax-highlighted</strong> by cell language,
 markdown cells and markdown outputs render as formatted markdown, a single DataFrame / table output
-renders in an <strong>interactive data viewer</strong> — a scrollable table you can page (<code>n</code>/<code>p</code>),
+renders in an <strong>interactive data viewer</strong> - a scrollable table you can page (<code>n</code>/<code>p</code>),
 sort by the focused column (<code>s</code>), and export to CSV (<code>e</code>), backed by the full
-cached artifact rather than the 20-row preview — and image outputs (e.g.
-matplotlib figures) render <strong>inline</strong> — using the terminal's graphics protocol
+cached artifact rather than the 20-row preview - and image outputs (e.g.
+matplotlib figures) render <strong>inline</strong> - using the terminal's graphics protocol
 (kitty / iTerm2 / Sixel) where available, degrading to Unicode half-blocks
 otherwise.</p>
 <p>Cell status glyphs:</p>
@@ -2238,7 +2238,7 @@ otherwise.</p>
 </tr>
 <tr>
 <td><code>--user VALUE</code></td>
-<td>Identity header value — needed to attach to an owned notebook.</td>
+<td>Identity header value - needed to attach to an owned notebook.</td>
 </tr>
 </tbody>
 </table>

@@ -2163,20 +2163,20 @@ Strata is a <strong>value-semantics</strong> engine: a cell receives <em>copies<
 (deserialized from artifacts), not the caller's live objects. A linear Jupyter
 kernel shares one memory space, so a model trained in one cell is visible
 everywhere; Strata's cells are isolated, so two patterns that work in Jupyter
-break here — both silently, because the run still goes green:</p>
+break here - both silently, because the run still goes green:</p>
 <ol>
 <li>
 <p><strong>In-place mutation that isn't exported.</strong> A cell that trains a model with
    <code>optimizer.step()</code> (a method call, no <code>model = …</code> reassignment) mutates
    <code>model</code> <em>in place</em>. Strata's data-flow only treats a variable as a cell's
-   output if it's assigned/subscripted/attr-set — so the trained <code>model</code> is
+   output if it's assigned/subscripted/attr-set - so the trained <code>model</code> is
    never re-exported, and downstream cells read the <strong>pre-training</strong> version.</p>
 </li>
 <li>
 <p><strong>Shared mutable references split across cells.</strong> <code>optimizer = Adam(model.parameters())</code>
    makes the optimizer hold references to the <em>same tensors</em> as the model.
    Stored as two separate artifacts and reloaded into a later cell, they become
-   two <em>different</em> tensor sets — so <code>optimizer.step()</code> updates the optimizer's
+   two <em>different</em> tensor sets - so <code>optimizer.step()</code> updates the optimizer's
    private copies and the <code>model</code> you evaluate/save never changes. Training is a
    silent no-op.</p>
 </li>
@@ -2186,8 +2186,8 @@ each variable is an independent immutable artifact.</strong> Strata deliberately
 <em>not</em> try to fake it (preserving cross-artifact object identity, or silently
 re-exporting a mutated input, would make provenance lie).</p>
 <h3 id="the-pattern-that-works">The pattern that works<a class="headerlink" href="#the-pattern-that-works" title="Permanent link">&para;</a></h3>
-<p>Express training as one content-addressed transform — <strong>data in, trained model
-out</strong> — by keeping the model, its optimizer, and the training loop in <strong>one
+<p>Express training as one content-addressed transform - <strong>data in, trained model
+out</strong> - by keeping the model, its optimizer, and the training loop in <strong>one
 cell</strong>, and making the trained model that cell's output:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># @name train</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">model</span> <span class="o">=</span> <span class="n">build_model</span><span class="p">()</span>
@@ -2198,12 +2198,12 @@ cell</strong>, and making the trained model that cell's output:</p>
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_fn</span><span class="p">(</span><span class="n">model</span><span class="p">(</span><span class="n">xb</span><span class="p">),</span> <span class="n">yb</span><span class="p">)</span>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>        <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>        <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># `model` (trained) is this cell&#39;s output — downstream cells get the trained one.</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># `model` (trained) is this cell&#39;s output - downstream cells get the trained one.</span>
 <a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="n">trained_model</span> <span class="o">=</span> <span class="n">model</span>
 </code></pre></div>
 <p>For a large handoff, export a <strong>checkpoint</strong> instead of a live object: save a
 <code>state_dict</code> (or a file path) from the training cell and load it downstream with
-explicit <code>map_location</code> — see the device/placement guidance in
+explicit <code>map_location</code> - see the device/placement guidance in
 <a href="../workers/">Distributed Workers</a>.</p>
 <h2 id="notebook-file-format">Notebook File Format<a class="headerlink" href="#notebook-file-format" title="Permanent link">&para;</a></h2>
 <p>Each notebook is a directory on disk:</p>

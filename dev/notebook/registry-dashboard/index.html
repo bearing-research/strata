@@ -2040,14 +2040,14 @@
 
 <h1 id="registry-dashboard">Registry Dashboard<a class="headerlink" href="#registry-dashboard" title="Permanent link">&para;</a></h1>
 <p>The registry dashboard is the <strong>UI for promoting models and approving changes</strong>
-right inside the notebook — so promotion doesn't have to be code. It surfaces
+right inside the notebook - so promotion doesn't have to be code. It surfaces
 the same names / aliases / tags / audit / lineage that the
 <a href="../../core/registry/">SDK and CLI</a> drive, backed by the identical audited routes.</p>
 <div class="admonition note">
 <p class="admonition-title">Dashboard UI is personal-mode only</p>
 <p>The dashboard <strong>shows up automatically in personal mode</strong> (the default
 <code>python -m strata</code>) and <strong>hides itself in service mode</strong>. If you don't see it,
-check your deployment mode. The registry itself is <em>not</em> personal-only — in
+check your deployment mode. The registry itself is <em>not</em> personal-only - in
 service mode the same names/aliases/tags resolve via SDK and REST (tenant-
 scoped reads), and publishing them works with <code>service_writes_enabled</code> + the
 <code>artifacts:write</code> scope (see
@@ -2057,7 +2057,7 @@ scoped reads), and publishing them works with <code>service_writes_enabled</code
 tag, or approval gate <em>is</em>), see <a href="../../core/registry/">Artifacts &amp; Model Registry</a>.</p>
 <h2 id="what-youll-build">What you'll build<a class="headerlink" href="#what-youll-build" title="Permanent link">&para;</a></h2>
 <p>Publish a model from a cell, promote it to <strong>champion</strong>, watch the move land in
-the registry with full audit + lineage — without leaving the notebook.</p>
+the registry with full audit + lineage - without leaving the notebook.</p>
 <hr />
 <h2 id="1-open-the-notebook-ui">1. Open the notebook UI<a class="headerlink" href="#1-open-the-notebook-ui" title="Permanent link">&para;</a></h2>
 <p>Start the server and open it in a browser:</p>
@@ -2067,7 +2067,7 @@ the registry with full audit + lineage — without leaving the notebook.</p>
 <h2 id="2-publish-a-model-from-a-cell">2. Publish a model from a cell<a class="headerlink" href="#2-publish-a-model-from-a-cell" title="Permanent link">&para;</a></h2>
 <p>The dashboard surfaces what your <strong>cells publish</strong> to the registry. Inside any
 Python cell, use the <a href="../cells/#the-ambient-strata-client">ambient <code>strata</code> client</a>
-— it's already in the namespace, no import or setup:</p>
+- it's already in the namespace, no import or setup:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># ... you&#39;ve trained `model` in this or an upstream cell ...</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">)</span>
 </code></pre></div>
@@ -2079,9 +2079,9 @@ cell that produced it</strong>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>⬡ taxi/tip-model  v1   [Promote ▾]   ⎘
 </code></pre></div>
 <ul>
-<li><code>⬡ taxi/tip-model v1</code> — the name and version your cell put.</li>
-<li><code>[Promote ▾]</code> — promote this artifact (next step).</li>
-<li><code>⎘</code> — open its lineage.</li>
+<li><code>⬡ taxi/tip-model v1</code> - the name and version your cell put.</li>
+<li><code>[Promote ▾]</code> - promote this artifact (next step).</li>
+<li><code>⎘</code> - open its lineage.</li>
 </ul>
 <p>Promote where you trained the model, without scrolling anywhere.</p>
 <!-- TODO(screenshot): the per-cell promote strip under a published cell, showing
@@ -2091,27 +2091,27 @@ cell that produced it</strong>.</p>
 <p>Click <strong><code>[Promote ▾]</code></strong> and choose <strong>champion</strong> (or <strong>candidate</strong>). A toast
 confirms the result:</p>
 <ul>
-<li><strong><code>✓ taxi/tip-model → champion</code></strong> — applied immediately (the normal case).</li>
-<li><strong><code>⏳ champion change pending approval</code></strong> — the alias is <em>protected</em> (see
+<li><strong><code>✓ taxi/tip-model → champion</code></strong> - applied immediately (the normal case).</li>
+<li><strong><code>⏳ champion change pending approval</code></strong> - the alias is <em>protected</em> (see
   step 6); the move is queued instead of applied.</li>
 </ul>
-<p><code>champion</code> / <code>candidate</code> are intent pointers — the post-stages model, not
+<p><code>champion</code> / <code>candidate</code> are intent pointers - the post-stages model, not
 <code>Staging</code>/<code>Production</code> enums. A name can hold both at once (champion <em>and</em> a
 challenger candidate).</p>
 <h2 id="5-the-registry-tab">5. The Registry tab<a class="headerlink" href="#5-the-registry-tab" title="Permanent link">&para;</a></h2>
 <p>Open the <strong>bottom drawer</strong> and click the <strong>Registry</strong> tab. It has three parts,
 top to bottom:</p>
 <ol>
-<li><strong>Pending-approval banner</strong> — appears only when a protected-alias move is
+<li><strong>Pending-approval banner</strong> - appears only when a protected-alias move is
    queued, with <strong>Approve / Reject</strong> buttons (the human gate, in the UI).</li>
-<li><strong>Names table</strong> — every registry name, each row showing its <strong>alias chips</strong>
+<li><strong>Names table</strong> - every registry name, each row showing its <strong>alias chips</strong>
    (<code>★champ</code>, <code>cand</code>), latest version, <strong>tags</strong>, a <strong><code>[Promote ▾]</code></strong> menu, and a
    <strong><code>⎘</code></strong> lineage button. This is the same data on the per-cell strip, but for
-   <em>all</em> names — not just what the current notebook published.</li>
-<li><strong>Audit timeline</strong> (collapsible) — every name / alias / tag mutation, newest
+   <em>all</em> names - not just what the current notebook published.</li>
+<li><strong>Audit timeline</strong> (collapsible) - every name / alias / tag mutation, newest
    first, with who and from → to.</li>
 </ol>
-<!-- TODO(screenshot): the Registry tab open in the bottom drawer — pending banner
+<!-- TODO(screenshot): the Registry tab open in the bottom drawer - pending banner
      (with a queued protected move), the names table with ★champ/cand chips +
      tags + [Promote ▾], and the audit timeline. The hero shot for this page. -->
 
@@ -2129,8 +2129,10 @@ Unprotected aliases (<code>candidate</code>) still apply immediately.</p>
 view</strong> renders the provenance chain:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>model ← features ← scan ← table @ snapshot
 </code></pre></div>
-<p>— the same chain <code>strata artifact lineage</code> prints on the CLI, as an interactive
-view. It answers "which snapshot trained this model?" in one click.</p>
+<ul>
+<li>the same chain <code>strata artifact lineage</code> prints on the CLI, as an interactive
+view. It answers "which snapshot trained this model?" in one click.</li>
+</ul>
 <!-- TODO(screenshot): the lineage view/modal showing the model ← features ← scan
      ← table @ snapshot chain. -->
 
@@ -2158,7 +2160,7 @@ view. It answers "which snapshot trained this model?" in one click.</p>
 </tr>
 <tr>
 <td><strong>Promote said "pending" unexpectedly</strong></td>
-<td>That alias is in <code>STRATA_REGISTRY_PROTECTED_ALIASES</code> — approve it from the pending banner.</td>
+<td>That alias is in <code>STRATA_REGISTRY_PROTECTED_ALIASES</code> - approve it from the pending banner.</td>
 </tr>
 <tr>
 <td><strong>Promote did nothing</strong></td>
@@ -2168,11 +2170,11 @@ view. It answers "which snapshot trained this model?" in one click.</p>
 </table>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../../core/registry/">Artifacts &amp; Model Registry</a> — the concepts and the
+<li><a href="../../core/registry/">Artifacts &amp; Model Registry</a> - the concepts and the
   SDK/CLI that drive the same registry.</li>
-<li><a href="../cells/#the-ambient-strata-client">The ambient <code>strata</code> client</a> — how cells
+<li><a href="../cells/#the-ambient-strata-client">The ambient <code>strata</code> client</a> - how cells
   publish.</li>
-<li><a href="../lake-aware-cells/">Lake-Aware Cells</a> — the <code>@table</code> flow that makes a
+<li><a href="../lake-aware-cells/">Lake-Aware Cells</a> - the <code>@table</code> flow that makes a
   training cell stale so you <em>re-promote</em> when new data lands.</li>
 </ul>
 

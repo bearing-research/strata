@@ -2178,8 +2178,8 @@
 <p>The agent works best for additive tasks (creating new cells, installing packages). For complex refactoring, use Chat mode to discuss the approach first.</p>
 <h3 id="safety-surface">Safety surface<a class="headerlink" href="#safety-surface" title="Permanent link">&para;</a></h3>
 <p>Before granting the assistant write access, understand what it can and can't do.</p>
-<p><strong>Approval-gated tools.</strong> <code>delete_cell</code> and <code>add_package</code> always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after <strong>120 s by default</strong> and is treated as a decline so a closed tab doesn't leave the loop hanging; configure it with <code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code> on the server or <code>approval_timeout_seconds</code> in the notebook's <code>[ai]</code> section. Approval can be skipped with the <strong>Auto-approve</strong> toggle in the AI panel footer — that suppresses the gate for the remainder of the session.</p>
-<p><strong>Non-gated mutating tools.</strong> <code>create_cell</code>, <code>edit_cell</code>, and <code>run_cell</code> execute without prompting. <code>edit_cell</code> overwrites the cell source; <code>run_cell</code> executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to <code>cells/*.py</code>, so git is the practical undo for <code>edit_cell</code> and <code>delete_cell</code>. Side effects of <code>run_cell</code> — files written, packages mutated, API calls made — are not reversible.)</p>
+<p><strong>Approval-gated tools.</strong> <code>delete_cell</code> and <code>add_package</code> always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after <strong>120 s by default</strong> and is treated as a decline so a closed tab doesn't leave the loop hanging; configure it with <code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code> on the server or <code>approval_timeout_seconds</code> in the notebook's <code>[ai]</code> section. Approval can be skipped with the <strong>Auto-approve</strong> toggle in the AI panel footer - that suppresses the gate for the remainder of the session.</p>
+<p><strong>Non-gated mutating tools.</strong> <code>create_cell</code>, <code>edit_cell</code>, and <code>run_cell</code> execute without prompting. <code>edit_cell</code> overwrites the cell source; <code>run_cell</code> executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to <code>cells/*.py</code>, so git is the practical undo for <code>edit_cell</code> and <code>delete_cell</code>. Side effects of <code>run_cell</code> - files written, packages mutated, API calls made - are not reversible.)</p>
 <p><strong>Loop bounds.</strong></p>
 <table>
 <thead>
@@ -2217,13 +2217,13 @@
 </tr>
 </tbody>
 </table>
-<p>There is <strong>no aggregate token budget</strong> across iterations — a 10-iteration run can consume up to 10× the per-call limits. If you're using a metered provider, expect costs roughly proportional to (notebook context size + conversation history + tool-call traces) × iterations.</p>
+<p>There is <strong>no aggregate token budget</strong> across iterations - a 10-iteration run can consume up to 10× the per-call limits. If you're using a metered provider, expect costs roughly proportional to (notebook context size + conversation history + tool-call traces) × iterations.</p>
 <p><strong>What's NOT bounded.</strong></p>
 <ul>
 <li><strong>Package allowlist.</strong> <code>add_package</code> accepts any pip-compatible package spec. Approval-gated, so the user sees the spec before install, but there's no server-side allowlist or signature check. <code>pandas&gt;=2.0</code> and <code>evil-package@git+https://...</code> both pass the same gate.</li>
 <li><strong>Mount / credential access.</strong> <code>run_cell</code> executes in the notebook's normal execution context. It sees the notebook's mounts, env vars (including any unblanked secrets in the runtime panel), and any artifacts already in the store. Don't grant agent access to a notebook with production credentials unless you also trust the assistant's prompts.</li>
-<li><strong>Network access from cells.</strong> No sandboxing. A cell created and run by the agent can make outbound HTTP calls, read/write to mounted buckets, hit external APIs — same as a cell you wrote by hand.</li>
-<li><strong>Filesystem reads outside the notebook directory.</strong> Same as a hand-written cell — Python <code>open()</code> works wherever the strata-notebook process has permission. Inside a Docker / Fly deployment this is usually limited to the container, but a local-dev <code>uv run strata-notebook</code> has full user-account access.</li>
+<li><strong>Network access from cells.</strong> No sandboxing. A cell created and run by the agent can make outbound HTTP calls, read/write to mounted buckets, hit external APIs - same as a cell you wrote by hand.</li>
+<li><strong>Filesystem reads outside the notebook directory.</strong> Same as a hand-written cell - Python <code>open()</code> works wherever the strata-notebook process has permission. Inside a Docker / Fly deployment this is usually limited to the container, but a local-dev <code>uv run strata-notebook</code> has full user-account access.</li>
 </ul>
 <h3 id="package-install-scoping">Package install scoping<a class="headerlink" href="#package-install-scoping" title="Permanent link">&para;</a></h3>
 <p><code>add_package</code> calls <code>uv add &lt;package&gt;</code> against the <strong>per-notebook</strong>
@@ -2252,7 +2252,7 @@ into the system Python and cannot reach across to another notebook.</p>
 <li>The agent writes the new source to <code>cells/&lt;id&gt;.py</code> and calls
   <code>session.reload()</code>, then broadcasts a fresh <code>notebook_state</code> over
   WebSocket via <code>broadcast_notebook_sync</code> (<code>agent.py:450</code>).</li>
-<li>Every connected frontend tab — including the user's — replaces its
+<li>Every connected frontend tab - including the user's - replaces its
   cached state with the broadcast. The editor view re-renders with
   the agent's new source.</li>
 <li><strong>The user's unflushed keystrokes are lost.</strong> Source edits are
@@ -2271,12 +2271,12 @@ into the system Python and cannot reach across to another notebook.</p>
 panel and notices the cell changes there too, but if you're prone
 to typing into a buffer while the agent works, save first
 (Ctrl+S in the editor, or Shift+Enter to run).</p>
-<p><strong>Conversation memory is per-notebook.</strong> Agent history (the last 12 user/assistant text turns — tool traces are never kept) is persisted to the notebook's <code>.strata/agent_history.json</code>, so it survives a <code>strata-notebook</code> restart. Clicking <strong>Clear</strong> in the panel removes it, in memory and on disk. Like everything under <code>.strata/</code>, it's gitignored runtime state.</p>
+<p><strong>Conversation memory is per-notebook.</strong> Agent history (the last 12 user/assistant text turns - tool traces are never kept) is persisted to the notebook's <code>.strata/agent_history.json</code>, so it survives a <code>strata-notebook</code> restart. Clicking <strong>Clear</strong> in the panel removes it, in memory and on disk. Like everything under <code>.strata/</code>, it's gitignored runtime state.</p>
 <p><strong>Recommended posture.</strong></p>
 <ul>
 <li>For routine work, leave Auto-approve off so destructive actions surface a confirm.</li>
 <li>Don't put production database credentials in a notebook the agent has access to; use a separate notebook (or a service-mode deployment with proxy auth).</li>
-<li>After an agent run, review the diff in <code>cells/*.py</code> before pushing — the agent can rewrite cells without ceremony.</li>
+<li>After an agent run, review the diff in <code>cells/*.py</code> before pushing - the agent can rewrite cells without ceremony.</li>
 </ul>
 
 

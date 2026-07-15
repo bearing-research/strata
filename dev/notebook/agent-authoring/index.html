@@ -994,7 +994,7 @@
   <a href="#notebooktoml-the-minimum-that-works" class="md-nav__link">
     <span class="md-ellipsis">
       
-        notebook.toml — the minimum that works
+        notebook.toml - the minimum that works
       
     </span>
   </a>
@@ -1945,7 +1945,7 @@
   <a href="#notebooktoml-the-minimum-that-works" class="md-nav__link">
     <span class="md-ellipsis">
       
-        notebook.toml — the minimum that works
+        notebook.toml - the minimum that works
       
     </span>
   </a>
@@ -2039,17 +2039,17 @@
 
 
 <h1 id="authoring-notebooks-programmatically">Authoring Notebooks Programmatically<a class="headerlink" href="#authoring-notebooks-programmatically" title="Permanent link">&para;</a></h1>
-<p>A Strata notebook is a <strong>plain-text directory</strong> — TOML config plus one
+<p>A Strata notebook is a <strong>plain-text directory</strong> - TOML config plus one
 source file per cell. Anything that can write files can author one: a
 script, a code generator, or a coding agent (Claude Code, Codex, …). No
 server, no SDK, and no JSON blobs are involved.</p>
 <p>This page is the contract for external authors. If you follow it and the
-result doesn't open, validate, and run, that's a Strata bug — please
+result doesn't open, validate, and run, that's a Strata bug - please
 report it.</p>
 <h2 id="the-loop">The loop<a class="headerlink" href="#the-loop" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>strata<span class="w"> </span>new<span class="w"> </span><span class="s2">&quot;My Analysis&quot;</span><span class="w"> </span>--no-env<span class="w">     </span><span class="c1"># 1. scaffold</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># 2. write cells/*.py, list them in notebook.toml</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>strata<span class="w"> </span>validate<span class="w"> </span>my_analysis<span class="w">           </span><span class="c1"># 3. static checks — cheap, run after every edit</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>strata<span class="w"> </span>validate<span class="w"> </span>my_analysis<span class="w">           </span><span class="c1"># 3. static checks - cheap, run after every edit</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>strata<span class="w"> </span>run<span class="w"> </span>my_analysis<span class="w">                </span><span class="c1"># 4. execute (syncs the venv on first run)</span>
 </code></pre></div>
 <p><code>validate</code> and <code>run</code> both take <code>--format json</code> and use the same exit
@@ -2057,7 +2057,7 @@ codes: <code>0</code> success (warnings allowed), <code>1</code> failure with st
 findings on stdout, <code>2</code> invocation error on stderr. Iterate on the
 diagnostics until both exit <code>0</code>.</p>
 <h2 id="editing-files-vs-driving-commands">Editing files vs. driving commands<a class="headerlink" href="#editing-files-vs-driving-commands" title="Permanent link">&para;</a></h2>
-<p>Writing the files directly — as below — is the canonical contract, and the
+<p>Writing the files directly - as below - is the canonical contract, and the
 rest of this page documents it. If you'd rather not hand-edit <code>notebook.toml</code>
 or mint cell ids yourself, the <code>strata cell</code> and <code>strata dep</code> commands perform
 the same edits and print structured JSON:</p>
@@ -2081,13 +2081,13 @@ is the file-format contract underneath both.</p>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│   ├── load.py
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│   ├── notes.md
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│   └── stats.py
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>└── .strata/               # runtime state — NEVER create, edit, or commit
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>└── .strata/               # runtime state - NEVER create, edit, or commit
 </code></pre></div>
 <p><strong><code>.strata/</code> is hands-off.</strong> Display outputs, provenance hashes, console
 snapshots, and the artifact store live there; the server and CLI manage
 it entirely. It's gitignored. If you are generating a notebook from
 scratch, simply don't create it.</p>
-<h2 id="notebooktoml-the-minimum-that-works">notebook.toml — the minimum that works<a class="headerlink" href="#notebooktoml-the-minimum-that-works" title="Permanent link">&para;</a></h2>
+<h2 id="notebooktoml-the-minimum-that-works">notebook.toml - the minimum that works<a class="headerlink" href="#notebooktoml-the-minimum-that-works" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;my-analysis-001&quot;</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;My Analysis&quot;</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">cells</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
@@ -2099,7 +2099,7 @@ scratch, simply don't create it.</p>
 <p><strong>What <code>strata new</code> actually writes is a superset of this.</strong> The scaffold
 emits a UUID <code>notebook_id</code>, <code>created_at</code> / <code>updated_at</code> timestamps, and
 empty <code>workers = []</code> / <code>mounts = []</code> arrays. <strong>Edit the generated file in
-place</strong> — replace <code>cells = []</code> with your cell list and leave the other
+place</strong> - replace <code>cells = []</code> with your cell list and leave the other
 fields alone. Don't overwrite it with the minimal template above; the
 minimum is what <em>you</em> must provide when writing from scratch, not what
 the scaffold looks like.</p>
@@ -2107,23 +2107,23 @@ the scaffold looks like.</p>
 <a href="../../reference/notebook-toml/">notebook.toml Schema</a>. Rules that matter
 when writing it by hand:</p>
 <ul>
-<li><strong><code>notebook_id</code></strong> — any stable, unique string. The server generates
+<li><strong><code>notebook_id</code></strong> - any stable, unique string. The server generates
   UUIDs; hand-written IDs just need to never change afterwards (artifacts
-  are keyed to it — renaming orphans the cache).</li>
-<li><strong>Cell <code>id</code></strong> — unique within the notebook, used in artifact keys and
+  are keyed to it - renaming orphans the cache).</li>
+<li><strong>Cell <code>id</code></strong> - unique within the notebook, used in artifact keys and
   API routes. The server generates 8-char UUID prefixes; hand-written
   short names (<code>load</code>, <code>stats</code>) are fine. Don't reuse an ID after
   deleting a cell.</li>
-<li><strong><code>file</code></strong> — relative to <code>cells/</code>. Conventional extensions: <code>.py</code>
+<li><strong><code>file</code></strong> - relative to <code>cells/</code>. Conventional extensions: <code>.py</code>
   (python, prompt), <code>.R</code> (r), <code>.sql</code> (sql), <code>.md</code> (markdown).</li>
-<li><strong><code>order</code></strong> — display order <em>and</em> reference-resolution order (see
+<li><strong><code>order</code></strong> - display order <em>and</em> reference-resolution order (see
   below). Keep it consistent with the list order.</li>
-<li><strong><code>language</code></strong> — one of <code>python</code>, <code>r</code>, <code>sql</code>, <code>prompt</code>, <code>markdown</code>.</li>
+<li><strong><code>language</code></strong> - one of <code>python</code>, <code>r</code>, <code>sql</code>, <code>prompt</code>, <code>markdown</code>.</li>
 </ul>
 <h2 id="how-variables-flow-between-cells">How variables flow between cells<a class="headerlink" href="#how-variables-flow-between-cells" title="Permanent link">&para;</a></h2>
 <p>Each cell's top-level assignments are its <strong>defines</strong>; the free variables
 in its source are its <strong>references</strong>. A reference binds to the <strong>nearest
-earlier cell</strong> (by <code>order</code>) that defines that name — never to a later
+earlier cell</strong> (by <code>order</code>) that defines that name - never to a later
 cell. There is no notebook-global mutable namespace: every cross-cell
 value is an immutable, content-addressed artifact.</p>
 <p>Practical consequences for generated code:</p>
@@ -2135,12 +2135,12 @@ value is an immutable, content-addressed artifact.</p>
 <li>Re-running with unchanged source + inputs + environment is a cache hit;
   cells re-execute only when something upstream changed.</li>
 <li>Values cross cells by serialization (Arrow for tabular/numpy, JSON for
-  plain data, pickle otherwise) — write cells as if their inputs were
+  plain data, pickle otherwise) - write cells as if their inputs were
   freshly deserialized, because they are.</li>
 </ul>
 <h2 id="per-cell-configuration-annotations-not-toml">Per-cell configuration: annotations, not TOML<a class="headerlink" href="#per-cell-configuration-annotations-not-toml" title="Permanent link">&para;</a></h2>
 <p>Cell-level settings are <code># @</code> comment lines at the top of the cell
-source — they always win over anything persisted elsewhere. The full
+source - they always win over anything persisted elsewhere. The full
 surface is <a href="../annotations/">Cell Annotations</a>; the most common:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># @name revenue_model     ← stable display name</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># @timeout 120            ← per-cell timeout (seconds)</span>
@@ -2196,7 +2196,7 @@ unknown workers, …) without calling any LLM.</p>
 </table>
 <p><code>run --format json</code> reports per-cell <code>status</code>, <code>error</code>, and <code>cache_hit</code>,
 and skips downstream cells when an upstream fails (<code>"reason": "upstream
-failed"</code>) — fix the first error and re-run; everything already correct is
+failed"</code>) - fix the first error and re-run; everything already correct is
 a cache hit.</p>
 <h2 id="verifying-computed-values">Verifying computed values<a class="headerlink" href="#verifying-computed-values" title="Permanent link">&para;</a></h2>
 <p>Per-cell <code>stdout</code> / <code>stderr</code> are included in the <code>run --format json</code>
@@ -2211,26 +2211,26 @@ payload (truncated at 10k chars), so the way to check a result is to
 </code></pre></div>
 <p>One caveat: a <strong>cache hit replays the stored artifact without re-running
 the cell</strong>, so <code>stdout</code> can be absent on warm runs. Pass <code>--force</code> when
-you need fresh console output. Don't read <code>.strata/</code> directly — it's
+you need fresh console output. Don't read <code>.strata/</code> directly - it's
 machine-managed runtime state with no stability guarantees.</p>
 <h2 id="donts">Don'ts<a class="headerlink" href="#donts" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Don't create or edit <code>.strata/</code></strong> — runtime state, machine-managed.</li>
-<li><strong>Don't hand-edit <code>uv.lock</code></strong> — declare dependencies in
+<li><strong>Don't create or edit <code>.strata/</code></strong> - runtime state, machine-managed.</li>
+<li><strong>Don't hand-edit <code>uv.lock</code></strong> - declare dependencies in
   <code>pyproject.toml</code> and let <code>strata run</code> / <code>uv sync</code> resolve. The
   scaffolded <code>pyproject.toml</code> is <strong>not empty</strong>: it pins the notebook's
   Python version and pre-seeds the runtime packages the cell harness
-  needs (<code>pyarrow</code>, <code>orjson</code>, <code>cloudpickle</code>) — append your dependencies
+  needs (<code>pyarrow</code>, <code>orjson</code>, <code>cloudpickle</code>) - append your dependencies
   to the existing list.</li>
 <li><strong>Don't reuse cell IDs</strong> or change <code>notebook_id</code> after artifacts exist.</li>
 <li><strong>Don't encode per-cell config in <code>notebook.toml</code></strong> when an annotation
-  exists — annotations are the single per-cell configuration surface.</li>
+  exists - annotations are the single per-cell configuration surface.</li>
 <li><strong>Don't write outputs into the notebook directory</strong> from cell code
   unless you mean to commit them; artifacts already persist results.</li>
 </ul>
 <h2 id="worked-example">Worked example<a class="headerlink" href="#worked-example" title="Permanent link">&para;</a></h2>
 <p>This exact notebook is pinned by Strata's test suite
-(<code>TestHandWrittenNotebookContract</code>) — if it ever stops working, CI fails:</p>
+(<code>TestHandWrittenNotebookContract</code>) - if it ever stops working, CI fails:</p>
 <p><code>notebook.toml</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;agent-handwritten-001&quot;</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;Hand-written by an agent&quot;</span>
@@ -2249,7 +2249,7 @@ machine-managed runtime state with no stability guarantees.</p>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">mean</span> <span class="o">=</span> <span class="n">total</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>$<span class="w"> </span>strata<span class="w"> </span>validate<span class="w"> </span>./handwritten<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>strata<span class="w"> </span>run<span class="w"> </span>./handwritten
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>✓<span class="w"> </span>valid<span class="w"> </span>—<span class="w"> </span><span class="m">3</span><span class="w"> </span>cell<span class="o">(</span>s<span class="o">)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>✓<span class="w"> </span>valid<span class="w"> </span>-<span class="w"> </span><span class="m">3</span><span class="w"> </span>cell<span class="o">(</span>s<span class="o">)</span>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>...
 <a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="m">3</span><span class="w"> </span>ran<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span>.2s
 </code></pre></div>

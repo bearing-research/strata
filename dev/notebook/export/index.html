@@ -2199,20 +2199,20 @@ in the notebook header, same engine, browser triggers a file download.</p>
 <a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>strata<span class="w"> </span><span class="nb">export</span><span class="w"> </span>./my_analysis<span class="w"> </span>--app-view<span class="w"> </span>--to<span class="w"> </span>html<span class="w"> </span>--out<span class="w"> </span>dashboard.html
 </code></pre></div>
 <h2 id="app-view-snapshot-app-view">App-view snapshot (<code>--app-view</code>)<a class="headerlink" href="#app-view-snapshot-app-view" title="Permanent link">&para;</a></h2>
-<p>A regular export is a <strong>document</strong> view — it shows every cell's <em>source</em>
+<p>A regular export is a <strong>document</strong> view - it shows every cell's <em>source</em>
 alongside its outputs, for reading or archiving the notebook. An
 app-view snapshot is a <strong>dashboard</strong> view: it renders only what the
-<a href="../cells/#app-view">read-only app view</a> shows — widget panels (as their
-current control values), markdown, and display outputs — with <strong>no cell
+<a href="../cells/#app-view">read-only app view</a> shows - widget panels (as their
+current control values), markdown, and display outputs - with <strong>no cell
 sources, chips, or console</strong>.</p>
 <p>It's the static counterpart to embedding the app view. Where an embed is
 <em>live</em> (an <code>&lt;iframe&gt;</code> backed by a running server, interactive), a
-snapshot is <em>frozen</em> and <strong>self-contained</strong> — a single file with images
+snapshot is <em>frozen</em> and <strong>self-contained</strong> - a single file with images
 baked in as <code>data:</code> URLs, no server or network needed. Use it to email a
 report, drop a result on a shared drive, or archive exactly what a run
 produced.</p>
-<p>Widget cells render as a compact line of <code>control: value</code> chips — the
-parameter settings that produced the outputs below them — read from the
+<p>Widget cells render as a compact line of <code>control: value</code> chips - the
+parameter settings that produced the outputs below them - read from the
 notebook's persisted control values. Cells marked <code># @app hide</code> are
 omitted, matching the live app view; prompt-cell responses stay excluded
 for the same privacy reason as a regular export.</p>

@@ -2168,8 +2168,8 @@
 <li>The worker runs the cell in a subprocess and returns outputs as a gzipped bundle.</li>
 <li>Strata stores the outputs as artifacts; cache hits work identically to local cells.</li>
 </ol>
-<p>Cells run in <strong>the worker's Python environment</strong>, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into the worker image before launching it. Unlike Strata's own server, the worker process does <strong>not</strong> require a uv-managed env — it can be pip-installed into a plain Docker image.</p>
-<p>For the wire-level contract — request envelopes, response bundle format, error codes, the pull-model with signed URLs — see the <a href="../../reference/executor-protocol/">Executor Protocol</a> reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use <code>strata-worker</code>.</p>
+<p>Cells run in <strong>the worker's Python environment</strong>, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into the worker image before launching it. Unlike Strata's own server, the worker process does <strong>not</strong> require a uv-managed env - it can be pip-installed into a plain Docker image.</p>
+<p>For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the <a href="../../reference/executor-protocol/">Executor Protocol</a> reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use <code>strata-worker</code>.</p>
 <h2 id="quick-start-run-a-worker-locally">Quick start: run a worker locally<a class="headerlink" href="#quick-start-run-a-worker-locally" title="Permanent link">&para;</a></h2>
 <p>Start by getting a worker running on your own machine. This verifies your install before you spend time on a cloud deploy, and the same <code># @worker name</code> annotation works against both local and cloud workers.</p>
 <p><strong>1. Start the worker:</strong></p>
@@ -2212,7 +2212,7 @@
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">platform</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">hostname</span> <span class="o">=</span> <span class="n">platform</span><span class="o">.</span><span class="n">node</span><span class="p">()</span>
 </code></pre></div>
-<p>When the cell runs, the UI shows a pulsing <strong>"dispatching → local"</strong> badge during execution. The <code>hostname</code> artifact is what the worker process saw, not your laptop — confirming the cell really ran remotely.</p>
+<p>When the cell runs, the UI shows a pulsing <strong>"dispatching → local"</strong> badge during execution. The <code>hostname</code> artifact is what the worker process saw, not your laptop - confirming the cell really ran remotely.</p>
 <p>Once this works locally, the cloud deploys below just change <code>config.url</code> from <code>http://127.0.0.1:9000</code> to the worker's public URL.</p>
 <h2 id="deploy-to-the-cloud">Deploy to the cloud<a class="headerlink" href="#deploy-to-the-cloud" title="Permanent link">&para;</a></h2>
 <p>Strata ships a reference executor as the <code>strata-worker</code> console script. Any platform that can run an HTTP service on a Python image will work. Two walkthroughs follow:</p>
@@ -2252,7 +2252,7 @@
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>├── fly.toml
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>└── .dockerignore
 </code></pre></div>
-<p><strong><code>Dockerfile</code></strong> — installs <code>strata-notebook</code> and your workload deps from a uv-managed venv. Unlike <code>strata-notebook</code>, the worker entry (<code>strata-worker</code>) is not gated by Strata's runtime guard, so a plain <code>pip install</code> would also work — but the uv-python base image keeps tooling consistent across server + worker and drops a few hundred MB of build stage versus a source install.</p>
+<p><strong><code>Dockerfile</code></strong> - installs <code>strata-notebook</code> and your workload deps from a uv-managed venv. Unlike <code>strata-notebook</code>, the worker entry (<code>strata-worker</code>) is not gated by Strata's runtime guard, so a plain <code>pip install</code> would also work - but the uv-python base image keeps tooling consistent across server + worker and drops a few hundred MB of build stage versus a source install.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/astral-sh/uv:python3.12-bookworm-slim</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="k">ENV</span><span class="w"> </span><span class="nv">VIRTUAL_ENV</span><span class="o">=</span>/opt/strata-venv
@@ -2295,7 +2295,7 @@
 <a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>.venv
 </code></pre></div>
 <p><strong>2. Deploy:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>fly<span class="w"> </span>launch<span class="w"> </span>--no-deploy<span class="w">   </span><span class="c1"># first time only — creates the app, accepts fly.toml</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>fly<span class="w"> </span>launch<span class="w"> </span>--no-deploy<span class="w">   </span><span class="c1"># first time only - creates the app, accepts fly.toml</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>fly<span class="w"> </span>deploy
 </code></pre></div>
 <p>The first build takes ~30 seconds (wheel download + layer assembly). Subsequent deploys reuse the layer cache and finish in seconds.</p>
@@ -2350,11 +2350,11 @@
 <p><strong>2. Deploy:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>modal<span class="w"> </span>deploy<span class="w"> </span>worker.py
 </code></pre></div>
-<p>Modal prints the deployed URL after the build finishes — something like <code>https://your-username--my-gpu-worker-gpu-executor.modal.run</code>. The first build with torch + sentence-transformers takes ~5 minutes; redeploys with no changes hit the layer cache and finish in seconds.</p>
+<p>Modal prints the deployed URL after the build finishes - something like <code>https://your-username--my-gpu-worker-gpu-executor.modal.run</code>. The first build with torch + sentence-transformers takes ~5 minutes; redeploys with no changes hit the layer cache and finish in seconds.</p>
 <p><strong>3. Verify:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>curl<span class="w"> </span>https://your-username--my-gpu-worker-gpu-executor.modal.run/health
 </code></pre></div>
-<p>The first request after a scale-down cold-starts the container (~20–30 s for GPU). Health-check requests do <strong>not</strong> start the GPU function on most Modal plans — if <code>/health</code> returns immediately, the function is warm; if it doesn't respond, send a real cell from the notebook to wake it.</p>
+<p>The first request after a scale-down cold-starts the container (~20–30 s for GPU). Health-check requests do <strong>not</strong> start the GPU function on most Modal plans - if <code>/health</code> returns immediately, the function is warm; if it doesn't respond, send a real cell from the notebook to wake it.</p>
 <p><strong>4. Register in <code>notebook.toml</code>:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="k">[[workers]]</span>
 <a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;modal-gpu&quot;</span>
@@ -2385,7 +2385,7 @@
 </tr>
 <tr>
 <td><code>runtime_id</code></td>
-<td>Stable identifier hashed into cell provenance — see <a href="#caching-and-provenance">Caching</a> below</td>
+<td>Stable identifier hashed into cell provenance - see <a href="#caching-and-provenance">Caching</a> below</td>
 </tr>
 <tr>
 <td><code>config.url</code></td>
@@ -2397,7 +2397,7 @@
 </tr>
 <tr>
 <td><code>config.token</code></td>
-<td>Literal bearer token (dev only) — see <a href="#authentication">Authentication</a></td>
+<td>Literal bearer token (dev only) - see <a href="#authentication">Authentication</a></td>
 </tr>
 <tr>
 <td><code>config.token_env</code></td>
@@ -2491,7 +2491,7 @@ device-bound objects like <code>torch.device</code> and CUDA tensors when a DAG 
 <li><strong>Prefer passing a state_dict / checkpoint path</strong> between a training cell and
   downstream analysis cells, rather than a live CUDA model object.</li>
 </ul>
-<p>This is partly notebook design — Strata can't know your placement intent — but
+<p>This is partly notebook design - Strata can't know your placement intent - but
 the isolation boundary makes it a footgun worth designing around explicitly.</p>
 <h2 id="caching-and-provenance">Caching and provenance<a class="headerlink" href="#caching-and-provenance" title="Permanent link">&para;</a></h2>
 <p>Remote execution results are cached identically to local cells. The provenance hash includes the worker's <code>runtime_id</code>, so:</p>
@@ -2510,17 +2510,17 @@ the isolation boundary makes it a footgun worth designing around explicitly.</p>
 <li>Redeploying the same image (no dep changes). The cache is correct by construction; re-running is wasted compute.</li>
 <li>Scaling the number of worker instances. Output is deterministic given the same inputs.</li>
 </ul>
-<p>If you don't set <code>runtime_id</code>, Strata uses the worker <code>name</code> as a fallback. That's fine for solo notebooks but risks cache surprises if two notebooks both have a worker named <code>gpu</code> pointing at different deployments — set <code>runtime_id</code> explicitly in shared notebooks.</p>
+<p>If you don't set <code>runtime_id</code>, Strata uses the worker <code>name</code> as a fallback. That's fine for solo notebooks but risks cache surprises if two notebooks both have a worker named <code>gpu</code> pointing at different deployments - set <code>runtime_id</code> explicitly in shared notebooks.</p>
 <h2 id="health-checks">Health checks<a class="headerlink" href="#health-checks" title="Permanent link">&para;</a></h2>
 <p>Every worker exposes <code>GET /health</code>. The notebook UI polls this and shows a green/red badge next to cells that use the worker; cells refuse to dispatch to an unhealthy worker.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>curl<span class="w"> </span>https://my-worker.example.com/health
 </code></pre></div>
-<p>The <code>/health</code> endpoint is <strong>not</strong> gated by <code>STRATA_WORKER_TOKEN</code> — platform health probes (Fly, k8s liveness, Cloudflare) don't need the secret.</p>
+<p>The <code>/health</code> endpoint is <strong>not</strong> gated by <code>STRATA_WORKER_TOKEN</code> - platform health probes (Fly, k8s liveness, Cloudflare) don't need the secret.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <p><strong><code>401 Unauthorized</code> when running a cell.</strong>
 <code>STRATA_WORKER_TOKEN</code> is set on the worker but the notebook isn't sending it. Confirm <code>token_env</code> (or <code>token</code>) in <code>notebook.toml</code> matches an env var that's actually exported in the strata-notebook's shell. Restart <code>strata-notebook</code> after exporting; it reads env at startup.</p>
 <p><strong><code>Connection refused</code> or <code>Could not resolve host</code>.</strong>
-<code>config.url</code> doesn't match where the worker is actually listening. From the strata-notebook host, run <code>curl &lt;config.url base&gt;/health</code> — it should respond. For Fly, <code>fly status</code> shows the public hostname; for Modal, <code>modal app list</code> shows deployed URLs.</p>
+<code>config.url</code> doesn't match where the worker is actually listening. From the strata-notebook host, run <code>curl &lt;config.url base&gt;/health</code> - it should respond. For Fly, <code>fly status</code> shows the public hostname; for Modal, <code>modal app list</code> shows deployed URLs.</p>
 <p><strong>Worker <code>/health</code> works but cells fail with <code>ModuleNotFoundError: &lt;package&gt;</code>.</strong>
 The worker image is missing the dependency the cell needs. Add it to the Dockerfile's <code>pip install</code> (Fly) or the <code>.pip_install(...)</code> chain (Modal) and redeploy. The worker uses <strong>its own</strong> Python env; nothing from the notebook server's env transfers.</p>
 <p><strong>Cells dispatched to a Modal worker hang for 30+ seconds before output.</strong>
@@ -2530,7 +2530,7 @@ A cell input is larger than the worker's max-input limit. Default is 256 MB; ove
 <p><strong>Fly build fails with <code>error: failed to fetch wheel</code> from a workload dep.</strong>
 Some Python deps (torch, sentence-transformers) don't ship abi3 wheels and fall back to building from source. If your worker needs one, add <code>build-essential</code> (plus the dep-specific toolchain) to the Dockerfile via <code>RUN apt-get install -y --no-install-recommends build-essential &amp;&amp; rm -rf /var/lib/apt/lists/*</code> before the <code>uv pip install</code> step.</p>
 <p><strong>Modal redeploy hangs at "Building image".</strong>
-You changed <code>.pip_install(...)</code> — Modal is rebuilding the image layer. With torch + sentence-transformers this takes ~5 minutes the first time on a new image hash. Subsequent deploys with no dep changes hit the layer cache and finish in seconds.</p>
+You changed <code>.pip_install(...)</code> - Modal is rebuilding the image layer. With torch + sentence-transformers this takes ~5 minutes the first time on a new image hash. Subsequent deploys with no dep changes hit the layer cache and finish in seconds.</p>
 <h2 id="live-status">Live status<a class="headerlink" href="#live-status" title="Permanent link">&para;</a></h2>
 <p>When a cell dispatches to a remote worker, the UI shows a pulsing <strong>"dispatching → <name>"</strong> badge during execution. After completion, the worker name and transport type appear in the cell metadata.</p>
 

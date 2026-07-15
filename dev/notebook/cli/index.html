@@ -2146,7 +2146,7 @@ dispatch, and mount resolution all behave the same way.</p>
 <p><code>&lt;notebook_dir&gt;</code> must be a path to a directory containing <code>notebook.toml</code>
 (plus <code>cells/</code>, <code>pyproject.toml</code>, <code>uv.lock</code>). It's the same on-disk layout the
 UI works with; you can pass any notebook directory from <code>STRATA_NOTEBOOK_STORAGE_DIR</code>
-or anywhere else on the filesystem. <code>strata run</code> is <strong>local-only</strong> — it does
+or anywhere else on the filesystem. <code>strata run</code> is <strong>local-only</strong> - it does
 not talk to a running <code>strata-notebook</code> or a service-mode deployment. Each
 invocation opens its own <code>NotebookSession</code>, runs the cells, and exits.</p>
 <h3 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h3>
@@ -2172,7 +2172,7 @@ invocation opens its own <code>NotebookSession</code>, runs the cells, and exits
 </tr>
 <tr>
 <td><code>--format</code></td>
-<td><code>human</code> (default) or <code>json</code> — both write to stdout</td>
+<td><code>human</code> (default) or <code>json</code> - both write to stdout</td>
 </tr>
 <tr>
 <td><code>--quiet</code></td>
@@ -2183,7 +2183,7 @@ invocation opens its own <code>NotebookSession</code>, runs the cells, and exits
 <p><code>--format json</code> writes a single JSON object to <strong>stdout</strong> when the run
 finishes: <code>{"notebook", "success", "duration_ms", "cells": [...]}</code> with one
 entry per cell (<code>id</code>, <code>status</code> ∈ <code>ok|error|skipped</code>, <code>duration_ms</code>,
-<code>cache_hit</code>, plus <code>stdout</code> / <code>stderr</code> — truncated at 10k chars — and
+<code>cache_hit</code>, plus <code>stdout</code> / <code>stderr</code> - truncated at 10k chars - and
 <code>error</code> / <code>reason</code> where applicable). Cache hits replay the stored
 artifact without re-emitting console output, so <code>stdout</code> can be absent on
 warm runs (<code>--force</code> re-executes). Errors and pre-flight diagnostics go to
@@ -2225,7 +2225,7 @@ even when some cells failed (each failure produces a JSON object with
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install Strata</span>
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">        </span><span class="c1"># uv tool install creates a uv-managed env at</span>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">        </span><span class="c1"># ~/.local/share/uv/tools/strata-notebook with the strata</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">        </span><span class="c1"># CLI on PATH — satisfies the runtime guard.</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">        </span><span class="c1"># CLI on PATH - satisfies the runtime guard.</span>
 <a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">uv tool install strata-notebook</span>
 <a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Run notebook</span>
 <a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">strata run ./notebooks/daily_report --format json</span>
@@ -2258,14 +2258,14 @@ shell that invokes the command, they are never stored in the notebook.</p>
 <p>For notebooks that require env vars set only via the Runtime panel (never
 committed), export them before invoking <code>strata run</code>.</p>
 <h2 id="strata-validate"><code>strata validate</code><a class="headerlink" href="#strata-validate" title="Permanent link">&para;</a></h2>
-<p>Static checks without executing anything — no environment sync, no
+<p>Static checks without executing anything - no environment sync, no
 subprocesses, no LLM calls:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>validate<span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span><span class="o">[</span>--format<span class="w"> </span>human<span class="p">|</span>json<span class="o">]</span>
 </code></pre></div>
 <ul>
 <li><code>notebook.toml</code> parses and the cell files load</li>
 <li>the DAG builds without cycles</li>
-<li>per-cell annotation diagnostics — the <strong>same validation the server runs
+<li>per-cell annotation diagnostics - the <strong>same validation the server runs
   on open / reload</strong> (<code>worker_unknown</code>, <code>loop_missing_carry</code>,
   <code>sql_missing_connection</code>, malformed <code>@output_schema</code>, …)</li>
 </ul>
@@ -2292,23 +2292,23 @@ any existing cells are preserved, so re-running it never orphans artifacts.</p>
 <h2 id="inspecting-a-notebook-cell-dag-status">Inspecting a notebook (<code>cell</code>, <code>dag</code>, <code>status</code>)<a class="headerlink" href="#inspecting-a-notebook-cell-dag-status" title="Permanent link">&para;</a></h2>
 <p>For agents (and humans) that need to read a notebook's state without executing
 it, three read-only commands print structured JSON (default) or a compact human
-view. They open the notebook locally — no server, no env sync:</p>
+view. They open the notebook locally - no server, no env sync:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># every cell: id, name, status, source</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>strata<span class="w"> </span>cell<span class="w"> </span>show<span class="w"> </span>&lt;notebook_dir&gt;<span class="w"> </span>&lt;cell_id&gt;<span class="w">  </span><span class="c1"># one cell: source, status, outputs, console, staleness</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>strata<span class="w"> </span>dag<span class="w">       </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># dependency edges + topological order</span>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>strata<span class="w"> </span>status<span class="w">    </span>&lt;notebook_dir&gt;<span class="w">            </span><span class="c1"># per-cell status + staleness summary</span>
 </code></pre></div>
-<p>Each takes <code>--format human|json</code> (JSON is the default — these are agent-first).
+<p>Each takes <code>--format human|json</code> (JSON is the default - these are agent-first).
 The JSON shapes match the server's REST API (<code>GET /{id}/cells</code>, <code>GET /{id}/dag</code>),
 so a script written against the local CLI keeps working against a running
 server later. Exit codes follow the same contract as <code>run</code> / <code>validate</code>: <code>0</code>
-success, <code>1</code> operation failure (e.g. unknown cell — a structured <code>{"error": …}</code>
+success, <code>1</code> operation failure (e.g. unknown cell - a structured <code>{"error": …}</code>
 on stdout), <code>2</code> invocation error (bad path) on stderr.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>my_analysis<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.cells[] | select(.status == &quot;error&quot;) | .id&#39;</span>
 </code></pre></div>
 <h3 id="reading-a-live-session-server-session">Reading a live session (<code>--server</code> / <code>--session</code>)<a class="headerlink" href="#reading-a-live-session-server-session" title="Permanent link">&para;</a></h3>
 <p>The four read commands also inspect a session on a <strong>running</strong> <code>strata-notebook</code>
-— the same session a human is watching in the TUI or web UI — instead of a local
+- the same session a human is watching in the TUI or web UI - instead of a local
 directory. Pass <code>--server &lt;url&gt; --session &lt;id&gt;</code> in place of the notebook path:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>--server<span class="w"> </span>http://localhost:8765<span class="w"> </span>--session<span class="w"> </span><span class="nv">$SID</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>strata<span class="w"> </span>cell<span class="w"> </span>show<span class="w"> </span>--server<span class="w"> </span>http://localhost:8765<span class="w"> </span>--session<span class="w"> </span><span class="nv">$SID</span><span class="w"> </span>&lt;cell_id&gt;
@@ -2316,7 +2316,7 @@ directory. Pass <code>--server &lt;url&gt; --session &lt;id&gt;</code> in place 
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>strata<span class="w"> </span>status<span class="w">    </span>--server<span class="w"> </span>http://localhost:8765<span class="w"> </span>--session<span class="w"> </span><span class="nv">$SID</span>
 </code></pre></div>
 <p><code>&lt;id&gt;</code> is the session id (the route <code>{id}</code>, not the <code>notebook.toml</code> id). The
-output is identical to the local backend — both project the same wire shape — so
+output is identical to the local backend - both project the same wire shape - so
 a script written against a local notebook works unchanged against a live session.
 <code>cell run</code> / <code>cell test</code> and the authoring commands accept the same selector
 (see below), so the entire surface works against a live session. Remote
@@ -2333,15 +2333,15 @@ by default; <code>--rerun</code> bypasses the target's cache, <code>--force</cod
 whatever upstream artifacts already exist). <code>cell test</code> runs the cell's
 <code>cells/{cell_id}.test.py</code> via pytest and reports per-test outcomes; pass
 <code>--file tests.py</code> (or <code>-</code> for stdin) to <strong>set</strong> the cell's test source first and
-then run it — the one cell-test affordance that previously required editing the
+then run it - the one cell-test affordance that previously required editing the
 file by hand. Both <strong>sync the venv first</strong> (like <code>strata run</code>) unless you pass
 <code>--no-sync</code>.</p>
 <p>Both also accept <code>--server &lt;url&gt; --session &lt;id&gt;</code> to run on a live session instead
 of a local directory (<code>strata cell run --server http://localhost:8765 --session
 $SID &lt;cell_id&gt; --rerun</code>). The server owns its venv, so the remote path never syncs
-— <code>--no-sync</code> is a local-only flag — and <code>--rerun</code> / <code>--force</code> map to the
+- <code>--no-sync</code> is a local-only flag - and <code>--rerun</code> / <code>--force</code> map to the
 server's run modes, so remote execution has the same three modes as local.</p>
-<p><code>--format json</code> (default) writes a single clean JSON object to <strong>stdout</strong> — the
+<p><code>--format json</code> (default) writes a single clean JSON object to <strong>stdout</strong> - the
 executor's logs go to stderr, so the stdout stream stays parseable:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>run<span class="w"> </span>nb<span class="w"> </span>featurize<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;{status, cache_hit, error}&#39;</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>strata<span class="w"> </span>cell<span class="w"> </span><span class="nb">test</span><span class="w"> </span>nb<span class="w"> </span>featurize<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.cases[] | select(.outcome != &quot;passed&quot;)&#39;</span>
@@ -2364,7 +2364,7 @@ passed, <code>1</code> a test failed/errored, <code>2</code> pytest unavailable 
 id (the same scheme the server uses) and prints the new cell; <code>mv</code> prints the new
 order. <code>cell annotate</code> splices <code># @key</code> <a href="../annotations/">annotations</a> into a
 cell's source (<code>--set KEY=VALUE</code> / <code>--unset KEY</code>, both repeatable) while leaving
-the body untouched — a convenience over rewriting the whole source with <code>edit</code>;
+the body untouched - a convenience over rewriting the whole source with <code>edit</code>;
 it targets scalar directives (<code>name</code>, <code>worker</code>, <code>timeout</code>, <code>model</code>, …), so edit
 the source directly for repeatable <code>mount</code> / <code>table</code> / <code>env</code>. Dependency
 commands run <code>uv add</code> / <code>uv remove</code> and report whether the lockfile changed. All
@@ -2373,11 +2373,11 @@ failure such as an unknown cell or a failed <code>uv</code> resolve, <code>2</co
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;total = sum(nums)&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>strata<span class="w"> </span>cell<span class="w"> </span>add<span class="w"> </span>nb<span class="w"> </span>--file<span class="w"> </span>-<span class="w"> </span>--after<span class="w"> </span>load<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>.id
 </code></pre></div>
 <p>These also accept <code>--server &lt;url&gt; --session &lt;id&gt;</code> to author into a live session
-instead of a local directory — edits land in the running notebook a human is
+instead of a local directory - edits land in the running notebook a human is
 watching in the TUI. (<code>cell add</code> makes two calls: it mints the cell on the
 server, then sets its source.)</p>
 <p>Together with inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>) and execution (<code>cell
-run/test</code>), this is the full agent surface — and <strong>all of it</strong> works either
+run/test</code>), this is the full agent surface - and <strong>all of it</strong> works either
 offline against a directory or <code>--server/--session</code> against a running server. An
 MCP server wrapping the same operations lands in a later release.</p>
 

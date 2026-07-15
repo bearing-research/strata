@@ -1985,7 +1985,7 @@
 
 
 <h1 id="cell-unit-tests">Cell Unit Tests<a class="headerlink" href="#cell-unit-tests" title="Permanent link">&para;</a></h1>
-<p>Every Python cell can carry <strong>its own <code>pytest</code> tests</strong> — written right next to
+<p>Every Python cell can carry <strong>its own <code>pytest</code> tests</strong> - written right next to
 the cell, run against the cell's real outputs, with per-test pass/fail surfaced
 inline. It's the missing half of a reactive notebook: the DAG keeps your cells
 <em>consistent</em>, and cell tests keep them <em>correct</em>.</p>
@@ -1996,13 +1996,13 @@ failed <code>assert df.shape == (200, 5)</code> shows you both sides), fixtures,
 <div class="admonition note">
 <p class="admonition-title">Python cells only</p>
 <p>Cell tests are available on Python code cells. <code>pytest</code> must be installed in
-the notebook's environment (<code>uv add pytest</code> — or it's already there if your
+the notebook's environment (<code>uv add pytest</code> - or it's already there if your
 cells use it). A run with no <code>pytest</code> surfaces an actionable message rather
 than failing silently.</p>
 </div>
 <hr />
 <h2 id="the-cell-fixture">The <code>cell</code> fixture<a class="headerlink" href="#the-cell-fixture" title="Permanent link">&para;</a></h2>
-<p>Tests receive one fixture — <strong><code>cell</code></strong> — whose attributes are the cell's
+<p>Tests receive one fixture - <strong><code>cell</code></strong> - whose attributes are the cell's
 namespace <strong>after it runs against its real upstream inputs</strong>. <code>cell.X</code> is
 whatever <code>X</code> is at the end of the cell:</p>
 <ul>
@@ -2019,12 +2019,12 @@ whatever <code>X</code> is at the end of the cell:</p>
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="k">assert</span> <span class="p">(</span><span class="n">cell</span><span class="o">.</span><span class="n">sales</span><span class="p">[</span><span class="s2">&quot;revenue&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">expected</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
 </code></pre></div>
 <p>The cell body runs <strong>once</strong> per test session (in a fixture), with its upstream
-artifacts deserialized and injected — so <code>cell.sales</code> is the actual DataFrame
+artifacts deserialized and injected - so <code>cell.sales</code> is the actual DataFrame
 your upstream cell produced, not a mock. If the cell source itself raises, every
 test that requests <code>cell</code> reports a clear <em>setup</em> error rather than an opaque
 collection failure.</p>
 <h2 id="writing-and-running-tests">Writing and running tests<a class="headerlink" href="#writing-and-running-tests" title="Permanent link">&para;</a></h2>
-<p>Open the <strong>Tests</strong> panel on any Python cell — the <code>🧪</code> toggle next to Inspect —
+<p>Open the <strong>Tests</strong> panel on any Python cell - the <code>🧪</code> toggle next to Inspect -
 and write your tests. They're saved as a committed sibling file,
 <code>cells/&lt;cell-id&gt;.test.py</code>, so they version and review alongside the cell source.
 A cell with no tests simply carries no <code>.test.py</code> file.</p>
@@ -2054,7 +2054,7 @@ without opening the panel:</p>
 </tr>
 <tr>
 <td>amber</td>
-<td><strong>errored</strong> — the cell source or test setup blew up</td>
+<td><strong>errored</strong> - the cell source or test setup blew up</td>
 </tr>
 <tr>
 <td><code>· stale</code></td>
@@ -2063,7 +2063,7 @@ without opening the panel:</p>
 </tbody>
 </table>
 <p>Stale is computed from a fingerprint of <code>(cell source, test source, input
-versions)</code>. Edit the cell, edit the tests, or change an upstream — the badge
+versions)</code>. Edit the cell, edit the tests, or change an upstream - the badge
 goes stale, telling you the last green result no longer reflects the code.</p>
 <h2 id="what-persists">What persists<a class="headerlink" href="#what-persists" title="Permanent link">&para;</a></h2>
 <p>Results are saved to <code>.strata/runtime.json</code> and <strong>rehydrate when you reopen the
@@ -2083,9 +2083,9 @@ clients and automation can run them too:</p>
 shapes.</p>
 <h2 id="a-worked-example">A worked example<a class="headerlink" href="#a-worked-example" title="Permanent link">&para;</a></h2>
 <p>The <a href="../../examples/pandas_basics/"><code>pandas_basics</code></a> example ships tests on four
-of its cells — validating a produced DataFrame, a computed column, a filter
-invariant, and an aggregation — a good template for the common shapes:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># cells/select-filter.test.py — pin a filter invariant</span>
+of its cells - validating a produced DataFrame, a computed column, a filter
+invariant, and an aggregation - a good template for the common shapes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># cells/select-filter.test.py - pin a filter invariant</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_predicate_holds_for_every_row</span><span class="p">(</span><span class="n">cell</span><span class="p">):</span>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="k">assert</span> <span class="p">(</span><span class="n">cell</span><span class="o">.</span><span class="n">high_value</span><span class="p">[</span><span class="s2">&quot;units&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">20</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="k">assert</span> <span class="p">(</span><span class="n">cell</span><span class="o">.</span><span class="n">high_value</span><span class="p">[</span><span class="s2">&quot;price&quot;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">30</span><span class="p">)</span><span class="o">.</span><span class="n">all</span><span class="p">()</span>
@@ -2094,7 +2094,7 @@ invariant, and an aggregation — a good template for the common shapes:</p>
 <ul>
 <li><strong>Python cells only</strong> (not prompt, SQL, R, or markdown cells).</li>
 <li><code>pytest</code> must be in the notebook environment.</li>
-<li>Tests run against a <strong>re-executed copy</strong> of the cell with injected inputs —
+<li>Tests run against a <strong>re-executed copy</strong> of the cell with injected inputs -
   they don't share live state with an interactive run, so they're deterministic
   but won't see, e.g., a variable you only set in the REPL.</li>
 </ul>

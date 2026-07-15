@@ -1424,7 +1424,7 @@
   <a href="#post-v1execute-push-model-recommended" class="md-nav__link">
     <span class="md-ellipsis">
       
-        POST /v1/execute (push model — recommended)
+        POST /v1/execute (push model - recommended)
       
     </span>
   </a>
@@ -1934,7 +1934,7 @@
   <a href="#post-v1execute-push-model-recommended" class="md-nav__link">
     <span class="md-ellipsis">
       
-        POST /v1/execute (push model — recommended)
+        POST /v1/execute (push model - recommended)
       
     </span>
   </a>
@@ -2085,8 +2085,8 @@
 <a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span><span class="nt">&quot;active_executions&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span>
 <a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="p">}</span>
 </code></pre></div>
-<p><code>active_executions</code> is the count of in-flight <code>/v1/*</code> calls — useful for autoscaler signals. The notebook UI polls this and shows the worker badge red if <code>/health</code> fails or times out.</p>
-<h2 id="post-v1execute-push-model-recommended"><code>POST /v1/execute</code> (push model — recommended)<a class="headerlink" href="#post-v1execute-push-model-recommended" title="Permanent link">&para;</a></h2>
+<p><code>active_executions</code> is the count of in-flight <code>/v1/*</code> calls - useful for autoscaler signals. The notebook UI polls this and shows the worker badge red if <code>/health</code> fails or times out.</p>
+<h2 id="post-v1execute-push-model-recommended"><code>POST /v1/execute</code> (push model - recommended)<a class="headerlink" href="#post-v1execute-push-model-recommended" title="Permanent link">&para;</a></h2>
 <p>The standard executor v1 envelope. Cells and inputs are pushed inline; the worker returns the output bundle directly in the response.</p>
 <p><strong>Content-Type</strong>: <code>multipart/form-data</code>.</p>
 <p><strong>Form fields:</strong></p>
@@ -2180,7 +2180,7 @@
 <tr>
 <td><code>inputs</code></td>
 <td>array of <code>{name, format}</code></td>
-<td>Each entry references a multipart field with the same <code>name</code>. <code>format</code> is the content type — <code>arrow/ipc</code>, <code>pickle/object</code>, <code>json/object</code>, <code>module/import</code>, <code>module/cell</code>, <code>module/cell-instance</code>.</td>
+<td>Each entry references a multipart field with the same <code>name</code>. <code>format</code> is the content type - <code>arrow/ipc</code>, <code>pickle/object</code>, <code>json/object</code>, <code>module/import</code>, <code>module/cell</code>, <code>module/cell-instance</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -2189,7 +2189,7 @@
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="na">Content-Type</span><span class="o">:</span> <span class="l">application/x-tar</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="na">X-Strata-Output-Format</span><span class="o">:</span> <span class="l">notebook-output-bundle@v1</span>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>&lt;gzipped tar bundle — see &quot;Output bundle&quot; below&gt;
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>&lt;gzipped tar bundle - see &quot;Output bundle&quot; below&gt;
 </code></pre></div>
 <p><strong>Errors:</strong></p>
 <table>
@@ -2293,15 +2293,15 @@
 <p>Set <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS=1</code> to bypass the IP check (tests and local-dev with 127.0.0.1 servers only).</p>
 <h2 id="output-bundle-notebook-output-bundlev1">Output bundle (<code>notebook-output-bundle@v1</code>)<a class="headerlink" href="#output-bundle-notebook-output-bundlev1" title="Permanent link">&para;</a></h2>
 <p>A gzipped tar archive containing:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>manifest.json           — execution metadata + index of files below
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>outputs/                — each defined variable as one file
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>  result.arrow          — content_type &quot;arrow/ipc&quot;
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>  log.json              — content_type &quot;json/object&quot;
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>  model.pickle          — content_type &quot;pickle/object&quot;
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>display/                — display-only outputs (figures, markdown blobs)
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>  cell_default.png      — content_type &quot;image/png&quot;
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>console.json            — { &quot;stdout&quot;: &quot;...&quot;, &quot;stderr&quot;: &quot;...&quot; }
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>error.json              — present only on failure
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>manifest.json           - execution metadata + index of files below
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>outputs/                - each defined variable as one file
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>  result.arrow          - content_type &quot;arrow/ipc&quot;
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>  log.json              - content_type &quot;json/object&quot;
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>  model.pickle          - content_type &quot;pickle/object&quot;
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>display/                - display-only outputs (figures, markdown blobs)
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>  cell_default.png      - content_type &quot;image/png&quot;
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>console.json            - { &quot;stdout&quot;: &quot;...&quot;, &quot;stderr&quot;: &quot;...&quot; }
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>error.json              - present only on failure
 </code></pre></div>
 <p><strong><code>manifest.json</code>:</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span>
@@ -2331,10 +2331,10 @@
 <p>All <code>4xx</code> and <code>5xx</code> responses use FastAPI's default JSON shape:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="p">{</span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;human-readable error message&gt;&quot;</span><span class="p">}</span>
 </code></pre></div>
-<p>Workers do not return structured error codes — the HTTP status is the machine-readable signal. Production deployments behind an authenticating proxy should not surface worker error messages to end users verbatim, since they may include path fragments or internal hostnames.</p>
+<p>Workers do not return structured error codes - the HTTP status is the machine-readable signal. Production deployments behind an authenticating proxy should not surface worker error messages to end users verbatim, since they may include path fragments or internal hostnames.</p>
 <h2 id="implementing-a-custom-worker">Implementing a custom worker<a class="headerlink" href="#implementing-a-custom-worker" title="Permanent link">&para;</a></h2>
 <p>The minimum surface is <code>POST /v1/execute</code> + <code>GET /health</code>. The reference Python implementation is <code>create_notebook_executor_app()</code> in <code>src/strata/notebook/remote_executor.py</code> (~750 LOC) and is the canonical specification when in doubt.</p>
-<p>A custom worker doesn't have to run Python — it just has to accept the <code>notebook_cell@v1</code> envelope, execute the source somehow, and return the bundle. In practice almost all workers wrap a Python interpreter (since cells are Python) and the <code>strata-worker</code> script is the path of least resistance.</p>
+<p>A custom worker doesn't have to run Python - it just has to accept the <code>notebook_cell@v1</code> envelope, execute the source somehow, and return the bundle. In practice almost all workers wrap a Python interpreter (since cells are Python) and the <code>strata-worker</code> script is the path of least resistance.</p>
 
 
 

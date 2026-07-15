@@ -2087,17 +2087,17 @@
 <h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><a href="https://docs.astral.sh/uv/">uv</a> ≥ 0.8</strong> — install via the
+<li><strong><a href="https://docs.astral.sh/uv/">uv</a> ≥ 0.8</strong> - install via the
   <a href="https://docs.astral.sh/uv/getting-started/installation/">uv installer</a>
   (<code>curl -LsSf https://astral.sh/uv/install.sh | sh</code> on macOS/Linux;
   PowerShell installer on Windows). uv fetches a compatible Python
   automatically, so you don't need Python 3.12+ pre-installed. Strata
   refuses to start outside a uv-managed env.</li>
-<li><strong><a href="https://rustup.rs/">Rust toolchain</a></strong> (<code>rustup</code>) — only for
+<li><strong><a href="https://rustup.rs/">Rust toolchain</a></strong> (<code>rustup</code>) - only for
   source builds (not Docker or <code>uv add</code>). Needed by <code>maturin</code> to
   compile the native Arrow IPC extension; <code>cargo</code> and <code>rustc</code> must
   be on <code>PATH</code> when you run <code>uv sync</code>.</li>
-<li><strong><a href="https://nodejs.org/">Node.js 25+</a></strong> — only if building the
+<li><strong><a href="https://nodejs.org/">Node.js 25+</a></strong> - only if building the
   frontend from source.</li>
 </ul>
 <p>Windows: source builds work via WSL2 (smoother) or native Windows
@@ -2166,7 +2166,7 @@ and CLI binary are both named <code>strata</code>.</p>
 </tr>
 <tr>
 <td><code>uv run strata cell &lt;action&gt;</code>, <code>strata dag</code>, <code>strata status</code>, <code>strata dep &lt;action&gt;</code></td>
-<td>Agent-facing notebook tooling: inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>), execute (<code>cell run/test</code>), and author (<code>cell add/edit/rm/mv</code>, <code>dep add/rm</code>) — offline against a directory or <code>--server/--session</code> against a running server. See <a href="../../notebook/cli/#inspecting-a-notebook-cell-dag-status">Notebook CLI</a>.</td>
+<td>Agent-facing notebook tooling: inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>), execute (<code>cell run/test</code>), and author (<code>cell add/edit/rm/mv</code>, <code>dep add/rm</code>) - offline against a directory or <code>--server/--session</code> against a running server. See <a href="../../notebook/cli/#inspecting-a-notebook-cell-dag-status">Notebook CLI</a>.</td>
 </tr>
 <tr>
 <td><code>uv run strata export &lt;notebook-dir&gt;</code></td>
@@ -2195,7 +2195,7 @@ inside the uv-managed venv. If you've activated the venv
 (<code>source .venv/bin/activate</code>), you can drop the prefix and call
 <code>strata-notebook</code> / <code>strata</code> / <code>strata-worker</code> directly.</p>
 <h2 id="development-commands">Development Commands<a class="headerlink" href="#development-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Sync with all optional extras — matches CI. Required for the test</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Sync with all optional extras - matches CI. Required for the test</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="c1"># suite because the harness fixtures point the per-notebook venv at</span>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># the dev interpreter, so the dev env needs the [notebook] extra</span>
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># (orjson, pyarrow, cloudpickle) for cell-execution tests.</span>

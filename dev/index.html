@@ -1917,20 +1917,20 @@ or execution metadata bleeding into the history.</p>
 producing artifacts that flow through an auto-built DAG.</p>
 <p><strong>Highlights:</strong></p>
 <ul>
-<li><strong>content-addressed:</strong> every cell output is keyed by source + inputs + environment — identical work hits the cache forever</li>
+<li><strong>content-addressed:</strong> every cell output is keyed by source + inputs + environment - identical work hits the cache forever</li>
 <li><strong>reactive:</strong> edit a cell, the cascade re-runs only the downstream cells that depend on it</li>
-<li><strong>dag-from-ast:</strong> Strata reads each cell's AST to wire upstream/downstream — no decorators, no manual edges</li>
-<li><strong>dag-view:</strong> the dependency graph renders alongside the cells — double-click any node to jump to its source</li>
-<li><strong>git-friendly:</strong> notebooks are plain <code>.py</code> files plus a TOML manifest — readable diffs, no JSON blobs</li>
+<li><strong>dag-from-ast:</strong> Strata reads each cell's AST to wire upstream/downstream - no decorators, no manual edges</li>
+<li><strong>dag-view:</strong> the dependency graph renders alongside the cells - double-click any node to jump to its source</li>
+<li><strong>git-friendly:</strong> notebooks are plain <code>.py</code> files plus a TOML manifest - readable diffs, no JSON blobs</li>
 <li><strong>prompt cells:</strong> LLM calls are first-class DAG nodes, <code>{{ variable }}</code> interpolation from upstream cells, cached by template + inputs + model config</li>
 <li><strong>SQL cells:</strong> named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery</li>
-<li><strong>loop cells:</strong> <code># @loop max_iter=N carry=state</code> iterates a cell with explicit carry between steps — each iteration is its own artifact</li>
+<li><strong>loop cells:</strong> <code># @loop max_iter=N carry=state</code> iterates a cell with explicit carry between steps - each iteration is its own artifact</li>
 <li><strong>interactive widgets + app view:</strong> a <code>widget</code> cell is a control panel (slider / dropdown / …) whose values downstream cells consume; with <strong>⚡ Live</strong> on, dragging a control recomputes the dependents. Open a notebook as a read-only <strong>app</strong>, <strong>embed</strong> it as an <code>&lt;iframe&gt;</code>, or export a frozen <strong>snapshot</strong></li>
-<li><strong>distributed:</strong> <code># @worker gpu-fly</code> dispatches a single cell to a remote box — bring your own compute</li>
+<li><strong>distributed:</strong> <code># @worker gpu-fly</code> dispatches a single cell to a remote box - bring your own compute</li>
 <li><strong>mounts:</strong> <code># @mount data s3://bucket/prefix ro</code> makes any S3 / GCS / Azure prefix a local <code>pathlib.Path</code></li>
 <li><strong>isolated envs:</strong> every notebook gets its own uv-managed <code>.venv/</code>, locked and reproducible</li>
 <li><strong>auto-install:</strong> missing import in a cell? one click adds the package via uv and re-runs</li>
-<li><strong>headless:</strong> <code>strata run ./my-notebook</code> for CI and scheduled execution — same DAG, same cache</li>
+<li><strong>headless:</strong> <code>strata run ./my-notebook</code> for CI and scheduled execution - same DAG, same cache</li>
 </ul>
 <p><a class="md-button md-button--primary" href="getting-started/notebook/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Notebook Quickstart</a></p>
 <hr />

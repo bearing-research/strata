@@ -787,7 +787,7 @@
   <a href="#step-1-build-a-warehouse" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1 — Build a warehouse
+        Step 1 - Build a warehouse
       
     </span>
   </a>
@@ -798,7 +798,7 @@
   <a href="#step-2-declare-a-lake-aware-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 2 — Declare a lake-aware cell
+        Step 2 - Declare a lake-aware cell
       
     </span>
   </a>
@@ -809,7 +809,7 @@
   <a href="#step-3-the-staleness-loop" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 3 — The staleness loop
+        Step 3 - The staleness loop
       
     </span>
   </a>
@@ -820,7 +820,7 @@
   <a href="#step-4-pin-a-snapshot-for-reproducibility" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 4 — Pin a snapshot for reproducibility
+        Step 4 - Pin a snapshot for reproducibility
       
     </span>
   </a>
@@ -1923,7 +1923,7 @@
   <a href="#step-1-build-a-warehouse" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1 — Build a warehouse
+        Step 1 - Build a warehouse
       
     </span>
   </a>
@@ -1934,7 +1934,7 @@
   <a href="#step-2-declare-a-lake-aware-cell" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 2 — Declare a lake-aware cell
+        Step 2 - Declare a lake-aware cell
       
     </span>
   </a>
@@ -1945,7 +1945,7 @@
   <a href="#step-3-the-staleness-loop" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 3 — The staleness loop
+        Step 3 - The staleness loop
       
     </span>
   </a>
@@ -1956,7 +1956,7 @@
   <a href="#step-4-pin-a-snapshot-for-reproducibility" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 4 — Pin a snapshot for reproducibility
+        Step 4 - Pin a snapshot for reproducibility
       
     </span>
   </a>
@@ -2021,7 +2021,7 @@
 versioned input via the <a href="../annotations/#table"><code>@table</code></a> annotation. The
 table's current snapshot id is folded into the cell's provenance, so <strong>new
 data landing in the lake makes the cell stale and the normal cascade re-runs
-it</strong> — no manual data-version bookkeeping, no re-pointing paths.</p>
+it</strong> - no manual data-version bookkeeping, no re-pointing paths.</p>
 <p>This page is the end-to-end walkthrough: build a tiny warehouse, scan it from
 a cell, retrain when new data arrives, and pin a snapshot for reproducibility.
 For the bare syntax, see the <a href="../annotations/#table"><code>@table</code> reference</a>.</p>
@@ -2043,7 +2043,7 @@ is simpler. <code>@table</code> earns its keep precisely when the snapshot can m
 <li><code>pyiceberg</code> available in your notebook environment (it ships with the
   <code>[notebook]</code> extra).</li>
 </ul>
-<h2 id="step-1-build-a-warehouse">Step 1 — Build a warehouse<a class="headerlink" href="#step-1-build-a-warehouse" title="Permanent link">&para;</a></h2>
+<h2 id="step-1-build-a-warehouse">Step 1 - Build a warehouse<a class="headerlink" href="#step-1-build-a-warehouse" title="Permanent link">&para;</a></h2>
 <p>Any Iceberg catalog works (local, S3, GCS, Azure). For this walkthrough, a
 local SQLite-catalog warehouse with one table. Run this once, outside the
 notebook:</p>
@@ -2075,10 +2075,10 @@ notebook:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>/tmp/strata-demo/warehouse
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>setup_warehouse.py
 </code></pre></div>
-<p>The <strong>table URI</strong> is <code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code> — here
+<p>The <strong>table URI</strong> is <code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code> - here
 <code>file:///tmp/strata-demo/warehouse#shop.orders</code>. This is the same URI format
 <code>client.materialize</code> accepts.</p>
-<h2 id="step-2-declare-a-lake-aware-cell">Step 2 — Declare a lake-aware cell<a class="headerlink" href="#step-2-declare-a-lake-aware-cell" title="Permanent link">&para;</a></h2>
+<h2 id="step-2-declare-a-lake-aware-cell">Step 2 - Declare a lake-aware cell<a class="headerlink" href="#step-2-declare-a-lake-aware-cell" title="Permanent link">&para;</a></h2>
 <p>In a notebook cell, declare the table and scan it. The <code>@table</code> annotation
 injects two variables: <code>orders</code> (the table URI) and <code>orders_snapshot</code> (the
 resolved snapshot id).</p>
@@ -2095,20 +2095,20 @@ resolved snapshot id).</p>
 <a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">df</span> <span class="o">=</span> <span class="n">scan</span><span class="o">.</span><span class="n">to_pandas</span><span class="p">()</span>
 <a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
 <a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="c1"># Re-export the snapshot as a real variable so downstream cells can use it</span>
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c1"># (injected @table vars live only in this cell — see &quot;Gotchas&quot; below).</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="c1"># (injected @table vars live only in this cell - see &quot;Gotchas&quot; below).</span>
 <a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="n">orders_snapshot_value</span> <span class="o">=</span> <span class="n">orders_snapshot</span>
 <a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>
 <a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="n">total</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">&quot;amount&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;scanned </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows at snapshot </span><span class="si">{</span><span class="n">orders_snapshot</span><span class="si">}</span><span class="s2"> — total=</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;scanned </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span><span class="si">}</span><span class="s2"> rows at snapshot </span><span class="si">{</span><span class="n">orders_snapshot</span><span class="si">}</span><span class="s2"> - total=</span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </code></pre></div>
 <p>Run it (Shift+Enter). Passing <code>orders_snapshot</code> to the scan makes the cell
 <strong>deterministic</strong>: it reads exactly the snapshot its provenance recorded.</p>
-<h2 id="step-3-the-staleness-loop">Step 3 — The staleness loop<a class="headerlink" href="#step-3-the-staleness-loop" title="Permanent link">&para;</a></h2>
+<h2 id="step-3-the-staleness-loop">Step 3 - The staleness loop<a class="headerlink" href="#step-3-the-staleness-loop" title="Permanent link">&para;</a></h2>
 <p>Add a downstream cell that depends on the scan:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">report</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;orders total at snapshot </span><span class="si">{</span><span class="n">orders_snapshot_value</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2">&quot;</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">report</span>
 </code></pre></div>
-<p>Run all cells — both go green. Now <strong>land new data</strong> in the lake:</p>
+<p>Run all cells - both go green. Now <strong>land new data</strong> in the lake:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># append_month2.py</span>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pyarrow</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pa</span>
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyiceberg.catalog.sql</span><span class="w"> </span><span class="kn">import</span> <span class="n">SqlCatalog</span>
@@ -2121,20 +2121,20 @@ resolved snapshot id).</p>
 </code></pre></div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>append_month2.py
 </code></pre></div>
-<p>Back in the notebook, the <code>@table</code> cell now shows <strong>stale</strong> — its snapshot id
+<p>Back in the notebook, the <code>@table</code> cell now shows <strong>stale</strong> - its snapshot id
 moved from S1 to S2, so its provenance changed. A plain <strong>Run</strong> (no force)
 recomputes the scan against S2 and <strong>cascades</strong> the rebuild to every
 downstream cell. Nothing changed in your code; the data moved, and Strata
 treated that exactly like a code change.</p>
-<p>Run again without appending and the cell is a <strong>cache hit</strong> — same snapshot,
+<p>Run again without appending and the cell is a <strong>cache hit</strong> - same snapshot,
 same provenance, instant.</p>
-<h2 id="step-4-pin-a-snapshot-for-reproducibility">Step 4 — Pin a snapshot for reproducibility<a class="headerlink" href="#step-4-pin-a-snapshot-for-reproducibility" title="Permanent link">&para;</a></h2>
+<h2 id="step-4-pin-a-snapshot-for-reproducibility">Step 4 - Pin a snapshot for reproducibility<a class="headerlink" href="#step-4-pin-a-snapshot-for-reproducibility" title="Permanent link">&para;</a></h2>
 <p>To freeze a cell to one snapshot forever (e.g. to reproduce a past result),
 add <code>snapshot=&lt;id&gt;</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># @table orders file:///tmp/strata-demo/warehouse#shop.orders snapshot=1292033279574548405</span>
 </code></pre></div>
 <p>A pinned cell reads that snapshot regardless of new data and <strong>never goes
-stale</strong> on appends — the lake-side analog of a mount <code>pin</code>. Drop the
+stale</strong> on appends - the lake-side analog of a mount <code>pin</code>. Drop the
 <code>snapshot=</code> to return to tracking the current snapshot.</p>
 <h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
 <p>The snapshot id is part of the cell's <strong>provenance hash</strong>, alongside the
@@ -2144,14 +2144,14 @@ source hash, environment hash, and input hashes:</p>
 </code></pre></div>
 <p>A table fingerprint is <code>"&lt;name&gt;:table:&lt;uri&gt;:&lt;snapshot_id&gt;"</code>. Because the
 snapshot id is immutable and content-addressed, a cached result for a given
-provenance is valid forever — and a moved snapshot is a different provenance,
+provenance is valid forever - and a moved snapshot is a different provenance,
 hence a different (missing) cache entry, hence a recompute. This is the same
 provenance machinery that makes ordinary cells stale when their source or
 inputs change; <code>@table</code> simply adds the lake snapshot to the mix.</p>
 <h2 id="gotchas">Gotchas<a class="headerlink" href="#gotchas" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Injected vars don't flow downstream.</strong> <code>orders</code> and <code>orders_snapshot</code> live
-  only in the <em>declaring</em> cell's namespace — they are injections, not cell
+  only in the <em>declaring</em> cell's namespace - they are injections, not cell
   <em>defines</em>, so downstream cells can't reference them directly. Re-export what
   you need as a real assignment (<code>orders_snapshot_value = orders_snapshot</code>),
   exactly as in Step 2. This mirrors how mount variables behave.</li>
@@ -2166,9 +2166,9 @@ inputs change; <code>@table</code> simply adds the lake snapshot to the mix.</p>
 </ul>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../annotations/#table"><code>@table</code> annotation reference</a> — the syntax surface.</li>
-<li><a href="../annotations/">Cell Annotations</a> — all per-cell annotations.</li>
-<li><a href="../../getting-started/core/">Core Quickstart</a> — <code>client.materialize</code> and
+<li><a href="../annotations/#table"><code>@table</code> annotation reference</a> - the syntax surface.</li>
+<li><a href="../annotations/">Cell Annotations</a> - all per-cell annotations.</li>
+<li><a href="../../getting-started/core/">Core Quickstart</a> - <code>client.materialize</code> and
   <code>scan@v1</code> from the SDK directly, without the notebook.</li>
 </ul>
 

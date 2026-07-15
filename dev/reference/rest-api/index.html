@@ -3660,7 +3660,7 @@
 
 <h1 id="rest-api-reference">REST API Reference<a class="headerlink" href="#rest-api-reference" title="Permanent link">&para;</a></h1>
 <p>This page documents the <strong>notebook</strong> REST surface, mounted under <code>/v1/notebooks</code>. Strata Core also exposes a <code>POST /v1/materialize</code> endpoint for direct artifact materialization; see the <a href="../../getting-started/core/">Library Quickstart</a> for that surface.</p>
-<p>The remote-worker contract — <code>/v1/execute</code>, <code>/v1/notebook-execute</code>, <code>/v1/execute-manifest</code>, <code>/health</code> — is documented separately on the <a href="../executor-protocol/">Executor Protocol</a> page. Those endpoints live on a different process (<code>strata-worker</code>), not the main server.</p>
+<p>The remote-worker contract - <code>/v1/execute</code>, <code>/v1/notebook-execute</code>, <code>/v1/execute-manifest</code>, <code>/health</code> - is documented separately on the <a href="../executor-protocol/">Executor Protocol</a> page. Those endpoints live on a different process (<code>strata-worker</code>), not the main server.</p>
 <div class="admonition note">
 <p class="admonition-title">Session ID vs Notebook ID</p>
 </div>
@@ -3678,7 +3678,7 @@
 <tbody>
 <tr>
 <td><code>GET /openapi.json</code></td>
-<td>Full OpenAPI 3.1 schema — request and response models for every endpoint, generated from the FastAPI route definitions.</td>
+<td>Full OpenAPI 3.1 schema - request and response models for every endpoint, generated from the FastAPI route definitions.</td>
 </tr>
 <tr>
 <td><code>GET /docs</code></td>
@@ -3690,7 +3690,7 @@
 </tr>
 </tbody>
 </table>
-<p>When this page and the live spec disagree, the live spec wins — it's generated from the source of truth. This page exists for orientation and walks through the high-traffic flows.</p>
+<p>When this page and the live spec disagree, the live spec wins - it's generated from the source of truth. This page exists for orientation and walks through the high-traffic flows.</p>
 <h3 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h3>
 <p>Authentication depends on <code>deployment_mode</code>:</p>
 <table>
@@ -3720,7 +3720,7 @@
 </tbody>
 </table>
 <p>In service mode, <strong>every</strong> <code>/v1/*</code> endpoint requires <code>X-Strata-Principal</code> (the proxy-asserted user identity) and the <code>X-Strata-Proxy-Token</code> shared secret. Two further restrictions narrow what each endpoint accepts:</p>
-<p><strong>Personal-mode-only endpoints.</strong> These notebook-session-lifecycle operations return <code>400 Bad Request</code> outside personal mode (long-lived sessions and filesystem notebook management don't fit a multi-tenant service deployment). Artifact and registry <em>writes</em>, by contrast, are available in service mode when <code>service_writes_enabled</code> is on, with the <code>artifacts:write</code> scope — see <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode</a>.</p>
+<p><strong>Personal-mode-only endpoints.</strong> These notebook-session-lifecycle operations return <code>400 Bad Request</code> outside personal mode (long-lived sessions and filesystem notebook management don't fit a multi-tenant service deployment). Artifact and registry <em>writes</em>, by contrast, are available in service mode when <code>service_writes_enabled</code> is on, with the <code>artifacts:write</code> scope - see <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode</a>.</p>
 <table>
 <thead>
 <tr>
@@ -3763,7 +3763,7 @@
 </tbody>
 </table>
 <p>All other endpoints documented below need only <code>X-Strata-Principal</code> + <code>X-Strata-Proxy-Token</code> in service mode, and no auth in personal mode. Endpoints below carry a <code>Personal mode only</code> callout where applicable; otherwise treat them as available in both modes.</p>
-<p>Personal mode with no header configured is effectively trust-on-first-call — anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a <a href="../../deployment/modes/">trust-model decision</a>; see <a href="../../deployment/fly/#trust-model">Fly.io deployment</a> for the load-bearing details.</p>
+<p>Personal mode with no header configured is effectively trust-on-first-call - anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a <a href="../../deployment/modes/">trust-model decision</a>; see <a href="../../deployment/fly/#trust-model">Fly.io deployment</a> for the load-bearing details.</p>
 <h3 id="error-shape">Error shape<a class="headerlink" href="#error-shape" title="Permanent link">&para;</a></h3>
 <p>All <code>4xx</code> and <code>5xx</code> responses use FastAPI's standard JSON shape:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="p">{</span><span class="nt">&quot;detail&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;human-readable error message&gt;&quot;</span><span class="p">}</span>
@@ -3806,7 +3806,7 @@
 </tr>
 <tr>
 <td><code>403</code></td>
-<td>Authenticated, but missing the required scope (e.g. <code>admin:cache</code>) — returned as <code>404</code> if <code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true</code> (the default)</td>
+<td>Authenticated, but missing the required scope (e.g. <code>admin:cache</code>) - returned as <code>404</code> if <code>STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true</code> (the default)</td>
 </tr>
 <tr>
 <td><code>404</code></td>
@@ -3814,7 +3814,7 @@
 </tr>
 <tr>
 <td><code>409</code></td>
-<td>Conflict — concurrent environment job, conflicting cell edit, or attempt to use a destructive endpoint outside personal mode</td>
+<td>Conflict - concurrent environment job, conflicting cell edit, or attempt to use a destructive endpoint outside personal mode</td>
 </tr>
 <tr>
 <td><code>413</code></td>
@@ -3826,16 +3826,16 @@
 </tr>
 <tr>
 <td><code>429</code></td>
-<td>Rate limit exceeded — global, per-client, or per-tenant</td>
+<td>Rate limit exceeded - global, per-client, or per-tenant</td>
 </tr>
 <tr>
 <td><code>500</code></td>
-<td>Server bug — captured to logs with the request ID</td>
+<td>Server bug - captured to logs with the request ID</td>
 </tr>
 </tbody>
 </table>
 <h3 id="request-ids">Request IDs<a class="headerlink" href="#request-ids" title="Permanent link">&para;</a></h3>
-<p>Every request gets an <code>X-Request-ID</code> response header (and the same value is echoed if the client sent one in). Log lines and traces include this ID — copy it when filing bugs.</p>
+<p>Every request gets an <code>X-Request-ID</code> response header (and the same value is echoed if the client sent one in). Log lines and traces include this ID - copy it when filing bugs.</p>
 <h3 id="tenancy">Tenancy<a class="headerlink" href="#tenancy" title="Permanent link">&para;</a></h3>
 <p>In multi-tenant deployments, the <code>X-Tenant-ID</code> header (1–64 alphanumeric, <code>_</code>, <code>-</code>) scopes every endpoint to that tenant's namespace. The tenant ID is hashed into cache keys, artifact paths, and QoS limiter pools. ACL evaluation is <strong>deny-first</strong>: explicit denies cannot be overridden by allows. See <a href="../../deployment/service-mode/">Service Mode</a> for the full contract.</p>
 <h2 id="notebook-lifecycle">Notebook Lifecycle<a class="headerlink" href="#notebook-lifecycle" title="Permanent link">&para;</a></h2>
@@ -3966,7 +3966,7 @@ management endpoint.</p>
 <h3 id="execute-cell-rest">Execute Cell (REST)<a class="headerlink" href="#execute-cell-rest" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>POST /v1/notebooks/{session_id}/cells/{cell_id}/execute?mode=normal
 </code></pre></div>
-<p>The optional <code>mode</code> query parameter selects the run mode: <code>normal</code> (default —
+<p>The optional <code>mode</code> query parameter selects the run mode: <code>normal</code> (default -
 use the cache and materialize stale upstreams), <code>rerun</code> (bypass the target
 cell's cache, still materialize upstreams), or <code>force</code> (run against whatever
 upstream artifacts already exist). An unrecognized mode returns <code>400</code>.</p>
@@ -3980,7 +3980,7 @@ upstream artifacts already exist). An unrecognized mode returns <code>400</code>
 <p>Runs the committed <code>cells/{cell_id}.test.py</code> via pytest against a re-executed
 copy of the cell and returns per-test outcomes: <code>{ "cell_id", "passed",
 "failed", "errored", "skipped", "pytest_unavailable", "ran_at", "tests": [{
-"name", "nodeid", "outcome", "message" }] }</code>. Python cells only — a non-Python
+"name", "nodeid", "outcome", "message" }] }</code>. Python cells only - a non-Python
 cell or one with no test source returns <code>400</code>. The REST twin of the WebSocket
 <code>cell_run_tests</code> message, for clients (the CLI, agents) that don't drive a
 socket.</p>

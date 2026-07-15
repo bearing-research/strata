@@ -1913,7 +1913,7 @@
 <ul>
 <li>Python 3.13 (devcontainer feature, on an Ubuntu 22.04 base)</li>
 <li>VS Code extensions: Python, Ruff</li>
-<li>Strata installed from the published PyPI wheel — no Rust or Node build</li>
+<li>Strata installed from the published PyPI wheel - no Rust or Node build</li>
 </ul>
 <h2 id="setup-flow">Setup flow<a class="headerlink" href="#setup-flow" title="Permanent link">&para;</a></h2>
 <ol>
@@ -1921,7 +1921,7 @@
 <p><strong><code>postCreateCommand</code></strong> (<code>setup.sh</code>) runs once on container creation:</p>
 <ul>
 <li>Installs <code>uv</code></li>
-<li><code>uv tool install strata-notebook</code> — the prebuilt wheel, so it finishes in under a minute (no Rust compilation)</li>
+<li><code>uv tool install strata-notebook</code> - the prebuilt wheel, so it finishes in under a minute (no Rust compilation)</li>
 </ul>
 </li>
 <li>
@@ -1935,8 +1935,8 @@
 <p>Port <strong>8765</strong> is forwarded automatically with <code>onAutoForward: "openBrowser"</code>, so your browser opens the notebook UI as soon as the server is ready.</p>
 <h2 id="contributing-to-strata">Contributing to Strata<a class="headerlink" href="#contributing-to-strata" title="Permanent link">&para;</a></h2>
 <p>The Codespace installs the published wheel, which is all you need to <em>use</em>
-Strata. To <strong>develop</strong> Strata — building the Rust extension and frontend
-from source — set up a full dev environment instead:</p>
+Strata. To <strong>develop</strong> Strata - building the Rust extension and frontend
+from source - set up a full dev environment instead:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>--proto<span class="w"> </span><span class="s1">&#39;=https&#39;</span><span class="w"> </span>-sSf<span class="w"> </span>https://sh.rustup.rs<span class="w"> </span><span class="p">|</span><span class="w"> </span>sh<span class="w"> </span>-s<span class="w"> </span>--<span class="w"> </span>-y<span class="w">   </span><span class="c1"># Rust toolchain</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/bearing-research/strata.git
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">cd</span><span class="w"> </span>strata<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras

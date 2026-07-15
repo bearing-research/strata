@@ -3155,7 +3155,7 @@
 <p>The DAG builder links references back to the <strong>last</strong> cell that defined each name (shadowing is handled by order). Edges flow producer → consumer. When you edit an upstream cell, every downstream cell that depends on it becomes stale automatically.</p>
 <p>Only variables that a downstream cell actually references get stored as artifacts. Intermediate scratch variables stay in the subprocess and are discarded when the cell finishes.</p>
 <h3 id="the-ambient-strata-client">The ambient <code>strata</code> client<a class="headerlink" href="#the-ambient-strata-client" title="Permanent link">&para;</a></h3>
-<p>Every <strong>locally-executed</strong> Python cell gets a ready <code>strata</code> client in its namespace, already bound to the running server — no import or construction needed:</p>
+<p>Every <strong>locally-executed</strong> Python cell gets a ready <code>strata</code> client in its namespace, already bound to the running server - no import or construction needed:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># no `from strata_client import StrataClient` / `StrataClient(base_url=...)`</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">materialize</span><span class="p">(</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">trips</span><span class="p">],</span>
@@ -3163,11 +3163,11 @@
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">)</span>
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">strata</span><span class="o">.</span><span class="n">set_alias</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;champion&quot;</span><span class="p">,</span> <span class="n">art</span><span class="o">.</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">art</span><span class="o">.</span><span class="n">version</span><span class="p">)</span>
 </code></pre></div>
-<p>It's a lightweight client with the same API surface for the common operations (<code>materialize</code>, <code>put</code>, <code>set_alias</code>, <code>set_tag</code>, <code>resolve_alias</code>, …); explicit <code>from strata_client import StrataClient</code> still works if you want the full client. The ambient <code>strata</code> is created fresh per cell run and closed automatically — you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a <code>@mount</code> path or an <code>@table</code> variable.</p>
-<p>Cells routed to a <strong>remote executor worker</strong> (not local execution) don't get the ambient <code>strata</code> — import a client explicitly there.</p>
-<p>When a cell publishes with a name — <code>strata.put(model, name="taxi/tip-model")</code> — the artifact appears in the <a href="../../core/registry/#in-the-notebook-the-registry-dashboard">registry dashboard</a>: a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage — all in the UI).</p>
+<p>It's a lightweight client with the same API surface for the common operations (<code>materialize</code>, <code>put</code>, <code>set_alias</code>, <code>set_tag</code>, <code>resolve_alias</code>, …); explicit <code>from strata_client import StrataClient</code> still works if you want the full client. The ambient <code>strata</code> is created fresh per cell run and closed automatically - you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a <code>@mount</code> path or an <code>@table</code> variable.</p>
+<p>Cells routed to a <strong>remote executor worker</strong> (not local execution) don't get the ambient <code>strata</code> - import a client explicitly there.</p>
+<p>When a cell publishes with a name - <code>strata.put(model, name="taxi/tip-model")</code> - the artifact appears in the <a href="../../core/registry/#in-the-notebook-the-registry-dashboard">registry dashboard</a>: a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).</p>
 <blockquote>
-<p>Calls through <code>strata</code> are <strong>side effects</strong>. On a cache hit the cell body doesn't re-run, so a <code>strata.set_alias(...)</code> won't re-fire — fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.</p>
+<p>Calls through <code>strata</code> are <strong>side effects</strong>. On a cache hit the cell body doesn't re-run, so a <code>strata.set_alias(...)</code> won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.</p>
 </blockquote>
 <h3 id="library-cells-cross-cell-defs-and-classes">Library cells (cross-cell defs and classes)<a class="headerlink" href="#library-cells-cross-cell-defs-and-classes" title="Permanent link">&para;</a></h3>
 <p>Top-level <code>def</code> and <code>class</code> definitions are shared across cells via a synthetic Python module, write a helper once, call it anywhere.</p>
@@ -3252,7 +3252,7 @@
 </tr>
 <tr>
 <td><code># @env KEY=value</code></td>
-<td>Set an env var for this cell only — non-sensitive values only; literal lands in committed source. For secrets use <code>notebook.toml [env]</code> or the Runtime panel.</td>
+<td>Set an env var for this cell only - non-sensitive values only; literal lands in committed source. For secrets use <code>notebook.toml [env]</code> or the Runtime panel.</td>
 </tr>
 <tr>
 <td><code># @mount …</code></td>
@@ -3714,7 +3714,7 @@ this is blocking you.</p>
 <p>See <a href="../annotations/">Cell Annotations</a> for the full reference.</p>
 <hr />
 <h2 id="widget-cells">Widget Cells<a class="headerlink" href="#widget-cells" title="Permanent link">&para;</a></h2>
-<p>A <strong>widget cell</strong> is a declarative control panel — one control per line — that
+<p>A <strong>widget cell</strong> is a declarative control panel - one control per line - that
 feeds values into the DAG. Drag a slider or pick from a dropdown, and the cells
 that read that value go stale; run them to see the result. Add one with the
 <strong>+</strong> menu (<strong>Widget</strong>), or declare <code>language = "widget"</code> in <code>notebook.toml</code>.</p>
@@ -3771,17 +3771,17 @@ exactly like a Python cell's output:</p>
 </table>
 <p>Arguments must be literals. Omit <code>default=</code> and it's inferred (a slider's <code>min</code>,
 a dropdown's first option, <code>False</code>, <code>""</code>). Omit a slider's <code>step=</code> and it's
-derived from the range — roughly <code>(max - min) / 100</code>, snapped to a readable
+derived from the range - roughly <code>(max - min) / 100</code>, snapped to a readable
 <code>1</code>/<code>2</code>/<code>5</code> × 10ⁿ increment (so <code>slider(0, 1)</code> steps by <code>0.01</code>, <code>slider(0, 100)</code>
 by <code>1</code>). Pass <code>step=</code> explicitly to override.</p>
 <h3 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h3>
-<p>A widget cell runs <strong>no code and no subprocess</strong> — it's declarative. Each
+<p>A widget cell runs <strong>no code and no subprocess</strong> - it's declarative. Each
 control's current value is stored as a content-addressed artifact, so:</p>
 <ul>
 <li><strong>Changing a control</strong> re-materializes its value and marks downstream cells
-  <strong>stale</strong> — the same signal as editing an upstream cell. Run the stale cells
+  <strong>stale</strong> - the same signal as editing an upstream cell. Run the stale cells
   (or accept the cascade) to propagate the change.</li>
-<li><strong>Returning a control to a previous value is a cache hit</strong> — downstream cells
+<li><strong>Returning a control to a previous value is a cache hit</strong> - downstream cells
   that already computed for that value don't recompute.</li>
 <li>The <strong>declaration</strong> (<code>slider(0, 1, …)</code>) is committed to <code>notebook.toml</code>; the
   <strong>current value</strong> is runtime state (a drag never churns the committed file).</li>
@@ -3794,21 +3794,21 @@ web UI (the CLI and read-only TUI show them as their declaration).</p>
 on <strong>⚡ Live</strong> (a <code># @live</code> annotation on the widget cell) and changing a control
 <strong>auto-runs</strong> the cheap downstream cells instead. Cells whose last run was
 expensive (over a cost threshold) are left stale rather than re-run on every
-drag — so a slider feeding a quick plot updates live, while one feeding a long
+drag - so a slider feeding a quick plot updates live, while one feeding a long
 training cell waits for a manual run.</p>
 <h3 id="app-view">App view<a class="headerlink" href="#app-view" title="Permanent link">&para;</a></h3>
 <p>Click <strong>App</strong> in the notebook header (or visit <code>/app/&lt;sessionId&gt;</code>) to open the
 notebook as a <strong>read-only interactive app</strong>: only widget control panels,
-markdown, and display outputs render — no editor, DAG, or toolbars. The
+markdown, and display outputs render - no editor, DAG, or toolbars. The
 connection is read-only (edits and arbitrary cell runs are rejected server-side),
-but viewers can still drive widgets — combined with <strong>⚡ Live</strong> that's the
+but viewers can still drive widgets - combined with <strong>⚡ Live</strong> that's the
 "tweak a parameter, see the result" dashboard you hand to a stakeholder.</p>
 <p>Add <code># @app hide</code> to a cell to keep it out of the app view (e.g. a setup cell
 whose output is noise). Run the notebook's cells once in the editor so the app
 has outputs to show, then share the app link.</p>
 <h4 id="embedding-the-app-view-in-another-site">Embedding the app view in another site<a class="headerlink" href="#embedding-the-app-view-in-another-site" title="Permanent link">&para;</a></h4>
-<p>The app view can be dropped into another page — a dashboard, wiki, or internal
-portal — as an <code>&lt;iframe&gt;</code>. Pick <strong>Embed</strong> from the notebook's <strong>Export</strong> menu to
+<p>The app view can be dropped into another page - a dashboard, wiki, or internal
+portal - as an <code>&lt;iframe&gt;</code>. Pick <strong>Embed</strong> from the notebook's <strong>Export</strong> menu to
 copy a ready-to-paste snippet, or build it yourself:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="p">&lt;</span><span class="nt">iframe</span> <span class="na">src</span><span class="o">=</span><span class="s">&quot;http://localhost:8765/#/app/&lt;sessionId&gt;?embed=1&quot;</span>
 <a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>        <span class="na">title</span><span class="o">=</span><span class="s">&quot;Strata notebook&quot;</span> <span class="na">style</span><span class="o">=</span><span class="s">&quot;width:100%;border:0&quot;</span><span class="p">&gt;&lt;/</span><span class="nt">iframe</span><span class="p">&gt;</span>
@@ -3832,7 +3832,7 @@ another host, list its origin in <code>embed_frame_ancestors</code> (env
 allow any host. Accepts a comma-separated list or a JSON array.</p>
 <hr />
 <h2 id="markdown-cells">Markdown Cells<a class="headerlink" href="#markdown-cells" title="Permanent link">&para;</a></h2>
-<p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG — they don't produce artifacts, don't participate in cascade execution, and don't have an <code>id</code> / variable that downstream cells can reference. They survive saves and exports verbatim.</p>
+<p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an <code>id</code> / variable that downstream cells can reference. They survive saves and exports verbatim.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="gu">## Stage 1: Load + Clean</span>
 <a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>
 <a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>The next two cells pull last quarter&#39;s events and drop rows with
@@ -3849,7 +3849,7 @@ allow any host. Accepts a comma-separated list or a JSON array.</p>
 <p>For loop cells, each iteration gets a suffix:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;@iter=&lt;k&gt;
 </code></pre></div>
-<p>The <code>&lt;artifact_id&gt;</code> is content-addressed (derived from the provenance hash); same code + same inputs + same env = same artifact ID across machines and runs. The <code>@v=N</code> version increments only when the same name pointer is re-bound to a new content hash — see <a href="../../getting-started/core/">Library usage</a> for how named artifacts work in the Core SDK.</p>
+<p>The <code>&lt;artifact_id&gt;</code> is content-addressed (derived from the provenance hash); same code + same inputs + same env = same artifact ID across machines and runs. The <code>@v=N</code> version increments only when the same name pointer is re-bound to a new content hash - see <a href="../../getting-started/core/">Library usage</a> for how named artifacts work in the Core SDK.</p>
 <p>Notebook cell outputs follow the pattern <code>nb_&lt;notebook_id&gt;_cell_&lt;cell_id&gt;_var_&lt;variable&gt;@v=N</code> for the variable-level artifacts a cell produces. You don't usually need to construct these by hand; the inspect panel surfaces them and <code># @loop start_from=&lt;cell-id&gt;@iter=k</code> references them by cell ID + iteration index, not the full URI.</p>
 <hr />
 <h2 id="loop-cells">Loop Cells<a class="headerlink" href="#loop-cells" title="Permanent link">&para;</a></h2>
@@ -3958,31 +3958,31 @@ once you've thrown away the intermediates.</p>
 <p>Reach for loop cells when <strong>being able to inspect or fork from iteration k matters</strong>. That's the feature you're paying for.</p>
 <hr />
 <h2 id="r-cells-020">R Cells <em>(0.2.0)</em><a class="headerlink" href="#r-cells-020" title="Permanent link">&para;</a></h2>
-<p>R is a first-class notebook language alongside Python. R cells run R source via the system <code>Rscript</code>, with the same provenance + caching + Arrow-IPC artifact pipeline as Python cells. Data crosses the language boundary as <code>arrow/ipc</code>: a <code>pandas.DataFrame</code> produced by a Python cell becomes a <code>data.frame</code> in the next R cell; an R <code>data.frame</code> (or <code>tibble</code>) becomes a <code>pandas.DataFrame</code> in the next Python cell. Non-tabular R values (S3 objects, lists with classes, environments) are stored as RDS and tagged <code>r_only=true</code> — a downstream Python cell that consumes one fails with a structured <code>StrataRArtifactError</code> rather than a confusing <code>NameError</code>.</p>
+<p>R is a first-class notebook language alongside Python. R cells run R source via the system <code>Rscript</code>, with the same provenance + caching + Arrow-IPC artifact pipeline as Python cells. Data crosses the language boundary as <code>arrow/ipc</code>: a <code>pandas.DataFrame</code> produced by a Python cell becomes a <code>data.frame</code> in the next R cell; an R <code>data.frame</code> (or <code>tibble</code>) becomes a <code>pandas.DataFrame</code> in the next Python cell. Non-tabular R values (S3 objects, lists with classes, environments) are stored as RDS and tagged <code>r_only=true</code> - a downstream Python cell that consumes one fails with a structured <code>StrataRArtifactError</code> rather than a confusing <code>NameError</code>.</p>
 <h3 id="r-environments">R environments<a class="headerlink" href="#r-environments" title="Permanent link">&para;</a></h3>
 <p>R environments are managed from the <strong>Environment</strong> panel, at parity with Python's uv-backed venv:</p>
 <ul>
-<li><strong>System R by default.</strong> A notebook with no <code>renv.lock</code> runs R cells against your system R library. The R card reads <strong>System R</strong> and shows the detected R version — cells work immediately as long as <code>arrow</code> + <code>jsonlite</code> are available system-wide.</li>
+<li><strong>System R by default.</strong> A notebook with no <code>renv.lock</code> runs R cells against your system R library. The R card reads <strong>System R</strong> and shows the detected R version - cells work immediately as long as <code>arrow</code> + <code>jsonlite</code> are available system-wide.</li>
 <li><strong>One-click renv bootstrap.</strong> <strong>Initialize renv</strong> creates a project-scoped, reproducible environment: it installs <code>renv</code> if missing, inits a bare project library, installs <code>jsonlite</code> + <code>arrow</code>, and snapshots to <code>renv.lock</code>. Progress streams live on the card (the first run compiles <code>arrow</code> from source, which takes a few minutes). When it finishes the card flips to <strong>In sync</strong>.</li>
 <li><strong>Per-package install.</strong> A missing-package error in an R cell surfaces a structured hint with an <strong>Install</strong> button that runs <code>renv::install()</code> + <code>renv::snapshot()</code> for the named package.</li>
-<li><strong>Automatic restore on open.</strong> Opening a notebook that has an <code>renv.lock</code> restores the project library automatically — the <code>uv sync</code> analogue for R. Editing <code>renv.lock</code> invalidates R cells' cache the same way editing <code>uv.lock</code> invalidates Python cells'.</li>
+<li><strong>Automatic restore on open.</strong> Opening a notebook that has an <code>renv.lock</code> restores the project library automatically - the <code>uv sync</code> analogue for R. Editing <code>renv.lock</code> invalidates R cells' cache the same way editing <code>uv.lock</code> invalidates Python cells'.</li>
 </ul>
 <p><code>renv.lock</code> is committed config (like <code>uv.lock</code>); the built <code>renv/library/</code> is gitignored.</p>
 <h3 id="plots">Plots<a class="headerlink" href="#plots" title="Permanent link">&para;</a></h3>
-<p>R cells display plots inline, like a Python cell's matplotlib figure. Base graphics (<code>plot()</code>, <code>hist()</code>, …) and grid-based plots (ggplot2, lattice) are captured to PNG and rendered in the cell output. A bare trailing plot object auto-renders — a last-line <code>p</code> where <code>p &lt;- ggplot(...)</code> shows the plot without an explicit <code>print(p)</code>, mirroring the R console. A cell that draws several plots produces an ordered list of image outputs.</p>
+<p>R cells display plots inline, like a Python cell's matplotlib figure. Base graphics (<code>plot()</code>, <code>hist()</code>, …) and grid-based plots (ggplot2, lattice) are captured to PNG and rendered in the cell output. A bare trailing plot object auto-renders - a last-line <code>p</code> where <code>p &lt;- ggplot(...)</code> shows the plot without an explicit <code>print(p)</code>, mirroring the R console. A cell that draws several plots produces an ordered list of image outputs.</p>
 <h3 id="whats-still-ahead">What's still ahead<a class="headerlink" href="#whats-still-ahead" title="Permanent link">&para;</a></h3>
 <p><strong>Warm Rscript pool.</strong> Notebooks containing R cells keep a small pool of
 pre-spawned R workers (R startup, <code>.Rprofile</code>/renv activation, and
 <code>jsonlite</code>/<code>arrow</code> loads already paid), so an R cell run skips the ~1–2s
-interpreter cold-start. Workers are single-shot — one cell each, then
-replaced — preserving per-cell isolation; editing <code>renv.lock</code> drains and
+interpreter cold-start. Workers are single-shot - one cell each, then
+replaced - preserving per-cell isolation; editing <code>renv.lock</code> drains and
 respawns the pool. Pure-Python notebooks and machines without <code>Rscript</code>
 never start one.</p>
 <p>R execution and display are complete; remaining R polish is tracked on GitHub: <a href="https://github.com/bearing-research/strata/issues/83">#83</a> (R version matrix on CI), <a href="https://github.com/bearing-research/strata/issues/84">#84</a> (cross-language run-all batching).</p>
 <h3 id="what-you-need-today">What you need today<a class="headerlink" href="#what-you-need-today" title="Permanent link">&para;</a></h3>
 <ul>
 <li>R <code>&gt;= 4.2</code> on <code>PATH</code> (Strata calls <code>Rscript</code>).</li>
-<li>The <code>arrow</code> and <code>jsonlite</code> R packages — either available in the system R library, or installed into a project library via <strong>Initialize renv</strong> in the Environment panel (which installs both for you).</li>
+<li>The <code>arrow</code> and <code>jsonlite</code> R packages - either available in the system R library, or installed into a project library via <strong>Initialize renv</strong> in the Environment panel (which installs both for you).</li>
 </ul>
 <h3 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h3>
 <p>See <a href="https://github.com/bearing-research/strata/tree/main/examples/r_lm_vs_sklearn"><code>examples/r_lm_vs_sklearn/</code></a> for a working notebook: a Python cell synthesises a housing dataset, an R cell fits <code>lm(price ~ sqft + bedrooms + age + location, data = housing_train)</code> and returns tidy coefficient + model-stats + prediction <code>data.frame</code>s, a Python cell fits the same model with <code>LinearRegression</code> and prints a side-by-side comparison. The R formula's auto-factor-encoding of <code>location</code> is the one-line stats-edge moment.</p>
@@ -4006,7 +4006,7 @@ never start one.</p>
 </tr>
 <tr>
 <td><code># @mount data file:///x</code></td>
-<td>Binds <code>data</code> inside the R cell to the mount's local path (a character string — R has no <code>pathlib.Path</code>).</td>
+<td>Binds <code>data</code> inside the R cell to the mount's local path (a character string - R has no <code>pathlib.Path</code>).</td>
 </tr>
 <tr>
 <td><code># @timeout 60</code></td>

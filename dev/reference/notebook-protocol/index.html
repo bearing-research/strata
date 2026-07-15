@@ -2091,7 +2091,7 @@ per-frame details live in <a href="../rest-api/">REST API Reference</a> and
 <a href="../websocket/">WebSocket Protocol</a>; this page is the orientation map plus the
 load-bearing rules that aren't obvious from either of those individually.</p>
 <p>If you want exhaustive request/response shapes, the live OpenAPI document at
-<code>GET /openapi.json</code> is authoritative — Swagger UI is at <code>GET /docs</code>.</p>
+<code>GET /openapi.json</code> is authoritative - Swagger UI is at <code>GET /docs</code>.</p>
 <h2 id="what-the-backend-is">What the backend is<a class="headerlink" href="#what-the-backend-is" title="Permanent link">&para;</a></h2>
 <p>The notebook backend is a FastAPI service that exposes:</p>
 <table>
@@ -2113,13 +2113,13 @@ load-bearing rules that aren't obvious from either of those individually.</p>
 </tbody>
 </table>
 <p>The Vue frontend is a thin consumer of both. Anything Vue can do, a second
-client can do — there's no internal API.</p>
+client can do - there's no internal API.</p>
 <h2 id="bootstrap-flow">Bootstrap flow<a class="headerlink" href="#bootstrap-flow" title="Permanent link">&para;</a></h2>
 <p>The minimum sequence to render a notebook view:</p>
 <ol>
 <li><strong>Open the notebook.</strong> <code>POST /v1/notebooks/open</code> with the notebook
    directory path. The response carries everything you need to render the UI
-   cold — see <a href="#cold-start-payload">Cold-start payload</a> below. The
+   cold - see <a href="#cold-start-payload">Cold-start payload</a> below. The
    <code>session_id</code> in the response is the route parameter for every subsequent
    call.</li>
 </ol>
@@ -2128,23 +2128,23 @@ client can do — there's no internal API.</p>
    the same payload shape.
 2. <strong>Connect the WebSocket.</strong> <code>ws://.../v1/notebooks/ws/{session_id}</code>. The
    handler verifies the session exists and (if owned) that the caller is the
-   owner — refuses with close code <code>1008 Notebook not found</code> otherwise. No
+   owner - refuses with close code <code>1008 Notebook not found</code> otherwise. No
    initial frame is sent on accept.
 3. <strong>Send <code>notebook_sync</code></strong> as the first client → server message. The server
    answers with a <code>notebook_state</code> frame containing the same fields as the
-   open response. This is your sole resync primitive on reconnects — there's
+   open response. This is your sole resync primitive on reconnects - there's
    no <code>resume_after_seq</code>.
 4. <strong>Listen.</strong> Execution events (cell status, output, console, errors,
    cascade prompts, DAG updates, environment-job lifecycle, agent loop) all
-   arrive over the WS. Subsequent structural edits — adding / removing /
+   arrive over the WS. Subsequent structural edits - adding / removing /
    reordering cells, updating env / mounts / workers, dependency mutations
-   — go via REST; the backend re-broadcasts the affected state through the
+   - go via REST; the backend re-broadcasts the affected state through the
    WS automatically.</p>
 <p>That is the entire bootstrap. The remaining sections of this page explain the
 gotchas in that flow.</p>
 <h2 id="path-parameter-gotcha-session_id-vs-notebook-id">Path parameter gotcha: session_id vs notebook id<a class="headerlink" href="#path-parameter-gotcha-session_id-vs-notebook-id" title="Permanent link">&para;</a></h2>
 <p>The route parameter <code>{notebook_id}</code> (in both REST and WS) is <strong>the
-<code>session_id</code> returned from <code>POST /open</code></strong> — not the <code>notebook_id</code> field
+<code>session_id</code> returned from <code>POST /open</code></strong> - not the <code>notebook_id</code> field
 inside <code>notebook.toml</code>. The TOML id is the on-disk stable identifier; the
 session id is the runtime handle the server uses to look you up.</p>
 <p>A non-Vue client that passes the TOML id will get clean 404s from every
@@ -2159,22 +2159,22 @@ stores the session id from the open response.</p>
   authenticating proxy (Cloudflare Access, Pomerium, …). The proxy injects
   the configured header (e.g. <code>X-Authenticated-User</code>); the backend reads it
   via <code>_caller_identity</code> and uses it for:</li>
-<li><strong>Storage scoping</strong> — each user gets a private subdir under the storage
+<li><strong>Storage scoping</strong> - each user gets a private subdir under the storage
     root (<code>/discover</code>, <code>/create</code>, path-keyed deletes).</li>
-<li><strong>Owner stamping</strong> — <code>notebook.toml</code> records <code>owner = "&lt;header value&gt;"</code>
+<li><strong>Owner stamping</strong> - <code>notebook.toml</code> records <code>owner = "&lt;header value&gt;"</code>
     on create.</li>
-<li><strong>Owner enforcement</strong> — every <code>WS /{session_id}</code> upgrade and every
+<li><strong>Owner enforcement</strong> - every <code>WS /{session_id}</code> upgrade and every
     REST <code>/{session_id}/...</code> route checks the caller's header against the
     notebook's owner. Mismatch returns close <code>1008</code> or HTTP 404 (same
     generic "Notebook not found" body, so probes can't enumerate owners).</li>
-<li><strong>Unowned notebooks pass through</strong> — legacy notebooks without an
+<li><strong>Unowned notebooks pass through</strong> - legacy notebooks without an
     <code>owner</code> field (and notebooks created by services that don't send the
     header) accept any caller.</li>
 </ul>
 <p>Both surfaces share a single gate: every <code>SessionDep</code> route routes through
 <code>get_notebook_session</code>, which resolves the session and immediately calls
 <code>_require_owner</code>. The WS upgrade applies the same check before
-<code>accept()</code>. A leaked <code>session_id</code> is <em>not</em> a bearer capability — owner
+<code>accept()</code>. A leaked <code>session_id</code> is <em>not</em> a bearer capability - owner
 enforcement is symmetric across REST and WS, with no opt-outs.</p>
 <h3 id="service-mode">Service mode<a class="headerlink" href="#service-mode" title="Permanent link">&para;</a></h3>
 <ul>
@@ -2184,7 +2184,7 @@ enforcement is symmetric across REST and WS, with no opt-outs.</p>
   headers; missing or invalid token closes with <code>1008</code>.</li>
 <li>Notebook-session lifecycle endpoints (<code>/open</code>, <code>/create</code>, session
   reconnect, <code>/discover</code>, path-keyed deletes) are personal-mode-only and
-  return <code>400 Bad Request</code> in service mode — write surface in service mode
+  return <code>400 Bad Request</code> in service mode - write surface in service mode
   routes through the artifact build pipeline instead. See the
   <a href="../rest-api/#authentication">REST API page</a> for the full list.</li>
 </ul>
@@ -2299,7 +2299,7 @@ against the preserved execution state.</p>
 <ul>
 <li><strong>A tmux detach / VPN blip / browser refresh does not kill a running
   cell</strong> as long as you reconnect within ~60 seconds.</li>
-<li><strong>Vue's "close tab to cancel"</strong> still works — the user just waits past the
+<li><strong>Vue's "close tab to cancel"</strong> still works - the user just waits past the
   window. The grace constant (<code>_GRACE_CANCEL_SECONDS</code> in <code>ws.py</code>) is a
   module-level number you can override at startup if you want a different
   default.</li>
@@ -2307,11 +2307,11 @@ against the preserved execution state.</p>
   disconnected (<code>cell_console</code> mid-stream, <code>cell_output_delta</code>,
   <code>cell_iteration_progress</code>, <code>cascade_progress</code>) are dropped. On reconnect, send <code>notebook_sync</code> and
   rebuild from the fresh <code>notebook_state</code>. Persisted state (finished
-  <code>cell_status</code>, latest <code>cell_output</code>) survives — it's recovered through
+  <code>cell_status</code>, latest <code>cell_output</code>) survives - it's recovered through
   the snapshot.</li>
 <li><strong>Sequence numbers continue across reconnects.</strong> Every server-to-client
   message carries a <code>seq</code> from a per-notebook counter. The counter doesn't
-  reset on reconnect; if you see a large gap, that's expected — treat it as
+  reset on reconnect; if you see a large gap, that's expected - treat it as
   a hint to drop local in-flight state and replace from <code>notebook_state</code>.</li>
 </ul>
 <p>See <a href="../websocket/#reconnection-semantics">WebSocket Protocol → Reconnection semantics</a>
@@ -2319,7 +2319,7 @@ for the message-level detail.</p>
 <h2 id="message-types">Message types<a class="headerlink" href="#message-types" title="Permanent link">&para;</a></h2>
 <p>The full list of WS frame types lives on the <a href="../websocket/">WebSocket Protocol</a>
 page. <strong>Every type corresponds to a member of
-<code>strata.notebook.protocol.MessageType</code></strong> — that enum is the canonical
+<code>strata.notebook.protocol.MessageType</code></strong> - that enum is the canonical
 source. A non-Vue client can enumerate the full set by iterating it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata.notebook.protocol</span><span class="w"> </span><span class="kn">import</span> <span class="n">MessageType</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
@@ -2331,13 +2331,13 @@ human readability but the values match exactly. If you see a frame whose
 <code>type</code> doesn't match an enum value, treat that as a bug to report.</p>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../rest-api/">REST API Reference</a> — every endpoint with request /
+<li><a href="../rest-api/">REST API Reference</a> - every endpoint with request /
   response shapes.</li>
-<li><a href="../websocket/">WebSocket Protocol</a> — every C→S and S→C frame with
+<li><a href="../websocket/">WebSocket Protocol</a> - every C→S and S→C frame with
   payload shapes.</li>
-<li><a href="../notebook-toml/">notebook.toml Schema</a> — what the on-disk config
+<li><a href="../notebook-toml/">notebook.toml Schema</a> - what the on-disk config
   looks like.</li>
-<li><a href="../configuration/">Configuration</a> — the server-side knobs
+<li><a href="../configuration/">Configuration</a> - the server-side knobs
   (<code>personal_mode_user_header</code>, deployment mode, storage root, …).</li>
 </ul>
 

@@ -1932,15 +1932,15 @@
 <p>Strata Notebook can expose a <strong>running notebook session</strong> to an external coding
 agent (Claude Code, and any other <a href="https://modelcontextprotocol.io">Model Context
 Protocol</a> client) over an HTTP endpoint at
-<code>/mcp</code>. The agent gets the same operations the <a href="../cli/"><code>strata</code> CLI</a> drives —
-read, run, author, manage dependencies — but against a <strong>warm session</strong>: its
+<code>/mcp</code>. The agent gets the same operations the <a href="../cli/"><code>strata</code> CLI</a> drives -
+read, run, author, manage dependencies - but against a <strong>warm session</strong>: its
 populated artifact cache and current cell state, not an offline copy.</p>
 <p>Because the tools reuse Strata's broadcasting execution paths, the browser UI
 and the <a href="../tui/">terminal viewer</a> double as a <strong>live view</strong> of the agent at
-work — cells flip status, outputs render, and new cells appear as the agent
+work - cells flip status, outputs render, and new cells appear as the agent
 edits them.</p>
 <h2 id="enable-it">Enable it<a class="headerlink" href="#enable-it" title="Permanent link">&para;</a></h2>
-<p>The endpoint is <strong>off by default</strong> and is <strong>personal-mode only</strong> — it has no
+<p>The endpoint is <strong>off by default</strong> and is <strong>personal-mode only</strong> - it has no
 per-request authentication, so it grants a caller full control of the session
 and is safe only behind a loopback, single-user deployment. (Starting the
 server in service mode with the flag set is rejected at startup.)</p>
@@ -1961,7 +1961,7 @@ The typical loop:</p>
 <li><code>list_notebooks</code> → the agent gets the <code>session_id</code>.</li>
 <li>The agent inspects (<code>get_notebook</code> / <code>get_cell</code> / <code>dag</code> / <code>status</code>), edits
    (<code>add_cell</code> / <code>edit_cell</code> / …), runs (<code>run_cell</code> / <code>run_tests</code>), and manages
-   dependencies (<code>add_dependency</code> / <code>remove_dependency</code>) — all against that
+   dependencies (<code>add_dependency</code> / <code>remove_dependency</code>) - all against that
    session, while you watch it happen in the browser or the TUI.</li>
 </ol>
 <h2 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h2>
@@ -1987,7 +1987,7 @@ The typical loop:</p>
 </tr>
 <tr>
 <td><code>dag(session_id)</code></td>
-<td>The dependency graph — edges, topological order, roots, leaves.</td>
+<td>The dependency graph - edges, topological order, roots, leaves.</td>
 </tr>
 <tr>
 <td><code>status(session_id)</code></td>
@@ -2038,8 +2038,8 @@ already exist.</p>
 <h2 id="watching-the-agent">Watching the agent<a class="headerlink" href="#watching-the-agent" title="Permanent link">&para;</a></h2>
 <p>The built-in AI panel streams its own reasoning into the <strong>Agent panel</strong>. An
 external agent's reasoning lives in its own client, so instead its <strong>tool
-actions are narrated there automatically</strong> — "ran cell abc → ok", "added python
-cell def", "added dependency polars" — as it works. It can also call the <code>note</code>
+actions are narrated there automatically</strong> - "ran cell abc → ok", "added python
+cell def", "added dependency polars" - as it works. It can also call the <code>note</code>
 tool to post an explicit line of narration ("about to refactor featurize into
 two cells"). Open the notebook in the browser or the
 <a href="../tui/">terminal viewer</a> and you can follow along in real time.</p>
@@ -2047,7 +2047,7 @@ two cells"). Open the notebook in the browser or the
 <p>The MCP tools and the <code>strata</code> CLI share one operation contract
 (<a href="../agent-authoring/"><code>NotebookOps</code></a>) and return the same curated views. The CLI
 is the right tool for <strong>offline / headless</strong> authoring (write files, <code>strata
-run</code>); the MCP server is for driving a <strong>live, warm session</strong> — rich outputs,
+run</code>); the MCP server is for driving a <strong>live, warm session</strong> - rich outputs,
 partial re-runs against a populated cache, and edits a human watches in real
 time. See <a href="../agent-authoring/">Authoring Programmatically</a> for the file + CLI
 loop that needs no server at all.</p>

@@ -2243,27 +2243,27 @@ can open in the UI, run headlessly, edit, or export.</p>
 <li><strong><code>;</code>-suppression</strong> of the trailing display (Strata's harness
   auto-displays bare expressions; the converter detects <code>df;</code> and
   appends a <code>pass</code> so the display is skipped).</li>
-<li><strong><code>%pip install</code>, <code>!pip install</code>, <code>%conda install</code></strong> — packages
+<li><strong><code>%pip install</code>, <code>!pip install</code>, <code>%conda install</code></strong> - packages
   captured into the new notebook's <code>pyproject.toml</code>.</li>
-<li><strong><code>%env</code>, <code>%set_env</code></strong> — translated to <code># @env KEY=VAL</code> cell
+<li><strong><code>%env</code>, <code>%set_env</code></strong> - translated to <code># @env KEY=VAL</code> cell
   annotations.</li>
-<li><strong><code>%run script.py</code></strong> — translated to <code>exec(Path(...).read_text())</code>.</li>
-<li><strong><code>%%bash</code>, <code>%%sh</code>, <code>%%script</code></strong> — bodies wrapped in
+<li><strong><code>%run script.py</code></strong> - translated to <code>exec(Path(...).read_text())</code>.</li>
+<li><strong><code>%%bash</code>, <code>%%sh</code>, <code>%%script</code></strong> - bodies wrapped in
   <code>subprocess.run(..., shell=True)</code>.</li>
-<li><strong><code>%%writefile</code></strong> — translated to <code>Path(...).write_text(...)</code>.</li>
-<li><strong><code>%timeit</code>, <code>%time</code> (line form)</strong> — the magic prefix is dropped;
+<li><strong><code>%%writefile</code></strong> - translated to <code>Path(...).write_text(...)</code>.</li>
+<li><strong><code>%timeit</code>, <code>%time</code> (line form)</strong> - the magic prefix is dropped;
   the body keeps running.</li>
 </ul>
 <p><strong>What you lose:</strong></p>
 <ul>
 <li><strong>All cell outputs.</strong> Imported cells start blank; first run
   produces fresh outputs from the resolved environment. This is
-  intentional — the whole point of content-addressed caching is to
+  intentional - the whole point of content-addressed caching is to
   produce outputs from a known source + env, not to trust whatever
   was last serialized into the <code>.ipynb</code>.</li>
 <li><strong>Widgets</strong> (<code>ipywidgets</code>, <code>tqdm.notebook</code>, custom display).
   Strata's display protocol covers DataFrames, plots, markdown,
-  images — but interactive JS widgets don't survive.</li>
+  images - but interactive JS widgets don't survive.</li>
 <li><strong><code>%matplotlib inline</code> / <code>notebook</code>.</strong> Dropped. Strata captures
   figures via the display protocol automatically.</li>
 <li><strong>Raw cells.</strong> Skipped entirely (counted in the import report).</li>
@@ -2273,14 +2273,14 @@ can open in the UI, run headlessly, edit, or export.</p>
   manually with <code>subprocess.run(...)</code> if the escape was load-bearing.</li>
 <li><strong>Non-Python <code>%%</code> cell magics</strong> (<code>%%R</code>, <code>%%ruby</code>, <code>%%javascript</code>,
   <code>%%html</code>, <code>%%latex</code>, <code>%%svg</code>, <code>%%markdown</code>). Dropped.</li>
-<li><strong><code>%%sql</code>.</strong> Dropped — convert by hand to a Strata
+<li><strong><code>%%sql</code>.</strong> Dropped - convert by hand to a Strata
   <a href="../cells/#sql-cells">SQL cell</a> if you want it back.</li>
 <li><strong>REPL-inspection magics</strong> (<code>%who</code>, <code>%whos</code>, <code>%lsmagic</code>, <code>%history</code>,
   <code>%alias</code>, etc.). Dropped; no Strata equivalent.</li>
 </ul>
 <p>Everything that's "dropped" is reported in the import report
 (<code>&lt;notebook_dir&gt;/import_report.md</code>) with the exact line number and
-the marker comment placed in the cell source — there's no silent
+the marker comment placed in the cell source - there's no silent
 data loss.</p>
 <h2 id="when-to-use-it">When to use it<a class="headerlink" href="#when-to-use-it" title="Permanent link">&para;</a></h2>
 <ul>

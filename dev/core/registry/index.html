@@ -1999,7 +1999,7 @@
 with content-addressed provenance. The registry layer adds the pointers and
 history that turn the artifact store into a lightweight model registry:
 <strong>names</strong>, <strong>aliases</strong>, <strong>tags</strong>, an append-only <strong>audit</strong>, and optional
-<strong>approval gates</strong> — all in the same SQLite metadata store, no extra
+<strong>approval gates</strong> - all in the same SQLite metadata store, no extra
 services.</p>
 <h2 id="names">Names<a class="headerlink" href="#names" title="Permanent link">&para;</a></h2>
 <p>A name is a mutable, human-readable pointer to one artifact version:</p>
@@ -2011,7 +2011,7 @@ services.</p>
 fully supported. A name tracks "the latest blessed build of this line";
 every move is audited.</p>
 <h2 id="aliases">Aliases<a class="headerlink" href="#aliases" title="Permanent link">&para;</a></h2>
-<p>Aliases are intent pointers <em>on a name</em> — the post-stages registry model
+<p>Aliases are intent pointers <em>on a name</em> - the post-stages registry model
 (champion/candidate rather than Staging/Production enums):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">client</span><span class="o">.</span><span class="n">set_alias</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;champion&quot;</span><span class="p">,</span> <span class="n">artifact_id</span><span class="p">,</span> <span class="n">version</span><span class="p">)</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">client</span><span class="o">.</span><span class="n">set_alias</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;candidate&quot;</span><span class="p">,</span> <span class="n">new_id</span><span class="p">,</span> <span class="n">new_version</span><span class="p">)</span>
@@ -2020,7 +2020,7 @@ every move is audited.</p>
 <p>A name can hold any number of aliases. Aliases may pin a <strong>superseded</strong>
 version (an old champion stays fetchable after a rebuild), and an aliased
 artifact is protected from garbage collection. Setting an alias to the
-version it already points at is a <strong>no-op</strong> — idempotent promote cells
+version it already points at is a <strong>no-op</strong> - idempotent promote cells
 re-run without spamming history.</p>
 <p>In the artifact CLI, <code>name@alias</code> works anywhere a reference does:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>show<span class="w"> </span>taxi/tip-model@champion
@@ -2028,14 +2028,14 @@ re-run without spamming history.</p>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>strata<span class="w"> </span>artifact<span class="w"> </span>pull<span class="w"> </span>taxi/tip-model@champion<span class="w"> </span>--to<span class="w"> </span>model.arrow
 </code></pre></div>
 <h2 id="tags">Tags<a class="headerlink" href="#tags" title="Permanent link">&para;</a></h2>
-<p>Key/value facts about one artifact version — recorded at promote time,
+<p>Key/value facts about one artifact version - recorded at promote time,
 queryable later:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">client</span><span class="o">.</span><span class="n">set_tag</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">version</span><span class="p">,</span> <span class="s2">&quot;mae&quot;</span><span class="p">,</span> <span class="s2">&quot;1.226&quot;</span><span class="p">)</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">client</span><span class="o">.</span><span class="n">set_tag</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">version</span><span class="p">,</span> <span class="s2">&quot;trained_at_snapshot&quot;</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">snapshot</span><span class="p">))</span>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">client</span><span class="o">.</span><span class="n">get_tags</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">version</span><span class="p">)</span>
 </code></pre></div>
 <h2 id="audit">Audit<a class="headerlink" href="#audit" title="Permanent link">&para;</a></h2>
-<p>Every name, alias, and tag mutation lands in an append-only audit table —
+<p>Every name, alias, and tag mutation lands in an append-only audit table -
 written <strong>in the same transaction</strong> as the mutation, so a change can never
 land unrecorded. The audit answers "what did champion point to before?":</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>$<span class="w"> </span>strata<span class="w"> </span>artifact<span class="w"> </span>audit<span class="w"> </span>taxi/tip-model
@@ -2052,7 +2052,7 @@ SDK exposes <code>get_registry_audit(name=..., artifact_id=...)</code>.</p>
 </code></pre></div>
 <p>Moves (and deletes) of protected aliases return <strong>202 pending</strong> instead of
 applying. The queue is visible, and approval applies the move with the
-approver as the audit actor — atomically with the pending-consumption, so
+approver as the audit actor - atomically with the pending-consumption, so
 a crash can never swallow an approval:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">client</span><span class="o">.</span><span class="n">list_pending_changes</span><span class="p">()</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">client</span><span class="o">.</span><span class="n">approve_alias_change</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;champion&quot;</span><span class="p">)</span>
@@ -2065,16 +2065,16 @@ approve fails cleanly and the pending entry stays for an explicit reject.
 Unprotected aliases apply immediately; the default is no gating.</p>
 <p><strong>Authorization (service mode).</strong> When exposed under trusted-proxy auth,
 approve and reject require the <code>admin:registry</code> scope, and approval
-enforces separation of duty — the requester cannot self-approve their own
+enforces separation of duty - the requester cannot self-approve their own
 move unless they hold the <code>admin:*</code> break-glass scope. The audit log is
 tenant-scoped: a principal reads only its own tenant's history (<code>admin:*</code>
 sees the whole store). In personal mode (single operator, no auth) these
 gates are inert. Resolving names/aliases is a tenant-scoped read in service
 mode; <em>publishing</em> them (<code>set_name</code> / <code>set_alias</code>) requires opting into
-<code>service_writes_enabled</code> and holding the <code>artifacts:write</code> scope — see
+<code>service_writes_enabled</code> and holding the <code>artifacts:write</code> scope - see
 <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode → shared research store</a>.</p>
 <h2 id="the-promotion-flow-end-to-end">The promotion flow, end to end<a class="headerlink" href="#the-promotion-flow-end-to-end" title="Permanent link">&para;</a></h2>
-<p>The shape this is designed for — a notebook training pipeline whose last
+<p>The shape this is designed for - a notebook training pipeline whose last
 cell promotes through the registry:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># promote cell</span>
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">model_art</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">features_uri</span><span class="p">],</span> <span class="n">transform</span><span class="o">=...</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">)</span>
@@ -2092,13 +2092,13 @@ challenger → a human approves → and the whole history is reconstructible:</p
 <a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>strata<span class="w"> </span>artifact<span class="w"> </span>verify<span class="w">    </span><span class="c1"># store-wide blob/metadata consistency check</span>
 </code></pre></div>
 <h2 id="in-the-notebook-the-registry-dashboard">In the notebook (the registry dashboard)<a class="headerlink" href="#in-the-notebook-the-registry-dashboard" title="Permanent link">&para;</a></h2>
-<p>Everything above also has a UI — the registry is a first-class surface in the
+<p>Everything above also has a UI - the registry is a first-class surface in the
 notebook, so promotion and approvals don't have to be code. Registry routes are
 <strong>personal-mode only</strong> today, so the dashboard hides itself in service mode.</p>
 <div class="admonition tip">
 <p class="admonition-title">New to it? Start with the walkthrough</p>
-<p>For a click-by-click guide — publish from a cell → promote → approve →
-lineage — see <a href="../../notebook/registry-dashboard/"><strong>Registry Dashboard</strong></a>.
+<p>For a click-by-click guide - publish from a cell → promote → approve →
+lineage - see <a href="../../notebook/registry-dashboard/"><strong>Registry Dashboard</strong></a>.
 The rest of this section is the reference for what each piece does.</p>
 </div>
 <p><strong>Publishing.</strong> Inside a cell, the <a href="../../notebook/cells/#the-ambient-strata-client">ambient <code>strata</code>
@@ -2108,23 +2108,23 @@ client</a> publishes with a name:</p>
 <p>The artifact lands in the registry and is <strong>stamped with the cell that produced
 it</strong>, so it shows up right under that cell.</p>
 <p><strong>Per-cell strip.</strong> Below a cell that published, a compact strip shows what it
-put into the registry — <code>⬡ taxi/tip-model v3  ★champion  mae=1.98</code> — with a
+put into the registry - <code>⬡ taxi/tip-model v3  ★champion  mae=1.98</code> - with a
 <code>[Promote▾]</code> menu (champion / candidate) and a <code>⎘</code> lineage button. Promote
 where you trained the model, without leaving the cell.</p>
 <p><strong>Registry tab.</strong> The bottom drawer has a <strong>Registry</strong> tab:</p>
 <ul>
-<li>a <strong>pending-approval</strong> banner with <strong>Approve / Reject</strong> — the human gate, in
+<li>a <strong>pending-approval</strong> banner with <strong>Approve / Reject</strong> - the human gate, in
   the UI (a protected-alias move queues here);</li>
-<li>a <strong>names table</strong> — each name with its alias chips (<code>★champ</code>, <code>cand</code>),
+<li>a <strong>names table</strong> - each name with its alias chips (<code>★champ</code>, <code>cand</code>),
   latest version, tags, and <code>[Promote▾]</code>;</li>
 <li>a collapsible <strong>audit</strong> timeline.</li>
 </ul>
 <p><strong>Promote feedback.</strong> Setting an alias toasts the result: <code>✓ taxi/tip-model →
 champion</code> when it applies, or <code>⏳ champion change pending approval</code> when the
-alias is protected — at which point the pending banner appears for someone to
+alias is protected - at which point the pending banner appears for someone to
 approve. Unprotected aliases (candidate) apply immediately.</p>
-<p><strong>Lineage.</strong> The <code>⎘</code> button (strip or names table) opens the provenance chain —
-<code>model ← features ← scan ← table @ snapshot</code> — the same lineage the CLI prints,
+<p><strong>Lineage.</strong> The <code>⎘</code> button (strip or names table) opens the provenance chain -
+<code>model ← features ← scan ← table @ snapshot</code> - the same lineage the CLI prints,
 as an interactive view.</p>
 <p>So the same promote → gate → approve → audit loop the SDK/CLI drives is a few
 clicks in the notebook, backed by the identical audited routes.</p>
@@ -2132,7 +2132,7 @@ clicks in the notebook, backed by the identical audited routes.</p>
 <p>Registry state lives in the same <code>artifacts.sqlite</code> as artifact metadata
 (WAL mode, transaction-per-mutation). Everything commits before the API
 responds; the audit is in-transaction with its mutation; server restarts
-are non-events. The CLI reads the store directly — server up or down.</p>
+are non-events. The CLI reads the store directly - server up or down.</p>
 
 
 

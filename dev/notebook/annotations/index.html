@@ -992,7 +992,7 @@
   <a href="#sweep-mode-compare-all-variants-at-once" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Sweep mode — compare all variants at once
+        Sweep mode - compare all variants at once
       
     </span>
   </a>
@@ -1003,7 +1003,7 @@
   <a href="#fan-out-run-a-downstream-cell-once-per-variant" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Fan-out — run a downstream cell once per variant
+        Fan-out - run a downstream cell once per variant
       
     </span>
   </a>
@@ -2489,7 +2489,7 @@
   <a href="#sweep-mode-compare-all-variants-at-once" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Sweep mode — compare all variants at once
+        Sweep mode - compare all variants at once
       
     </span>
   </a>
@@ -2500,7 +2500,7 @@
   <a href="#fan-out-run-a-downstream-cell-once-per-variant" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Fan-out — run a downstream cell once per variant
+        Fan-out - run a downstream cell once per variant
       
     </span>
   </a>
@@ -2656,7 +2656,7 @@
 <p class="admonition-title"><code>@name</code> is a display label, not a referenceable ID</p>
 <p><code>@name</code> sets what shows in the DAG view. It is <strong>not</strong> what
 <code>@after</code> or <code>@loop start_from=</code> references. Those resolve against
-the cell's <code>id</code> in <code>notebook.toml</code>, which is a separate field —
+the cell's <code>id</code> in <code>notebook.toml</code>, which is a separate field -
 see <a href="#cell-ids">Cell IDs</a> below.</p>
 </div>
 <hr />
@@ -2748,7 +2748,7 @@ the cell budget.</p>
 <p><code># @env</code> values live in <strong>committed cell source</strong> (<code>cells/*.py</code>).
 The sensitive-key blanking that the notebook.toml <code>[env]</code> writer
 applies (KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL values blanked
-before commit) does <strong>not</strong> apply to <code># @env</code> — the literal value
+before commit) does <strong>not</strong> apply to <code># @env</code> - the literal value
 you type goes straight to git.</p>
 <p>For API keys and other secrets, use the notebook's <code>[env]</code> block
 in <code>notebook.toml</code> (blanked automatically) or the Runtime panel
@@ -2766,7 +2766,7 @@ or <code>OMP_NUM_THREADS</code>.</p>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">scratch</span> <span class="o">/</span> <span class="s2">&quot;summary.txt&quot;</span>  <span class="c1"># → Path(&quot;/tmp/strata/mounts/.../summary.txt&quot;)</span>
 </code></pre></div>
 <p><strong>The mount name becomes a <code>pathlib.Path</code> variable in the cell's namespace.</strong> No
-<code>/mnt/&lt;name&gt;</code> directory convention — the variable directly references the
+<code>/mnt/&lt;name&gt;</code> directory convention - the variable directly references the
 resolved local path (the cached mirror for remote URIs, the URI's local
 filesystem path for <code>file://</code> URIs). Use standard <code>Path</code> operations: <code>/</code> for
 joining, <code>.read_text()</code>, <code>.iterdir()</code>, etc.</p>
@@ -2775,7 +2775,7 @@ joining, <code>.read_text()</code>, <code>.iterdir()</code>, etc.</p>
 <h2 id="table">@table<a class="headerlink" href="#table" title="Permanent link">&para;</a></h2>
 <p>Declare an Iceberg table input. The table's current snapshot id becomes part
 of the cell's provenance: <strong>when new data lands in the table, the cell goes
-stale and the normal cascade machinery re-runs it</strong> — no manual data-version
+stale and the normal cascade machinery re-runs it</strong> - no manual data-version
 bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
 retrain on new data, pin a snapshot), see
 <a href="../lake-aware-cells/">Lake-Aware Cells</a>.</p>
@@ -2785,18 +2785,18 @@ retrain on new data, pin a snapshot), see
 <a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;executor&quot;</span><span class="p">:</span> <span class="s2">&quot;scan@v1&quot;</span><span class="p">,</span> <span class="s2">&quot;params&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;snapshot_id&quot;</span><span class="p">:</span> <span class="n">trips_snapshot</span><span class="p">}},</span>
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="p">)</span>
 </code></pre></div>
-<p><strong>Two variables are injected into the cell's namespace</strong>: <code>&lt;name&gt;</code> — the table
-URI string — and <code>&lt;name&gt;_snapshot</code> — the snapshot id resolved when the cell's
+<p><strong>Two variables are injected into the cell's namespace</strong>: <code>&lt;name&gt;</code> - the table
+URI string - and <code>&lt;name&gt;_snapshot</code> - the snapshot id resolved when the cell's
 provenance was computed. Passing <code>&lt;name&gt;_snapshot</code> to the scan makes the cell
 fully deterministic: it reads exactly the snapshot its provenance recorded.</p>
 <p>Format: <code># @table &lt;name&gt; &lt;uri&gt; [snapshot=&lt;id&gt;]</code>. The URI is
-<code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code> — the same format <code>client.materialize</code>
+<code>&lt;warehouse&gt;#&lt;namespace&gt;.&lt;table&gt;</code> - the same format <code>client.materialize</code>
 accepts. The name must be a valid Python identifier.</p>
 <p><code>snapshot=&lt;id&gt;</code> pins the table: the cell reads that snapshot forever and never
 goes stale on new data (the lake-side analog of a mount <code>pin</code>). Without a pin,
 the snapshot is re-resolved every time staleness is evaluated.</p>
 <p>Like mount variables, the injected names live only in the declaring cell's
-namespace — they are not cell <em>defines</em> and do not flow to downstream cells.
+namespace - they are not cell <em>defines</em> and do not flow to downstream cells.
 To use the snapshot id downstream, export it as a real variable:
 <code>scanned_snapshot = trips_snapshot</code>.</p>
 <p>If the catalog is unreachable when provenance is computed, the cell is
@@ -2829,7 +2829,7 @@ configure the AI call.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a># @output json
 </code></pre></div>
 <p>Accepts <code>json</code> (the response is parsed/coerced as JSON) or <code>text</code>
-(free-form text — the default). Auto-set to <code>json</code> when
+(free-form text - the default). Auto-set to <code>json</code> when
 <code>@output_schema</code> is present, so the schema and <code># @output json</code> don't
 need to appear together.</p>
 <h3 id="output_schema"><code>@output_schema</code><a class="headerlink" href="#output_schema" title="Permanent link">&para;</a></h3>
@@ -2867,7 +2867,7 @@ iteration and the <code>carry</code> variable threads state between them.</p>
 <li><code>start_from=&lt;cell-id&gt;@iter=&lt;k&gt;</code>, (optional) resume from another loop cell's
   stored iteration <code>k</code>. Useful for forking a converged run to explore a
   variant. <code>&lt;cell-id&gt;</code> is the upstream loop cell's <code>id</code> in
-  <code>notebook.toml</code> (not its <code>@name</code>) — see <a href="#cell-ids">Cell IDs</a>.</li>
+  <code>notebook.toml</code> (not its <code>@name</code>) - see <a href="#cell-ids">Cell IDs</a>.</li>
 </ul>
 <h3 id="loop_until"><code>@loop_until</code><a class="headerlink" href="#loop_until" title="Permanent link">&para;</a></h3>
 <p>Python expression evaluated after each iteration in the cell's namespace. When
@@ -2998,20 +2998,20 @@ provides, the DAG falls back to the <strong>first variant in source order</stron
 A <code>variant_active_unknown</code> diagnostic surfaces in the UI when the
 selection drifts (e.g. you renamed a variant in source without updating
 the toml entry).</p>
-<h3 id="sweep-mode-compare-all-variants-at-once">Sweep mode — compare all variants at once<a class="headerlink" href="#sweep-mode-compare-all-variants-at-once" title="Permanent link">&para;</a></h3>
+<h3 id="sweep-mode-compare-all-variants-at-once">Sweep mode - compare all variants at once<a class="headerlink" href="#sweep-mode-compare-all-variants-at-once" title="Permanent link">&para;</a></h3>
 <p>Switch mode answers "which model do I pick?". <strong>Sweep mode</strong> answers
-"how do all three compare on the same downstream pipeline?" — it runs
+"how do all three compare on the same downstream pipeline?" - it runs
 <strong>every</strong> variant on each group execution and hands a downstream cell the
 whole set as a <code>{variant_name: value}</code> dict.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="k">[[variant_group]]</span>
 <a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;classifier&quot;</span>
 <a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;sweep&quot;</span><span class="w">        </span><span class="c1"># default is &quot;switch&quot;; `active` is ignored in sweep</span>
 </code></pre></div>
-<p>The variant cells are <strong>unchanged</strong> — same <code># @variant &lt;group&gt; &lt;name&gt;</code>
+<p>The variant cells are <strong>unchanged</strong> - same <code># @variant &lt;group&gt; &lt;name&gt;</code>
 annotation, same defines contract. Only the consumer changes: instead of
 seeing one <code>model</code>, a downstream cell receives a dict keyed by variant
 name and can compare them in one pass:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="c1"># downstream cell — `preds` is {&quot;logreg&quot;: ..., &quot;rf&quot;: ..., &quot;gbm&quot;: ...}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="c1"># downstream cell - `preds` is {&quot;logreg&quot;: ..., &quot;rf&quot;: ..., &quot;gbm&quot;: ...}</span>
 <a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="n">scores</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">accuracy</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">y_test</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">preds</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
 </code></pre></div>
 <p>Migrating switch → sweep is a one-line toml edit (no cell changes). In
@@ -3022,20 +3022,20 @@ variant→artifact map, so <strong>adding a variant only runs that one</strong> 
 renaming/removing a variant restalens the downstream as expected.</p>
 <p>Caveats worth knowing: a variant that fails is simply dropped from the
 dict (the downstream still runs once with the partial set), and a sweep
-group of one is legal but pointless — you'd get a one-key dict. Sweep-group
+group of one is legal but pointless - you'd get a one-key dict. Sweep-group
 members and their downstream consumers always run as <strong>single-cell</strong>
-executions — they're excluded from run-all's shared-namespace batching, so a
+executions - they're excluded from run-all's shared-namespace batching, so a
 sweep notebook doesn't get that speedup. This is deliberate: batching would let
 one variant's in-namespace state leak into a sibling's, corrupting its
 provenance, so sweep trades the batch speedup for per-variant isolation.</p>
-<h3 id="fan-out-run-a-downstream-cell-once-per-variant">Fan-out — run a downstream cell once per variant<a class="headerlink" href="#fan-out-run-a-downstream-cell-once-per-variant" title="Permanent link">&para;</a></h3>
+<h3 id="fan-out-run-a-downstream-cell-once-per-variant">Fan-out - run a downstream cell once per variant<a class="headerlink" href="#fan-out-run-a-downstream-cell-once-per-variant" title="Permanent link">&para;</a></h3>
 <p>Sweep mode hands a downstream cell the whole <code>{variant: value}</code> dict. Sometimes
-you'd rather run the <em>downstream work itself</em> once per variant — score each
+you'd rather run the <em>downstream work itself</em> once per variant - score each
 model on its own, tune each independently, dispatch each to its own GPU worker.
 That's <code># @per_variant</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="c1"># @per_variant</span>
 <a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="c1"># Runs once per model variant. `preds` is bound to THAT variant&#39;s list</span>
-<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="c1"># (a scalar), not the whole dict — so this cell computes one accuracy.</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="c1"># (a scalar), not the whole dict - so this cell computes one accuracy.</span>
 <a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="n">accuracy</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">==</span> <span class="n">t</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">preds</span><span class="p">,</span> <span class="n">y_true</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
 </code></pre></div>
 <p>The cell runs N times (once per variant of its upstream sweep group), each
@@ -3044,18 +3044,18 @@ per-variant too, so a <strong>downstream cell decides how to consume it</strong>
 <ul>
 <li>Another <code># @per_variant</code> cell continues the fan-out, zipping by variant name
   (instance <code>logreg</code> reads the upstream <code>logreg</code> value).</li>
-<li>A plain cell <strong>collapses</strong> it back to a <code>{variant: value}</code> dict — the same v1
+<li>A plain cell <strong>collapses</strong> it back to a <code>{variant: value}</code> dict - the same v1
   sweep machinery:</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="c1"># plain downstream — `accuracy` is {&quot;logreg&quot;: 0.9, &quot;rf&quot;: 0.88, ...}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="c1"># plain downstream - `accuracy` is {&quot;logreg&quot;: 0.9, &quot;rf&quot;: 0.88, ...}</span>
 <a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="n">best</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">accuracy</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">accuracy</span><span class="o">.</span><span class="n">get</span><span class="p">)</span>
 </code></pre></div>
 <p>Each instance is an independent <code>materialize</code>: its own provenance, its own
-cache entry, its own worker dispatch — so <code># @per_variant</code> + <code># @worker gpu</code>
+cache entry, its own worker dispatch - so <code># @per_variant</code> + <code># @worker gpu</code>
 fans out to N independent jobs, and adding a variant only runs the new instance.</p>
 <p><strong>Choosing the group.</strong> Bare <code># @per_variant</code> infers the group when the cell
 reads from exactly one sweep group. If it reads from two or more, name the one
-to fan out over — <code># @per_variant model</code> — and the others collapse to dicts. A
+to fan out over - <code># @per_variant model</code> - and the others collapse to dicts. A
 cell fans out over <strong>one</strong> group; comparing across two groups (cartesian) isn't
 supported. The validator flags the mistakes: <code>per_variant_no_sweep_source</code>
 (nothing to fan out over), <code>per_variant_ambiguous_group</code> (bare form, ≥2 groups),

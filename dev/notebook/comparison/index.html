@@ -1930,7 +1930,7 @@
 
 <h1 id="vs-jupyter-marimo-pluto">vs Jupyter, Marimo, Pluto<a class="headerlink" href="#vs-jupyter-marimo-pluto" title="Permanent link">&para;</a></h1>
 <p>Strata is closest in spirit to the new generation of reactive notebooks
-(Marimo, Pluto.jl) — it shares the "your DAG comes from your variable
+(Marimo, Pluto.jl) - it shares the "your DAG comes from your variable
 references" idea. Where Strata steps further is in turning every cell output
 into a content-addressed artifact and treating remote compute and AI calls
 as first-class cell behaviors rather than escape hatches.</p>
@@ -2020,7 +2020,7 @@ as first-class cell behaviors rather than escape hatches.</p>
 <td>Headless / CI runner</td>
 <td><code>strata run</code> (executes the cascade in topological order)</td>
 <td>Notebooks runnable as <code>python file.py</code></td>
-<td>None first-class — <code>.jl</code> file works ad-hoc via <code>julia notebook.jl</code>, otherwise via PlutoUtils.jl</td>
+<td>None first-class - <code>.jl</code> file works ad-hoc via <code>julia notebook.jl</code>, otherwise via PlutoUtils.jl</td>
 <td><code>nbconvert --execute</code></td>
 </tr>
 </tbody>
@@ -2028,7 +2028,7 @@ as first-class cell behaviors rather than escape hatches.</p>
 <h2 id="where-strata-is-distinctive">Where Strata is distinctive<a class="headerlink" href="#where-strata-is-distinctive" title="Permanent link">&para;</a></h2>
 <p><strong>Caching is automatic, not opt-in.</strong> Marimo offers persistent caching
 through <code>mo.persistent_cache</code> (decorator or context manager), <code>mo.cache</code>,
-and <code>mo.lru_cache</code> — the user explicitly delimits a block of code they
+and <code>mo.lru_cache</code> - the user explicitly delimits a block of code they
 want cached. In Strata, every cell's output is content-addressed by
 default: the provenance hash of source + upstream artifact hashes +
 environment lockfile decides cache identity, and a cache hit is the path
@@ -2039,8 +2039,8 @@ the whole notebook process. Strata's <code># @worker gpu-fly</code> annotation r
 a single cell, fitting one classifier on a GPU, fingerprinting one file
 on a high-memory box, without rewriting the rest of the pipeline.</p>
 <p><strong>AI calls are first-class DAG nodes.</strong> Marimo's "AI-native editor"
-framing — including the <code>marimo pair</code> agent skill they shipped in
-v0.22.5 — covers code-authoring assistance: generating cells from a
+framing - including the <code>marimo pair</code> agent skill they shipped in
+v0.22.5 - covers code-authoring assistance: generating cells from a
 prompt, inline autocompletion, sidebar chat. LLM responses are not
 themselves DAG nodes; if a user calls an LLM from a Python cell, it's
 an ordinary expression with no caching, no schema enforcement, no
@@ -2048,7 +2048,7 @@ retry on validation. Strata's prompt cells render a <code>{{ var }}</code>
 template against upstream artifacts, send the result to an
 OpenAI-compatible API (or Anthropic native tool-use when an output
 schema is set), validate against an optional JSON Schema, and store
-the response as a cached artifact — same caching guarantees as a
+the response as a cached artifact - same caching guarantees as a
 Python cell. Mixing prompt and Python cells in one DAG is the point.</p>
 <p><strong>Variant cells are unique to Strata.</strong> Three alternative training
 implementations can share the same DAG slot; switching the active variant
@@ -2063,7 +2063,7 @@ bumps on structural edits, adding/removing cells, changing workers:
 so re-running a cell never touches the tracked tree. Jupyter <code>.ipynb</code>
 files JSON-encode source, outputs (base64 images and all), and execution
 counts in the same blob; Marimo and Pluto avoid the JSON issue with one
-text file per notebook but still keep all cells together — and Marimo's
+text file per notebook but still keep all cells together - and Marimo's
 PEP 723 inline dependency block means dependency edits and code edits
 share the same file. Strata's per-cell layout keeps a diff that touches
 cell 3 from rebasing on top of changes to cell 7.</p>

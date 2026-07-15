@@ -2013,13 +2013,13 @@
 <td><strong>Notebook storage</strong></td>
 <td><code>~/.strata/notebooks/</code></td>
 <td>One subdirectory per notebook: <code>notebook.toml</code>, <code>cells/*.py</code>, <code>pyproject.toml</code>, <code>uv.lock</code>, <code>.strata/</code> (per-notebook runtime), <code>.venv/</code> (per-notebook venv)</td>
-<td>Always — this is your work</td>
+<td>Always - this is your work</td>
 </tr>
 <tr>
 <td><strong>Iceberg row-group cache</strong></td>
 <td><code>~/.strata/cache/</code></td>
 <td>Arrow-IPC files keyed by Parquet row-group, plus <code>meta.sqlite</code> (or <code>STRATA_METADATA_DB</code> if set)</td>
-<td>Optional — purely a perf cache, safe to delete</td>
+<td>Optional - purely a perf cache, safe to delete</td>
 </tr>
 <tr>
 <td><strong>Server-side artifact store</strong></td>
@@ -2031,15 +2031,15 @@
 </table>
 <p>Inside each notebook directory:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>mynotebook/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── notebook.toml             # committed config — schema: notebook-toml.md
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── notebook.toml             # committed config - schema: notebook-toml.md
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── pyproject.toml            # uv-managed deps for this notebook
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── uv.lock                   # pinned versions
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── cells/                    # one .py per cell — committed source
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└── .strata/                  # runtime state — gitignored
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── cells/                    # one .py per cell - committed source
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└── .strata/                  # runtime state - gitignored
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    ├── runtime.json          # display outputs, provenance hashes, env metadata
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    ├── console/              # per-cell stdout/stderr (one JSON per cell)
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    └── artifacts/            # SQLite + blobs (cached cell outputs)
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>└── .venv/                    # uv-materialized venv — gitignored, host-specific
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>└── .venv/                    # uv-materialized venv - gitignored, host-specific
 </code></pre></div>
 <p>The <code>.strata/artifacts/</code> directory is the <strong>per-notebook</strong> artifact store. It grows as cells produce outputs and is the thing that makes "re-run an unchanged cell" instant.</p>
 <h2 id="backup">Backup<a class="headerlink" href="#backup" title="Permanent link">&para;</a></h2>
@@ -2048,7 +2048,7 @@
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>tar<span class="w"> </span>--exclude<span class="o">=</span><span class="s1">&#39;.strata&#39;</span><span class="w"> </span>--exclude<span class="o">=</span><span class="s1">&#39;.venv&#39;</span><span class="w"> </span>-czf<span class="w"> </span>mynotebook.tar.gz<span class="w"> </span>mynotebook/
 </code></pre></div>
 <p>The excluded directories are runtime state (regenerable) and a host-specific venv (rebuildable with <code>uv sync</code>). Skipping them keeps the backup small (typical: tens of KB instead of hundreds of MB).</p>
-<p>If you'd rather not exclude <code>.strata/</code>, you can include it for a "warm restore" — cached cell outputs survive the trip and downstream cells stay green on the destination. Just expect the archive to be larger.</p>
+<p>If you'd rather not exclude <code>.strata/</code>, you can include it for a "warm restore" - cached cell outputs survive the trip and downstream cells stay green on the destination. Just expect the archive to be larger.</p>
 <h2 id="moving-between-machines">Moving between machines<a class="headerlink" href="#moving-between-machines" title="Permanent link">&para;</a></h2>
 <p>Same idea: copy the notebook directory minus <code>.venv/</code>. Optionally minus <code>.strata/</code> if you want a clean cache.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># On source</span>
@@ -2090,7 +2090,7 @@
 </tr>
 </tbody>
 </table>
-<p>Deleting a notebook also deletes its <code>.strata/artifacts/</code> — there's no shared artifact store across notebooks, so nothing leaks.</p>
+<p>Deleting a notebook also deletes its <code>.strata/artifacts/</code> - there's no shared artifact store across notebooks, so nothing leaks.</p>
 <h2 id="cleaning-up-the-core-artifact-store">Cleaning up the Core artifact store<a class="headerlink" href="#cleaning-up-the-core-artifact-store" title="Permanent link">&para;</a></h2>
 <p>The <strong>server-side</strong> artifact store (driven by <code>StrataClient.materialize</code>) accumulates blobs that may no longer be referenced by any name pointer. There's no automatic cap on it; you GC manually:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/artifacts/gc?max_age_days=7&#39;</span>
@@ -2104,16 +2104,16 @@
 <p>The GC pass:</p>
 <ul>
 <li>Walks the metadata SQLite for artifacts older than <code>max_age_days</code></li>
-<li>Filters to "unreferenced" — no <code>[name]</code> pointer references them</li>
+<li>Filters to "unreferenced" - no <code>[name]</code> pointer references them</li>
 <li>Deletes only artifacts in <code>ready</code> or <code>failed</code> state (in-flight artifacts are safe)</li>
 <li>Returns counts + bytes freed</li>
 </ul>
-<p>Personal mode only — service-mode deployments need the <code>admin:cache</code> scope and should usually GC per-tenant.</p>
-<p>GC the <strong>per-notebook</strong> artifact store by deleting the notebook (or by deleting <code>.strata/artifacts/</code> while the server isn't running). There's no per-notebook GC endpoint — cell-output artifacts are content-addressed and pruning them would defeat the cache.</p>
+<p>Personal mode only - service-mode deployments need the <code>admin:cache</code> scope and should usually GC per-tenant.</p>
+<p>GC the <strong>per-notebook</strong> artifact store by deleting the notebook (or by deleting <code>.strata/artifacts/</code> while the server isn't running). There's no per-notebook GC endpoint - cell-output artifacts are content-addressed and pruning them would defeat the cache.</p>
 <h2 id="cleaning-up-the-iceberg-row-group-cache">Cleaning up the Iceberg row-group cache<a class="headerlink" href="#cleaning-up-the-iceberg-row-group-cache" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/cache/clear&#39;</span>
 </code></pre></div>
-<p>Clears the in-memory + on-disk Iceberg cache. Personal mode is unrestricted; service mode requires the <code>admin:cache</code> scope. Safe to run at any time — the worst case is the next read repopulates from Parquet.</p>
+<p>Clears the in-memory + on-disk Iceberg cache. Personal mode is unrestricted; service mode requires the <code>admin:cache</code> scope. Safe to run at any time - the worst case is the next read repopulates from Parquet.</p>
 <h2 id="disk-usage-budgeting">Disk-usage budgeting<a class="headerlink" href="#disk-usage-budgeting" title="Permanent link">&para;</a></h2>
 <p>This is the part most people get bitten by. There are <strong>two</strong> caps to understand and they don't cover everything.</p>
 <table>
@@ -2129,7 +2129,7 @@
 <tr>
 <td><code>STRATA_MAX_CACHE_SIZE_BYTES</code></td>
 <td>10 GB</td>
-<td>The Iceberg row-group cache (<code>~/.strata/cache/</code>) — LRU-evicted to stay under the cap</td>
+<td>The Iceberg row-group cache (<code>~/.strata/cache/</code>) - LRU-evicted to stay under the cap</td>
 <td>Anything else</td>
 </tr>
 <tr>
@@ -2142,16 +2142,16 @@
 </table>
 <p>Things with <strong>no built-in size limit</strong>:</p>
 <ul>
-<li><code>~/.strata/notebooks/*/​.strata/artifacts/</code> — per-notebook artifact stores. Grow with each cell run that produces new outputs (cache hits don't add bytes; only new provenance hashes do).</li>
-<li><code>~/.strata/notebooks/*/​.venv/</code> — per-notebook venvs. Grow with each <code>uv add</code>; the heaviest notebooks (torch + cuda) can run to several GB each. Use shared system packages or smaller deps if disk is tight.</li>
+<li><code>~/.strata/notebooks/*/​.strata/artifacts/</code> - per-notebook artifact stores. Grow with each cell run that produces new outputs (cache hits don't add bytes; only new provenance hashes do).</li>
+<li><code>~/.strata/notebooks/*/​.venv/</code> - per-notebook venvs. Grow with each <code>uv add</code>; the heaviest notebooks (torch + cuda) can run to several GB each. Use shared system packages or smaller deps if disk is tight.</li>
 <li>The server's <code>~/.strata/artifacts/</code> until you GC it.</li>
 </ul>
 <p>Practical guidance:</p>
 <ul>
 <li>Run <code>POST /v1/artifacts/gc</code> weekly (or on a cron) if you use the Core SDK.</li>
-<li>The Iceberg cache is self-managing under its byte cap — leave it.</li>
+<li>The Iceberg cache is self-managing under its byte cap - leave it.</li>
 <li>If a single notebook's <code>.strata/artifacts/</code> gets uncomfortably large, the cleanest reset is to delete the notebook's <code>.strata/</code> directory while the server isn't running. Cell source survives; provenance cache resets.</li>
-<li>For <code>.venv/</code> sprawl: <code>du -sh ~/.strata/notebooks/*/.venv</code> is the quickest audit. Old notebooks you don't open anymore can have their <code>.venv/</code> deleted — <code>uv sync</code> will recreate it next time.</li>
+<li>For <code>.venv/</code> sprawl: <code>du -sh ~/.strata/notebooks/*/.venv</code> is the quickest audit. Old notebooks you don't open anymore can have their <code>.venv/</code> deleted - <code>uv sync</code> will recreate it next time.</li>
 </ul>
 <h2 id="notebook-storage-location">Notebook storage location<a class="headerlink" href="#notebook-storage-location" title="Permanent link">&para;</a></h2>
 <p>The notebook storage root is controlled by <code>STRATA_NOTEBOOK_STORAGE_DIR</code>. The default is <code>~/.strata/notebooks/</code> (matches the <code>~/.strata/</code> convention for cache + artifacts).</p>
@@ -2165,10 +2165,10 @@ move them once:</p>
 </code></pre></div>
 <p>or set <code>STRATA_NOTEBOOK_STORAGE_DIR=/tmp/strata-notebooks</code> if you
 intentionally want the legacy path (e.g. you're already mounting a
-volume at <code>/tmp/strata-notebooks</code> in Docker — see the Docker page
+volume at <code>/tmp/strata-notebooks</code> in Docker - see the Docker page
 for that pattern).</p>
 </div>
-<p>For multi-user deployments, see <code>STRATA_PERSONAL_MODE_USER_HEADER</code> in <a href="../../reference/configuration/#notebook">Configuration</a> — it scopes each user to their own subdirectory under the storage root.</p>
+<p>For multi-user deployments, see <code>STRATA_PERSONAL_MODE_USER_HEADER</code> in <a href="../../reference/configuration/#notebook">Configuration</a> - it scopes each user to their own subdirectory under the storage root.</p>
 
 
 

@@ -2017,7 +2017,7 @@ comparison.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>curl<span class="w"> </span>https://&lt;your-app-name&gt;.fly.dev/health
 </code></pre></div>
 <p>Expected response: <code>{"status":"ok"}</code> (plus details). If you get a
-504 or connection error, run <code>fly logs</code> to inspect the startup —
+504 or connection error, run <code>fly logs</code> to inspect the startup -
 the most common cause is a cold-start delay on the first request.</p>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
 <p>The <code>fly.toml</code> at the repo root configures:</p>
@@ -2035,7 +2035,7 @@ the most common cause is a cold-start delay on the first request.</p>
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="n">UV_PYTHON_DOWNLOADS</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;automatic&quot;</span>
 </code></pre></div>
 <p><code>STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL</code> is what lets personal-mode
-bind to <code>0.0.0.0</code> instead of loopback only — without it, Strata
+bind to <code>0.0.0.0</code> instead of loopback only - without it, Strata
 refuses to start on a Fly machine because the Fly proxy can't reach
 a loopback bind. Setting this is the explicit acknowledgment that
 you understand the personal-mode trust model (see the warning above).</p>
