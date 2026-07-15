@@ -1,0 +1,2649 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A content-addressed computation graph with an interactive notebook UI">
+      
+      
+      
+        <link rel="canonical" href="https://bearing-research.github.io/strata/0.5.0/notebook/import/">
+      
+      
+        <link rel="prev" href="../mcp/">
+      
+      
+        <link rel="next" href="../export/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Import from Jupyter - Strata</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#import" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Strata" class="md-header__button md-logo" aria-label="Strata" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Strata
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Import from Jupyter
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/bearing-research/strata" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    bearing-research/strata
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../getting-started/notebook/" class="md-tabs__link">
+          
+  
+  
+  Notebook
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/core/" class="md-tabs__link">
+          
+  
+  
+  Core
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/notebook-protocol/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/installation/" class="md-tabs__link">
+          
+  
+  
+  Deployment
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Strata" class="md-nav__button md-logo" aria-label="Strata" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Strata
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/bearing-research/strata" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    bearing-research/strata
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebook
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Notebook
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/notebook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../comparison/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    vs Jupyter, Marimo, Pluto
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Types
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../annotations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Annotations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cell Unit Tests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lake-aware-cells/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lake-Aware Cells
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../registry-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Registry Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Distributed Workers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ai/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../secrets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Secret Manager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Headless Runner
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authoring Programmatically
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import from Jupyter
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Import from Jupyter
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-survives-what-doesnt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What survives, what doesn't
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-to-use-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REST
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-converter-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the converter does
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What the converter does">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cell-by-cell-in-source-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell-by-cell, in source order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-display-suppression-preserved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ;-display-suppression preserved
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#magic-translation-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Magic translation table
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shell-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        !shell commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-import-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The import report
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations-by-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations by design
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stress-testing-with-the-corpus-runner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stress-testing with the corpus runner
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stress-testing with the corpus runner">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#extended-corpus-nightly-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extended corpus + nightly CI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#round-trip-back-to-ipynb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Round-trip back to .ipynb
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Terminal Viewer (TUI)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../keyboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keyboard Shortcuts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Core
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../core/registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Artifacts & Registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/notebook-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebook Client Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/rest-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSocket Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/executor-protocol/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Executor Protocol
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/notebook-toml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    notebook.toml Schema
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deployment
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/service-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Service Mode
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/lifecycle/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations & Lifecycle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy & Sharing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/fly/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fly.io
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/codespaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Codespaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deployment/observability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Observability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-survives-what-doesnt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What survives, what doesn't
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-to-use-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REST
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-the-converter-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the converter does
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What the converter does">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cell-by-cell-in-source-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell-by-cell, in source order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-display-suppression-preserved" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ;-display-suppression preserved
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#magic-translation-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Magic translation table
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shell-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        !shell commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-import-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The import report
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations-by-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limitations by design
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stress-testing-with-the-corpus-runner" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stress-testing with the corpus runner
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stress-testing with the corpus runner">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#extended-corpus-nightly-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extended corpus + nightly CI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#round-trip-back-to-ipynb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Round-trip back to .ipynb
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="import">Import<a class="headerlink" href="#import" title="Permanent link">&para;</a></h1>
+<p><code>strata import</code> converts a Jupyter <code>.ipynb</code> file into a Strata
+notebook directory. The result is a normal Strata notebook, same
+DAG analysis, same artifact store, same execution model, that you
+can open in the UI, run headlessly, edit, or export.</p>
+<h2 id="what-survives-what-doesnt">What survives, what doesn't<a class="headerlink" href="#what-survives-what-doesnt" title="Permanent link">&para;</a></h2>
+<p>Read this before you decide to import a particular notebook.</p>
+<p><strong>What survives:</strong></p>
+<ul>
+<li><strong>Code and markdown cells</strong>, in source order, including variable
+  rebinding patterns like <code>df = df.dropna()</code> (Strata's DAG handles
+  read-before-write correctly).</li>
+<li><strong><code>;</code>-suppression</strong> of the trailing display (Strata's harness
+  auto-displays bare expressions; the converter detects <code>df;</code> and
+  appends a <code>pass</code> so the display is skipped).</li>
+<li><strong><code>%pip install</code>, <code>!pip install</code>, <code>%conda install</code></strong> - packages
+  captured into the new notebook's <code>pyproject.toml</code>.</li>
+<li><strong><code>%env</code>, <code>%set_env</code></strong> - translated to <code># @env KEY=VAL</code> cell
+  annotations.</li>
+<li><strong><code>%run script.py</code></strong> - translated to <code>exec(Path(...).read_text())</code>.</li>
+<li><strong><code>%%bash</code>, <code>%%sh</code>, <code>%%script</code></strong> - bodies wrapped in
+  <code>subprocess.run(..., shell=True)</code>.</li>
+<li><strong><code>%%writefile</code></strong> - translated to <code>Path(...).write_text(...)</code>.</li>
+<li><strong><code>%timeit</code>, <code>%time</code> (line form)</strong> - the magic prefix is dropped;
+  the body keeps running.</li>
+</ul>
+<p><strong>What you lose:</strong></p>
+<ul>
+<li><strong>All cell outputs.</strong> Imported cells start blank; first run
+  produces fresh outputs from the resolved environment. This is
+  intentional - the whole point of content-addressed caching is to
+  produce outputs from a known source + env, not to trust whatever
+  was last serialized into the <code>.ipynb</code>.</li>
+<li><strong>Widgets</strong> (<code>ipywidgets</code>, <code>tqdm.notebook</code>, custom display).
+  Strata's display protocol covers DataFrames, plots, markdown,
+  images - but interactive JS widgets don't survive.</li>
+<li><strong><code>%matplotlib inline</code> / <code>notebook</code>.</strong> Dropped. Strata captures
+  figures via the display protocol automatically.</li>
+<li><strong>Raw cells.</strong> Skipped entirely (counted in the import report).</li>
+<li><strong><code>!shell</code> commands</strong> other than <code>pip install</code>. Dropped with a
+  marker comment; assignment-form (<code>var = !cmd</code>) drops the command
+  and stubs <code>var = []</code> so downstream code still parses. Restore
+  manually with <code>subprocess.run(...)</code> if the escape was load-bearing.</li>
+<li><strong>Non-Python <code>%%</code> cell magics</strong> (<code>%%R</code>, <code>%%ruby</code>, <code>%%javascript</code>,
+  <code>%%html</code>, <code>%%latex</code>, <code>%%svg</code>, <code>%%markdown</code>). Dropped.</li>
+<li><strong><code>%%sql</code>.</strong> Dropped - convert by hand to a Strata
+  <a href="../cells/#sql-cells">SQL cell</a> if you want it back.</li>
+<li><strong>REPL-inspection magics</strong> (<code>%who</code>, <code>%whos</code>, <code>%lsmagic</code>, <code>%history</code>,
+  <code>%alias</code>, etc.). Dropped; no Strata equivalent.</li>
+</ul>
+<p>Everything that's "dropped" is reported in the import report
+(<code>&lt;notebook_dir&gt;/import_report.md</code>) with the exact line number and
+the marker comment placed in the cell source - there's no silent
+data loss.</p>
+<h2 id="when-to-use-it">When to use it<a class="headerlink" href="#when-to-use-it" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>You arrived from Jupyter</strong> and want to try Strata on a notebook
+  you already have. One command and you're working in Strata's model
+  (content-addressed caching, explicit DAG, distributed workers,
+  prompt cells, …) without rewriting from scratch.</li>
+<li><strong>You're picking up someone else's analysis</strong> that lives as an
+  <code>.ipynb</code> on GitHub or Kaggle. Import it once, iterate normally.</li>
+<li><strong>You're stress-testing Strata</strong> against real-world notebooks:
+  the import + corpus-runner combo is the validation harness Strata
+  itself uses pre-release.</li>
+</ul>
+<p>The import is <strong>one-shot</strong>, not a live sync. The <code>.ipynb</code> is treated
+as input; the resulting notebook directory is the source of truth
+from then on. There's no "save back to ipynb", that's a separate
+<a href="#round-trip-back-to-ipynb">planned feature</a>.</p>
+<h2 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>strata<span class="w"> </span>import<span class="w"> </span>&lt;path/to/notebook.ipynb&gt;<span class="w"> </span><span class="o">[</span>options<span class="o">]</span>
+</code></pre></div>
+<h3 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--out &lt;dir&gt;</code></td>
+<td>Target notebook directory. Defaults to a sibling directory named after the <code>.ipynb</code> stem.</td>
+</tr>
+<tr>
+<td><code>--check-deps</code></td>
+<td>After capturing dependencies, run <code>uv lock</code> to verify they resolve into a lockfile.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Side-by-side default: ./my_analysis.ipynb → ./my_analysis/</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>strata<span class="w"> </span>import<span class="w"> </span>my_analysis.ipynb
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Place the result elsewhere</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>strata<span class="w"> </span>import<span class="w"> </span>~/Downloads/kaggle_titanic.ipynb<span class="w"> </span>--out<span class="w"> </span>~/work/titanic
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Then open or run normally</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>strata-notebook<span class="w"> </span>--notebook-storage-dir<span class="w"> </span>~/work<span class="w">     </span><span class="c1"># UI</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>strata<span class="w"> </span>run<span class="w"> </span>~/work/titanic<span class="w">                       </span><span class="c1"># headless</span>
+</code></pre></div>
+<h2 id="rest">REST<a class="headerlink" href="#rest" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>POST /v1/notebooks/import
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>Content-Type: multipart/form-data
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>file</code></td>
+<td>file (required)</td>
+<td>The <code>.ipynb</code> upload. Hard cap of 50 MB per request.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>Override the notebook name. Defaults to the upload's filename stem.</td>
+</tr>
+<tr>
+<td><code>parent_path</code></td>
+<td>string</td>
+<td>Override the storage location. Must lie inside the configured storage root.</td>
+</tr>
+</tbody>
+</table>
+<p>Returns the same notebook state shape as <code>POST /v1/notebooks/create</code>
+plus an <code>import_report</code> field with the conversion details. On
+malformed input, invalid JSON, non-nbformat structure, path
+traversal in <code>name</code>, collision with an existing notebook, returns a
+clean <code>400</code> or <code>409</code> with <code>detail</code> set.</p>
+<h2 id="what-the-converter-does">What the converter does<a class="headerlink" href="#what-the-converter-does" title="Permanent link">&para;</a></h2>
+<h3 id="cell-by-cell-in-source-order">Cell-by-cell, in source order<a class="headerlink" href="#cell-by-cell-in-source-order" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Jupyter cell</th>
+<th>Strata cell</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Markdown</td>
+<td>Markdown cell with the source verbatim</td>
+</tr>
+<tr>
+<td>Code</td>
+<td>Python cell (after magic translation, see below)</td>
+</tr>
+<tr>
+<td>Raw</td>
+<td>Skipped; counted in the report</td>
+</tr>
+</tbody>
+</table>
+<p>Variable rebinding (<code>df = df.dropna()</code>, <code>df = df[df.col &gt; 0]</code>, …)
+is a first-class pattern. Strata's DAG analyser handles read-before-
+write semantics correctly: the cell appears as both a producer
+<em>and</em> a consumer of <code>df</code>, so the upstream edge is drawn and downstream
+cells see the post-mutation view.</p>
+<h3 id="-display-suppression-preserved"><code>;</code>-display-suppression preserved<a class="headerlink" href="#-display-suppression-preserved" title="Permanent link">&para;</a></h3>
+<p><code>df;</code> in Jupyter evaluates <code>df</code> but suppresses the auto-displayed
+value. Strata's harness auto-displays the last bare expression too,
+so the converter detects the trailing <code>;</code> (with or without an
+adjacent comment) and appends a <code>pass</code> so the harness skips display.
+The cell still runs.</p>
+<h3 id="magic-translation-table">Magic translation table<a class="headerlink" href="#magic-translation-table" title="Permanent link">&para;</a></h3>
+<p>Single dict in <code>strata.notebook.jupyter_import</code>. Adding a row
+extends support; rows can be:</p>
+<table>
+<thead>
+<tr>
+<th>Magic</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>%matplotlib inline</code>, <code>%matplotlib notebook</code></td>
+<td>Dropped. Strata captures figures via the display protocol.</td>
+</tr>
+<tr>
+<td><code>%load_ext</code>, <code>%reload_ext</code>, <code>%autoreload</code>, <code>%config</code>, <code>%colors</code>, <code>%rerun</code></td>
+<td>Dropped.</td>
+</tr>
+<tr>
+<td><code>%capture</code>, <code>%xmode</code>, <code>%pdb</code>, <code>%debug</code>, <code>%tb</code></td>
+<td>Dropped.</td>
+</tr>
+<tr>
+<td><code>%who</code>, <code>%who_ls</code>, <code>%whos</code>, <code>%lsmagic</code>, <code>%magic</code>, <code>%history</code>, <code>%alias</code>, <code>%alias_magic</code></td>
+<td>Dropped (interactive REPL inspection has no Strata equivalent).</td>
+</tr>
+<tr>
+<td><code>%timeit</code>, <code>%time</code> (line form)</td>
+<td>Magic stripped, body kept.</td>
+</tr>
+<tr>
+<td><code>%pip install &lt;pkgs&gt;</code>, <code>!pip install &lt;pkgs&gt;</code>, <code>%conda install &lt;pkgs&gt;</code></td>
+<td>Packages captured into <code>pyproject.toml</code>.</td>
+</tr>
+<tr>
+<td><code>%env KEY=VAL</code>, <code>%set_env KEY=VAL</code></td>
+<td>Translated to a <code># @env KEY=VAL</code> cell annotation.</td>
+</tr>
+<tr>
+<td><code>%run script.py</code></td>
+<td>Translated to an <code>exec(Path("script.py").read_text())</code> (with a self-contained <code>Path</code> import).</td>
+</tr>
+<tr>
+<td><code>%%bash</code>, <code>%%sh</code>, <code>%%script</code></td>
+<td>Body wrapped in <code>subprocess.run(..., shell=True)</code>.</td>
+</tr>
+<tr>
+<td><code>%%writefile &lt;path&gt;</code>, <code>%%file &lt;path&gt;</code></td>
+<td>Translated to <code>Path(&lt;path&gt;).write_text(&lt;body&gt;)</code>.</td>
+</tr>
+<tr>
+<td><code>%%timeit</code>, <code>%%time</code>, <code>%%capture</code></td>
+<td>Recurse on body as plain code.</td>
+</tr>
+<tr>
+<td><code>%%javascript</code>, <code>%%js</code>, <code>%%html</code>, <code>%%latex</code>, <code>%%svg</code>, <code>%%markdown</code></td>
+<td>Dropped. Strata has no equivalent renderer.</td>
+</tr>
+<tr>
+<td><code>%%R</code>, <code>%%ruby</code>, <code>%%perl</code>, <code>%%cython</code>, <code>%%fortran</code>, <code>%%sql</code></td>
+<td>Dropped (non-Python languages and embedded SQL aren't auto-translatable; use Strata's SQL cell type for <code>%%sql</code> content).</td>
+</tr>
+<tr>
+<td>Anything unrecognized</td>
+<td>Dropped with a <code># strata: unsupported magic '&lt;name&gt;' dropped</code> comment at the original location.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="shell-commands"><code>!shell</code> commands<a class="headerlink" href="#shell-commands" title="Permanent link">&para;</a></h3>
+<p>Auto-running shell from an untrusted notebook is a real hazard
+(stress-testing public Kaggle notebooks is a primary use case), so
+the converter is conservative:</p>
+<ul>
+<li><strong><code>!pip install pkg1 pkg2</code></strong>: packages captured to deps,
+  source line removed.</li>
+<li><strong><code>var = !cmd</code></strong> (assignment-form shell escape) command dropped,
+  <code>var</code> stub-bound to <code>[]</code> so downstream code still parses. Restore
+  manually with <code>subprocess.run(...)</code> if the shell escape matters.</li>
+<li><strong>Other <code>!cmd</code></strong>: dropped with a marker comment. Surfaces in the
+  import report's <em>Shell commands dropped</em> section.</li>
+</ul>
+<h3 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h3>
+<p>Four sources, in priority order, earlier sources shadow later ones,
+so a version-pinned spec from <code>requirements.txt</code> wins over a bare
+inferred-from-imports entry:</p>
+<ol>
+<li>Sibling <code>requirements.txt</code> next to the <code>.ipynb</code>.</li>
+<li>Sibling <code>pyproject.toml</code> next to the <code>.ipynb</code>.</li>
+<li><code>%pip install</code> / <code>!pip install</code> lines extracted from cells.</li>
+<li><strong>Bare imports in cell source.</strong> AST-walk each cell, collect
+   top-level import names, filter stdlib (via <code>sys.stdlib_module_names</code>)
+   and local sibling modules (anything that resolves to a <code>*.py</code> or
+   <code>*/__init__.py</code> next to the notebook). Map import names to PyPI
+   names via a small hand-maintained dict for common mismatches:
+   <code>cv2 → opencv-python</code>, <code>sklearn → scikit-learn</code>, <code>PIL → Pillow</code>,
+   <code>bs4 → beautifulsoup4</code>, <code>yaml → PyYAML</code>, etc. Anything not in the
+   dict is assumed to use the same name on PyPI (right ~95% of the
+   time).</li>
+</ol>
+<p>The combined set is deduped with PEP 503-normalized package names
+(so <code>scikit-learn</code> and <code>scikit_learn</code> collapse to one entry) and
+filtered to <strong>PEP 508 specifiers only</strong>: <code>pyproject.toml</code>'s
+<code>dependencies</code> won't accept editable installs (<code>-e .</code>), bare URLs
+(<code>git+https://…</code>), or local paths. Skipped specs land in the import
+report so you can address them by hand.</p>
+<p>The deps are written to the new notebook's <code>pyproject.toml</code>. First
+<code>uv sync</code> (which runs automatically when you open the notebook in
+the UI, or when you invoke <code>strata run</code>) resolves them. The
+importer doesn't call <code>uv add</code> itself, that's slow, networked, and
+partial-failure-prone.</p>
+<h2 id="the-import-report">The import report<a class="headerlink" href="#the-import-report" title="Permanent link">&para;</a></h2>
+<p>Every import writes <code>&lt;notebook_dir&gt;/import_report.md</code> and the same
+content is returned inline on the REST response (<code>import_report.report_text</code>).</p>
+<p>Sections appear only when relevant, a clean notebook with no magics,
+no shell, and no deps produces a short report with just the counts.
+Sections that surface when applicable:</p>
+<ul>
+<li><strong>Counts</strong>: markdown / code cells, <code>;</code>-suppression instances,
+  skipped cell types.</li>
+<li><strong>Magics translated</strong>: list of every magic the converter rewrote
+  or absorbed.</li>
+<li><strong>Magics dropped</strong>: magics with no Strata equivalent; the source
+  carries a marker comment where each one used to live.</li>
+<li><strong>Shell commands dropped</strong>: <code>!cmd</code> lines (except <code>!pip install</code>)
+  that the converter removed.</li>
+<li><strong>Dependencies captured</strong>: what landed in <code>pyproject.toml</code>,
+  ready for <code>uv sync</code> to resolve.</li>
+<li><strong>Warnings</strong>: anything noteworthy; e.g. pip-only specs skipped
+  for not being valid PEP 508.</li>
+</ul>
+<h2 id="limitations-by-design">Limitations by design<a class="headerlink" href="#limitations-by-design" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>No output preservation.</strong> Imported cells start blank. Running
+  the notebook through Strata produces fresh outputs from a known
+  environment, which is exactly the signal the
+  <a href="#stress-testing-with-the-corpus-runner">corpus-runner stress test</a>
+  is built to validate. Pre-loaded author outputs would mask
+  execution incompatibilities.</li>
+<li><strong>No widgets.</strong> <code>application/vnd.jupyter.widget-view+json</code>
+  outputs and <code>%%javascript</code> cells are dropped with a warning.
+  Strata's display protocol doesn't model interactive widgets.</li>
+<li><strong>No round-trip back to <code>.ipynb</code>.</strong> Tracked as a follow-up; out
+  of scope for the import path itself.</li>
+<li><strong>Kaggle hard-coded paths.</strong> Notebooks that reference
+  <code>/kaggle/input/...</code> directly will fail on first run outside
+  Kaggle. The path lives unchanged in the imported source; surface
+  it in the report or rewrite by hand.</li>
+</ul>
+<h2 id="stress-testing-with-the-corpus-runner">Stress-testing with the corpus runner<a class="headerlink" href="#stress-testing-with-the-corpus-runner" title="Permanent link">&para;</a></h2>
+<p>The same <code>import_notebook</code> machinery the CLI and REST endpoint use
+backs the corpus runner under <code>tests/notebook/test_jupyter_corpus.py</code>.
+Five hand-crafted smoke fixtures get scored through:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>parse:    can we read the .ipynb at all?
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>convert:  did jupyter_import produce a valid Strata notebook dir?
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>dag:      does the DAG build with no cycles / unbound references?
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>run:      does `strata run` complete with no exceptions?
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>artifact: do leaf cells produce non-empty artifacts?
+</code></pre></div>
+<p>The fast tier (<code>parse + convert + dag</code>) runs on every PR. The full
+tier (<code>+ run + artifact</code>) is opt-in:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nv">STRATA_CORPUS_RUN</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/notebook/test_jupyter_corpus.py
+</code></pre></div>
+<p>The runner does a <code>uv sync</code> per fixture and a real <code>strata run</code>,
+so it's slow (network) and intended for nightly schedules or
+manual pre-release verification.</p>
+<h3 id="extended-corpus-nightly-ci">Extended corpus + nightly CI<a class="headerlink" href="#extended-corpus-nightly-ci" title="Permanent link">&para;</a></h3>
+<p><code>tests/notebook/jupyter_corpus/extended.yaml</code> lists public <code>.ipynb</code>
+URLs pinned to specific commit SHAs. The <code>jupyter-corpus</code> GitHub
+Actions workflow fetches each one nightly (04:00 UTC) and runs it
+through the same rubric. Failures are report-only, the workflow
+uploads a junit XML artifact, doesn't gate other CI. The cache is
+keyed by the manifest's content hash so once a URL has been
+fetched it's served from disk on subsequent runs.</p>
+<p>Anyone can trigger the workflow from the Actions tab via
+<code>workflow_dispatch</code>. Adding a new entry: pick a stable repo, pin to
+a commit SHA, run <code>STRATA_CORPUS_RUN=1 pytest -k &lt;name&gt;</code> locally to
+verify the entry clears the bar you set, commit the manifest line.</p>
+<h2 id="round-trip-back-to-ipynb">Round-trip back to <code>.ipynb</code><a class="headerlink" href="#round-trip-back-to-ipynb" title="Permanent link">&para;</a></h2>
+<p>Out of scope today. Tracked as a follow-up because preserving the
+import-lossy parts (Jupyter outputs, widget metadata, original
+magic text) would compromise the import itself. See
+<code>docs/internal/design-jupyter-import.md</code> if you're picking this up.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.tabs", "navigation.top", "content.code.copy", "search.highlight", "search.suggest"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
