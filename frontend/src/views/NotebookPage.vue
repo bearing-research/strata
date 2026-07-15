@@ -546,7 +546,7 @@ function goHome() {
         </router-link>
         <button
           type="button"
-          class="header-logs-link header-embed-btn"
+          class="header-logs-link"
           data-testid="nav-embed"
           :title="'Copy an <iframe> snippet to embed this app in another site'"
           @click="copyEmbedSnippet"
@@ -807,26 +807,25 @@ function goHome() {
   border-color: var(--accent-primary);
 }
 
+/* Works identically for the <a> nav links and the <button> (Embed): the
+   button-chrome resets (font, background, line-height, cursor) keep the two
+   element types pixel-identical. */
 .header-logs-link {
+  font-family: inherit;
   font-size: 12px;
+  line-height: 1.5;
   color: var(--text-secondary);
   text-decoration: none;
   padding: 3px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
 }
 
 .header-logs-link:hover {
   color: var(--text-primary);
   border-color: var(--border-strong);
-}
-
-/* The Embed control is a <button> but should read like the sibling links. */
-.header-embed-btn {
-  background: none;
-  font: inherit;
-  line-height: normal;
-  cursor: pointer;
 }
 
 .mode-badge {
