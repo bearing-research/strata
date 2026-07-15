@@ -20,9 +20,9 @@ Strata Notebook can dispatch individual cells to remote machines via the **execu
 4. The worker runs the cell in a subprocess and returns outputs as a gzipped bundle.
 5. Strata stores the outputs as artifacts; cache hits work identically to local cells.
 
-Cells run in **the worker's Python environment**, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into the worker image before launching it. Unlike Strata's own server, the worker process does **not** require a uv-managed env — it can be pip-installed into a plain Docker image.
+Cells run in **the worker's Python environment**, so install your workload dependencies (torch, datafusion, sentence-transformers, etc.) into the worker image before launching it. Unlike Strata's own server, the worker process does **not** require a uv-managed env - it can be pip-installed into a plain Docker image.
 
-For the wire-level contract — request envelopes, response bundle format, error codes, the pull-model with signed URLs — see the [Executor Protocol](../reference/executor-protocol.md) reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use `strata-worker`.
+For the wire-level contract - request envelopes, response bundle format, error codes, the pull-model with signed URLs - see the [Executor Protocol](../reference/executor-protocol.md) reference. This page covers deployment and registration; that one covers the bytes on the wire and is what you'd implement against to write a custom worker that doesn't use `strata-worker`.
 
 ## Quick start: run a worker locally
 
@@ -86,7 +86,7 @@ import platform
 hostname = platform.node()
 ```
 
-When the cell runs, the UI shows a pulsing **"dispatching → local"** badge during execution. The `hostname` artifact is what the worker process saw, not your laptop — confirming the cell really ran remotely.
+When the cell runs, the UI shows a pulsing **"dispatching → local"** badge during execution. The `hostname` artifact is what the worker process saw, not your laptop - confirming the cell really ran remotely.
 
 Once this works locally, the cloud deploys below just change `config.url` from `http://127.0.0.1:9000` to the worker's public URL.
 
@@ -122,7 +122,7 @@ my-strata-worker/
 └── .dockerignore
 ```
 
-**`Dockerfile`** — installs `strata-notebook` and your workload deps from a uv-managed venv. Unlike `strata-notebook`, the worker entry (`strata-worker`) is not gated by Strata's runtime guard, so a plain `pip install` would also work — but the uv-python base image keeps tooling consistent across server + worker and drops a few hundred MB of build stage versus a source install.
+**`Dockerfile`** - installs `strata-notebook` and your workload deps from a uv-managed venv. Unlike `strata-notebook`, the worker entry (`strata-worker`) is not gated by Strata's runtime guard, so a plain `pip install` would also work - but the uv-python base image keeps tooling consistent across server + worker and drops a few hundred MB of build stage versus a source install.
 
 ```dockerfile
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
@@ -176,7 +176,7 @@ __pycache__
 **2. Deploy:**
 
 ```bash
-fly launch --no-deploy   # first time only — creates the app, accepts fly.toml
+fly launch --no-deploy   # first time only - creates the app, accepts fly.toml
 fly deploy
 ```
 
@@ -250,7 +250,7 @@ def gpu_executor():
 modal deploy worker.py
 ```
 
-Modal prints the deployed URL after the build finishes — something like `https://your-username--my-gpu-worker-gpu-executor.modal.run`. The first build with torch + sentence-transformers takes ~5 minutes; redeploys with no changes hit the layer cache and finish in seconds.
+Modal prints the deployed URL after the build finishes - something like `https://your-username--my-gpu-worker-gpu-executor.modal.run`. The first build with torch + sentence-transformers takes ~5 minutes; redeploys with no changes hit the layer cache and finish in seconds.
 
 **3. Verify:**
 
@@ -258,7 +258,7 @@ Modal prints the deployed URL after the build finishes — something like `https
 curl https://your-username--my-gpu-worker-gpu-executor.modal.run/health
 ```
 
-The first request after a scale-down cold-starts the container (~20–30 s for GPU). Health-check requests do **not** start the GPU function on most Modal plans — if `/health` returns immediately, the function is warm; if it doesn't respond, send a real cell from the notebook to wake it.
+The first request after a scale-down cold-starts the container (~20–30 s for GPU). Health-check requests do **not** start the GPU function on most Modal plans - if `/health` returns immediately, the function is warm; if it doesn't respond, send a real cell from the notebook to wake it.
 
 **4. Register in `notebook.toml`:**
 
@@ -281,10 +281,10 @@ Workers live in `notebook.toml` under `[[workers]]`. You can add them through th
 | --- | --- |
 | `name` | Used in `@worker <name>` annotations and the dropdown UI |
 | `backend` | Always `"executor"` for HTTP workers |
-| `runtime_id` | Stable identifier hashed into cell provenance — see [Caching](#caching-and-provenance) below |
+| `runtime_id` | Stable identifier hashed into cell provenance - see [Caching](#caching-and-provenance) below |
 | `config.url` | The HTTP endpoint for the executor protocol |
 | `config.transport` | `"http"` for direct push, `"signed"` for pull-model with signed URLs |
-| `config.token` | Literal bearer token (dev only) — see [Authentication](#authentication) |
+| `config.token` | Literal bearer token (dev only) - see [Authentication](#authentication) |
 | `config.token_env` | Env var name holding the bearer token (preferred for prod) |
 
 A typical multi-worker notebook ends up with:
@@ -404,7 +404,7 @@ device-bound objects like `torch.device` and CUDA tensors when a DAG mixes a
 - **Prefer passing a state_dict / checkpoint path** between a training cell and
   downstream analysis cells, rather than a live CUDA model object.
 
-This is partly notebook design — Strata can't know your placement intent — but
+This is partly notebook design - Strata can't know your placement intent - but
 the isolation boundary makes it a footgun worth designing around explicitly.
 
 ## Caching and provenance
@@ -425,7 +425,7 @@ Remote execution results are cached identically to local cells. The provenance h
 - Redeploying the same image (no dep changes). The cache is correct by construction; re-running is wasted compute.
 - Scaling the number of worker instances. Output is deterministic given the same inputs.
 
-If you don't set `runtime_id`, Strata uses the worker `name` as a fallback. That's fine for solo notebooks but risks cache surprises if two notebooks both have a worker named `gpu` pointing at different deployments — set `runtime_id` explicitly in shared notebooks.
+If you don't set `runtime_id`, Strata uses the worker `name` as a fallback. That's fine for solo notebooks but risks cache surprises if two notebooks both have a worker named `gpu` pointing at different deployments - set `runtime_id` explicitly in shared notebooks.
 
 ## Health checks
 
@@ -435,7 +435,7 @@ Every worker exposes `GET /health`. The notebook UI polls this and shows a green
 curl https://my-worker.example.com/health
 ```
 
-The `/health` endpoint is **not** gated by `STRATA_WORKER_TOKEN` — platform health probes (Fly, k8s liveness, Cloudflare) don't need the secret.
+The `/health` endpoint is **not** gated by `STRATA_WORKER_TOKEN` - platform health probes (Fly, k8s liveness, Cloudflare) don't need the secret.
 
 ## Troubleshooting
 
@@ -443,7 +443,7 @@ The `/health` endpoint is **not** gated by `STRATA_WORKER_TOKEN` — platform he
 `STRATA_WORKER_TOKEN` is set on the worker but the notebook isn't sending it. Confirm `token_env` (or `token`) in `notebook.toml` matches an env var that's actually exported in the strata-notebook's shell. Restart `strata-notebook` after exporting; it reads env at startup.
 
 **`Connection refused` or `Could not resolve host`.**
-`config.url` doesn't match where the worker is actually listening. From the strata-notebook host, run `curl <config.url base>/health` — it should respond. For Fly, `fly status` shows the public hostname; for Modal, `modal app list` shows deployed URLs.
+`config.url` doesn't match where the worker is actually listening. From the strata-notebook host, run `curl <config.url base>/health` - it should respond. For Fly, `fly status` shows the public hostname; for Modal, `modal app list` shows deployed URLs.
 
 **Worker `/health` works but cells fail with `ModuleNotFoundError: <package>`.**
 The worker image is missing the dependency the cell needs. Add it to the Dockerfile's `pip install` (Fly) or the `.pip_install(...)` chain (Modal) and redeploy. The worker uses **its own** Python env; nothing from the notebook server's env transfers.
@@ -458,7 +458,7 @@ A cell input is larger than the worker's max-input limit. Default is 256 MB; ove
 Some Python deps (torch, sentence-transformers) don't ship abi3 wheels and fall back to building from source. If your worker needs one, add `build-essential` (plus the dep-specific toolchain) to the Dockerfile via `RUN apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*` before the `uv pip install` step.
 
 **Modal redeploy hangs at "Building image".**
-You changed `.pip_install(...)` — Modal is rebuilding the image layer. With torch + sentence-transformers this takes ~5 minutes the first time on a new image hash. Subsequent deploys with no dep changes hit the layer cache and finish in seconds.
+You changed `.pip_install(...)` - Modal is rebuilding the image layer. With torch + sentence-transformers this takes ~5 minutes the first time on a new image hash. Subsequent deploys with no dep changes hit the layer cache and finish in seconds.
 
 ## Live status
 

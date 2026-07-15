@@ -8,7 +8,7 @@ through a network. It's the right mode when:
 - The server is reachable beyond a loopback interface.
 - Multi-tenancy matters, separate caches, separate QoS, separate
   metrics per tenant.
-- You want the platform to mediate writes — either routing them
+- You want the platform to mediate writes - either routing them
   through server-side transforms, or letting authenticated clients
   publish directly to a shared store with `service_writes_enabled`
   (the [shared research store](#authenticated-write-back-the-shared-research-store)).
@@ -163,14 +163,14 @@ Compared to personal mode:
   `STRATA_ARTIFACT_BLOB_BACKEND=s3` etc.). Service mode refuses to
   start without a persistent target.
 - **Reads work; direct writes are off by default.** Clients can read
-  results — scan/stream a table, fetch an artifact's data
+  results - scan/stream a table, fetch an artifact's data
   (`GET /v1/artifacts/{id}/v/{n}/data`), and resolve a dataset by name
-  (`GET /v1/names/{name}`) — all tenant-scoped and ACL-gated. Direct
+  (`GET /v1/names/{name}`) - all tenant-scoped and ACL-gated. Direct
   *write* endpoints (`put`, `set_name`, …) are disabled at the surface
   by default; the platform decides what gets materialized via
   server-side transforms (`transforms_config` /
   `[tool.strata.transforms]`). To let authenticated clients publish
-  directly — the shared-research-store pattern — opt in with
+  directly - the shared-research-store pattern - opt in with
   `service_writes_enabled` (see
   [below](#authenticated-write-back-the-shared-research-store)).
 - **ACLs apply.** `acl_config` deny / allow rules gate
@@ -229,19 +229,19 @@ A few operations require a specific scope under trusted-proxy auth
 | Scope | Gates |
 |---|---|
 | `admin:cache` | `POST /v1/cache/clear` |
-| `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` — deciding protected-alias changes |
+| `admin:registry` | `POST /v1/registry/pending/approve` and `.../reject` - deciding protected-alias changes |
 | `artifacts:write` | Publishing in service mode (`put` / `set_name` / `set_alias` / tags) when `service_writes_enabled=true`. See [below](#authenticated-write-back-the-shared-research-store). |
 
 Registry **approval** additionally enforces separation of duty: the
 principal who requested a protected-alias move cannot approve it
 themselves unless they hold `admin:*`. The registry **audit** read
-(`GET /v1/registry/audit`) is tenant-scoped — a principal sees only its
+(`GET /v1/registry/audit`) is tenant-scoped - a principal sees only its
 own tenant's history; `admin:*` sees the whole store.
 
 ## Authenticated write-back: the shared research store
 
 !!! warning "Preview"
-    Authenticated write-back is a **preview** feature — it deliberately re-opens
+    Authenticated write-back is a **preview** feature - it deliberately re-opens
     writes in service mode, which is security-sensitive. It's off by default,
     auth-required, scope-gated, tenant-scoped, and audited, but the surface is
     new and may change. Evaluate it before relying on it in production. The
@@ -253,7 +253,7 @@ researchers, each driving their own notebook, who **publish** processed datasets
 to one central store so a dataset computed once is available to the whole team.
 
 `service_writes_enabled` opts into that. It lets authenticated clients write
-directly — `put`, `set_name`, `set_alias`, tags — under a strict contract:
+directly - `put`, `set_name`, `set_alias`, tags - under a strict contract:
 
 - **Opt-in and auth-required.** Off by default; setting it requires
   `auth_mode=trusted_proxy` (enforced at startup), so every write is
@@ -285,7 +285,7 @@ strata.put(inputs=[], transform={"ref": "clean@v1"}, data=cleaned,
 # Any teammate (team-a) resolves the name to its current artifact and reads it:
 info = strata.resolve_name("team/cleaned-events")   # {artifact_uri, version, …}
 
-# Other-team principals (team-b) cannot resolve team-a's name — tenant isolation.
+# Other-team principals (team-b) cannot resolve team-a's name - tenant isolation.
 ```
 
 ### Connecting a notebook to the shared store

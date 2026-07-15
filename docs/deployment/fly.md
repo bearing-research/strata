@@ -55,7 +55,7 @@ curl https://<your-app-name>.fly.dev/health
 ```
 
 Expected response: `{"status":"ok"}` (plus details). If you get a
-504 or connection error, run `fly logs` to inspect the startup —
+504 or connection error, run `fly logs` to inspect the startup -
 the most common cause is a cold-start delay on the first request.
 
 ## Configuration
@@ -78,7 +78,7 @@ The `fly.toml` at the repo root configures:
 ```
 
 `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL` is what lets personal-mode
-bind to `0.0.0.0` instead of loopback only — without it, Strata
+bind to `0.0.0.0` instead of loopback only - without it, Strata
 refuses to start on a Fly machine because the Fly proxy can't reach
 a loopback bind. Setting this is the explicit acknowledgment that
 you understand the personal-mode trust model (see the warning above).

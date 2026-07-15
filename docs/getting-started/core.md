@@ -43,7 +43,7 @@ Same inputs, same transform, three different cache states, and the third is stil
 
 Table URIs use the form `<scheme>://<warehouse-path>#<namespace>.<table>`:
 
-- `<scheme>` is the storage scheme — `file://` for a local Iceberg warehouse, `s3://` / `gs://` / `az://` for cloud blob storage.
+- `<scheme>` is the storage scheme - `file://` for a local Iceberg warehouse, `s3://` / `gs://` / `az://` for cloud blob storage.
 - `<warehouse-path>` is the path to the warehouse root (the directory containing Iceberg metadata).
 - The fragment after `#` names the Iceberg table inside the warehouse, as `<namespace>.<table>`.
 

@@ -54,18 +54,18 @@ Strata is a **value-semantics** engine: a cell receives *copies* of its inputs
 (deserialized from artifacts), not the caller's live objects. A linear Jupyter
 kernel shares one memory space, so a model trained in one cell is visible
 everywhere; Strata's cells are isolated, so two patterns that work in Jupyter
-break here — both silently, because the run still goes green:
+break here - both silently, because the run still goes green:
 
 1. **In-place mutation that isn't exported.** A cell that trains a model with
    `optimizer.step()` (a method call, no `model = …` reassignment) mutates
    `model` *in place*. Strata's data-flow only treats a variable as a cell's
-   output if it's assigned/subscripted/attr-set — so the trained `model` is
+   output if it's assigned/subscripted/attr-set - so the trained `model` is
    never re-exported, and downstream cells read the **pre-training** version.
 
 2. **Shared mutable references split across cells.** `optimizer = Adam(model.parameters())`
    makes the optimizer hold references to the *same tensors* as the model.
    Stored as two separate artifacts and reloaded into a later cell, they become
-   two *different* tensor sets — so `optimizer.step()` updates the optimizer's
+   two *different* tensor sets - so `optimizer.step()` updates the optimizer's
    private copies and the `model` you evaluate/save never changes. Training is a
    silent no-op.
 
@@ -76,8 +76,8 @@ re-exporting a mutated input, would make provenance lie).
 
 ### The pattern that works
 
-Express training as one content-addressed transform — **data in, trained model
-out** — by keeping the model, its optimizer, and the training loop in **one
+Express training as one content-addressed transform - **data in, trained model
+out** - by keeping the model, its optimizer, and the training loop in **one
 cell**, and making the trained model that cell's output:
 
 ```python
@@ -90,13 +90,13 @@ for epoch in range(epochs):
         loss = loss_fn(model(xb), yb)
         loss.backward()
         optimizer.step()
-# `model` (trained) is this cell's output — downstream cells get the trained one.
+# `model` (trained) is this cell's output - downstream cells get the trained one.
 trained_model = model
 ```
 
 For a large handoff, export a **checkpoint** instead of a live object: save a
 `state_dict` (or a file path) from the training cell and load it downstream with
-explicit `map_location` — see the device/placement guidance in
+explicit `map_location` - see the device/placement guidance in
 [Distributed Workers](workers.md).
 
 ## Notebook File Format

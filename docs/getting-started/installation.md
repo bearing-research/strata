@@ -2,17 +2,17 @@
 
 ## Prerequisites
 
-- **[uv](https://docs.astral.sh/uv/) ≥ 0.8** — install via the
+- **[uv](https://docs.astral.sh/uv/) ≥ 0.8** - install via the
   [uv installer](https://docs.astral.sh/uv/getting-started/installation/)
   (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux;
   PowerShell installer on Windows). uv fetches a compatible Python
   automatically, so you don't need Python 3.12+ pre-installed. Strata
   refuses to start outside a uv-managed env.
-- **[Rust toolchain](https://rustup.rs/)** (`rustup`) — only for
+- **[Rust toolchain](https://rustup.rs/)** (`rustup`) - only for
   source builds (not Docker or `uv add`). Needed by `maturin` to
   compile the native Arrow IPC extension; `cargo` and `rustc` must
   be on `PATH` when you run `uv sync`.
-- **[Node.js 25+](https://nodejs.org/)** — only if building the
+- **[Node.js 25+](https://nodejs.org/)** - only if building the
   frontend from source.
 
 Windows: source builds work via WSL2 (smoother) or native Windows
@@ -91,7 +91,7 @@ and CLI binary are both named `strata`.
 | `uv run strata run <notebook-dir>` | Headless notebook execution for CI / scheduled runs. See [Headless Runner](../notebook/cli.md). |
 | `uv run strata validate <notebook-dir>` | Static checks (schema, annotations, DAG) without executing. See [Headless Runner](../notebook/cli.md#strata-validate). |
 | `uv run strata new <name>` | Scaffold a notebook directory. See [Headless Runner](../notebook/cli.md#strata-new). |
-| `uv run strata cell <action>`, `strata dag`, `strata status`, `strata dep <action>` | Agent-facing notebook tooling: inspect (`cell list/show`, `dag`, `status`), execute (`cell run/test`), and author (`cell add/edit/rm/mv`, `dep add/rm`) — offline against a directory or `--server/--session` against a running server. See [Notebook CLI](../notebook/cli.md#inspecting-a-notebook-cell-dag-status). |
+| `uv run strata cell <action>`, `strata dag`, `strata status`, `strata dep <action>` | Agent-facing notebook tooling: inspect (`cell list/show`, `dag`, `status`), execute (`cell run/test`), and author (`cell add/edit/rm/mv`, `dep add/rm`) - offline against a directory or `--server/--session` against a running server. See [Notebook CLI](../notebook/cli.md#inspecting-a-notebook-cell-dag-status). |
 | `uv run strata export <notebook-dir>` | Render a notebook to markdown or HTML (add `--app-view` for a frozen dashboard snapshot). See [Export](../notebook/export.md). |
 | `uv run strata import <ipynb-file>` | Convert a Jupyter `.ipynb` into a Strata notebook directory. See [Import from Jupyter](../notebook/import.md). |
 | `uv run strata artifact <cmd> [dir]` | Inspect a local artifact store without a server: `list`, `show <ref>`, `lineage <ref>` (renders model ← features ← scan ← table @ snapshot), `pull <ref> --to FILE`, `audit [name]` (registry history), `pending` (approval queue), `verify`. `<ref>` is a name, `id@v=N`, or bare id. |
@@ -106,7 +106,7 @@ inside the uv-managed venv. If you've activated the venv
 ## Development Commands
 
 ```bash
-# Sync with all optional extras — matches CI. Required for the test
+# Sync with all optional extras - matches CI. Required for the test
 # suite because the harness fixtures point the per-notebook venv at
 # the dev interpreter, so the dev env needs the [notebook] extra
 # (orjson, pyarrow, cloudpickle) for cell-execution tests.

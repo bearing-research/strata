@@ -43,7 +43,7 @@ If no `@name` is set, the DAG view falls back to showing the cell's defined vari
 !!! warning "`@name` is a display label, not a referenceable ID"
     `@name` sets what shows in the DAG view. It is **not** what
     `@after` or `@loop start_from=` references. Those resolve against
-    the cell's `id` in `notebook.toml`, which is a separate field —
+    the cell's `id` in `notebook.toml`, which is a separate field -
     see [Cell IDs](#cell-ids) below.
 
 ---
@@ -169,7 +169,7 @@ Format: `# @env KEY=value`. Multiple `@env` lines are supported. The variable is
     `# @env` values live in **committed cell source** (`cells/*.py`).
     The sensitive-key blanking that the notebook.toml `[env]` writer
     applies (KEY/SECRET/TOKEN/PASSWORD/CREDENTIAL values blanked
-    before commit) does **not** apply to `# @env` — the literal value
+    before commit) does **not** apply to `# @env` - the literal value
     you type goes straight to git.
 
     For API keys and other secrets, use the notebook's `[env]` block
@@ -193,7 +193,7 @@ scratch / "summary.txt"  # → Path("/tmp/strata/mounts/.../summary.txt")
 ```
 
 **The mount name becomes a `pathlib.Path` variable in the cell's namespace.** No
-`/mnt/<name>` directory convention — the variable directly references the
+`/mnt/<name>` directory convention - the variable directly references the
 resolved local path (the cached mirror for remote URIs, the URI's local
 filesystem path for `file://` URIs). Use standard `Path` operations: `/` for
 joining, `.read_text()`, `.iterdir()`, etc.
@@ -206,7 +206,7 @@ Format: `# @mount <name> <uri> [ro|rw]`. Defaults to `ro` (read-only) if the mod
 
 Declare an Iceberg table input. The table's current snapshot id becomes part
 of the cell's provenance: **when new data lands in the table, the cell goes
-stale and the normal cascade machinery re-runs it** — no manual data-version
+stale and the normal cascade machinery re-runs it** - no manual data-version
 bookkeeping. For an end-to-end walkthrough (build a warehouse, scan it,
 retrain on new data, pin a snapshot), see
 [Lake-Aware Cells](lake-aware-cells.md).
@@ -219,13 +219,13 @@ art = client.materialize(
 )
 ```
 
-**Two variables are injected into the cell's namespace**: `<name>` — the table
-URI string — and `<name>_snapshot` — the snapshot id resolved when the cell's
+**Two variables are injected into the cell's namespace**: `<name>` - the table
+URI string - and `<name>_snapshot` - the snapshot id resolved when the cell's
 provenance was computed. Passing `<name>_snapshot` to the scan makes the cell
 fully deterministic: it reads exactly the snapshot its provenance recorded.
 
 Format: `# @table <name> <uri> [snapshot=<id>]`. The URI is
-`<warehouse>#<namespace>.<table>` — the same format `client.materialize`
+`<warehouse>#<namespace>.<table>` - the same format `client.materialize`
 accepts. The name must be a valid Python identifier.
 
 `snapshot=<id>` pins the table: the cell reads that snapshot forever and never
@@ -233,7 +233,7 @@ goes stale on new data (the lake-side analog of a mount `pin`). Without a pin,
 the snapshot is re-resolved every time staleness is evaluated.
 
 Like mount variables, the injected names live only in the declaring cell's
-namespace — they are not cell *defines* and do not flow to downstream cells.
+namespace - they are not cell *defines* and do not flow to downstream cells.
 To use the snapshot id downstream, export it as a real variable:
 `scanned_snapshot = trips_snapshot`.
 
@@ -292,7 +292,7 @@ Force the response format.
 ```
 
 Accepts `json` (the response is parsed/coerced as JSON) or `text`
-(free-form text — the default). Auto-set to `json` when
+(free-form text - the default). Auto-set to `json` when
 `@output_schema` is present, so the schema and `# @output json` don't
 need to appear together.
 
@@ -346,7 +346,7 @@ Key/value parameters:
 - `start_from=<cell-id>@iter=<k>`, (optional) resume from another loop cell's
   stored iteration `k`. Useful for forking a converged run to explore a
   variant. `<cell-id>` is the upstream loop cell's `id` in
-  `notebook.toml` (not its `@name`) — see [Cell IDs](#cell-ids).
+  `notebook.toml` (not its `@name`) - see [Cell IDs](#cell-ids).
 
 ### `@loop_until`
 
@@ -494,10 +494,10 @@ A `variant_active_unknown` diagnostic surfaces in the UI when the
 selection drifts (e.g. you renamed a variant in source without updating
 the toml entry).
 
-### Sweep mode — compare all variants at once
+### Sweep mode - compare all variants at once
 
 Switch mode answers "which model do I pick?". **Sweep mode** answers
-"how do all three compare on the same downstream pipeline?" — it runs
+"how do all three compare on the same downstream pipeline?" - it runs
 **every** variant on each group execution and hands a downstream cell the
 whole set as a `{variant_name: value}` dict.
 
@@ -507,13 +507,13 @@ group = "classifier"
 mode = "sweep"        # default is "switch"; `active` is ignored in sweep
 ```
 
-The variant cells are **unchanged** — same `# @variant <group> <name>`
+The variant cells are **unchanged** - same `# @variant <group> <name>`
 annotation, same defines contract. Only the consumer changes: instead of
 seeing one `model`, a downstream cell receives a dict keyed by variant
 name and can compare them in one pass:
 
 ```python
-# downstream cell — `preds` is {"logreg": ..., "rf": ..., "gbm": ...}
+# downstream cell - `preds` is {"logreg": ..., "rf": ..., "gbm": ...}
 scores = {name: accuracy(p, y_test) for name, p in preds.items()}
 ```
 
@@ -526,24 +526,24 @@ renaming/removing a variant restalens the downstream as expected.
 
 Caveats worth knowing: a variant that fails is simply dropped from the
 dict (the downstream still runs once with the partial set), and a sweep
-group of one is legal but pointless — you'd get a one-key dict. Sweep-group
+group of one is legal but pointless - you'd get a one-key dict. Sweep-group
 members and their downstream consumers always run as **single-cell**
-executions — they're excluded from run-all's shared-namespace batching, so a
+executions - they're excluded from run-all's shared-namespace batching, so a
 sweep notebook doesn't get that speedup. This is deliberate: batching would let
 one variant's in-namespace state leak into a sibling's, corrupting its
 provenance, so sweep trades the batch speedup for per-variant isolation.
 
-### Fan-out — run a downstream cell once per variant
+### Fan-out - run a downstream cell once per variant
 
 Sweep mode hands a downstream cell the whole `{variant: value}` dict. Sometimes
-you'd rather run the *downstream work itself* once per variant — score each
+you'd rather run the *downstream work itself* once per variant - score each
 model on its own, tune each independently, dispatch each to its own GPU worker.
 That's `# @per_variant`:
 
 ```python
 # @per_variant
 # Runs once per model variant. `preds` is bound to THAT variant's list
-# (a scalar), not the whole dict — so this cell computes one accuracy.
+# (a scalar), not the whole dict - so this cell computes one accuracy.
 accuracy = sum(p == t for p, t in zip(preds, y_true)) / len(y_true)
 ```
 
@@ -553,21 +553,21 @@ per-variant too, so a **downstream cell decides how to consume it**:
 
 - Another `# @per_variant` cell continues the fan-out, zipping by variant name
   (instance `logreg` reads the upstream `logreg` value).
-- A plain cell **collapses** it back to a `{variant: value}` dict — the same v1
+- A plain cell **collapses** it back to a `{variant: value}` dict - the same v1
   sweep machinery:
 
 ```python
-# plain downstream — `accuracy` is {"logreg": 0.9, "rf": 0.88, ...}
+# plain downstream - `accuracy` is {"logreg": 0.9, "rf": 0.88, ...}
 best = max(accuracy, key=accuracy.get)
 ```
 
 Each instance is an independent `materialize`: its own provenance, its own
-cache entry, its own worker dispatch — so `# @per_variant` + `# @worker gpu`
+cache entry, its own worker dispatch - so `# @per_variant` + `# @worker gpu`
 fans out to N independent jobs, and adding a variant only runs the new instance.
 
 **Choosing the group.** Bare `# @per_variant` infers the group when the cell
 reads from exactly one sweep group. If it reads from two or more, name the one
-to fan out over — `# @per_variant model` — and the others collapse to dicts. A
+to fan out over - `# @per_variant model` - and the others collapse to dicts. A
 cell fans out over **one** group; comparing across two groups (cartesian) isn't
 supported. The validator flags the mistakes: `per_variant_no_sweep_source`
 (nothing to fan out over), `per_variant_ambiguous_group` (bare form, ≥2 groups),

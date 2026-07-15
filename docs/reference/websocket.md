@@ -4,7 +4,7 @@ The notebook UI communicates with the backend via a WebSocket connection for rea
 
 For a client-author orientation that walks the bootstrap flow and load-bearing rules (path-parameter gotcha, owner gating, cold-start payload, grace window), start at the [Notebook Client Protocol](notebook-protocol.md) page; this page is the message-level reference.
 
-Every frame type below corresponds to a member of `strata.notebook.protocol.MessageType` — that enum is the canonical source. If the tables here and the enum diverge, the enum wins.
+Every frame type below corresponds to a member of `strata.notebook.protocol.MessageType` - that enum is the canonical source. If the tables here and the enum diverge, the enum wins.
 
 ## Connection
 
@@ -14,7 +14,7 @@ ws://localhost:8765/v1/notebooks/ws/{session_id}
 
 The `{session_id}` is the one returned by `POST /v1/notebooks/open` or `/create`. A session is single-process: opening the same notebook from a second tab returns a different session ID and runs an isolated execution context.
 
-In service mode (proxy auth), the same headers required for REST endpoints — `X-Strata-Principal`, `X-Strata-Proxy-Token`, and `X-Tenant-ID` if multi-tenant — must be present on the WebSocket upgrade. A missing or invalid token closes the connection with `1008 Policy Violation`.
+In service mode (proxy auth), the same headers required for REST endpoints - `X-Strata-Principal`, `X-Strata-Proxy-Token`, and `X-Tenant-ID` if multi-tenant - must be present on the WebSocket upgrade. A missing or invalid token closes the connection with `1008 Policy Violation`.
 
 ## Envelope
 
@@ -103,7 +103,7 @@ All messages are JSON with this shape:
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
 | `cell_status`             | `{ "cell_id": "...", "status": "running" }`                                                                              | Status changed                                   |
 | `cell_output`             | `{ "cell_id": "...", "outputs": {...}, "display": {...}, "displays": [...], "cache_hit": false }`                        | Execution result, including rich visible outputs |
-| `cell_output_delta`       | `{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }`                                                     | Streamed partial output while the cell runs (today: prompt cells). `kind: "delta"` appends `text` to a per-cell buffer; `kind: "retry"` means schema validation failed — clear the buffer, `attempt` is the new attempt number, `text` is the first validator error. Ephemeral: never persisted or replayed; the final `cell_output` is canonical. Cache hits emit no deltas. |
+| `cell_output_delta`       | `{ "cell_id": "...", "attempt": 1, "kind": "delta", "text": "..." }`                                                     | Streamed partial output while the cell runs (today: prompt cells). `kind: "delta"` appends `text` to a per-cell buffer; `kind: "retry"` means schema validation failed - clear the buffer, `attempt` is the new attempt number, `text` is the first validator error. Ephemeral: never persisted or replayed; the final `cell_output` is canonical. Cache hits emit no deltas. |
 | `cell_console`            | `{ "cell_id": "...", "stream": "stdout", "text": "..." }`                                                                | Incremental output                               |
 | `cell_error`              | `{ "cell_id": "...", "error": "..." }`                                                                                   | Execution error                                  |
 | `cell_iteration_progress` | `{ "cell_id": "...", "iteration": 3, "max_iter": 50, "artifact_uri": "...", "content_type": "...", "duration_ms": 128 }` | Per-iteration update from a `@loop` cell         |
@@ -169,19 +169,19 @@ Every server → client message carries a `seq` from a single counter scoped to 
 What the client uses `seq` for:
 
 - **Ordering.** Messages arrive in `seq` order under normal conditions. If your client coalesces state updates, key dedupe on `seq` rather than `type`.
-- **Gap detection across reconnects.** After reconnecting, the first message you receive may have a `seq` far higher than the last one you saw — events emitted while you were disconnected are not buffered. Treat any gap (or any reconnect) as a reason to send `notebook_sync` and replace local state.
+- **Gap detection across reconnects.** After reconnecting, the first message you receive may have a `seq` far higher than the last one you saw - events emitted while you were disconnected are not buffered. Treat any gap (or any reconnect) as a reason to send `notebook_sync` and replace local state.
 - **One-way ack.** The client doesn't echo `seq` back; the server tracks no per-connection ack state.
 
 ## Reconnection semantics
 
-Disconnects happen — proxy timeouts, network drops, server restarts, tab sleep. The recovery protocol:
+Disconnects happen - proxy timeouts, network drops, server restarts, tab sleep. The recovery protocol:
 
 1. **Client reconnects** to `ws://.../v1/notebooks/ws/{session_id}` with the same session ID. The session itself is in-memory on the server and survives reconnects; it's cleaned up only when closed explicitly via `DELETE /v1/notebooks/{session_id}` or when the server restarts.
-2. **Server accepts the reconnect** and resumes emitting messages from the session's existing `seq` counter (continuing, not resetting). If the previous client disconnected within the **60-second cancel grace window** and a cell is still running, the execution survives the disconnect — the client picks up where it left off.
+2. **Server accepts the reconnect** and resumes emitting messages from the session's existing `seq` counter (continuing, not resetting). If the previous client disconnected within the **60-second cancel grace window** and a cell is still running, the execution survives the disconnect - the client picks up where it left off.
 3. **Client sends `notebook_sync`** as its first message after reconnecting. The server responds with `notebook_state` containing the full current state (cells, DAG, cell statuses, latest display outputs).
 4. **Client replaces local state** with the synced payload and resumes listening.
 
-There is **no replay** of missed messages — events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_output_delta` for a streaming prompt cell, `cell_iteration_progress` for a `@loop` cell, `cell_variant_progress` for a `# @per_variant` fan-out cell, `cascade_progress`) are not.
+There is **no replay** of missed messages - events emitted while the client was disconnected are lost. State persisted to the artifact store (`cell_output`, finished cell statuses) is recovered via `notebook_sync`; transient progress events (`cell_console` mid-stream, `cell_output_delta` for a streaming prompt cell, `cell_iteration_progress` for a `@loop` cell, `cell_variant_progress` for a `# @per_variant` fan-out cell, `cascade_progress`) are not.
 
 ### Cancel-on-disconnect grace window
 
@@ -194,7 +194,7 @@ This is the trade-off Vue's close-tab-to-cancel semantics make with TUI-style tr
 | Code | Meaning |
 | --- | --- |
 | `1000` | Normal closure (client or server initiated) |
-| `1008` | Policy violation — session not found, ownership mismatch in per-user personal mode, or service-mode auth failure on the upgrade |
+| `1008` | Policy violation - session not found, ownership mismatch in per-user personal mode, or service-mode auth failure on the upgrade |
 
 If the session has been closed server-side (notebook deleted, server restart), the WebSocket upgrade is refused with `1008`. The client should call `POST /v1/notebooks/open` to start a new session.
 

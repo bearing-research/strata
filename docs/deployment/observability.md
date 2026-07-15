@@ -88,10 +88,10 @@ The notebook UI ships two operator views, reachable from any notebook's header
 (**Logs** / **Artifacts**) and via a **← Back** button that returns to the
 notebook:
 
-- **Logs** (`/logs`) — the server-log stream with level / logger / search
+- **Logs** (`/logs`) - the server-log stream with level / logger / search
   filters and a **live tail**. Backed by an in-memory ring buffer:
   `GET /v1/logs` (snapshot) and `GET /v1/logs/stream` (Server-Sent Events).
-- **Artifacts** (`/artifacts`) — a sortable, filterable list of stored
+- **Artifacts** (`/artifacts`) - a sortable, filterable list of stored
   artifacts with summary stats. Backed by `GET /v1/artifacts` (with `since` /
   sort / order filters) and `GET /v1/artifacts/stats`.
 
@@ -102,14 +102,14 @@ and OTLP traces above for production monitoring and alerting.
 
 `observability/grafana/provisioning/` is mounted into the Grafana
 container so the dashboard and the Prometheus datasource are
-provisioned on container start — no importing by hand.
+provisioned on container start - no importing by hand.
 
 To open it:
 
 1. Bring up the stack (above) and go to
-   [http://localhost:3000](http://localhost:3000) — log in with
+   [http://localhost:3000](http://localhost:3000) - log in with
    `admin` / `admin`.
-2. Left nav → **Dashboards** → **Strata — Iceberg Serving +
+2. Left nav → **Dashboards** → **Strata - Iceberg Serving +
    Observability**.
 3. Panels stay flat until the server sees traffic. Send some load
    (see [Generating load](#generating-load)) and they fill in within
@@ -131,7 +131,7 @@ The dashboard covers the serving layer end to end:
 A test (`tests/test_observability_dashboard.py`) fails CI if a panel
 references a metric the server no longer exposes, so the dashboard
 can't silently drift out of sync with `/metrics/prometheus` again
-(it had — the QoS metrics were renamed and the panels went dark).
+(it had - the QoS metrics were renamed and the panels went dark).
 
 To add more dashboards, drop the JSON into
 `observability/grafana/provisioning/dashboards/` and restart the
@@ -163,7 +163,7 @@ ephemeral containers), wrap the scrape in your own sidecar.
 To use the bundled dashboard with your own Grafana, import
 `observability/grafana/provisioning/dashboards/strata.json` (Dashboards
 → New → Import) and pick your Prometheus from the dashboard's
-**Datasource** dropdown — it's a template variable, not hard-wired to
+**Datasource** dropdown - it's a template variable, not hard-wired to
 the compose stack.
 
 ## Generating load
@@ -181,9 +181,9 @@ uv run python benchmarks/capacity_sweep.py \
 
 After it runs:
 
-- **Grafana** ([:3000](http://localhost:3000)) — the scan-rate,
+- **Grafana** ([:3000](http://localhost:3000)) - the scan-rate,
   cache, and QoS panels move within a scrape interval or two.
-- **Jaeger** ([:16686](http://localhost:16686)) — a handful of
+- **Jaeger** ([:16686](http://localhost:16686)) - a handful of
   materialize spans with their full child waterfall.
 
 ## Health endpoints

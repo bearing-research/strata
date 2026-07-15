@@ -7,11 +7,11 @@ Strata can pull environment variables from an external secret manager so API key
 | Provider               | Status              | Auth                                             |
 | ---------------------- | ------------------- | ------------------------------------------------ |
 | Infisical              | Supported           | Machine Identity (recommended) or service token  |
-| HashiCorp Vault        | Not yet implemented | —                                                |
-| AWS Secrets Manager    | Not yet implemented | —                                                |
-| Doppler                | Not yet implemented | —                                                |
+| HashiCorp Vault        | Not yet implemented | -                                                |
+| AWS Secrets Manager    | Not yet implemented | -                                                |
+| Doppler                | Not yet implemented | -                                                |
 
-Today Strata ships one provider (Infisical). Vault / AWS Secrets Manager / Doppler are **not yet implemented** — the `SecretProvider` protocol in `strata.notebook.secret_manager` is structured so each is a one-file drop-in, but the code doesn't exist yet. File an issue if you need a specific provider sooner.
+Today Strata ships one provider (Infisical). Vault / AWS Secrets Manager / Doppler are **not yet implemented** - the `SecretProvider` protocol in `strata.notebook.secret_manager` is structured so each is a one-file drop-in, but the code doesn't exist yet. File an issue if you need a specific provider sooner.
 
 ## Setting up Infisical
 

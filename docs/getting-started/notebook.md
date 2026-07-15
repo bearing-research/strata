@@ -47,8 +47,8 @@ parent directory under the notebook storage root. Strata creates a
 directory containing `notebook.toml`, a per-notebook `pyproject.toml`,
 a `cells/` folder, and an empty first cell ready to type into.
 
-By default the storage root is `~/.strata/notebooks` — **not** the
-directory you launched from — so new notebooks land there regardless of
+By default the storage root is `~/.strata/notebooks` - **not** the
+directory you launched from - so new notebooks land there regardless of
 your shell's working directory. To put them somewhere else (the current
 directory is a common choice), start the server with `--notebook-dir`:
 
@@ -76,7 +76,7 @@ in the cell language picker.
 | **Python** | Regular Python code. Most cells. |
 | **Prompt** | LLM call as a DAG node. The body is a template with `{{ variable }}` substitution from upstream cells; the response is cached as an artifact like any other cell output. |
 | **SQL** | A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. |
-| **Widget** | A declarative control panel — one control per line (`alpha = slider(0, 1)`, plus number/dropdown/checkbox/text). Each control is an input downstream cells consume; with **⚡ Live** on, dragging one recomputes the cells that depend on it. |
+| **Widget** | A declarative control panel - one control per line (`alpha = slider(0, 1)`, plus number/dropdown/checkbox/text). Each control is an input downstream cells consume; with **⚡ Live** on, dragging one recomputes the cells that depend on it. |
 | **Markdown** | Prose between cells. Rendered as HTML; not part of the DAG. |
 | **Loop** | A Python cell that re-runs with a `carry` variable threaded across iterations. Annotate with `# @loop max_iter=N carry=state`. |
 | **Variant** | Multiple cells share one DAG slot (`# @variant group name`); only the active variant is in the DAG at any time. For A/B-ing different implementations of the same step. |

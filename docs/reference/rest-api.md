@@ -2,7 +2,7 @@
 
 This page documents the **notebook** REST surface, mounted under `/v1/notebooks`. Strata Core also exposes a `POST /v1/materialize` endpoint for direct artifact materialization; see the [Library Quickstart](../getting-started/core.md) for that surface.
 
-The remote-worker contract — `/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/health` — is documented separately on the [Executor Protocol](executor-protocol.md) page. Those endpoints live on a different process (`strata-worker`), not the main server.
+The remote-worker contract - `/v1/execute`, `/v1/notebook-execute`, `/v1/execute-manifest`, `/health` - is documented separately on the [Executor Protocol](executor-protocol.md) page. Those endpoints live on a different process (`strata-worker`), not the main server.
 
 !!! note "Session ID vs Notebook ID"
 Route parameters use the **session ID** (a UUID generated when the notebook is opened), not the persistent `notebook_id` from `notebook.toml`. The session ID is returned by the `open` and `create` endpoints.
@@ -15,11 +15,11 @@ The server exposes a live OpenAPI document at runtime:
 
 | Path | What it serves |
 | --- | --- |
-| `GET /openapi.json` | Full OpenAPI 3.1 schema — request and response models for every endpoint, generated from the FastAPI route definitions. |
+| `GET /openapi.json` | Full OpenAPI 3.1 schema - request and response models for every endpoint, generated from the FastAPI route definitions. |
 | `GET /docs` | Swagger UI for interactive try-it-out. |
 | `GET /redoc` | ReDoc browser for the same schema. |
 
-When this page and the live spec disagree, the live spec wins — it's generated from the source of truth. This page exists for orientation and walks through the high-traffic flows.
+When this page and the live spec disagree, the live spec wins - it's generated from the source of truth. This page exists for orientation and walks through the high-traffic flows.
 
 ### Authentication
 
@@ -33,7 +33,7 @@ Authentication depends on `deployment_mode`:
 
 In service mode, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the proxy-asserted user identity) and the `X-Strata-Proxy-Token` shared secret. Two further restrictions narrow what each endpoint accepts:
 
-**Personal-mode-only endpoints.** These notebook-session-lifecycle operations return `400 Bad Request` outside personal mode (long-lived sessions and filesystem notebook management don't fit a multi-tenant service deployment). Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope — see [Service Mode](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
+**Personal-mode-only endpoints.** These notebook-session-lifecycle operations return `400 Bad Request` outside personal mode (long-lived sessions and filesystem notebook management don't fit a multi-tenant service deployment). Artifact and registry *writes*, by contrast, are available in service mode when `service_writes_enabled` is on, with the `artifacts:write` scope - see [Service Mode](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
 
 | Endpoint | Why personal-mode-only |
 | --- | --- |
@@ -50,7 +50,7 @@ In service mode, **every** `/v1/*` endpoint requires `X-Strata-Principal` (the p
 
 All other endpoints documented below need only `X-Strata-Principal` + `X-Strata-Proxy-Token` in service mode, and no auth in personal mode. Endpoints below carry a `Personal mode only` callout where applicable; otherwise treat them as available in both modes.
 
-Personal mode with no header configured is effectively trust-on-first-call — anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](../deployment/modes.md); see [Fly.io deployment](../deployment/fly.md#trust-model) for the load-bearing details.
+Personal mode with no header configured is effectively trust-on-first-call - anyone reaching the server can use it. Deploying personal mode to a public URL without an auth proxy is a [trust-model decision](../deployment/modes.md); see [Fly.io deployment](../deployment/fly.md#trust-model) for the load-bearing details.
 
 ### Error shape
 
@@ -82,17 +82,17 @@ Validation errors (`422`) come from Pydantic and contain structured field info:
 | `204` | Success, no body (e.g. `DELETE` operations) |
 | `400` | Malformed request (invalid path, bad enum value, ACL block) |
 | `401` | Service mode auth header missing or proxy-token mismatch |
-| `403` | Authenticated, but missing the required scope (e.g. `admin:cache`) — returned as `404` if `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
+| `403` | Authenticated, but missing the required scope (e.g. `admin:cache`) - returned as `404` if `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND=true` (the default) |
 | `404` | Notebook session not found, or hidden 403 (see above) |
-| `409` | Conflict — concurrent environment job, conflicting cell edit, or attempt to use a destructive endpoint outside personal mode |
+| `409` | Conflict - concurrent environment job, conflicting cell edit, or attempt to use a destructive endpoint outside personal mode |
 | `413` | Request body or scan response exceeded the configured byte cap |
 | `422` | Pydantic validation error on the request body |
-| `429` | Rate limit exceeded — global, per-client, or per-tenant |
-| `500` | Server bug — captured to logs with the request ID |
+| `429` | Rate limit exceeded - global, per-client, or per-tenant |
+| `500` | Server bug - captured to logs with the request ID |
 
 ### Request IDs
 
-Every request gets an `X-Request-ID` response header (and the same value is echoed if the client sent one in). Log lines and traces include this ID — copy it when filing bugs.
+Every request gets an `X-Request-ID` response header (and the same value is echoed if the client sent one in). Log lines and traces include this ID - copy it when filing bugs.
 
 ### Tenancy
 
@@ -279,7 +279,7 @@ PUT /v1/notebooks/{session_id}/cells/reorder
 POST /v1/notebooks/{session_id}/cells/{cell_id}/execute?mode=normal
 ```
 
-The optional `mode` query parameter selects the run mode: `normal` (default —
+The optional `mode` query parameter selects the run mode: `normal` (default -
 use the cache and materialize stale upstreams), `rerun` (bypass the target
 cell's cache, still materialize upstreams), or `force` (run against whatever
 upstream artifacts already exist). An unrecognized mode returns `400`.
@@ -296,7 +296,7 @@ POST /v1/notebooks/{session_id}/cells/{cell_id}/tests
 Runs the committed `cells/{cell_id}.test.py` via pytest against a re-executed
 copy of the cell and returns per-test outcomes: `{ "cell_id", "passed",
 "failed", "errored", "skipped", "pytest_unavailable", "ran_at", "tests": [{
-"name", "nodeid", "outcome", "message" }] }`. Python cells only — a non-Python
+"name", "nodeid", "outcome", "message" }] }`. Python cells only - a non-Python
 cell or one with no test source returns `400`. The REST twin of the WebSocket
 `cell_run_tests` message, for clients (the CLI, agents) that don't drive a
 socket.

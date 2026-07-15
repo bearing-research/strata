@@ -4,7 +4,7 @@ A **lake-aware cell** is a notebook cell that takes an Iceberg table as a
 versioned input via the [`@table`](annotations.md#table) annotation. The
 table's current snapshot id is folded into the cell's provenance, so **new
 data landing in the lake makes the cell stale and the normal cascade re-runs
-it** — no manual data-version bookkeeping, no re-pointing paths.
+it** - no manual data-version bookkeeping, no re-pointing paths.
 
 This page is the end-to-end walkthrough: build a tiny warehouse, scan it from
 a cell, retrain when new data arrives, and pin a snapshot for reproducibility.
@@ -30,7 +30,7 @@ is simpler. `@table` earns its keep precisely when the snapshot can move.
 - `pyiceberg` available in your notebook environment (it ships with the
   `[notebook]` extra).
 
-## Step 1 — Build a warehouse
+## Step 1 - Build a warehouse
 
 Any Iceberg catalog works (local, S3, GCS, Azure). For this walkthrough, a
 local SQLite-catalog warehouse with one table. Run this once, outside the
@@ -68,11 +68,11 @@ mkdir -p /tmp/strata-demo/warehouse
 uv run python setup_warehouse.py
 ```
 
-The **table URI** is `<warehouse>#<namespace>.<table>` — here
+The **table URI** is `<warehouse>#<namespace>.<table>` - here
 `file:///tmp/strata-demo/warehouse#shop.orders`. This is the same URI format
 `client.materialize` accepts.
 
-## Step 2 — Declare a lake-aware cell
+## Step 2 - Declare a lake-aware cell
 
 In a notebook cell, declare the table and scan it. The `@table` annotation
 injects two variables: `orders` (the table URI) and `orders_snapshot` (the
@@ -92,17 +92,17 @@ scan = client.materialize(
 df = scan.to_pandas()
 
 # Re-export the snapshot as a real variable so downstream cells can use it
-# (injected @table vars live only in this cell — see "Gotchas" below).
+# (injected @table vars live only in this cell - see "Gotchas" below).
 orders_snapshot_value = orders_snapshot
 
 total = int(df["amount"].sum())
-print(f"scanned {len(df)} rows at snapshot {orders_snapshot} — total={total}")
+print(f"scanned {len(df)} rows at snapshot {orders_snapshot} - total={total}")
 ```
 
 Run it (Shift+Enter). Passing `orders_snapshot` to the scan makes the cell
 **deterministic**: it reads exactly the snapshot its provenance recorded.
 
-## Step 3 — The staleness loop
+## Step 3 - The staleness loop
 
 Add a downstream cell that depends on the scan:
 
@@ -111,7 +111,7 @@ report = f"orders total at snapshot {orders_snapshot_value}: {total}"
 report
 ```
 
-Run all cells — both go green. Now **land new data** in the lake:
+Run all cells - both go green. Now **land new data** in the lake:
 
 ```python
 # append_month2.py
@@ -129,16 +129,16 @@ print("snapshot S2:", table.current_snapshot().snapshot_id)
 uv run python append_month2.py
 ```
 
-Back in the notebook, the `@table` cell now shows **stale** — its snapshot id
+Back in the notebook, the `@table` cell now shows **stale** - its snapshot id
 moved from S1 to S2, so its provenance changed. A plain **Run** (no force)
 recomputes the scan against S2 and **cascades** the rebuild to every
 downstream cell. Nothing changed in your code; the data moved, and Strata
 treated that exactly like a code change.
 
-Run again without appending and the cell is a **cache hit** — same snapshot,
+Run again without appending and the cell is a **cache hit** - same snapshot,
 same provenance, instant.
 
-## Step 4 — Pin a snapshot for reproducibility
+## Step 4 - Pin a snapshot for reproducibility
 
 To freeze a cell to one snapshot forever (e.g. to reproduce a past result),
 add `snapshot=<id>`:
@@ -148,7 +148,7 @@ add `snapshot=<id>`:
 ```
 
 A pinned cell reads that snapshot regardless of new data and **never goes
-stale** on appends — the lake-side analog of a mount `pin`. Drop the
+stale** on appends - the lake-side analog of a mount `pin`. Drop the
 `snapshot=` to return to tracking the current snapshot.
 
 ## How it works
@@ -163,7 +163,7 @@ provenance = hash(input_hashes + mount_fingerprints + table_fingerprints,
 
 A table fingerprint is `"<name>:table:<uri>:<snapshot_id>"`. Because the
 snapshot id is immutable and content-addressed, a cached result for a given
-provenance is valid forever — and a moved snapshot is a different provenance,
+provenance is valid forever - and a moved snapshot is a different provenance,
 hence a different (missing) cache entry, hence a recompute. This is the same
 provenance machinery that makes ordinary cells stale when their source or
 inputs change; `@table` simply adds the lake snapshot to the mix.
@@ -171,7 +171,7 @@ inputs change; `@table` simply adds the lake snapshot to the mix.
 ## Gotchas
 
 - **Injected vars don't flow downstream.** `orders` and `orders_snapshot` live
-  only in the *declaring* cell's namespace — they are injections, not cell
+  only in the *declaring* cell's namespace - they are injections, not cell
   *defines*, so downstream cells can't reference them directly. Re-export what
   you need as a real assignment (`orders_snapshot_value = orders_snapshot`),
   exactly as in Step 2. This mirrors how mount variables behave.
@@ -186,7 +186,7 @@ inputs change; `@table` simply adds the lake snapshot to the mix.
 
 ## See also
 
-- [`@table` annotation reference](annotations.md#table) — the syntax surface.
-- [Cell Annotations](annotations.md) — all per-cell annotations.
-- [Core Quickstart](../getting-started/core.md) — `client.materialize` and
+- [`@table` annotation reference](annotations.md#table) - the syntax surface.
+- [Cell Annotations](annotations.md) - all per-cell annotations.
+- [Core Quickstart](../getting-started/core.md) - `client.materialize` and
   `scan@v1` from the SDK directly, without the notebook.

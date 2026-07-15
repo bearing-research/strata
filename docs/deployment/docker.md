@@ -89,7 +89,7 @@ sharing layer; no action needed.
 
 **Why `/tmp/strata-notebooks` inside the container?** That's the path
 the compose file pins via `STRATA_NOTEBOOK_STORAGE_DIR`. The path is
-arbitrary as long as the env var and the volume mount agree — feel
+arbitrary as long as the env var and the volume mount agree - feel
 free to change both to `/data/notebooks` or whatever fits your
 mental model.
 

@@ -77,5 +77,5 @@ the directory you want under your existing storage root instead:
 
 | Notebook | What you'll see |
 | --- | --- |
-| [`r_mtcars_analysis`](../examples/r_mtcars_analysis.md) | A pure-R notebook — `lm()`, `aggregate()`, and inline ggplot2 + base-graphics plots, with `data.frame` and R-only (RDS) handoff between R cells. |
+| [`r_mtcars_analysis`](../examples/r_mtcars_analysis.md) | A pure-R notebook - `lm()`, `aggregate()`, and inline ggplot2 + base-graphics plots, with `data.frame` and R-only (RDS) handoff between R cells. |
 | [`r_lm_vs_sklearn`](../examples/r_lm_vs_sklearn.md) | Mixed Python + R: fit a model with R's `lm()` and compare side-by-side with scikit-learn over a cross-language Arrow handoff. |
