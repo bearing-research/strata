@@ -916,8 +916,10 @@ async function addCell(
  * rendered content with `Content-Disposition: attachment` so the
  * browser handles the save dialog. No file is buffered in JS.
  */
-function downloadExport(notebookId: string, format: 'markdown' | 'html'): void {
-  const url = `${STRATA_BASE}/v1/notebooks/${notebookId}/export?fmt=${format}`
+function downloadExport(notebookId: string, format: 'markdown' | 'html', appView = false): void {
+  const url =
+    `${STRATA_BASE}/v1/notebooks/${notebookId}/export?fmt=${format}` +
+    (appView ? '&app_view=1' : '')
   // A hidden anchor click is the canonical "start a download" trick;
   // window.open would briefly flash a tab, window.location would
   // navigate away. The anchor stays invisible.

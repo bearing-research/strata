@@ -47,6 +47,11 @@ class ExportOptions:
     output_format: ExportFormat = ExportFormat.MARKDOWN
     include_inactive_variants: bool = False
     include_console: bool = True
+    # App-view snapshot: render only what the read-only app view shows —
+    # widgets (as their current control values), markdown, and display outputs
+    # — with no cell sources, chips, or console. A frozen, self-contained
+    # picture of the dashboard, portable to anywhere the server can't reach.
+    app_view: bool = False
     # Per-output byte cap. Affects console snapshots, JSON previews,
     # and inline image data URLs. DataFrame previews are row-capped
     # separately (20 rows) so the byte cap rarely binds on them.
@@ -78,6 +83,22 @@ def export_notebook(
     _resolve_variant_flags(state)
 
     blocks: list[Block] = []
+
+    if options.app_view:
+        # App-view snapshot: the notebook name as the page title, then only
+        # the cells the app view surfaces — rendered as presentation, not
+        # source. No README banner (the app view has none).
+        blocks.append(HeadingBlock(state.name, level=1))
+        for cell in state.cells:
+            if not options.include_inactive_variants and cell.variant_active is False:
+                continue
+            if not _is_app_cell(cell):
+                continue
+            blocks.extend(_render_app_cell(cell, state, notebook_dir, options))
+        if options.output_format == ExportFormat.HTML:
+            return _emit_html(blocks, title=state.name)
+        return _emit_markdown(blocks)
+
     readme = _load_readme(notebook_dir)
     if readme is not None:
         # README already opens with its own h1; adding a "Notebook: <name>"
@@ -165,6 +186,77 @@ class TableBlock(Block):
 
 # ---------------------------------------------------------------------------
 # Cell rendering
+
+
+def _is_app_hidden(source: str) -> bool:
+    """Whether a cell carries ``# @app hide`` — mirrors the app view's filter."""
+    import re
+
+    return any(re.match(r"#\s*@app\s+hide\b", line.strip()) for line in source.splitlines())
+
+
+def _is_app_cell(cell: CellState) -> bool:
+    """Cells the app view surfaces: widget panels, markdown prose, and anything
+    with a display output — minus cells marked ``# @app hide``. Mirrors the
+    ``appCells`` filter in ``AppView.vue`` so a snapshot matches the live app.
+    """
+    if _is_app_hidden(cell.source):
+        return False
+    return cell.language in (CellLanguage.WIDGET, CellLanguage.MARKDOWN) or bool(
+        cell.display_outputs
+    )
+
+
+def _render_widget_controls(cell: CellState) -> list[Block]:
+    """Render a widget cell's controls as static ``(name, value)`` chips — the
+    parameter settings that produced the snapshot's outputs. Values come from
+    the persisted ``widget_values``, falling back to each control's default.
+    """
+    from strata.notebook.widget_analyzer import analyze_widget_cell
+
+    descriptors = analyze_widget_cell(cell.source).descriptors
+    values = cell.widget_values or {}
+    items = [(d.name, str(values.get(d.name, d.default))) for d in descriptors]
+    return [ChipsBlock(items)] if items else []
+
+
+def _render_app_cell(
+    cell: CellState,
+    state: NotebookState,
+    notebook_dir: Path,
+    options: ExportOptions,
+) -> list[Block]:
+    """Render one cell for an app-view snapshot: presentation only — no source,
+    chips, or console. Prompt cells are skipped (their output is the model
+    response, which export never renders — same privacy default as the doc
+    export).
+    """
+    if cell.language == CellLanguage.PROMPT:
+        return []
+    if cell.language == CellLanguage.MARKDOWN:
+        return [MarkdownBlock(cell.source)]
+
+    from strata.notebook.annotations import parse_annotations
+
+    blocks: list[Block] = []
+    name = parse_annotations(cell.source).name
+    if name:
+        blocks.append(HeadingBlock(name, level=2))
+
+    if cell.language == CellLanguage.WIDGET:
+        blocks.extend(_render_widget_controls(cell))
+        return blocks
+
+    for output in cell.display_outputs or []:
+        blocks.extend(
+            _render_display_output(
+                output,
+                notebook_dir=notebook_dir,
+                notebook_id=state.id,
+                max_bytes=options.max_output_bytes,
+            )
+        )
+    return blocks
 
 
 def _render_cell(

@@ -701,3 +701,96 @@ def test_export_never_emits_prompt_response_marker_for_real_examples() -> None:
         assert expected_marker in rendered_html.lower(), (
             f"prompt-cell privacy marker missing in HTML export of {nb_dir.name}"
         )
+
+
+# ---------------------------------------------------------------------------
+# App-view snapshot profile (ExportOptions.app_view)
+
+
+def _app_opts(fmt: str = "markdown") -> ExportOptions:
+    from strata.notebook.export import ExportFormat
+
+    return ExportOptions(app_view=True, output_format=ExportFormat(fmt))
+
+
+def test_app_view_snapshot_shows_outputs_not_source(tmp_path: Path) -> None:
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "# @name Scores\nsecret_source_marker = 1\n")
+    update_cell_display_outputs(
+        nb_dir,
+        "c1",
+        [
+            {
+                "content_type": "arrow/ipc",
+                "rows": 1,
+                "columns": ["name", "score"],
+                "preview": [{"name": "Alice", "score": 95}],
+                "bytes": 0,
+            }
+        ],
+    )
+
+    rendered = export_notebook(nb_dir, _app_opts())
+
+    assert "| Alice | 95 |" in rendered  # the output is shown
+    assert "secret_source_marker" not in rendered  # the source is not
+    assert "```python" not in rendered  # no code fences at all
+
+
+def test_app_view_snapshot_renders_widget_control_values(tmp_path: Path) -> None:
+    from strata.notebook.runtime_state import persist_cell_widget_values
+
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "controls", language="widget")
+    write_cell(
+        nb_dir,
+        "controls",
+        "alpha = slider(0, 1, default=0.5)\ncurve = dropdown(['linear', 'sqrt'])\n",
+    )
+    persist_cell_widget_values(nb_dir, "controls", {"alpha": 0.7})
+
+    rendered = export_notebook(nb_dir, _app_opts())
+
+    # Persisted value wins; unset control falls back to its default.
+    assert "alpha" in rendered and "0.7" in rendered
+    assert "curve" in rendered and "linear" in rendered
+
+
+def test_app_view_snapshot_hides_app_hidden_cell(tmp_path: Path) -> None:
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "setup")
+    write_cell(nb_dir, "setup", "# @app hide\nx = 1\n")
+    update_cell_display_outputs(
+        nb_dir,
+        "setup",
+        [
+            {
+                "content_type": "arrow/ipc",
+                "rows": 1,
+                "columns": ["hidden"],
+                "preview": [{"hidden": "should_not_appear"}],
+                "bytes": 0,
+            }
+        ],
+    )
+
+    rendered = export_notebook(nb_dir, _app_opts())
+
+    assert "should_not_appear" not in rendered
+
+
+def test_app_view_snapshot_excludes_prompt_cells(tmp_path: Path) -> None:
+    nb_dir = _make_notebook(tmp_path)
+    add_cell_to_notebook(nb_dir, "p1", language="prompt")
+    write_cell(nb_dir, "p1", "Summarize {{ df }} in one sentence.\n")
+    update_cell_display_outputs(
+        nb_dir,
+        "p1",
+        [{"content_type": "text/markdown", "markdown": "a leaked response", "bytes": 0}],
+    )
+
+    rendered = export_notebook(nb_dir, _app_opts())
+
+    assert "leaked response" not in rendered
+    assert "Summarize" not in rendered

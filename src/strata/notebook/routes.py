@@ -3170,6 +3170,7 @@ def _render_notebook_export(
     *,
     fmt: str,
     include_inactive_variants: bool,
+    app_view: bool = False,
 ):
     """Render a notebook to a single shareable markdown/HTML file.
 
@@ -3185,6 +3186,7 @@ def _render_notebook_export(
         options = ExportOptions(
             output_format=ExportFormat(fmt),
             include_inactive_variants=bool(include_inactive_variants),
+            app_view=bool(app_view),
         )
         body = export_notebook(session.path, options)
     except ValueError as exc:
@@ -3196,6 +3198,8 @@ def _render_notebook_export(
         raise HTTPException(status_code=500, detail="Export failed")
 
     safe_name = session.path.name or "notebook"
+    if app_view:
+        safe_name = f"{safe_name}-app"
     extension = "html" if fmt == "html" else "md"
     media_type = "text/html; charset=utf-8" if fmt == "html" else "text/markdown; charset=utf-8"
     return Response(
@@ -3213,6 +3217,7 @@ async def export_notebook(
     session: SessionDep,
     fmt: str = "zip",
     include_inactive_variants: bool = False,
+    app_view: bool = False,
 ):
     """Export the notebook in the requested format.
 
@@ -3245,6 +3250,7 @@ async def export_notebook(
             session,
             fmt=fmt,
             include_inactive_variants=bool(include_inactive_variants),
+            app_view=bool(app_view),
         )
 
     # Default: ZIP bundle.
