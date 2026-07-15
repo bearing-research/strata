@@ -95,6 +95,12 @@ exhaustive commit history.
   (e.g. a table *and* a plot), both refresh, not just the first — the cascade
   snapshots its target set up front so running one cell can't demote a
   not-yet-run sibling to idle and skip it.
+- **Consistent notebook-header buttons.** The **Add cell** and **Export** menus
+  referenced CSS variables that don't exist (`--border-color`, `--bg-secondary`),
+  so they fell back to hardcoded light colors — an off-theme white island,
+  especially wrong in dark mode — and the **Embed** button didn't match its
+  sibling nav links. The header controls now share one theme-aware style in both
+  light and dark.
 - **No more spurious `display` mutation warning.** Any cell whose last line was
   a bare expression (e.g. a trailing `df` to show it) emitted a false
   "'display' was mutated in place" warning — the harness's own injected display
