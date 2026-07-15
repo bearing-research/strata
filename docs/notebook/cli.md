@@ -23,7 +23,7 @@ strata run <notebook_dir> [options]
 `<notebook_dir>` must be a path to a directory containing `notebook.toml`
 (plus `cells/`, `pyproject.toml`, `uv.lock`). It's the same on-disk layout the
 UI works with; you can pass any notebook directory from `STRATA_NOTEBOOK_STORAGE_DIR`
-or anywhere else on the filesystem. `strata run` is **local-only** — it does
+or anywhere else on the filesystem. `strata run` is **local-only** - it does
 not talk to a running `strata-notebook` or a service-mode deployment. Each
 invocation opens its own `NotebookSession`, runs the cells, and exits.
 
@@ -34,13 +34,13 @@ invocation opens its own `NotebookSession`, runs the cells, and exits.
 | `--force`     | Ignore the artifact cache and re-execute every cell from scratch |
 | `--no-sync`   | Skip `uv sync`; require `.venv/` to already exist                |
 | `--timeout`   | Per-cell timeout (seconds) for this run, overriding the 300s default; a per-cell `# @timeout` or notebook.toml `timeout` still wins. For compute-heavy cells (model training, feature extraction). |
-| `--format`    | `human` (default) or `json` — both write to stdout               |
+| `--format`    | `human` (default) or `json` - both write to stdout               |
 | `--quiet`     | Suppress per-cell status lines (human format only)               |
 
 `--format json` writes a single JSON object to **stdout** when the run
 finishes: `{"notebook", "success", "duration_ms", "cells": [...]}` with one
 entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
-`cache_hit`, plus `stdout` / `stderr` — truncated at 10k chars — and
+`cache_hit`, plus `stdout` / `stderr` - truncated at 10k chars - and
 `error` / `reason` where applicable). Cache hits replay the stored
 artifact without re-emitting console output, so `stdout` can be absent on
 warm runs (`--force` re-executes). Errors and pre-flight diagnostics go to
@@ -71,7 +71,7 @@ jobs:
       - name: Install Strata
         # uv tool install creates a uv-managed env at
         # ~/.local/share/uv/tools/strata-notebook with the strata
-        # CLI on PATH — satisfies the runtime guard.
+        # CLI on PATH - satisfies the runtime guard.
         run: uv tool install strata-notebook
       - name: Run notebook
         run: strata run ./notebooks/daily_report --format json
@@ -113,7 +113,7 @@ committed), export them before invoking `strata run`.
 
 ## `strata validate`
 
-Static checks without executing anything — no environment sync, no
+Static checks without executing anything - no environment sync, no
 subprocesses, no LLM calls:
 
 ```bash
@@ -122,7 +122,7 @@ strata validate <notebook_dir> [--format human|json]
 
 - `notebook.toml` parses and the cell files load
 - the DAG builds without cycles
-- per-cell annotation diagnostics — the **same validation the server runs
+- per-cell annotation diagnostics - the **same validation the server runs
   on open / reload** (`worker_unknown`, `loop_missing_carry`,
   `sql_missing_connection`, malformed `@output_schema`, …)
 
@@ -157,7 +157,7 @@ any existing cells are preserved, so re-running it never orphans artifacts.
 
 For agents (and humans) that need to read a notebook's state without executing
 it, three read-only commands print structured JSON (default) or a compact human
-view. They open the notebook locally — no server, no env sync:
+view. They open the notebook locally - no server, no env sync:
 
 ```bash
 strata cell list <notebook_dir>            # every cell: id, name, status, source
@@ -166,11 +166,11 @@ strata dag       <notebook_dir>            # dependency edges + topological orde
 strata status    <notebook_dir>            # per-cell status + staleness summary
 ```
 
-Each takes `--format human|json` (JSON is the default — these are agent-first).
+Each takes `--format human|json` (JSON is the default - these are agent-first).
 The JSON shapes match the server's REST API (`GET /{id}/cells`, `GET /{id}/dag`),
 so a script written against the local CLI keeps working against a running
 server later. Exit codes follow the same contract as `run` / `validate`: `0`
-success, `1` operation failure (e.g. unknown cell — a structured `{"error": …}`
+success, `1` operation failure (e.g. unknown cell - a structured `{"error": …}`
 on stdout), `2` invocation error (bad path) on stderr.
 
 ```bash
@@ -180,7 +180,7 @@ strata cell list my_analysis | jq '.cells[] | select(.status == "error") | .id'
 ### Reading a live session (`--server` / `--session`)
 
 The four read commands also inspect a session on a **running** `strata-notebook`
-— the same session a human is watching in the TUI or web UI — instead of a local
+- the same session a human is watching in the TUI or web UI - instead of a local
 directory. Pass `--server <url> --session <id>` in place of the notebook path:
 
 ```bash
@@ -191,7 +191,7 @@ strata status    --server http://localhost:8765 --session $SID
 ```
 
 `<id>` is the session id (the route `{id}`, not the `notebook.toml` id). The
-output is identical to the local backend — both project the same wire shape — so
+output is identical to the local backend - both project the same wire shape - so
 a script written against a local notebook works unchanged against a live session.
 `cell run` / `cell test` and the authoring commands accept the same selector
 (see below), so the entire surface works against a live session. Remote
@@ -213,17 +213,17 @@ by default; `--rerun` bypasses the target's cache, `--force` runs against
 whatever upstream artifacts already exist). `cell test` runs the cell's
 `cells/{cell_id}.test.py` via pytest and reports per-test outcomes; pass
 `--file tests.py` (or `-` for stdin) to **set** the cell's test source first and
-then run it — the one cell-test affordance that previously required editing the
+then run it - the one cell-test affordance that previously required editing the
 file by hand. Both **sync the venv first** (like `strata run`) unless you pass
 `--no-sync`.
 
 Both also accept `--server <url> --session <id>` to run on a live session instead
 of a local directory (`strata cell run --server http://localhost:8765 --session
 $SID <cell_id> --rerun`). The server owns its venv, so the remote path never syncs
-— `--no-sync` is a local-only flag — and `--rerun` / `--force` map to the
+- `--no-sync` is a local-only flag - and `--rerun` / `--force` map to the
 server's run modes, so remote execution has the same three modes as local.
 
-`--format json` (default) writes a single clean JSON object to **stdout** — the
+`--format json` (default) writes a single clean JSON object to **stdout** - the
 executor's logs go to stderr, so the stdout stream stays parseable:
 
 ```bash
@@ -254,7 +254,7 @@ strata dep rm        <notebook_dir> <package>                     # uv remove
 id (the same scheme the server uses) and prints the new cell; `mv` prints the new
 order. `cell annotate` splices `# @key` [annotations](annotations.md) into a
 cell's source (`--set KEY=VALUE` / `--unset KEY`, both repeatable) while leaving
-the body untouched — a convenience over rewriting the whole source with `edit`;
+the body untouched - a convenience over rewriting the whole source with `edit`;
 it targets scalar directives (`name`, `worker`, `timeout`, `model`, …), so edit
 the source directly for repeatable `mount` / `table` / `env`. Dependency
 commands run `uv add` / `uv remove` and report whether the lockfile changed. All
@@ -266,11 +266,11 @@ echo 'total = sum(nums)' | strata cell add nb --file - --after load --format jso
 ```
 
 These also accept `--server <url> --session <id>` to author into a live session
-instead of a local directory — edits land in the running notebook a human is
+instead of a local directory - edits land in the running notebook a human is
 watching in the TUI. (`cell add` makes two calls: it mints the cell on the
 server, then sets its source.)
 
 Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
-run/test`), this is the full agent surface — and **all of it** works either
+run/test`), this is the full agent surface - and **all of it** works either
 offline against a directory or `--server/--session` against a running server. An
 MCP server wrapping the same operations lands in a later release.

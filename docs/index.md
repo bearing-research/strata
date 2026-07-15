@@ -20,20 +20,20 @@ producing artifacts that flow through an auto-built DAG.
 
 **Highlights:**
 
-- **content-addressed:** every cell output is keyed by source + inputs + environment — identical work hits the cache forever
+- **content-addressed:** every cell output is keyed by source + inputs + environment - identical work hits the cache forever
 - **reactive:** edit a cell, the cascade re-runs only the downstream cells that depend on it
-- **dag-from-ast:** Strata reads each cell's AST to wire upstream/downstream — no decorators, no manual edges
-- **dag-view:** the dependency graph renders alongside the cells — double-click any node to jump to its source
-- **git-friendly:** notebooks are plain `.py` files plus a TOML manifest — readable diffs, no JSON blobs
+- **dag-from-ast:** Strata reads each cell's AST to wire upstream/downstream - no decorators, no manual edges
+- **dag-view:** the dependency graph renders alongside the cells - double-click any node to jump to its source
+- **git-friendly:** notebooks are plain `.py` files plus a TOML manifest - readable diffs, no JSON blobs
 - **prompt cells:** LLM calls are first-class DAG nodes, `{{ variable }}` interpolation from upstream cells, cached by template + inputs + model config
 - **SQL cells:** named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery
-- **loop cells:** `# @loop max_iter=N carry=state` iterates a cell with explicit carry between steps — each iteration is its own artifact
+- **loop cells:** `# @loop max_iter=N carry=state` iterates a cell with explicit carry between steps - each iteration is its own artifact
 - **interactive widgets + app view:** a `widget` cell is a control panel (slider / dropdown / …) whose values downstream cells consume; with **⚡ Live** on, dragging a control recomputes the dependents. Open a notebook as a read-only **app**, **embed** it as an `<iframe>`, or export a frozen **snapshot**
-- **distributed:** `# @worker gpu-fly` dispatches a single cell to a remote box — bring your own compute
+- **distributed:** `# @worker gpu-fly` dispatches a single cell to a remote box - bring your own compute
 - **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3 / GCS / Azure prefix a local `pathlib.Path`
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
 - **auto-install:** missing import in a cell? one click adds the package via uv and re-runs
-- **headless:** `strata run ./my-notebook` for CI and scheduled execution — same DAG, same cache
+- **headless:** `strata run ./my-notebook` for CI and scheduled execution - same DAG, same cache
 
 [:octicons-arrow-right-24: Notebook Quickstart](getting-started/notebook.md){ .md-button .md-button--primary }
 

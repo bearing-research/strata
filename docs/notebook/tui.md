@@ -3,11 +3,11 @@
 `strata-notebook-tui` is a **read-only terminal spectator** for a live notebook
 session. It attaches to a running `strata-notebook` server over the same
 WebSocket protocol the web UI uses, then renders the notebook and streams every
-update — cell status changes, console output, results, cascade and
-environment-job progress, and an AI agent's activity — as they happen.
+update - cell status changes, console output, results, cascade and
+environment-job progress, and an AI agent's activity - as they happen.
 
 It does not edit or run cells. Its purpose is **watching**: open a notebook in
-the web UI (or let an AI agent drive it), and follow along in a terminal — a
+the web UI (or let an AI agent drive it), and follow along in a terminal - a
 second pane, an SSH session, or a tmux window beside your editor.
 
 ## Install
@@ -27,7 +27,7 @@ viewer's dependencies, so `strata-notebook-tui` will fail to start.
 
 ## Workflow
 
-The viewer is a client — you always have a **server**, a **session**, and the
+The viewer is a client - you always have a **server**, a **session**, and the
 **viewer watching it**.
 
 ### 1. Start the server
@@ -45,7 +45,7 @@ strata new my-notebook         # creates ./my-notebook
 ```
 
 …or create / open one in the web UI at `:8765`. (`strata-notebook-tui` can open
-an existing notebook directory itself — see `--notebook` below — but it can't
+an existing notebook directory itself - see `--notebook` below - but it can't
 create one.)
 
 ### 3. Watch it
@@ -72,23 +72,23 @@ in another terminal:
 
 The agent's reasoning streams into the Agent tab while cells flip status, the
 selection follows the running cell, and results render live. Agent
-confirmation prompts are shown as *"awaiting driver confirmation"* — the viewer
+confirmation prompts are shown as *"awaiting driver confirmation"* - the viewer
 is read-only, so the web UI (the driver) answers them.
 
 ## Layout and keys
 
 The left pane lists the cells (status glyph, name, and last-run time); the right
-pane is split into two tab-groups for the selected cell — the **code** on top
+pane is split into two tab-groups for the selected cell - the **code** on top
 (Source, Tests source) and the **runtime** on the bottom (Output, Console, Agent,
 Results). A header line shows the connection state, follow mode, and any
 cascade / environment / agent activity.
 
 When the driver runs a cell's [unit tests](testing.md), the result shows as a
-badge on that cell in the list — `✓ 4/4` (green), `✗ 2/4` on failure, `·stale`
-when the cell changed since the run — and the header notes the test run. The
+badge on that cell in the list - `✓ 4/4` (green), `✗ 2/4` on failure, `·stale`
+when the cell changed since the run - and the header notes the test run. The
 top **Tests** tab (`3`) shows the test *source*; the bottom **Results** tab (`7`)
 shows the individual outcomes for the selected cell: each test as `✓`/`✗`/`⚠`/`○`
-with its failure message (the rewritten-assert diff) underneath — the pytest run,
+with its failure message (the rewritten-assert diff) underneath - the pytest run,
 in the terminal.
 
 | Key | Action |
@@ -112,10 +112,10 @@ in the terminal.
 
 The tabs render richly: source is **syntax-highlighted** by cell language,
 markdown cells and markdown outputs render as formatted markdown, a single DataFrame / table output
-renders in an **interactive data viewer** — a scrollable table you can page (`n`/`p`),
+renders in an **interactive data viewer** - a scrollable table you can page (`n`/`p`),
 sort by the focused column (`s`), and export to CSV (`e`), backed by the full
-cached artifact rather than the 20-row preview — and image outputs (e.g.
-matplotlib figures) render **inline** — using the terminal's graphics protocol
+cached artifact rather than the 20-row preview - and image outputs (e.g.
+matplotlib figures) render **inline** - using the terminal's graphics protocol
 (kitty / iTerm2 / Sixel) where available, degrading to Unicode half-blocks
 otherwise.
 
@@ -142,7 +142,7 @@ strata-notebook-tui [--session ID | --notebook PATH] [--server URL] [--user-head
 | `--notebook PATH` | Open / reuse a session for a notebook directory path (the path must exist on the server's filesystem). |
 | `--server URL` | Base URL of the server (default: `$STRATA_TUI_SERVER` or `http://localhost:8765`). |
 | `--user-header NAME` | Identity header name, matching the server's `personal_mode_user_header`. |
-| `--user VALUE` | Identity header value — needed to attach to an owned notebook. |
+| `--user VALUE` | Identity header value - needed to attach to an owned notebook. |
 
 ## Authentication
 

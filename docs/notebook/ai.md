@@ -106,9 +106,9 @@ The agent works best for additive tasks (creating new cells, installing packages
 
 Before granting the assistant write access, understand what it can and can't do.
 
-**Approval-gated tools.** `delete_cell` and `add_package` always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after **120 s by default** and is treated as a decline so a closed tab doesn't leave the loop hanging; configure it with `STRATA_AI_APPROVAL_TIMEOUT_SECONDS` on the server or `approval_timeout_seconds` in the notebook's `[ai]` section. Approval can be skipped with the **Auto-approve** toggle in the AI panel footer — that suppresses the gate for the remainder of the session.
+**Approval-gated tools.** `delete_cell` and `add_package` always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after **120 s by default** and is treated as a decline so a closed tab doesn't leave the loop hanging; configure it with `STRATA_AI_APPROVAL_TIMEOUT_SECONDS` on the server or `approval_timeout_seconds` in the notebook's `[ai]` section. Approval can be skipped with the **Auto-approve** toggle in the AI panel footer - that suppresses the gate for the remainder of the session.
 
-**Non-gated mutating tools.** `create_cell`, `edit_cell`, and `run_cell` execute without prompting. `edit_cell` overwrites the cell source; `run_cell` executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to `cells/*.py`, so git is the practical undo for `edit_cell` and `delete_cell`. Side effects of `run_cell` — files written, packages mutated, API calls made — are not reversible.)
+**Non-gated mutating tools.** `create_cell`, `edit_cell`, and `run_cell` execute without prompting. `edit_cell` overwrites the cell source; `run_cell` executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to `cells/*.py`, so git is the practical undo for `edit_cell` and `delete_cell`. Side effects of `run_cell` - files written, packages mutated, API calls made - are not reversible.)
 
 **Loop bounds.**
 
@@ -120,14 +120,14 @@ Before granting the assistant write access, understand what it can and can't do.
 | Per-call output tokens | `STRATA_AI_MAX_OUTPUT_TOKENS` (default 4096) | LLM config |
 | Per-call context tokens | `STRATA_AI_MAX_CONTEXT_TOKENS` (default 100000) | LLM config |
 
-There is **no aggregate token budget** across iterations — a 10-iteration run can consume up to 10× the per-call limits. If you're using a metered provider, expect costs roughly proportional to (notebook context size + conversation history + tool-call traces) × iterations.
+There is **no aggregate token budget** across iterations - a 10-iteration run can consume up to 10× the per-call limits. If you're using a metered provider, expect costs roughly proportional to (notebook context size + conversation history + tool-call traces) × iterations.
 
 **What's NOT bounded.**
 
 - **Package allowlist.** `add_package` accepts any pip-compatible package spec. Approval-gated, so the user sees the spec before install, but there's no server-side allowlist or signature check. `pandas>=2.0` and `evil-package@git+https://...` both pass the same gate.
 - **Mount / credential access.** `run_cell` executes in the notebook's normal execution context. It sees the notebook's mounts, env vars (including any unblanked secrets in the runtime panel), and any artifacts already in the store. Don't grant agent access to a notebook with production credentials unless you also trust the assistant's prompts.
-- **Network access from cells.** No sandboxing. A cell created and run by the agent can make outbound HTTP calls, read/write to mounted buckets, hit external APIs — same as a cell you wrote by hand.
-- **Filesystem reads outside the notebook directory.** Same as a hand-written cell — Python `open()` works wherever the strata-notebook process has permission. Inside a Docker / Fly deployment this is usually limited to the container, but a local-dev `uv run strata-notebook` has full user-account access.
+- **Network access from cells.** No sandboxing. A cell created and run by the agent can make outbound HTTP calls, read/write to mounted buckets, hit external APIs - same as a cell you wrote by hand.
+- **Filesystem reads outside the notebook directory.** Same as a hand-written cell - Python `open()` works wherever the strata-notebook process has permission. Inside a Docker / Fly deployment this is usually limited to the container, but a local-dev `uv run strata-notebook` has full user-account access.
 
 ### Package install scoping
 
@@ -159,7 +159,7 @@ If the user has a cell open in the editor while the agent calls
 - The agent writes the new source to `cells/<id>.py` and calls
   `session.reload()`, then broadcasts a fresh `notebook_state` over
   WebSocket via `broadcast_notebook_sync` (`agent.py:450`).
-- Every connected frontend tab — including the user's — replaces its
+- Every connected frontend tab - including the user's - replaces its
   cached state with the broadcast. The editor view re-renders with
   the agent's new source.
 - **The user's unflushed keystrokes are lost.** Source edits are
@@ -179,10 +179,10 @@ panel and notices the cell changes there too, but if you're prone
 to typing into a buffer while the agent works, save first
 (Ctrl+S in the editor, or Shift+Enter to run).
 
-**Conversation memory is per-notebook.** Agent history (the last 12 user/assistant text turns — tool traces are never kept) is persisted to the notebook's `.strata/agent_history.json`, so it survives a `strata-notebook` restart. Clicking **Clear** in the panel removes it, in memory and on disk. Like everything under `.strata/`, it's gitignored runtime state.
+**Conversation memory is per-notebook.** Agent history (the last 12 user/assistant text turns - tool traces are never kept) is persisted to the notebook's `.strata/agent_history.json`, so it survives a `strata-notebook` restart. Clicking **Clear** in the panel removes it, in memory and on disk. Like everything under `.strata/`, it's gitignored runtime state.
 
 **Recommended posture.**
 
 - For routine work, leave Auto-approve off so destructive actions surface a confirm.
 - Don't put production database credentials in a notebook the agent has access to; use a separate notebook (or a service-mode deployment with proxy auth).
-- After an agent run, review the diff in `cells/*.py` before pushing — the agent can rewrite cells without ceremony.
+- After an agent run, review the diff in `cells/*.py` before pushing - the agent can rewrite cells without ceremony.

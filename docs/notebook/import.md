@@ -17,27 +17,27 @@ Read this before you decide to import a particular notebook.
 - **`;`-suppression** of the trailing display (Strata's harness
   auto-displays bare expressions; the converter detects `df;` and
   appends a `pass` so the display is skipped).
-- **`%pip install`, `!pip install`, `%conda install`** — packages
+- **`%pip install`, `!pip install`, `%conda install`** - packages
   captured into the new notebook's `pyproject.toml`.
-- **`%env`, `%set_env`** — translated to `# @env KEY=VAL` cell
+- **`%env`, `%set_env`** - translated to `# @env KEY=VAL` cell
   annotations.
-- **`%run script.py`** — translated to `exec(Path(...).read_text())`.
-- **`%%bash`, `%%sh`, `%%script`** — bodies wrapped in
+- **`%run script.py`** - translated to `exec(Path(...).read_text())`.
+- **`%%bash`, `%%sh`, `%%script`** - bodies wrapped in
   `subprocess.run(..., shell=True)`.
-- **`%%writefile`** — translated to `Path(...).write_text(...)`.
-- **`%timeit`, `%time` (line form)** — the magic prefix is dropped;
+- **`%%writefile`** - translated to `Path(...).write_text(...)`.
+- **`%timeit`, `%time` (line form)** - the magic prefix is dropped;
   the body keeps running.
 
 **What you lose:**
 
 - **All cell outputs.** Imported cells start blank; first run
   produces fresh outputs from the resolved environment. This is
-  intentional — the whole point of content-addressed caching is to
+  intentional - the whole point of content-addressed caching is to
   produce outputs from a known source + env, not to trust whatever
   was last serialized into the `.ipynb`.
 - **Widgets** (`ipywidgets`, `tqdm.notebook`, custom display).
   Strata's display protocol covers DataFrames, plots, markdown,
-  images — but interactive JS widgets don't survive.
+  images - but interactive JS widgets don't survive.
 - **`%matplotlib inline` / `notebook`.** Dropped. Strata captures
   figures via the display protocol automatically.
 - **Raw cells.** Skipped entirely (counted in the import report).
@@ -47,14 +47,14 @@ Read this before you decide to import a particular notebook.
   manually with `subprocess.run(...)` if the escape was load-bearing.
 - **Non-Python `%%` cell magics** (`%%R`, `%%ruby`, `%%javascript`,
   `%%html`, `%%latex`, `%%svg`, `%%markdown`). Dropped.
-- **`%%sql`.** Dropped — convert by hand to a Strata
+- **`%%sql`.** Dropped - convert by hand to a Strata
   [SQL cell](cells.md#sql-cells) if you want it back.
 - **REPL-inspection magics** (`%who`, `%whos`, `%lsmagic`, `%history`,
   `%alias`, etc.). Dropped; no Strata equivalent.
 
 Everything that's "dropped" is reported in the import report
 (`<notebook_dir>/import_report.md`) with the exact line number and
-the marker comment placed in the cell source — there's no silent
+the marker comment placed in the cell source - there's no silent
 data loss.
 
 ## When to use it

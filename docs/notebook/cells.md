@@ -56,7 +56,7 @@ Only variables that a downstream cell actually references get stored as artifact
 
 ### The ambient `strata` client
 
-Every **locally-executed** Python cell gets a ready `strata` client in its namespace, already bound to the running server — no import or construction needed:
+Every **locally-executed** Python cell gets a ready `strata` client in its namespace, already bound to the running server - no import or construction needed:
 
 ```python
 # no `from strata_client import StrataClient` / `StrataClient(base_url=...)`
@@ -67,13 +67,13 @@ art = strata.materialize(
 strata.set_alias("taxi/tip-model", "champion", art.artifact_id, art.version)
 ```
 
-It's a lightweight client with the same API surface for the common operations (`materialize`, `put`, `set_alias`, `set_tag`, `resolve_alias`, …); explicit `from strata_client import StrataClient` still works if you want the full client. The ambient `strata` is created fresh per cell run and closed automatically — you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a `@mount` path or an `@table` variable.
+It's a lightweight client with the same API surface for the common operations (`materialize`, `put`, `set_alias`, `set_tag`, `resolve_alias`, …); explicit `from strata_client import StrataClient` still works if you want the full client. The ambient `strata` is created fresh per cell run and closed automatically - you don't manage its lifecycle. It's an injected runtime tool, not a cell variable: it doesn't flow downstream and isn't part of provenance (using it has no effect on staleness), exactly like a `@mount` path or an `@table` variable.
 
-Cells routed to a **remote executor worker** (not local execution) don't get the ambient `strata` — import a client explicitly there.
+Cells routed to a **remote executor worker** (not local execution) don't get the ambient `strata` - import a client explicitly there.
 
-When a cell publishes with a name — `strata.put(model, name="taxi/tip-model")` — the artifact appears in the [registry dashboard](../core/registry.md#in-the-notebook-the-registry-dashboard): a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage — all in the UI).
+When a cell publishes with a name - `strata.put(model, name="taxi/tip-model")` - the artifact appears in the [registry dashboard](../core/registry.md#in-the-notebook-the-registry-dashboard): a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).
 
-> Calls through `strata` are **side effects**. On a cache hit the cell body doesn't re-run, so a `strata.set_alias(...)` won't re-fire — fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.
+> Calls through `strata` are **side effects**. On a cache hit the cell body doesn't re-run, so a `strata.set_alias(...)` won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.
 
 ### Library cells (cross-cell defs and classes)
 
@@ -170,7 +170,7 @@ Warnings surface as a pill on the cell and a structured entry in the execution l
 | `# @name X`        | Display name for the DAG view                    |
 | `# @worker X`      | Route execution to a named remote worker         |
 | `# @timeout 60`    | Override execution timeout (seconds, default 300) |
-| `# @env KEY=value` | Set an env var for this cell only — non-sensitive values only; literal lands in committed source. For secrets use `notebook.toml [env]` or the Runtime panel. |
+| `# @env KEY=value` | Set an env var for this cell only - non-sensitive values only; literal lands in committed source. For secrets use `notebook.toml [env]` or the Runtime panel. |
 | `# @mount …`       | Attach a filesystem mount (see [Annotations][a]) |
 | `# @loop …`        | Turn the cell into a [loop cell](#loop-cells)    |
 
@@ -560,7 +560,7 @@ See [Cell Annotations][a] for the full reference.
 
 ## Widget Cells
 
-A **widget cell** is a declarative control panel — one control per line — that
+A **widget cell** is a declarative control panel - one control per line - that
 feeds values into the DAG. Drag a slider or pick from a dropdown, and the cells
 that read that value go stale; run them to see the result. Add one with the
 **+** menu (**Widget**), or declare `language = "widget"` in `notebook.toml`.
@@ -596,19 +596,19 @@ report
 
 Arguments must be literals. Omit `default=` and it's inferred (a slider's `min`,
 a dropdown's first option, `False`, `""`). Omit a slider's `step=` and it's
-derived from the range — roughly `(max - min) / 100`, snapped to a readable
+derived from the range - roughly `(max - min) / 100`, snapped to a readable
 `1`/`2`/`5` × 10ⁿ increment (so `slider(0, 1)` steps by `0.01`, `slider(0, 100)`
 by `1`). Pass `step=` explicitly to override.
 
 ### How it works
 
-A widget cell runs **no code and no subprocess** — it's declarative. Each
+A widget cell runs **no code and no subprocess** - it's declarative. Each
 control's current value is stored as a content-addressed artifact, so:
 
 - **Changing a control** re-materializes its value and marks downstream cells
-  **stale** — the same signal as editing an upstream cell. Run the stale cells
+  **stale** - the same signal as editing an upstream cell. Run the stale cells
   (or accept the cascade) to propagate the change.
-- **Returning a control to a previous value is a cache hit** — downstream cells
+- **Returning a control to a previous value is a cache hit** - downstream cells
   that already computed for that value don't recompute.
 - The **declaration** (`slider(0, 1, …)`) is committed to `notebook.toml`; the
   **current value** is runtime state (a drag never churns the committed file).
@@ -623,16 +623,16 @@ By default a control change marks downstream cells stale and you run them. Turn
 on **⚡ Live** (a `# @live` annotation on the widget cell) and changing a control
 **auto-runs** the cheap downstream cells instead. Cells whose last run was
 expensive (over a cost threshold) are left stale rather than re-run on every
-drag — so a slider feeding a quick plot updates live, while one feeding a long
+drag - so a slider feeding a quick plot updates live, while one feeding a long
 training cell waits for a manual run.
 
 ### App view
 
 Click **App** in the notebook header (or visit `/app/<sessionId>`) to open the
 notebook as a **read-only interactive app**: only widget control panels,
-markdown, and display outputs render — no editor, DAG, or toolbars. The
+markdown, and display outputs render - no editor, DAG, or toolbars. The
 connection is read-only (edits and arbitrary cell runs are rejected server-side),
-but viewers can still drive widgets — combined with **⚡ Live** that's the
+but viewers can still drive widgets - combined with **⚡ Live** that's the
 "tweak a parameter, see the result" dashboard you hand to a stakeholder.
 
 Add `# @app hide` to a cell to keep it out of the app view (e.g. a setup cell
@@ -641,8 +641,8 @@ has outputs to show, then share the app link.
 
 #### Embedding the app view in another site
 
-The app view can be dropped into another page — a dashboard, wiki, or internal
-portal — as an `<iframe>`. Pick **Embed** from the notebook's **Export** menu to
+The app view can be dropped into another page - a dashboard, wiki, or internal
+portal - as an `<iframe>`. Pick **Embed** from the notebook's **Export** menu to
 copy a ready-to-paste snippet, or build it yourself:
 
 ```html
@@ -673,7 +673,7 @@ allow any host. Accepts a comma-separated list or a JSON array.
 
 ## Markdown Cells
 
-Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG — they don't produce artifacts, don't participate in cascade execution, and don't have an `id` / variable that downstream cells can reference. They survive saves and exports verbatim.
+Plain prose between cells, rendered with `markdown-it` + `DOMPurify` for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are **not** part of the DAG - they don't produce artifacts, don't participate in cascade execution, and don't have an `id` / variable that downstream cells can reference. They survive saves and exports verbatim.
 
 ```markdown
 ## Stage 1: Load + Clean
@@ -703,7 +703,7 @@ For loop cells, each iteration gets a suffix:
 strata://artifact/<artifact_id>@v=<version>@iter=<k>
 ```
 
-The `<artifact_id>` is content-addressed (derived from the provenance hash); same code + same inputs + same env = same artifact ID across machines and runs. The `@v=N` version increments only when the same name pointer is re-bound to a new content hash — see [Library usage](../getting-started/core.md) for how named artifacts work in the Core SDK.
+The `<artifact_id>` is content-addressed (derived from the provenance hash); same code + same inputs + same env = same artifact ID across machines and runs. The `@v=N` version increments only when the same name pointer is re-bound to a new content hash - see [Library usage](../getting-started/core.md) for how named artifacts work in the Core SDK.
 
 Notebook cell outputs follow the pattern `nb_<notebook_id>_cell_<cell_id>_var_<variable>@v=N` for the variable-level artifacts a cell produces. You don't usually need to construct these by hand; the inspect panel surfaces them and `# @loop start_from=<cell-id>@iter=k` references them by cell ID + iteration index, not the full URI.
 
@@ -815,30 +815,30 @@ Reach for loop cells when **being able to inspect or fork from iteration k matte
 
 ## R Cells *(0.2.0)*
 
-R is a first-class notebook language alongside Python. R cells run R source via the system `Rscript`, with the same provenance + caching + Arrow-IPC artifact pipeline as Python cells. Data crosses the language boundary as `arrow/ipc`: a `pandas.DataFrame` produced by a Python cell becomes a `data.frame` in the next R cell; an R `data.frame` (or `tibble`) becomes a `pandas.DataFrame` in the next Python cell. Non-tabular R values (S3 objects, lists with classes, environments) are stored as RDS and tagged `r_only=true` — a downstream Python cell that consumes one fails with a structured `StrataRArtifactError` rather than a confusing `NameError`.
+R is a first-class notebook language alongside Python. R cells run R source via the system `Rscript`, with the same provenance + caching + Arrow-IPC artifact pipeline as Python cells. Data crosses the language boundary as `arrow/ipc`: a `pandas.DataFrame` produced by a Python cell becomes a `data.frame` in the next R cell; an R `data.frame` (or `tibble`) becomes a `pandas.DataFrame` in the next Python cell. Non-tabular R values (S3 objects, lists with classes, environments) are stored as RDS and tagged `r_only=true` - a downstream Python cell that consumes one fails with a structured `StrataRArtifactError` rather than a confusing `NameError`.
 
 ### R environments
 
 R environments are managed from the **Environment** panel, at parity with Python's uv-backed venv:
 
-- **System R by default.** A notebook with no `renv.lock` runs R cells against your system R library. The R card reads **System R** and shows the detected R version — cells work immediately as long as `arrow` + `jsonlite` are available system-wide.
+- **System R by default.** A notebook with no `renv.lock` runs R cells against your system R library. The R card reads **System R** and shows the detected R version - cells work immediately as long as `arrow` + `jsonlite` are available system-wide.
 - **One-click renv bootstrap.** **Initialize renv** creates a project-scoped, reproducible environment: it installs `renv` if missing, inits a bare project library, installs `jsonlite` + `arrow`, and snapshots to `renv.lock`. Progress streams live on the card (the first run compiles `arrow` from source, which takes a few minutes). When it finishes the card flips to **In sync**.
 - **Per-package install.** A missing-package error in an R cell surfaces a structured hint with an **Install** button that runs `renv::install()` + `renv::snapshot()` for the named package.
-- **Automatic restore on open.** Opening a notebook that has an `renv.lock` restores the project library automatically — the `uv sync` analogue for R. Editing `renv.lock` invalidates R cells' cache the same way editing `uv.lock` invalidates Python cells'.
+- **Automatic restore on open.** Opening a notebook that has an `renv.lock` restores the project library automatically - the `uv sync` analogue for R. Editing `renv.lock` invalidates R cells' cache the same way editing `uv.lock` invalidates Python cells'.
 
 `renv.lock` is committed config (like `uv.lock`); the built `renv/library/` is gitignored.
 
 ### Plots
 
-R cells display plots inline, like a Python cell's matplotlib figure. Base graphics (`plot()`, `hist()`, …) and grid-based plots (ggplot2, lattice) are captured to PNG and rendered in the cell output. A bare trailing plot object auto-renders — a last-line `p` where `p <- ggplot(...)` shows the plot without an explicit `print(p)`, mirroring the R console. A cell that draws several plots produces an ordered list of image outputs.
+R cells display plots inline, like a Python cell's matplotlib figure. Base graphics (`plot()`, `hist()`, …) and grid-based plots (ggplot2, lattice) are captured to PNG and rendered in the cell output. A bare trailing plot object auto-renders - a last-line `p` where `p <- ggplot(...)` shows the plot without an explicit `print(p)`, mirroring the R console. A cell that draws several plots produces an ordered list of image outputs.
 
 ### What's still ahead
 
 **Warm Rscript pool.** Notebooks containing R cells keep a small pool of
 pre-spawned R workers (R startup, `.Rprofile`/renv activation, and
 `jsonlite`/`arrow` loads already paid), so an R cell run skips the ~1–2s
-interpreter cold-start. Workers are single-shot — one cell each, then
-replaced — preserving per-cell isolation; editing `renv.lock` drains and
+interpreter cold-start. Workers are single-shot - one cell each, then
+replaced - preserving per-cell isolation; editing `renv.lock` drains and
 respawns the pool. Pure-Python notebooks and machines without `Rscript`
 never start one.
 
@@ -847,7 +847,7 @@ R execution and display are complete; remaining R polish is tracked on GitHub: [
 ### What you need today
 
 - R `>= 4.2` on `PATH` (Strata calls `Rscript`).
-- The `arrow` and `jsonlite` R packages — either available in the system R library, or installed into a project library via **Initialize renv** in the Environment panel (which installs both for you).
+- The `arrow` and `jsonlite` R packages - either available in the system R library, or installed into a project library via **Initialize renv** in the Environment panel (which installs both for you).
 
 ### Example
 
@@ -861,7 +861,7 @@ The same annotation parser handles both Python and R cells (`#`-prefixed comment
 | -------------------------- | ----------------------------------------------------------------------- |
 | `# @name <text>`           | Cell display name in the UI.                                            |
 | `# @env KEY=value`         | Sets `Sys.getenv("KEY")` for the cell's process.                        |
-| `# @mount data file:///x`  | Binds `data` inside the R cell to the mount's local path (a character string — R has no `pathlib.Path`).  |
+| `# @mount data file:///x`  | Binds `data` inside the R cell to the mount's local path (a character string - R has no `pathlib.Path`).  |
 | `# @timeout 60`            | Per-cell execution timeout in seconds.                                  |
 
 Loop annotations (`@loop`, `@loop_until`) and prompt-cell annotations (`@output_schema` etc.) do not apply to R cells.

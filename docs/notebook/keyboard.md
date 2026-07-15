@@ -38,7 +38,7 @@ These are available in the cell gutter (visible on hover):
 ## Not yet bound to keyboard
 
 These operations exist in the UI / WebSocket protocol but don't have
-dedicated keyboard shortcuts yet — use the buttons or menu:
+dedicated keyboard shortcuts yet - use the buttons or menu:
 
 - **Run all cells** (WebSocket `notebook_run_all`)
 - **Add cell below / above** (use `+` in the cell gutter)
@@ -51,5 +51,5 @@ dedicated keyboard shortcuts yet — use the buttons or menu:
 This list is intentionally explicit so you know what's wired up
 versus what's still UI-only. Missing bindings are usually a one-line
 addition in `frontend/src/components/KeyboardShortcutsModal.vue`
-plus the matching handler — open an issue if a specific shortcut is
+plus the matching handler - open an issue if a specific shortcut is
 high-friction for you.

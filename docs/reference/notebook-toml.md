@@ -2,7 +2,7 @@
 
 `notebook.toml` is the **committed** configuration for a notebook. It declares the cells, their metadata, the per-notebook environment, mounts, workers, database connections, and any AI/secret-manager wiring. The file is human-editable and git-diffable; the matching backend writer round-trips it so external edits survive UI saves.
 
-Runtime state — display outputs, per-cell provenance hashes, console snapshots, `uv sync` timestamps — lives in `.strata/runtime.json`, **not** here. `notebook.toml` only changes on structural edits (add/remove/reorder a cell, change a worker/timeout/env/mounts/AI settings).
+Runtime state - display outputs, per-cell provenance hashes, console snapshots, `uv sync` timestamps - lives in `.strata/runtime.json`, **not** here. `notebook.toml` only changes on structural edits (add/remove/reorder a cell, change a worker/timeout/env/mounts/AI settings).
 
 The schema is defined in `src/strata/notebook/models.py::NotebookToml` and the round-tripping rules in `src/strata/notebook/writer.py`.
 
@@ -29,7 +29,7 @@ timeout = 300                       # notebook-level default in seconds; overrid
 | `worker` | string \| absent | Notebook-level default worker name. Overridden by cell-level `worker` (below) or `# @worker` annotations. |
 | `timeout` | float \| absent | Notebook-level default cell timeout in seconds. Same precedence as `worker`. |
 
-## `[env]` — Notebook environment variables
+## `[env]` - Notebook environment variables
 
 ```toml
 [env]
@@ -42,7 +42,7 @@ ANTHROPIC_API_KEY = ""              # blanked: keys matching KEY/SECRET/TOKEN/PA
 
 **Whole-block elision.** If every entry is either empty or a blanked sensitive key, the writer omits the `[env]` block entirely on save. Typing an API key into the Runtime panel doesn't churn the committed file.
 
-## `[ai]` — AI assistant configuration
+## `[ai]` - AI assistant configuration
 
 ```toml
 [ai]
@@ -56,9 +56,9 @@ model = "claude-sonnet-4-6"
 
 Advanced provider fields (`base_url`, `timeout_seconds`, token ceilings, …) are documented in [AI Integration](../notebook/ai.md#custom-provider-configuration).
 
-The API key and base URL come from the runtime environment (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / `STRATA_AI_API_KEY` / `STRATA_AI_BASE_URL`) — they never live in this file.
+The API key and base URL come from the runtime environment (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` / `STRATA_AI_API_KEY` / `STRATA_AI_BASE_URL`) - they never live in this file.
 
-## `[secret_manager]` — External secret-manager wiring
+## `[secret_manager]` - External secret-manager wiring
 
 ```toml
 [secret_manager]
@@ -73,7 +73,7 @@ Routing-only config for an external secret manager (Infisical, Doppler, AWS SM, 
 
 Allowed keys: `provider`, `project_id`, `environment`, `path`, `base_url`. Unknown keys are dropped on save.
 
-## `[[mounts]]` — Filesystem mounts
+## `[[mounts]]` - Filesystem mounts
 
 ```toml
 [[mounts]]
@@ -90,15 +90,15 @@ Each mount becomes a `pathlib.Path` variable in the cell namespace. Cells access
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `name` | string (required) | Identifier — injected as a `Path` variable in the cell. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
+| `name` | string (required) | Identifier - injected as a `Path` variable in the cell. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
 | `uri` | string (required) | `file:///path`, `s3://bucket/prefix`, `gs://bucket/prefix`, `az://container/prefix`. |
 | `mode` | `"ro"` \| `"rw"` | Default `"ro"`. |
-| `pin` | string \| absent | Pinned version/etag — disables auto-fingerprinting. |
+| `pin` | string \| absent | Pinned version/etag - disables auto-fingerprinting. |
 | `options` | table | Backend storage options passed through to fsspec. Common keys: `anon`, `endpoint_url`, `profile`. |
 
 Cell-level mounts (under `[[cells.mounts]]`) supplement notebook-level ones.
 
-## `[[workers]]` — Remote worker registry
+## `[[workers]]` - Remote worker registry
 
 ```toml
 [[workers]]
@@ -117,9 +117,9 @@ token_env = "STRATA_FLY_WORKER_TOKEN"
 | `name` | string (required) | Worker name referenced in `# @worker <name>` annotations. Must match `[a-zA-Z0-9][a-zA-Z0-9._-]*`. |
 | `backend` | `"local"` \| `"executor"` | Default `"local"`. `"executor"` for HTTP workers; `"local"` for in-process. |
 | `runtime_id` | string \| absent | Stable fingerprint hashed into cell provenance. Bump to invalidate the cache for cells using this worker. |
-| `config` | table | Backend-specific. For `"executor"`: `url`, `transport` (`"http"` or `"signed"`), `token` (literal — dev only), `token_env` (env var name — preferred). See [Distributed Workers](../notebook/workers.md). |
+| `config` | table | Backend-specific. For `"executor"`: `url`, `transport` (`"http"` or `"signed"`), `token` (literal - dev only), `token_env` (env var name - preferred). See [Distributed Workers](../notebook/workers.md). |
 
-## `[connections.<name>]` — Named database connections
+## `[connections.<name>]` - Named database connections
 
 ```toml
 [connections.warehouse]
@@ -140,15 +140,15 @@ SQL cells reference these by name via `# @sql connection=<name>`.
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `<name>` | section header | Connection name — referenced by `# @sql connection=<name>`. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
+| `<name>` | section header | Connection name - referenced by `# @sql connection=<name>`. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
 | `driver` | string (required) | One of the shipped adapters: `duckdb`, `sqlite`, `postgresql`, `snowflake`, `bigquery`. MotherDuck and MySQL are planned but not yet implemented. |
 | `auth` | table | `${VAR}` indirections only. Resolved from the process environment at execute time; never hashed into provenance. |
 | `options` | table | Driver-specific runtime tunables that don't change which objects the connection sees (`application_name`, `connect_timeout`, etc.). |
-| (driver-specific top-level keys) | varies | `uri`, `host`, `account`, `database`, `role`, `path`, ... — interpreted by the driver adapter. |
+| (driver-specific top-level keys) | varies | `uri`, `host`, `account`, `database`, `role`, `path`, ... - interpreted by the driver adapter. |
 
 **Malformed connection preservation.** If a `[connections.<name>]` block fails validation (bad name, missing `driver`, etc.), it's preserved verbatim under `[[malformed_connection]]` on save so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.
 
-## `[[variant_group]]` — Active-variant pointers
+## `[[variant_group]]` - Active-variant pointers
 
 ```toml
 [[variant_group]]
@@ -156,14 +156,14 @@ group = "model_choice"
 active = "logistic"
 ```
 
-Cells declare group membership via `# @variant <group> <name>` in their source. This block records which member is currently active — only the active cell participates in the DAG.
+Cells declare group membership via `# @variant <group> <name>` in their source. This block records which member is currently active - only the active cell participates in the DAG.
 
 | Key | Type | Description |
 | --- | --- | --- |
 | `group` | string (required) | Variant group identifier. Must match the group name used in `# @variant`. |
 | `active` | string (required) | Currently active variant name within the group. |
 
-## `[[cells]]` — Cell registry
+## `[[cells]]` - Cell registry
 
 ```toml
 [[cells]]
@@ -191,7 +191,7 @@ timeout = 600                 # cell-level override
 
 | Key | Type | Description |
 | --- | --- | --- |
-| `id` | string (required) | Stable cell identifier. Backend generates an 8-character UUID prefix when cells are created via UI / REST; hand-edits can use any unique string (e.g. `seed`, `top-orders`). This is what `@after` and `@loop start_from=` resolve against — **not** `@name`. See [Cell IDs](../notebook/annotations.md#cell-ids). |
+| `id` | string (required) | Stable cell identifier. Backend generates an 8-character UUID prefix when cells are created via UI / REST; hand-edits can use any unique string (e.g. `seed`, `top-orders`). This is what `@after` and `@loop start_from=` resolve against - **not** `@name`. See [Cell IDs](../notebook/annotations.md#cell-ids). |
 | `file` | string (required) | Path to the cell source under `cells/`. |
 | `language` | `"python"` \| `"prompt"` \| `"sql"` \| `"markdown"` | Default `"python"`. |
 | `order` | float | Display order. Float so cells can be inserted between existing ones without renumbering. Default `0`. |
@@ -224,4 +224,4 @@ Runtime writers never touch `notebook.toml`; structural-edit writers never touch
 
 ## Round-trip safety
 
-The writer preserves unknown top-level keys verbatim. If you hand-edit the file with a key the parser doesn't know about, it survives saves — useful for experimental settings or external tooling. Known-but-malformed blocks (a `[connections.<name>]` with no `driver`, a typoed worker name) are also preserved under `[[malformed_connection]]` / `[[malformed_worker]]` so you don't lose the data while you debug.
+The writer preserves unknown top-level keys verbatim. If you hand-edit the file with a key the parser doesn't know about, it survives saves - useful for experimental settings or external tooling. Known-but-malformed blocks (a `[connections.<name>]` with no `driver`, a typoed worker name) are also preserved under `[[malformed_connection]]` / `[[malformed_worker]]` so you don't lose the data while you debug.

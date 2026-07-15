@@ -55,22 +55,22 @@ strata export ./my_analysis --app-view --to html --out dashboard.html
 
 ## App-view snapshot (`--app-view`)
 
-A regular export is a **document** view — it shows every cell's *source*
+A regular export is a **document** view - it shows every cell's *source*
 alongside its outputs, for reading or archiving the notebook. An
 app-view snapshot is a **dashboard** view: it renders only what the
-[read-only app view](cells.md#app-view) shows — widget panels (as their
-current control values), markdown, and display outputs — with **no cell
+[read-only app view](cells.md#app-view) shows - widget panels (as their
+current control values), markdown, and display outputs - with **no cell
 sources, chips, or console**.
 
 It's the static counterpart to embedding the app view. Where an embed is
 *live* (an `<iframe>` backed by a running server, interactive), a
-snapshot is *frozen* and **self-contained** — a single file with images
+snapshot is *frozen* and **self-contained** - a single file with images
 baked in as `data:` URLs, no server or network needed. Use it to email a
 report, drop a result on a shared drive, or archive exactly what a run
 produced.
 
-Widget cells render as a compact line of `control: value` chips — the
-parameter settings that produced the outputs below them — read from the
+Widget cells render as a compact line of `control: value` chips - the
+parameter settings that produced the outputs below them - read from the
 notebook's persisted control values. Cells marked `# @app hide` are
 omitted, matching the live app view; prompt-cell responses stay excluded
 for the same privacy reason as a regular export.

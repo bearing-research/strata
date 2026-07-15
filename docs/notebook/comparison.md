@@ -1,7 +1,7 @@
 # vs Jupyter, Marimo, Pluto
 
 Strata is closest in spirit to the new generation of reactive notebooks
-(Marimo, Pluto.jl) — it shares the "your DAG comes from your variable
+(Marimo, Pluto.jl) - it shares the "your DAG comes from your variable
 references" idea. Where Strata steps further is in turning every cell output
 into a content-addressed artifact and treating remote compute and AI calls
 as first-class cell behaviors rather than escape hatches.
@@ -20,13 +20,13 @@ as first-class cell behaviors rather than escape hatches.
 | Loop / iteration cells | Yes (`# @loop max_iter=N carry=var`), checkpointed per iteration | No | No | No |
 | Variant cells (tabbed alternatives sharing a DAG slot) | Yes | No | No | No |
 | Per-notebook Python environment | Separate `pyproject.toml` + `uv.lock` per notebook | PEP 723 inline script metadata at the top of the `.py` file (`# /// script` block); `marimo edit --sandbox` provisions the venv via uv (or pip/poetry/pixi/rye) | Julia project / Project.toml | Manual (venv / conda / kernel spec) |
-| Headless / CI runner | `strata run` (executes the cascade in topological order) | Notebooks runnable as `python file.py` | None first-class — `.jl` file works ad-hoc via `julia notebook.jl`, otherwise via PlutoUtils.jl | `nbconvert --execute` |
+| Headless / CI runner | `strata run` (executes the cascade in topological order) | Notebooks runnable as `python file.py` | None first-class - `.jl` file works ad-hoc via `julia notebook.jl`, otherwise via PlutoUtils.jl | `nbconvert --execute` |
 
 ## Where Strata is distinctive
 
 **Caching is automatic, not opt-in.** Marimo offers persistent caching
 through `mo.persistent_cache` (decorator or context manager), `mo.cache`,
-and `mo.lru_cache` — the user explicitly delimits a block of code they
+and `mo.lru_cache` - the user explicitly delimits a block of code they
 want cached. In Strata, every cell's output is content-addressed by
 default: the provenance hash of source + upstream artifact hashes +
 environment lockfile decides cache identity, and a cache hit is the path
@@ -39,8 +39,8 @@ a single cell, fitting one classifier on a GPU, fingerprinting one file
 on a high-memory box, without rewriting the rest of the pipeline.
 
 **AI calls are first-class DAG nodes.** Marimo's "AI-native editor"
-framing — including the `marimo pair` agent skill they shipped in
-v0.22.5 — covers code-authoring assistance: generating cells from a
+framing - including the `marimo pair` agent skill they shipped in
+v0.22.5 - covers code-authoring assistance: generating cells from a
 prompt, inline autocompletion, sidebar chat. LLM responses are not
 themselves DAG nodes; if a user calls an LLM from a Python cell, it's
 an ordinary expression with no caching, no schema enforcement, no
@@ -48,7 +48,7 @@ retry on validation. Strata's prompt cells render a `{{ var }}`
 template against upstream artifacts, send the result to an
 OpenAI-compatible API (or Anthropic native tool-use when an output
 schema is set), validate against an optional JSON Schema, and store
-the response as a cached artifact — same caching guarantees as a
+the response as a cached artifact - same caching guarantees as a
 Python cell. Mixing prompt and Python cells in one DAG is the point.
 
 **Variant cells are unique to Strata.** Three alternative training
@@ -65,7 +65,7 @@ bumps on structural edits, adding/removing cells, changing workers:
 so re-running a cell never touches the tracked tree. Jupyter `.ipynb`
 files JSON-encode source, outputs (base64 images and all), and execution
 counts in the same blob; Marimo and Pluto avoid the JSON issue with one
-text file per notebook but still keep all cells together — and Marimo's
+text file per notebook but still keep all cells together - and Marimo's
 PEP 723 inline dependency block means dependency edits and code edits
 share the same file. Strata's per-cell layout keeps a diff that touches
 cell 3 from rebasing on top of changes to cell 7.

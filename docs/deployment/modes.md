@@ -1,6 +1,6 @@
 # Deployment Modes
 
-Strata's `deployment_mode` is binary — `personal` or `service` — but
+Strata's `deployment_mode` is binary - `personal` or `service` - but
 `personal` supports two flavors depending on whether
 `STRATA_PERSONAL_MODE_USER_HEADER` is set. In practice you're choosing
 between three shapes.

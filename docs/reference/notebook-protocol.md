@@ -7,7 +7,7 @@ per-frame details live in [REST API Reference](rest-api.md) and
 load-bearing rules that aren't obvious from either of those individually.
 
 If you want exhaustive request/response shapes, the live OpenAPI document at
-`GET /openapi.json` is authoritative — Swagger UI is at `GET /docs`.
+`GET /openapi.json` is authoritative - Swagger UI is at `GET /docs`.
 
 ## What the backend is
 
@@ -19,7 +19,7 @@ The notebook backend is a FastAPI service that exposes:
 | `WS /v1/notebooks/ws/{session_id}` | Live execution: cell status, output streams, DAG updates, cascade prompts, inspect REPL, agent loop |
 
 The Vue frontend is a thin consumer of both. Anything Vue can do, a second
-client can do — there's no internal API.
+client can do - there's no internal API.
 
 ## Bootstrap flow
 
@@ -27,7 +27,7 @@ The minimum sequence to render a notebook view:
 
 1. **Open the notebook.** `POST /v1/notebooks/open` with the notebook
    directory path. The response carries everything you need to render the UI
-   cold — see [Cold-start payload](#cold-start-payload) below. The
+   cold - see [Cold-start payload](#cold-start-payload) below. The
    `session_id` in the response is the route parameter for every subsequent
    call.
 
@@ -36,17 +36,17 @@ The minimum sequence to render a notebook view:
    the same payload shape.
 2. **Connect the WebSocket.** `ws://.../v1/notebooks/ws/{session_id}`. The
    handler verifies the session exists and (if owned) that the caller is the
-   owner — refuses with close code `1008 Notebook not found` otherwise. No
+   owner - refuses with close code `1008 Notebook not found` otherwise. No
    initial frame is sent on accept.
 3. **Send `notebook_sync`** as the first client → server message. The server
    answers with a `notebook_state` frame containing the same fields as the
-   open response. This is your sole resync primitive on reconnects — there's
+   open response. This is your sole resync primitive on reconnects - there's
    no `resume_after_seq`.
 4. **Listen.** Execution events (cell status, output, console, errors,
    cascade prompts, DAG updates, environment-job lifecycle, agent loop) all
-   arrive over the WS. Subsequent structural edits — adding / removing /
+   arrive over the WS. Subsequent structural edits - adding / removing /
    reordering cells, updating env / mounts / workers, dependency mutations
-   — go via REST; the backend re-broadcasts the affected state through the
+   - go via REST; the backend re-broadcasts the affected state through the
    WS automatically.
 
 That is the entire bootstrap. The remaining sections of this page explain the
@@ -55,7 +55,7 @@ gotchas in that flow.
 ## Path parameter gotcha: session_id vs notebook id
 
 The route parameter `{notebook_id}` (in both REST and WS) is **the
-`session_id` returned from `POST /open`** — not the `notebook_id` field
+`session_id` returned from `POST /open`** - not the `notebook_id` field
 inside `notebook.toml`. The TOML id is the on-disk stable identifier; the
 session id is the runtime handle the server uses to look you up.
 
@@ -73,22 +73,22 @@ stores the session id from the open response.
   authenticating proxy (Cloudflare Access, Pomerium, …). The proxy injects
   the configured header (e.g. `X-Authenticated-User`); the backend reads it
   via `_caller_identity` and uses it for:
-  - **Storage scoping** — each user gets a private subdir under the storage
+  - **Storage scoping** - each user gets a private subdir under the storage
     root (`/discover`, `/create`, path-keyed deletes).
-  - **Owner stamping** — `notebook.toml` records `owner = "<header value>"`
+  - **Owner stamping** - `notebook.toml` records `owner = "<header value>"`
     on create.
-  - **Owner enforcement** — every `WS /{session_id}` upgrade and every
+  - **Owner enforcement** - every `WS /{session_id}` upgrade and every
     REST `/{session_id}/...` route checks the caller's header against the
     notebook's owner. Mismatch returns close `1008` or HTTP 404 (same
     generic "Notebook not found" body, so probes can't enumerate owners).
-  - **Unowned notebooks pass through** — legacy notebooks without an
+  - **Unowned notebooks pass through** - legacy notebooks without an
     `owner` field (and notebooks created by services that don't send the
     header) accept any caller.
 
 Both surfaces share a single gate: every `SessionDep` route routes through
 `get_notebook_session`, which resolves the session and immediately calls
 `_require_owner`. The WS upgrade applies the same check before
-`accept()`. A leaked `session_id` is *not* a bearer capability — owner
+`accept()`. A leaked `session_id` is *not* a bearer capability - owner
 enforcement is symmetric across REST and WS, with no opt-outs.
 
 ### Service mode
@@ -99,7 +99,7 @@ enforcement is symmetric across REST and WS, with no opt-outs.
   headers; missing or invalid token closes with `1008`.
 - Notebook-session lifecycle endpoints (`/open`, `/create`, session
   reconnect, `/discover`, path-keyed deletes) are personal-mode-only and
-  return `400 Bad Request` in service mode — write surface in service mode
+  return `400 Bad Request` in service mode - write surface in service mode
   routes through the artifact build pipeline instead. See the
   [REST API page](rest-api.md#authentication) for the full list.
 
@@ -151,7 +151,7 @@ What this means for a client:
 
 - **A tmux detach / VPN blip / browser refresh does not kill a running
   cell** as long as you reconnect within ~60 seconds.
-- **Vue's "close tab to cancel"** still works — the user just waits past the
+- **Vue's "close tab to cancel"** still works - the user just waits past the
   window. The grace constant (`_GRACE_CANCEL_SECONDS` in `ws.py`) is a
   module-level number you can override at startup if you want a different
   default.
@@ -159,11 +159,11 @@ What this means for a client:
   disconnected (`cell_console` mid-stream, `cell_output_delta`,
   `cell_iteration_progress`, `cascade_progress`) are dropped. On reconnect, send `notebook_sync` and
   rebuild from the fresh `notebook_state`. Persisted state (finished
-  `cell_status`, latest `cell_output`) survives — it's recovered through
+  `cell_status`, latest `cell_output`) survives - it's recovered through
   the snapshot.
 - **Sequence numbers continue across reconnects.** Every server-to-client
   message carries a `seq` from a per-notebook counter. The counter doesn't
-  reset on reconnect; if you see a large gap, that's expected — treat it as
+  reset on reconnect; if you see a large gap, that's expected - treat it as
   a hint to drop local in-flight state and replace from `notebook_state`.
 
 See [WebSocket Protocol → Reconnection semantics](websocket.md#reconnection-semantics)
@@ -173,7 +173,7 @@ for the message-level detail.
 
 The full list of WS frame types lives on the [WebSocket Protocol](websocket.md)
 page. **Every type corresponds to a member of
-`strata.notebook.protocol.MessageType`** — that enum is the canonical
+`strata.notebook.protocol.MessageType`** - that enum is the canonical
 source. A non-Vue client can enumerate the full set by iterating it:
 
 ```python
@@ -189,11 +189,11 @@ human readability but the values match exactly. If you see a frame whose
 
 ## Where to go next
 
-- [REST API Reference](rest-api.md) — every endpoint with request /
+- [REST API Reference](rest-api.md) - every endpoint with request /
   response shapes.
-- [WebSocket Protocol](websocket.md) — every C→S and S→C frame with
+- [WebSocket Protocol](websocket.md) - every C→S and S→C frame with
   payload shapes.
-- [notebook.toml Schema](notebook-toml.md) — what the on-disk config
+- [notebook.toml Schema](notebook-toml.md) - what the on-disk config
   looks like.
-- [Configuration](configuration.md) — the server-side knobs
+- [Configuration](configuration.md) - the server-side knobs
   (`personal_mode_user_header`, deployment mode, storage root, …).

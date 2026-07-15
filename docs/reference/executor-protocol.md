@@ -55,9 +55,9 @@ Liveness + capabilities probe. No auth.
 }
 ```
 
-`active_executions` is the count of in-flight `/v1/*` calls — useful for autoscaler signals. The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
+`active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
 
-## `POST /v1/execute` (push model — recommended)
+## `POST /v1/execute` (push model - recommended)
 
 The standard executor v1 envelope. Cells and inputs are pushed inline; the worker returns the output bundle directly in the response.
 
@@ -108,7 +108,7 @@ The standard executor v1 envelope. Cells and inputs are pushed inline; the worke
 | `transform.params.timeout_seconds` | float | Execution timeout (default 30). |
 | `transform.params.mounts` | array of MountSpec | Filesystem mounts injected as `Path` variables (see [notebook.toml schema](notebook-toml.md#mounts-filesystem-mounts)). |
 | `transform.params.env` | object | Env vars set in the cell subprocess. |
-| `inputs` | array of `{name, format}` | Each entry references a multipart field with the same `name`. `format` is the content type — `arrow/ipc`, `pickle/object`, `json/object`, `module/import`, `module/cell`, `module/cell-instance`. |
+| `inputs` | array of `{name, format}` | Each entry references a multipart field with the same `name`. `format` is the content type - `arrow/ipc`, `pickle/object`, `json/object`, `module/import`, `module/cell`, `module/cell-instance`. |
 
 **Response (200)**:
 
@@ -117,7 +117,7 @@ HTTP/1.1 200 OK
 Content-Type: application/x-tar
 X-Strata-Output-Format: notebook-output-bundle@v1
 
-<gzipped tar bundle — see "Output bundle" below>
+<gzipped tar bundle - see "Output bundle" below>
 ```
 
 **Errors:**
@@ -219,15 +219,15 @@ Set `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1` to bypass the IP check (tests and local-
 A gzipped tar archive containing:
 
 ```
-manifest.json           — execution metadata + index of files below
-outputs/                — each defined variable as one file
-  result.arrow          — content_type "arrow/ipc"
-  log.json              — content_type "json/object"
-  model.pickle          — content_type "pickle/object"
-display/                — display-only outputs (figures, markdown blobs)
-  cell_default.png      — content_type "image/png"
-console.json            — { "stdout": "...", "stderr": "..." }
-error.json              — present only on failure
+manifest.json           - execution metadata + index of files below
+outputs/                - each defined variable as one file
+  result.arrow          - content_type "arrow/ipc"
+  log.json              - content_type "json/object"
+  model.pickle          - content_type "pickle/object"
+display/                - display-only outputs (figures, markdown blobs)
+  cell_default.png      - content_type "image/png"
+console.json            - { "stdout": "...", "stderr": "..." }
+error.json              - present only on failure
 ```
 
 **`manifest.json`:**
@@ -268,10 +268,10 @@ All `4xx` and `5xx` responses use FastAPI's default JSON shape:
 {"detail": "<human-readable error message>"}
 ```
 
-Workers do not return structured error codes — the HTTP status is the machine-readable signal. Production deployments behind an authenticating proxy should not surface worker error messages to end users verbatim, since they may include path fragments or internal hostnames.
+Workers do not return structured error codes - the HTTP status is the machine-readable signal. Production deployments behind an authenticating proxy should not surface worker error messages to end users verbatim, since they may include path fragments or internal hostnames.
 
 ## Implementing a custom worker
 
 The minimum surface is `POST /v1/execute` + `GET /health`. The reference Python implementation is `create_notebook_executor_app()` in `src/strata/notebook/remote_executor.py` (~750 LOC) and is the canonical specification when in doubt.
 
-A custom worker doesn't have to run Python — it just has to accept the `notebook_cell@v1` envelope, execute the source somehow, and return the bundle. In practice almost all workers wrap a Python interpreter (since cells are Python) and the `strata-worker` script is the path of least resistance.
+A custom worker doesn't have to run Python - it just has to accept the `notebook_cell@v1` envelope, execute the source somehow, and return the bundle. In practice almost all workers wrap a Python interpreter (since cells are Python) and the `strata-worker` script is the path of least resistance.
