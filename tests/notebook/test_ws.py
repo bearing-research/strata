@@ -2198,6 +2198,57 @@ async def test_live_cost_gate_leaves_expensive_downstream_stale(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_live_widget_reruns_all_downstream_leaves(tmp_path):
+    """A `# @live` change must re-run EVERY cheap downstream cell, not just the
+    first. Two sibling leaves read the control; running the first triggers a
+    staleness recompute that demotes the second from STALE to IDLE, and a
+    per-iteration status check used to skip it — so the table updated but the
+    plot didn't. The cascade snapshots its targets up front to stay
+    order-independent.
+    """
+    from strata.notebook.models import CellLanguage, CellStatus
+    from strata.notebook.session import ExecutionSample, NotebookSession
+    from strata.notebook.ws import _handle_widget_update
+
+    nb = create_notebook(tmp_path, "Live Two Leaves")
+    add_cell_to_notebook(nb, "controls", None)
+    add_cell_to_notebook(nb, "leaf_a", "controls")
+    add_cell_to_notebook(nb, "leaf_b", "leaf_a")
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.notebook_state.get_cell("controls").language = CellLanguage.WIDGET
+    session.notebook_state.get_cell(
+        "controls"
+    ).source = "# @live\nalpha = slider(0, 1, default=0.5)"
+    # Both leaves read the control and produce a display output — no edge
+    # between them (siblings), mirroring the example's table + plot cells.
+    session.notebook_state.get_cell("leaf_a").source = "a = alpha * 2\na"
+    session.notebook_state.get_cell("leaf_b").source = "b = alpha * 3\nb"
+    session._analyze_and_build_dag()
+    session.environment_sync_state = "ready"
+
+    await _run_cell_to_terminal(session, "leaf_a")
+    await _run_cell_to_terminal(session, "leaf_b")
+    for cid in ("leaf_a", "leaf_b"):
+        assert session.notebook_state.get_cell(cid).status == CellStatus.READY
+        # Pin durations below the cost gate so neither is skipped as expensive.
+        session.execution_history[cid] = [ExecutionSample(duration_ms=1.0, cache_hit=False)]
+
+    fake, execution_state = _make_fake_ws(session)
+    await _handle_widget_update(
+        cast(WebSocket, fake),
+        session,
+        {"cell_id": "controls", "values": {"alpha": 0.25}},
+        execution_state,
+        session.id,
+    )
+    await _drain_execution(execution_state)
+
+    # BOTH downstream leaves re-ran — neither was skipped and left stale/idle.
+    assert session.notebook_state.get_cell("leaf_a").status == CellStatus.READY
+    assert session.notebook_state.get_cell("leaf_b").status == CellStatus.READY
+
+
+@pytest.mark.asyncio
 async def test_read_only_viewer_rejects_mutations_but_allows_widget_update(tmp_path):
     """A `?role=viewer` (app-mode) connection can drive widgets + sync, but every
     mutation frame is rejected with a `read_only` error."""

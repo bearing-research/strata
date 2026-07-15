@@ -3044,12 +3044,22 @@ async def _run_live_cascade(
         reachable.add(cid)
         queue.extend(dag.cell_downstream.get(cid, []))
 
+    # Snapshot which reachable cells are stale BEFORE running any of them.
+    # Executing one cell broadcasts a staleness recompute, and that pass can
+    # demote a not-yet-run *sibling* from STALE to IDLE (a leaf with no cached
+    # result at the new widget value — the #361 idle branch). A per-iteration
+    # ``status == STALE`` check would then skip it, so with two downstream
+    # leaves only the first ran (e.g. the table updated but the plot didn't).
+    # Deciding the target set up front makes the cascade order-independent.
+    stale_targets = {
+        cid
+        for cid in reachable
+        if (c := session.notebook_state.get_cell(cid)) is not None and c.status == CellStatus.STALE
+    }
+
     blocked: set[str] = set()
     for cid in dag.topological_order:
-        if cid not in reachable:
-            continue
-        cell = session.notebook_state.get_cell(cid)
-        if cell is None or cell.status != CellStatus.STALE:
+        if cid not in stale_targets:
             continue
         if any(up in blocked for up in dag.cell_upstream.get(cid, [])):
             blocked.add(cid)  # a stale input can't be produced — don't run
