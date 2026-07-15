@@ -7,6 +7,17 @@ exhaustive commit history.
 
 ## Unreleased
 
+## 0.5.0 — 2026-07-15
+
+0.5.0 turns the notebook into an **interactive, shareable app**. The headlines
+are **interactive widget cells** — declarative control panels whose values
+downstream cells consume — with a live-updating **app view** you can **embed** in
+another site as an `<iframe>` or export as a frozen, self-contained **snapshot**;
+and an **MCP server** that lets a coding agent drive a live notebook session.
+Alongside them: an interactive **DataFrame viewer** (page / sort / filter /
+search + export), **per-variant fan-out** (`# @per_variant`), and **Logs /
+Artifacts** operator pages. No breaking changes.
+
 ### Added
 
 - **App view — open a notebook as a read-only interactive app.** Click **App**
