@@ -115,18 +115,18 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.35rem 0.75rem;
-  font-size: 0.875rem;
-  border: 1px solid var(--border-color, #d0d0d0);
-  background: var(--bg-secondary, #fff);
-  color: var(--text-primary, #222);
-  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border-radius: 6px;
   cursor: pointer;
   transition: background-color 0.1s ease;
 }
 
 .export-trigger:hover:not(:disabled) {
-  background: var(--bg-hover, #f3f3f3);
+  background: var(--bg-hover);
 }
 
 .export-trigger:disabled {
@@ -135,7 +135,7 @@ onBeforeUnmount(() => {
 }
 
 .export-trigger.is-open {
-  background: var(--bg-hover, #f3f3f3);
+  background: var(--bg-hover);
 }
 
 .trigger-caret {
@@ -148,8 +148,8 @@ onBeforeUnmount(() => {
   top: calc(100% + 4px);
   right: 0;
   min-width: 16rem;
-  background: var(--bg-primary, #fff);
-  border: 1px solid var(--border-color, #d0d0d0);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   z-index: 50;
@@ -173,7 +173,7 @@ onBeforeUnmount(() => {
 }
 
 .export-option:hover {
-  background: var(--bg-hover, #f3f3f3);
+  background: var(--bg-hover);
 }
 
 .option-label {
@@ -183,6 +183,6 @@ onBeforeUnmount(() => {
 
 .option-description {
   font-size: 0.75rem;
-  color: var(--text-secondary, #666);
+  color: var(--text-muted);
 }
 </style>

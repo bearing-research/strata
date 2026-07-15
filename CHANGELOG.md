@@ -91,6 +91,12 @@ exhaustive commit history.
   slider (with **⚡ Live** on, or in the app view / an embed) now recomputes the
   cells that depend on it, as intended. (widget cells now populate
   `artifact_uris` like a Python cell's multi-output vars.)
+- **Consistent notebook-header buttons.** The **Add cell** and **Export** menus
+  referenced CSS variables that don't exist (`--border-color`, `--bg-secondary`),
+  so they fell back to hardcoded light colors — an off-theme white island,
+  especially wrong in dark mode — and the **Embed** button didn't match its
+  sibling nav links. The header controls now share one theme-aware style in both
+  light and dark.
 - **No more spurious `display` mutation warning.** Any cell whose last line was
   a bare expression (e.g. a trailing `df` to show it) emitted a false
   "'display' was mutated in place" warning — the harness's own injected display

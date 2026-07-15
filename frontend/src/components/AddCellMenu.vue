@@ -104,18 +104,18 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.35rem 0.75rem;
-  font-size: 0.875rem;
-  border: 1px solid var(--border-color, #d0d0d0);
-  background: var(--bg-secondary, #fff);
-  color: var(--text-primary, #222);
-  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border-radius: 6px;
   cursor: pointer;
   transition: background-color 0.1s ease;
 }
 
 .add-cell-trigger:hover:not(:disabled) {
-  background: var(--bg-hover, #f3f3f3);
+  background: var(--bg-hover);
 }
 
 .add-cell-trigger:disabled {
@@ -124,7 +124,7 @@ onBeforeUnmount(() => {
 }
 
 .add-cell-trigger.is-open {
-  background: var(--bg-hover, #f3f3f3);
+  background: var(--bg-hover);
 }
 
 .trigger-caret {
@@ -142,8 +142,8 @@ onBeforeUnmount(() => {
   top: calc(100% + 4px);
   left: 0;
   min-width: 14rem;
-  background: var(--bg-primary, #fff);
-  border: 1px solid var(--border-color, #d0d0d0);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   z-index: 50;
@@ -162,11 +162,11 @@ onBeforeUnmount(() => {
   border: 0;
   cursor: pointer;
   text-align: left;
-  color: var(--text-primary, #222);
+  color: var(--text-primary);
 }
 
 .add-cell-option:hover {
-  background: var(--bg-hover, #f1f4f8);
+  background: var(--bg-hover);
 }
 
 .option-label {
@@ -176,6 +176,6 @@ onBeforeUnmount(() => {
 
 .option-description {
   font-size: 0.75rem;
-  color: var(--text-secondary, #666);
+  color: var(--text-muted);
 }
 </style>
