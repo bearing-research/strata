@@ -449,6 +449,10 @@ jobs:
         run: npm run benchmark:notebook -- --base-url http://127.0.0.1:8770 --iterations 1
         working-directory: frontend
 
+      - name: Run embeddable app-view browser smoke
+        run: npm run embed:smoke -- --base-url http://127.0.0.1:8770 --parent-path /tmp
+        working-directory: frontend
+
       - name: Show server logs on failure
         if: failure()
         run: cat /tmp/strata-ci.log
