@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useNotebook } from '../stores/notebook'
 import WidgetCell from '../components/WidgetCell.vue'
 import DataTable from '../components/DataTable.vue'
@@ -18,6 +19,25 @@ const { notebook, orderedCells, openBySessionId, cleanupWebSocket, setViewerMode
 const loading = ref(true)
 const error = ref<string | null>(null)
 
+// Embed mode (`/app/:id?embed=1`): drop the standalone chrome (title + Edit
+// link) so the view drops cleanly into a host `<iframe>`, and post the content
+// height to the parent frame so the host can size the iframe with no inner
+// scrollbar. Only the height travels — no notebook data — so a `*` target
+// origin is safe.
+const route = useRoute()
+const isEmbed = computed(() => route.query.embed === '1')
+const rootEl = ref<HTMLElement | null>(null)
+let resizeObserver: ResizeObserver | null = null
+
+function postHeight() {
+  if (!isEmbed.value || window.parent === window) return
+  const height = Math.ceil(rootEl.value?.scrollHeight ?? document.body.scrollHeight)
+  window.parent.postMessage(
+    { type: 'strata:embed:resize', sessionId: props.sessionId, height },
+    '*',
+  )
+}
+
 onMounted(async () => {
   cleanupWebSocket() // drop any editor connection so we reconnect read-only
   setViewerMode(true)
@@ -28,11 +48,18 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  if (isEmbed.value) {
+    await nextTick()
+    resizeObserver = new ResizeObserver(() => postHeight())
+    if (rootEl.value) resizeObserver.observe(rootEl.value)
+    postHeight()
+  }
 })
 
 onUnmounted(() => {
   setViewerMode(false)
   cleanupWebSocket()
+  resizeObserver?.disconnect()
 })
 
 const notebookName = computed(() => notebook.name || 'Notebook')
@@ -65,8 +92,8 @@ function outputRows(output: CellOutput): unknown[][] {
 </script>
 
 <template>
-  <div class="app-view">
-    <header class="app-header">
+  <div ref="rootEl" class="app-view" :class="{ embed: isEmbed }">
+    <header v-if="!isEmbed" class="app-header">
       <h1>{{ notebookName }}</h1>
       <router-link class="edit-link" :to="`/notebook/${sessionId}`">← Edit</router-link>
     </header>
@@ -129,6 +156,13 @@ function outputRows(output: CellOutput): unknown[][] {
   max-width: 900px;
   margin: 0 auto;
   padding: 24px 20px 64px;
+}
+/* Embedded in a host iframe: tighter padding, no full-page bottom gutter, and
+   let the host's background show through rather than forcing our own. */
+.app-view.embed {
+  padding: 12px 14px;
+  max-width: none;
+  background: transparent;
 }
 .app-header {
   display: flex;

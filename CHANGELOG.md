@@ -16,6 +16,17 @@ exhaustive commit history.
   drive widgets, so with a widget's **⚡ Live** toggle on it's an interactive
   "tweak a parameter, see the result" dashboard. `# @app hide` keeps a cell out
   of the view.
+- **Embed the app view in another site.** The read-only app view can be dropped
+  into a dashboard/wiki/portal as an `<iframe>` — click **Embed** in the notebook
+  header to copy a ready-to-paste snippet. `?embed=1` strips the standalone chrome
+  and the embedded app posts its content height to the parent
+  (`strata:embed:resize`) so the host sizes the frame with no inner scrollbar;
+  widgets stay live inside the frame. Cross-origin embedding is opt-in and secure
+  by default — a notebook is framable only from its own origin
+  (`Content-Security-Policy: frame-ancestors 'self'`) until you list host origins
+  in `embed_frame_ancestors` (env `STRATA_EMBED_FRAME_ANCESTORS`), which also
+  closes the prior gap where no framing header was sent at all. See
+  [Cell Types → Embedding the app view](docs/notebook/cells.md).
 - **Interactive widget cells.** A new `widget` cell kind is a declarative
   control panel — one control per line (`alpha = slider(0, 1, default=0.5)`,
   plus `number` / `dropdown` / `checkbox` / `text`). Each control defines a

@@ -328,6 +328,14 @@ class StrataConfig(BaseSettings):
     # unset, the deployment behaves like a single-user instance — the default
     # for a developer running on localhost.
     personal_mode_user_header: str | None = None
+    # Origins allowed to embed a notebook's app view in an ``<iframe>`` (e.g.
+    # a dashboard or wiki on another host). Sets ``Content-Security-Policy:
+    # frame-ancestors 'self' <origins>`` on every response. Empty (the default)
+    # means same-origin only — external embedding is opt-in, and unlike the old
+    # no-header behavior a stray page can no longer frame Strata. Accepts a JSON
+    # array or a comma-separated list; each entry is an origin
+    # (``https://analytics.example.com``) or ``*`` to allow any host.
+    embed_frame_ancestors: Annotated[list[str], NoDecode] = Field(default_factory=list)
     artifact_dir: Path | None = None
     # Builds stuck in 'building' longer than this are demoted to failed at
     # startup (zombie sweep) — they can never serve data and would otherwise
@@ -469,6 +477,29 @@ class StrataConfig(BaseSettings):
                 v = [part.strip() for part in stripped.split(",") if part.strip()]
         if not isinstance(v, list):
             raise ValueError("registry_protected_aliases must be a list")
+        return [str(item) for item in v]
+
+    @field_validator("embed_frame_ancestors", mode="before")
+    @classmethod
+    def normalize_embed_frame_ancestors(cls, v: Any) -> list[str]:
+        """Accept list, JSON array, or comma-separated origins."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                import json
+
+                parsed = json.loads(stripped)
+                if not isinstance(parsed, list):
+                    raise ValueError("embed_frame_ancestors must be a list")
+                v = parsed
+            else:
+                v = [part.strip() for part in stripped.split(",") if part.strip()]
+        if not isinstance(v, list):
+            raise ValueError("embed_frame_ancestors must be a list")
         return [str(item) for item in v]
 
     @field_validator("notebook_python_versions", mode="before")

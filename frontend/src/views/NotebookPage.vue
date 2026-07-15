@@ -34,6 +34,23 @@ const route = useRoute()
 const router = useRouter()
 const { record, remove, findBySessionId } = useRecentNotebooks()
 
+// "Embed" — copy a ready-to-paste iframe snippet (app view in embed mode) plus
+// the tiny auto-resize listener, so the notebook drops into another site.
+const embedCopied = ref(false)
+function embedSnippet(): string {
+  const url = `${window.location.origin}/#/app/${props.sessionId}?embed=1`
+  return [
+    `<iframe src="${url}" title="Strata notebook" style="width:100%;border:0"></iframe>`,
+    `<script>addEventListener('message',e=>{if(e.data&&e.data.type==='strata:embed:resize')`,
+    `document.querySelector('iframe[title=\\'Strata notebook\\']').style.height=e.data.height+'px'})<\/script>`,
+  ].join('\n')
+}
+async function copyEmbedSnippet() {
+  await navigator.clipboard.writeText(embedSnippet())
+  embedCopied.value = true
+  setTimeout(() => (embedCopied.value = false), 1800)
+}
+
 const {
   notebook,
   orderedCells,
@@ -527,6 +544,15 @@ function goHome() {
         >
           App
         </router-link>
+        <button
+          type="button"
+          class="header-logs-link header-embed-btn"
+          data-testid="nav-embed"
+          :title="'Copy an <iframe> snippet to embed this app in another site'"
+          @click="copyEmbedSnippet"
+        >
+          {{ embedCopied ? 'Copied ✓' : 'Embed' }}
+        </button>
         <router-link
           to="/artifacts"
           class="header-logs-link"
@@ -793,6 +819,14 @@ function goHome() {
 .header-logs-link:hover {
   color: var(--text-primary);
   border-color: var(--border-strong);
+}
+
+/* The Embed control is a <button> but should read like the sibling links. */
+.header-embed-btn {
+  background: none;
+  font: inherit;
+  line-height: normal;
+  cursor: pointer;
 }
 
 .mode-badge {

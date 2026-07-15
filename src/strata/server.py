@@ -894,6 +894,25 @@ async def connection_tracking_middleware(request: Request, call_next):
         connection_metrics.request_completed()
 
 
+# Security headers middleware
+@app.middleware("http")
+async def frame_ancestors_middleware(request: Request, call_next):
+    """Set ``Content-Security-Policy: frame-ancestors`` so operators control
+    which origins may embed a notebook's app view in an ``<iframe>``.
+
+    Default (no ``embed_frame_ancestors`` configured) is ``'self'`` — the app
+    is framable only from its own origin. Listing origins opts into
+    cross-origin embedding (a dashboard/wiki on another host); ``*`` allows any.
+    This also closes the prior gap where no framing header was sent at all, so
+    a stray page could silently iframe Strata.
+    """
+    response = await call_next(request)
+    origins = list(getattr(_state.config, "embed_frame_ancestors", [])) if _state else []
+    ancestors = "*" if "*" in origins else " ".join(["'self'", *origins])
+    response.headers["Content-Security-Policy"] = f"frame-ancestors {ancestors}"
+    return response
+
+
 # Rate limiting middleware
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
