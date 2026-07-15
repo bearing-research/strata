@@ -126,3 +126,38 @@ def test_serialize_cell_emits_widget_block(widget_session):
 def test_serialize_cell_no_widget_block_for_python(widget_session):
     data = widget_session.serialize_cell(widget_session.notebook_state.get_cell("consume"))
     assert "widget" not in data
+
+
+@pytest.mark.asyncio
+async def test_widget_publishes_artifact_uris_for_downstream_provenance(widget_session):
+    """Regression: a widget value change must reach downstream provenance.
+
+    The widget cell must publish each control's value artifact onto
+    ``cell.artifact_uris`` (like a Python cell's multi-output vars). Without it,
+    a downstream consumer's ``_collect_input_hashes`` finds no upstream
+    artifact, its provenance is blind to the control value, and it cache-hits
+    the stale output — i.e. dragging a slider never updates downstream cells,
+    which is exactly what live mode / the interactive app view depend on.
+    """
+    from strata.notebook.runtime_state import persist_cell_widget_values
+
+    executor = CellExecutor(widget_session)
+    await executor.execute_cell("controls", _WIDGET_SRC)
+
+    controls = widget_session.notebook_state.get_cell("controls")
+    assert "alpha" in controls.artifact_uris
+    assert "mode" in controls.artifact_uris
+
+    # The downstream consumer resolves the widget's value artifacts as inputs.
+    hashes_before = widget_session._collect_input_hashes("consume")
+    assert hashes_before, "downstream saw no upstream widget artifacts"
+
+    # Change the control value and re-materialize the widget cell.
+    persist_cell_widget_values(widget_session.path, "controls", {"alpha": 0.9})
+    await executor.execute_cell("controls", _WIDGET_SRC)
+
+    hashes_after = widget_session._collect_input_hashes("consume")
+    assert hashes_after and hashes_after != hashes_before, (
+        "downstream input hashes did not change when the widget value changed — "
+        "its provenance would cache-hit the stale output"
+    )

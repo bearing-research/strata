@@ -2907,6 +2907,21 @@ class CellExecutor:
         result_dict = execute_widget_cell(self.session, cell_id, source, use_cache=use_cache)
 
         if result_dict.get("success"):
+            # Publish each control's value artifact onto the cell's
+            # ``artifact_uris`` — the same map a Python cell populates for its
+            # multi-output vars (executor L1215/L1651). Without this a widget
+            # cell stays ``artifact_uris={}``, so a downstream consumer's
+            # ``_collect_input_hashes`` finds no upstream artifact, its
+            # provenance never reflects the control value, and it cache-hits the
+            # old output — i.e. dragging a slider never updates downstream.
+            cell = self.session.notebook_state.get_cell(cell_id)
+            if cell is not None:
+                cell.artifact_uris = {
+                    name: out["artifact_uri"]
+                    for name, out in (result_dict.get("outputs") or {}).items()
+                    if isinstance(out, dict) and out.get("artifact_uri")
+                }
+
             prov = await self._compute_cell_provenance(cell_id, source)
             self.session.record_successful_execution_provenance(
                 cell_id,
