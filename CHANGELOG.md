@@ -90,7 +90,11 @@ exhaustive commit history.
   reflected the control value and it cache-hit the stale output. Dragging a
   slider (with **⚡ Live** on, or in the app view / an embed) now recomputes the
   cells that depend on it, as intended. (widget cells now populate
-  `artifact_uris` like a Python cell's multi-output vars.)
+  `artifact_uris` like a Python cell's multi-output vars.) The live cascade also
+  no longer skips **sibling** cells: with two outputs driven by the same control
+  (e.g. a table *and* a plot), both refresh, not just the first — the cascade
+  snapshots its target set up front so running one cell can't demote a
+  not-yet-run sibling to idle and skip it.
 - **Consistent notebook-header buttons.** The **Add cell** and **Export** menus
   referenced CSS variables that don't exist (`--border-color`, `--bg-secondary`),
   so they fell back to hardcoded light colors — an off-theme white island,
