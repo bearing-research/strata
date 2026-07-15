@@ -1074,6 +1074,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="App view">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#embedding-the-app-view-in-another-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Embedding the app view in another site
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -2809,6 +2826,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="App view">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#embedding-the-app-view-in-another-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Embedding the app view in another site
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -3762,24 +3796,48 @@ but viewers can still drive widgets — combined with <strong>⚡ Live</strong> 
 <p>Add <code># @app hide</code> to a cell to keep it out of the app view (e.g. a setup cell
 whose output is noise). Run the notebook's cells once in the editor so the app
 has outputs to show, then share the app link.</p>
+<h4 id="embedding-the-app-view-in-another-site">Embedding the app view in another site<a class="headerlink" href="#embedding-the-app-view-in-another-site" title="Permanent link">&para;</a></h4>
+<p>The app view can be dropped into another page — a dashboard, wiki, or internal
+portal — as an <code>&lt;iframe&gt;</code>. Click <strong>Embed</strong> in the notebook header to copy a
+ready-to-paste snippet, or build it yourself:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="p">&lt;</span><span class="nt">iframe</span> <span class="na">src</span><span class="o">=</span><span class="s">&quot;http://localhost:8765/#/app/&lt;sessionId&gt;?embed=1&quot;</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>        <span class="na">title</span><span class="o">=</span><span class="s">&quot;Strata notebook&quot;</span> <span class="na">style</span><span class="o">=</span><span class="s">&quot;width:100%;border:0&quot;</span><span class="p">&gt;&lt;/</span><span class="nt">iframe</span><span class="p">&gt;</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="p">&lt;</span><span class="nt">script</span><span class="p">&gt;</span>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="w">  </span><span class="nx">addEventListener</span><span class="p">(</span><span class="s1">&#39;message&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="p">.</span><span class="nx">type</span><span class="w"> </span><span class="o">===</span><span class="w"> </span><span class="s1">&#39;strata:embed:resize&#39;</span><span class="p">)</span>
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="w">      </span><span class="nb">document</span><span class="p">.</span><span class="nx">querySelector</span><span class="p">(</span><span class="s1">&#39;iframe[title=&quot;Strata notebook&quot;]&#39;</span><span class="p">).</span><span class="nx">style</span><span class="p">.</span><span class="nx">height</span><span class="w"> </span><span class="o">=</span>
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="w">        </span><span class="nx">e</span><span class="p">.</span><span class="nx">data</span><span class="p">.</span><span class="nx">height</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s1">&#39;px&#39;</span>
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a><span class="w">  </span><span class="p">})</span>
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a><span class="p">&lt;/</span><span class="nt">script</span><span class="p">&gt;</span>
+</code></pre></div>
+<p><code>?embed=1</code> drops the standalone chrome (the title bar and <strong>← Edit</strong> link) so the
+view blends into the host page, and the embedded app posts its content height to
+the parent frame (<code>{ type: 'strata:embed:resize', height }</code>) so the optional
+listener above sizes the iframe with no inner scrollbar. Widgets stay live inside
+the frame, so with <strong>⚡ Live</strong> on it's a fully interactive embedded panel.</p>
+<p><strong>Cross-origin embedding is opt-in.</strong> By default a notebook is framable only from
+its own origin (<code>Content-Security-Policy: frame-ancestors 'self'</code>). To embed on
+another host, list its origin in <code>embed_frame_ancestors</code> (env
+<code>STRATA_EMBED_FRAME_ANCESTORS</code>), e.g. <code>https://analytics.example.com</code>, or <code>*</code> to
+allow any host. Accepts a comma-separated list or a JSON array.</p>
 <hr />
 <h2 id="markdown-cells">Markdown Cells<a class="headerlink" href="#markdown-cells" title="Permanent link">&para;</a></h2>
 <p>Plain prose between cells, rendered with <code>markdown-it</code> + <code>DOMPurify</code> for safe HTML output. Useful for section headings, methodology notes, and annotating decision points in a notebook. Markdown cells are <strong>not</strong> part of the DAG — they don't produce artifacts, don't participate in cascade execution, and don't have an <code>id</code> / variable that downstream cells can reference. They survive saves and exports verbatim.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="gu">## Stage 1: Load + Clean</span>
-<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>
-<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>The next two cells pull last quarter&#39;s events and drop rows with
-<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>missing timestamps. The clean DataFrame <span class="sb">`events_clean`</span> is what
-<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>everything downstream reads.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="gu">## Stage 1: Load + Clean</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a>The next two cells pull last quarter&#39;s events and drop rows with
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>missing timestamps. The clean DataFrame <span class="sb">`events_clean`</span> is what
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>everything downstream reads.
 </code></pre></div>
 <p>Create a markdown cell via the <strong>+ Add cell</strong> menu (pick "Markdown") or by setting <code>language = "markdown"</code> on a cell entry in <code>notebook.toml</code>. The cell source lives in <code>cells/&lt;id&gt;.md</code> rather than <code>.py</code>.</p>
 <p>See <a href="../../examples/markdown_showcase/">Markdown showcase</a> for what the supported renderers handle (headings, lists, tables, code fences, fenced HTML attributes) and what's stripped by the security guard.</p>
 <hr />
 <h2 id="artifact-uris">Artifact URIs<a class="headerlink" href="#artifact-uris" title="Permanent link">&para;</a></h2>
 <p>Cells expose their outputs as artifacts under a stable URI scheme:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;
 </code></pre></div>
 <p>For loop cells, each iteration gets a suffix:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;@iter=&lt;k&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a>strata://artifact/&lt;artifact_id&gt;@v=&lt;version&gt;@iter=&lt;k&gt;
 </code></pre></div>
 <p>The <code>&lt;artifact_id&gt;</code> is content-addressed (derived from the provenance hash); same code + same inputs + same env = same artifact ID across machines and runs. The <code>@v=N</code> version increments only when the same name pointer is re-bound to a new content hash — see <a href="../../getting-started/core/">Library usage</a> for how named artifacts work in the Core SDK.</p>
 <p>Notebook cell outputs follow the pattern <code>nb_&lt;notebook_id&gt;_cell_&lt;cell_id&gt;_var_&lt;variable&gt;@v=N</code> for the variable-level artifacts a cell produces. You don't usually need to construct these by hand; the inspect panel surfaces them and <code># @loop start_from=&lt;cell-id&gt;@iter=k</code> references them by cell ID + iteration index, not the full URI.</p>
@@ -3789,21 +3847,21 @@ has outputs to show, then share the app link.</p>
 <p>Use loop cells for iterative refinement (hill climbing, MCMC, training loops with checkpoints), simulations, and anything where you'd want to pause and inspect intermediate states, or fork a new run from a promising one.</p>
 <h3 id="minimal-example">Minimal example<a class="headerlink" href="#minimal-example" title="Permanent link">&para;</a></h3>
 <p>Two cells: a seed and a loop.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="c1"># seed cell, initial carry state</span>
-<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span> <span class="s2">&quot;best_score&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">),</span> <span class="s2">&quot;iter&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="c1"># seed cell, initial carry state</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span> <span class="s2">&quot;best_score&quot;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="s2">&quot;inf&quot;</span><span class="p">),</span> <span class="s2">&quot;iter&quot;</span><span class="p">:</span> <span class="mi">0</span><span class="p">}</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="c1"># loop cell</span>
-<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="c1"># @loop max_iter=40 carry=state</span>
-<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="c1"># @loop_until state[&quot;best_score&quot;] &lt; 1e-3</span>
-<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
-<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a>
-<a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a><span class="c1"># Each iteration: read `state`, compute the next step, rebind `state`.</span>
-<a id="__codelineno-34-7" name="__codelineno-34-7" href="#__codelineno-34-7"></a><span class="n">candidate</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)</span>
-<a id="__codelineno-34-8" name="__codelineno-34-8" href="#__codelineno-34-8"></a><span class="n">score</span> <span class="o">=</span> <span class="n">candidate</span> <span class="o">**</span> <span class="mi">2</span>   <span class="c1"># some objective</span>
-<a id="__codelineno-34-9" name="__codelineno-34-9" href="#__codelineno-34-9"></a><span class="k">if</span> <span class="n">score</span> <span class="o">&lt;</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;best_score&quot;</span><span class="p">]:</span>
-<a id="__codelineno-34-10" name="__codelineno-34-10" href="#__codelineno-34-10"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="n">candidate</span><span class="p">,</span> <span class="s2">&quot;best_score&quot;</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span> <span class="s2">&quot;iter&quot;</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;iter&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
-<a id="__codelineno-34-11" name="__codelineno-34-11" href="#__codelineno-34-11"></a><span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-34-12" name="__codelineno-34-12" href="#__codelineno-34-12"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">&quot;iter&quot;</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;iter&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="c1"># loop cell</span>
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="c1"># @loop max_iter=40 carry=state</span>
+<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="c1"># @loop_until state[&quot;best_score&quot;] &lt; 1e-3</span>
+<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">random</span>
+<a id="__codelineno-35-5" name="__codelineno-35-5" href="#__codelineno-35-5"></a>
+<a id="__codelineno-35-6" name="__codelineno-35-6" href="#__codelineno-35-6"></a><span class="c1"># Each iteration: read `state`, compute the next step, rebind `state`.</span>
+<a id="__codelineno-35-7" name="__codelineno-35-7" href="#__codelineno-35-7"></a><span class="n">candidate</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;x&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="o">-</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)</span>
+<a id="__codelineno-35-8" name="__codelineno-35-8" href="#__codelineno-35-8"></a><span class="n">score</span> <span class="o">=</span> <span class="n">candidate</span> <span class="o">**</span> <span class="mi">2</span>   <span class="c1"># some objective</span>
+<a id="__codelineno-35-9" name="__codelineno-35-9" href="#__codelineno-35-9"></a><span class="k">if</span> <span class="n">score</span> <span class="o">&lt;</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;best_score&quot;</span><span class="p">]:</span>
+<a id="__codelineno-35-10" name="__codelineno-35-10" href="#__codelineno-35-10"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">&quot;x&quot;</span><span class="p">:</span> <span class="n">candidate</span><span class="p">,</span> <span class="s2">&quot;best_score&quot;</span><span class="p">:</span> <span class="n">score</span><span class="p">,</span> <span class="s2">&quot;iter&quot;</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;iter&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
+<a id="__codelineno-35-11" name="__codelineno-35-11" href="#__codelineno-35-11"></a><span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-35-12" name="__codelineno-35-12" href="#__codelineno-35-12"></a>    <span class="n">state</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="s2">&quot;iter&quot;</span><span class="p">:</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;iter&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">}</span>
 </code></pre></div>
 <p>After execution, <code>state</code> holds the final iteration's value and every intermediate iteration is queryable.</p>
 <h3 id="required-directives">Required directives<a class="headerlink" href="#required-directives" title="Permanent link">&para;</a></h3>
@@ -3847,9 +3905,9 @@ has outputs to show, then share the app link.</p>
 </table>
 <h3 id="per-iteration-artifacts">Per-iteration artifacts<a class="headerlink" href="#per-iteration-artifacts" title="Permanent link">&para;</a></h3>
 <p>Every iteration's carry value becomes its own artifact with an <code>@iter=k</code> suffix:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@v=1@iter=0
-<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@v=1@iter=1
-<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a>...
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@v=1@iter=0
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>strata://artifact/nb_..._cell_&lt;loop_id&gt;_var_state@v=1@iter=1
+<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a>...
 </code></pre></div>
 <p>The inspect panel shows an iteration picker so you can scrub through the intermediate states. The <strong>final</strong> iteration's artifact is also the cell's canonical output (no <code>@iter</code> suffix) downstream cells read it via the normal DAG path.</p>
 <h3 id="forking-a-loop">Forking a loop<a class="headerlink" href="#forking-a-loop" title="Permanent link">&para;</a></h3>
@@ -3866,10 +3924,10 @@ happens if you push harder from that exact state with a different step size.</p>
 <li>Add a new loop cell below. Reference the original cell's ID (not the full
    URI) in <code>start_from</code>:</li>
 </ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="c1"># new loop cell, continues from iteration 17 of the previous run</span>
-<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="c1"># @loop max_iter=20 carry=state start_from=hill_climb@iter=17</span>
-<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a><span class="n">state</span><span class="p">[</span><span class="s2">&quot;step_size&quot;</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">0.5</span>  <span class="c1"># smaller steps from here on</span>
-<a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a><span class="n">state</span> <span class="o">=</span> <span class="n">sample_and_score</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="c1"># new loop cell, continues from iteration 17 of the previous run</span>
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="c1"># @loop max_iter=20 carry=state start_from=hill_climb@iter=17</span>
+<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="n">state</span><span class="p">[</span><span class="s2">&quot;step_size&quot;</span><span class="p">]</span> <span class="o">*=</span> <span class="mf">0.5</span>  <span class="c1"># smaller steps from here on</span>
+<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="n">state</span> <span class="o">=</span> <span class="n">sample_and_score</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
 </code></pre></div>
 <ol>
 <li>Run the new cell. It reads iteration 17's carry value as its seed, runs up
