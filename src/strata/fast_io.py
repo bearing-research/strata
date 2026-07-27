@@ -55,12 +55,21 @@ def get_concat_mode() -> str:
     return _FAST_CONCAT_MODE
 
 
-def read_file_mmap(path: str) -> bytes:
-    """Read file using memory-mapping for faster cache hits.
+# Below this size, Python's read_bytes() beats the Rust mmap path: the mmap
+# syscall + FFI + PyBytes copy overhead isn't amortized until the read is large
+# enough. The measured crossover is ~4-6 MB (benchmarks/bench_rust_ext.py), so
+# only reads at or above this threshold go through Rust. Override with
+# STRATA_MMAP_MIN_BYTES (0 forces mmap always, matching the pre-threshold path).
+MMAP_MIN_BYTES = int(os.environ.get("STRATA_MMAP_MIN_BYTES", 4 * 1024 * 1024))
 
-    Uses Rust mmap implementation when available, falling back to Python
-    read_bytes() otherwise. Memory-mapping is faster for large files and
-    for repeated access to the same file (OS page cache reuse).
+
+def read_file_mmap(path: str) -> bytes:
+    """Read a file, using Rust mmap only when it's actually faster.
+
+    Memory-mapping wins for large files (fewer copies, OS page-cache reuse) but
+    loses on small ones, where its fixed overhead dominates a plain read. We
+    route only reads at/above ``MMAP_MIN_BYTES`` through Rust; smaller reads and
+    any mmap error fall back to ``Path.read_bytes()``.
 
     Args:
         path: Path to the file to read
@@ -70,9 +79,11 @@ def read_file_mmap(path: str) -> bytes:
     """
     if _RUST_AVAILABLE and _rust_module is not None:
         try:
-            return bytes(_rust_module.read_file_bytes(path))
+            if os.stat(path).st_size >= MMAP_MIN_BYTES:
+                return bytes(_rust_module.read_file_bytes(path))
         except Exception:
-            # Fall back to Python on any error
+            # Small file, missing file, or mmap failure: fall through to the
+            # plain read below, which reproduces the real error if there is one.
             pass
 
     # Fallback: standard Python file read

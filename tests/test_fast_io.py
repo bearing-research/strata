@@ -36,6 +36,44 @@ class TestFastIoAvailability:
             assert hasattr(_strata_core, "concat_ipc_streams")
 
 
+class TestReadFileMmapThreshold:
+    """The mmap read routes only large files through Rust (small ones regress)."""
+
+    def _spy_rust(self, monkeypatch):
+        """Replace the Rust reader with a spy that records if it was called."""
+        if not fast_io.is_rust_available():
+            pytest.skip("Rust module not available")
+        calls: list[str] = []
+        real = fast_io._rust_module.read_file_bytes
+
+        def spy(path):
+            calls.append(path)
+            return real(path)
+
+        monkeypatch.setattr(fast_io._rust_module, "read_file_bytes", spy)
+        return calls
+
+    def test_small_file_skips_rust(self, tmp_path, monkeypatch):
+        calls = self._spy_rust(monkeypatch)
+        path = tmp_path / "small"
+        path.write_bytes(b"x" * 1024)  # 1 KB, well under the threshold
+        assert fast_io.read_file_mmap(str(path)) == b"x" * 1024
+        assert calls == []  # Rust path not taken
+
+    def test_large_file_uses_rust(self, tmp_path, monkeypatch):
+        calls = self._spy_rust(monkeypatch)
+        path = tmp_path / "big"
+        data = b"y" * (fast_io.MMAP_MIN_BYTES + 1)
+        path.write_bytes(data)
+        assert fast_io.read_file_mmap(str(path)) == data
+        assert calls == [str(path)]  # Rust path taken exactly once
+
+    def test_nonexistent_still_raises(self, tmp_path):
+        # The size check must not swallow a genuinely missing file.
+        with pytest.raises(FileNotFoundError):
+            fast_io.read_file_mmap(str(tmp_path / "nope"))
+
+
 class TestConcatStreamBytes:
     """Tests for concat_stream_bytes function."""
 
