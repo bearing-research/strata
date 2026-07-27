@@ -331,8 +331,8 @@ def build_pipeline_ir(
     return PipelineIR(
         target=target,
         runtime=runtime,
-        notebook_id=state.id,
-        notebook_name=state.name,
+        pipeline_id=state.id,
+        pipeline_name=state.name,
         env_hash=env_hash,
         requirements=requirements,
         requires_python=requires_python,

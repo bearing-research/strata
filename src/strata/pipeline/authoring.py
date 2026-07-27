@@ -225,8 +225,8 @@ def build_pipeline_ir_from_functions(
     return PipelineIR(
         target=target,
         runtime=runtime,
-        notebook_id=name.lower().replace(" ", "-"),
-        notebook_name=name,
+        pipeline_id=name.lower().replace(" ", "-"),
+        pipeline_name=name,
         env_hash=env_hash,
         requirements=requirements or [],
         requires_python=requires_python,

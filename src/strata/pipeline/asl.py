@@ -73,12 +73,12 @@ def render_state_machine(ir: PipelineIR, options: AslRenderOptions | None = None
     translatable nodes, so the output is always a runnable state machine.
     """
     options = options or AslRenderOptions()
-    job_prefix = options.glue_job_prefix or ir.notebook_id
+    job_prefix = options.glue_job_prefix or ir.pipeline_id
     artifact_root = options.artifact_root.rstrip("/")
     athena_out = options.athena_output_location or f"{artifact_root}/athena-results/"
     node_by_id = {n.id: n for n in ir.nodes}
 
-    comment = f"Compiled from Strata notebook {ir.notebook_name} ({ir.notebook_id})"
+    comment = f"Compiled from Strata pipeline {ir.pipeline_name} ({ir.pipeline_id})"
 
     levels = _levels(ir)
     if not levels:

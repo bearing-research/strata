@@ -61,7 +61,7 @@ def test_node_module_builds_wired_ir():
     ir = build_pipeline_ir_from_functions(PIPE, name="Scale Demo")
 
     assert ir.runtime == "container"
-    assert ir.notebook_name == "Scale Demo"
+    assert ir.pipeline_name == "Scale Demo"
     assert ir.topological_order == ["load", "scale", "total"]
 
     by_id = {n.id: n for n in ir.nodes}

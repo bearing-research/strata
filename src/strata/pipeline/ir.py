@@ -153,8 +153,8 @@ class PipelineIR(BaseModel):
     ir_version: int = 1
     target: str = "aws"
     runtime: str = "container"  # node execution: "container" (Lambda) or "glue"
-    notebook_id: str
-    notebook_name: str
+    pipeline_id: str  # identity of the source graph (a notebook id, a module slug, ...)
+    pipeline_name: str
     env_hash: str
     requirements: list[str] = Field(default_factory=list)  # notebook [project.dependencies]
     requires_python: str = ""  # notebook requires-python (Glue Python Shell is 3.9)

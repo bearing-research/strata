@@ -47,8 +47,8 @@ _EXTERNAL_ROOTS = {
 class AccessManifest(BaseModel):
     """Everything the compiled pipeline must be able to reach, plus parity risks."""
 
-    notebook_id: str
-    notebook_name: str
+    pipeline_id: str
+    pipeline_name: str
     tables: list[TableRef] = Field(default_factory=list)
     mounts: list[MountRef] = Field(default_factory=list)
     connections: list[ConnectionRef] = Field(default_factory=list)
@@ -149,8 +149,8 @@ def build_access_manifest(ir: PipelineIR) -> AccessManifest:
         required_env.update(conn.auth_env_vars)
 
     return AccessManifest(
-        notebook_id=ir.notebook_id,
-        notebook_name=ir.notebook_name,
+        pipeline_id=ir.pipeline_id,
+        pipeline_name=ir.pipeline_name,
         tables=list(tables.values()),
         mounts=list(mounts.values()),
         connections=ir.connections,
