@@ -66,16 +66,32 @@ class MountRef(BaseModel):
     option_keys: list[str] = Field(default_factory=list)
 
 
+class ScanFilter(BaseModel):
+    """A predicate pushed down into an Iceberg scan by the optimizer.
+
+    Semantics-preserving: lifting a node's filter into its scan changes only how
+    much data is read, never the result (so provenance/identity are untouched).
+    ``op`` is a :class:`strata.filters.FilterOp` value (``=  !=  <  <=  >  >=``).
+    """
+
+    column: str
+    op: str
+    value: str | bool | int | float
+
+
 class TableRef(BaseModel):
     """An Iceberg table a node scans (``@table``).
 
     ``snapshot_pin`` is the crux of experiment↔production data parity: when set,
     the notebook and the pipeline read the byte-identical snapshot forever.
+    ``filters`` are predicates the optimizer lifted from the node body into the
+    scan (see :mod:`strata.pipeline.optimize`); empty until a pass runs.
     """
 
     name: str
     uri: str
     snapshot_pin: int | None = None
+    filters: list[ScanFilter] = Field(default_factory=list)
 
 
 class ConnectionRef(BaseModel):

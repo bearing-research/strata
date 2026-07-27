@@ -47,9 +47,11 @@ from strata.pipeline.ir import (
     PipelineIR,
     PipelineNode,
     PipelineParameter,
+    ScanFilter,
     TableRef,
     UnsupportedCell,
 )
+from strata.pipeline.optimize import pushdown_scan_filters
 
 __all__ = [
     "AccessManifest",
@@ -63,6 +65,7 @@ __all__ = [
     "PipelineIR",
     "PipelineNode",
     "PipelineParameter",
+    "ScanFilter",
     "TableRef",
     "UnsupportedCell",
     "build_access_manifest",
@@ -70,6 +73,7 @@ __all__ = [
     "build_pipeline_ir_from_functions",
     "build_pipeline_ir_from_module",
     "node",
+    "pushdown_scan_filters",
     "render_dockerfile",
     "render_glue_script",
     "render_handler",
