@@ -6,6 +6,7 @@ Subcommands:
     new       Scaffold a notebook directory
     export    Render a notebook to markdown or HTML for sharing
     import    Convert a Jupyter .ipynb file into a Strata notebook directory
+    compile   Compile a notebook into a production pipeline IR (pipeline.json)
     artifact  Artifact store maintenance (verify)
 
 The existing ``strata-notebook`` script and ``python -m strata`` entry
@@ -20,6 +21,7 @@ import sys
 
 from strata.notebook.cli import (
     add_cell_arguments,
+    add_compile_arguments,
     add_dag_arguments,
     add_dep_arguments,
     add_export_arguments,
@@ -28,6 +30,7 @@ from strata.notebook.cli import (
     add_run_arguments,
     add_status_arguments,
     add_validate_arguments,
+    compile_main,
     dag_main,
     export_main,
     import_main,
@@ -262,6 +265,19 @@ def _build_parser() -> argparse.ArgumentParser:
     add_dag_arguments(dag_parser)
     dag_parser.set_defaults(func=dag_main)
 
+    compile_parser = subparsers.add_parser(
+        "compile",
+        help="Compile a notebook into a production pipeline IR (pipeline.json)",
+        description=(
+            "Compile a Strata notebook DAG into a portable pipeline IR: nodes "
+            "(cells) with compute targets (Python -> AWS Glue, SQL -> Athena), "
+            "inputs/outputs as artifacts, and a compile-time provenance preview. "
+            "Read-only and offline; no cell is executed. Emits pipeline.json."
+        ),
+    )
+    add_compile_arguments(compile_parser)
+    compile_parser.set_defaults(func=_dispatch_compile)
+
     status_parser = subparsers.add_parser(
         "status",
         help="Print per-cell status + staleness for a notebook",
@@ -314,6 +330,10 @@ def _dispatch_export(args: argparse.Namespace) -> int:
 
 def _dispatch_import(args: argparse.Namespace) -> int:
     return import_main(args)
+
+
+def _dispatch_compile(args: argparse.Namespace) -> int:
+    return compile_main(args)
 
 
 def main(argv: list[str] | None = None) -> int:

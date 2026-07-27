@@ -839,6 +839,95 @@ def export_main(args: argparse.Namespace) -> int:
     return 0
 
 
+def add_compile_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register ``strata compile`` — emit the pipeline IR for a notebook."""
+    parser.add_argument("path", help="Path to the notebook directory")
+    parser.add_argument(
+        "--target",
+        default="aws",
+        choices=["aws"],
+        help="Pipeline target family (default: aws)",
+    )
+    parser.add_argument(
+        "--runtime",
+        default="container",
+        choices=["container", "glue"],
+        help=(
+            "Node execution model: container = Python 3.12 Lambda image, exact "
+            "parity (default); glue = Glue Python Shell / Athena (SQL support)"
+        ),
+    )
+    parser.add_argument(
+        "--emit",
+        default="ir",
+        choices=["ir", "asl", "access", "bundle"],
+        help=(
+            "ir = pipeline.json (default); asl = a Step Functions state machine; "
+            "access = the data/model access manifest + parity risks; "
+            "bundle = a deployable directory (requires --out DIR)"
+        ),
+    )
+    parser.add_argument(
+        "-o",
+        "--out",
+        dest="output_path",
+        default=None,
+        help="Write output here (a directory for --emit bundle; default: stdout)",
+    )
+
+
+def compile_main(args: argparse.Namespace) -> int:
+    """Entry point for ``strata compile``.
+
+    Compiles the notebook DAG into a :class:`~strata.pipeline.PipelineIR`
+    and writes it as ``pipeline.json`` to ``--out`` (default stdout). Read-only
+    and offline — no cell is executed.
+    """
+    from strata.notebook.compile import (
+        PipelineCompileError,
+        build_pipeline_ir_from_dir,
+    )
+    from strata.pipeline import (
+        build_access_manifest,
+        render_state_machine,
+        write_bundle,
+    )
+
+    path = Path(args.path)
+    if not (path / "notebook.toml").is_file():
+        print(f"error: {path} is not a notebook directory (no notebook.toml)", file=sys.stderr)
+        return 2
+
+    if args.emit == "bundle" and not args.output_path:
+        print("error: --emit bundle requires --out DIR", file=sys.stderr)
+        return 2
+
+    try:
+        ir = build_pipeline_ir_from_dir(path, target=args.target, runtime=args.runtime)
+    except PipelineCompileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    if args.emit == "bundle":
+        written = write_bundle(ir, args.output_path)
+        for file in written:
+            print(file, file=sys.stderr)
+        return 0
+
+    if args.emit == "access":
+        document = build_access_manifest(ir).model_dump(mode="json")
+    elif args.emit == "asl":
+        document = render_state_machine(ir)
+    else:
+        document = ir.model_dump(mode="json")
+    payload = json.dumps(document, indent=2) + "\n"
+    if args.output_path:
+        Path(args.output_path).write_text(payload, encoding="utf-8")
+    else:
+        sys.stdout.write(payload)
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Agent inspect commands (NotebookOps, local backend) — `strata cell …` etc.
 #
