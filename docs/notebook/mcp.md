@@ -33,6 +33,12 @@ claude mcp add --transport http strata http://localhost:8765/mcp
 If the flag is set but the `[mcp]` extra is not installed, the server logs a
 warning and starts normally without the endpoint.
 
+!!! tip "One-command setup"
+    [`strata agent <notebook-dir>`](agent.md) does the enable-open-register-watch
+    steps below for you — it starts the server with this endpoint on, opens a
+    session, writes the `.mcp.json` an agent auto-connects to, and attaches the
+    TUI. Reach for it unless you want to wire the pieces up by hand.
+
 ## Workflow
 
 Sessions are opened by the notebook UI or the CLI; the MCP tools operate on

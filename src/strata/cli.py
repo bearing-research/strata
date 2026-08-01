@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from strata.notebook.agent_launch import add_agent_arguments, agent_main
 from strata.notebook.cli import (
     add_cell_arguments,
     add_dag_arguments,
@@ -276,6 +277,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     add_dep_arguments(dep_parser)
 
+    agent_parser = subparsers.add_parser(
+        "agent",
+        help="Open a notebook for a coding agent to drive, with a live TUI",
+        description=(
+            "One-command on-ramp: create-or-open a notebook, start (or reuse) a "
+            "server with the MCP endpoint enabled, open a session, write the "
+            ".mcp.json + CLAUDE.md a coding agent needs, and attach the TUI. "
+            "Then run `claude` in the notebook directory to drive it."
+        ),
+    )
+    add_agent_arguments(agent_parser)
+    agent_parser.set_defaults(func=_dispatch_agent)
+
     return parser
 
 
@@ -314,6 +328,10 @@ def _dispatch_export(args: argparse.Namespace) -> int:
 
 def _dispatch_import(args: argparse.Namespace) -> int:
     return import_main(args)
+
+
+def _dispatch_agent(args: argparse.Namespace) -> int:
+    return agent_main(args)
 
 
 def main(argv: list[str] | None = None) -> int:
