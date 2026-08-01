@@ -16,7 +16,7 @@
         <link rel="prev" href="../agent-authoring/">
       
       
-        <link rel="next" href="../import/">
+        <link rel="next" href="../agent/">
       
       
         
@@ -1056,6 +1056,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Drive with a Coding Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../import/" class="md-nav__link">
         
   
@@ -1952,6 +1980,13 @@ server in service mode with the flag set is rejected at startup.)</p>
 </code></pre></div>
 <p>If the flag is set but the <code>[mcp]</code> extra is not installed, the server logs a
 warning and starts normally without the endpoint.</p>
+<div class="admonition tip">
+<p class="admonition-title">One-command setup</p>
+<p><a href="../agent/"><code>strata agent &lt;notebook-dir&gt;</code></a> does the enable-open-register-watch
+steps below for you — it starts the server with this endpoint on, opens a
+session, writes the <code>.mcp.json</code> an agent auto-connects to, and attaches the
+TUI. Reach for it unless you want to wire the pieces up by hand.</p>
+</div>
 <h2 id="workflow">Workflow<a class="headerlink" href="#workflow" title="Permanent link">&para;</a></h2>
 <p>Sessions are opened by the notebook UI or the CLI; the MCP tools operate on
 sessions that are <strong>already open</strong> (they do not open notebooks from a path).
