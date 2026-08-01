@@ -7,6 +7,20 @@ exhaustive commit history.
 
 ## Unreleased
 
+### Added
+
+- **`strata agent <notebook-dir>` - one command to drive a notebook with a
+  coding agent.** The MCP server, the CLI ops, and the terminal viewer already
+  existed, but wiring them together by hand was a fiddly, ordered dance nobody
+  did - so a coding agent never actually reached for the notebook. This command
+  collapses it: it creates-or-opens the notebook, starts (or reuses) a server
+  with the MCP endpoint enabled, opens a session (the one step an agent can't do
+  itself), drops a `.mcp.json` + a managed `CLAUDE.md` working agreement into the
+  notebook directory, and attaches the read-only TUI. Then you run `claude` in
+  that directory in another pane: it auto-connects, reads the agreement, and
+  drives cells that light up **live** in the TUI. Needs the `[mcp]` and `[tui]`
+  extras. See [Driving a notebook with a coding agent](docs/notebook/agent.md).
+
 ## 0.5.0 - 2026-07-15
 
 0.5.0 turns the notebook into an **interactive, shareable app**. The headlines

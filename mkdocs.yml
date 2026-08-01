@@ -79,6 +79,7 @@ nav:
     - Headless Runner: notebook/cli.md
     - Authoring Programmatically: notebook/agent-authoring.md
     - MCP Server: notebook/mcp.md
+    - Drive with a Coding Agent: notebook/agent.md
     - Import from Jupyter: notebook/import.md
     - Export: notebook/export.md
     - Terminal Viewer (TUI): notebook/tui.md

@@ -1,0 +1,90 @@
+# Driving a notebook with a coding agent
+
+`strata agent <notebook-dir>` is a one-command on-ramp: it stands up everything
+a coding agent (Claude Code) needs to drive a **live** Strata notebook, and
+attaches a terminal viewer so you watch it happen in real time.
+
+It exists because the pieces were already there — the [MCP server](mcp.md), the
+[`strata` CLI](cli.md) ops, the [terminal viewer](tui.md) — but wiring them
+together by hand is a fiddly, ordered dance: enable the MCP endpoint *before*
+the server boots, open a session (the agent can't do that itself), point the
+agent at the right session, and only then start driving. `strata agent` does all
+of it in one step.
+
+## Prerequisites
+
+The `[mcp]` (agent endpoint) and `[tui]` (terminal viewer) extras:
+
+```bash
+uv sync --extra mcp --extra tui     # or: uv sync --all-extras
+```
+
+## Use it
+
+```bash
+strata agent ./my-notebook
+```
+
+That single command:
+
+1. **creates-or-opens** the notebook directory (scaffolds a new one if needed),
+2. **starts** a notebook server with the MCP endpoint enabled (or **reuses** one
+   already running on the target URL),
+3. **opens a session** — the step the agent cannot do itself, since the MCP
+   tools only see notebooks that are already open,
+4. **writes** a `.mcp.json` and a managed block in `CLAUDE.md` into the notebook
+   directory, and
+5. **attaches** the read-only TUI to that session.
+
+It prints the one line you run on the agent's side, then hands the terminal to
+the TUI. In a second terminal:
+
+```bash
+cd ./my-notebook && claude
+```
+
+Claude Code discovers the notebook's `.mcp.json`, connects to the `strata-notebook`
+MCP server, reads the `CLAUDE.md` working agreement, and starts building the
+notebook by adding and running cells — each of which **lights up live in the TUI**
+you left running in the first terminal.
+
+When you quit the TUI, the server `strata agent` started is shut down with it. If
+you pointed it at a server you started yourself, that server is left running.
+
+## What gets written into the notebook
+
+- **`.mcp.json`** — registers the running server's `/mcp` endpoint as an MCP
+  server named `strata-notebook`, so Claude Code auto-connects when launched in
+  the directory. Overwritten on each launch (it points at the current port).
+- **`CLAUDE.md`** — a working agreement telling the agent to drive the notebook
+  through the MCP tools rather than writing throwaway `.py` scripts, so its work
+  is captured as versioned, content-addressed, cached cells that you can see.
+  Only the region between the `<!-- strata:agent:start -->` /
+  `<!-- strata:agent:end -->` markers is managed; your own notes in the same file
+  are preserved and rewritten around.
+
+Both are safe to commit — they make the notebook agent-ready for anyone who
+clones it.
+
+## Options
+
+| Flag | Effect |
+| --- | --- |
+| `--server URL` | Server base URL; reused if already running there, else started. Default `http://localhost:8765` (or `$STRATA_TUI_SERVER`). |
+| `--python X.Y` | Python `major.minor` for a newly created notebook's venv. |
+| `--no-env` | When creating a notebook, skip building its venv now. |
+| `--no-tui` | Set up and open the session but don't attach the TUI (useful when you keep a browser tab open instead, or drive the launcher from a script). |
+
+## Reusing a server you already run
+
+If a server is already listening at the target URL, `strata agent` reuses it
+instead of starting one — but it must have the MCP endpoint enabled, and it must
+be allowed to open the notebook. A server confines notebooks to its configured
+storage root, so a reused server only opens notebooks that live under that root.
+If it can't, stop it and let `strata agent` start one scoped to your notebook.
+
+## Related
+
+- [MCP Server](mcp.md) — the full tool list and the endpoint's security model.
+- [Terminal Viewer (TUI)](tui.md) — the live spectator `strata agent` attaches.
+- [Authoring Programmatically](agent-authoring.md) — the same ops as a Python API.
