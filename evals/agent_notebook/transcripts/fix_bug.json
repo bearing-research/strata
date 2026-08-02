@@ -1,0 +1,31 @@
+{
+  "events": [
+    { "name": "mcp__strata_notebook__list_notebooks" },
+    {
+      "name": "mcp__strata_notebook__get_notebook",
+      "arguments": { "session_id": "s" }
+    },
+    {
+      "name": "mcp__strata_notebook__run_cell",
+      "arguments": { "session_id": "s", "cell_id": "c2" }
+    },
+    {
+      "name": "mcp__strata_notebook__get_cell",
+      "arguments": { "session_id": "s", "cell_id": "c2" }
+    },
+    {
+      "name": "mcp__strata_notebook__edit_cell",
+      "arguments": {
+        "session_id": "s",
+        "cell_id": "c2",
+        "source": "average = sum(values) / len(values)"
+      }
+    },
+    {
+      "name": "mcp__strata_notebook__run_cell",
+      "arguments": { "session_id": "s", "cell_id": "c2" }
+    }
+  ],
+  "final_text": "Fixed the typo (valuess -> values); notebook runs clean.",
+  "ok": true
+}

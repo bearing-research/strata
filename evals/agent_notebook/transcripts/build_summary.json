@@ -1,0 +1,29 @@
+{
+  "events": [
+    { "name": "mcp__strata_notebook__list_notebooks" },
+    {
+      "name": "mcp__strata_notebook__status",
+      "arguments": { "session_id": "s" }
+    },
+    {
+      "name": "mcp__strata_notebook__add_cell",
+      "arguments": {
+        "source": "import pandas as pd\ndf = pd.DataFrame({'city': ['a','b','c','d','e'], 'population': [1,2,3,4,5]})"
+      }
+    },
+    {
+      "name": "mcp__strata_notebook__add_cell",
+      "arguments": { "source": "total_population = df['population'].sum()" }
+    },
+    {
+      "name": "mcp__strata_notebook__run_cell",
+      "arguments": { "session_id": "s", "cell_id": "c1" }
+    },
+    {
+      "name": "mcp__strata_notebook__run_cell",
+      "arguments": { "session_id": "s", "cell_id": "c2" }
+    }
+  ],
+  "final_text": "Added and ran both cells; total_population computed.",
+  "ok": true
+}

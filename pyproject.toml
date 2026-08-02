@@ -245,6 +245,9 @@ unresolved-import = "warn"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Repo root on sys.path so tests can import the non-packaged `evals` suite
+# (the shipped package `strata` is imported from the installed venv, not here).
+pythonpath = ["."]
 # Per-test timeout: a deadlocked test (e.g. the intermittent py3.12/macOS
 # TestClient WS portal hang) fails in 3 min with a full thread-stack dump that
 # pinpoints the culprit — instead of hanging the CI job to GitHub's 6h cap. The
