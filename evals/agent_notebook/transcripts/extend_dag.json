@@ -1,0 +1,16 @@
+{
+  "events": [
+    { "name": "mcp__strata_notebook__list_notebooks" },
+    { "name": "mcp__strata_notebook__dag", "arguments": { "session_id": "s" } },
+    {
+      "name": "mcp__strata_notebook__add_cell",
+      "arguments": { "source": "total = sum(numbers)" }
+    },
+    {
+      "name": "mcp__strata_notebook__run_cell",
+      "arguments": { "session_id": "s", "cell_id": "c2", "mode": "normal" }
+    }
+  ],
+  "final_text": "Added a downstream cell computing total; ran only what was needed.",
+  "ok": true
+}
