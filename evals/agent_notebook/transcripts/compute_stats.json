@@ -1,10 +1,24 @@
 {
   "events": [
-    {"name": "mcp__strata-notebook__list_notebooks"},
-    {"name": "mcp__strata-notebook__add_cell", "arguments": {"source": "data = list(range(1, 101))"}},
-    {"name": "mcp__strata-notebook__add_cell", "arguments": {"source": "mean_val = sum(data) / len(data)\nsorted_d = sorted(data)\nmedian_val = (sorted_d[49] + sorted_d[50]) / 2"}},
-    {"name": "mcp__strata-notebook__run_cell", "arguments": {"session_id": "s", "cell_id": "c1"}},
-    {"name": "mcp__strata-notebook__run_cell", "arguments": {"session_id": "s", "cell_id": "c2"}}
+    { "name": "mcp__strata-notebook__list_notebooks" },
+    {
+      "name": "mcp__strata-notebook__add_cell",
+      "arguments": { "source": "data = list(range(1, 101))" }
+    },
+    {
+      "name": "mcp__strata-notebook__add_cell",
+      "arguments": {
+        "source": "mean_val = sum(data) / len(data)\nsorted_d = sorted(data)\nmedian_val = (sorted_d[49] + sorted_d[50]) / 2"
+      }
+    },
+    {
+      "name": "mcp__strata-notebook__run_cell",
+      "arguments": { "session_id": "s", "cell_id": "c1" }
+    },
+    {
+      "name": "mcp__strata-notebook__run_cell",
+      "arguments": { "session_id": "s", "cell_id": "c2" }
+    }
   ],
   "final_text": "Computed mean and median in the notebook.",
   "ok": true
