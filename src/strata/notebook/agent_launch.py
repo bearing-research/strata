@@ -225,7 +225,13 @@ def _write_agent_config(notebook_dir: Path, server_url: str, session_id: str) ->
     surgically: only the region between our managed markers is (re)written, so a
     user's own instructions in the same file survive.
     """
-    mcp_config = {"mcpServers": {"strata-notebook": {"type": "http", "url": f"{server_url}/mcp"}}}
+    # Trailing slash is required: the server mounts the MCP app at ``/mcp`` and
+    # Starlette 307-redirects ``/mcp`` → ``/mcp/``. MCP HTTP clients (Claude
+    # Code) drop the POST body across that redirect, so the handshake fails and
+    # the notebook tools never register — the agent then can't drive the
+    # notebook natively. Point straight at ``/mcp/`` and there's no redirect.
+    mcp_url = f"{server_url}/mcp/"
+    mcp_config = {"mcpServers": {"strata-notebook": {"type": "http", "url": mcp_url}}}
     (notebook_dir / ".mcp.json").write_text(
         json.dumps(mcp_config, indent=2) + "\n", encoding="utf-8"
     )
