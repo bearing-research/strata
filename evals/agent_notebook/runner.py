@@ -81,7 +81,9 @@ def _strata_run_ok(notebook_dir: Path) -> bool:
         return False
 
 
-def run_task(task: Task, driver: Driver, workdir: Path, *, live: bool = True) -> RunResult:
+def run_task(
+    task: Task, driver: Driver, workdir: Path, *, live: bool = True, label: str | None = None
+) -> RunResult:
     """Prepare the notebook, drive the agent, and score it.
 
     ``live=True`` (Claude Code) runs the real on-ramp: provision deps, spawn a
@@ -89,15 +91,21 @@ def run_task(task: Task, driver: Driver, workdir: Path, *, live: bool = True) ->
     ``strata run`` for the completion check. ``live=False`` (replay) skips all
     of that — no server, no venv, no LLM — so recorded runs re-score
     deterministically in CI; completion reflects only the seeded notebook.
+
+    ``label`` names the notebook subdir (defaults to the task id); repeats pass a
+    distinct label per run so each gets its own fresh notebook.
     """
     notebook_dir = agent_launch._resolve_notebook_dir(
-        str(workdir / task.id), None, initialize_environment=live
+        str(workdir / (label or task.id)), None, initialize_environment=live
     )
     if task.seed is not None:
         task.seed(notebook_dir)
 
     if not live:
-        traj = driver.run(task, notebook_dir)
+        try:
+            traj = driver.run(task, notebook_dir)
+        except Exception as exc:  # driver boundary: isolate a bad run, don't abort the suite
+            return _errored(task, driver, notebook_dir, f"driver error: {exc}")
         return score_run(
             task.id, driver.name, traj, notebook_dir, task.expect_variables, run_ok=None
         )
@@ -136,9 +144,15 @@ def _errored(task: Task, driver: Driver, notebook_dir: Path, msg: str) -> RunRes
 
 
 def run_suite(
-    tasks: list[Task], driver: Driver, workdir: Path, *, live: bool = True
+    tasks: list[Task], driver: Driver, workdir: Path, *, live: bool = True, repeats: int = 1
 ) -> list[RunResult]:
-    return [run_task(task, driver, workdir, live=live) for task in tasks]
+    """Run every task ``repeats`` times; each repeat gets its own fresh notebook."""
+    results = []
+    for task in tasks:
+        for i in range(repeats):
+            label = task.id if repeats == 1 else f"{task.id}-{i + 1}"
+            results.append(run_task(task, driver, workdir, live=live, label=label))
+    return results
 
 
 def summarize(results: list[RunResult]) -> dict:
@@ -155,15 +169,23 @@ def summarize(results: list[RunResult]) -> dict:
 
 
 def format_table(results: list[RunResult]) -> str:
-    header = f"{'task':<16} {'in-tool':>8} {'work':>5} {'esc':>4} {'clean':>6} {'pass':>5}"
-    lines = [header, "-" * len(header)]
+    """One row per task, aggregated across its repeats."""
+    groups: dict[str, list[RunResult]] = {}
     for r in results:
-        rate = "n/a" if r.in_tool.no_activity else f"{r.in_tool.in_tool_rate:.0%}"
-        clean = {True: "yes", False: "no", None: "-"}[r.completion.runs_clean]
-        passed = "yes" if r.completion.passed else "no"
+        groups.setdefault(r.task_id, []).append(r)
+
+    header = f"{'task':<16} {'runs':>4} {'in-tool':>8} {'min':>5} {'esc':>4} {'pass':>7}"
+    lines = [header, "-" * len(header)]
+    for task_id, runs in groups.items():
+        active = [r for r in runs if not r.in_tool.no_activity and r.error is None]
+        rates = [r.in_tool.in_tool_rate for r in active]
+        mean_rate = f"{mean(rates):.0%}" if rates else "n/a"
+        min_rate = f"{min(rates):.0%}" if rates else "n/a"
+        escapes = sum(r.in_tool.escapes for r in runs)
+        passed = sum(1 for r in runs if r.completion.passed)
         lines.append(
-            f"{r.task_id:<16} {rate:>8} {r.in_tool.notebook_work:>5} "
-            f"{r.in_tool.python_escapes:>4} {clean:>6} {passed:>5}"
+            f"{task_id:<16} {len(runs):>4} {mean_rate:>8} {min_rate:>5} "
+            f"{escapes:>4} {f'{passed}/{len(runs)}':>7}"
         )
     return "\n".join(lines)
 
@@ -188,6 +210,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", default=None, help="Write the full JSON report here")
     parser.add_argument("--timeout", type=float, default=600.0, help="Per-run agent timeout (s)")
     parser.add_argument("--max-budget-usd", type=float, default=None, help="Claude Code spend cap")
+    parser.add_argument("--repeats", type=int, default=1, help="Runs per task (default 1)")
     args = parser.parse_args(argv)
 
     tasks = TASKS
@@ -207,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
     workdir.mkdir(parents=True, exist_ok=True)
 
     try:
-        results = run_suite(tasks, driver, workdir, live=live)
+        results = run_suite(tasks, driver, workdir, live=live, repeats=args.repeats)
     finally:
         if workdir_ctx is not None:
             workdir_ctx.cleanup()
