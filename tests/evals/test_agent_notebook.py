@@ -28,12 +28,14 @@ TRANSCRIPTS = REPO_ROOT / "evals" / "agent_notebook" / "transcripts"
 # --- trajectory classification -------------------------------------------------
 
 
-def test_mcp_tool_name_sanitized_prefix_is_recognized() -> None:
-    # Claude Code sanitizes the server name (strata-notebook -> strata_notebook).
+def test_mcp_tool_name_prefix_is_recognized() -> None:
+    # Claude Code v2.1.x keeps the hyphen: mcp__strata-notebook__<tool>. Splitting
+    # on __ and keying off the trailing segment tolerates hyphen or underscore.
+    assert ToolEvent("mcp__strata-notebook__run_cell").is_notebook_work
     assert ToolEvent("mcp__strata_notebook__run_cell").is_notebook_work
-    assert ToolEvent("mcp__strata_notebook__get_notebook").is_notebook_read
+    assert ToolEvent("mcp__strata-notebook__get_notebook").is_notebook_read
     # Reads are neither work nor escape.
-    assert not ToolEvent("mcp__strata_notebook__status").is_notebook_work
+    assert not ToolEvent("mcp__strata-notebook__status").is_notebook_work
 
 
 def test_bash_python_is_an_escape_but_other_bash_is_not() -> None:

@@ -39,7 +39,9 @@ def test_write_agent_config_writes_mcp_json(tmp_path) -> None:
 
     cfg = json.loads((nb / ".mcp.json").read_text())
     server = cfg["mcpServers"]["strata-notebook"]
-    assert server == {"type": "http", "url": "http://localhost:8765/mcp"}
+    # Trailing slash matters: without it Starlette redirects /mcp -> /mcp/ and
+    # the MCP client's handshake POST loses its body, so the tools never load.
+    assert server == {"type": "http", "url": "http://localhost:8765/mcp/"}
 
 
 def test_write_agent_config_claude_md_has_session_and_markers(tmp_path) -> None:
