@@ -6,8 +6,15 @@ that.
 
 The headline metric is the **in-tool rate**: of the work actions an agent took,
 what fraction went through the notebook's MCP tools (`add_cell`, `edit_cell`,
-`run_cell`, …) versus escaping to Bash Python (`python foo.py`, `uv run python`,
-`pytest`). Task completion and efficiency are reported alongside.
+`run_cell`, …) versus an **escape** — a bypass of the notebook. Three escape
+modes are detected:
+
+- **bash-python** — running Python/tests via Bash instead of `run_cell`
+- **bash-install** — `pip`/`uv`/`conda` installs via Bash instead of `add_dependency`
+- **cell-file-edit** — editing a cell's source file directly (Write/Edit) instead
+  of `edit_cell`/`add_cell`
+
+Task completion and efficiency are reported alongside.
 
 ## How it's structured
 
@@ -63,6 +70,16 @@ Capture a real Claude Code session's `stream-json` and drop it in as
 driver does. This lets you freeze a real trajectory and iterate on the graders
 offline.
 
+## Repeats
+
+Agent runs are non-deterministic, so a single pass can be a lucky (or unlucky)
+sweep. `--repeats N` runs each task N times; the report aggregates per task
+(mean and **min** in-tool rate, escapes, pass count) so the headline is robust:
+
+```bash
+uv run python -m evals.agent_notebook.runner --driver claude_code --repeats 3
+```
+
 ## Tasks
 
 | id | what it exercises |
@@ -71,6 +88,15 @@ offline.
 | `train_eval` | Add a dependency, fit a model, compute accuracy |
 | `fix_bug` | Debug a seeded failing cell and make the notebook run clean |
 | `extend_dag` | Add a downstream cell on an existing variable, run only what's needed |
+| `compute_stats` | Two dependent cells over a range (pure Python) |
+| `aggregate_group` | pandas groupby aggregate |
+| `explore_inline` | Compute an answer from inline data (tempts a scratch script) |
+| `add_missing_dep` | Fix a missing import — tempts a Bash `pip`/`uv` install |
+| `refactor_split` | Split one cell into two — tempts editing the cell file directly |
+
+The last three are deliberate **escape-tempters**: each has a tempting bypass the
+working agreement asks the agent to resist, and the graders flag it if taken.
 
 Add a scenario by appending a `Task` to `tasks.py` (name the expected variables
-in the prompt so completion is checkable without an LLM judge).
+in the prompt so completion is checkable without an LLM judge). If you want the
+replay/CI path to cover it, drop a matching transcript in `transcripts/`.

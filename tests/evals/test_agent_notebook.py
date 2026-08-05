@@ -39,13 +39,35 @@ def test_mcp_tool_name_prefix_is_recognized() -> None:
 
 
 def test_bash_python_is_an_escape_but_other_bash_is_not() -> None:
-    assert ToolEvent("Bash", {"command": "python train.py"}).is_python_escape
-    assert ToolEvent("Bash", {"command": "uv run python -c 'print(1)'"}).is_python_escape
-    assert ToolEvent("Bash", {"command": "pytest -q"}).is_python_escape
-    assert not ToolEvent("Bash", {"command": "ls -la"}).is_python_escape
-    assert not ToolEvent("Bash", {"command": "git status"}).is_python_escape
+    assert ToolEvent("Bash", {"command": "python train.py"}).escape_reason == "bash-python"
+    assert ToolEvent("Bash", {"command": "uv run python -c 'print(1)'"}).is_escape
+    assert ToolEvent("Bash", {"command": "pytest -q"}).escape_reason == "bash-python"
+    assert not ToolEvent("Bash", {"command": "ls -la"}).is_escape
+    assert not ToolEvent("Bash", {"command": "git status"}).is_escape
     # A path that merely contains 'python' must not trip the detector.
-    assert not ToolEvent("Bash", {"command": "echo $PYTHONPATH"}).is_python_escape
+    assert not ToolEvent("Bash", {"command": "echo $PYTHONPATH"}).is_escape
+
+
+def test_bash_package_install_is_an_escape() -> None:
+    # Managing deps via Bash bypasses add_dependency — the change never lands
+    # in the notebook's committed env.
+    pip = ToolEvent("Bash", {"command": "pip install requests"})
+    uv_add = ToolEvent("Bash", {"command": "uv add pandas"})
+    assert pip.escape_reason == "bash-install"
+    assert uv_add.escape_reason == "bash-install"
+    assert ToolEvent("Bash", {"command": "uv pip install numpy"}).is_escape
+    assert not ToolEvent("Bash", {"command": "uv sync"}).is_escape
+
+
+def test_editing_a_cell_file_directly_is_an_escape() -> None:
+    # Writing/Editing a cell's source file bypasses edit_cell/add_cell.
+    assert (
+        ToolEvent("Write", {"file_path": "/nb/cells/abc123.py"}).escape_reason == "cell-file-edit"
+    )
+    assert ToolEvent("Edit", {"file_path": "/nb/cells/abc123.py"}).is_escape
+    # Editing other files (a data file, the pyproject) is not a notebook bypass.
+    assert not ToolEvent("Write", {"file_path": "/nb/data/x.csv"}).is_escape
+    assert not ToolEvent("Edit", {"file_path": "/nb/pyproject.toml"}).is_escape
 
 
 # --- graders -------------------------------------------------------------------
@@ -55,7 +77,7 @@ def test_in_tool_rate_all_notebook_is_one() -> None:
     traj = Trajectory(events=[ToolEvent("mcp__strata_notebook__run_cell") for _ in range(3)])
     grade = graders.grade_in_tool(traj)
     assert grade.notebook_work == 3
-    assert grade.python_escapes == 0
+    assert grade.escapes == 0
     assert grade.in_tool_rate == 1.0
     assert not grade.no_activity
 
@@ -71,9 +93,9 @@ def test_in_tool_rate_mixed_penalizes_escapes() -> None:
     )
     grade = graders.grade_in_tool(traj)
     assert grade.notebook_work == 3
-    assert grade.python_escapes == 1
+    assert grade.escapes == 1
     assert grade.in_tool_rate == 0.75
-    assert grade.escape_commands == ["python scratch.py"]
+    assert grade.escape_details == ["bash-python: python scratch.py"]
 
 
 def test_in_tool_rate_no_activity_flagged() -> None:
@@ -145,7 +167,7 @@ def test_parse_stream_json_marks_error_result() -> None:
 def test_parse_normalized_roundtrip() -> None:
     obj = {"events": [{"name": "Bash", "arguments": {"command": "python x.py"}}], "ok": True}
     traj = parse_normalized(obj)
-    assert traj.events[0].is_python_escape
+    assert traj.events[0].is_escape
 
 
 def test_replay_driver_reads_committed_transcripts() -> None:
@@ -173,7 +195,7 @@ def test_run_suite_replay_scores_committed_transcripts(tmp_path) -> None:
     assert len(results) == len(tasks)
     assert all(r.error is None for r in results)
     # Every committed transcript is an ideal in-tool run: no escapes, rate 1.0.
-    assert all(r.in_tool.python_escapes == 0 for r in results)
+    assert all(r.in_tool.escapes == 0 for r in results)
     assert all(r.in_tool.in_tool_rate == 1.0 for r in results)
 
     summary = runner.summarize(results)
@@ -204,5 +226,15 @@ def test_run_suite_replay_detects_an_escape(tmp_path) -> None:
     results = runner.run_suite(
         [TASKS_BY_ID["extend_dag"]], ReplayDriver(bad_dir), tmp_path, live=False
     )
-    assert results[0].in_tool.python_escapes == 1
+    assert results[0].in_tool.escapes == 1
     assert results[0].in_tool.in_tool_rate == 0.0
+
+
+def test_run_suite_repeats_produces_one_result_per_run(tmp_path) -> None:
+    driver = ReplayDriver(TRANSCRIPTS)
+    tasks = [TASKS_BY_ID["build_summary"], TASKS_BY_ID["extend_dag"]]
+    results = runner.run_suite(tasks, driver, tmp_path, live=False, repeats=3)
+    assert len(results) == 6  # 2 tasks x 3 repeats
+    # The aggregated table has one row per task, not per run.
+    body = [ln for ln in runner.format_table(results).splitlines()[2:] if ln.strip()]
+    assert len(body) == 2

@@ -19,18 +19,20 @@ class InToolGrade:
     """The headline adoption metric: work done in the notebook vs. routed around it."""
 
     notebook_work: int
-    python_escapes: int
+    escapes: int
     in_tool_rate: float
     no_activity: bool
-    escape_commands: list[str] = field(default_factory=list)
+    escape_details: list[str] = field(default_factory=list)
 
 
 def grade_in_tool(traj: Trajectory) -> InToolGrade:
     """Fraction of work actions taken through the notebook's MCP tools.
 
-    ``in_tool_rate = notebook_work / (notebook_work + python_escapes)``. A run
-    that did neither is ``no_activity`` (rate reported as 1.0 but excluded from
-    suite aggregates — it's a completion failure, not an adoption signal).
+    ``in_tool_rate = notebook_work / (notebook_work + escapes)``, where an escape
+    is any bypass of the notebook — running Python via Bash, installing packages
+    via Bash, or editing a cell file directly (see ``ToolEvent.escape_reason``).
+    A run that did neither is ``no_activity`` (rate reported as 1.0 but excluded
+    from suite aggregates — it's a completion failure, not an adoption signal).
     """
     work = traj.work_events()
     escapes = traj.escape_events()
@@ -39,10 +41,10 @@ def grade_in_tool(traj: Trajectory) -> InToolGrade:
     rate = 1.0 if no_activity else len(work) / denom
     return InToolGrade(
         notebook_work=len(work),
-        python_escapes=len(escapes),
+        escapes=len(escapes),
         in_tool_rate=rate,
         no_activity=no_activity,
-        escape_commands=[str(e.arguments.get("command", "")) for e in escapes],
+        escape_details=[f"{e.escape_reason}: {e.escape_detail()}" for e in escapes],
     )
 
 
@@ -94,7 +96,7 @@ class EfficiencyGrade:
     tool_calls: int
     notebook_reads: int
     notebook_work: int
-    python_escapes: int
+    escapes: int
 
 
 def grade_efficiency(traj: Trajectory) -> EfficiencyGrade:
@@ -102,7 +104,7 @@ def grade_efficiency(traj: Trajectory) -> EfficiencyGrade:
         tool_calls=traj.tool_calls,
         notebook_reads=sum(1 for e in traj.events if e.is_notebook_read),
         notebook_work=len(traj.work_events()),
-        python_escapes=len(traj.escape_events()),
+        escapes=len(traj.escape_events()),
     )
 
 
