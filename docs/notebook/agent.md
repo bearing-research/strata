@@ -21,6 +21,8 @@ uv sync --extra mcp --extra tui     # or: uv sync --all-extras
 
 ## Use it
 
+![A coding agent builds a Strata notebook live in the terminal; the model stays cached when only the evaluation changes.](../assets/agent-demo.gif)
+
 ```bash
 strata agent ./my-notebook
 ```

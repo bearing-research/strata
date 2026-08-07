@@ -1,0 +1,14 @@
+[project]
+name = "agent-demo"
+version = "0.1.0"
+description = "A coding agent builds this notebook; the model trains once and is cached"
+requires-python = "==3.12.*"
+dependencies = [
+    "pyarrow>=18.0.0",
+    "orjson>=3.10.0",
+    "cloudpickle>=3.0.0",
+    "numpy>=2.0.0",
+    "scikit-learn>=1.5.0",
+]
+
+[tool.uv]

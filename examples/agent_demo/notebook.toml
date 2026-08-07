@@ -1,0 +1,9 @@
+notebook_id = "agent-demo-001"
+name = "Agent Demo"
+created_at = 2026-08-07 00:00:00+00:00
+updated_at = 2026-08-07 00:00:00+00:00
+cells = [
+    { id = "intro", file = "intro.md", language = "markdown", order = 0 },
+    { id = "train", file = "train.py", language = "python", order = 1 },
+    { id = "evaluate", file = "evaluate.py", language = "python", order = 2 },
+]
