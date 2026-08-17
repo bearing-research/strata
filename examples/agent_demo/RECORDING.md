@@ -64,8 +64,8 @@ stay **cached** — it is not retrained — while just the evaluation recomputes
 - Target **15–25 s** and **< 5 MB** (GitHub inlines images up to 10 MB, but
   smaller loads faster). Trim dead air; start on the empty TUI, end on the cached
   model + new confusion matrix.
-- Save it to **`docs/assets/agent-demo.gif`** (the path the README and
-  `docs/notebook/agent.md` already reference).
+- Save it to **`docs/assets/agent-demo.gif`**; the follow-up change wires that
+  path into the README hero and `docs/notebook/agent.md`.
 
 ## Suggested caption
 

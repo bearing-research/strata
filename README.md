@@ -12,11 +12,6 @@
 
 **Strata is a content-addressed computation graph with an interactive notebook UI.**
 
-<p align="center">
-  <img src="docs/assets/agent-demo.gif" alt="A coding agent builds a Strata notebook live in the terminal; the model stays cached when only the evaluation changes." width="820">
-</p>
-<p align="center"><em>A coding agent builds a Strata notebook live — and never retrains the model when only the evaluation changes.</em> · <a href="docs/notebook/agent.md">How it works</a></p>
-
 Every cell output is a versioned artifact keyed by its provenance: source,
 inputs, and environment. Strata reads each cell's AST to build the
 dependency graph automatically, so re-running a notebook is mostly a series
