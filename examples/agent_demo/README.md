@@ -1,6 +1,7 @@
 # Agent Demo — a coding agent builds this notebook
 
-This is the notebook from the [`strata agent`](../../docs/notebook/agent.md)
+This is the notebook from the
+[`strata agent`](https://bearing-research.github.io/strata/notebook/agent/)
 demo: a coding agent (Claude Code) builds it live while you watch in the
 terminal UI. It's a plain, runnable notebook — the agent-driven part is just how
 it gets written.
@@ -31,6 +32,6 @@ uv run strata run . --force   # run every cell
 
 ## Reproducing the demo
 
-To watch a coding agent build this notebook from scratch, see
-[`RECORDING.md`](RECORDING.md) — it has the exact `strata agent` command and the
-two prompts, plus the screen-capture settings.
+To watch a coding agent build this notebook from scratch, see `RECORDING.md` in
+this directory — it has the exact `strata agent` command and the two prompts,
+plus the screen-capture settings.
