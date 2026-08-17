@@ -7,6 +7,15 @@ exhaustive commit history.
 
 ## Unreleased
 
+### Fixed
+
+- **`strata agent` now detects a missing MCP endpoint instead of silently
+  proceeding.** The mount check probed `/mcp` (no trailing slash), which falls
+  through to the SPA and always returns `200` - so a server without the `[mcp]`
+  extra looked "mounted", the agent got no notebook tools, and it fell back to
+  driving the REST API by hand. The check now probes `/mcp/` and distinguishes
+  the JSON MCP endpoint from the HTML SPA, failing fast with a clear hint.
+
 ### Added
 
 - **`agent_demo` example - a coding agent's notebook, and the recipe to record
