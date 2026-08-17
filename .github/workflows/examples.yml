@@ -54,6 +54,7 @@ jobs:
       fail-fast: false
       matrix:
         example:
+          - agent_demo
           - iris_classification
           - pandas_basics
           - loop_hill_climb

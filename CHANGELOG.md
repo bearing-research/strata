@@ -9,6 +9,11 @@ exhaustive commit history.
 
 ### Added
 
+- **`agent_demo` example - a coding agent's notebook, and the recipe to record
+  it.** A small, runnable notebook (`examples/agent_demo/`) that trains a model
+  once and reuses it from cache when only the evaluation changes - the
+  content-addressed payoff. `examples/agent_demo/RECORDING.md` documents the
+  exact `strata agent` flow to capture it as a demo.
 - **`strata agent <notebook-dir>` - one command to drive a notebook with a
   coding agent.** The MCP server, the CLI ops, and the terminal viewer already
   existed, but wiring them together by hand was a fiddly, ordered dance nobody
