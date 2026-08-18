@@ -72,17 +72,24 @@ def _server_alive(server_url: str) -> bool:
 
 
 def _mcp_mounted(server_url: str) -> bool:
-    """True if the ``/mcp`` endpoint is mounted (i.e. MCP is enabled).
+    """True if the MCP endpoint is actually mounted (i.e. MCP is enabled).
 
-    A mounted FastMCP streamable-HTTP app answers a bare GET with a 4xx other
-    than 404 (missing session / wrong method); an unmounted path is a plain
-    FastAPI 404. So 404 — and only 404 — means "not mounted".
+    Probe ``/mcp/`` — the real endpoint (trailing slash; ``/mcp`` without it
+    falls through to the SPA). A mounted FastMCP app answers a bare GET with a
+    JSON 4xx (e.g. 406 Not Acceptable). When MCP is *not* mounted — the
+    ``[mcp]`` extra is missing, or the server is in service mode — the path hits
+    the SPA catch-all, which returns ``200 text/html``. Status alone can't tell
+    them apart (both non-404), so key off content type: the SPA is HTML, the MCP
+    endpoint is JSON. (Without a bundled frontend the miss is a plain ``404``,
+    also excluded.)
     """
     try:
-        response = httpx.get(f"{server_url}/mcp", timeout=5.0)
+        response = httpx.get(f"{server_url}/mcp/", timeout=5.0)
     except httpx.HTTPError:
         return False
-    return response.status_code != 404
+    if response.status_code == 404:
+        return False
+    return "text/html" not in response.headers.get("content-type", "")
 
 
 def _resolve_notebook_dir(

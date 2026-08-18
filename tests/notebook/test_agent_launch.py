@@ -100,20 +100,30 @@ def test_write_agent_config_rewrites_block_keeps_user_text(tmp_path) -> None:
     assert "sess-first99" not in text
 
 
-@pytest.mark.parametrize("status", [400, 405, 406, 200])
-def test_mcp_mounted_true_for_non_404(monkeypatch, status) -> None:
-    class _Resp:
-        status_code = status
+class _Resp:
+    def __init__(self, status_code: int, content_type: str) -> None:
+        self.status_code = status_code
+        self.headers = {"content-type": content_type}
 
-    monkeypatch.setattr(agent_launch.httpx, "get", lambda *a, **k: _Resp())
+
+@pytest.mark.parametrize("status", [400, 406])
+def test_mcp_mounted_true_for_json_4xx(monkeypatch, status) -> None:
+    # A mounted FastMCP endpoint answers a bare GET with a JSON 4xx.
+    resp = _Resp(status, "application/json")
+    monkeypatch.setattr(agent_launch.httpx, "get", lambda *a, **k: resp)
     assert agent_launch._mcp_mounted("http://localhost:8765") is True
 
 
-def test_mcp_mounted_false_for_404(monkeypatch) -> None:
-    class _Resp:
-        status_code = 404
+def test_mcp_mounted_false_for_spa_html(monkeypatch) -> None:
+    # The regression: MCP not mounted -> /mcp/ hits the SPA -> 200 text/html.
+    resp = _Resp(200, "text/html; charset=utf-8")
+    monkeypatch.setattr(agent_launch.httpx, "get", lambda *a, **k: resp)
+    assert agent_launch._mcp_mounted("http://localhost:8765") is False
 
-    monkeypatch.setattr(agent_launch.httpx, "get", lambda *a, **k: _Resp())
+
+def test_mcp_mounted_false_for_404(monkeypatch) -> None:
+    resp = _Resp(404, "application/json")
+    monkeypatch.setattr(agent_launch.httpx, "get", lambda *a, **k: resp)
     assert agent_launch._mcp_mounted("http://localhost:8765") is False
 
 

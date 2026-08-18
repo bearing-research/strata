@@ -206,6 +206,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--driver", choices=["replay", "claude_code"], default="claude_code")
     parser.add_argument("--transcripts", help="Transcript dir for --driver replay")
     parser.add_argument("--tasks", help="Comma-separated task ids (default: all)")
+    parser.add_argument(
+        "--select",
+        choices=["all", "core", "hard"],
+        default="all",
+        help="Task group: core (transcript-backed), hard (escape-tempting stress), or all",
+    )
     parser.add_argument("--workdir", default=None, help="Where eval notebooks are built")
     parser.add_argument("--out", default=None, help="Write the full JSON report here")
     parser.add_argument("--timeout", type=float, default=600.0, help="Per-run agent timeout (s)")
@@ -213,12 +219,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repeats", type=int, default=1, help="Runs per task (default 1)")
     args = parser.parse_args(argv)
 
-    tasks = TASKS
     if args.tasks:
         try:
             tasks = [TASKS_BY_ID[tid.strip()] for tid in args.tasks.split(",")]
         except KeyError as exc:
             raise SystemExit(f"unknown task id: {exc}")
+    elif args.select == "core":
+        tasks = [t for t in TASKS if not t.hard]
+    elif args.select == "hard":
+        tasks = [t for t in TASKS if t.hard]
+    else:
+        tasks = TASKS
 
     driver = _build_driver(args)
     live = args.driver != "replay"

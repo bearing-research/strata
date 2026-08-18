@@ -187,9 +187,17 @@ def test_replay_driver_missing_transcript_raises(tmp_path) -> None:
 # --- full replay suite (harness wiring, no server) -----------------------------
 
 
+def _transcript_backed_tasks() -> list:
+    """Tasks that have a committed transcript (hard tasks are live-only)."""
+    ids = {p.stem for p in TRANSCRIPTS.glob("*.json")}
+    ids |= {p.stem for p in TRANSCRIPTS.glob("*.jsonl")}
+    return [TASKS_BY_ID[i] for i in sorted(ids) if i in TASKS_BY_ID]
+
+
 def test_run_suite_replay_scores_committed_transcripts(tmp_path) -> None:
     driver = ReplayDriver(TRANSCRIPTS)
-    tasks = list(TASKS_BY_ID.values())
+    tasks = _transcript_backed_tasks()
+    assert len(tasks) >= 9  # the core suite is transcript-backed
     results = runner.run_suite(tasks, driver, tmp_path, live=False)
 
     assert len(results) == len(tasks)

@@ -26,6 +26,21 @@ class Task:
     # package name. Tasks that deliberately test dependency management say so
     # in the prompt and can leave this empty.
     deps: list[str] = field(default_factory=list)
+    # "hard" tasks are longer / messier / more ambiguous — the ones most likely
+    # to tempt an agent into a scratch-Python escape. They're live-only stress
+    # tests (no committed transcript); filter with `--select hard`.
+    hard: bool = False
+
+
+def _seed_file(notebook_dir: Path, relpath: str, content: str) -> None:
+    """Write a data file the agent (and its cells) can read at ``relpath``.
+
+    Cells run with the notebook directory as their working directory, so a cell
+    can open ``relpath`` directly.
+    """
+    target = notebook_dir / relpath
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
 
 
 def _seed_cells(notebook_dir: Path, sources: list[str]) -> None:
@@ -63,6 +78,49 @@ def _seed_missing_dep(notebook_dir: Path) -> None:
 
 def _seed_one_big_cell(notebook_dir: Path) -> None:
     _seed_cells(notebook_dir, ["raw = [1, -2, 3, -4, 5]\nclean = [x for x in raw if x > 0]\n"])
+
+
+# --- harder / escape-tempting seeds -------------------------------------------
+
+_SALES_CSV = (
+    "city,product,revenue\n"
+    "NYC,widget,120\nLA,widget,90\nNYC,gadget,200\nSF,gadget,60\n"
+    "LA,gadget,140\nNYC,widget,80\nSF,widget,50\nLA,widget,70\n"
+)
+
+_EVENTS_CSV = (
+    "user,action,value\n"
+    "u1,view,1\nu2,click,3\nu1,click,3\nu3,view,1\nu2,purchase,50\n"
+    "u1,view,1\nu3,click,3\nu2,view,1\nu1,purchase,80\nu3,purchase,20\n"
+)
+
+
+def _seed_sales_csv(notebook_dir: Path) -> None:
+    _seed_file(notebook_dir, "data/sales.csv", _SALES_CSV)
+
+
+def _seed_events_csv(notebook_dir: Path) -> None:
+    _seed_file(notebook_dir, "data/events.csv", _EVENTS_CSV)
+
+
+def _seed_bad_record(notebook_dir: Path) -> None:
+    # `carol` has no amount → the dict comprehension raises ValueError at runtime.
+    # Not a typo — the agent has to look at the data to see what's wrong.
+    _seed_cells(
+        notebook_dir,
+        [
+            'records = [("alice", 100), ("bob", 200), ("carol",)]\n',
+            "totals = {name: amount for name, amount in records}\n",
+        ],
+    )
+
+
+def _seed_buggy_function(notebook_dir: Path) -> None:
+    # Off-by-formula bug: subtracts pct as an absolute value, not a percentage.
+    _seed_cells(
+        notebook_dir,
+        ["def discount(price, pct):\n    return price - pct / 100\n"],
+    )
 
 
 TASKS: list[Task] = [
@@ -160,6 +218,72 @@ TASKS: list[Task] = [
         ),
         expect_variables=["raw", "clean"],
         seed=_seed_one_big_cell,
+    ),
+    # --- hard: longer / messier / more ambiguous, live-only stress tests ------
+    Task(
+        id="explore_csv",
+        prompt=(
+            "There's a CSV at `data/sales.csv` (columns: city, product, revenue). "
+            "In the notebook, load it into a DataFrame `sales`, then compute "
+            "`revenue_by_city` (total revenue per city) and `top_product` (the "
+            "product with the highest total revenue). Do the work in cells and run "
+            "them."
+        ),
+        expect_variables=["sales", "revenue_by_city", "top_product"],
+        seed=_seed_sales_csv,
+        deps=["pandas"],
+        hard=True,
+    ),
+    Task(
+        id="debug_runtime",
+        prompt=(
+            "A cell in this notebook fails at runtime — it's not a typo, the data "
+            "has a bad record. Diagnose it, fix the data or the code so the "
+            "notebook runs clean, and keep a variable `totals` mapping each name to "
+            "its amount."
+        ),
+        expect_variables=["records", "totals"],
+        seed=_seed_bad_record,
+        hard=True,
+    ),
+    Task(
+        id="multi_step_pipeline",
+        prompt=(
+            "Build a four-step pipeline, one cell per step, in the notebook: "
+            "(1) `raw` = a list of 40 (user, spend) tuples across 5 users, with "
+            "some spends <= 0; (2) `cleaned` = only the entries with spend > 0; "
+            "(3) `by_user` = a dict of total spend per user from `cleaned`; "
+            "(4) `top_users` = the 3 users with the highest total spend. Run every "
+            "cell."
+        ),
+        expect_variables=["raw", "cleaned", "by_user", "top_users"],
+        hard=True,
+    ),
+    Task(
+        id="open_ended_analysis",
+        prompt=(
+            "Explore `data/events.csv` (columns: user, action, value) in the "
+            "notebook. Surface one concrete finding: define `insight` (a short "
+            "string describing what you found) and `evidence` (the computed number "
+            "or object that backs it). Do the exploration and computation in cells."
+        ),
+        expect_variables=["insight", "evidence"],
+        seed=_seed_events_csv,
+        deps=["pandas"],
+        hard=True,
+    ),
+    Task(
+        id="verify_fix",
+        prompt=(
+            "The notebook defines `discount(price, pct)`, which should return the "
+            "price after a percentage discount (e.g. discount(100, 10) == 90). It's "
+            "wrong. In the notebook, check it on a couple of cases, find and fix the "
+            "bug, and make everything run. Keep `discount` and add `check_passed` "
+            "set to True once it's correct."
+        ),
+        expect_variables=["discount", "check_passed"],
+        seed=_seed_buggy_function,
+        hard=True,
     ),
 ]
 
