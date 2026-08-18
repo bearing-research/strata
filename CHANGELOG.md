@@ -7,6 +7,19 @@ exhaustive commit history.
 
 ## Unreleased
 
+### Added
+
+- **Runtime-hydrated module export - share a cell's `def`/`class` even when it
+  closes over a runtime value.** Previously a cell that defined a reusable
+  function referencing a runtime global (an upstream artifact, or a value
+  computed in its own cell - a loaded model, a `cwd`-derived path) failed to
+  share it downstream ("cannot be shared across cells yet"). Now those values
+  are stored and hydrated into the synthetic module at load time, so the pattern
+  just works - locally, in run-all batches, on warm pools, and on remote HTTP
+  workers (both the direct and signed/manifest transports). Only genuinely
+  unresolvable names (bound nowhere in the notebook), top-level lambdas, and
+  star imports still block.
+
 ### Fixed
 
 - **`strata agent` now detects a missing MCP endpoint instead of silently

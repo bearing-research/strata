@@ -1095,6 +1095,58 @@ class Person:
         assert third.outputs["rendered"]["preview"] == "John:20"
 
     @pytest.mark.asyncio
+    async def test_execute_supports_signed_http_executor_worker_with_injection(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+    ):
+        """A shared def that hydrates a runtime value works over the signed
+        transport: the injected blob is staged as a signed-URL artifact and the
+        worker fetches it to hydrate the synthetic module."""
+        worker_cfg = {
+            "url": notebook_executor_server["execute_url"],
+            "transport": "signed",
+            "strata_url": notebook_build_server["base_url"],
+        }
+        notebook_build_server["config"].transforms_config["notebook_workers"] = [
+            {
+                "name": "gpu-http-signed",
+                "backend": "executor",
+                "runtime_id": "gpu-http-signed-a100",
+                "config": worker_cfg,
+            }
+        ]
+        sample_notebook.notebook_state.workers = [
+            WorkerSpec(
+                name="gpu-http-signed",
+                backend=WorkerBackendType.EXECUTOR,
+                runtime_id="gpu-http-signed-a100",
+                config=worker_cfg,
+            )
+        ]
+        sample_notebook.notebook_state.worker = "gpu-http-signed"
+        cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
+        cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
+        cell1.worker = "gpu-http-signed"
+        cell2.worker = "gpu-http-signed"
+        cell1.source = "base = 10 + len('abc')\n\ndef addbase(y):\n    return base + y"
+        cell2.source = "result = addbase(5)"
+        sample_notebook.re_analyze_cell("cell1")
+        sample_notebook.re_analyze_cell("cell2")
+
+        executor = CellExecutor(sample_notebook)
+        first = await executor.execute_cell("cell1", cell1.source)
+        assert first.success is True
+        assert first.remote_transport == "signed"
+        assert first.outputs["addbase"]["content_type"] == "module/cell"
+
+        second = await executor.execute_cell("cell2", cell2.source)
+        assert second.success is True
+        assert second.remote_transport == "signed"
+        assert second.outputs["result"]["preview"] == 18
+
+    @pytest.mark.asyncio
     async def test_execute_supports_signed_http_executor_worker_in_personal_mode(
         self,
         sample_notebook,
