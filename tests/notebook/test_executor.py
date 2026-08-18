@@ -1428,14 +1428,12 @@ class Person:
         assert third.outputs["rendered"]["preview"] == "Ada:10"
 
     @pytest.mark.asyncio
-    async def test_execute_rejects_cross_cell_export_with_top_level_runtime_state(
-        self, sample_notebook
-    ):
-        """Mixed runtime statements should fail with an explicit exportability error."""
+    async def test_execute_shares_export_with_same_cell_runtime_state(self, sample_notebook):
+        """A def closing over a same-cell runtime value is shareable: the value
+        is stored and hydrated into the synthetic module (Phase 2)."""
         cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
         cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
-        # ``x = len([])`` is a non-literal runtime assignment — plain
-        # literal constants (``x = 1``) export fine alongside the def.
+        # ``x = len([])`` is a non-literal runtime assignment ``add`` closes over.
         cell1.source = """
 x = len([])
 
@@ -1446,15 +1444,15 @@ def add(y):
         sample_notebook.re_analyze_cell("cell1")
         sample_notebook.re_analyze_cell("cell2")
 
-        result = await CellExecutor(sample_notebook).execute_cell("cell1", cell1.source)
+        executor = CellExecutor(sample_notebook)
+        result1 = await executor.execute_cell("cell1", cell1.source)
+        assert result1.success is True
+        assert result1.outputs["add"]["content_type"] == "module/cell"
 
-        assert result.success is False
-        assert result.error is not None
-        assert "cannot be shared across cells yet" in result.error
-        # ``add`` references runtime-only ``x`` that's dropped from the
-        # slice — error message names the function and the unresolved var.
-        assert "function `add`" in result.error
-        assert "x" in result.error
+        result2 = await executor.execute_cell("cell2", cell2.source)
+        assert result2.success is True
+        # x = len([]) = 0, so add(2) = 2.
+        assert result2.outputs["result"]["preview"] == 2
 
     @pytest.mark.asyncio
     async def test_execute_rejects_cross_cell_export_with_top_level_lambda(self, sample_notebook):

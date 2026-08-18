@@ -556,3 +556,27 @@ def test_no_injectable_arg_is_backward_compatible() -> None:
     plan = build_module_export_plan("def add(y):\n    return x + y")
     assert plan.is_exportable is False
     assert plan.injected_inputs == set()
+
+
+# --- same-cell runtime bindings (Phase 2) -----------------------------------
+
+
+def test_runtime_binding_names_identifies_dropped_assignments() -> None:
+    from strata.notebook.module_export import runtime_binding_names
+
+    src = "import os\nCONST = 5\nx = compute()\nfor i in range(3):\n    y = i\n\ndef f():\n    pass"
+    names = runtime_binding_names(src)
+    assert "x" in names and "y" in names  # runtime bindings the slicer drops
+    assert "os" not in names  # import: kept
+    assert "CONST" not in names  # literal constant: kept
+    assert "f" not in names  # def: kept
+
+
+def test_same_cell_runtime_binding_is_injectable() -> None:
+    from strata.notebook.module_export import runtime_binding_names
+
+    src = "data = list(range(5))\n\ndef total(e):\n    return sum(data) + e"
+    plan = build_module_export_plan(src, injectable=runtime_binding_names(src))
+    assert plan.is_exportable is True
+    assert "total" in plan.exported_symbols
+    assert plan.injected_inputs == {"data"}

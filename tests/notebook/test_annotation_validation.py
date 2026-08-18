@@ -317,12 +317,11 @@ class TestModuleExportBlockedDiagnostic:
         assert _codes(cell, _nb()) == []
 
     def test_def_with_unresolved_runtime_dep_warns_when_consumed(self):
-        """``scale`` closes over ``STEP``, which is computed at runtime
-        and thus dropped from the slice. The synthetic module would
-        NameError when ``scale`` is called downstream — surface the
-        problem at validation time so the user can fix it before
-        execution."""
-        cell = _cell("STEP = compute_step()\n\ndef scale(x):\n    return x * STEP\n")
+        """``scale`` closes over ``STEP``, which is bound nowhere in the
+        notebook — a truly-unknown name, still a real export blocker. (A
+        *same-cell* or upstream runtime ``STEP`` would instead be hydrated;
+        this warns only because nothing produces it.)"""
+        cell = _cell("def scale(x):\n    return x * STEP\n")
         downstream = _cell("y = scale(2)", cell_id="c2")
         downstream.references = ["scale"]
         nb = _nb()
@@ -351,10 +350,11 @@ class TestModuleExportBlockedDiagnostic:
         assert "module_export_blocked" not in codes
 
     def test_class_with_unresolved_base_warns_when_consumed(self):
-        """A base class whose name isn't bound in the slice is a real
-        export blocker — class body executes at module load and would
-        NameError on the missing base."""
-        cell = _cell("Parent = make_parent()\n\nclass Child(Parent):\n    pass\n")
+        """A base class whose name is bound nowhere in the notebook is a
+        real export blocker — class body executes at module load and would
+        NameError on the missing base. (A same-cell/upstream ``Parent`` would
+        be hydrated instead.)"""
+        cell = _cell("class Child(Parent):\n    pass\n")
         downstream = _cell("c = Child()", cell_id="c2")
         downstream.references = ["Child"]
         nb = _nb()

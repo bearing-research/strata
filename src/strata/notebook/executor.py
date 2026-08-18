@@ -82,7 +82,7 @@ from strata.notebook.models import (
     TableSpec,
     WorkerBackendType,
 )
-from strata.notebook.module_export import build_module_export_plan
+from strata.notebook.module_export import build_module_export_plan, runtime_binding_names
 from strata.notebook.mounts import (
     MountCredentials,
     MountFingerprinter,
@@ -3435,11 +3435,15 @@ class CellExecutor:
         producer = self.session.dag.variable_producer
         cells_by_id = {c.id: c for c in self.session.notebook_state.cells}
         this_cell = cells_by_id.get(cell_id)
-        injectable = frozenset(
+        cross_cell = frozenset(
             v
             for v in (this_cell.references if this_cell else [])
             if isinstance(producer.get(v), str) and producer[v] != cell_id
         )
+        # Same-cell runtime values (a loaded model, a cwd-derived path) can be
+        # hydrated too — the cell produces them, so we store and inject them.
+        same_cell_runtime = runtime_binding_names(source)
+        injectable = cross_cell | same_cell_runtime
 
         export_plan = build_module_export_plan(source, injectable=injectable)
         exportable_vars = sorted(set(export_plan.exported_symbols) & set(consumed_vars))
@@ -3476,14 +3480,23 @@ class CellExecutor:
         injected_refs: dict[str, str] = {}
         for name in sorted(export_plan.injected_inputs):
             prod_id = producer.get(name)
-            prod_cell = cells_by_id.get(prod_id) if isinstance(prod_id, str) else None
-            uri = prod_cell.artifact_uris.get(name) if prod_cell is not None else None
+            if isinstance(prod_id, str) and prod_id != cell_id:
+                # Cross-cell: use the upstream producer's pinned artifact URI.
+                prod_cell = cells_by_id.get(prod_id)
+                uri = prod_cell.artifact_uris.get(name) if prod_cell is not None else None
+            else:
+                # Same-cell: persist this cell's own runtime value now (store is
+                # idempotent by provenance, so the later _store_outputs pass is a
+                # no-op) and pin its URI.
+                uri = self._store_same_cell_injected(
+                    cell_id, name, output_dir, outputs, provenance_hash, source
+                )
             if uri is None:
                 return (
                     "This cell defines reusable code used downstream "
                     f"({', '.join(sorted(set(exportable_vars) | set(blocked_vars)))}), "
-                    f"but an upstream value it closes over (`{name}`) isn't "
-                    "available to share yet."
+                    f"but a value it closes over (`{name}`) isn't available to "
+                    "share yet."
                 )
             injected_refs[name] = uri
 
@@ -3522,6 +3535,40 @@ class CellExecutor:
             }
 
         return None
+
+    def _store_same_cell_injected(
+        self,
+        cell_id: str,
+        var_name: str,
+        output_dir: Path,
+        outputs: dict[str, Any],
+        provenance_hash: str,
+        source: str,
+    ) -> str | None:
+        """Persist a same-cell runtime value an exported def closes over, and
+        return its pinned artifact URI (or None if it can't be stored).
+
+        The harness serializes every new top-level variable, so the value's blob
+        is already in *output_dir*; we just store it as an artifact keyed to
+        this cell. ``store_cell_output`` dedups by provenance, so a later
+        ``_store_outputs`` pass over the same variable is a no-op.
+        """
+        spec = outputs.get(var_name)
+        if not isinstance(spec, dict) or "file" not in spec or "error" in spec:
+            return None
+        blob_path = output_dir / spec["file"]
+        if not blob_path.exists():
+            return None
+        artifact_mgr = self.session.get_artifact_manager()
+        artifact_version = artifact_mgr.store_cell_output(
+            cell_id=cell_id,
+            variable_name=var_name,
+            blob_data=blob_path.read_bytes(),
+            content_type=spec.get("content_type", "pickle/object"),
+            provenance_hash=derive_subkey(provenance_hash, var_name),
+            source_hash=compute_source_hash(source),
+        )
+        return f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
 
     # ------------------------------------------------------------------
     # Harness helpers

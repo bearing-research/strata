@@ -92,6 +92,26 @@ class TestLocalModuleExports:
                 assert result3["type"] == "cell_output"
                 assert result3["payload"]["outputs"]["result"]["preview"] == 18
 
+    def test_same_cell_runtime_value_injection(self, setup):
+        """A def closing over a SAME-CELL runtime value is shareable: the value
+        is stored and hydrated into the synthetic module (Phase 2)."""
+        client, tmp = setup
+        nb = (
+            NotebookBuilder(tmp)
+            .add_cell("c1", "data = list(range(5))\n\ndef total(e):\n    return sum(data) + e")
+            .add_cell("c2", "result = total(100)", after="c1")
+        )
+
+        with open_notebook_session(client, nb.path) as (sid, session):
+            with ws_connect(client, sid) as ws:
+                result1 = execute_cell_and_wait(ws, "c1")
+                assert result1["type"] == "cell_output"
+                assert result1["payload"]["outputs"]["total"]["content_type"] == "module/cell"
+
+                result2 = execute_cell_and_wait(ws, "c2")
+                assert result2["type"] == "cell_output"
+                assert result2["payload"]["outputs"]["result"]["preview"] == 110
+
     def test_cross_cell_class_export(self, setup):
         client, tmp = setup
         nb = (
