@@ -453,6 +453,16 @@ def temp_warehouse(tmp_path):
     # Append data to table
     table.append(data)
 
+    # Release the fixture's write connection to catalog.db. Otherwise it stays
+    # open for the whole test while the *server* opens a second SqlCatalog on
+    # the same SQLite file — and on tmpfs + Python 3.14 that two-connection
+    # overlap intermittently trips ``SQLITE_IOERR`` ("disk I/O error") in the
+    # server's catalog read (the test_cache_warm_endpoint flake). Disposing the
+    # engine flushes and closes the write connection so the server reads a
+    # clean, single-owner file; the returned ``catalog`` reconnects lazily if a
+    # test uses it again.
+    catalog.engine.dispose()
+
     return {
         "warehouse_path": warehouse_path,
         "table_uri": f"{warehouse_uri}#test_db.events",
