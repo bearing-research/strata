@@ -296,7 +296,7 @@ executor. Core decides whether results already exist and persists them.
 ## Development
 
 ```bash
-uv sync                                # Install deps + build Rust extension
+uv sync --all-extras                   # Install deps + build Rust extension (matches CI)
 uv run pytest                          # Run all tests
 uv run pre-commit run --all-files      # Lint + format
 cd frontend && npm run dev             # Frontend dev server (hot reload)
