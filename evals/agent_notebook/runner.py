@@ -220,6 +220,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.tasks:
+        if args.select != "all":
+            print("note: --select is ignored because --tasks was given", file=sys.stderr)
         try:
             tasks = [TASKS_BY_ID[tid.strip()] for tid in args.tasks.split(",")]
         except KeyError as exc:
@@ -233,6 +235,22 @@ def main(argv: list[str] | None = None) -> int:
 
     driver = _build_driver(args)
     live = args.driver != "replay"
+
+    # Replay can only score tasks it has a transcript for (hard tasks are
+    # live-only). Skip the rest with a note instead of erroring, so the
+    # documented `--driver replay` command works whatever the selection.
+    if not live:
+        transcript_dir = Path(args.transcripts)
+        have = {p.stem for p in transcript_dir.glob("*.json")}
+        have |= {p.stem for p in transcript_dir.glob("*.jsonl")}
+        missing = [t.id for t in tasks if t.id not in have]
+        if missing:
+            print(
+                f"replay: skipping {len(missing)} task(s) without a transcript: "
+                f"{', '.join(missing)}",
+                file=sys.stderr,
+            )
+        tasks = [t for t in tasks if t.id in have]
 
     import tempfile
 

@@ -238,6 +238,16 @@ def test_run_suite_replay_detects_an_escape(tmp_path) -> None:
     assert results[0].in_tool.in_tool_rate == 0.0
 
 
+def test_cli_replay_all_skips_transcriptless_hard_tasks(capsys) -> None:
+    # Regression: `--driver replay` with the default `--select all` must skip the
+    # live-only hard tasks (no transcript) with a note, not error on them.
+    rc = runner.main(["--driver", "replay", "--transcripts", str(TRANSCRIPTS), "--select", "all"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "skipping" in captured.err
+    assert '"errored": 0' in captured.out
+
+
 def test_run_suite_repeats_produces_one_result_per_run(tmp_path) -> None:
     driver = ReplayDriver(TRANSCRIPTS)
     tasks = [TASKS_BY_ID["build_summary"], TASKS_BY_ID["extend_dag"]]
