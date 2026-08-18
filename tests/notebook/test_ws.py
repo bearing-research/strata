@@ -548,9 +548,10 @@ async def test_cell_execute_refreshes_downstream_staleness(temp_notebook):
 async def test_cell_execute_surfaces_module_export_error(temp_notebook):
     """Unsupported cross-cell code export should surface as a direct cell error."""
     notebook_dir, _ = temp_notebook
-    # ``x = len([])`` is a non-literal runtime assignment; plain literal
-    # constants (``x = 1``) would now export fine alongside the def.
-    write_cell(notebook_dir, "root", "x = len([])\n\ndef add(y):\n    return x + y\n")
+    # ``x`` is bound nowhere in the notebook — a truly-unknown name, still a
+    # hard export blocker. (A same-cell/upstream runtime ``x`` would now be
+    # hydrated instead of erroring.)
+    write_cell(notebook_dir, "root", "def add(y):\n    return x + y\n")
     write_cell(notebook_dir, "middle", "result = add(2)")
     session = open_session(notebook_dir)
     session.re_analyze_cell("root")
