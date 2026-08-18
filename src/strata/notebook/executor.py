@@ -1967,7 +1967,7 @@ class CellExecutor:
         self,
         worker_spec: Any,
         source: str,
-        input_specs: dict[str, dict[str, str]],
+        input_specs: dict[str, dict[str, Any]],
         mount_specs: list[MountSpec],
         output_dir: Path,
         runtime_env: dict[str, str],
@@ -1999,6 +1999,20 @@ class CellExecutor:
                 build_id=remote_build_id,
             )
 
+        metadata_inputs: list[dict[str, Any]] = []
+        for var_name, spec in sorted(input_specs.items()):
+            entry: dict[str, Any] = {
+                "name": var_name,
+                "format": str(spec.get("content_type", "pickle/object")),
+                "uri": None,
+                "byte_size": (output_dir / str(spec["file"])).stat().st_size,
+            }
+            # A module/cell export carries injected upstream/same-cell values its
+            # defs close over; the worker needs the sub-spec to hydrate them.
+            if spec.get("injected"):
+                entry["injected"] = spec["injected"]
+            metadata_inputs.append(entry)
+
         metadata = {
             "protocol_version": EXECUTOR_PROTOCOL_VERSION,
             "build_id": f"notebook-{uuid.uuid4().hex[:12]}",
@@ -2019,15 +2033,7 @@ class CellExecutor:
                     "env": runtime_env,
                 },
             },
-            "inputs": [
-                {
-                    "name": var_name,
-                    "format": str(spec.get("content_type", "pickle/object")),
-                    "uri": None,
-                    "byte_size": (output_dir / str(spec["file"])).stat().st_size,
-                }
-                for var_name, spec in sorted(input_specs.items())
-            ],
+            "inputs": metadata_inputs,
         }
 
         files: list[tuple[str, tuple[str, Any, str]]] = [
@@ -2041,21 +2047,17 @@ class CellExecutor:
             )
         ]
         input_file_handles: list[Any] = []
-        for spec in input_specs.values():
-            file_name = str(spec["file"])
-            input_path = output_dir / file_name
-            handle = open(input_path, "rb")
+
+        def _add_file(file_name: str) -> None:
+            handle = open(output_dir / file_name, "rb")
             input_file_handles.append(handle)
-            files.append(
-                (
-                    file_name,
-                    (
-                        file_name,
-                        handle,
-                        "application/octet-stream",
-                    ),
-                )
-            )
+            files.append((file_name, (file_name, handle, "application/octet-stream")))
+
+        for spec in input_specs.values():
+            _add_file(str(spec["file"]))
+            # Ship the injected blobs alongside the module descriptor.
+            for inj in (spec.get("injected") or {}).values():
+                _add_file(str(inj["file"]))
 
         timeout = max(timeout_seconds + 5.0, 30.0)
         headers = {
@@ -2140,6 +2142,16 @@ class CellExecutor:
         build_id: str | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through the core build + signed-URL transport path."""
+        # Module-export injection (a shared def's hydrated upstream/same-cell
+        # values) rides the direct transport but is not yet staged as signed
+        # URLs here — fail loudly rather than ship a worker that NameErrors.
+        if any(spec.get("injected") for spec in input_specs.values()):
+            raise RuntimeError(
+                "A cell consumes a shared def that needs hydrated values, which "
+                "is not yet supported over the signed/manifest worker transport. "
+                "Use a direct-transport worker (config.transport: direct)."
+            )
+
         from strata.auth import get_principal
         from strata.server import get_state
 
