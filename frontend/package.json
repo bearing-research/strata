@@ -30,13 +30,13 @@
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
-    "@types/node": "^26.1.1",
-    "@vitejs/plugin-vue": "^6.0.7",
+    "@types/node": "^26.1.2",
+    "@vitejs/plugin-vue": "^6.0.8",
     "@vue/tsconfig": "^0.9.0",
-    "playwright": "^1.61.1",
-    "prettier": "^3.9.5",
+    "playwright": "^1.62.1",
+    "prettier": "^3.9.6",
     "typescript": "~6.0.3",
-    "vite": "^8.1.4",
-    "vue-tsc": "^3.3.7"
+    "vite": "^8.2.1",
+    "vue-tsc": "^3.3.9"
   }
 }
