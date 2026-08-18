@@ -296,7 +296,7 @@ def create_notebook_executor_app() -> FastAPI:
         try:
             output_dir = tmpdir
 
-            inputs: dict[str, dict[str, str]] = {}
+            inputs: dict[str, dict[str, Any]] = {}
             for var_name, spec in raw_inputs.items():
                 if not isinstance(spec, dict):
                     raise HTTPException(
@@ -313,6 +313,26 @@ def create_notebook_executor_app() -> FastAPI:
                     "content_type": content_type,
                     "file": file_name,
                 }
+                # A module/cell export may ship injected values its defs close
+                # over — write each blob and pass the sub-spec so the harness
+                # hydrates the synthetic module.
+                injected = spec.get("injected")
+                if isinstance(injected, dict):
+                    resolved_injected: dict[str, dict[str, str]] = {}
+                    for inj_name, inj_spec in injected.items():
+                        if not isinstance(inj_spec, dict):
+                            continue
+                        inj_ct = str(inj_spec.get("content_type", "pickle/object"))
+                        inj_file = (
+                            Path(str(inj_spec.get("file", ""))).name
+                            or f"{var_name}__inj__{inj_name}{_input_extension(inj_ct)}"
+                        )
+                        inj_data = await write_input_bytes(inj_name, inj_file, inj_spec)
+                        with open(output_dir / inj_file, "wb") as f:
+                            f.write(inj_data)
+                        resolved_injected[inj_name] = {"content_type": inj_ct, "file": inj_file}
+                    if resolved_injected:
+                        inputs[var_name]["injected"] = resolved_injected
 
             mount_resolver = MountResolver(
                 cache_dir=output_dir / "mount_cache",
@@ -537,6 +557,8 @@ def create_notebook_executor_app() -> FastAPI:
                 "content_type": content_type,
                 "file": f"{name}{_input_extension(content_type)}",
             }
+            if isinstance(descriptor.get("injected"), dict):
+                raw_inputs[name]["injected"] = descriptor["injected"]
 
         return await _run_notebook_execution(
             source=source,

@@ -308,6 +308,42 @@ class TestDirectHttpModuleExports:
                 assert result2["payload"]["remote_transport"] == "direct"
                 assert result2["payload"]["outputs"]["result"]["preview"] == 12.56637
 
+    def test_injection_export_over_direct_http_worker(self, setup, notebook_executor_server):
+        """A def closing over a runtime value, hydrated via injection, works when
+        the consuming cell runs on a remote HTTP worker — the injected blob and
+        spec must ride the worker transport."""
+        client, tmp = setup
+        nb = (
+            NotebookBuilder(tmp)
+            .add_cell("c1", "base = 10 + len('abc')\n\ndef addbase(y):\n    return base + y")
+            .add_cell("c2", "result = addbase(5)", after="c1")
+        )
+
+        with open_notebook_session(client, nb.path) as (sid, session):
+            _put_notebook_workers(
+                client,
+                sid,
+                [
+                    {
+                        "name": "gpu-http",
+                        "backend": "executor",
+                        "runtime_id": "gpu-http-a100",
+                        "config": {"url": notebook_executor_server["execute_url"]},
+                    }
+                ],
+            )
+            _put_notebook_worker(client, sid, "gpu-http")
+
+            with ws_connect(client, sid) as ws:
+                result1 = execute_cell_and_wait(ws, "c1")
+                assert result1["type"] == "cell_output"
+                assert result1["payload"]["outputs"]["addbase"]["content_type"] == "module/cell"
+
+                result2 = execute_cell_and_wait(ws, "c2")
+                assert result2["type"] == "cell_output"
+                assert result2["payload"]["remote_transport"] == "direct"
+                assert result2["payload"]["outputs"]["result"]["preview"] == 18
+
     def test_class_instance_export_over_direct_http_worker(
         self,
         setup,
