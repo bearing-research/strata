@@ -241,7 +241,16 @@ def _validate_module_export(
     """
     from strata.notebook.module_export import build_module_export_plan
 
-    plan = build_module_export_plan(cell.source)
+    # Names another cell defines can be hydrated into the synthetic module at
+    # load time, so a def closing over them isn't blocked — mirror the
+    # executor's injectable set (see _write_module_export_outputs).
+    injectable = frozenset(
+        v
+        for v in cell.references
+        for other in notebook_state.cells
+        if other.id != cell.id and v in other.defines
+    )
+    plan = build_module_export_plan(cell.source, injectable=injectable)
     if plan.is_exportable:
         return []
 

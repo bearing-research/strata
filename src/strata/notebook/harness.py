@@ -80,6 +80,16 @@ def _deserialize_one(var_name: str, spec: dict, output_dir: Path) -> Any:
         print(f"Warning: input file not found: {full_path}", file=sys.stderr)
         return _MISSING
     try:
+        # A module/cell export may carry injected upstream values its defs close
+        # over; deserialize those and hydrate the synthetic module.
+        injected_specs = spec.get("injected")
+        if spec.get("content_type", "") == "module/cell" and injected_specs:
+            injected: dict[str, Any] = {}
+            for inj_name, inj_spec in injected_specs.items():
+                value = _deserialize_one(f"{var_name}__inj__{inj_name}", inj_spec, output_dir)
+                if value is not _MISSING:
+                    injected[inj_name] = value
+            return _ser.deserialize_cell_module_with_injection(full_path, injected)
         return _ser.deserialize_value(spec.get("content_type", ""), full_path)
     except _ser.StrataRArtifactError as e:
         # R-only payload from an upstream R cell. Re-raise with the variable

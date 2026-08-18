@@ -68,6 +68,30 @@ class TestLocalModuleExports:
                 assert result2["type"] == "cell_output"
                 assert result2["payload"]["outputs"]["result"]["preview"] == 12.56637
 
+    def test_cross_cell_runtime_value_injection(self, setup):
+        """A def closing over an UPSTREAM runtime value exports via injection,
+        and the downstream consumer gets that value hydrated. This pattern was
+        previously rejected ("cannot be shared across cells yet")."""
+        client, tmp = setup
+        nb = (
+            NotebookBuilder(tmp)
+            .add_cell("c1", "base = 10 + len('abc')")  # runtime value = 13
+            .add_cell("c2", "def addbase(y):\n    return base + y", after="c1")
+            .add_cell("c3", "result = addbase(5)", after="c2")
+        )
+
+        with open_notebook_session(client, nb.path) as (sid, session):
+            with ws_connect(client, sid) as ws:
+                execute_cell_and_wait(ws, "c1")
+                result2 = execute_cell_and_wait(ws, "c2")
+                assert result2["type"] == "cell_output"
+                # The def exports as a synthetic module despite closing over `base`.
+                assert result2["payload"]["outputs"]["addbase"]["content_type"] == "module/cell"
+
+                result3 = execute_cell_and_wait(ws, "c3")
+                assert result3["type"] == "cell_output"
+                assert result3["payload"]["outputs"]["result"]["preview"] == 18
+
     def test_cross_cell_class_export(self, setup):
         client, tmp = setup
         nb = (

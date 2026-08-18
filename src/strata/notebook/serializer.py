@@ -1681,6 +1681,7 @@ def _ensure_cell_module(
     module_name: str,
     module_source: str,
     file_path: Path,
+    injected: dict[str, Any] | None = None,
 ):
     import types
 
@@ -1689,6 +1690,12 @@ def _ensure_cell_module(
         module = types.ModuleType(module_name)
         module.__file__ = str(file_path)
         sys.modules[module_name] = module
+        # Hydrate upstream runtime values the slice's defs close over, before
+        # exec so module-load references (defaults, bases, decorators) resolve
+        # and the defs capture them. The module_name folds in the injected
+        # identity, so a differently-hydrated slice gets a distinct cache key.
+        if injected:
+            module.__dict__.update(injected)
         exec(compile(module_source, module_name, "exec"), module.__dict__)  # noqa: S102
     module.__dict__[_CELL_MODULE_SOURCE_ATTR] = module_source
     module.__dict__[_CELL_MODULE_FLAG_ATTR] = True
@@ -1701,7 +1708,7 @@ def _ensure_cell_module(
     return module
 
 
-def _deserialize_cell_module(file_path: Path) -> Any:
+def _deserialize_cell_module(file_path: Path, injected: dict[str, Any] | None = None) -> Any:
     with open(file_path, encoding="utf-8") as f:
         data = json.load(f)
 
@@ -1713,7 +1720,7 @@ def _deserialize_cell_module(file_path: Path) -> Any:
     if not isinstance(module_source, str):
         raise ValueError(f"Exported notebook module '{module_name}' has invalid source")
 
-    module = _ensure_cell_module(module_name, module_source, file_path)
+    module = _ensure_cell_module(module_name, module_source, file_path, injected=injected)
 
     try:
         return getattr(module, symbol_name)
@@ -1721,6 +1728,12 @@ def _deserialize_cell_module(file_path: Path) -> Any:
         raise ValueError(
             f"Exported notebook module '{module_name}' does not define '{symbol_name}'"
         ) from exc
+
+
+def deserialize_cell_module_with_injection(file_path: Path, injected: dict[str, Any]) -> Any:
+    """Deserialize a ``module/cell`` export, hydrating *injected* upstream values
+    into the synthetic module's namespace before exec."""
+    return _deserialize_cell_module(file_path, injected=injected)
 
 
 def _deserialize_cell_instance(file_path: Path) -> Any:
