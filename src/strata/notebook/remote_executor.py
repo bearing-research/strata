@@ -316,21 +316,25 @@ def create_notebook_executor_app() -> FastAPI:
                 # A module/cell export may ship injected values its defs close
                 # over — write each blob and pass the sub-spec so the harness
                 # hydrates the synthetic module.
-                injected = spec.get("injected")
-                if isinstance(injected, dict):
+                injected_map = spec.get("injected")
+                if isinstance(injected_map, dict):
                     resolved_injected: dict[str, dict[str, str]] = {}
-                    for inj_name, inj_spec in injected.items():
+                    for inj_index, inj_key in enumerate(injected_map):
+                        inj_spec = injected_map[inj_key]
                         if not isinstance(inj_spec, dict):
                             continue
+                        inj_name = str(inj_key)
                         inj_ct = str(inj_spec.get("content_type", "pickle/object"))
-                        inj_file = (
-                            Path(str(inj_spec.get("file", ""))).name
-                            or f"{var_name}__inj__{inj_name}{_input_extension(inj_ct)}"
-                        )
-                        inj_data = await write_input_bytes(inj_name, inj_file, inj_spec)
-                        with open(output_dir / inj_file, "wb") as f:
+                        # The client's file name is only used to look up the
+                        # uploaded blob; the on-disk name is constructed locally
+                        # (indices + a content-type-mapped extension) so no
+                        # request-provided value ever reaches a filesystem path.
+                        inj_lookup = Path(str(inj_spec.get("file", ""))).name
+                        inj_data = await write_input_bytes(inj_name, inj_lookup, inj_spec)
+                        safe_file = f"__inj_{len(inputs)}_{inj_index}{_input_extension(inj_ct)}"
+                        with open(output_dir / safe_file, "wb") as f:
                             f.write(inj_data)
-                        resolved_injected[inj_name] = {"content_type": inj_ct, "file": inj_file}
+                        resolved_injected[inj_name] = {"content_type": inj_ct, "file": safe_file}
                     if resolved_injected:
                         inputs[var_name]["injected"] = resolved_injected
 
