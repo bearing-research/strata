@@ -107,6 +107,11 @@ class ModuleExportPlan:
     exported_symbols: dict[str, ExportedSymbol] = field(default_factory=dict)
     unsupported_symbols: set[str] = field(default_factory=set)
     blocking_symbols: set[str] = field(default_factory=set)
+    # Names the exported code closes over that aren't bound in the slice but
+    # are produced upstream — resolved from the artifact store and injected
+    # into the synthetic module's namespace before exec, rather than blocking.
+    # Empty unless the caller passes ``injectable``.
+    injected_inputs: set[str] = field(default_factory=set)
     unsupported_reasons: list[str] = field(default_factory=list)
     # True when the slicer dropped any node from the cell. Pure module
     # cells (no drops) keep this False so callers that want the strict
@@ -125,8 +130,17 @@ class ModuleExportPlan:
         return "; ".join(self.unsupported_reasons)
 
 
-def build_module_export_plan(source: str) -> ModuleExportPlan:
+def build_module_export_plan(
+    source: str, *, injectable: frozenset[str] = frozenset()
+) -> ModuleExportPlan:
     """Validate a cell source and produce an export plan.
+
+    ``injectable`` names — variables produced upstream that this cell references
+    — are not treated as blockers when a shared def/class closes over them.
+    Instead they are recorded in ``injected_inputs`` and later hydrated into the
+    synthetic module's namespace from the artifact store. Left empty (the
+    default), every unresolved free name blocks, preserving the source-only
+    contract for callers that don't hydrate.
 
     Slices ``source`` to keep only nodes that re-execute safely in a
     clean module namespace (docstring, imports, defs, async defs,
@@ -202,6 +216,7 @@ def build_module_export_plan(source: str) -> ModuleExportPlan:
     blocking_symbols: set[str] = set(blocking_lambda_names)
     unsupported_reasons: list[str] = []
     module_load_unresolved: set[str] = set()
+    injected_inputs: set[str] = set()
 
     kind_map: dict[str, str] = {}
     for node in keep_nodes:
@@ -281,10 +296,16 @@ def build_module_export_plan(source: str) -> ModuleExportPlan:
             }
             module_load_unresolved |= annotation_unresolved
 
-        if module_load_unresolved:
+        # Injectable names (produced upstream) don't fail the export — they'll
+        # be hydrated into the module namespace before exec. Only the remaining
+        # "hard" unresolved names block.
+        module_load_hard = module_load_unresolved - injectable
+        injected_inputs |= module_load_unresolved & injectable
+
+        if module_load_hard:
             unsupported_reasons.append(
                 "top-level expressions reference names not defined or imported in "
-                f"this cell: {', '.join(sorted(module_load_unresolved))}"
+                f"this cell: {', '.join(sorted(module_load_hard))}"
             )
 
         for child in module_table.get_children():
@@ -292,16 +313,17 @@ def build_module_export_plan(source: str) -> ModuleExportPlan:
                 continue
             symbol_name = child.get_name()
             unresolved = _scope_unresolved(child, module_locals)
-            if unresolved:
+            unresolved_hard = unresolved - injectable
+            if unresolved_hard:
                 unsupported_symbols.add(symbol_name)
                 blocking_symbols.add(symbol_name)
                 kind_word = kind_map.get(symbol_name, child.get_type())
                 unsupported_reasons.append(
                     f"{kind_word} `{symbol_name}` references names not defined or imported in "
-                    f"this cell: {', '.join(sorted(unresolved))}"
+                    f"this cell: {', '.join(sorted(unresolved_hard))}"
                 )
                 continue
-            if module_load_unresolved:
+            if module_load_hard:
                 # Module-load failure poisons every symbol — the synthetic
                 # module's ``exec`` would raise before binding any of them.
                 unsupported_symbols.add(symbol_name)
@@ -310,14 +332,16 @@ def build_module_export_plan(source: str) -> ModuleExportPlan:
             if symbol_name in divergent:
                 # Name diverges from runtime; don't export.
                 continue
+            # Any remaining unresolved names are injectable (hard set empty).
+            injected_inputs |= unresolved
             exported_symbols[symbol_name] = ExportedSymbol(
                 symbol_name, kind_map.get(symbol_name, child.get_type())
             )
 
     # Literal-constant assignments ride alongside any kept defs/classes.
-    # Skip them when the slice itself can't import (module-load free
+    # Skip them when the slice itself can't import (hard module-load free
     # vars unresolved), and skip names that diverge with runtime drops.
-    if not module_load_unresolved:
+    if not (module_load_unresolved - injectable):
         for node in keep_nodes:
             if _is_literal_constant_assignment(node):
                 for name in _target_names_for_assignment(node):
@@ -337,6 +361,7 @@ def build_module_export_plan(source: str) -> ModuleExportPlan:
         unsupported_symbols=unsupported_symbols,
         blocking_symbols=blocking_symbols,
         unsupported_reasons=unsupported_reasons,
+        injected_inputs=injected_inputs,
         sliced=sliced,
     )
 

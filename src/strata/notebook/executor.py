@@ -3064,6 +3064,57 @@ class CellExecutor:
                 "uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
             }
 
+        def _load_versioned_spec(uri: str, file_stem: str) -> dict[str, str] | None:
+            """Resolve a pinned ``strata://artifact/{id}@v={n}`` URI to a file spec."""
+            ref = uri.removeprefix("strata://artifact/")
+            if "@v=" not in ref:
+                return None
+            art_id, _, ver = ref.partition("@v=")
+            try:
+                version = int(ver)
+            except ValueError:
+                return None
+            artifact = artifact_mgr.artifact_store.get_artifact(art_id, version)
+            if artifact is None:
+                return None
+            content_type = "pickle/object"
+            if artifact.transform_spec:
+                try:
+                    params = json.loads(artifact.transform_spec).get("params", {})
+                except ValueError:
+                    params = {}
+                content_type = params.get("content_type") or content_type
+            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
+            input_file = output_dir / f"{file_stem}{ext}"
+            with open(input_file, "wb") as f:
+                f.write(artifact_mgr.load_artifact_data(art_id, version))
+            return {"content_type": content_type, "file": f"{file_stem}{ext}"}
+
+        def _attach_injected(var_name: str, spec: dict[str, Any]) -> None:
+            """For a module/cell spec, resolve its injected upstream values to
+            files so the harness can hydrate the synthetic module before exec."""
+            if spec.get("content_type") != "module/cell":
+                return
+            try:
+                descriptor = json.loads((output_dir / spec["file"]).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return
+            injected = descriptor.get("injected") or {}
+            resolved: dict[str, dict[str, str]] = {}
+            for name, uri in injected.items():
+                sub = _load_versioned_spec(uri, f"{var_name}__inj__{name}")
+                if sub is None:
+                    logger.error(
+                        "Injected value '%s' for module export '%s' could not be resolved (%s).",
+                        name,
+                        var_name,
+                        uri,
+                    )
+                    continue
+                resolved[name] = sub
+            if resolved:
+                spec["injected"] = resolved
+
         for upstream_id in cell.upstream_ids:
             upstream_cell = self.session.notebook_state.get_cell(upstream_id)
             if upstream_cell is None:
@@ -3162,6 +3213,7 @@ class CellExecutor:
                             )
                         continue
 
+                    _attach_injected(var_name, spec)
                     input_specs[var_name] = spec
                     logger.info(
                         "Loaded input %s from artifact store (%s)",
@@ -3377,7 +3429,19 @@ class CellExecutor:
         if not consumed_vars:
             return None
 
-        export_plan = build_module_export_plan(source)
+        # Names this cell references that an upstream cell produces can be
+        # hydrated into the synthetic module at load time instead of blocking a
+        # def/class that closes over them.
+        producer = self.session.dag.variable_producer
+        cells_by_id = {c.id: c for c in self.session.notebook_state.cells}
+        this_cell = cells_by_id.get(cell_id)
+        injectable = frozenset(
+            v
+            for v in (this_cell.references if this_cell else [])
+            if isinstance(producer.get(v), str) and producer[v] != cell_id
+        )
+
+        export_plan = build_module_export_plan(source, injectable=injectable)
         exportable_vars = sorted(set(export_plan.exported_symbols) & set(consumed_vars))
         blocked_vars = sorted(export_plan.blocking_symbols & set(consumed_vars))
         if not exportable_vars and not blocked_vars:
@@ -3405,17 +3469,45 @@ class CellExecutor:
         if not code_exports:
             return None
 
+        # Resolve each injected name to the pinned, versioned artifact URI of
+        # the upstream variable — the value the exported code will be hydrated
+        # with. If a needed value can't be pinned, fall back to blocking rather
+        # than shipping a module that would NameError at call time.
+        injected_refs: dict[str, str] = {}
+        for name in sorted(export_plan.injected_inputs):
+            prod_id = producer.get(name)
+            prod_cell = cells_by_id.get(prod_id) if isinstance(prod_id, str) else None
+            uri = prod_cell.artifact_uris.get(name) if prod_cell is not None else None
+            if uri is None:
+                return (
+                    "This cell defines reusable code used downstream "
+                    f"({', '.join(sorted(set(exportable_vars) | set(blocked_vars)))}), "
+                    f"but an upstream value it closes over (`{name}`) isn't "
+                    "available to share yet."
+                )
+            injected_refs[name] = uri
+
         source_hash = compute_source_hash(source)
         notebook_id = self.session.notebook_state.id
+        # Fold the injected artifact identity into the module name so the
+        # sys.modules cache can't alias two hydrations of the same slice.
+        injected_tag = hashlib.sha256(
+            "|".join(f"{k}={v}" for k, v in sorted(injected_refs.items())).encode()
+        ).hexdigest()
+
+        module_suffix = source_hash[:12]
+        if injected_refs:
+            module_suffix = f"{source_hash[:12]}_{injected_tag[:8]}"
 
         for var_name in exportable_vars:
             symbol = export_plan.exported_symbols[var_name]
             descriptor = {
-                "module_name": (f"nb_{notebook_id}_{cell_id}_{var_name}_{source_hash[:12]}"),
+                "module_name": (f"nb_{notebook_id}_{cell_id}_{var_name}_{module_suffix}"),
                 "symbol_name": var_name,
                 "kind": symbol.kind,
                 "source": export_plan.module_source,
                 "provenance_hash": derive_subkey(provenance_hash, var_name),
+                "injected": injected_refs,
             }
             output_file = output_dir / f"{var_name}.cell_module.json"
             with open(output_file, "w", encoding="utf-8") as f:
