@@ -366,6 +366,28 @@ def build_module_export_plan(
     )
 
 
+def runtime_binding_names(source: str) -> frozenset[str]:
+    """Names a cell binds at module scope via *runtime* code — i.e. everything
+    the export slicer drops (not imports, defs, classes, or literal constants).
+
+    These are candidates for same-cell hydration: a def in the cell that closes
+    over one of them can be shared if the value is stored and injected, since
+    the cell itself produces it. Callers pass this set (union with cross-cell
+    producers) as ``injectable`` to :func:`build_module_export_plan`.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return frozenset()
+    kept = (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, kept) or _is_literal_constant_assignment(node):
+            continue
+        names |= _module_bindings_in(node)
+    return frozenset(names)
+
+
 def _emit_slice_source(keep_nodes: list[ast.stmt], *, original: str) -> str:
     """Return the slice as runnable Python source.
 

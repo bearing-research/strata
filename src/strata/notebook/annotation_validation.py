@@ -239,17 +239,19 @@ def _validate_module_export(
     *trying* to share defs across cells and hit one of the failure
     modes above.
     """
-    from strata.notebook.module_export import build_module_export_plan
+    from strata.notebook.module_export import build_module_export_plan, runtime_binding_names
 
-    # Names another cell defines can be hydrated into the synthetic module at
-    # load time, so a def closing over them isn't blocked — mirror the
-    # executor's injectable set (see _write_module_export_outputs).
-    injectable = frozenset(
+    # Names an upstream cell defines, or this cell's own runtime values, can be
+    # hydrated into the synthetic module at load time, so a def closing over
+    # them isn't blocked — mirror the executor's injectable set (see
+    # _write_module_export_outputs).
+    cross_cell = frozenset(
         v
         for v in cell.references
         for other in notebook_state.cells
         if other.id != cell.id and v in other.defines
     )
+    injectable = cross_cell | runtime_binding_names(cell.source)
     plan = build_module_export_plan(cell.source, injectable=injectable)
     if plan.is_exportable:
         return []

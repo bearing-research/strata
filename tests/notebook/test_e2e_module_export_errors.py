@@ -30,19 +30,17 @@ class TestUnsupportedModuleExports:
     """Unsupported reusable-code cells should fail clearly over WS."""
 
     def test_def_with_unresolved_runtime_dep_error_surfaces_over_websocket(self, setup):
-        # ``add`` references ``x``, which is computed at runtime by
-        # ``x = len([])`` and isn't part of the cell's exportable slice.
-        # The synthetic module would NameError when ``add`` is called,
-        # so we block at execution time and surface a precise message
-        # naming both the function and the unresolved variable.
+        # ``add`` references ``x``, which is bound nowhere in the notebook —
+        # a truly-unknown name. The synthetic module would NameError when
+        # ``add`` is called, so we block at execution time and surface a
+        # precise message. (A same-cell/upstream runtime ``x`` would now be
+        # hydrated instead.)
         client, tmp = setup
         nb = (
             NotebookBuilder(tmp)
             .add_cell(
                 "c1",
                 """
-x = len([])
-
 def add(y):
     return x + y
 """.strip(),
