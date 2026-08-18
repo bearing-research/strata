@@ -2142,16 +2142,6 @@ class CellExecutor:
         build_id: str | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through the core build + signed-URL transport path."""
-        # Module-export injection (a shared def's hydrated upstream/same-cell
-        # values) rides the direct transport but is not yet staged as signed
-        # URLs here — fail loudly rather than ship a worker that NameErrors.
-        if any(spec.get("injected") for spec in input_specs.values()):
-            raise RuntimeError(
-                "A cell consumes a shared def that needs hydrated values, which "
-                "is not yet supported over the signed/manifest worker transport. "
-                "Use a direct-transport worker (config.transport: direct)."
-            )
-
         from strata.auth import get_principal
         from strata.server import get_state
 
@@ -2220,6 +2210,12 @@ class CellExecutor:
         )
         input_uris = sorted(
             {str(spec["uri"]) for spec in staged_input_specs.values() if spec.get("uri")}
+            | {
+                str(inj["uri"])
+                for spec in staged_input_specs.values()
+                for inj in (spec.get("injected") or {}).values()
+                if isinstance(inj, dict) and inj.get("uri")
+            }
         )
 
         build_params = {
@@ -2448,31 +2444,23 @@ class CellExecutor:
         *,
         artifact_store: Any,
         build_id: str,
-        input_specs: dict[str, dict[str, str]],
+        input_specs: dict[str, dict[str, Any]],
         output_dir: Path,
         tenant_id: str | None,
         principal_id: str | None,
-    ) -> tuple[dict[str, dict[str, str]], list[tuple[str, int]]]:
+    ) -> tuple[dict[str, dict[str, Any]], list[tuple[str, int]]]:
         """Stage notebook upstream blobs into the service artifact store for signed transport."""
-        staged_specs: dict[str, dict[str, str]] = {}
+        staged_specs: dict[str, dict[str, Any]] = {}
         input_artifacts: list[tuple[str, int]] = []
 
-        for var_name, spec in sorted(input_specs.items()):
-            file_name = str(spec.get("file", "")).strip()
-            if not file_name:
-                raise RuntimeError(
-                    "Signed notebook executor transport is missing a local "
-                    f"input file for {var_name}"
-                )
+        def _stage_blob(var_name: str, file_name: str, content_type: str, source_uri: str) -> str:
+            """Stage one local blob as an artifact; return its ``strata://`` URI."""
             input_path = output_dir / file_name
             if not input_path.exists():
                 raise RuntimeError(
                     f"Signed notebook executor transport could not find input file {file_name!r}"
                 )
-
             blob_data = input_path.read_bytes()
-            content_type = str(spec.get("content_type", "pickle/object"))
-            source_uri = str(spec.get("uri", "")).strip()
             source_token = source_uri or f"local:{file_name}"
             source_hash = hashlib.sha256(source_token.encode("utf-8")).hexdigest()[:16]
             artifact_id = (
@@ -2497,7 +2485,6 @@ class CellExecutor:
                 },
                 inputs=[source_uri] if source_uri else [],
             )
-
             version = artifact_store.create_artifact(
                 artifact_id=artifact_id,
                 provenance_hash=provenance_hash,
@@ -2518,13 +2505,33 @@ class CellExecutor:
                 raise RuntimeError(
                     f"Failed to finalize staged notebook input artifact for {var_name}"
                 )
-
-            staged_uri = f"strata://artifact/{finalized.id}@v={finalized.version}"
-            staged_specs[var_name] = {
-                "uri": staged_uri,
-                "content_type": content_type,
-            }
             input_artifacts.append((finalized.id, finalized.version))
+            return f"strata://artifact/{finalized.id}@v={finalized.version}"
+
+        for var_name, spec in sorted(input_specs.items()):
+            file_name = str(spec.get("file", "")).strip()
+            if not file_name:
+                raise RuntimeError(
+                    "Signed notebook executor transport is missing a local "
+                    f"input file for {var_name}"
+                )
+            content_type = str(spec.get("content_type", "pickle/object"))
+            source_uri = str(spec.get("uri", "")).strip()
+            staged_uri = _stage_blob(var_name, file_name, content_type, source_uri)
+            staged_specs[var_name] = {"uri": staged_uri, "content_type": content_type}
+
+            # A module/cell export ships injected values; stage each so the
+            # worker can fetch them by signed URL and hydrate the module.
+            injected = spec.get("injected")
+            if isinstance(injected, dict):
+                staged_injected: dict[str, dict[str, str]] = {}
+                for inj_name, inj_spec in injected.items():
+                    inj_ct = str(inj_spec.get("content_type", "pickle/object"))
+                    inj_uri = _stage_blob(
+                        f"{var_name}__inj__{inj_name}", str(inj_spec["file"]), inj_ct, ""
+                    )
+                    staged_injected[inj_name] = {"uri": inj_uri, "content_type": inj_ct}
+                staged_specs[var_name]["injected"] = staged_injected
 
         return staged_specs, input_artifacts
 
