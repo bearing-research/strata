@@ -497,3 +497,62 @@ def circle(r):
     )
     assert plan.is_exportable is False
     assert "star imports are not supported" in plan.format_error()
+
+
+# --- injectable upstream names (runtime-hydrated module export) --------------
+
+
+def test_injectable_upstream_name_unblocks_and_records_injection() -> None:
+    """A def closing over an upstream name is exportable when that name is
+    injectable, and the name is recorded for hydration rather than blocking."""
+    src = "def add(y):\n    return x + y"
+    assert build_module_export_plan(src).is_exportable is False  # baseline blocks
+    plan = build_module_export_plan(src, injectable=frozenset({"x"}))
+    assert plan.is_exportable is True
+    assert "add" in plan.exported_symbols
+    assert "add" not in plan.blocking_symbols
+    assert plan.injected_inputs == {"x"}
+
+
+def test_injectable_only_covers_named_upstreams() -> None:
+    """A def referencing both an injectable and a truly-unknown name stays
+    blocked, and the error names only the hard one."""
+    src = "def add(y):\n    return x + y + z"
+    plan = build_module_export_plan(src, injectable=frozenset({"x"}))
+    assert plan.is_exportable is False
+    assert "z" in plan.format_error()
+    assert "`x`" not in plan.format_error()
+    assert "add" in plan.blocking_symbols
+
+
+def test_injectable_module_load_default_unblocks() -> None:
+    """A default value referencing an upstream name (evaluated at module load)
+    is injectable too."""
+    src = "def add(y, base=BASE):\n    return base + y"
+    assert build_module_export_plan(src).is_exportable is False
+    plan = build_module_export_plan(src, injectable=frozenset({"BASE"}))
+    assert plan.is_exportable is True
+    assert "BASE" in plan.injected_inputs
+
+
+def test_injectable_class_base_unblocks() -> None:
+    src = "class Child(Parent):\n    pass"
+    plan = build_module_export_plan(src, injectable=frozenset({"Parent"}))
+    assert plan.is_exportable is True
+    assert "Parent" in plan.injected_inputs
+    assert "Child" in plan.exported_symbols
+
+
+def test_injectable_ignored_when_name_already_bound_in_slice() -> None:
+    """A literal bound in-cell resolves from the slice; passing it as injectable
+    must not spuriously record it for hydration."""
+    src = "x = 1\n\ndef add(y):\n    return x + y"
+    plan = build_module_export_plan(src, injectable=frozenset({"x"}))
+    assert plan.is_exportable is True
+    assert plan.injected_inputs == set()
+
+
+def test_no_injectable_arg_is_backward_compatible() -> None:
+    plan = build_module_export_plan("def add(y):\n    return x + y")
+    assert plan.is_exportable is False
+    assert plan.injected_inputs == set()
