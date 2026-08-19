@@ -308,6 +308,12 @@ class CellAnnotations:
     sql: SqlAnnotation | None = None
     cache: CachePolicy | None = None
 
+    # ``# @nocache`` — always re-execute this cell, never serve a provenance
+    # cache hit. For cells run for their side effects or fresh randomness
+    # (a file write, an API call, ``random``/``time.now()``), where replaying a
+    # cached result would skip the effect. Applies to every language.
+    nocache: bool = False
+
     # Variant grouping
     variant: VariantAnnotation | None = None
 
@@ -401,6 +407,10 @@ def parse_annotations(source: str) -> CellAnnotations:
                 env_key = value[:eq_idx].strip()
                 env_val = value[eq_idx + 1 :].strip()
                 result.env[env_key] = env_val
+
+        elif key == "nocache":
+            # ``# @nocache`` -> always re-run; ``# @nocache off`` re-enables caching.
+            result.nocache = value.strip().lower() not in ("off", "false", "no", "0")
 
         elif key == "name":
             if value:

@@ -951,14 +951,12 @@ class NotebookSession:
             return
 
         cell.execution_method = result.execution_method
-        # A cache hit replays display outputs from the artifact store but
-        # carries no fresh console — stdout/stderr aren't part of the cached
-        # artifact. Writing the empty cache-hit console here would make
-        # ``update_cell_console_output`` *unlink* the file the original
-        # execution wrote, so a re-run that hits cache (e.g. a second
-        # ``strata run``) would silently delete recoverable print() output.
-        # Leave the persisted console untouched on cache hits.
-        if result.success and not result.cache_hit:
+        # Persist console on a real execution, and on a cache hit that *replays*
+        # console (a leaf cell whose stdout/stderr were cached by provenance).
+        # We must NOT write on a cache hit that carries no console, because
+        # ``update_cell_console_output`` would *unlink* the file the original
+        # execution wrote — silently deleting recoverable print() output.
+        if result.success and (not result.cache_hit or result.stdout or result.stderr):
             cell.console_stdout = result.stdout or ""
             cell.console_stderr = result.stderr or ""
             # Console output lives in .strata/console/, not notebook.toml —
@@ -1113,6 +1111,27 @@ class NotebookSession:
             hydrated = self._hydrate_display_output(output)
             resolved.append(CellOutput(**hydrated) if hydrated is not None else output)
         return resolved
+
+    def _resolve_cached_console(self, cell_id: str, provenance_hash: str) -> tuple[str, str] | None:
+        """Return cached ``(stdout, stderr)`` for a leaf cell when a prior run
+        with the same provenance stored it, else ``None``.
+
+        Mirrors :meth:`_resolve_cached_display_outputs` — the console artifact is
+        keyed by ``derive_subkey(provenance_hash, "__console__")`` so it replays
+        only on an identical provenance.
+        """
+        notebook_id = self.notebook_state.id
+        artifact_id = f"nb_{notebook_id}_cell_{cell_id}_var___console__"
+        expected_hash = hashlib.sha256(f"{provenance_hash}:__console__".encode()).hexdigest()
+        artifact = self.artifact_manager.artifact_store.get_latest_version(artifact_id)
+        if artifact is None or artifact.provenance_hash != expected_hash:
+            return None
+        try:
+            blob = self.artifact_manager.load_artifact_data(artifact_id, artifact.version)
+            payload = json.loads(blob)
+        except (ValueError, OSError, KeyError):
+            return None
+        return str(payload.get("stdout", "")), str(payload.get("stderr", ""))
 
     def _hydrate_display_output(self, output: CellOutput | dict[str, Any]) -> dict[str, Any] | None:
         """Return a serialized display payload with any transient inline data added."""

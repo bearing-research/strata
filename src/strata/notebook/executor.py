@@ -1085,6 +1085,9 @@ class CellExecutor:
             # RW mounts make the cell non-cacheable (side effects).
             if prov.has_rw_mount:
                 use_cache = False
+            # `# @nocache` — author opted this cell out of provenance caching.
+            if prov.annotations.nocache:
+                use_cache = False
 
             worker_spec = resolve_worker_spec(
                 self.session.notebook_state,
@@ -1142,6 +1145,14 @@ class CellExecutor:
                 if cell is not None
                 else []
             )
+            # A leaf cell (no consumed vars) has no artifact to cache, but its
+            # stdout/stderr are stored by provenance -- replay them so an
+            # unchanged re-run is instant instead of re-executing.
+            cached_console = (
+                self.session._resolve_cached_console(cell_id, provenance_hash)
+                if (cell is not None and use_cache and not consumed_vars)
+                else None
+            )
             if use_cache:
                 if consumed_vars:
                     first_var = sorted(consumed_vars)[0]
@@ -1191,7 +1202,9 @@ class CellExecutor:
                 cached_artifact is not None or bool(cached_display_outputs),
             )
 
-            if cached_artifact is not None or (not consumed_vars and cached_display_outputs):
+            if cached_artifact is not None or (
+                not consumed_vars and (cached_display_outputs or cached_console)
+            ):
                 if remote_metadata.get("remote_transport") == "signed":
                     remote_metadata.setdefault("remote_build_state", "ready")
                 # Cache hit — update cell state and return.
@@ -1218,6 +1231,8 @@ class CellExecutor:
                     cell_id=cell_id,
                     success=True,
                     outputs={},
+                    stdout=cached_console[0] if cached_console else "",
+                    stderr=cached_console[1] if cached_console else "",
                     display_outputs=[output.model_dump() for output in cached_display_outputs],
                     display_output=(
                         cached_display_outputs[-1].model_dump() if cached_display_outputs else None
@@ -1369,6 +1384,19 @@ class CellExecutor:
                         exec_result.display_output = (
                             exec_result.display_outputs[-1] if exec_result.display_outputs else None
                         )
+                        # Cache a leaf cell's console by provenance so an
+                        # unchanged re-run replays it instead of re-executing
+                        # (a coding-agent scratchpad's `print`-based snippets).
+                        if use_cache and not consumed_vars:
+                            self._store_console_outputs(
+                                cell_id,
+                                provenance_hash,
+                                exec_result.stdout,
+                                exec_result.stderr,
+                                input_hashes,
+                                source_hash=source_hash,
+                                env_hash=env_hash,
+                            )
 
                     # ⑥ Sync-back read-write mounts after successful execution.
                     if exec_result.success and resolved_mounts:
@@ -1580,6 +1608,8 @@ class CellExecutor:
             provenance_hash = prov.provenance_hash
 
             if prov.has_rw_mount:
+                use_cache = False
+            if prov.annotations.nocache:
                 use_cache = False
 
             logger.info(
@@ -3378,6 +3408,38 @@ class CellExecutor:
                 all_stored = False
 
         return all_stored
+
+    def _store_console_outputs(
+        self,
+        cell_id: str,
+        provenance_hash: str,
+        stdout: str,
+        stderr: str,
+        input_hashes: list[str],
+        *,
+        source_hash: str = "",
+        env_hash: str = "",
+    ) -> None:
+        """Persist a leaf cell's console output as a provenance-keyed artifact.
+
+        Mirrors :meth:`_store_display_outputs` but for stdout/stderr, so a leaf
+        cell that only ``print``s (no display value, no downstream consumer) can
+        still cache-hit and replay its output on an unchanged re-run.
+        """
+        if not stdout and not stderr:
+            return
+        artifact_mgr = self.session.get_artifact_manager()
+        blob = json.dumps({"stdout": stdout, "stderr": stderr}).encode("utf-8")
+        artifact_mgr.store_cell_output(
+            cell_id=cell_id,
+            variable_name="__console__",
+            blob_data=blob,
+            content_type="json/object",
+            provenance_hash=derive_subkey(provenance_hash, "__console__"),
+            input_versions={h: h for h in input_hashes},
+            source_hash=source_hash,
+            env_hash=env_hash,
+        )
 
     def _store_display_outputs(
         self,
