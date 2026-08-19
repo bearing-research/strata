@@ -241,6 +241,34 @@ If the catalog is unreachable when provenance is computed, the cell is
 conservatively treated as stale; if it is still unreachable at execution time,
 the run fails with a clear error.
 
+## @nocache
+
+Force the cell to **always re-execute** — never serve a provenance cache hit.
+
+```python
+# @nocache
+import urllib.request
+
+latest = urllib.request.urlopen("https://api.example.com/now").read()
+print(latest)
+```
+
+By default every cell is cached by provenance
+(`sha256(inputs + source + env)`), including a leaf cell that only `print`s —
+an unchanged rerun replays its output instantly instead of recomputing. That is
+exactly what you want for deterministic work, and it makes the notebook a good
+**scratchpad** (see [Driving a notebook with an agent](agent.md)). But it is
+wrong for a cell whose *point* is a side effect or fresh value:
+
+- writes a file, sends a request, mutates external state — replaying the cached
+  result would **skip the effect**;
+- reads the clock, `random`, a live API — you want a **fresh value** each run.
+
+`# @nocache` opts such a cell out. `# @nocache off` re-enables caching (useful to
+override a default you set elsewhere). It applies to every language and sits
+alongside the read-write-`@mount` rule, which already forces re-execution for
+the same reason.
+
 ---
 
 ## Prompt Cell Annotations

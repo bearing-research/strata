@@ -51,6 +51,30 @@ you left running in the first terminal.
 When you quit the TUI, the server `strata agent` started is shut down with it. If
 you pointed it at a server you started yourself, that server is left running.
 
+## Why it's a good agent scratchpad
+
+Coding agents usually explore by writing throwaway `.py` scripts to a temp
+directory and running them — work that vanishes the moment it finishes, can't be
+seen, and recomputes from scratch every time. A Strata notebook is a better home
+for exactly that kind of scratch work, and the working agreement above points the
+agent at it:
+
+- **It persists and it's visible.** Each snippet becomes a versioned,
+  content-addressed cell you can see building live in the TUI — not an invisible
+  script in `/tmp`.
+- **Unchanged work never recomputes.** Every cell is cached by provenance
+  (`sha256(inputs + source + env)`), *including a leaf cell that only `print`s* —
+  so an agent that re-runs an unchanged diagnostic cell gets its output back
+  instantly instead of paying for it again. The expensive step an agent ran ten
+  turns ago is still a cache hit now.
+- **Side effects stay honest.** A cell that writes a file, calls an API, or reads
+  the clock shouldn't replay a stale result. The agent marks those with
+  [`# @nocache`](annotations.md#nocache) so they always re-execute; everything
+  else stays cached.
+
+The net effect: the agent's exploration is captured, watchable, and free to
+re-derive — a durable scratchpad instead of a pile of discarded scripts.
+
 ## What gets written into the notebook
 
 - **`.mcp.json`** — registers the running server's `/mcp` endpoint as an MCP
