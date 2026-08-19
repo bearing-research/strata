@@ -233,6 +233,41 @@ Display()
         assert second.display_output["artifact_uri"].startswith("strata://artifact/")
 
     @pytest.mark.asyncio
+    async def test_execute_stdout_is_cached_for_leaf_cells(self, sample_notebook):
+        """A leaf cell that only prints (no display value, no consumer) caches by
+        provenance and replays its stdout on an unchanged re-run — the agent
+        scratchpad case."""
+        executor = CellExecutor(sample_notebook)
+        source = "print('hello from a leaf cell')\n"
+
+        first = await executor.execute_cell("cell1", source)
+        assert first.success is True
+        assert first.cache_hit is False
+        assert "hello from a leaf cell" in first.stdout
+
+        second = await executor.execute_cell("cell1", source)
+        assert second.success is True
+        assert second.cache_hit is True
+        assert second.execution_method == "cached"
+        # stdout is replayed from the provenance-keyed console cache.
+        assert "hello from a leaf cell" in second.stdout
+
+    @pytest.mark.asyncio
+    async def test_nocache_annotation_always_reexecutes(self, sample_notebook):
+        """`# @nocache` opts a cell out of provenance caching — it re-runs every
+        time even when its source/inputs/env are unchanged."""
+        executor = CellExecutor(sample_notebook)
+        source = "# @nocache\nprint('side effect')\n"
+
+        first = await executor.execute_cell("cell1", source)
+        assert first.success is True
+        assert first.cache_hit is False
+
+        second = await executor.execute_cell("cell1", source)
+        assert second.success is True
+        assert second.cache_hit is False  # never cached
+
+    @pytest.mark.asyncio
     async def test_execute_markdown_display_output_is_cached_for_leaf_cells(self, sample_notebook):
         """Markdown display outputs should persist as display artifacts and cache-hit on rerun."""
         executor = CellExecutor(sample_notebook)

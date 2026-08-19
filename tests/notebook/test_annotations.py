@@ -393,3 +393,19 @@ class TestSpliceDirectives:
     def test_remove_preserves_crlf(self):
         out = self._rm("# @worker a\r\nx = 1\r\n", "worker")
         assert out == "x = 1\r\n"
+
+
+class TestNocacheAnnotation:
+    """Tests for the @nocache annotation."""
+
+    def test_nocache_sets_flag(self):
+        result = parse_annotations("# @nocache\nprint('x')\n")
+        assert result.nocache is True
+
+    def test_nocache_off_disables(self):
+        result = parse_annotations("# @nocache off\nprint('x')\n")
+        assert result.nocache is False
+
+    def test_nocache_default_false(self):
+        result = parse_annotations("print('x')\n")
+        assert result.nocache is False
