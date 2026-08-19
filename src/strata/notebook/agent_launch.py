@@ -217,7 +217,15 @@ that away, and the watcher can't see them.
 
 **Do not** run Python here with the Bash tool (`python …`, `uv run …`, a REPL,
 or a scratch script). That work is invisible to the notebook and to the person
-watching, and it isn't cached. Put the code in a cell and `run_cell` it instead.
+watching, and it isn't cached. Put the code in a cell and `run_cell` it instead
+— **this is your scratchpad**. Even a throwaway `print`-only diagnostic cell is
+cached by provenance, so re-running it unchanged replays its output instantly
+rather than recomputing; leave those cells in place instead of deleting them.
+
+**One exception — side effects and fresh values:** a cell whose point is a side
+effect (writing a file, calling an API, mutating external state) or a fresh
+value (the clock, `random`, a live endpoint) must not replay a cached result.
+Put `# @nocache` on the first line of such a cell so it always re-executes.
 
 Prefer editing an existing cell over re-adding one; prefer `run_cell` over
 re-deriving a value you already computed — the cache makes an unchanged rerun
