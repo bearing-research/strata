@@ -1,6 +1,6 @@
 # Cell Annotations & Environment
 
-Annotations are metadata directives written in the leading comment block of a cell. They control display names, execution routing, timeouts, environment variables, and filesystem mounts, without separate configuration UI. The cell source is the single source of truth.
+Annotations are metadata directives written in the leading comment block of a cell. They control display names, execution routing, timeouts, environment variables, filesystem mounts, and cache behavior, without separate configuration UI. The cell source is the single source of truth.
 
 ```python
 # @name Train Classifier
@@ -688,6 +688,7 @@ When the same setting is configured at multiple levels, the most specific wins:
 | **Mounts** | `# @mount ...` | `cell.mounts` overrides | `notebook.mounts` defaults |
 | **SQL connection** | `# @sql connection=X` |, | none, required for SQL cells |
 | **Cache policy** | `# @cache <policy>` |, | `fingerprint` (read), `session` (write) |
+| **Cache opt-out** | `# @nocache` |, | cache on (serve provenance hits) |
 
 Annotations always take priority. This lets you override per-cell behavior without editing `notebook.toml`.
 

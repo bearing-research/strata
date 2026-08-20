@@ -9,6 +9,57 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ## Unreleased
 
+### Added
+
+- **Runtime-hydrated module export - share a cell's `def`/`class` even when it
+  closes over a runtime value.** Previously a cell that defined a reusable
+  function referencing a runtime global (an upstream artifact, or a value
+  computed in its own cell - a loaded model, a `cwd`-derived path) failed to
+  share it downstream ("cannot be shared across cells yet"). Now those values
+  are stored and hydrated into the synthetic module at load time, so the pattern
+  just works - locally, in run-all batches, on warm pools, and on remote HTTP
+  workers (both the direct and signed/manifest transports). Only genuinely
+  unresolvable names (bound nowhere in the notebook), top-level lambdas, and
+  star imports still block.
+- **Leaf-cell console caching + `# @nocache` - the notebook as an agent
+  scratchpad.** A leaf cell (no downstream consumer) that only `print`s now
+  caches its stdout/stderr by provenance and replays it on an unchanged re-run,
+  instead of re-executing cold every time. This makes the notebook a viable
+  cached scratchpad for a coding agent, replacing throwaway `/tmp` scripts.
+  Cells that must always run - a side effect, a live API call, a fresh random
+  draw - opt out with `# @nocache` (`# @nocache off` re-enables); the gate
+  applies to every language. See
+  [Cell Annotations](notebook/annotations.md#nocache) and
+  [Driving a notebook with a coding agent](notebook/agent.md).
+
+### Fixed
+
+- **`strata agent` now detects a missing MCP endpoint instead of silently
+  proceeding.** The mount check probed `/mcp` (no trailing slash), which falls
+  through to the SPA and always returns `200` - so a server without the `[mcp]`
+  extra looked "mounted", the agent got no notebook tools, and it fell back to
+  driving the REST API by hand. The check now probes `/mcp/` and distinguishes
+  the JSON MCP endpoint from the HTML SPA, failing fast with a clear hint.
+
+### Added
+
+- **`agent_demo` example - a coding agent's notebook, and the recipe to record
+  it.** A small, runnable notebook (`examples/agent_demo/`) that trains a model
+  once and reuses it from cache when only the evaluation changes - the
+  content-addressed payoff. `examples/agent_demo/RECORDING.md` documents the
+  exact `strata agent` flow to capture it as a demo.
+- **`strata agent <notebook-dir>` - one command to drive a notebook with a
+  coding agent.** The MCP server, the CLI ops, and the terminal viewer already
+  existed, but wiring them together by hand was a fiddly, ordered dance nobody
+  did - so a coding agent never actually reached for the notebook. This command
+  collapses it: it creates-or-opens the notebook, starts (or reuses) a server
+  with the MCP endpoint enabled, opens a session (the one step an agent can't do
+  itself), drops a `.mcp.json` + a managed `CLAUDE.md` working agreement into the
+  notebook directory, and attaches the read-only TUI. Then you run `claude` in
+  that directory in another pane: it auto-connects, reads the agreement, and
+  drives cells that light up **live** in the TUI. Needs the `[mcp]` and `[tui]`
+  extras. See [Driving a notebook with a coding agent](notebook/agent.md).
+
 ## 0.5.0 - 2026-07-15
 
 0.5.0 turns the notebook into an **interactive, shareable app**. The headlines

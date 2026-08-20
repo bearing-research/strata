@@ -41,9 +41,11 @@ invocation opens its own `NotebookSession`, runs the cells, and exits.
 finishes: `{"notebook", "success", "duration_ms", "cells": [...]}` with one
 entry per cell (`id`, `status` ∈ `ok|error|skipped`, `duration_ms`,
 `cache_hit`, plus `stdout` / `stderr` - truncated at 10k chars - and
-`error` / `reason` where applicable). Cache hits replay the stored
-artifact without re-emitting console output, so `stdout` can be absent on
-warm runs (`--force` re-executes). Errors and pre-flight diagnostics go to
+`error` / `reason` where applicable). For a cell that produces an output
+artifact, a cache hit replays that artifact without re-emitting console
+output, so `stdout` can be absent on warm runs (`--force` re-executes). A
+leaf cell that only `print`s is different: its stdout/stderr are cached by
+provenance and replayed on a warm hit. Errors and pre-flight diagnostics go to
 stderr regardless of format. Pipe stdout to `jq`:
 `strata run ... --format json | jq '.cells[] | select(.status == "error")'`.
 
@@ -273,4 +275,6 @@ server, then sets its source.)
 Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
 run/test`), this is the full agent surface - and **all of it** works either
 offline against a directory or `--server/--session` against a running server. An
-MCP server wrapping the same operations lands in a later release.
+MCP server wrapping the same operations is also available — see
+[MCP Server](mcp.md), or [`strata agent`](agent.md) for the one-command on-ramp
+that stands it up and points a coding agent at a live session.

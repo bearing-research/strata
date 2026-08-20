@@ -196,7 +196,11 @@ The cache is content-addressed: the cache key is a hash of the
 cell's source, its upstream artifacts, and the environment lockfile.
 Re-running with the same three is always a cache hit. No `@memoize`,
 no manual invalidation, and the cached result is byte-identical to
-what produced it the first time.
+what produced it the first time. Even a cell that only `print`s and
+feeds nothing downstream is cached — its console output is keyed by
+the same hash and replayed on a warm re-run. A cell that must always
+run (a side effect, a live API call, a fresh random draw) opts out
+with [`# @nocache`](../notebook/annotations.md#nocache).
 
 ## 5. Edit upstream, watch the cascade
 
