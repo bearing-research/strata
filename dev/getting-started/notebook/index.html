@@ -2382,7 +2382,11 @@ header shows a <strong>cached</strong> badge alongside the duration ("cached ·
 cell's source, its upstream artifacts, and the environment lockfile.
 Re-running with the same three is always a cache hit. No <code>@memoize</code>,
 no manual invalidation, and the cached result is byte-identical to
-what produced it the first time.</p>
+what produced it the first time. Even a cell that only <code>print</code>s and
+feeds nothing downstream is cached — its console output is keyed by
+the same hash and replayed on a warm re-run. A cell that must always
+run (a side effect, a live API call, a fresh random draw) opts out
+with <a href="../../notebook/annotations/#nocache"><code># @nocache</code></a>.</p>
 <h2 id="5-edit-upstream-watch-the-cascade">5. Edit upstream, watch the cascade<a class="headerlink" href="#5-edit-upstream-watch-the-cascade" title="Permanent link">&para;</a></h2>
 <p>Edit the loader, say, change <code>time.sleep(2)</code> to <code>time.sleep(1)</code>.
 Strata re-analyzes the source, computes a new provenance hash, and

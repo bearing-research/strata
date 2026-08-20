@@ -2677,7 +2677,7 @@
 
 
 <h1 id="cell-annotations-environment">Cell Annotations &amp; Environment<a class="headerlink" href="#cell-annotations-environment" title="Permanent link">&para;</a></h1>
-<p>Annotations are metadata directives written in the leading comment block of a cell. They control display names, execution routing, timeouts, environment variables, and filesystem mounts, without separate configuration UI. The cell source is the single source of truth.</p>
+<p>Annotations are metadata directives written in the leading comment block of a cell. They control display names, execution routing, timeouts, environment variables, filesystem mounts, and cache behavior, without separate configuration UI. The cell source is the single source of truth.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># @name Train Classifier</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># @worker my-gpu</span>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># @timeout 120</span>
@@ -3235,6 +3235,12 @@ doesn't affect per-variable provenance hashes.</p>
 <td><code># @cache &lt;policy&gt;</code></td>
 <td>,</td>
 <td><code>fingerprint</code> (read), <code>session</code> (write)</td>
+</tr>
+<tr>
+<td><strong>Cache opt-out</strong></td>
+<td><code># @nocache</code></td>
+<td>,</td>
+<td>cache on (serve provenance hits)</td>
 </tr>
 </tbody>
 </table>

@@ -2212,9 +2212,11 @@ invocation opens its own <code>NotebookSession</code>, runs the cells, and exits
 finishes: <code>{"notebook", "success", "duration_ms", "cells": [...]}</code> with one
 entry per cell (<code>id</code>, <code>status</code> ∈ <code>ok|error|skipped</code>, <code>duration_ms</code>,
 <code>cache_hit</code>, plus <code>stdout</code> / <code>stderr</code> - truncated at 10k chars - and
-<code>error</code> / <code>reason</code> where applicable). Cache hits replay the stored
-artifact without re-emitting console output, so <code>stdout</code> can be absent on
-warm runs (<code>--force</code> re-executes). Errors and pre-flight diagnostics go to
+<code>error</code> / <code>reason</code> where applicable). For a cell that produces an output
+artifact, a cache hit replays that artifact without re-emitting console
+output, so <code>stdout</code> can be absent on warm runs (<code>--force</code> re-executes). A
+leaf cell that only <code>print</code>s is different: its stdout/stderr are cached by
+provenance and replayed on a warm hit. Errors and pre-flight diagnostics go to
 stderr regardless of format. Pipe stdout to <code>jq</code>:
 <code>strata run ... --format json | jq '.cells[] | select(.status == "error")'</code>.</p>
 <h3 id="exit-codes">Exit Codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
@@ -2407,7 +2409,9 @@ server, then sets its source.)</p>
 <p>Together with inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>) and execution (<code>cell
 run/test</code>), this is the full agent surface - and <strong>all of it</strong> works either
 offline against a directory or <code>--server/--session</code> against a running server. An
-MCP server wrapping the same operations lands in a later release.</p>
+MCP server wrapping the same operations is also available — see
+<a href="../mcp/">MCP Server</a>, or <a href="../agent/"><code>strata agent</code></a> for the one-command on-ramp
+that stands it up and points a coding agent at a live session.</p>
 
 
 
