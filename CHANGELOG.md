@@ -19,6 +19,16 @@ exhaustive commit history.
   workers (both the direct and signed/manifest transports). Only genuinely
   unresolvable names (bound nowhere in the notebook), top-level lambdas, and
   star imports still block.
+- **Leaf-cell console caching + `# @nocache` - the notebook as an agent
+  scratchpad.** A leaf cell (no downstream consumer) that only `print`s now
+  caches its stdout/stderr by provenance and replays it on an unchanged re-run,
+  instead of re-executing cold every time. This makes the notebook a viable
+  cached scratchpad for a coding agent, replacing throwaway `/tmp` scripts.
+  Cells that must always run - a side effect, a live API call, a fresh random
+  draw - opt out with `# @nocache` (`# @nocache off` re-enables); the gate
+  applies to every language. See
+  [Cell Annotations](docs/notebook/annotations.md#nocache) and
+  [Driving a notebook with a coding agent](docs/notebook/agent.md).
 
 ### Fixed
 

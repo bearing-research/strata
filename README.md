@@ -50,6 +50,7 @@ blobs or execution metadata bleeding into the history.
 - **per-variant fan-out (0.5.0):** `# @per_variant` runs a cell once per variant of a sweep group - each variant its own artifact, cache entry, and worker dispatch, so adding a variant only runs the new instance
 - **terminal viewer (0.4.0):** `strata-notebook-tui` attaches to a running notebook and renders it live in the terminal - cells flip status as they run, syntax-highlighted source, tables and markdown rendered, a layered DAG view (`d`), and an Agent tab that streams an AI agent's reasoning as it drives the notebook. Read-only - watch an agent (or a run-all) work in one terminal from another. Ships behind the `[tui]` extra (`uv tool install "strata-notebook[tui]"`)
 - **agent CLI (0.4.0):** the `strata` command drives a notebook end to end - inspect (`cell list/show`, `dag`, `status`), run one cell at a time (`cell run/test`), and author (`cell add/edit/rm/mv`, `cell annotate`, `dep add/rm`) - all with `--format json` and stable exit codes. Works **offline against a notebook directory or against a live session on a running server** (`--server/--session`), so an agent builds and runs a notebook the same way whether or not a server is up
+- **agent on-ramp:** `strata agent ./nb` is one command that stands up an MCP-enabled server, opens a session, writes `.mcp.json` + a `CLAUDE.md` working agreement, and attaches the terminal viewer - point a coding agent (Claude Code) at a live notebook and watch it build cells. The notebook doubles as the agent's **persistent, cached scratchpad**: unchanged cells (even a leaf cell that only `print`s) replay instantly instead of recomputing, so exploration is captured and watchable instead of thrown away in `/tmp`. A cell whose point is a side effect or a fresh value opts out with `# @nocache`
 - **distributed:** `# @worker gpu-fly` dispatches a single cell to a remote box - bring your own compute
 - **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3 / GCS / Azure prefix a local `pathlib.Path`
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
@@ -138,6 +139,13 @@ execution is a `materialize(inputs, transform, environment) → artifact` operat
 and the cache is correct by construction because it's keyed on content,
 not time.
 
+Even a leaf cell that only `print`s is cached: its console output is keyed
+by the same provenance hash, so an unchanged re-run replays the output
+instantly rather than executing again. That makes the notebook a good
+**scratchpad** - a coding agent's exploratory snippets stop recomputing.
+Cells that must always run (a side effect, a live API call, a fresh random
+draw) opt out with `# @nocache`.
+
 ## Distributed Execution
 
 Each cell can declare which worker it runs on via a single annotation:
@@ -221,7 +229,7 @@ still moving:
   in CI. BigQuery and Snowflake adapters ship but lack integration test
   coverage; pin a Strata version in production until that lands.
   MotherDuck and MySQL are planned but not yet implemented.
-- **Wire / on-disk formats.** `notebook.toml`, `runtime.json`, and the
+- **Wire / on-disk formats.** `notebook.toml`, `.strata/runtime.json`, and the
   artifact cache layout may change between minor versions during 0.x.
   Rely on the Python API surface, not the file shapes.
 

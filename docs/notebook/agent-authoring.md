@@ -182,9 +182,11 @@ strata run my_analysis --format json | jq -r '.cells[] | select(.id == "stats").
 # total=93900
 ```
 
-One caveat: a **cache hit replays the stored artifact without re-running
-the cell**, so `stdout` can be absent on warm runs. Pass `--force` when
-you need fresh console output. Don't read `.strata/` directly - it's
+One caveat: for a cell that produces an output artifact, a **cache hit
+replays the stored artifact without re-running the cell**, so `stdout` can be
+absent on warm runs. Pass `--force` when you need fresh console output. (A
+leaf cell that only `print`s is the exception — its console is cached by
+provenance and replayed on a warm hit.) Don't read `.strata/` directly - it's
 machine-managed runtime state with no stability guarantees.
 
 ## Don'ts
