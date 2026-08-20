@@ -215,6 +215,16 @@ it on first read and caches the bytes locally for the session.
 | [markdown_showcase](https://bearing-research.github.io/strata/examples/markdown_showcase/)     | Markdown cells, dynamic `Markdown(...)` outputs, security cases                     |
 | [library_cells](https://bearing-research.github.io/strata/examples/library_cells/)             | Cross-cell library code: pure module cells, mixed runtime+library cells, the limits |
 | [news_alpha_trader](https://bearing-research.github.io/strata/examples/news_alpha_trader/)     | Multi-stage trading pipeline with prompt cells and structured LLM outputs           |
+| [review_triage](https://bearing-research.github.io/strata/examples/review_triage/)             | Prompt cell with `# @output_schema` - structured, schema-validated LLM output       |
+| [r_mtcars_analysis](https://bearing-research.github.io/strata/examples/r_mtcars_analysis/)     | Pure-R notebook - `mtcars` regression with inline ggplot2 / base-graphics plots     |
+| [r_lm_vs_sklearn](https://bearing-research.github.io/strata/examples/r_lm_vs_sklearn/)         | Cross-language R + Python - R `lm()` vs scikit-learn over shared Arrow data          |
+| [sql_orders_report](https://bearing-research.github.io/strata/examples/sql_orders_report/)     | SQL cells over a local SQLite warehouse, mixing SQL / Python / markdown              |
+| [widget_playground](https://bearing-research.github.io/strata/examples/widget_playground/)     | Widget cell (control panel) driving a downstream cell, with `# @live` reactivity     |
+| [model_variants](https://bearing-research.github.io/strata/examples/model_variants/)           | Variant groups - alternative training cells sharing one DAG slot (switch mode)       |
+| [model_variants_sweep](https://bearing-research.github.io/strata/examples/model_variants_sweep/) | Variant sweep mode - run every variant and compare them in one downstream cell     |
+| [loop_hill_climb](https://bearing-research.github.io/strata/examples/loop_hill_climb/)         | `# @loop` / `# @loop_until` iteration with carry and per-iteration artifacts         |
+| [data_viewer](https://bearing-research.github.io/strata/examples/data_viewer/)                 | Interactive data viewer - page / sort / filter / search the full cached artifact     |
+| [agent_demo](https://bearing-research.github.io/strata/examples/agent_demo/)                   | A coding agent builds the notebook live; only the eval re-runs when the model caches |
 
 ## Known rough edges
 
