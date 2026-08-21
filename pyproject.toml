@@ -207,6 +207,10 @@ features = ["pyo3/extension-module"]
 # src/strata/_frontend/ before building.
 include = [
     { path = "src/strata/_frontend/**/*", format = ["sdist", "wheel"] },
+    # Coding-agent skill shipped inside the package: discovered from
+    # `<site-packages>/strata/.agents/skills/` once strata-notebook is
+    # installed, so an agent learns to use the notebook as a scratchpad.
+    { path = "src/strata/.agents/skills/**/*", format = ["sdist", "wheel"] },
     # Maturin's sdist is built via ``cargo package`` rooted at
     # ``rust/`` and doesn't pick up files from the repo root by
     # default. Without these, the sdist's PEP 639 ``License-File:

@@ -195,41 +195,44 @@ def _agent_guidance(session_id: str) -> str:
     """The working-agreement body written into the notebook's CLAUDE.md."""
     return f"""# Driving this Strata notebook
 
-This directory is a **Strata notebook**. Operate on it through the connected
-**`strata-notebook` MCP server** (auto-configured in `.mcp.json`) — not by
-writing throwaway `.py` scripts and running them.
+This directory is a **Strata notebook** — a persistent, cached, inspectable
+scratchpad. Operate on it through the connected **`strata-notebook` MCP server**
+(auto-configured in `.mcp.json`).
 
-Work done here is captured as versioned, content-addressed cells: identical
-computations are deduplicated and never re-run, lineage is explicit, and a human
-is watching this session live in a terminal UI. Scratch scripts throw all of
-that away, and the watcher can't see them.
+**Decision rule:** any Python you'd run to check or compute something → a
+notebook cell, **not** `Bash: python …` / `uv run …` / a REPL / a temp `.py`
+script. Scratch scripts are invisible, uncached, and thrown away; a cell
+persists, appears live in the human's terminal viewer, and caches — so you build
+on your own prior work instead of recomputing it.
 
 **How to work:**
 
 1. Call `list_notebooks` to get the open `session_id` (it is `{session_id}` for
    this launch, but confirm — a new id is minted each time).
-2. Use `get_notebook` / `status` / `dag` to see the current cells and state.
-3. Build by adding and running cells: `add_cell`, `edit_cell`, `run_cell` (and
-   `add_dependency` for packages). Every cell you run appears live in the
-   watcher's UI.
-4. Use `note` to narrate what you're about to do so the person watching can
-   follow along.
+2. **Look before you compute:** `status` / `get_notebook` / `dag` show the
+   current cells and their variables. If a variable you need already exists,
+   reference it in a new cell rather than recomputing it.
+3. Run a snippet in one call with **`run_snippet(session_id, source)`** — it adds
+   a cell and runs it, returning the run outcome (`status`, `cache_hit`,
+   `stdout`) under `run`. (Use `add_cell` without a run only to stage a cell.)
+4. Use `note` to narrate what you're about to do so the watcher can follow along.
 
-**Do not** run Python here with the Bash tool (`python …`, `uv run …`, a REPL,
-or a scratch script). That work is invisible to the notebook and to the person
-watching, and it isn't cached. Put the code in a cell and `run_cell` it instead
-— **this is your scratchpad**. Even a throwaway `print`-only diagnostic cell is
-cached by provenance, so re-running it unchanged replays its output instantly
-rather than recomputing; leave those cells in place instead of deleting them.
+**The caching payoff — how to get it:**
 
-**One exception — side effects and fresh values:** a cell whose point is a side
-effect (writing a file, calling an API, mutating external state) or a fresh
+- Put an **expensive step in its own cell whose result a later cell consumes**.
+  It's cached by provenance across the session: iterate on the downstream cell
+  and the expensive upstream stays a cache hit, never re-executing.
+- **To change a result, `edit_cell` its cell and `run_cell`** — only that cell
+  and what's downstream recompute; upstream stays cached.
+- **Prefer editing an existing cell over re-adding an identical one.** A leaf
+  cell that only prints replays its cached output on an unchanged *same-cell*
+  re-run; re-adding the same snippet runs cold. Leave finished diagnostic cells
+  in place — an unchanged re-run is instant.
+
+**The one exception — side effects and fresh values:** a cell whose point is a
+side effect (writing a file, calling an API, mutating external state) or a fresh
 value (the clock, `random`, a live endpoint) must not replay a cached result.
 Put `# @nocache` on the first line of such a cell so it always re-executes.
-
-Prefer editing an existing cell over re-adding one; prefer `run_cell` over
-re-deriving a value you already computed — the cache makes an unchanged rerun
-instant.
 """
 
 
