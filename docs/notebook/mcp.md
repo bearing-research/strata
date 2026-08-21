@@ -64,6 +64,7 @@ The typical loop:
 | `run_cell(session_id, cell_id, mode)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. |
 | `run_tests(session_id, cell_id)` | Run a cell's `cells/{id}.test.py`. |
 | `add_cell(session_id, source, after?, language?)` | Add a cell (server mints the id). |
+| `run_snippet(session_id, source, after?, language?)` | Add a cell **and run it** in one call; returns the cell view with the run outcome nested under `run`. The scratchpad primitive. |
 | `edit_cell(session_id, cell_id, source)` | Replace a cell's source. |
 | `remove_cell(session_id, cell_id)` | Delete a cell and its files. |
 | `move_cell(session_id, cell_id, index)` | Reorder a cell. |

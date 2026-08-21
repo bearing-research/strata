@@ -239,6 +239,26 @@ def test_cli_cell_add_then_rm(chain_nb, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out) == {"removed": new["id"]}
 
 
+def test_cli_cell_add_inline_c(chain_nb, capsys):
+    # `-c` supplies the cell source inline, as an alternative to `--file`.
+    assert main(["cell", "add", str(chain_nb), "-c", "w = 7", "--format", "json"]) == 0
+    new = json.loads(capsys.readouterr().out)
+    assert new["source"] == "w = 7"
+
+
+def test_cli_cell_add_c_and_file_are_mutually_exclusive(chain_nb, tmp_path):
+    src = tmp_path / "s.py"
+    src.write_text("w = 5")
+    with pytest.raises(SystemExit):
+        main(["cell", "add", str(chain_nb), "-c", "w = 7", "--file", str(src)])
+
+
+def test_cli_cell_add_requires_a_source(chain_nb):
+    # Neither -c nor --file → the required mutually-exclusive group rejects it.
+    with pytest.raises(SystemExit):
+        main(["cell", "add", str(chain_nb)])
+
+
 def test_cli_cell_annotate_set_and_unset(chain_nb, capsys):
     # Set two annotations on cell `a`; the @name is reflected back in the view.
     rc = main(

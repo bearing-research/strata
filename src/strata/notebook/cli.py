@@ -976,14 +976,26 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     test_p.add_argument("--format", choices=["human", "json"], default="json")
     test_p.set_defaults(func=cell_test_main)
 
-    add_p = sub.add_parser("add", help="Add a new cell from a source file")
+    add_p = sub.add_parser("add", help="Add a new cell, optionally running it")
     _add_target_args(add_p)
-    add_p.add_argument("--file", required=True, help="Source file (`-` for stdin)")
+    add_src = add_p.add_mutually_exclusive_group(required=True)
+    add_src.add_argument("--file", help="Source file (`-` for stdin)")
+    add_src.add_argument("-c", "--code", help="Inline cell source")
     add_p.add_argument("--after", help="Insert after this cell id (default: at the end)")
     add_p.add_argument(
         "--language",
         choices=["python", "markdown", "sql", "r", "prompt"],
         default="python",
+    )
+    add_p.add_argument(
+        "--run",
+        action="store_true",
+        help="Execute the cell after adding it; fold the run result into the output",
+    )
+    add_p.add_argument(
+        "--no-sync",
+        action="store_true",
+        help="With --run: skip `uv sync`; require an existing .venv",
     )
     add_p.add_argument("--format", choices=["human", "json"], default="json")
     add_p.set_defaults(func=cell_add_main)
@@ -1088,11 +1100,20 @@ def _emit_op_error(exc: Exception, fmt: str) -> int:
 def cell_add_main(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
-    try:
-        source = _read_source_arg(args.file)
-    except OSError as exc:
-        print(f"error: cannot read --file: {exc}", file=sys.stderr)
-        return 2
+    if args.code is not None:
+        source = args.code
+    else:
+        try:
+            source = _read_source_arg(args.file)
+        except OSError as exc:
+            print(f"error: cannot read --file: {exc}", file=sys.stderr)
+            return 2
+
+    if args.run:
+        import asyncio
+
+        return asyncio.run(_cell_add_run_async(args, source))
+
     with _read_ops(args) as ops:
         if ops is None:
             return 2
@@ -1105,6 +1126,55 @@ def cell_add_main(args: argparse.Namespace) -> int:
         else:
             print(f"added {cell.id}  {cell.name}")
         return 0
+
+
+async def _cell_add_run_async(args: argparse.Namespace, source: str) -> int:
+    """Add a cell and immediately run it in one call, folding in the run outcome.
+
+    Mirrors ``cell run``'s backend handling: the local backend syncs its venv
+    first; a remote server owns its own. The JSON payload is the new cell view
+    with the run result nested under ``run``.
+    """
+    from strata.notebook.ops import NotebookOpsError
+
+    is_remote = bool(args.server)
+    ops = _open_read_ops(args)
+    if ops is None:
+        return 2
+    try:
+        try:
+            cell = ops.add_cell(source, after=args.after, language=args.language)
+        except NotebookOpsError as exc:
+            return _emit_op_error(exc, args.format)
+        if not is_remote:
+            rc = await _prepare_env_for_ops(ops, args)
+            if rc != 0:
+                return rc
+        try:
+            result = await ops.run_cell(cell.id, mode="normal")
+        except NotebookOpsError as exc:
+            return _emit_op_error(exc, args.format)
+    finally:
+        if is_remote:
+            _close_ops(ops)
+        else:
+            await ops.aclose()
+
+    if args.format == "json":
+        payload = cell.model_dump(mode="json")
+        payload["run"] = result.model_dump(mode="json")
+        _emit_json(payload)
+    else:
+        print(f"added {cell.id}  {cell.name}")
+        timing = f"{result.execution_method}, {_format_ms(result.duration_ms)}"
+        print(f"{result.status}  {result.cell_id}  ({timing})")
+        if result.stdout:
+            print("--- stdout ---")
+            print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+        if result.error:
+            print("--- error ---")
+            print(result.error)
+    return 0 if result.status == "ok" else 1
 
 
 def cell_edit_main(args: argparse.Namespace) -> int:

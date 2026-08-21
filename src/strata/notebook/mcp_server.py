@@ -210,6 +210,24 @@ async def _add_cell(
     return view.model_dump(mode="json")
 
 
+async def _run_snippet(
+    session_manager: SessionManager,
+    session_id: str,
+    source: str,
+    after: str | None = None,
+    language: str = "python",
+) -> dict[str, Any]:
+    """Add a cell and immediately run it — the one-call scratchpad primitive.
+
+    Composes :func:`_add_cell` + :func:`_run_cell`, so the run broadcasts the same
+    live frames a spectator sees. Returns the new cell view with the run result
+    nested under ``run``.
+    """
+    view = await _add_cell(session_manager, session_id, source, after, language)
+    view["run"] = await _run_cell(session_manager, session_id, view["id"], "normal")
+    return view
+
+
 async def _edit_cell(
     session_manager: SessionManager, session_id: str, cell_id: str, source: str
 ) -> dict[str, Any]:
@@ -380,6 +398,24 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         cell appears live in any attached viewer.
         """
         return await _add_cell(session_manager, session_id, source, after, language)
+
+    @mcp.tool()
+    async def run_snippet(
+        session_id: str,
+        source: str,
+        after: str | None = None,
+        language: str = "python",
+    ) -> dict[str, Any]:
+        """Add a cell and run it in one call — the scratchpad primitive.
+
+        Prefer this over add_cell + run_cell for quick exploration: it mints a
+        cell, executes it (normal mode — a cache hit if the source + inputs are
+        unchanged), and returns the new cell view with the run outcome (status,
+        cache_hit, stdout, stderr) nested under ``run``. The run appears live in
+        any attached viewer. Use ``add_cell`` without a run only when you want to
+        stage a cell without executing it.
+        """
+        return await _run_snippet(session_manager, session_id, source, after, language)
 
     @mcp.tool()
     async def edit_cell(session_id: str, cell_id: str, source: str) -> dict[str, Any]:
