@@ -16,6 +16,7 @@ for back-compat.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from strata.notebook.agent_launch import add_agent_arguments, agent_main
@@ -290,6 +291,43 @@ def _build_parser() -> argparse.ArgumentParser:
     add_agent_arguments(agent_parser)
     agent_parser.set_defaults(func=_dispatch_agent)
 
+    watch_parser = subparsers.add_parser(
+        "watch",
+        help="Attach the read-only TUI to a live notebook session (watch only)",
+        description=(
+            "Open the terminal spectator on a running notebook session, without "
+            "writing any config. Unlike `agent`, it does not create `.mcp.json` / "
+            "`CLAUDE.md` or take over the server lifecycle - it just shows a "
+            "notebook live. Requires a running server (start one with `agent` or "
+            "`python -m strata`)."
+        ),
+    )
+    watch_target = watch_parser.add_mutually_exclusive_group()
+    watch_target.add_argument(
+        "notebook_dir",
+        nargs="?",
+        help="Notebook directory to open/reuse a session for (local path).",
+    )
+    watch_target.add_argument(
+        "--session", metavar="ID", help="Attach to a specific running session id."
+    )
+    watch_parser.add_argument(
+        "--server",
+        default=os.environ.get("STRATA_TUI_SERVER", "http://localhost:8765"),
+        help="Server base URL (default: $STRATA_TUI_SERVER or :8765).",
+    )
+    watch_parser.add_argument(
+        "--user-header",
+        default=os.environ.get("STRATA_TUI_USER_HEADER_NAME"),
+        help="Identity header name (matches the server's personal_mode_user_header).",
+    )
+    watch_parser.add_argument(
+        "--user",
+        default=os.environ.get("STRATA_TUI_USER"),
+        help="Identity header value (needed when the notebook is owned).",
+    )
+    watch_parser.set_defaults(func=_dispatch_watch)
+
     return parser
 
 
@@ -332,6 +370,19 @@ def _dispatch_import(args: argparse.Namespace) -> int:
 
 def _dispatch_agent(args: argparse.Namespace) -> int:
     return agent_main(args)
+
+
+def _dispatch_watch(args: argparse.Namespace) -> int:
+    from strata.notebook.tui.cli import run_spectator
+
+    run_spectator(
+        server=args.server,
+        session=args.session,
+        notebook=args.notebook_dir,
+        user_header=args.user_header,
+        user=args.user,
+    )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
