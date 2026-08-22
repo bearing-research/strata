@@ -2095,6 +2095,16 @@ create one.)</p>
 UI), attach without naming it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata-notebook-tui<span class="w">            </span><span class="c1"># auto-attaches the only running session, or shows a picker</span>
 </code></pre></div>
+<p>The <code>strata</code> CLI wraps the same spectator as <strong><code>strata watch</code></strong>, so you don't need
+the separate binary on <code>PATH</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>watch<span class="w"> </span>./my-notebook<span class="w">     </span><span class="c1"># open/reuse a session for that path, then attach</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>strata<span class="w"> </span>watch<span class="w"> </span>--session<span class="w"> </span>&lt;id&gt;<span class="w">    </span><span class="c1"># attach to a specific running session</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>strata<span class="w"> </span>watch<span class="w">                   </span><span class="c1"># auto-attach the only session, or show a picker</span>
+</code></pre></div>
+<p><code>strata watch</code> is watch-only: unlike <a href="../agent/"><code>strata agent</code></a>, it writes no
+<code>.mcp.json</code> / <code>CLAUDE.md</code> and never owns the server lifecycle - it just shows a
+notebook live. Point it at a scratchpad an agent is driving to see the cells land
+in real time.</p>
 <h2 id="watching-an-agent">Watching an agent<a class="headerlink" href="#watching-an-agent" title="Permanent link">&para;</a></h2>
 <p>The viewer's headline use case is following an AI agent as it drives a notebook
 in another terminal:</p>
@@ -2238,7 +2248,7 @@ otherwise.</p>
 </tbody>
 </table>
 <h2 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata-notebook-tui<span class="w"> </span><span class="o">[</span>--session<span class="w"> </span>ID<span class="w"> </span><span class="p">|</span><span class="w"> </span>--notebook<span class="w"> </span>PATH<span class="o">]</span><span class="w"> </span><span class="o">[</span>--server<span class="w"> </span>URL<span class="o">]</span><span class="w"> </span><span class="o">[</span>--user-header<span class="w"> </span>NAME<span class="w"> </span>--user<span class="w"> </span>VALUE<span class="o">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata-notebook-tui<span class="w"> </span><span class="o">[</span>--session<span class="w"> </span>ID<span class="w"> </span><span class="p">|</span><span class="w"> </span>--notebook<span class="w"> </span>PATH<span class="o">]</span><span class="w"> </span><span class="o">[</span>--server<span class="w"> </span>URL<span class="o">]</span><span class="w"> </span><span class="o">[</span>--user-header<span class="w"> </span>NAME<span class="w"> </span>--user<span class="w"> </span>VALUE<span class="o">]</span>
 </code></pre></div>
 <table>
 <thead>

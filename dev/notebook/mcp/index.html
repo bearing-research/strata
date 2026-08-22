@@ -2041,6 +2041,10 @@ The typical loop:</p>
 <td>Add a cell (server mints the id).</td>
 </tr>
 <tr>
+<td><code>run_snippet(session_id, source, after?, language?)</code></td>
+<td>Add a cell <strong>and run it</strong> in one call; returns the cell view with the run outcome nested under <code>run</code>. The scratchpad primitive.</td>
+</tr>
+<tr>
 <td><code>edit_cell(session_id, cell_id, source)</code></td>
 <td>Replace a cell's source.</td>
 </tr>

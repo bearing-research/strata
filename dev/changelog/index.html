@@ -2871,6 +2871,15 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>One-call add-and-run + <code>strata watch</code> - lower-friction agent scratchpad.</strong>
+  <code>strata cell add</code> gains <code>-c 'src'</code> (inline source) and <code>--run</code> (execute right
+  after adding, folding the run outcome into the JSON), and the notebook MCP
+  server gains a <code>run_snippet</code> tool that adds and runs a cell in a single call -
+  so an exploratory computation costs one call, the same as <code>python -c</code>. New
+  <code>strata watch [dir|--session]</code> attaches the read-only TUI to a live session
+  without writing any config (unlike <code>strata agent</code>), so a human can watch an
+  agent's scratchpad at any moment. See <a href="../notebook/cli/">Notebook CLI</a> and
+  <a href="../notebook/tui/">Terminal Viewer</a>.</li>
 <li><strong>Runtime-hydrated module export - share a cell's <code>def</code>/<code>class</code> even when it
   closes over a runtime value.</strong> Previously a cell that defined a reusable
   function referencing a runtime global (an upstream artifact, or a value
