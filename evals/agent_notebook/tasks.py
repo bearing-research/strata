@@ -131,7 +131,7 @@ def _seed_buggy_function(notebook_dir: Path) -> None:
 
 
 # --- un-primed scratchpad probes: deterministic data files, no notebook prompt --
-# City rows: 4 distinct cities + 2 blanks (of 12). Latency deterministic.
+# City rows: 4 distinct cities (nyc/sf/lon/tok) + 3 blanks, of 12. Latency deterministic.
 _SCRATCH_USERS_CSV = "id,city,latency_ms\n" + "\n".join(
     f"{i},{['nyc', 'sf', 'lon', 'tok', '', 'nyc', ''][i % 7]},{(i * 37) % 400}" for i in range(12)
 )

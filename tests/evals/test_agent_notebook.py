@@ -81,9 +81,12 @@ def test_strata_cli_scratchpad_path_counts_as_notebook_work() -> None:
     add = ToolEvent("Bash", {"command": "strata cell add ./scratch -c 'print(1)' --run"})
     assert add.is_notebook_work and not add.is_escape
     assert ToolEvent("Bash", {"command": "uv run strata cell run ./scratch abc"}).is_notebook_work
+    # rm/mv/annotate mirror the MCP WORK_TOOLS (remove_cell/move_cell) — also work.
+    for cmd in ("strata cell rm ./s abc", "strata cell mv ./s abc 0", "strata cell annotate ./s a"):
+        assert ToolEvent("Bash", {"command": cmd}).is_notebook_work, cmd
     # `strata dep add` is the in-notebook way to add a package — work, not a
-    # bash-install escape.
-    dep = ToolEvent("Bash", {"command": "strata dep add ./scratch numpy"})
+    # bash-install escape (its `pytest`/pkg arg must not trip the detectors).
+    dep = ToolEvent("Bash", {"command": "strata dep add ./scratch pytest"})
     assert dep.is_notebook_work and not dep.is_escape
     # Inspecting via the CLI is a read.
     assert ToolEvent("Bash", {"command": "strata status ./scratch"}).is_notebook_read
@@ -98,6 +101,28 @@ def test_strata_cell_with_python_in_payload_is_not_a_bash_python_escape() -> Non
     assert ev.is_notebook_work
     # A bare `python -c` is still an escape.
     assert ToolEvent("Bash", {"command": "python -c 'print(1)'"}).escape_reason == "bash-python"
+
+
+def test_a_real_escape_is_not_masked_by_a_strata_call_in_the_same_command() -> None:
+    # Per-segment classification: a `strata` call in one segment must not suppress
+    # a genuine python/install bypass in another segment of a compound command.
+    ev = ToolEvent("Bash", {"command": "strata status ./scratch && python -c 'bypass'"})
+    assert ev.escape_reason == "bash-python"
+    assert ev.is_notebook_read  # the strata status half still counts as a read
+    inst = ToolEvent("Bash", {"command": "strata cell list ./s ; pip install evil"})
+    assert inst.escape_reason == "bash-install"
+
+
+def test_scratch_users_csv_ground_truth() -> None:
+    # Pin the seeded data the manual scoring checks against (the comment must not
+    # drift from the generator): 4 distinct non-blank cities, 3 blank rows of 12.
+    from evals.agent_notebook.tasks import _SCRATCH_USERS_CSV
+
+    rows = _SCRATCH_USERS_CSV.splitlines()[1:]  # drop header
+    cities = [r.split(",")[1] for r in rows]
+    assert len(rows) == 12
+    assert sum(1 for c in cities if not c) == 3
+    assert len({c for c in cities if c}) == 4
 
 
 def test_scratchpad_tasks_are_un_primed() -> None:

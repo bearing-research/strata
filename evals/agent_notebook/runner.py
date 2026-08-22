@@ -241,6 +241,19 @@ def main(argv: list[str] | None = None) -> int:
     driver = _build_driver(args)
     live = args.driver != "replay"
 
+    # Scratchpad tasks measure the *un-primed* trigger rate, but live `run_task`
+    # still runs the priming on-ramp (writes the `strata agent` CLAUDE.md). Warn
+    # loudly so the reported in-tool rate isn't misread as un-primed — until the
+    # automated un-primed driver exists, run those tasks by the manual procedure
+    # in the README.
+    if live and any(t.scratchpad for t in tasks):
+        print(
+            "WARNING: scratchpad tasks run PRIMED here — live run_task writes the "
+            "on-ramp CLAUDE.md, so the in-tool rate reflects compliance, NOT the "
+            "un-primed trigger rate. See README 'Un-primed trigger rate'.",
+            file=sys.stderr,
+        )
+
     # Replay can only score tasks it has a transcript for (hard tasks are
     # live-only). Skip the rest with a note instead of erroring, so the
     # documented `--driver replay` command works whatever the selection.
