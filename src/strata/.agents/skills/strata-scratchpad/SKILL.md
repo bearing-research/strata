@@ -61,6 +61,20 @@ strata dep add ./scratch numpy         # or: add_dependency(session_id, "numpy")
 strata cell add ./scratch -c 'import numpy as np; print(np.arange(6).mean())' --run
 ```
 
+## Reading files from your project
+
+A cell executes with its **working directory set to the notebook dir** (e.g.
+`./scratch`), **not** the directory you launched from. So a relative path like
+`open("data.txt")` will *not* find a file that lives in your project — pass the
+**absolute path** instead:
+
+```bash
+strata cell add ./scratch -c 'import json; print(len(json.load(open("/abs/path/to/events.json"))))' --run
+```
+
+(Or declare it as a mount with `# @mount data /abs/path ro` on the cell's first
+line, which injects `data` as a `pathlib.Path`.)
+
 ## Look before you compute
 
 Before recomputing something, check what the scratchpad already holds:
