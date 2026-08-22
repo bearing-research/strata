@@ -29,8 +29,37 @@ blobs or execution metadata bleeding into the history.
 
 **Docs:** [bearing-research.github.io/strata](https://bearing-research.github.io/strata/)
 
+## Give your coding agent a cached scratchpad
+
+Coding agents explore by writing throwaway `python -c` and `/tmp` scripts —
+invisible, uncached, redone every session. Point one at Strata instead and it
+uses a **persistent, cached notebook** as its scratchpad: every snippet becomes a
+content-addressed cell, so the expensive step it ran ten turns ago is still a
+cache hit now, a human can watch it work live, and the work is a git-diffable
+directory instead of discarded scripts.
+
+Install it as a one-command [Claude Code plugin](plugins/strata-scratchpad/)
+(needs the `strata` CLI on `PATH` — `uv tool install strata-notebook`):
+
+```
+/plugin marketplace add bearing-research/strata
+/plugin install strata-scratchpad@strata
+```
+
+<!-- Demo GIF slot. Record with examples/agent_demo/RECORDING.md, save to
+     docs/assets/agent-demo.gif, then uncomment the line below:
+![A coding agent builds a Strata notebook live — the model stays cached when only the evaluation changes](docs/assets/agent-demo.gif)
+-->
+
+Does the agent actually reach for it instead of a scratch script? There's an eval
+that measures exactly that (`evals/agent_notebook/`) — in the un-primed sessions
+tested so far it reaches for the notebook every time, and building the eval
+caught real bugs. Small sample, and honest about it. See
+[Driving a notebook with a coding agent](https://bearing-research.github.io/strata/notebook/agent/).
+
 ## Highlights
 
+- **agent scratchpad:** a Claude Code plugin makes a coding agent use a cached notebook cell for throwaway Python instead of `/tmp` scripts - one-call add-and-run, and unchanged work is never recomputed
 - **content-addressed:** every cell output is keyed by source + inputs + environment - identical work hits the cache forever
 - **reactive:** edit a cell, the cascade re-runs only the downstream cells that depend on it
 - **dag-from-ast:** Strata reads each cell's AST to wire upstream/downstream - no decorators, no manual edges
