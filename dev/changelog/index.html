@@ -2871,6 +2871,15 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>strata-scratchpad</code> agent skill + sharpened working agreement.</strong> The
+  <code>strata-notebook</code> package now ships a <code>strata-scratchpad</code> skill (under
+  <code>&lt;site-packages&gt;/strata/.agents/skills/</code>) that a coding agent discovers in any
+  project, so it reaches for a cached notebook cell for throwaway Python instead
+  of <code>python -c</code> / temp scripts. The <code>strata agent</code> CLAUDE.md working agreement is
+  rewritten to lead with a decision rule, the one-call <code>run_snippet</code>, and the
+  consumed-output caching + edit-and-rerun patterns (including a note that a cell
+  runs in the notebook dir, so project files need absolute paths). See
+  <a href="../notebook/agent/">Driving a notebook with a coding agent</a>.</li>
 <li><strong>One-call add-and-run + <code>strata watch</code> - lower-friction agent scratchpad.</strong>
   <code>strata cell add</code> gains <code>-c 'src'</code> (inline source) and <code>--run</code> (execute right
   after adding, folding the run outcome into the JSON), and the notebook MCP

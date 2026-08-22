@@ -2060,6 +2060,17 @@ agent at it:</p>
 </ul>
 <p>The net effect: the agent's exploration is captured, watchable, and free to
 re-derive — a durable scratchpad instead of a pile of discarded scripts.</p>
+<p>Two things make the agent actually reach for it:</p>
+<ul>
+<li><strong>One-call runs.</strong> <code>run_snippet(session_id, source)</code> (MCP) and <code>strata cell add
+  … -c 'src' --run</code> (CLI) add a cell <strong>and</strong> run it in a single call, returning
+  <code>stdout</code> — the same cost as <code>python -c</code>, so a cell isn't the slower path.</li>
+<li><strong>A shipped skill.</strong> <code>strata-notebook</code> installs a <code>strata-scratchpad</code> skill
+  (under <code>&lt;site-packages&gt;/strata/.agents/skills/</code>) that a coding agent discovers
+  in <strong>any</strong> project — so it knows to use a cached notebook cell for throwaway
+  Python even when it isn't launched inside a notebook directory. A human can
+  attach a live viewer at any moment with <a href="../tui/"><code>strata watch ./scratch</code></a>.</li>
+</ul>
 <h2 id="what-gets-written-into-the-notebook">What gets written into the notebook<a class="headerlink" href="#what-gets-written-into-the-notebook" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong><code>.mcp.json</code></strong> — registers the running server's <code>/mcp</code> endpoint as an MCP
