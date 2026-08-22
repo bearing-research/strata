@@ -208,9 +208,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tasks", help="Comma-separated task ids (default: all)")
     parser.add_argument(
         "--select",
-        choices=["all", "core", "hard"],
+        choices=["all", "core", "hard", "scratchpad"],
         default="all",
-        help="Task group: core (transcript-backed), hard (escape-tempting stress), or all",
+        help=(
+            "Task group: core (transcript-backed), hard (escape-tempting stress), "
+            "scratchpad (un-primed trigger-rate probes), or all"
+        ),
     )
     parser.add_argument("--workdir", default=None, help="Where eval notebooks are built")
     parser.add_argument("--out", default=None, help="Write the full JSON report here")
@@ -227,14 +230,29 @@ def main(argv: list[str] | None = None) -> int:
         except KeyError as exc:
             raise SystemExit(f"unknown task id: {exc}")
     elif args.select == "core":
-        tasks = [t for t in TASKS if not t.hard]
+        tasks = [t for t in TASKS if not t.hard and not t.scratchpad]
     elif args.select == "hard":
         tasks = [t for t in TASKS if t.hard]
+    elif args.select == "scratchpad":
+        tasks = [t for t in TASKS if t.scratchpad]
     else:
         tasks = TASKS
 
     driver = _build_driver(args)
     live = args.driver != "replay"
+
+    # Scratchpad tasks measure the *un-primed* trigger rate, but live `run_task`
+    # still runs the priming on-ramp (writes the `strata agent` CLAUDE.md). Warn
+    # loudly so the reported in-tool rate isn't misread as un-primed — until the
+    # automated un-primed driver exists, run those tasks by the manual procedure
+    # in the README.
+    if live and any(t.scratchpad for t in tasks):
+        print(
+            "WARNING: scratchpad tasks run PRIMED here — live run_task writes the "
+            "on-ramp CLAUDE.md, so the in-tool rate reflects compliance, NOT the "
+            "un-primed trigger rate. See README 'Un-primed trigger rate'.",
+            file=sys.stderr,
+        )
 
     # Replay can only score tasks it has a transcript for (hard tasks are
     # live-only). Skip the rest with a note instead of erroring, so the

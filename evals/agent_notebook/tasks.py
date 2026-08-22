@@ -30,6 +30,13 @@ class Task:
     # to tempt an agent into a scratch-Python escape. They're live-only stress
     # tests (no committed transcript); filter with `--select hard`.
     hard: bool = False
+    # "scratchpad" tasks are the un-primed trigger-rate probes: the prompt never
+    # mentions the notebook, so the agent only reaches for it if the
+    # `strata-scratchpad` skill fired. The headline is the in-tool rate — did it
+    # use `strata cell add --run` / `run_snippet` vs a Bash `python -c`. These
+    # are run un-primed (skill installed, no `strata agent` on-ramp) and live-only;
+    # filter with `--select scratchpad`. See README "Un-primed trigger rate".
+    scratchpad: bool = False
 
 
 def _seed_file(notebook_dir: Path, relpath: str, content: str) -> None:
@@ -121,6 +128,29 @@ def _seed_buggy_function(notebook_dir: Path) -> None:
         notebook_dir,
         ["def discount(price, pct):\n    return price - pct / 100\n"],
     )
+
+
+# --- un-primed scratchpad probes: deterministic data files, no notebook prompt --
+# City rows: 4 distinct cities (nyc/sf/lon/tok) + 3 blanks, of 12. Latency deterministic.
+_SCRATCH_USERS_CSV = "id,city,latency_ms\n" + "\n".join(
+    f"{i},{['nyc', 'sf', 'lon', 'tok', '', 'nyc', ''][i % 7]},{(i * 37) % 400}" for i in range(12)
+)
+# Events: 3 categories, deterministic amounts (total = 780; a=220,b=260,c=300).
+_SCRATCH_EVENTS_JSON = (
+    "["
+    + ",".join(
+        f'{{"category": "{["a", "b", "c"][i % 3]}", "amount": {10 * (i + 1)}}}' for i in range(12)
+    )
+    + "]"
+)
+
+
+def _seed_scratch_users(notebook_dir: Path) -> None:
+    _seed_file(notebook_dir, "users.csv", _SCRATCH_USERS_CSV + "\n")
+
+
+def _seed_scratch_events(notebook_dir: Path) -> None:
+    _seed_file(notebook_dir, "events.json", _SCRATCH_EVENTS_JSON)
 
 
 TASKS: list[Task] = [
@@ -284,6 +314,61 @@ TASKS: list[Task] = [
         expect_variables=["discount", "check_passed"],
         seed=_seed_buggy_function,
         hard=True,
+    ),
+    # --- scratchpad: un-primed trigger-rate probes. The prompt asks only for a
+    # result and never mentions the notebook; the agent reaches for it only if
+    # the `strata-scratchpad` skill fired. Headline = in-tool rate (did it use
+    # `strata cell add --run` / `run_snippet` vs a Bash `python -c`). Data files
+    # seed into the project; expect_variables is empty because the answer is the
+    # printed result, not a named variable. Run un-primed and live-only.
+    Task(
+        id="scratch_distinct_cities",
+        prompt=(
+            "The file users.csv has a `city` column (some rows are blank). How many "
+            "distinct non-blank cities are there, and how many rows have a blank city?"
+        ),
+        seed=_seed_scratch_users,
+        expect_run_clean=False,
+        scratchpad=True,
+    ),
+    Task(
+        id="scratch_p95_latency",
+        prompt=("In users.csv, what is the p95 of the `latency_ms` column? Give the number."),
+        seed=_seed_scratch_users,
+        expect_run_clean=False,
+        scratchpad=True,
+    ),
+    Task(
+        id="scratch_category_totals",
+        prompt=(
+            "events.json is a JSON array of objects with `category` and `amount`. "
+            "Report the total amount per category, sorted high to low."
+        ),
+        seed=_seed_scratch_events,
+        expect_run_clean=False,
+        scratchpad=True,
+    ),
+    Task(
+        id="scratch_amount_fraction",
+        prompt=(
+            "In events.json, what fraction of the `amount` values are above 100? "
+            "Give the fraction and the raw counts."
+        ),
+        seed=_seed_scratch_events,
+        expect_run_clean=False,
+        scratchpad=True,
+    ),
+    Task(
+        id="scratch_verify_function",
+        prompt=(
+            "mathutils.py defines `clamp_pct(x)` meant to clamp a percentage into "
+            "[0, 100]. Is it correct for negative inputs? Check a few cases."
+        ),
+        seed=lambda nb: _seed_file(
+            nb, "mathutils.py", "def clamp_pct(x):\n    return min(x, 100)\n"
+        ),
+        expect_run_clean=False,
+        scratchpad=True,
     ),
 ]
 

@@ -70,6 +70,73 @@ def test_editing_a_cell_file_directly_is_an_escape() -> None:
     assert not ToolEvent("Edit", {"file_path": "/nb/pyproject.toml"}).is_escape
 
 
+def test_run_snippet_mcp_tool_counts_as_work() -> None:
+    # The one-call scratchpad primitive must score like add_cell/run_cell.
+    assert ToolEvent("mcp__strata-notebook__run_snippet").is_notebook_work
+
+
+def test_strata_cli_scratchpad_path_counts_as_notebook_work() -> None:
+    # The scratchpad flow drives the notebook via the `strata` CLI over Bash, not
+    # the MCP tools — those calls must score as work/reads, not fall through.
+    add = ToolEvent("Bash", {"command": "strata cell add ./scratch -c 'print(1)' --run"})
+    assert add.is_notebook_work and not add.is_escape
+    assert ToolEvent("Bash", {"command": "uv run strata cell run ./scratch abc"}).is_notebook_work
+    # rm/mv/annotate mirror the MCP WORK_TOOLS (remove_cell/move_cell) — also work.
+    for cmd in ("strata cell rm ./s abc", "strata cell mv ./s abc 0", "strata cell annotate ./s a"):
+        assert ToolEvent("Bash", {"command": cmd}).is_notebook_work, cmd
+    # `strata dep add` is the in-notebook way to add a package — work, not a
+    # bash-install escape (its `pytest`/pkg arg must not trip the detectors).
+    dep = ToolEvent("Bash", {"command": "strata dep add ./scratch pytest"})
+    assert dep.is_notebook_work and not dep.is_escape
+    # Inspecting via the CLI is a read.
+    assert ToolEvent("Bash", {"command": "strata status ./scratch"}).is_notebook_read
+    assert ToolEvent("Bash", {"command": "strata cell list ./scratch"}).is_notebook_read
+
+
+def test_strata_cell_with_python_in_payload_is_not_a_bash_python_escape() -> None:
+    # A cell whose source imports pytest/python must not read as a bash-python
+    # bypass — it's the agent putting code in a cell, the opposite of an escape.
+    ev = ToolEvent("Bash", {"command": "strata cell add ./scratch -c 'import pytest' --run"})
+    assert ev.escape_reason is None
+    assert ev.is_notebook_work
+    # A bare `python -c` is still an escape.
+    assert ToolEvent("Bash", {"command": "python -c 'print(1)'"}).escape_reason == "bash-python"
+
+
+def test_a_real_escape_is_not_masked_by_a_strata_call_in_the_same_command() -> None:
+    # Per-segment classification: a `strata` call in one segment must not suppress
+    # a genuine python/install bypass in another segment of a compound command.
+    ev = ToolEvent("Bash", {"command": "strata status ./scratch && python -c 'bypass'"})
+    assert ev.escape_reason == "bash-python"
+    assert ev.is_notebook_read  # the strata status half still counts as a read
+    inst = ToolEvent("Bash", {"command": "strata cell list ./s ; pip install evil"})
+    assert inst.escape_reason == "bash-install"
+
+
+def test_scratch_users_csv_ground_truth() -> None:
+    # Pin the seeded data the manual scoring checks against (the comment must not
+    # drift from the generator): 4 distinct non-blank cities, 3 blank rows of 12.
+    from evals.agent_notebook.tasks import _SCRATCH_USERS_CSV
+
+    rows = _SCRATCH_USERS_CSV.splitlines()[1:]  # drop header
+    cities = [r.split(",")[1] for r in rows]
+    assert len(rows) == 12
+    assert sum(1 for c in cities if not c) == 3
+    assert len({c for c in cities if c}) == 4
+
+
+def test_scratchpad_tasks_are_un_primed() -> None:
+    from evals.agent_notebook.tasks import TASKS
+
+    scratch = [t for t in TASKS if t.scratchpad]
+    assert scratch, "expected scratchpad trigger-rate tasks"
+    # The whole point: the prompt must NOT tell the agent to use the notebook —
+    # otherwise it measures compliance, not spontaneous trigger.
+    for t in scratch:
+        low = t.prompt.lower()
+        assert "notebook" not in low and "cell" not in low and "scratch" not in low, t.id
+
+
 # --- graders -------------------------------------------------------------------
 
 
