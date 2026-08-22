@@ -1,0 +1,12 @@
+{
+  "name": "strata-scratchpad",
+  "description": "Use a persistent, cached Strata notebook as a coding agent's scratchpad — quick computations, data exploration, sanity checks — instead of throwaway python -c / temp scripts. Work persists, is watchable, and unchanged runs are instant.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Bearing Research",
+    "url": "https://github.com/bearing-research/strata"
+  },
+  "homepage": "https://bearing-research.github.io/strata/notebook/agent/",
+  "repository": "https://github.com/bearing-research/strata",
+  "license": "Apache-2.0"
+}

@@ -11,6 +11,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **`strata-scratchpad` Claude Code plugin.** The repo now ships a plugin
+  (marketplace `strata`, plugin `plugins/strata-scratchpad/`) bundling the
+  scratchpad skill plus a `/strata-scratchpad:scratch` command. Install with
+  `/plugin marketplace add bearing-research/strata` then `/plugin install
+  strata-scratchpad@strata` — the most reliable way to give any Claude Code
+  session the scratchpad behavior. See
+  [Driving a notebook with a coding agent](notebook/agent.md).
 - **`strata-scratchpad` agent skill + sharpened working agreement.** The
   `strata-notebook` package now ships a `strata-scratchpad` skill (under
   `<site-packages>/strata/.agents/skills/`) that a coding agent discovers in any
