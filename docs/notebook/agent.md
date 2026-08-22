@@ -86,6 +86,21 @@ Two things make the agent actually reach for it:
   Python even when it isn't launched inside a notebook directory. A human can
   attach a live viewer at any moment with [`strata watch ./scratch`](tui.md).
 
+## Installing the scratchpad skill as a plugin
+
+The skill travels with the `strata-notebook` package, but the most reliable way
+to give any Claude Code session the scratchpad behavior is the **plugin**, which
+also bundles a `/strata-scratchpad:scratch` command:
+
+```
+/plugin marketplace add bearing-research/strata
+/plugin install strata-scratchpad@strata
+```
+
+Once installed the skill is auto-discovered in every project (the `strata` CLI
+still needs to be on `PATH`). The plugin source lives in the repo at
+`plugins/strata-scratchpad/`.
+
 ## What gets written into the notebook
 
 - **`.mcp.json`** — registers the running server's `/mcp` endpoint as an MCP
