@@ -74,6 +74,27 @@ def _dag(session_manager: SessionManager, session_id: str) -> dict[str, Any]:
     return _resolve_ops(session_manager, session_id).dag().model_dump(mode="json")
 
 
+def _get_variable(session_manager: SessionManager, session_id: str, name: str) -> dict[str, Any]:
+    """Return the cell that defines *name* — the "do I already have this?" lookup.
+
+    Composes the dag's variable→producer map with ``get_cell``. When *name* isn't
+    defined, returns ``defined: False`` plus the available variable names so the
+    miss doubles as discovery.
+    """
+    ops = _resolve_ops(session_manager, session_id)
+    producers = ops.dag().variable_producer
+    producer = producers.get(name)
+    if producer is None:
+        return {"variable": name, "defined": False, "available": sorted(producers)}
+    if producer.startswith(("sweep:", "fanout:")):
+        # A variant/sweep group has no single producing cell.
+        return {"variable": name, "defined": True, "defined_in": producer}
+    # A plain cell-id producer that get_cell can't fetch is a real error — let it
+    # propagate rather than masking it as "defined".
+    cell = ops.get_cell(producer).model_dump(mode="json")
+    return {"variable": name, "defined": True, "defined_in": cell["id"], "cell": cell}
+
+
 def _status(session_manager: SessionManager, session_id: str) -> dict[str, Any]:
     """Return a compact per-cell status + staleness summary."""
     return _resolve_ops(session_manager, session_id).status().model_dump(mode="json")
@@ -342,6 +363,17 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         Errors if the notebook session or the cell id does not exist.
         """
         return _get_cell(session_manager, session_id, cell_id)
+
+    @mcp.tool()
+    def get_variable(session_id: str, name: str) -> dict[str, Any]:
+        """Look up the cell that defines a variable — "do I already have `name`?"
+
+        Use this before recomputing something: if `name` already exists, reference
+        it in a new cell instead of rebuilding it. Returns the defining cell
+        (source, status, outputs) under ``cell`` with ``defined: true``; if it
+        isn't defined, ``defined: false`` plus the ``available`` variable names.
+        """
+        return _get_variable(session_manager, session_id, name)
 
     @mcp.tool()
     def dag(session_id: str) -> dict[str, Any]:

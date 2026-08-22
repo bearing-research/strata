@@ -173,6 +173,7 @@ view. They open the notebook locally - no server, no env sync:
 ```bash
 strata cell list <notebook_dir>            # every cell: id, name, status, source
 strata cell show <notebook_dir> <cell_id>  # one cell: source, status, outputs, console, staleness
+strata cell show <notebook_dir> --var NAME # the cell that DEFINES a variable (else the available names)
 strata dag       <notebook_dir>            # dependency edges + topological order
 strata status    <notebook_dir>            # per-cell status + staleness summary
 ```

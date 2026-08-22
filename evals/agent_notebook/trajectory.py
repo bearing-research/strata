@@ -27,7 +27,9 @@ WORK_TOOLS = frozenset(
         "remove_dependency",
     }
 )
-READ_TOOLS = frozenset({"list_notebooks", "get_notebook", "get_cell", "dag", "status", "note"})
+READ_TOOLS = frozenset(
+    {"list_notebooks", "get_notebook", "get_cell", "get_variable", "dag", "status", "note"}
+)
 
 # The ways an agent routes *around* the notebook — the escape hatches the
 # working agreement tells it not to use. Each is a distinct bypass:

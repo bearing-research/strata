@@ -9,6 +9,11 @@ exhaustive commit history.
 
 ### Added
 
+- **Variable-addressed lookup — "do I already have this?" for a scratchpad.**
+  `strata cell show <dir> --var NAME` (and the `get_variable` MCP tool) return the
+  cell that defines a variable — its source, status, and outputs — or, if it's not
+  defined, the list of variables that are. Lets an agent reference a value it
+  already computed instead of recomputing it. See [Notebook CLI](docs/notebook/cli.md#inspecting-a-notebook-cell-dag-status).
 - **`strata new --project-mount` — read project files from a scratchpad without
   absolute paths.** Adds a pinned, read-only notebook-level mount of the project
   directory as a `project` Path variable, so a scratchpad living in a

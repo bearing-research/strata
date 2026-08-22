@@ -84,12 +84,15 @@ or add a per-cell `# @mount data /abs/path ro` (injects `data` as a `pathlib.Pat
 Before recomputing something, check what the scratchpad already holds:
 
 ```bash
-strata status ./scratch      # cells, their variables, staleness
-strata cell show ./scratch <cell_id>   # a cell's source + output + console
+strata status ./scratch              # cells, their variables, staleness
+strata cell show ./scratch --var df  # the cell that defines `df` — or, if it's not
+                                     # defined, the list of variables that ARE
+strata cell show ./scratch <cell_id> # a specific cell's source + output + console
 ```
 
-If a variable you need already exists, **reference it in a new cell** rather than
-recomputing it — the DAG wires the dependency and the upstream stays cached.
+(MCP: `get_variable(session_id, "df")`.) If a variable you need already exists,
+**reference it in a new cell** rather than recomputing it — the DAG wires the
+dependency and the upstream stays cached.
 
 ## The caching payoff — how to get it
 
