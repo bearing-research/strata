@@ -11,6 +11,11 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **Add-and-run returns the cell's rendered outputs.** `strata cell add … --run`
+  and the `run_snippet` MCP tool now return the **post-run** cell view, so a cell
+  ending in a bare expression (`df.describe()`, `total`) hands its value back in
+  `outputs` — an agent gets the result without a separate `cell show` or a
+  `print()`.
 - **Variable-addressed lookup — "do I already have this?" for a scratchpad.**
   `strata cell show <dir> --var NAME` (and the `get_variable` MCP tool) return the
   cell that defines a variable — its source, status, and outputs — or, if it's not

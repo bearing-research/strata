@@ -245,7 +245,12 @@ async def _run_snippet(
     nested under ``run``.
     """
     view = await _add_cell(session_manager, session_id, source, after, language)
-    view["run"] = await _run_cell(session_manager, session_id, view["id"], "normal")
+    run = await _run_cell(session_manager, session_id, view["id"], "normal")
+    # Re-fetch the post-run cell so the returned view carries its rendered outputs
+    # (a trailing bare expression's value), not just stdout — the view from
+    # _add_cell is pre-run and has none.
+    view = _get_cell(session_manager, session_id, view["id"])
+    view["run"] = run
     return view
 
 

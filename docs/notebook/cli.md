@@ -267,8 +267,10 @@ strata dep rm        <notebook_dir> <package>                     # uv remove
 same scheme the server uses) and prints the new cell; `mv` prints the new order.
 Pass **`--run`** to execute the cell right after adding it — the one-call
 scratchpad primitive — and the run outcome (`status`, `cache_hit`, `stdout`,
-`stderr`) is folded into the output under `run` (`--no-sync` skips the venv sync,
-as with `cell run`). `cell annotate` splices `# @key` [annotations](annotations.md) into a
+`stderr`) is folded into the output under `run`. The returned cell is the
+**post-run** view, so its rendered `outputs` (a trailing bare expression's value)
+ride along without a separate `cell show` (`--no-sync` skips the venv sync, as
+with `cell run`). `cell annotate` splices `# @key` [annotations](annotations.md) into a
 cell's source (`--set KEY=VALUE` / `--unset KEY`, both repeatable) while leaving
 the body untouched - a convenience over rewriting the whole source with `edit`;
 it targets scalar directives (`name`, `worker`, `timeout`, `model`, …), so edit

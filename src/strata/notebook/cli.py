@@ -1246,6 +1246,10 @@ async def _cell_add_run_async(args: argparse.Namespace, source: str) -> int:
                 return rc
         try:
             result = await ops.run_cell(cell.id, mode="normal")
+            # Re-fetch the post-run cell so the payload carries its rendered
+            # outputs (a trailing bare expression's value), not just stdout — the
+            # pre-run view from add_cell has none.
+            cell = ops.get_cell(cell.id)
         except NotebookOpsError as exc:
             return _emit_op_error(exc, args.format)
     finally:

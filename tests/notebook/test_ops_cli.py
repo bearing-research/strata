@@ -293,6 +293,61 @@ def test_cli_cell_show_requires_exactly_one_of_id_or_var(chain_nb, capsys):
     assert main(["cell", "show", str(chain_nb), "a", "--var", "x", "--format", "json"]) == 2
 
 
+def test_cli_cell_add_run_includes_post_run_outputs(chain_nb, monkeypatch, capsys):
+    # add --run must return the POST-run cell view so its rendered outputs (a
+    # trailing bare expression's value) ride along — not the pre-run view.
+    from strata.notebook import cli as cli_mod
+    from strata.notebook.ops import CellView, OutputView, RunResult
+
+    pre = CellView(
+        id="new",
+        name="",
+        language="python",
+        status="ready",
+        source="1 + 1",
+        staleness_reasons=[],
+        upstream_ids=[],
+        downstream_ids=[],
+        outputs=[],
+        console_stdout="",
+        console_stderr="",
+    )
+    post = pre.model_copy(update={"outputs": [OutputView(content_type="json/object", preview=2)]})
+
+    class _FakeOps:
+        def add_cell(self, source, after=None, language="python"):
+            return pre
+
+        async def run_cell(self, cid, mode="normal"):
+            return RunResult(
+                cell_id=cid,
+                status="ok",
+                cache_hit=False,
+                execution_method="subprocess",
+                duration_ms=1.0,
+                stdout="",
+            )
+
+        def get_cell(self, cid):
+            return post
+
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(cli_mod, "_open_read_ops", lambda args: _FakeOps())
+
+    async def _no_env(ops, args):
+        return 0
+
+    monkeypatch.setattr(cli_mod, "_prepare_env_for_ops", _no_env)
+
+    rc = main(["cell", "add", str(chain_nb), "-c", "1 + 1", "--run", "--format", "json"])
+    assert rc == 0
+    d = json.loads(capsys.readouterr().out)
+    assert d["outputs"] == [o.model_dump(mode="json") for o in post.outputs]
+    assert d["run"]["status"] == "ok"
+
+
 def test_cli_cell_add_inline_c(chain_nb, capsys):
     # `-c` supplies the cell source inline, as an alternative to `--file`.
     assert main(["cell", "add", str(chain_nb), "-c", "w = 7", "--format", "json"]) == 0
