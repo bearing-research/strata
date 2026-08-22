@@ -143,18 +143,23 @@ high in-tool rate means the skill *triggered on its own*.
 | `scratch_amount_fraction` | fraction of amounts above a threshold |
 | `scratch_verify_function` | is `clamp_pct` correct on negatives? |
 
-**Setup differs from the primed path** and is currently a documented manual
-procedure (the automated un-primed driver — skill-install + plain project, no
-on-ramp — is the next increment; today's `run_task` writes the priming
-`CLAUDE.md`):
+**The runner drives it automatically.** For a `scratchpad` task, `run_task` takes
+the **un-primed** path (`_run_scratchpad_task`): it makes a plain project dir,
+seeds the data, installs the skill into a project-scoped `.claude/skills/`, and
+runs the agent with **no on-ramp** — no `.mcp.json`, no priming `CLAUDE.md`. The
+`claude_code` driver detects the absent `.mcp.json` and drops its MCP flags, so
+the agent has only the CLI + the skill. `strata` (with `cell add --run`) must be
+on `PATH`.
 
-1. Install the skill so Claude Code discovers it, e.g.
-   `cp -r <site-packages>/strata/.agents/skills/strata-scratchpad ~/.claude/skills/`
-   (or install the [plugin](../../plugins/strata-scratchpad/)); ensure `strata`
-   (with `cell add --run`) is on `PATH`.
-2. For each `scratchpad` task, seed its data file into a scratch **project** dir
-   and start a fresh `claude` session there with the task prompt verbatim — never
-   adding "use the notebook".
-3. Score adoption by ground truth: did a `scratch/` notebook gain cells (skill
-   used) vs a `python -c` / temp script (escape)? The round-1/round-2 results are
-   in `docs/internal/design-agent-scratchpad-spike.md`.
+```bash
+uv run python -m evals.agent_notebook.runner --driver claude_code \
+    --select scratchpad --repeats 3
+```
+
+The headline is the same in-tool rate; because the prompt never mentions the
+notebook, that number **is** the un-primed trigger rate. Round-1/round-2 results
+are in `docs/internal/design-agent-scratchpad-spike.md`.
+
+In `--driver replay` the same path scores a committed transcript (e.g.
+`scratch_distinct_cities.json`, a `strata cell add --run` run) so CI validates the
+scoring without a live agent.

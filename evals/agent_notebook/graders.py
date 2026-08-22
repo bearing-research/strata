@@ -67,6 +67,10 @@ def notebook_defines(notebook_dir: Path) -> set[str]:
     from strata.notebook.analyzer import analyze_cell
     from strata.notebook.parser import parse_notebook
 
+    # A notebook-less dir (an un-primed scratchpad project, where the agent makes
+    # its own `scratch/` subdir) defines nothing at the top level.
+    if not (notebook_dir / "notebook.toml").is_file():
+        return set()
     state = parse_notebook(notebook_dir)
     defined: set[str] = set()
     for cell in state.cells:

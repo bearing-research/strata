@@ -137,6 +137,42 @@ def test_scratchpad_tasks_are_un_primed() -> None:
         assert "notebook" not in low and "cell" not in low and "scratch" not in low, t.id
 
 
+def test_claude_driver_uses_mcp_flags_only_when_configured() -> None:
+    from evals.agent_notebook.drivers import ClaudeCodeDriver
+
+    d = ClaudeCodeDriver()
+    primed = d._command("hi", use_mcp=True)
+    assert "--mcp-config" in primed and "--strict-mcp-config" in primed
+    # Un-primed scratchpad run: no MCP server, drive via the CLI + skill instead.
+    unprimed = d._command("hi", use_mcp=False)
+    assert "--mcp-config" not in unprimed
+    assert "bypassPermissions" in unprimed and "stream-json" in unprimed
+
+
+def test_install_scratchpad_skill_copies_into_project(tmp_path) -> None:
+    from evals.agent_notebook.runner import _install_scratchpad_skill
+
+    _install_scratchpad_skill(tmp_path)
+    skill = tmp_path / ".claude" / "skills" / "strata-scratchpad" / "SKILL.md"
+    assert skill.is_file()
+    assert "name: strata-scratchpad" in skill.read_text(encoding="utf-8")
+
+
+def test_scratchpad_task_scores_cli_adoption_via_replay(tmp_path) -> None:
+    # End-to-end through the un-primed path: the committed transcript drives a
+    # `strata cell add --run` (CLI) run, which the classifier scores as in-tool.
+    from evals.agent_notebook.drivers import ReplayDriver
+    from evals.agent_notebook.runner import run_task
+
+    res = run_task(
+        TASKS_BY_ID["scratch_distinct_cities"], ReplayDriver(TRANSCRIPTS), tmp_path, live=False
+    )
+    assert res.in_tool.in_tool_rate == 1.0
+    assert res.in_tool.escapes == 0
+    # A notebook-less project dir must not crash completion grading.
+    assert res.completion.missing_variables == []
+
+
 # --- graders -------------------------------------------------------------------
 
 
