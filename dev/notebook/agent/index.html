@@ -1047,6 +1047,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#installing-the-scratchpad-skill-as-a-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installing the scratchpad skill as a plugin
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-gets-written-into-the-notebook" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1937,6 +1948,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#installing-the-scratchpad-skill-as-a-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installing the scratchpad skill as a plugin
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-gets-written-into-the-notebook" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2071,6 +2093,16 @@ re-derive — a durable scratchpad instead of a pile of discarded scripts.</p>
   Python even when it isn't launched inside a notebook directory. A human can
   attach a live viewer at any moment with <a href="../tui/"><code>strata watch ./scratch</code></a>.</li>
 </ul>
+<h2 id="installing-the-scratchpad-skill-as-a-plugin">Installing the scratchpad skill as a plugin<a class="headerlink" href="#installing-the-scratchpad-skill-as-a-plugin" title="Permanent link">&para;</a></h2>
+<p>The skill travels with the <code>strata-notebook</code> package, but the most reliable way
+to give any Claude Code session the scratchpad behavior is the <strong>plugin</strong>, which
+also bundles a <code>/strata-scratchpad:scratch</code> command:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>/plugin marketplace add bearing-research/strata
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>/plugin install strata-scratchpad@strata
+</code></pre></div>
+<p>Once installed the skill is auto-discovered in every project (the <code>strata</code> CLI
+still needs to be on <code>PATH</code>). The plugin source lives in the repo at
+<code>plugins/strata-scratchpad/</code>.</p>
 <h2 id="what-gets-written-into-the-notebook">What gets written into the notebook<a class="headerlink" href="#what-gets-written-into-the-notebook" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong><code>.mcp.json</code></strong> — registers the running server's <code>/mcp</code> endpoint as an MCP

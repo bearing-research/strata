@@ -2871,6 +2871,13 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong><code>strata-scratchpad</code> Claude Code plugin.</strong> The repo now ships a plugin
+  (marketplace <code>strata</code>, plugin <code>plugins/strata-scratchpad/</code>) bundling the
+  scratchpad skill plus a <code>/strata-scratchpad:scratch</code> command. Install with
+  <code>/plugin marketplace add bearing-research/strata</code> then <code>/plugin install
+  strata-scratchpad@strata</code> — the most reliable way to give any Claude Code
+  session the scratchpad behavior. See
+  <a href="../notebook/agent/">Driving a notebook with a coding agent</a>.</li>
 <li><strong><code>strata-scratchpad</code> agent skill + sharpened working agreement.</strong> The
   <code>strata-notebook</code> package now ships a <code>strata-scratchpad</code> skill (under
   <code>&lt;site-packages&gt;/strata/.agents/skills/</code>) that a coding agent discovers in any
