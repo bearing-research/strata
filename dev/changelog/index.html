@@ -2871,6 +2871,11 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Variable-addressed lookup — "do I already have this?" for a scratchpad.</strong>
+  <code>strata cell show &lt;dir&gt; --var NAME</code> (and the <code>get_variable</code> MCP tool) return the
+  cell that defines a variable — its source, status, and outputs — or, if it's not
+  defined, the list of variables that are. Lets an agent reference a value it
+  already computed instead of recomputing it. See <a href="../notebook/cli/#inspecting-a-notebook-cell-dag-status">Notebook CLI</a>.</li>
 <li><strong><code>strata new --project-mount</code> — read project files from a scratchpad without
   absolute paths.</strong> Adds a pinned, read-only notebook-level mount of the project
   directory as a <code>project</code> Path variable, so a scratchpad living in a
