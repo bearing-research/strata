@@ -46,9 +46,11 @@ CLI (works anywhere, no server needed):
 strata cell add ./scratch -c 'print(sum(range(6)) / 6)' --run
 ```
 
-Returns JSON: the new cell plus a `run` block with `status`, `cache_hit`,
-`stdout`, `stderr`. The first run of new code is always cold (`cache_hit: false`)
-— that's expected.
+Returns JSON: the new cell (with its rendered `outputs`) plus a `run` block with
+`status`, `cache_hit`, `stdout`, `stderr`. The first run of new code is always
+cold (`cache_hit: false`) — that's expected. **End a cell in a bare expression**
+(e.g. a final line `df.describe()` or `total`) to get its value back in
+`outputs` — you don't have to `print()` it. Use `print(...)` for free-form text.
 
 MCP (when a session is connected — visible live in the viewer):
 
