@@ -53,6 +53,37 @@ def test_create_notebook():
         assert (notebook_dir / "cells").is_dir()
 
 
+def test_create_notebook_project_mount_adds_pinned_ro_mount():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        parent = Path(tmpdir)
+        notebook_dir = create_notebook(
+            parent, "Scratch", initialize_environment=False, project_mount="project"
+        )
+        nb = parse_notebook(notebook_dir)
+        assert len(nb.mounts) == 1
+        mount = nb.mounts[0]
+        assert mount.name == "project"
+        # Points at the project (parent) dir, read-only, and pinned so it never
+        # gets fingerprinted (no directory hashing, no staleness churn).
+        assert mount.uri == f"file://{parent}"
+        assert mount.mode.value == "ro"
+        assert mount.pin is not None
+
+
+def test_create_notebook_without_project_mount_has_no_mounts():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Plain", initialize_environment=False)
+        assert parse_notebook(notebook_dir).mounts == []
+
+
+def test_create_notebook_project_mount_rejects_bad_identifier():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with pytest.raises(ValueError, match="identifier"):
+            create_notebook(
+                Path(tmpdir), "Bad", initialize_environment=False, project_mount="not-an-ident"
+            )
+
+
 def test_update_environment_metadata_reads_pyvenv_cfg_without_subprocess(
     monkeypatch: pytest.MonkeyPatch,
 ):

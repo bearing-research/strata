@@ -146,7 +146,7 @@ run` is the expensive step. See
 Scaffold a notebook directory without the server:
 
 ```bash
-strata new "My Analysis" [--parent DIR] [--python 3.12] [--no-env] [--format human|json]
+strata new "My Analysis" [--parent DIR] [--python 3.12] [--no-env] [--project-mount [NAME]] [--format human|json]
 ```
 
 Creates `<parent>/my_analysis/` with `notebook.toml`, `pyproject.toml`
@@ -154,6 +154,15 @@ Creates `<parent>/my_analysis/` with `notebook.toml`, `pyproject.toml`
 directory, then syncs the venv (skip with `--no-env`; `strata run` syncs it
 later). Idempotent on an existing notebook directory: the `notebook_id` and
 any existing cells are preserved, so re-running it never orphans artifacts.
+
+`--project-mount [NAME]` adds a notebook-level **read-only mount of `--parent`**
+(the project directory) as a `Path` variable `NAME` (default `project`) in every
+cell — so cells read project files as `open(project / "file")` without absolute
+paths, even though a cell runs with its working directory set to the notebook
+dir. The mount is **pinned**, so it never gets fingerprinted (no directory
+hashing, and the project's own churn never re-stales cells). This is the
+scratchpad-friendly default when the notebook lives in a subdirectory of a
+project (see the [notebook scratchpad skill](agent.md#why-its-a-good-agent-scratchpad)).
 
 ## Inspecting a notebook (`cell`, `dag`, `status`)
 

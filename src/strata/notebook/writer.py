@@ -471,6 +471,7 @@ def create_notebook(
     *,
     initialize_environment: bool = True,
     owner: str | None = None,
+    project_mount: str | None = None,
 ) -> Path:
     """Create a new notebook directory with notebook.toml and pyproject.toml.
 
@@ -482,6 +483,12 @@ def create_notebook(
         owner: Opaque identity string stamped into notebook.toml. None means
             unowned (the default for non-shared deployments). Set by callers
             that have resolved a caller identity from a request header.
+        project_mount: When set, add a notebook-level read-only mount of
+            *parent_dir* (the project) under this variable name, so cells can
+            read project files as ``open(<name> / "file")`` without absolute
+            paths. The mount is ``pin``-ed so it never contributes staleness
+            (no directory hashing, no churn from the project's own changes) —
+            the scratchpad-friendly default. See the notebook scratchpad skill.
 
     Returns:
         Path to created notebook directory
@@ -549,6 +556,16 @@ def create_notebook(
         except Exception:
             pass
 
+    # Optional project mount: a pinned read-only mount of the project dir, so
+    # cells read project files as `open(<name> / "file")` without absolute paths.
+    # Pinned → no directory hashing and a stable fingerprint (the project's own
+    # churn, including this notebook's .strata/, never re-stales cells).
+    mounts: list[MountSpec] = []
+    if project_mount is not None:
+        if not project_mount.isidentifier():
+            raise ValueError(f"--project-mount name {project_mount!r} must be a valid identifier")
+        mounts.append(MountSpec(name=project_mount, uri=f"file://{parent_dir}", pin="project-root"))
+
     # Create notebook.toml
     now = datetime.now(tz=UTC)
     notebook_toml = NotebookToml(
@@ -558,6 +575,7 @@ def create_notebook(
         created_at=existing_created_at or now,
         updated_at=now,
         cells=existing_cells,
+        mounts=mounts,
     )
     write_notebook_toml(notebook_dir, notebook_toml)
 
