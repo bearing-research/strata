@@ -9,6 +9,15 @@ exhaustive commit history.
 
 ### Added
 
+- **`strata-scratchpad` agent skill + sharpened working agreement.** The
+  `strata-notebook` package now ships a `strata-scratchpad` skill (under
+  `<site-packages>/strata/.agents/skills/`) that a coding agent discovers in any
+  project, so it reaches for a cached notebook cell for throwaway Python instead
+  of `python -c` / temp scripts. The `strata agent` CLAUDE.md working agreement is
+  rewritten to lead with a decision rule, the one-call `run_snippet`, and the
+  consumed-output caching + edit-and-rerun patterns (including a note that a cell
+  runs in the notebook dir, so project files need absolute paths). See
+  [Driving a notebook with a coding agent](docs/notebook/agent.md).
 - **One-call add-and-run + `strata watch` - lower-friction agent scratchpad.**
   `strata cell add` gains `-c 'src'` (inline source) and `--run` (execute right
   after adding, folding the run outcome into the JSON), and the notebook MCP
