@@ -628,6 +628,20 @@ def add_new_arguments(parser: argparse.ArgumentParser) -> None:
         help="Skip creating the uv venv now; `strata run` will sync it later",
     )
     parser.add_argument(
+        "--project-mount",
+        dest="project_mount",
+        nargs="?",
+        const="project",
+        default=None,
+        metavar="NAME",
+        help=(
+            "Mount --parent (the project dir) read-only as a Path variable NAME "
+            "(default 'project') in every cell, so cells read project files as "
+            "`open(NAME / 'file')` without absolute paths. Pinned, so it never "
+            "adds staleness. Handy for a scratchpad living in a project subdir."
+        ),
+    )
+    parser.add_argument(
         "--format",
         choices=["human", "json"],
         default="human",
@@ -651,6 +665,7 @@ def new_main(args: argparse.Namespace) -> int:
             args.name,
             args.python_version,
             initialize_environment=not args.no_env,
+            project_mount=getattr(args, "project_mount", None),
         )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)

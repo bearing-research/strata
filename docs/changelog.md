@@ -11,6 +11,13 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **`strata new --project-mount` — read project files from a scratchpad without
+  absolute paths.** Adds a pinned, read-only notebook-level mount of the project
+  directory as a `project` Path variable, so a scratchpad living in a
+  subdirectory reads project files as `open(project / "file")` even though a cell
+  runs in the notebook dir. Pinned → no directory hashing and no staleness churn.
+  The `strata-scratchpad` skill now uses it, removing the absolute-path papercut
+  the un-primed measurement surfaced. See [Notebook CLI](notebook/cli.md#strata-new).
 - **`strata-scratchpad` Claude Code plugin.** The repo now ships a plugin
   (marketplace `strata`, plugin `plugins/strata-scratchpad/`) bundling the
   scratchpad skill plus a `/strata-scratchpad:scratch` command. Install with

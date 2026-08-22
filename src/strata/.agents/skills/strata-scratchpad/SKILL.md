@@ -25,9 +25,12 @@ and edit-and-rerun them.
 Create a scratchpad notebook if one doesn't exist yet, and gitignore it:
 
 ```bash
-strata new scratch --parent . --no-env    # creates ./scratch/ (a notebook dir)
+strata new scratch --parent . --no-env --project-mount   # ./scratch/, project mounted as `project`
 echo "scratch/" >> .gitignore              # optional; it's your workspace
 ```
+
+`--project-mount` mounts the project dir read-only as a `project` Path variable in
+every cell, so you can read project files as `project / "file"` (see below).
 
 If a `strata-notebook` **MCP server is connected** (you were launched via
 `strata agent`, or `.mcp.json` registers one), prefer the MCP tools below —
@@ -64,16 +67,17 @@ strata cell add ./scratch -c 'import numpy as np; print(np.arange(6).mean())' --
 ## Reading files from your project
 
 A cell executes with its **working directory set to the notebook dir** (e.g.
-`./scratch`), **not** the directory you launched from. So a relative path like
-`open("data.txt")` will *not* find a file that lives in your project — pass the
-**absolute path** instead:
+`./scratch`), **not** the directory you launched from — so a bare
+`open("data.txt")` won't find a file in your project. If you created the
+scratchpad with `--project-mount` (above), read project files through the
+`project` Path variable, which points at the project root:
 
 ```bash
-strata cell add ./scratch -c 'import json; print(len(json.load(open("/abs/path/to/events.json"))))' --run
+strata cell add ./scratch -c 'import json; print(len(json.load(open(project / "events.json"))))' --run
 ```
 
-(Or declare it as a mount with `# @mount data /abs/path ro` on the cell's first
-line, which injects `data` as a `pathlib.Path`.)
+Without the mount, pass an **absolute path** instead (`open("/abs/path/events.json")`),
+or add a per-cell `# @mount data /abs/path ro` (injects `data` as a `pathlib.Path`).
 
 ## Look before you compute
 

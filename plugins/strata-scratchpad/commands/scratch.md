@@ -7,11 +7,14 @@ ad-hoc Python for the rest of this session, instead of `python -c` or temp
 scripts.
 
 1. If `./scratch/notebook.toml` doesn't exist yet, create it:
-   `strata new scratch --parent . --no-env` (and add `scratch/` to `.gitignore`).
+   `strata new scratch --parent . --no-env --project-mount` (and add `scratch/` to
+   `.gitignore`). `--project-mount` exposes the project dir as a `project` Path in
+   every cell.
 2. From now on, run throwaway Python as a cell:
    `strata cell add ./scratch -c '<code>' --run` — it adds a cell and runs it in
-   one call, returning `stdout`. Read project files by **absolute path** (a cell
-   runs in the notebook dir). Add third-party libs with `strata dep add ./scratch <pkg>` first.
+   one call, returning `stdout`. Read project files via the `project` Path
+   (`open(project / "file")`); a cell runs in the notebook dir, so a bare relative
+   path won't find them. Add third-party libs with `strata dep add ./scratch <pkg>` first.
 3. Reuse instead of recomputing: `strata status ./scratch` to see prior cells and
    their variables; reference an existing variable in a new cell rather than
    recomputing it. Put an expensive step in its own cell whose result a later cell
