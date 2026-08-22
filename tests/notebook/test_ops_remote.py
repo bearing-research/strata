@@ -157,6 +157,44 @@ def test_cli_no_target_is_exit_2(capsys):
     assert "notebook directory or --server" in capsys.readouterr().err
 
 
+def test_cli_show_by_id_routes_to_remote(monkeypatch, capsys):
+    # Regression: `cell show --server … <id>` must reach get_cell(<id>). With
+    # cell_id now optional (for --var), argparse could misfile the lone positional
+    # into notebook_dir; cell_show_main recovers it for the remote form.
+    seen = {}
+
+    class _FakeRemote:
+        def __init__(self, base_url, session_id, **_):
+            assert base_url == "http://srv" and session_id == "s1"
+
+        def get_cell(self, cell_id):
+            seen["cell_id"] = cell_id
+            return CellView(
+                id=cell_id,
+                name="",
+                language="python",
+                status="ready",
+                source="x = 1",
+                staleness_reasons=[],
+                upstream_ids=[],
+                downstream_ids=[],
+                outputs=[OutputView()],
+                console_stdout="",
+                console_stderr="",
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("strata.notebook.ops.RemoteNotebookOps", _FakeRemote)
+    rc = main(
+        ["cell", "show", "--server", "http://srv", "--session", "s1", "mycell", "--format", "json"]
+    )
+    assert rc == 0
+    assert seen["cell_id"] == "mycell"
+    assert json.loads(capsys.readouterr().out)["id"] == "mycell"
+
+
 def test_cli_list_routes_to_remote(monkeypatch, capsys):
     class _FakeRemote:
         def __init__(self, base_url, session_id, **_):

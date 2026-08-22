@@ -18,6 +18,7 @@ from strata.notebook.mcp_server import (
     _edit_cell,
     _get_cell,
     _get_notebook,
+    _get_variable,
     _list_notebooks,
     _move_cell,
     _note,
@@ -161,6 +162,16 @@ async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
         and "ran cell a" in m["payload"]["text"]
         for m in notes
     )
+
+
+def test_get_variable_defined_and_undefined(sm_with_session):
+    sm, session_id, _ = sm_with_session
+    # sm_with_session: cell `a` defines x, cell `b` defines y (= x + 1).
+    hit = _get_variable(sm, session_id, "x")
+    assert hit["defined"] is True and hit["defined_in"] == "a"
+    assert hit["cell"]["source"] == "x = 1"
+    miss = _get_variable(sm, session_id, "nope")
+    assert miss["defined"] is False and miss["available"] == ["x", "y"]
 
 
 @pytest.mark.asyncio
