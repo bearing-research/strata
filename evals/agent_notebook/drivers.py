@@ -135,14 +135,14 @@ class ClaudeCodeDriver:
         self.timeout = timeout
         self.max_budget_usd = max_budget_usd
 
-    def _command(self, prompt: str) -> list[str]:
-        cmd = [
-            self.binary,
-            "-p",
-            prompt,
-            "--mcp-config",
-            ".mcp.json",
-            "--strict-mcp-config",
+    def _command(self, prompt: str, *, use_mcp: bool) -> list[str]:
+        cmd = [self.binary, "-p", prompt]
+        if use_mcp:
+            # Primed on-ramp: the notebook has a .mcp.json wiring the strata
+            # tools. The un-primed scratchpad flow has none — the agent drives
+            # the notebook through the `strata` CLI + the installed skill instead.
+            cmd += ["--mcp-config", ".mcp.json", "--strict-mcp-config"]
+        cmd += [
             "--permission-mode",
             "bypassPermissions",
             "--output-format",
@@ -154,8 +154,10 @@ class ClaudeCodeDriver:
         return cmd
 
     def run(self, task: Task, notebook_dir: Path) -> Trajectory:
+        # Adapt to the setup: MCP flags only when the on-ramp wrote a .mcp.json.
+        use_mcp = (notebook_dir / ".mcp.json").is_file()
         proc = subprocess.run(
-            self._command(task.prompt),
+            self._command(task.prompt, use_mcp=use_mcp),
             cwd=str(notebook_dir),
             capture_output=True,
             text=True,

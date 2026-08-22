@@ -1,0 +1,18 @@
+{
+  "events": [
+    {
+      "name": "Bash",
+      "arguments": {
+        "command": "strata new scratch --parent . --no-env --project-mount"
+      }
+    },
+    {
+      "name": "Bash",
+      "arguments": {
+        "command": "strata cell add ./scratch -c 'import csv\\nrows = list(csv.DictReader(open(project / \"users.csv\")))\\ncities = [r[\"city\"] for r in rows]\\ndistinct = sorted({c for c in cities if c.strip()})\\nblank = sum(1 for c in cities if not c.strip())\\nprint(len(distinct), distinct, blank)' --run"
+      }
+    }
+  ],
+  "final_text": "4 distinct cities (lon, nyc, sf, tok); 3 rows have a blank city.",
+  "ok": true
+}

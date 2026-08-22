@@ -4,6 +4,9 @@ Per task the runner drives the **real on-ramp** — it reuses the same
 ``agent_launch`` helpers ``strata agent`` uses (create-or-open, spawn a server
 with MCP, open a session, write ``.mcp.json`` + ``CLAUDE.md``) — then hands the
 prepared notebook to a driver, scores the run, and tears the server down.
+``scratchpad`` tasks are the exception: they run **un-primed** (a plain project
+with the skill installed and no on-ramp) via :func:`_run_scratchpad_task`, so
+their in-tool rate is the spontaneous trigger rate, not compliance.
 
 Local (real Claude Code):
 
@@ -81,6 +84,42 @@ def _strata_run_ok(notebook_dir: Path) -> bool:
         return False
 
 
+def _install_scratchpad_skill(project_dir: Path) -> None:
+    """Copy the packaged ``strata-scratchpad`` skill into a project-scoped
+    ``.claude/skills/`` so Claude Code discovers it — the un-primed equivalent of
+    the on-ramp's CLAUDE.md, without telling the agent to use the notebook.
+    """
+    import shutil
+
+    import strata
+
+    src = Path(strata.__file__).parent / ".agents" / "skills" / "strata-scratchpad" / "SKILL.md"
+    dst_dir = project_dir / ".claude" / "skills" / "strata-scratchpad"
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dst_dir / "SKILL.md")
+
+
+def _run_scratchpad_task(
+    task: Task, driver: Driver, workdir: Path, *, live: bool, label: str | None
+) -> RunResult:
+    """Un-primed trigger-rate run: a plain project dir with the skill installed but
+    **no** on-ramp (no .mcp.json, no priming CLAUDE.md). The prompt never mentions
+    the notebook, so the in-tool rate measures whether the skill fired on its own.
+    Ground truth is the trajectory (CLI-aware classifier), so completion is N/A.
+    """
+    project_dir = Path(workdir) / (label or task.id)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    if task.seed is not None:
+        task.seed(project_dir)  # data files land in the project, not a notebook
+    if live:
+        _install_scratchpad_skill(project_dir)
+    try:
+        traj = driver.run(task, project_dir)
+    except Exception as exc:  # driver boundary: isolate a bad run
+        return _errored(task, driver, project_dir, f"driver error: {exc}")
+    return score_run(task.id, driver.name, traj, project_dir, [], run_ok=None)
+
+
 def run_task(
     task: Task, driver: Driver, workdir: Path, *, live: bool = True, label: str | None = None
 ) -> RunResult:
@@ -94,7 +133,13 @@ def run_task(
 
     ``label`` names the notebook subdir (defaults to the task id); repeats pass a
     distinct label per run so each gets its own fresh notebook.
+
+    Scratchpad tasks take the un-primed path (:func:`_run_scratchpad_task`): a
+    plain project with the skill installed and no on-ramp.
     """
+    if task.scratchpad:
+        return _run_scratchpad_task(task, driver, workdir, live=live, label=label)
+
     notebook_dir = agent_launch._resolve_notebook_dir(
         str(workdir / (label or task.id)), None, initialize_environment=live
     )
@@ -240,19 +285,6 @@ def main(argv: list[str] | None = None) -> int:
 
     driver = _build_driver(args)
     live = args.driver != "replay"
-
-    # Scratchpad tasks measure the *un-primed* trigger rate, but live `run_task`
-    # still runs the priming on-ramp (writes the `strata agent` CLAUDE.md). Warn
-    # loudly so the reported in-tool rate isn't misread as un-primed — until the
-    # automated un-primed driver exists, run those tasks by the manual procedure
-    # in the README.
-    if live and any(t.scratchpad for t in tasks):
-        print(
-            "WARNING: scratchpad tasks run PRIMED here — live run_task writes the "
-            "on-ramp CLAUDE.md, so the in-tool rate reflects compliance, NOT the "
-            "un-primed trigger rate. See README 'Un-primed trigger rate'.",
-            file=sys.stderr,
-        )
 
     # Replay can only score tasks it has a transcript for (hard tasks are
     # live-only). Skip the rest with a note instead of erroring, so the
