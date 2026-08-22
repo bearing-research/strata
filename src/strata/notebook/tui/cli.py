@@ -42,27 +42,41 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> None:
-    """Parse args and launch the Textual spectator.
+def run_spectator(
+    *,
+    server: str,
+    session: str | None = None,
+    notebook: str | Path | None = None,
+    user_header: str | None = None,
+    user: str | None = None,
+) -> None:
+    """Launch the read-only Textual spectator against a running server.
 
-    With no ``--session`` / ``--notebook``, the app lists the caller's running
-    sessions and (auto-attaches the only one, else) shows an interactive picker.
+    Shared by this binary and the ``strata watch`` subcommand. With neither
+    *session* nor *notebook*, the app lists the caller's running sessions and
+    (auto-attaches the only one, else) shows an interactive picker.
     """
-    args = _build_parser().parse_args(argv)
-
     # Lazy import so ``--help`` doesn't pay the Textual import cost.
     from strata.notebook.tui.app import NotebookTUI
     from strata.notebook.tui.client import TuiClient
 
     headers: dict[str, str] = {}
-    if args.user_header and args.user:
-        headers[args.user_header] = args.user
+    if user_header and user:
+        headers[user_header] = user
 
-    client = TuiClient(server_url=args.server, auth_headers=headers)
-    notebook_path = str(args.notebook.expanduser().resolve()) if args.notebook else None
+    client = TuiClient(server_url=server, auth_headers=headers)
+    notebook_path = str(Path(notebook).expanduser().resolve()) if notebook else None
 
-    NotebookTUI(
-        client=client,
-        session_id=args.session,
-        notebook_path=notebook_path,
-    ).run()
+    NotebookTUI(client=client, session_id=session, notebook_path=notebook_path).run()
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Parse args and launch the Textual spectator."""
+    args = _build_parser().parse_args(argv)
+    run_spectator(
+        server=args.server,
+        session=args.session,
+        notebook=args.notebook,
+        user_header=args.user_header,
+        user=args.user,
+    )

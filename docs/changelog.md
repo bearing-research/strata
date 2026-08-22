@@ -11,6 +11,15 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **One-call add-and-run + `strata watch` - lower-friction agent scratchpad.**
+  `strata cell add` gains `-c 'src'` (inline source) and `--run` (execute right
+  after adding, folding the run outcome into the JSON), and the notebook MCP
+  server gains a `run_snippet` tool that adds and runs a cell in a single call -
+  so an exploratory computation costs one call, the same as `python -c`. New
+  `strata watch [dir|--session]` attaches the read-only TUI to a live session
+  without writing any config (unlike `strata agent`), so a human can watch an
+  agent's scratchpad at any moment. See [Notebook CLI](notebook/cli.md) and
+  [Terminal Viewer](notebook/tui.md).
 - **Runtime-hydrated module export - share a cell's `def`/`class` even when it
   closes over a runtime value.** Previously a cell that defined a reusable
   function referencing a runtime global (an upstream artifact, or a value

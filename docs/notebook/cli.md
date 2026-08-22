@@ -243,7 +243,7 @@ An agent can also build and edit a notebook through commands (instead of writing
 `notebook.toml` + `cells/*.py` by hand):
 
 ```bash
-strata cell add      <notebook_dir> --file body.py [--after <id>] [--language python|markdown|sql|r|prompt]
+strata cell add      <notebook_dir> (--file body.py | -c 'src') [--run] [--after <id>] [--language python|markdown|sql|r|prompt]
 strata cell edit     <notebook_dir> <cell_id> --file body.py     # replace a cell's source
 strata cell rm       <notebook_dir> <cell_id>                     # delete a cell
 strata cell mv       <notebook_dir> <cell_id> --to <index>        # reorder (0-based)
@@ -252,9 +252,13 @@ strata dep add       <notebook_dir> <package>                     # uv add
 strata dep rm        <notebook_dir> <package>                     # uv remove
 ```
 
-`--file -` reads cell source from stdin. `cell add` mints a backend-style 8-char
-id (the same scheme the server uses) and prints the new cell; `mv` prints the new
-order. `cell annotate` splices `# @key` [annotations](annotations.md) into a
+`--file -` reads cell source from stdin; `-c 'src'` passes the source inline
+(the two are mutually exclusive). `cell add` mints a backend-style 8-char id (the
+same scheme the server uses) and prints the new cell; `mv` prints the new order.
+Pass **`--run`** to execute the cell right after adding it — the one-call
+scratchpad primitive — and the run outcome (`status`, `cache_hit`, `stdout`,
+`stderr`) is folded into the output under `run` (`--no-sync` skips the venv sync,
+as with `cell run`). `cell annotate` splices `# @key` [annotations](annotations.md) into a
 cell's source (`--set KEY=VALUE` / `--unset KEY`, both repeatable) while leaving
 the body untouched - a convenience over rewriting the whole source with `edit`;
 it targets scalar directives (`name`, `worker`, `timeout`, `model`, …), so edit

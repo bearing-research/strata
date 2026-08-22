@@ -61,6 +61,20 @@ UI), attach without naming it:
 strata-notebook-tui            # auto-attaches the only running session, or shows a picker
 ```
 
+The `strata` CLI wraps the same spectator as **`strata watch`**, so you don't need
+the separate binary on `PATH`:
+
+```bash
+strata watch ./my-notebook     # open/reuse a session for that path, then attach
+strata watch --session <id>    # attach to a specific running session
+strata watch                   # auto-attach the only session, or show a picker
+```
+
+`strata watch` is watch-only: unlike [`strata agent`](agent.md), it writes no
+`.mcp.json` / `CLAUDE.md` and never owns the server lifecycle - it just shows a
+notebook live. Point it at a scratchpad an agent is driving to see the cells land
+in real time.
+
 ## Watching an agent
 
 The viewer's headline use case is following an AI agent as it drives a notebook

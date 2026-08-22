@@ -24,6 +24,7 @@ from strata.notebook.mcp_server import (
     _remove_cell,
     _remove_dependency,
     _run_cell,
+    _run_snippet,
     _run_tests,
     _status,
     build_mcp_app,
@@ -160,6 +161,44 @@ async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
         and "ran cell a" in m["payload"]["text"]
         for m in notes
     )
+
+
+@pytest.mark.asyncio
+async def test_run_snippet_adds_then_runs_in_one_call(sm_with_session, monkeypatch):
+    sm, session_id, _ = sm_with_session
+
+    async def fake_broadcast(session, cell_id, execution_state, notebook_id, mode="normal"):
+        class _Result:
+            def to_dict(self):
+                return {
+                    "cell_id": cell_id,
+                    "status": "ready",
+                    "cache_hit": False,
+                    "execution_method": "subprocess",
+                    "duration_ms": 5.0,
+                    "stdout": "snippet ran\n",
+                    "stderr": "",
+                    "error": None,
+                }
+
+        return _Result()
+
+    async def fake_sync(notebook_id, session):
+        pass
+
+    monkeypatch.setattr("strata.notebook.ws.execute_cell_and_broadcast", fake_broadcast)
+    monkeypatch.setattr("strata.notebook.ws.broadcast_notebook_sync", fake_sync)
+    monkeypatch.setattr(
+        sm.get_session(session_id), "environment_execution_block_message", lambda: None
+    )
+
+    view = await _run_snippet(sm, session_id, "print('snippet ran')")
+    # One call returns the new cell view AND its run outcome nested under `run`.
+    assert view["source"] == "print('snippet ran')"
+    assert view["run"]["status"] == "ok"
+    assert view["run"]["stdout"] == "snippet ran\n"
+    # The cell really landed in the notebook (add half of add-and-run).
+    assert _get_cell(sm, session_id, view["id"])["source"] == "print('snippet ran')"
 
 
 @pytest.mark.asyncio
