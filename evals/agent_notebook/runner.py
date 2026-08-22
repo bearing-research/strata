@@ -208,9 +208,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tasks", help="Comma-separated task ids (default: all)")
     parser.add_argument(
         "--select",
-        choices=["all", "core", "hard"],
+        choices=["all", "core", "hard", "scratchpad"],
         default="all",
-        help="Task group: core (transcript-backed), hard (escape-tempting stress), or all",
+        help=(
+            "Task group: core (transcript-backed), hard (escape-tempting stress), "
+            "scratchpad (un-primed trigger-rate probes), or all"
+        ),
     )
     parser.add_argument("--workdir", default=None, help="Where eval notebooks are built")
     parser.add_argument("--out", default=None, help="Write the full JSON report here")
@@ -227,9 +230,11 @@ def main(argv: list[str] | None = None) -> int:
         except KeyError as exc:
             raise SystemExit(f"unknown task id: {exc}")
     elif args.select == "core":
-        tasks = [t for t in TASKS if not t.hard]
+        tasks = [t for t in TASKS if not t.hard and not t.scratchpad]
     elif args.select == "hard":
         tasks = [t for t in TASKS if t.hard]
+    elif args.select == "scratchpad":
+        tasks = [t for t in TASKS if t.scratchpad]
     else:
         tasks = TASKS
 

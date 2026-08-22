@@ -70,6 +70,48 @@ def test_editing_a_cell_file_directly_is_an_escape() -> None:
     assert not ToolEvent("Edit", {"file_path": "/nb/pyproject.toml"}).is_escape
 
 
+def test_run_snippet_mcp_tool_counts_as_work() -> None:
+    # The one-call scratchpad primitive must score like add_cell/run_cell.
+    assert ToolEvent("mcp__strata-notebook__run_snippet").is_notebook_work
+
+
+def test_strata_cli_scratchpad_path_counts_as_notebook_work() -> None:
+    # The scratchpad flow drives the notebook via the `strata` CLI over Bash, not
+    # the MCP tools — those calls must score as work/reads, not fall through.
+    add = ToolEvent("Bash", {"command": "strata cell add ./scratch -c 'print(1)' --run"})
+    assert add.is_notebook_work and not add.is_escape
+    assert ToolEvent("Bash", {"command": "uv run strata cell run ./scratch abc"}).is_notebook_work
+    # `strata dep add` is the in-notebook way to add a package — work, not a
+    # bash-install escape.
+    dep = ToolEvent("Bash", {"command": "strata dep add ./scratch numpy"})
+    assert dep.is_notebook_work and not dep.is_escape
+    # Inspecting via the CLI is a read.
+    assert ToolEvent("Bash", {"command": "strata status ./scratch"}).is_notebook_read
+    assert ToolEvent("Bash", {"command": "strata cell list ./scratch"}).is_notebook_read
+
+
+def test_strata_cell_with_python_in_payload_is_not_a_bash_python_escape() -> None:
+    # A cell whose source imports pytest/python must not read as a bash-python
+    # bypass — it's the agent putting code in a cell, the opposite of an escape.
+    ev = ToolEvent("Bash", {"command": "strata cell add ./scratch -c 'import pytest' --run"})
+    assert ev.escape_reason is None
+    assert ev.is_notebook_work
+    # A bare `python -c` is still an escape.
+    assert ToolEvent("Bash", {"command": "python -c 'print(1)'"}).escape_reason == "bash-python"
+
+
+def test_scratchpad_tasks_are_un_primed() -> None:
+    from evals.agent_notebook.tasks import TASKS
+
+    scratch = [t for t in TASKS if t.scratchpad]
+    assert scratch, "expected scratchpad trigger-rate tasks"
+    # The whole point: the prompt must NOT tell the agent to use the notebook —
+    # otherwise it measures compliance, not spontaneous trigger.
+    for t in scratch:
+        low = t.prompt.lower()
+        assert "notebook" not in low and "cell" not in low and "scratch" not in low, t.id
+
+
 # --- graders -------------------------------------------------------------------
 
 

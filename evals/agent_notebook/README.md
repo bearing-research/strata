@@ -83,7 +83,8 @@ uv run python -m evals.agent_notebook.runner --driver claude_code --repeats 3
 ## Tasks
 
 `--select` picks a group: `core` (the 9 transcript-backed tasks, also run in CI
-via replay), `hard` (the 5 live-only stress tests below), or `all` (default).
+via replay), `hard` (the 5 live-only stress tests below), `scratchpad` (the
+un-primed trigger-rate probes — see below), or `all` (default).
 
 ```bash
 uv run python -m evals.agent_notebook.runner --driver claude_code --select hard --repeats 3
@@ -118,3 +119,42 @@ Add a scenario by appending a `Task` to `tasks.py` (name the expected variables
 in the prompt so completion is checkable without an LLM judge; set `hard=True`
 for a stress test). If you want the replay/CI path to cover it, drop a matching
 transcript in `transcripts/`.
+
+## Un-primed trigger rate (the scratchpad measurement)
+
+The core/hard tasks measure the **primed** flow: `strata agent` hands the agent a
+notebook and a `CLAUDE.md` that *tells it* to drive the notebook — so they measure
+**compliance**. The `scratchpad` tasks measure the harder, more honest question:
+handed a normal task in a plain project with the `strata-scratchpad` skill
+installed but **no** on-ramp and **no** notebook mention, does the agent
+*spontaneously* reach for a cached notebook cell, or default to `python -c`?
+
+The scoring is the same **in-tool rate** — the trajectory classifier now counts
+the CLI scratchpad path (`strata cell add --run`, `strata dep add`, …) and the
+`run_snippet` MCP tool as notebook work, so a `python -c` / temp-script bypass is
+the escape. A `scratchpad` task's prompt never says "notebook" or "cell", so a
+high in-tool rate means the skill *triggered on its own*.
+
+| id | question (data seeded, no notebook mention) |
+| --- | --- |
+| `scratch_distinct_cities` | distinct + blank cities in `users.csv` |
+| `scratch_p95_latency` | p95 of a CSV column |
+| `scratch_category_totals` | per-category totals from `events.json` |
+| `scratch_amount_fraction` | fraction of amounts above a threshold |
+| `scratch_verify_function` | is `clamp_pct` correct on negatives? |
+
+**Setup differs from the primed path** and is currently a documented manual
+procedure (the automated un-primed driver — skill-install + plain project, no
+on-ramp — is the next increment; today's `run_task` writes the priming
+`CLAUDE.md`):
+
+1. Install the skill so Claude Code discovers it, e.g.
+   `cp -r <site-packages>/strata/.agents/skills/strata-scratchpad ~/.claude/skills/`
+   (or install the [plugin](../../plugins/strata-scratchpad/)); ensure `strata`
+   (with `cell add --run`) is on `PATH`.
+2. For each `scratchpad` task, seed its data file into a scratch **project** dir
+   and start a fresh `claude` session there with the task prompt verbatim — never
+   adding "use the notebook".
+3. Score adoption by ground truth: did a `scratch/` notebook gain cells (skill
+   used) vs a `python -c` / temp script (escape)? The round-1/round-2 results are
+   in `docs/internal/design-agent-scratchpad-spike.md`.

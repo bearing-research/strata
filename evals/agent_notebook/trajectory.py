@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 WORK_TOOLS = frozenset(
     {
         "run_cell",
+        "run_snippet",
         "run_tests",
         "add_cell",
         "edit_cell",
@@ -43,6 +44,18 @@ _INSTALL_ESCAPE = re.compile(
     r"(?:^|[\s;&|()`])(?:pip\s+install|uv\s+pip\s+install|uv\s+add|conda\s+install)\b"
 )
 _CELL_FILE = re.compile(r"[\\/]cells[\\/][^\\/]+\.py$")
+
+# The `strata` CLI is the *other* way to drive the notebook — the scratchpad
+# path an agent takes when it isn't on the MCP on-ramp (skill + `strata cell add
+# --run`, not `mcp__…__run_cell`). These Bash calls are notebook work / reads,
+# NOT escapes, so they must be scored like the equivalent MCP tools rather than
+# fall through to the bash-python detector (a cell's `-c` payload may itself
+# contain `import pytest`). Matched at a boundary so `uv run strata cell add`
+# and plain `strata cell add` both count.
+_CLI_WORK = re.compile(
+    r"(?:^|[\s;&|()`])strata\s+(?:cell\s+(?:add|edit|run|test)|dep\s+(?:add|rm|remove))\b"
+)
+_CLI_READ = re.compile(r"(?:^|[\s;&|()`])strata\s+(?:cell\s+(?:list|show)|dag|status)\b")
 _EDIT_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 
 
@@ -68,18 +81,27 @@ class ToolEvent:
         return None
 
     @property
+    def _bash_command(self) -> str:
+        return str(self.arguments.get("command", "")) if self.name == "Bash" else ""
+
+    @property
     def is_notebook_work(self) -> bool:
-        return self.notebook_tool in WORK_TOOLS
+        return self.notebook_tool in WORK_TOOLS or bool(_CLI_WORK.search(self._bash_command))
 
     @property
     def is_notebook_read(self) -> bool:
-        return self.notebook_tool in READ_TOOLS
+        return self.notebook_tool in READ_TOOLS or bool(_CLI_READ.search(self._bash_command))
 
     @property
     def escape_reason(self) -> str | None:
         """Why this call routes around the notebook, or None if it doesn't."""
         if self.name == "Bash":
             command = str(self.arguments.get("command", ""))
+            # Driving the notebook through the `strata` CLI is not an escape —
+            # check this before the python detector so a cell whose source
+            # imports pytest/python isn't misread as a bash-python bypass.
+            if _CLI_WORK.search(command) or _CLI_READ.search(command):
+                return None
             if _PY_ESCAPE.search(command):
                 return "bash-python"
             if _INSTALL_ESCAPE.search(command):
