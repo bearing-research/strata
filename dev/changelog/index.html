@@ -2871,6 +2871,11 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Add-and-run returns the cell's rendered outputs.</strong> <code>strata cell add … --run</code>
+  and the <code>run_snippet</code> MCP tool now return the <strong>post-run</strong> cell view, so a cell
+  ending in a bare expression (<code>df.describe()</code>, <code>total</code>) hands its value back in
+  <code>outputs</code> — an agent gets the result without a separate <code>cell show</code> or a
+  <code>print()</code>.</li>
 <li><strong>Variable-addressed lookup — "do I already have this?" for a scratchpad.</strong>
   <code>strata cell show &lt;dir&gt; --var NAME</code> (and the <code>get_variable</code> MCP tool) return the
   cell that defines a variable — its source, status, and outputs — or, if it's not

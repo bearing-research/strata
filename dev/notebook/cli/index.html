@@ -2404,8 +2404,10 @@ passed, <code>1</code> a test failed/errored, <code>2</code> pytest unavailable 
 same scheme the server uses) and prints the new cell; <code>mv</code> prints the new order.
 Pass <strong><code>--run</code></strong> to execute the cell right after adding it — the one-call
 scratchpad primitive — and the run outcome (<code>status</code>, <code>cache_hit</code>, <code>stdout</code>,
-<code>stderr</code>) is folded into the output under <code>run</code> (<code>--no-sync</code> skips the venv sync,
-as with <code>cell run</code>). <code>cell annotate</code> splices <code># @key</code> <a href="../annotations/">annotations</a> into a
+<code>stderr</code>) is folded into the output under <code>run</code>. The returned cell is the
+<strong>post-run</strong> view, so its rendered <code>outputs</code> (a trailing bare expression's value)
+ride along without a separate <code>cell show</code> (<code>--no-sync</code> skips the venv sync, as
+with <code>cell run</code>). <code>cell annotate</code> splices <code># @key</code> <a href="../annotations/">annotations</a> into a
 cell's source (<code>--set KEY=VALUE</code> / <code>--unset KEY</code>, both repeatable) while leaving
 the body untouched - a convenience over rewriting the whole source with <code>edit</code>;
 it targets scalar directives (<code>name</code>, <code>worker</code>, <code>timeout</code>, <code>model</code>, …), so edit
