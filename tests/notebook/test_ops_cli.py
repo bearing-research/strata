@@ -254,6 +254,38 @@ def test_cli_cell_show_var_undefined_lists_available(chain_nb, capsys):
     assert d["available"] == ["x", "y"]
 
 
+def test_cell_show_var_sweep_vs_dangling_producer(capsys):
+    from strata.notebook.cli import _cell_show_var
+    from strata.notebook.ops import NotebookOpsError
+
+    class _Dag:
+        def __init__(self, vp):
+            self.variable_producer = vp
+
+    class _FakeOps:
+        def __init__(self, vp, cells):
+            self._vp, self._cells = vp, cells
+
+        def dag(self):
+            return _Dag(self._vp)
+
+        def get_cell(self, cid):
+            if cid not in self._cells:
+                raise NotebookOpsError(f"no cell {cid!r}")
+            return self._cells[cid]
+
+    # A sweep-group producer has no single cell — reported as a pointer, no get_cell.
+    assert _cell_show_var(_FakeOps({"m": "sweep:grp"}, {}), "m", "json") == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "variable": "m",
+        "defined": True,
+        "defined_in": "sweep:grp",
+    }
+    # A plain producer id get_cell can't fetch is a real error, not masked as defined.
+    assert _cell_show_var(_FakeOps({"g": "ghost"}, {}), "g", "json") == 1
+    assert "error" in json.loads(capsys.readouterr().out)
+
+
 def test_cli_cell_show_requires_exactly_one_of_id_or_var(chain_nb, capsys):
     # Neither a cell id nor --var.
     assert main(["cell", "show", str(chain_nb), "--format", "json"]) == 2

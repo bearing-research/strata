@@ -81,17 +81,17 @@ def _get_variable(session_manager: SessionManager, session_id: str, name: str) -
     defined, returns ``defined: False`` plus the available variable names so the
     miss doubles as discovery.
     """
-    from strata.notebook.ops import NotebookOpsError
-
     ops = _resolve_ops(session_manager, session_id)
     producers = ops.dag().variable_producer
     producer = producers.get(name)
     if producer is None:
         return {"variable": name, "defined": False, "available": sorted(producers)}
-    try:
-        cell = ops.get_cell(producer).model_dump(mode="json")
-    except NotebookOpsError:
+    if producer.startswith(("sweep:", "fanout:")):
+        # A variant/sweep group has no single producing cell.
         return {"variable": name, "defined": True, "defined_in": producer}
+    # A plain cell-id producer that get_cell can't fetch is a real error — let it
+    # propagate rather than masking it as "defined".
+    cell = ops.get_cell(producer).model_dump(mode="json")
     return {"variable": name, "defined": True, "defined_in": cell["id"], "cell": cell}
 
 

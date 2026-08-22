@@ -1099,6 +1099,12 @@ def cell_show_main(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
 
     var = getattr(args, "var", None)
+    # Two optional positionals (notebook_dir from _add_target_args + cell_id) are
+    # ambiguous for the remote form `cell show --server … <id>`: argparse fills
+    # notebook_dir first, leaving cell_id None. Remote ignores notebook_dir, so
+    # recover the id from it.
+    if args.server and args.cell_id is None and args.notebook_dir is not None:
+        args.cell_id = args.notebook_dir
     if bool(args.cell_id) == bool(var):
         print("error: provide either a cell_id or --var NAME (exactly one)", file=sys.stderr)
         return 2
@@ -1140,16 +1146,21 @@ def _cell_show_var(ops: Any, var: str, fmt: str) -> int:
             if producers:
                 print(f"available: {', '.join(sorted(producers))}")
         return 0
-    try:
-        cell = ops.get_cell(producer)
-    except NotebookOpsError:
-        # Producer isn't a single cell (e.g. a sweep group renders as
-        # "sweep:<group>"); report the pointer without a full cell view.
+    if producer.startswith(("sweep:", "fanout:")):
+        # A variant/sweep group has no single producing cell — report the pointer
+        # without a cell view (don't try get_cell, which would fail).
         if fmt == "json":
             _emit_json({"variable": var, "defined": True, "defined_in": producer})
         else:
             print(f"variable: {var}  (defined in {producer})")
         return 0
+    try:
+        cell = ops.get_cell(producer)
+    except NotebookOpsError as exc:
+        # A plain cell-id producer that get_cell can't fetch is a real error
+        # (stale DAG pointer, backend failure) — surface it, don't mask it as
+        # "defined".
+        return _emit_op_error(exc, fmt)
     if fmt == "json":
         _emit_json(
             {
