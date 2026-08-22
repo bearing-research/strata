@@ -239,6 +239,28 @@ def test_cli_cell_add_then_rm(chain_nb, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out) == {"removed": new["id"]}
 
 
+def test_cli_cell_show_var_defined(chain_nb, capsys):
+    # chain_nb: cell `a` defines x, cell `b` defines y (= x + 1).
+    assert main(["cell", "show", str(chain_nb), "--var", "x", "--format", "json"]) == 0
+    d = json.loads(capsys.readouterr().out)
+    assert d["defined"] is True and d["defined_in"] == "a"
+    assert d["cell"]["source"] == "x = 1"
+
+
+def test_cli_cell_show_var_undefined_lists_available(chain_nb, capsys):
+    assert main(["cell", "show", str(chain_nb), "--var", "nope", "--format", "json"]) == 0
+    d = json.loads(capsys.readouterr().out)
+    assert d["defined"] is False
+    assert d["available"] == ["x", "y"]
+
+
+def test_cli_cell_show_requires_exactly_one_of_id_or_var(chain_nb, capsys):
+    # Neither a cell id nor --var.
+    assert main(["cell", "show", str(chain_nb), "--format", "json"]) == 2
+    # Both.
+    assert main(["cell", "show", str(chain_nb), "a", "--var", "x", "--format", "json"]) == 2
+
+
 def test_cli_cell_add_inline_c(chain_nb, capsys):
     # `-c` supplies the cell source inline, as an alternative to `--file`.
     assert main(["cell", "add", str(chain_nb), "-c", "w = 7", "--format", "json"]) == 0

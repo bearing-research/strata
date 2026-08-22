@@ -21,7 +21,10 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from strata.notebook.ops import CellView
 
 from strata.notebook.models import CellLanguage
 
@@ -954,9 +957,17 @@ def add_cell_arguments(parser: argparse.ArgumentParser) -> None:
     list_p.add_argument("--format", choices=["human", "json"], default="json")
     list_p.set_defaults(func=cell_list_main)
 
-    show_p = sub.add_parser("show", help="Show one cell: source, status, outputs, console")
+    show_p = sub.add_parser(
+        "show", help="Show a cell by id, or the cell that defines a variable (--var)"
+    )
     _add_target_args(show_p)
-    show_p.add_argument("cell_id", help="Cell id to show")
+    show_p.add_argument("cell_id", nargs="?", help="Cell id to show")
+    show_p.add_argument(
+        "--var",
+        dest="var",
+        metavar="NAME",
+        help="Show the cell that defines variable NAME (answers 'do I already have NAME?')",
+    )
     show_p.add_argument("--format", choices=["human", "json"], default="json")
     show_p.set_defaults(func=cell_show_main)
 
@@ -1073,12 +1084,30 @@ def cell_list_main(args: argparse.Namespace) -> int:
         return 0
 
 
+def _print_cell_human(cell: CellView) -> None:
+    print(f"id:       {cell.id}")
+    print(f"name:     {cell.name}")
+    print(f"language: {cell.language}")
+    print(f"status:   {cell.status}")
+    if cell.staleness_reasons:
+        print(f"stale:    {', '.join(cell.staleness_reasons)}")
+    print("--- source ---")
+    print(cell.source)
+
+
 def cell_show_main(args: argparse.Namespace) -> int:
     from strata.notebook.ops import NotebookOpsError
+
+    var = getattr(args, "var", None)
+    if bool(args.cell_id) == bool(var):
+        print("error: provide either a cell_id or --var NAME (exactly one)", file=sys.stderr)
+        return 2
 
     with _read_ops(args) as ops:
         if ops is None:
             return 2
+        if var is not None:
+            return _cell_show_var(ops, var, args.format)
         try:
             cell = ops.get_cell(args.cell_id)
         except NotebookOpsError as exc:
@@ -1086,15 +1115,54 @@ def cell_show_main(args: argparse.Namespace) -> int:
         if args.format == "json":
             _emit_json(cell.model_dump(mode="json"))
         else:
-            print(f"id:       {cell.id}")
-            print(f"name:     {cell.name}")
-            print(f"language: {cell.language}")
-            print(f"status:   {cell.status}")
-            if cell.staleness_reasons:
-                print(f"stale:    {', '.join(cell.staleness_reasons)}")
-            print("--- source ---")
-            print(cell.source)
+            _print_cell_human(cell)
         return 0
+
+
+def _cell_show_var(ops: Any, var: str, fmt: str) -> int:
+    """Show the cell that defines variable *var* — the agent's "do I already
+    have this?" lookup. Composes ``dag`` (the variable→producer map) + ``get_cell``.
+    """
+    from strata.notebook.ops import NotebookOpsError
+
+    try:
+        producers = ops.dag().variable_producer
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, fmt)
+    producer = producers.get(var)
+    if producer is None:
+        # Not defined anywhere — surface what *is* available, so the miss doubles
+        # as discovery.
+        if fmt == "json":
+            _emit_json({"variable": var, "defined": False, "available": sorted(producers)})
+        else:
+            print(f"'{var}' is not defined")
+            if producers:
+                print(f"available: {', '.join(sorted(producers))}")
+        return 0
+    try:
+        cell = ops.get_cell(producer)
+    except NotebookOpsError:
+        # Producer isn't a single cell (e.g. a sweep group renders as
+        # "sweep:<group>"); report the pointer without a full cell view.
+        if fmt == "json":
+            _emit_json({"variable": var, "defined": True, "defined_in": producer})
+        else:
+            print(f"variable: {var}  (defined in {producer})")
+        return 0
+    if fmt == "json":
+        _emit_json(
+            {
+                "variable": var,
+                "defined": True,
+                "defined_in": cell.id,
+                "cell": cell.model_dump(mode="json"),
+            }
+        )
+    else:
+        print(f"variable: {var}  (defined in {cell.id})")
+        _print_cell_human(cell)
+    return 0
 
 
 def _read_source_arg(path: str) -> str:
