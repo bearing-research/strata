@@ -186,7 +186,7 @@ Artifacts** operator pages. No breaking changes.
   images baked in as `data:` URLs. It's the static counterpart to embedding the
   live app view: portable to anywhere the server can't reach (email a report,
   archive a run). `# @app hide` and prompt-response privacy are honored, matching
-  the live app view. See [Export](notebook/export.md#app-view-snapshot---app-view).
+  the live app view. See [Export](notebook/export.md#app-view-snapshot-app-view).
 
 ### Fixed
 

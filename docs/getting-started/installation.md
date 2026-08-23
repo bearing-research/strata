@@ -12,7 +12,7 @@
   source builds (not Docker or `uv add`). Needed by `maturin` to
   compile the native Arrow IPC extension; `cargo` and `rustc` must
   be on `PATH` when you run `uv sync`.
-- **[Node.js 25+](https://nodejs.org/)** - only if building the
+- **[Node.js 26+](https://nodejs.org/)** - only if building the
   frontend from source.
 
 Windows: source builds work via WSL2 (smoother) or native Windows
