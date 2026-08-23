@@ -7,7 +7,7 @@ Binary image/media assets referenced by the README and the docs site.
 The hero clip in the top-level `README.md`: a coding agent builds a Strata
 notebook live and reuses the cached model when only the evaluation changes.
 
-- **How to record it:** follow [`examples/agent_demo/RECORDING.md`](../../examples/agent_demo/RECORDING.md)
+- **How to record it:** follow [`examples/agent_demo/RECORDING.md`](https://github.com/bearing-research/strata/blob/main/examples/agent_demo/RECORDING.md)
   (two side-by-side panes, `strata agent`, two prompts, ~15–25s, < 5 MB).
 - **Where it goes:** save the exported GIF here as `docs/assets/agent-demo.gif`.
 - **Wire it in:** uncomment the image line in the README's "Give your coding
