@@ -320,6 +320,7 @@ grouped by feature.
 
 ## What's next
 
+- [Driving a notebook with a coding agent](../notebook/agent.md) — let a coding agent (Claude Code) use the notebook as a persistent, **cached scratchpad** instead of throwaway scripts; installs as a one-command plugin
 - [Concepts](../notebook/concepts.md) for how the DAG, caching, and cascade work
 - [Cell Types](../notebook/cells.md) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
 - [Cell Annotations](../notebook/annotations.md) for `@worker`, `@mount`, `@loop`, and friends
