@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     import httpx
 
     from strata.notebook.dag import NotebookDag
-    from strata.notebook.models import CellState
+    from strata.notebook.models import CellState, WorkerSpec
     from strata.notebook.session import NotebookSession
 
 
@@ -164,6 +164,30 @@ class DependencyResult(BaseModel):
     success: bool
     lockfile_changed: bool
     error: str | None = None
+
+
+class WorkerView(BaseModel):
+    """An agent-facing view of one registered worker.
+
+    Projected from a :class:`~strata.notebook.models.WorkerSpec` — the fields an
+    agent needs to see where a cell would run, without the raw config bag.
+    """
+
+    name: str
+    backend: str  # "local" | "executor"
+    transport: str  # "local" | "direct" | "signed" | "embedded" | "executor"
+    url: str | None = None
+    runtime_id: str | None = None
+    token_env: str | None = None
+    is_default: bool = False
+
+
+class WorkerListView(BaseModel):
+    """The notebook's registered workers plus which one is the default."""
+
+    default: str | None  # configured notebook default; ``None`` ⇒ the built-in local worker
+    editable: bool  # False in service mode (definitions are server-managed)
+    workers: list[WorkerView]
 
 
 class NotebookOpsError(Exception):
@@ -580,6 +604,131 @@ class LocalNotebookOps:
         reorder_cells(self.notebook_dir, order)
         self._reload()
         return self.list_cells()
+
+    # -- workers -------------------------------------------------------------
+
+    def list_workers(self) -> WorkerListView:
+        """Return the notebook's registered workers + the default.
+
+        The built-in ``local`` worker is always listed first, followed by the
+        notebook-scoped ``[[workers]]`` definitions.
+        """
+        from strata.notebook.workers import (
+            get_builtin_local_worker,
+            notebook_worker_definitions_editable,
+        )
+
+        state = self._session.notebook_state
+        default = state.worker
+        specs = [get_builtin_local_worker(), *state.workers]
+        return WorkerListView(
+            default=default,
+            editable=notebook_worker_definitions_editable(state),
+            workers=[_worker_view(spec, default) for spec in specs],
+        )
+
+    def add_worker(
+        self,
+        name: str,
+        *,
+        url: str | None = None,
+        transport: str = "direct",
+        backend: str = "executor",
+        runtime_id: str | None = None,
+        token_env: str | None = None,
+        set_default: bool = False,
+    ) -> WorkerListView:
+        """Register (or replace by name) a notebook-scoped worker.
+
+        An ``executor`` worker requires ``url`` (its ``/v1/execute`` endpoint).
+        Re-adding an existing name replaces that definition. With
+        ``set_default`` the notebook's default worker is pointed at it.
+
+        Raises
+        ------
+        NotebookOpsError
+            If worker definitions aren't editable (service mode), the backend /
+            fields are invalid, or an ``executor`` worker is missing ``url``.
+        """
+        from pydantic import ValidationError
+
+        from strata.notebook.models import WorkerBackendType, WorkerConfig, WorkerSpec
+        from strata.notebook.workers import notebook_worker_definitions_editable
+        from strata.notebook.writer import update_notebook_worker, update_notebook_workers
+
+        state = self._session.notebook_state
+        if not notebook_worker_definitions_editable(state):
+            raise NotebookOpsError("worker definitions are managed by the server in service mode")
+        if backend == WorkerBackendType.EXECUTOR.value and not (url or "").strip():
+            raise NotebookOpsError(f"executor worker {name!r} requires a url")
+        try:
+            spec = WorkerSpec(
+                name=name,
+                backend=WorkerBackendType(backend),
+                runtime_id=runtime_id,
+                config=WorkerConfig(
+                    url=url or None,
+                    transport=transport,
+                    token_env=token_env,
+                ),
+            )
+        except (ValidationError, ValueError) as exc:
+            raise NotebookOpsError(f"invalid worker {name!r}: {exc}") from exc
+
+        others = [w for w in state.workers if w.name != spec.name]
+        update_notebook_workers(self.notebook_dir, [*others, spec])
+        if set_default:
+            update_notebook_worker(self.notebook_dir, spec.name)
+        self._reload()
+        return self.list_workers()
+
+    def remove_worker(self, name: str) -> WorkerListView:
+        """Remove a notebook-scoped worker; clears the default if it named it.
+
+        Raises
+        ------
+        NotebookOpsError
+            If ``name`` is the built-in ``local`` worker, isn't defined, or
+            definitions aren't editable.
+        """
+        from strata.notebook.workers import notebook_worker_definitions_editable
+        from strata.notebook.writer import update_notebook_worker, update_notebook_workers
+
+        state = self._session.notebook_state
+        if not notebook_worker_definitions_editable(state):
+            raise NotebookOpsError("worker definitions are managed by the server in service mode")
+        if name == "local":
+            raise NotebookOpsError("cannot remove the built-in 'local' worker")
+        remaining = [w for w in state.workers if w.name != name]
+        if len(remaining) == len(state.workers):
+            raise NotebookOpsError(f"no worker named {name!r}")
+        update_notebook_workers(self.notebook_dir, remaining)
+        if state.worker == name:
+            update_notebook_worker(self.notebook_dir, None)
+        self._reload()
+        return self.list_workers()
+
+    def set_default_worker(self, name: str | None) -> WorkerListView:
+        """Set (or clear, with ``None``/``"local"``) the notebook default worker.
+
+        Raises
+        ------
+        NotebookOpsError
+            If ``name`` isn't the built-in ``local`` worker or a defined worker.
+        """
+        from strata.notebook.writer import update_notebook_worker
+
+        normalized = (name or "").strip() or None
+        if normalized is not None and normalized != "local":
+            known = {w.name for w in self._session.notebook_state.workers}
+            if normalized not in known:
+                raise NotebookOpsError(
+                    f"no worker named {normalized!r} (add it first, or use 'local')"
+                )
+        # Store None for the implicit-local default so notebook.toml stays clean.
+        update_notebook_worker(self.notebook_dir, None if normalized == "local" else normalized)
+        self._reload()
+        return self.list_workers()
 
     async def add_dependency(self, package: str) -> DependencyResult:
         """Add a dependency (see :meth:`NotebookOps.add_dependency`)."""
@@ -998,6 +1147,25 @@ def _cell_view(cell: CellState) -> CellView:
 
 def _status_row(cell: CellState) -> CellStatusRow:
     return _status_row_from_wire(cell.serialize())
+
+
+def _worker_view(worker: WorkerSpec, default: str | None) -> WorkerView:
+    """Project a :class:`WorkerSpec` into an agent-facing :class:`WorkerView`.
+
+    A ``default`` of ``None`` means the notebook falls back to the built-in
+    ``local`` worker, so that row is the one flagged ``is_default``.
+    """
+    from strata.notebook.workers import worker_transport
+
+    return WorkerView(
+        name=worker.name,
+        backend=worker.backend.value,
+        transport=worker_transport(worker),
+        url=worker.config.url,
+        runtime_id=worker.runtime_id,
+        token_env=worker.config.token_env,
+        is_default=default == worker.name or (default is None and worker.name == "local"),
+    )
 
 
 def _dag_view(dag: NotebookDag | None) -> DagView:

@@ -320,6 +320,58 @@ async def _note(session_manager: SessionManager, session_id: str, message: str) 
     return {"ok": True}
 
 
+def _list_workers(session_manager: SessionManager, session_id: str) -> dict[str, Any]:
+    """Return the notebook's registered workers + the default (read-only)."""
+    return _resolve_ops(session_manager, session_id).list_workers().model_dump(mode="json")
+
+
+async def _add_worker(
+    session_manager: SessionManager,
+    session_id: str,
+    name: str,
+    url: str,
+    transport: str = "direct",
+    runtime_id: str | None = None,
+    token_env: str | None = None,
+    set_default: bool = False,
+) -> dict[str, Any]:
+    """Register an executor worker in the notebook, then sync + broadcast."""
+    session = _live_session(session_manager, session_id)
+    view = LocalNotebookOps.from_session(session).add_worker(
+        name,
+        url=url,
+        transport=transport,
+        runtime_id=runtime_id,
+        token_env=token_env,
+        set_default=set_default,
+    )
+    await _sync_and_broadcast(session_id, session)
+    await _agent_note(session_id, "mcp", f"registered worker {name} → {url}")
+    return view.model_dump(mode="json")
+
+
+async def _remove_worker(
+    session_manager: SessionManager, session_id: str, name: str
+) -> dict[str, Any]:
+    """Remove a notebook-scoped worker, then sync + broadcast."""
+    session = _live_session(session_manager, session_id)
+    view = LocalNotebookOps.from_session(session).remove_worker(name)
+    await _sync_and_broadcast(session_id, session)
+    await _agent_note(session_id, "mcp", f"removed worker {name}")
+    return view.model_dump(mode="json")
+
+
+async def _set_default_worker(
+    session_manager: SessionManager, session_id: str, name: str | None
+) -> dict[str, Any]:
+    """Set (or clear) the notebook default worker, then sync + broadcast."""
+    session = _live_session(session_manager, session_id)
+    view = LocalNotebookOps.from_session(session).set_default_worker(name)
+    await _sync_and_broadcast(session_id, session)
+    await _agent_note(session_id, "mcp", f"default worker → {name or 'local'}")
+    return view.model_dump(mode="json")
+
+
 def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     """Build the streamable-HTTP MCP ASGI app, or ``None`` if ``[mcp]`` is absent.
 
@@ -498,5 +550,63 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         notebook in the browser or terminal can follow what you're doing.
         """
         return await _note(session_manager, session_id, message)
+
+    @mcp.tool()
+    def list_workers(session_id: str) -> dict[str, Any]:
+        """List the notebook's registered workers and which is the default.
+
+        Each worker has a ``name`` (use it as ``# @worker <name>`` in a cell, or
+        as the notebook default), its ``backend`` / ``transport`` / ``url``, and
+        ``is_default``. The built-in ``local`` worker is always present. Use this
+        before routing a cell to confirm a worker exists.
+        """
+        return _list_workers(session_manager, session_id)
+
+    @mcp.tool()
+    async def add_worker(
+        session_id: str,
+        name: str,
+        url: str,
+        transport: str = "direct",
+        runtime_id: str | None = None,
+        token_env: str | None = None,
+        set_default: bool = False,
+    ) -> dict[str, Any]:
+        """Register a remote executor worker so cells can run on it.
+
+        ``url`` is the worker's ``/v1/execute`` endpoint (e.g.
+        ``http://127.0.0.1:9000/v1/execute``); ``transport`` is ``direct`` for a
+        plain HTTP worker. Set ``token_env`` to the name of an env var holding the
+        worker's bearer token, ``runtime_id`` to a stable fingerprint of the
+        worker's environment (so its cached results don't collide with local
+        runs), and ``set_default=True`` to route every cell there by default.
+        Re-adding an existing name replaces it. Then route a cell with
+        ``# @worker <name>`` (or rely on the default). Returns the updated worker
+        list.
+        """
+        return await _add_worker(
+            session_manager,
+            session_id,
+            name,
+            url,
+            transport,
+            runtime_id,
+            token_env,
+            set_default,
+        )
+
+    @mcp.tool()
+    async def set_default_worker(session_id: str, name: str | None = None) -> dict[str, Any]:
+        """Set the notebook's default worker (``name=None`` or ``"local"`` clears it).
+
+        Cells without a ``# @worker`` annotation run on the default. Returns the
+        updated worker list.
+        """
+        return await _set_default_worker(session_manager, session_id, name)
+
+    @mcp.tool()
+    async def remove_worker(session_id: str, name: str) -> dict[str, Any]:
+        """Remove a notebook-scoped worker (clears the default if it named it)."""
+        return await _remove_worker(session_manager, session_id, name)
 
     return mcp.streamable_http_app()

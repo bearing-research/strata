@@ -30,6 +30,7 @@ from strata.notebook.cli import (
     add_run_arguments,
     add_status_arguments,
     add_validate_arguments,
+    add_worker_arguments,
     dag_main,
     export_main,
     import_main,
@@ -277,6 +278,17 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Add or remove a Python dependency in a notebook directory.",
     )
     add_dep_arguments(dep_parser)
+
+    worker_parser = subparsers.add_parser(
+        "worker",
+        help="Manage notebook workers: ls, add, rm, default",
+        description=(
+            "Register notebook-scoped workers (e.g. a remote executor endpoint) "
+            "and set the default. Writes notebook.toml; a running server picks "
+            "the change up on its next session reload."
+        ),
+    )
+    add_worker_arguments(worker_parser)
 
     agent_parser = subparsers.add_parser(
         "agent",

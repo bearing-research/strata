@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from strata.notebook.ops import CellView
+    from strata.notebook.ops import CellView, WorkerListView
 
 from strata.notebook.models import CellLanguage
 
@@ -1395,6 +1395,131 @@ def add_dep_arguments(parser: argparse.ArgumentParser) -> None:
         dep_p.add_argument("package", help="Package spec, e.g. 'pandas' or 'pandas>=2'")
         dep_p.add_argument("--format", choices=["human", "json"], default="json")
         dep_p.set_defaults(func=dep_add_main if action == "add" else dep_rm_main)
+    parser.set_defaults(func=lambda args: (parser.print_help(), 0)[1])
+
+
+# ---------------------------------------------------------------------------
+# Worker registration commands (NotebookOps local backend) — `strata worker …`
+#
+# Writes notebook-scoped `[[workers]]` definitions to notebook.toml, offline. A
+# running server picks them up on its next session reload; an agent driving a
+# live session should use the MCP worker tools (they reload + broadcast).
+# ---------------------------------------------------------------------------
+
+
+def _emit_worker_list(view: WorkerListView, fmt: str) -> None:
+    """Print a WorkerListView as JSON, or a compact default-marked table."""
+    if fmt == "json":
+        _emit_json(view.model_dump(mode="json"))
+        return
+    for worker in view.workers:
+        mark = "*" if worker.is_default else " "
+        print(f"{mark} {worker.name:<16} {worker.transport:<9} {worker.url or ''}")
+
+
+def worker_ls_main(args: argparse.Namespace) -> int:
+    from strata.notebook.ops import NotebookOpsError
+
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    try:
+        view = ops.list_workers()
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    _emit_worker_list(view, args.format)
+    return 0
+
+
+def worker_add_main(args: argparse.Namespace) -> int:
+    from strata.notebook.ops import NotebookOpsError
+
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    try:
+        view = ops.add_worker(
+            args.name,
+            url=args.url,
+            transport=args.transport,
+            runtime_id=args.runtime_id,
+            token_env=args.token_env,
+            set_default=args.default,
+        )
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    _emit_worker_list(view, args.format)
+    return 0
+
+
+def worker_rm_main(args: argparse.Namespace) -> int:
+    from strata.notebook.ops import NotebookOpsError
+
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    try:
+        view = ops.remove_worker(args.name)
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    _emit_worker_list(view, args.format)
+    return 0
+
+
+def worker_default_main(args: argparse.Namespace) -> int:
+    from strata.notebook.ops import NotebookOpsError
+
+    ops = _open_local_ops(args.notebook_dir)
+    if ops is None:
+        return 2
+    try:
+        view = ops.set_default_worker(args.name)
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    _emit_worker_list(view, args.format)
+    return 0
+
+
+def add_worker_arguments(parser: argparse.ArgumentParser) -> None:
+    """Register the ``strata worker <action>`` group (ls, add, rm, default)."""
+    sub = parser.add_subparsers(dest="worker_command", metavar="<action>")
+
+    ls_p = sub.add_parser("ls", help="List registered workers and the default")
+    ls_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    ls_p.add_argument("--format", choices=["human", "json"], default="json")
+    ls_p.set_defaults(func=worker_ls_main)
+
+    add_p = sub.add_parser("add", help="Register an executor worker")
+    add_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    add_p.add_argument("name", help="Worker name (referenced by # @worker <name>)")
+    add_p.add_argument(
+        "--url",
+        required=True,
+        help="Executor endpoint, e.g. http://127.0.0.1:9000/v1/execute",
+    )
+    add_p.add_argument("--transport", default="direct", help="Transport (default: direct)")
+    add_p.add_argument(
+        "--runtime-id", dest="runtime_id", help="Stable env fingerprint for provenance"
+    )
+    add_p.add_argument(
+        "--token-env", dest="token_env", help="Env var holding the worker's bearer token"
+    )
+    add_p.add_argument("--default", action="store_true", help="Also set as the notebook default")
+    add_p.add_argument("--format", choices=["human", "json"], default="json")
+    add_p.set_defaults(func=worker_add_main)
+
+    rm_p = sub.add_parser("rm", help="Remove a worker")
+    rm_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    rm_p.add_argument("name", help="Worker name to remove")
+    rm_p.add_argument("--format", choices=["human", "json"], default="json")
+    rm_p.set_defaults(func=worker_rm_main)
+
+    default_p = sub.add_parser("default", help="Set (or clear) the default worker")
+    default_p.add_argument("notebook_dir", help="Path to the notebook directory")
+    default_p.add_argument("name", nargs="?", help="Worker name; omit or 'local' to clear")
+    default_p.add_argument("--format", choices=["human", "json"], default="json")
+    default_p.set_defaults(func=worker_default_main)
+
     parser.set_defaults(func=lambda args: (parser.print_help(), 0)[1])
 
 

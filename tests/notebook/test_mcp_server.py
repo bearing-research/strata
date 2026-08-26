@@ -14,19 +14,23 @@ import pytest
 from strata.notebook.mcp_server import (
     _add_cell,
     _add_dependency,
+    _add_worker,
     _dag,
     _edit_cell,
     _get_cell,
     _get_notebook,
     _get_variable,
     _list_notebooks,
+    _list_workers,
     _move_cell,
     _note,
     _remove_cell,
     _remove_dependency,
+    _remove_worker,
     _run_cell,
     _run_snippet,
     _run_tests,
+    _set_default_worker,
     _status,
     build_mcp_app,
 )
@@ -364,6 +368,46 @@ async def test_note_missing_session_raises(sm_with_session):
     sm, _, _ = sm_with_session
     with pytest.raises(ValueError, match="no open notebook session"):
         await _note(sm, "nope", "hello")
+
+
+@pytest.mark.asyncio
+async def test_worker_tools_register_default_and_remove(sm_with_session, monkeypatch):
+    sm, session_id, nb_dir = sm_with_session
+    broadcasts = []
+
+    async def fake_sync(notebook_id, session):
+        broadcasts.append(notebook_id)
+
+    monkeypatch.setattr("strata.notebook.ws.broadcast_notebook_sync", fake_sync)
+
+    url = "http://127.0.0.1:9000/v1/execute"
+    added = await _add_worker(
+        sm, session_id, "gpu", url, token_env="STRATA_WORKER_TOKEN_GPU", set_default=True
+    )
+    assert added["default"] == "gpu"
+    gpu = next(w for w in added["workers"] if w["name"] == "gpu")
+    assert gpu["url"] == url
+    assert gpu["is_default"] is True
+
+    # The live session was reloaded, so a plain read tool sees the new worker.
+    listed = _list_workers(sm, session_id)
+    assert [w["name"] for w in listed["workers"]] == ["local", "gpu"]
+
+    cleared = await _set_default_worker(sm, session_id, "local")
+    assert cleared["default"] is None
+
+    removed = await _remove_worker(sm, session_id, "gpu")
+    assert [w["name"] for w in removed["workers"]] == ["local"]
+
+    # add, set-default, remove → three live syncs for this session.
+    assert broadcasts == [session_id] * 3
+
+
+@pytest.mark.asyncio
+async def test_worker_tools_missing_session_raises(sm_with_session):
+    sm, _, _ = sm_with_session
+    with pytest.raises(ValueError, match="no open notebook session"):
+        await _add_worker(sm, "nope", "gpu", "http://127.0.0.1:9000/v1/execute")
 
 
 def test_build_mcp_app_returns_mountable_app(sm_with_session):

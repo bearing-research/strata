@@ -9,6 +9,15 @@ exhaustive commit history.
 
 ### Added
 
+- **Register a worker without hand-editing `notebook.toml`.** New
+  `strata worker add|ls|rm|default` CLI writes notebook-scoped `[[workers]]`
+  definitions (e.g. a remote executor's `/v1/execute` endpoint), and matching
+  `add_worker` / `set_default_worker` / `list_workers` / `remove_worker` MCP
+  tools let a coding agent register a worker and route cells to it in a live
+  session — the session reloads and the change appears in any attached viewer.
+  Previously the only way to point a cell at a worker was to edit the TOML by
+  hand; the `# @worker <name>` annotation could only reference a pre-declared
+  one. Groundwork for the SSH remote-worker path.
 - **Add-and-run returns the cell's rendered outputs.** `strata cell add … --run`
   and the `run_snippet` MCP tool now return the **post-run** cell view, so a cell
   ending in a bare expression (`df.describe()`, `total`) hands its value back in
