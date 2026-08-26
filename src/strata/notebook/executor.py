@@ -192,6 +192,16 @@ def _resolve_worker_token(worker_spec: Any) -> str | None:
     literal = str(getattr(config, "token", None) or "").strip()
     if literal:
         return literal
+    # A dynamically-provisioned worker (SSH tunnel) generates its token at
+    # provisioning time and keeps it in the server process, never in
+    # notebook.toml — look it up by worker name from the runtime registry.
+    name = str(getattr(worker_spec, "name", None) or "").strip()
+    if name:
+        from strata.notebook.worker_secrets import get_runtime_worker_token
+
+        runtime_token = get_runtime_worker_token(name)
+        if runtime_token:
+            return runtime_token
     return None
 
 
