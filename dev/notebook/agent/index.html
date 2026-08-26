@@ -1080,6 +1080,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#running-cells-on-a-remote-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running cells on a remote machine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#reusing-a-server-you-already-run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1981,6 +1992,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#running-cells-on-a-remote-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running cells on a remote machine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#reusing-a-server-you-already-run" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2142,8 +2164,20 @@ clones it.</p>
 <td><code>--no-tui</code></td>
 <td>Set up and open the session but don't attach the TUI (useful when you keep a browser tab open instead, or drive the launcher from a script).</td>
 </tr>
+<tr>
+<td><code>--worker-ssh user@host</code></td>
+<td>Provision a remote worker over SSH and route cells to it (see below).</td>
+</tr>
 </tbody>
 </table>
+<h2 id="running-cells-on-a-remote-machine">Running cells on a remote machine<a class="headerlink" href="#running-cells-on-a-remote-machine" title="Permanent link">&para;</a></h2>
+<p>Hand the agent an SSH target and it can run the heavy cells on that box — a GPU
+machine, a bigger instance, one closer to the data. The agent calls the
+<code>connect_ssh_worker</code> tool (its working agreement tells it to when you give it a
+target); or wire it up as the session opens with <code>strata agent … --worker-ssh
+user@gpu-box</code>. Strata installs the worker on the box if needed, tunnels to it,
+and makes it the default; keep a specific cell local with <code># @worker local</code>. See
+<a href="../workers/#run-cells-on-a-machine-you-can-ssh-to">Run cells on a machine you can SSH to</a>.</p>
 <h2 id="reusing-a-server-you-already-run">Reusing a server you already run<a class="headerlink" href="#reusing-a-server-you-already-run" title="Permanent link">&para;</a></h2>
 <p>If a server is already listening at the target URL, <code>strata agent</code> reuses it
 instead of starting one — but it must have the MCP endpoint enabled, and it must
@@ -2155,6 +2189,7 @@ If it can't, stop it and let <code>strata agent</code> start one scoped to your 
 <li><a href="../mcp/">MCP Server</a> — the full tool list and the endpoint's security model.</li>
 <li><a href="../tui/">Terminal Viewer (TUI)</a> — the live spectator <code>strata agent</code> attaches.</li>
 <li><a href="../agent-authoring/">Authoring Programmatically</a> — the same ops as a Python API.</li>
+<li><a href="../workers/#run-cells-on-a-machine-you-can-ssh-to">Distributed Workers</a> — running cells on a remote box over SSH.</li>
 </ul>
 
 
