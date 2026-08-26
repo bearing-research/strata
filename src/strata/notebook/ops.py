@@ -808,13 +808,22 @@ class RemoteNotebookOps:
         *,
         json: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> httpx.Response:
-        """Issue one request, turning a connection failure into an ops error."""
+        """Issue one request, turning a connection failure into an ops error.
+
+        ``timeout`` overrides the client default for a single call — used by the
+        SSH-worker verbs, whose first connect may install ``strata-worker`` on
+        the box and run well past the 30s default.
+        """
         import httpx
 
         url = f"{self._base_url}{path}"
+        kwargs: dict[str, Any] = {"json": json, "params": params}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
         try:
-            return self._client.request(method, url, json=json, params=params)
+            return self._client.request(method, url, **kwargs)
         except httpx.HTTPError as exc:
             raise NotebookOpsError(f"cannot reach {self._base_url}: {exc}") from exc
 
@@ -1008,6 +1017,54 @@ class RemoteNotebookOps:
             lockfile_changed=data.get("lockfile_changed", False),
             error=None,
         )
+
+    # -- ssh workers ---------------------------------------------------------
+
+    def add_ssh_worker(
+        self,
+        ssh_target: str,
+        *,
+        name: str | None = None,
+        set_default: bool = True,
+        install: bool = True,
+        timeout: float = 600.0,
+    ) -> dict[str, Any]:
+        """Provision + tunnel + register a worker over SSH on the server.
+
+        The tunnel is owned by the server (dispatch runs there), so this only
+        works against a running server. Returns the server's response — the
+        tunnel ``worker`` record plus the worker catalog. ``timeout`` is generous
+        since a first connect may install ``strata-worker`` on the box.
+        """
+        body: dict[str, Any] = {
+            "ssh_target": ssh_target,
+            "set_default": set_default,
+            "install": install,
+        }
+        if name:
+            body["name"] = name
+        resp = self._send(
+            "POST",
+            f"/v1/notebooks/{self._session_id}/workers/ssh",
+            json=body,
+            timeout=timeout,
+        )
+        if resp.status_code == 404:
+            raise NotebookOpsError(f"no session {self._session_id!r} on {self._base_url}")
+        if resp.status_code >= 400:
+            raise NotebookOpsError(_error_detail(resp))
+        return resp.json()
+
+    def remove_ssh_worker(self, name: str, *, stop_remote: bool = False) -> dict[str, Any]:
+        """Close a worker's SSH tunnel and remove its registration."""
+        resp = self._send(
+            "DELETE",
+            f"/v1/notebooks/{self._session_id}/workers/ssh/{name}",
+            params={"stop_remote": "true" if stop_remote else "false"},
+        )
+        if resp.status_code >= 400:
+            raise NotebookOpsError(_error_detail(resp))
+        return resp.json()
 
     def close(self) -> None:
         """Close the httpx client if this instance created it."""

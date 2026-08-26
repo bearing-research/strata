@@ -9,10 +9,16 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
 from strata.cli import main
-from strata.notebook.ops import LocalNotebookOps, NotebookOpsError, WorkerListView
+from strata.notebook.ops import (
+    LocalNotebookOps,
+    NotebookOpsError,
+    RemoteNotebookOps,
+    WorkerListView,
+)
 from strata.notebook.parser import parse_notebook
 from tests.notebook.test_cli import _build_notebook
 
@@ -167,3 +173,115 @@ def test_cli_worker_bad_dir(capsys, tmp_path):
     rc = main(["worker", "ls", str(tmp_path / "nope")])
     assert rc == 2
     assert "not a Strata notebook" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# RemoteNotebookOps SSH-worker verbs + `strata worker add-ssh|rm-ssh` CLI
+# ---------------------------------------------------------------------------
+
+
+def _ssh_ops(handler):
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    return RemoteNotebookOps("http://test", "sess-1", client=client)
+
+
+def test_remote_add_ssh_worker_posts_and_returns():
+    seen = {}
+
+    def handler(request):
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "worker": {
+                    "name": "gpu-box",
+                    "ssh_target": "user@gpu-box",
+                    "executor_url": "http://127.0.0.1:6000/v1/execute",
+                }
+            },
+        )
+
+    data = _ssh_ops(handler).add_ssh_worker("user@gpu-box", set_default=True)
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/v1/notebooks/sess-1/workers/ssh"
+    assert seen["body"] == {"ssh_target": "user@gpu-box", "set_default": True, "install": True}
+    assert data["worker"]["name"] == "gpu-box"
+
+
+def test_remote_add_ssh_worker_includes_name_when_given():
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"worker": {"name": "gpu"}})
+
+    _ssh_ops(handler).add_ssh_worker("user@box", name="gpu")
+    assert seen["body"]["name"] == "gpu"
+
+
+def test_remote_add_ssh_worker_error_raises():
+    ops = _ssh_ops(lambda req: httpx.Response(400, json={"detail": "key auth failed"}))
+    with pytest.raises(NotebookOpsError, match="key auth failed"):
+        ops.add_ssh_worker("user@box")
+
+
+def test_remote_remove_ssh_worker():
+    seen = {}
+
+    def handler(request):
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["query"] = request.url.query.decode()
+        return httpx.Response(200, json={"torn_down": True})
+
+    data = _ssh_ops(handler).remove_ssh_worker("gpu-box", stop_remote=True)
+    assert seen["method"] == "DELETE"
+    assert seen["path"] == "/v1/notebooks/sess-1/workers/ssh/gpu-box"
+    assert "stop_remote=true" in seen["query"]
+    assert data["torn_down"] is True
+
+
+def test_cli_worker_add_ssh_requires_server_and_session():
+    # --server / --session are required → argparse usage error, not a run.
+    with pytest.raises(SystemExit) as exc:
+        main(["worker", "add-ssh", "user@box"])
+    assert exc.value.code == 2
+
+
+def test_cli_worker_add_ssh_happy(monkeypatch, capsys):
+    calls = {}
+
+    class FakeOps:
+        def __init__(self, server, session):
+            calls["init"] = (server, session)
+
+        def add_ssh_worker(self, target, **kwargs):
+            calls["add"] = (target, kwargs)
+            return {"worker": {"name": "gpu-box", "ssh_target": target}}
+
+        def close(self):
+            calls["closed"] = True
+
+    monkeypatch.setattr("strata.notebook.ops.RemoteNotebookOps", FakeOps)
+    rc = main(
+        [
+            "worker",
+            "add-ssh",
+            "user@gpu-box",
+            "--server",
+            "http://s",
+            "--session",
+            "sess",
+            "--no-default",
+            "--format",
+            "human",
+        ]
+    )
+    assert rc == 0
+    assert calls["init"] == ("http://s", "sess")
+    assert calls["add"][0] == "user@gpu-box"
+    assert calls["add"][1]["set_default"] is False  # --no-default
+    assert calls["closed"] is True
+    assert "gpu-box" in capsys.readouterr().out
