@@ -372,6 +372,64 @@ async def _set_default_worker(
     return view.model_dump(mode="json")
 
 
+async def _connect_ssh_worker(
+    session_manager: SessionManager,
+    session_id: str,
+    ssh_target: str,
+    name: str | None = None,
+    set_default: bool = True,
+    install: bool = True,
+) -> dict[str, Any]:
+    """Provision + tunnel + register a remote worker over SSH, then broadcast.
+
+    Runs the server-owned supervisor (the tunnel must live in this process), so
+    the blocking SSH work is off-loaded to a thread. Returns the tunnel record
+    plus the updated worker list.
+    """
+    import asyncio
+    from dataclasses import asdict
+
+    from strata.notebook.routes import get_worker_supervisor
+    from strata.notebook.ssh_worker_service import establish_ssh_worker
+
+    session = _live_session(session_manager, session_id)
+    record = await asyncio.to_thread(
+        establish_ssh_worker,
+        session,
+        get_worker_supervisor(),
+        ssh_target=ssh_target,
+        name=name,
+        install=install,
+        set_default=set_default,
+    )
+    await _sync_and_broadcast(session_id, session)
+    await _agent_note(
+        session_id, "mcp", f"connected ssh worker {record.name} → {record.ssh_target}"
+    )
+    return {"worker": asdict(record), **_list_workers(session_manager, session_id)}
+
+
+async def _disconnect_ssh_worker(
+    session_manager: SessionManager,
+    session_id: str,
+    name: str,
+    stop_remote: bool = False,
+) -> dict[str, Any]:
+    """Close a worker's SSH tunnel and remove its registration, then broadcast."""
+    import asyncio
+
+    from strata.notebook.routes import get_worker_supervisor
+    from strata.notebook.ssh_worker_service import teardown_ssh_worker
+
+    session = _live_session(session_manager, session_id)
+    existed = await asyncio.to_thread(
+        teardown_ssh_worker, session, get_worker_supervisor(), name, stop_remote=stop_remote
+    )
+    await _sync_and_broadcast(session_id, session)
+    await _agent_note(session_id, "mcp", f"disconnected ssh worker {name}")
+    return {"torn_down": existed, **_list_workers(session_manager, session_id)}
+
+
 def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     """Build the streamable-HTTP MCP ASGI app, or ``None`` if ``[mcp]`` is absent.
 
@@ -608,5 +666,41 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     async def remove_worker(session_id: str, name: str) -> dict[str, Any]:
         """Remove a notebook-scoped worker (clears the default if it named it)."""
         return await _remove_worker(session_manager, session_id, name)
+
+    @mcp.tool()
+    async def connect_ssh_worker(
+        session_id: str,
+        ssh_target: str,
+        name: str | None = None,
+        set_default: bool = True,
+        install: bool = True,
+    ) -> dict[str, Any]:
+        """Run cells on a remote box the user gave you SSH access to.
+
+        When the user hands you an SSH target for compute (e.g. a GPU box),
+        call this: it connects to ``ssh_target`` (``user@host`` or an
+        ~/.ssh/config alias), installs strata-worker there if missing, launches
+        it, opens a secure tunnel, and registers it as a worker — so cells then
+        run on that box, cached by provenance like everything else. With
+        ``set_default`` (the default) every cell runs there; give a specific cell
+        ``# @worker local`` to keep it on this machine. A remote cell runs on the
+        *box's* filesystem, so its mounts and absolute paths are the box's, not
+        yours. Needs key-based SSH (no password prompts). May take a while on
+        first connect while it installs. Returns the tunnel record + worker list.
+        """
+        return await _connect_ssh_worker(
+            session_manager, session_id, ssh_target, name, set_default, install
+        )
+
+    @mcp.tool()
+    async def disconnect_ssh_worker(
+        session_id: str, name: str, stop_remote: bool = False
+    ) -> dict[str, Any]:
+        """Close a remote SSH worker's tunnel and unregister it.
+
+        With ``stop_remote`` also stops the strata-worker process on the box; by
+        default it's left running so a later reconnect is fast.
+        """
+        return await _disconnect_ssh_worker(session_manager, session_id, name, stop_remote)
 
     return mcp.streamable_http_app()
