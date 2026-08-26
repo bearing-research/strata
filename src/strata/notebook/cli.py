@@ -1480,8 +1480,48 @@ def worker_default_main(args: argparse.Namespace) -> int:
     return 0
 
 
+def worker_add_ssh_main(args: argparse.Namespace) -> int:
+    from strata.notebook.ops import NotebookOpsError, RemoteNotebookOps
+
+    ops = RemoteNotebookOps(args.server, args.session)
+    try:
+        data = ops.add_ssh_worker(
+            args.ssh_target,
+            name=args.name,
+            set_default=not args.no_default,
+            install=not args.no_install,
+        )
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    finally:
+        ops.close()
+    if args.format == "json":
+        _emit_json(data)
+    else:
+        worker = data.get("worker", {})
+        print(f"connected {worker.get('name')} → {worker.get('ssh_target')}")
+    return 0
+
+
+def worker_rm_ssh_main(args: argparse.Namespace) -> int:
+    from strata.notebook.ops import NotebookOpsError, RemoteNotebookOps
+
+    ops = RemoteNotebookOps(args.server, args.session)
+    try:
+        data = ops.remove_ssh_worker(args.name, stop_remote=args.stop_remote)
+    except NotebookOpsError as exc:
+        return _emit_op_error(exc, args.format)
+    finally:
+        ops.close()
+    if args.format == "json":
+        _emit_json(data)
+    else:
+        print(f"disconnected {args.name} (tunnel torn down: {data.get('torn_down')})")
+    return 0
+
+
 def add_worker_arguments(parser: argparse.ArgumentParser) -> None:
-    """Register the ``strata worker <action>`` group (ls, add, rm, default)."""
+    """Register the ``strata worker <action>`` group (ls, add, rm, default, add-ssh)."""
     sub = parser.add_subparsers(dest="worker_command", metavar="<action>")
 
     ls_p = sub.add_parser("ls", help="List registered workers and the default")
@@ -1519,6 +1559,38 @@ def add_worker_arguments(parser: argparse.ArgumentParser) -> None:
     default_p.add_argument("name", nargs="?", help="Worker name; omit or 'local' to clear")
     default_p.add_argument("--format", choices=["human", "json"], default="json")
     default_p.set_defaults(func=worker_default_main)
+
+    # add-ssh / rm-ssh drive a *running* server (the tunnel is server-owned), so
+    # they take --server/--session instead of a local notebook directory.
+    add_ssh_p = sub.add_parser(
+        "add-ssh", help="Provision + tunnel a worker over SSH (needs a running server)"
+    )
+    add_ssh_p.add_argument("ssh_target", help="SSH target, e.g. user@gpu-box")
+    add_ssh_p.add_argument(
+        "--server", required=True, help="Base URL of the running notebook server"
+    )
+    add_ssh_p.add_argument(
+        "--session", required=True, help="Open session id to attach the worker to"
+    )
+    add_ssh_p.add_argument("--name", default=None, help="Worker name (default: derived from host)")
+    add_ssh_p.add_argument(
+        "--no-default", action="store_true", help="Don't make it the notebook default"
+    )
+    add_ssh_p.add_argument(
+        "--no-install", action="store_true", help="Fail if strata-worker isn't already on the box"
+    )
+    add_ssh_p.add_argument("--format", choices=["human", "json"], default="json")
+    add_ssh_p.set_defaults(func=worker_add_ssh_main)
+
+    rm_ssh_p = sub.add_parser("rm-ssh", help="Tear down an SSH worker's tunnel + registration")
+    rm_ssh_p.add_argument("name", help="Worker name to disconnect")
+    rm_ssh_p.add_argument("--server", required=True, help="Base URL of the running notebook server")
+    rm_ssh_p.add_argument("--session", required=True, help="Open session id the worker is on")
+    rm_ssh_p.add_argument(
+        "--stop-remote", action="store_true", help="Also stop the remote strata-worker process"
+    )
+    rm_ssh_p.add_argument("--format", choices=["human", "json"], default="json")
+    rm_ssh_p.set_defaults(func=worker_rm_ssh_main)
 
     parser.set_defaults(func=lambda args: (parser.print_help(), 0)[1])
 
