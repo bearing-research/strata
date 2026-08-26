@@ -505,10 +505,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed" class="md-nav__link">
+  <a href="#performance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Fixed
+        Performance
       
     </span>
   </a>
@@ -516,10 +516,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#added_1" class="md-nav__link">
+  <a href="#fixed" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Added
+        Fixed
       
     </span>
   </a>
@@ -544,7 +544,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_2" class="md-nav__link">
+  <a href="#added_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -583,7 +583,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_3" class="md-nav__link">
+  <a href="#added_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -655,7 +655,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#added_4" class="md-nav__link">
+  <a href="#added_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -705,7 +705,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_5" class="md-nav__link">
+  <a href="#added_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -849,7 +849,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_6" class="md-nav__link">
+  <a href="#added_5" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2357,10 +2357,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#fixed" class="md-nav__link">
+  <a href="#performance" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Fixed
+        Performance
       
     </span>
   </a>
@@ -2368,10 +2368,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#added_1" class="md-nav__link">
+  <a href="#fixed" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Added
+        Fixed
       
     </span>
   </a>
@@ -2396,7 +2396,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_2" class="md-nav__link">
+  <a href="#added_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2435,7 +2435,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_3" class="md-nav__link">
+  <a href="#added_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2507,7 +2507,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#added_4" class="md-nav__link">
+  <a href="#added_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2557,7 +2557,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_5" class="md-nav__link">
+  <a href="#added_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2701,7 +2701,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_6" class="md-nav__link">
+  <a href="#added_5" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2923,7 +2923,8 @@ exhaustive commit history.</p>
   workers (both the direct and signed/manifest transports). Only genuinely
   unresolvable names (bound nowhere in the notebook), top-level lambdas, and
   star imports still block.</li>
-<li><strong>Leaf-cell console caching + <code># @nocache</code> - the notebook as an agent
+<li>
+<p><strong>Leaf-cell console caching + <code># @nocache</code> - the notebook as an agent
   scratchpad.</strong> A leaf cell (no downstream consumer) that only <code>print</code>s now
   caches its stdout/stderr by provenance and replays it on an unchanged re-run,
   instead of re-executing cold every time. This makes the notebook a viable
@@ -2932,7 +2933,35 @@ exhaustive commit history.</p>
   draw - opt out with <code># @nocache</code> (<code># @nocache off</code> re-enables); the gate
   applies to every language. See
   <a href="../notebook/annotations/#nocache">Cell Annotations</a> and
-  <a href="../notebook/agent/">Driving a notebook with a coding agent</a>.</li>
+  <a href="../notebook/agent/">Driving a notebook with a coding agent</a>.</p>
+</li>
+<li>
+<p><strong><code>strata agent &lt;notebook-dir&gt;</code> - one command to drive a notebook with a
+  coding agent.</strong> The MCP server, the CLI ops, and the terminal viewer already
+  existed, but wiring them together by hand was a fiddly, ordered dance nobody
+  did - so a coding agent never actually reached for the notebook. This command
+  collapses it: it creates-or-opens the notebook, starts (or reuses) a server
+  with the MCP endpoint enabled, opens a session (the one step an agent can't do
+  itself), drops a <code>.mcp.json</code> + a managed <code>CLAUDE.md</code> working agreement into the
+  notebook directory, and attaches the read-only TUI. Then you run <code>claude</code> in
+  that directory in another pane: it auto-connects, reads the agreement, and
+  drives cells that light up <strong>live</strong> in the TUI. Needs the <code>[mcp]</code> and <code>[tui]</code>
+  extras. See <a href="../notebook/agent/">Driving a notebook with a coding agent</a>.</p>
+</li>
+<li><strong><code>agent_demo</code> example - a coding agent's notebook, and the recipe to record
+  it.</strong> A small, runnable notebook (<code>examples/agent_demo/</code>) that trains a model
+  once and reuses it from cache when only the evaluation changes - the
+  content-addressed payoff. <code>examples/agent_demo/RECORDING.md</code> documents the
+  exact <code>strata agent</code> flow to capture it as a demo.</li>
+</ul>
+<h3 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Cache reads skip the Rust mmap path below 4 MB.</strong> <code>read_file_mmap</code> routed
+  every cache read through the Rust mmap path, but mmap loses to
+  <code>Path.read_bytes()</code> below ~4-6 MB (syscall + FFI + copy overhead), and a single
+  row-group cache entry is often that small. Reads under <code>STRATA_MMAP_MIN_BYTES</code>
+  (default 4 MB) and any mmap error now fall back to the plain read; larger reads
+  still take the faster mmap path.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
@@ -2956,25 +2985,6 @@ exhaustive commit history.</p>
   driving the REST API by hand. The check now probes <code>/mcp/</code> and distinguishes
   the JSON MCP endpoint from the HTML SPA, failing fast with a clear hint.</li>
 </ul>
-<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong><code>agent_demo</code> example - a coding agent's notebook, and the recipe to record
-  it.</strong> A small, runnable notebook (<code>examples/agent_demo/</code>) that trains a model
-  once and reuses it from cache when only the evaluation changes - the
-  content-addressed payoff. <code>examples/agent_demo/RECORDING.md</code> documents the
-  exact <code>strata agent</code> flow to capture it as a demo.</li>
-<li><strong><code>strata agent &lt;notebook-dir&gt;</code> - one command to drive a notebook with a
-  coding agent.</strong> The MCP server, the CLI ops, and the terminal viewer already
-  existed, but wiring them together by hand was a fiddly, ordered dance nobody
-  did - so a coding agent never actually reached for the notebook. This command
-  collapses it: it creates-or-opens the notebook, starts (or reuses) a server
-  with the MCP endpoint enabled, opens a session (the one step an agent can't do
-  itself), drops a <code>.mcp.json</code> + a managed <code>CLAUDE.md</code> working agreement into the
-  notebook directory, and attaches the read-only TUI. Then you run <code>claude</code> in
-  that directory in another pane: it auto-connects, reads the agreement, and
-  drives cells that light up <strong>live</strong> in the TUI. Needs the <code>[mcp]</code> and <code>[tui]</code>
-  extras. See <a href="../notebook/agent/">Driving a notebook with a coding agent</a>.</li>
-</ul>
 <h2 id="050-2026-07-15">0.5.0 - 2026-07-15<a class="headerlink" href="#050-2026-07-15" title="Permanent link">&para;</a></h2>
 <p>0.5.0 turns the notebook into an <strong>interactive, shareable app</strong>. The headlines
 are <strong>interactive widget cells</strong> (declarative control panels whose values
@@ -2984,7 +2994,7 @@ and an <strong>MCP server</strong> that lets a coding agent drive a live noteboo
 Alongside them: an interactive <strong>DataFrame viewer</strong> (page / sort / filter /
 search + export), <strong>per-variant fan-out</strong> (<code># @per_variant</code>), and <strong>Logs /
 Artifacts</strong> operator pages. No breaking changes.</p>
-<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
+<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>App view - open a notebook as a read-only interactive app.</strong> Click <strong>App</strong>
   in the notebook header (or visit <code>/app/&lt;sessionId&gt;</code>) to render just the widget
@@ -3103,7 +3113,7 @@ Artifacts</strong> operator pages. No breaking changes.</p>
 CLI</strong>, alongside an internal restructuring of the server, per-cell unit tests,
 broader value serialization with in-place mutation tracking, concurrency-bug
 fixes, and CI hardening. No breaking changes.</p>
-<h3 id="added_3">Added<a class="headerlink" href="#added_3" title="Permanent link">&para;</a></h3>
+<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
 <p><strong>A terminal viewer for notebooks (<code>strata-notebook-tui</code>).</strong> A read-only,
@@ -3336,7 +3346,7 @@ cell.featurize(cell.trips)…</code> - <code>cell.X</code> is any def or input a
   service mode; personal mode (single operator) is unaffected.</p>
 </li>
 </ul>
-<h3 id="added_4">Added<a class="headerlink" href="#added_4" title="Permanent link">&para;</a></h3>
+<h3 id="added_3">Added<a class="headerlink" href="#added_3" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong><code>strata-client</code>: a slim, independent client distribution.</strong> Using Strata as
   a library no longer means installing the whole server. The new <code>strata-client</code>
@@ -3695,7 +3705,7 @@ yields byte-identical output for notebooks without one (every existing
 Python-only notebook). The WS protocol gained reconnect + MessageType
 frames; external WS clients that ignore unknown frame types are
 unaffected. No Python API surface removed.</p>
-<h3 id="added_5">Added<a class="headerlink" href="#added_5" title="Permanent link">&para;</a></h3>
+<h3 id="added_4">Added<a class="headerlink" href="#added_4" title="Permanent link">&para;</a></h3>
 <h4 id="r-cells">R cells<a class="headerlink" href="#r-cells" title="Permanent link">&para;</a></h4>
 <p>R is a first-class notebook language alongside Python: cells execute
 end-to-end, cross-language Arrow exchange works, provenance/caching is
@@ -3926,7 +3936,7 @@ install</code> into a hand-rolled <code>python -m venv</code> is rejected by the
 startup guard. The notebook app boots via <code>strata-notebook</code> (or
 <code>python -m strata</code>); <code>strata-worker</code> boots a remote worker; and
 <code>strata run | export | import</code> covers headless notebook tooling.</p>
-<h3 id="added_6">Added<a class="headerlink" href="#added_6" title="Permanent link">&para;</a></h3>
+<h3 id="added_5">Added<a class="headerlink" href="#added_5" title="Permanent link">&para;</a></h3>
 <h4 id="notebook-ui-and-lifecycle">Notebook UI and lifecycle<a class="headerlink" href="#notebook-ui-and-lifecycle" title="Permanent link">&para;</a></h4>
 <ul>
 <li>notebook home / create / open flows with recent-notebook tracking</li>
