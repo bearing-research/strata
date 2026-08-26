@@ -133,3 +133,46 @@ def test_mcp_mounted_false_when_unreachable(monkeypatch) -> None:
 
     monkeypatch.setattr(agent_launch.httpx, "get", _boom)
     assert agent_launch._mcp_mounted("http://localhost:8765") is False
+
+
+def test_guidance_mentions_remote_ssh_worker() -> None:
+    text = agent_launch._agent_guidance("sess-abc")
+    # The agent must know to reach for a remote worker when handed an SSH target.
+    assert "connect_ssh_worker" in text
+    assert "# @worker local" in text
+
+
+def test_establish_ssh_worker_reports_success(monkeypatch, capsys) -> None:
+    class _Resp:
+        is_error = False
+
+        def json(self):
+            return {"worker": {"name": "gpu-box"}}
+
+    monkeypatch.setattr(agent_launch.httpx, "post", lambda *a, **k: _Resp())
+    agent_launch._establish_ssh_worker("http://localhost:8765", "sess", "user@gpu-box")
+    assert "gpu-box" in capsys.readouterr().out
+
+
+def test_establish_ssh_worker_warns_on_error_status(monkeypatch, capsys) -> None:
+    class _Resp:
+        is_error = True
+        status_code = 400
+
+        def json(self):
+            return {"detail": "key auth failed"}
+
+    monkeypatch.setattr(agent_launch.httpx, "post", lambda *a, **k: _Resp())
+    agent_launch._establish_ssh_worker("http://localhost:8765", "sess", "user@box")
+    err = capsys.readouterr().err
+    assert "not connected" in err and "key auth failed" in err
+
+
+def test_establish_ssh_worker_warns_on_network_error(monkeypatch, capsys) -> None:
+    def _boom(*a, **k):
+        raise agent_launch.httpx.ConnectError("refused")
+
+    monkeypatch.setattr(agent_launch.httpx, "post", _boom)
+    # A network failure is a warning, never an exception that aborts the launch.
+    agent_launch._establish_ssh_worker("http://localhost:8765", "sess", "user@box")
+    assert "could not connect" in capsys.readouterr().err
