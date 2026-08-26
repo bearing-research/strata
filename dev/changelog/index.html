@@ -2936,6 +2936,19 @@ exhaustive commit history.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Case-differing variables no longer share one artifact on a case-insensitive
+  filesystem.</strong> On macOS/APFS (and Windows), two variables whose names differ
+  only in case - the idiomatic <code>from pkg import Tikhonov</code> class + <code>tikhonov =
+  Tikhonov(...)</code> instance, or <code>Widget</code>/<code>widget</code> - mapped to the same blob
+  filename, so the store wrote one over the other and every downstream read of
+  either name got the last-written value (a confusing <code>__call__() got an
+  unexpected keyword argument</code> far from any visible shadowing). Per-variable blob
+  filenames (the serializer's write, the executor's input staging and output
+  reads, the artifact store's blob key, and the direct-HTTP executor transport)
+  now append a short hash of the exact-case name when it contains uppercase, so
+  distinct-case names stay on distinct files, and the executor matches output
+  files case-sensitively. All-lowercase names are unchanged, so existing caches
+  survive.</li>
 <li><strong><code>strata agent</code> now detects a missing MCP endpoint instead of silently
   proceeding.</strong> The mount check probed <code>/mcp</code> (no trailing slash), which falls
   through to the SPA and always returns <code>200</code> - so a server without the <code>[mcp]</code>
