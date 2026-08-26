@@ -162,3 +162,32 @@ def test_derive_subkey_zero_labels_is_just_parent_hash():
     identity element when a caller iterates over an optional label list."""
     parent = "abc"
     assert derive_subkey(parent) == hashlib.sha256(parent.encode()).hexdigest()
+
+
+def test_safe_filename_stem_is_case_collision_proof():
+    from strata.notebook.provenance import safe_filename_stem
+
+    # All-lowercase names (incl. the __display__N convention) are unchanged, so
+    # their blob filenames stay stable across upgrades.
+    assert safe_filename_stem("data") == "data"
+    assert safe_filename_stem("__display__0") == "__display__0"
+    # A name with uppercase gets a short hash suffix.
+    up = safe_filename_stem("Data")
+    assert up.startswith("Data-") and up != "Data"
+    # The real bug: Data vs data must not collide even under case folding
+    # (macOS/APFS, Windows), so their blob files stay distinct.
+    assert up != safe_filename_stem("data")
+    assert up.lower() != safe_filename_stem("data").lower()
+    # Two uppercase variants of one name also stay distinct.
+    assert safe_filename_stem("Data") != safe_filename_stem("DATA")
+
+
+def test_serializer_copy_matches_provenance_helper():
+    """serializer._safe_filename_stem is a standalone copy (the module loads in
+    the harness venv and can't import strata) — it must not drift from the
+    canonical provenance.safe_filename_stem."""
+    from strata.notebook.provenance import safe_filename_stem as canonical
+    from strata.notebook.serializer import _safe_filename_stem as copy
+
+    for name in ["data", "Data", "Widget", "widget", "Tikhonov", "__display__0", "DF", "a_b", "X1"]:
+        assert copy(name) == canonical(name), name

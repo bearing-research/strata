@@ -39,6 +39,7 @@ Loading pattern (used in each subprocess script):
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -365,6 +366,20 @@ class _Handler(NamedTuple):
     deserialize: _DeserializeFn | None
 
 
+def _safe_filename_stem(variable_name: str) -> str:
+    """Case-collision-proof filename stem (write side).
+
+    Kept byte-for-byte identical to ``provenance.safe_filename_stem`` (guarded by
+    a test) — this module is loaded standalone in the harness venv and cannot
+    ``import strata``, so it carries its own copy. See that function for the why:
+    ``Widget``/``widget`` (class + instance) must not share a blob file on a
+    case-insensitive filesystem.
+    """
+    if variable_name != variable_name.lower():
+        return f"{variable_name}-{hashlib.sha256(variable_name.encode()).hexdigest()[:8]}"
+    return variable_name
+
+
 def serialize_value(value: Any, output_dir: Path | str, variable_name: str) -> SerializedPayload:
     """Serialize *value* to *output_dir* and return a metadata dict.
 
@@ -470,7 +485,7 @@ def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> Serial
 
     table = _to_arrow_table(value)
 
-    filename = f"{variable_name}.arrow"
+    filename = f"{_safe_filename_stem(variable_name)}.arrow"
     filepath = output_dir / filename
     with open(filepath, "wb") as f:
         writer = pa.ipc.new_stream(f, table.schema)
@@ -890,7 +905,7 @@ def _coerce_markdown_text(value: Any) -> str:
 
 def _serialize_markdown(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     markdown_text = _coerce_markdown_text(value)
-    filename = f"{variable_name}.md"
+    filename = f"{_safe_filename_stem(variable_name)}.md"
     filepath = output_dir / filename
     filepath.write_text(markdown_text, encoding="utf-8")
     return {
@@ -914,7 +929,7 @@ def _serialize_image_png(value: Any, output_dir: Path, variable_name: str) -> Se
     if width is None or height is None:
         width, height = _png_size_from_bytes(png_bytes)
 
-    filename = f"{variable_name}.png"
+    filename = f"{_safe_filename_stem(variable_name)}.png"
     filepath = output_dir / filename
     with open(filepath, "wb") as f:
         f.write(png_bytes)
@@ -1044,7 +1059,7 @@ def _serialize_dataframe_json(
         preview = []
         payload.update({"columns": [], "data": [], "series_name": None})
 
-    filename = f"{variable_name}.arrow"
+    filename = f"{_safe_filename_stem(variable_name)}.arrow"
     filepath = output_dir / filename
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(payload, f)
@@ -1060,7 +1075,7 @@ def _serialize_dataframe_json(
 
 
 def _serialize_json(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
-    filename = f"{variable_name}.json"
+    filename = f"{_safe_filename_stem(variable_name)}.json"
     filepath = output_dir / filename
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(value, f, indent=2)
@@ -1074,7 +1089,7 @@ def _serialize_json(value: Any, output_dir: Path, variable_name: str) -> Seriali
 
 def _serialize_module(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     module_name = getattr(value, "__name__", variable_name)
-    filename = f"{variable_name}.module.json"
+    filename = f"{_safe_filename_stem(variable_name)}.module.json"
     filepath = output_dir / filename
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump({"module_name": module_name}, f)
@@ -1098,7 +1113,7 @@ def _serialize_cell_instance(value: Any, output_dir: Path, variable_name: str) -
     state = _extract_cell_instance_state(value)
     codec = _resolve_object_codec()
     state_bytes = codec.dumps(state)
-    filename = f"{variable_name}.cell_instance.pickle"
+    filename = f"{_safe_filename_stem(variable_name)}.cell_instance.pickle"
     filepath = output_dir / filename
     payload = {
         "module_name": type(value).__module__,
@@ -1128,7 +1143,7 @@ def _serialize_pickle(value: Any, output_dir: Path, variable_name: str) -> Seria
     # harness.py and pool_worker.py wrap serialize_value() in a
     # try/except that converts the exception into an error-shape entry,
     # so the failure surfaces at the cell that produced it.
-    filename = f"{variable_name}.pickle"
+    filename = f"{_safe_filename_stem(variable_name)}.pickle"
     filepath = output_dir / filename
     codec = _resolve_object_codec()
     payload = codec.dumps(value)

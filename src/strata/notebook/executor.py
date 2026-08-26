@@ -99,6 +99,7 @@ from strata.notebook.provenance import (
     compute_provenance_hash,
     compute_source_hash,
     derive_subkey,
+    safe_filename_stem,
 )
 from strata.notebook.remote_bundle import (
     pack_notebook_output_bundle,
@@ -2036,6 +2037,11 @@ class CellExecutor:
                 "format": str(spec.get("content_type", "pickle/object")),
                 "uri": None,
                 "byte_size": (output_dir / str(spec["file"])).stat().st_size,
+                # Carry the on-disk filename so the worker looks the uploaded part
+                # up by its actual (case-safe) name rather than re-deriving
+                # ``{var_name}{ext}`` — which no longer matches once a name with
+                # uppercase gets a hash suffix.
+                "file": str(spec["file"]),
             }
             # A module/cell export carries injected upstream/same-cell values its
             # defs close over; the worker needs the sub-spec to hydrate them.
@@ -3104,12 +3110,12 @@ class CellExecutor:
                     params = {}  # malformed transform_spec → default content type
                 content_type = params.get("content_type") or content_type
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
-            input_file = output_dir / f"{file_stem}{ext}"
+            input_file = output_dir / f"{safe_filename_stem(file_stem)}{ext}"
             with open(input_file, "wb") as f:
                 f.write(blob_data)
             return {
                 "content_type": content_type,
-                "file": f"{file_stem}{ext}",
+                "file": f"{safe_filename_stem(file_stem)}{ext}",
                 "uri": f"strata://artifact/{artifact.id}@v={artifact.version}",
             }
 
@@ -3134,10 +3140,10 @@ class CellExecutor:
                     params = {}
                 content_type = params.get("content_type") or content_type
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".pickle")
-            input_file = output_dir / f"{file_stem}{ext}"
+            input_file = output_dir / f"{safe_filename_stem(file_stem)}{ext}"
             with open(input_file, "wb") as f:
                 f.write(artifact_mgr.load_artifact_data(art_id, version))
-            return {"content_type": content_type, "file": f"{file_stem}{ext}"}
+            return {"content_type": content_type, "file": f"{safe_filename_stem(file_stem)}{ext}"}
 
         def _attach_injected(var_name: str, spec: dict[str, Any]) -> None:
             """For a module/cell spec, resolve its injected upstream values to
@@ -3322,88 +3328,100 @@ class CellExecutor:
 
         all_stored = True
 
+        # ``.rds`` is R-only (harness.R's RDS fallback tier), stored under its own
+        # content_type so a downstream consumer can recognise the tag without
+        # scanning bytes.
+        content_type_map = {
+            ".arrow": "arrow/ipc",
+            ".json": "json/object",
+            ".pickle": "pickle/object",
+            ".module.json": "module/import",
+            ".cell_module.json": "module/cell",
+            ".cell_instance.pickle": "module/cell-instance",
+            ".rds": "application/x-r-rds",
+        }
+        # Priority order matters: a module/cell(-instance)/import value writes BOTH
+        # a descriptor (``.cell_module.json`` / ``.cell_instance.pickle`` /
+        # ``.module.json``) AND a generic ``.pickle`` sidecar, so the specific
+        # descriptor must be matched before the generic ``.json`` / ``.pickle``.
+        output_exts = [
+            ".arrow",
+            ".cell_module.json",
+            ".cell_instance.pickle",
+            ".module.json",
+            ".json",
+            ".pickle",
+            ".rds",
+        ]
+
         for var_name in consumed_vars:
-            found = False
-            for ext in [
-                ".arrow",
-                ".cell_module.json",
-                ".cell_instance.pickle",
-                ".module.json",
-                ".json",
-                ".pickle",
-                ".rds",
-            ]:
-                output_file = output_dir / f"{var_name}{ext}"
-                if output_file.exists():
-                    found = True
-                    try:
-                        with open(output_file, "rb") as f:
-                            blob_data = f.read()
-
-                        content_type_map = {
-                            ".arrow": "arrow/ipc",
-                            ".json": "json/object",
-                            ".pickle": "pickle/object",
-                            ".module.json": "module/import",
-                            ".cell_module.json": "module/cell",
-                            ".cell_instance.pickle": "module/cell-instance",
-                            # R-only payload from harness.R's RDS fallback
-                            # tier. Stored under its own content_type so the
-                            # downstream consumer that #58 wires up (R cell
-                            # reading the artifact back, or a Python cell
-                            # being told the value is R-only) can recognise
-                            # the tag without scanning bytes.
-                            ".rds": "application/x-r-rds",
-                        }
-                        content_type = content_type_map.get(ext, "pickle/object")
-
-                        var_provenance = derive_subkey(provenance_hash, var_name)
-
-                        artifact_version = artifact_mgr.store_cell_output(
-                            cell_id=cell_id,
-                            variable_name=var_name,
-                            blob_data=blob_data,
-                            content_type=content_type,
-                            provenance_hash=var_provenance,
-                            input_versions={h: h for h in input_hashes},
-                            source_hash=source_hash,
-                            env_hash=env_hash,
-                            variant=variant,
-                        )
-                        uri = (
-                            f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
-                        )
-                        cell.artifact_uris[var_name] = uri
-                        cell.artifact_uri = uri  # backward compat
-                        logger.info(
-                            "Stored output %s for cell %s as %s@v=%d (%d bytes, %s)",
-                            var_name,
-                            cell_id,
-                            artifact_version.id,
-                            artifact_version.version,
-                            len(blob_data),
-                            content_type,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed to store output %s for cell %s",
-                            var_name,
-                            cell_id,
-                        )
-                        all_stored = False
+            # Python's serialize_value writes a case-safe stem (``Data-<hash>.json``);
+            # the R harness writes the plain name (``Data.json``). Try every
+            # safe-stem candidate first, then fall back to the plain name only if
+            # no safe-stem file exists at all — never per-ext, so a case-differing
+            # sibling with a different content type (say ``data`` as a DataFrame
+            # ``.arrow``) is never mistaken for ``Data``.
+            safe = safe_filename_stem(var_name)
+            stems = [safe] if safe == var_name else [safe, var_name]
+            output_file: Path | None = None
+            ext = ""
+            for stem in stems:
+                for candidate_ext in output_exts:
+                    candidate = output_dir / f"{stem}{candidate_ext}"
+                    if candidate.exists():
+                        output_file, ext = candidate, candidate_ext
+                        break
+                if output_file is not None:
                     break
 
-            if not found:
+            if output_file is None:
                 logger.warning(
                     "_store_outputs %s: no output file for consumed var %s "
-                    "("
-                    "looked for %s.arrow/.json/.pickle/"
-                    ".cell_module.json/.cell_instance.pickle/.rds in %s"
-                    ")",
+                    "(looked for %s{.arrow,.json,.pickle,.cell_module.json,"
+                    ".cell_instance.pickle,.rds} in %s)",
                     cell_id,
                     var_name,
-                    var_name,
+                    safe,
                     output_dir,
+                )
+                all_stored = False
+                continue
+
+            try:
+                with open(output_file, "rb") as f:
+                    blob_data = f.read()
+
+                content_type = content_type_map.get(ext, "pickle/object")
+                var_provenance = derive_subkey(provenance_hash, var_name)
+
+                artifact_version = artifact_mgr.store_cell_output(
+                    cell_id=cell_id,
+                    variable_name=var_name,
+                    blob_data=blob_data,
+                    content_type=content_type,
+                    provenance_hash=var_provenance,
+                    input_versions={h: h for h in input_hashes},
+                    source_hash=source_hash,
+                    env_hash=env_hash,
+                    variant=variant,
+                )
+                uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
+                cell.artifact_uris[var_name] = uri
+                cell.artifact_uri = uri  # backward compat
+                logger.info(
+                    "Stored output %s for cell %s as %s@v=%d (%d bytes, %s)",
+                    var_name,
+                    cell_id,
+                    artifact_version.id,
+                    artifact_version.version,
+                    len(blob_data),
+                    content_type,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to store output %s for cell %s",
+                    var_name,
+                    cell_id,
                 )
                 all_stored = False
 
@@ -3603,7 +3621,7 @@ class CellExecutor:
                 "provenance_hash": derive_subkey(provenance_hash, var_name),
                 "injected": injected_refs,
             }
-            output_file = output_dir / f"{var_name}.cell_module.json"
+            output_file = output_dir / f"{safe_filename_stem(var_name)}.cell_module.json"
             with open(output_file, "w", encoding="utf-8") as f:
                 json.dump(descriptor, f)
 
@@ -4683,7 +4701,7 @@ class CellExecutor:
             return None
         content_type = _artifact_content_type(art)
         ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
-        file_name = f"{var_name}{ext}"
+        file_name = f"{safe_filename_stem(var_name)}{ext}"
         (target_dir / file_name).write_bytes(blob)
         return {"content_type": content_type, "file": file_name}
 
@@ -4773,7 +4791,7 @@ class CellExecutor:
                 return {"cache_hit": False, "provenance_hash": provenance_hash}
             content_type = _artifact_content_type(canonical_art)
             ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(content_type, ".bin")
-            file_name = f"{var_name}{ext}"
+            file_name = f"{safe_filename_stem(var_name)}{ext}"
             (cell_output_dir / file_name).write_bytes(blob)
             cached_outputs[var_name] = {
                 "content_type": content_type,

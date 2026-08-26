@@ -80,6 +80,28 @@ def derive_subkey(parent_hash: str, *labels: str) -> str:
     return hashlib.sha256(":".join(pieces).encode()).hexdigest()
 
 
+def safe_filename_stem(variable_name: str) -> str:
+    """Case-collision-proof filename stem for a per-variable blob.
+
+    Two variables that differ only in case — the idiomatic ``Widget`` class +
+    ``widget`` instance, or ``from pkg import Tikhonov`` + ``tikhonov =
+    Tikhonov(...)`` — otherwise map to the same on-disk filename on a
+    case-insensitive filesystem (macOS/APFS, Windows). The harness then writes one
+    variable's blob over the other's, and every downstream read of either name
+    gets the last-written value. Appending a short hash of the exact-case name
+    keeps distinct-case names on distinct files; all-lowercase names (the common
+    case, including the ``__display__N`` convention) are returned unchanged so
+    their filenames stay stable across upgrades.
+
+    Every code path that turns a variable name into a blob filename — the
+    serializer (write), the executor's input staging and output reads — must use
+    this so writer and reader agree.
+    """
+    if variable_name != variable_name.lower():
+        return f"{variable_name}-{hashlib.sha256(variable_name.encode()).hexdigest()[:8]}"
+    return variable_name
+
+
 def compute_provenance_hash(
     input_hashes: list[str],
     source_hash: str,

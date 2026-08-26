@@ -557,9 +557,14 @@ def create_notebook_executor_app() -> FastAPI:
             if not name:
                 raise HTTPException(status_code=400, detail="input descriptor missing name")
             content_type = str(descriptor.get("format", "pickle/object"))
+            # Prefer the client's recorded on-disk filename (which is case-safe:
+            # a name with uppercase gets a hash suffix so it can't collide with a
+            # case-sibling on a case-insensitive FS). Only re-derive when absent
+            # (older clients), where {name}{ext} matched the upload name anyway.
+            recorded_file = str(descriptor.get("file", "")).strip()
             raw_inputs[name] = {
                 "content_type": content_type,
-                "file": f"{name}{_input_extension(content_type)}",
+                "file": recorded_file or f"{name}{_input_extension(content_type)}",
             }
             if isinstance(descriptor.get("injected"), dict):
                 raw_inputs[name]["injected"] = descriptor["injected"]

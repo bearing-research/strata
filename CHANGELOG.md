@@ -74,6 +74,19 @@ exhaustive commit history.
 
 ### Fixed
 
+- **Case-differing variables no longer share one artifact on a case-insensitive
+  filesystem.** On macOS/APFS (and Windows), two variables whose names differ
+  only in case - the idiomatic `from pkg import Tikhonov` class + `tikhonov =
+  Tikhonov(...)` instance, or `Widget`/`widget` - mapped to the same blob
+  filename, so the store wrote one over the other and every downstream read of
+  either name got the last-written value (a confusing `__call__() got an
+  unexpected keyword argument` far from any visible shadowing). Per-variable blob
+  filenames (the serializer's write, the executor's input staging and output
+  reads, the artifact store's blob key, and the direct-HTTP executor transport)
+  now append a short hash of the exact-case name when it contains uppercase, so
+  distinct-case names stay on distinct files, and the executor matches output
+  files case-sensitively. All-lowercase names are unchanged, so existing caches
+  survive.
 - **`strata agent` now detects a missing MCP endpoint instead of silently
   proceeding.** The mount check probed `/mcp` (no trailing slash), which falls
   through to the SPA and always returns `200` - so a server without the `[mcp]`
