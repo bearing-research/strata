@@ -124,6 +124,17 @@ clones it.
 | `--python X.Y` | Python `major.minor` for a newly created notebook's venv. |
 | `--no-env` | When creating a notebook, skip building its venv now. |
 | `--no-tui` | Set up and open the session but don't attach the TUI (useful when you keep a browser tab open instead, or drive the launcher from a script). |
+| `--worker-ssh user@host` | Provision a remote worker over SSH and route cells to it (see below). |
+
+## Running cells on a remote machine
+
+Hand the agent an SSH target and it can run the heavy cells on that box — a GPU
+machine, a bigger instance, one closer to the data. The agent calls the
+`connect_ssh_worker` tool (its working agreement tells it to when you give it a
+target); or wire it up as the session opens with `strata agent … --worker-ssh
+user@gpu-box`. Strata installs the worker on the box if needed, tunnels to it,
+and makes it the default; keep a specific cell local with `# @worker local`. See
+[Run cells on a machine you can SSH to](workers.md#run-cells-on-a-machine-you-can-ssh-to).
 
 ## Reusing a server you already run
 
@@ -138,3 +149,4 @@ If it can't, stop it and let `strata agent` start one scoped to your notebook.
 - [MCP Server](mcp.md) — the full tool list and the endpoint's security model.
 - [Terminal Viewer (TUI)](tui.md) — the live spectator `strata agent` attaches.
 - [Authoring Programmatically](agent-authoring.md) — the same ops as a Python API.
+- [Distributed Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to) — running cells on a remote box over SSH.

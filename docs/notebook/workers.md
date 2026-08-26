@@ -90,6 +90,40 @@ When the cell runs, the UI shows a pulsing **"dispatching → local"** badge dur
 
 Once this works locally, the cloud deploys below just change `config.url` from `http://127.0.0.1:9000` to the worker's public URL.
 
+## Run cells on a machine you can SSH to
+
+If you have a box you reach over SSH — a GPU machine, a bigger instance, one closer to the data — Strata can turn it into a worker for you in one step, without you deploying anything or hand-editing `notebook.toml`. Strata SSHes in, installs `strata-worker` if it's missing, launches it bound to the box's localhost, opens an `ssh -L` tunnel back to the notebook server, and registers it as a `direct`-transport worker. Cells then run on that box, cached by provenance like any other worker.
+
+**Driving a coding agent (the common case).** When you're driving the notebook with a coding agent ([Drive with a Coding Agent](agent.md)), just tell it the target — it calls the `connect_ssh_worker` MCP tool:
+
+```
+You: use ssh user@gpu-box for the training cells
+Agent → connect_ssh_worker(session_id, "user@gpu-box")
+```
+
+The agent's working agreement already tells it to reach for this when you hand it an SSH target, and to keep light cells local with `# @worker local`. To wire the worker up as the session opens instead, pass it to the on-ramp:
+
+```bash
+strata agent ./my-notebook --worker-ssh user@gpu-box
+```
+
+**From the CLI.** Against a running server (the tunnel is owned by the server, since that's where cells dispatch from), with the session id the server assigned:
+
+```bash
+strata worker add-ssh user@gpu-box --server http://localhost:8765 --session <session-id>
+# tear it down (add --stop-remote to also stop the worker process on the box):
+strata worker rm-ssh gpu-box --server http://localhost:8765 --session <session-id>
+```
+
+`add-ssh` makes the new worker the notebook default (pass `--no-default` to skip); `--name` overrides the name derived from the host, and `--no-install` fails fast rather than installing `strata-worker` on the box.
+
+**What to know:**
+
+- **Key-based SSH only.** Strata runs `ssh` in batch mode and never handles passwords — the target must authenticate non-interactively (an agent/key that works when you run `ssh user@gpu-box` yourself). A `user@host`, a bare `host`, or an `~/.ssh/config` alias all work.
+- **The first connect can take a minute** while it installs `strata-worker` on the box (via `uv tool install`); reconnects adopt the already-running worker.
+- **Security.** The worker binds the box's `127.0.0.1` — never a public port — and is reachable only through the authenticated SSH tunnel. A per-worker bearer token is generated for defense-in-depth; it's held in the notebook server's memory and **never written to `notebook.toml`**.
+- **A remote cell runs on the box's filesystem.** Its `file://` mounts and absolute paths resolve there, not on your machine, and cloud mounts use the box's own credentials. Results are cached under the remote environment's identity, so they don't collide with local runs.
+
 ## Deploy to the cloud
 
 Strata ships a reference executor as the `strata-worker` console script. Any platform that can run an HTTP service on a Python image will work. Two walkthroughs follow:
