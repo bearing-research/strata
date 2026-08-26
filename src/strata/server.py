@@ -574,6 +574,12 @@ async def _graceful_shutdown(state: ServerState) -> None:
     state._planning_executor.shutdown(wait=False)
     state._fetch_executor.shutdown(wait=False)
 
+    # Tear down any SSH-tunneled notebook workers so no `ssh -L` children outlive
+    # the server (the remote workers themselves are left running for reuse).
+    from strata.notebook.routes import shutdown_worker_supervisor
+
+    shutdown_worker_supervisor()
+
 
 # The mounted MCP ASGI app, or None when the endpoint is disabled / the [mcp]
 # extra is absent. Set at import by ``_mount_mcp_if_enabled``; read by lifespan.
