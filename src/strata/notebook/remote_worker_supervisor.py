@@ -27,6 +27,10 @@ from strata.notebook.ssh_worker import (
     SshTarget,
     SshWorkerError,
 )
+from strata.notebook.worker_secrets import (
+    clear_runtime_worker_token,
+    set_runtime_worker_token,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -224,6 +228,9 @@ class RemoteWorkerSupervisor:
             local_port=lport,
             remote_port=running.port,
         )
+        # Publish the token so the executor can authenticate dispatch to this
+        # worker by name, without ever writing the secret to notebook.toml.
+        set_runtime_worker_token(name, token)
         return record
 
     def token_for(self, name: str) -> str | None:
@@ -270,6 +277,7 @@ class RemoteWorkerSupervisor:
         active = self._tunnels.pop(name, None)
         if active is None:
             return False
+        clear_runtime_worker_token(name)
         active.handle.terminate()
         if stop_remote:
             import contextlib
@@ -284,7 +292,8 @@ class RemoteWorkerSupervisor:
         Wired to the server lifespan's shutdown so no ``ssh -L`` children outlive
         the server.
         """
-        for active in self._tunnels.values():
+        for name, active in self._tunnels.items():
+            clear_runtime_worker_token(name)
             active.handle.terminate()
         self._tunnels.clear()
 

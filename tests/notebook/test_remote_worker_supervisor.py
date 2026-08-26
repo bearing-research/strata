@@ -187,3 +187,35 @@ def test_shutdown_tears_down_all():
     sup.shutdown()
     assert all(h.terminated >= 1 for h in launcher.handles)
     assert sup.status() == []
+
+
+def test_establish_publishes_runtime_token_teardown_clears():
+    from strata.notebook.worker_secrets import (
+        clear_runtime_worker_token,
+        get_runtime_worker_token,
+    )
+
+    sup, _, _ = _supervisor()
+    try:
+        sup.establish("gpu", "user@box", token="tok123")
+        # The executor can now authenticate dispatch to "gpu" by name.
+        assert get_runtime_worker_token("gpu") == "tok123"
+        sup.teardown("gpu")
+        assert get_runtime_worker_token("gpu") is None
+    finally:
+        clear_runtime_worker_token("gpu")
+
+
+def test_shutdown_clears_runtime_tokens():
+    from strata.notebook.worker_secrets import (
+        clear_runtime_worker_token,
+        get_runtime_worker_token,
+    )
+
+    sup, _, _ = _supervisor()
+    try:
+        sup.establish("gpu", "user@box", token="tok123")
+        sup.shutdown()
+        assert get_runtime_worker_token("gpu") is None
+    finally:
+        clear_runtime_worker_token("gpu")
