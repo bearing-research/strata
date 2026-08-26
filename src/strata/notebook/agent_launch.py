@@ -180,6 +180,41 @@ def _open_session(server_url: str, notebook_dir: Path) -> str:
     return response.json()["session_id"]
 
 
+def _establish_ssh_worker(server_url: str, session_id: str, ssh_target: str) -> None:
+    """Provision + tunnel + register an SSH worker via the running server.
+
+    Best-effort: a failure is a warning, not a launch abort — the notebook is
+    still usable locally. Uses a long timeout since a first connect may install
+    ``strata-worker`` on the box.
+    """
+    print(_dim(f"connecting ssh worker {ssh_target} (first connect may install strata-worker)…"))
+    try:
+        response = httpx.post(
+            f"{server_url}/v1/notebooks/{session_id}/workers/ssh",
+            json={"ssh_target": ssh_target, "set_default": True},
+            timeout=600.0,
+        )
+    except httpx.HTTPError as exc:
+        print(f"warning: could not connect ssh worker {ssh_target}: {exc}", file=sys.stderr)
+        return
+    if response.is_error:
+        detail = ""
+        try:
+            body = response.json()
+            if isinstance(body, dict):
+                detail = str(body.get("detail") or "")
+        except ValueError:
+            detail = response.text.strip()
+        print(
+            f"warning: ssh worker {ssh_target} not connected "
+            f"({response.status_code}{f': {detail}' if detail else ''})",
+            file=sys.stderr,
+        )
+        return
+    name = (response.json().get("worker") or {}).get("name", ssh_target)
+    print(_dim(f"ssh worker '{name}' ready — cells run on {ssh_target} by default"))
+
+
 def _terminate(proc: subprocess.Popen) -> None:
     """Stop a spawned server, escalating to kill if it ignores SIGTERM."""
     if proc.poll() is not None:
@@ -233,6 +268,17 @@ on your own prior work instead of recomputing it.
 side effect (writing a file, calling an API, mutating external state) or a fresh
 value (the clock, `random`, a live endpoint) must not replay a cached result.
 Put `# @nocache` on the first line of such a cell so it always re-executes.
+
+**Running cells on a remote machine:** if the human gives you an SSH target for
+compute — a GPU box, a bigger machine, one closer to the data (e.g. `ssh
+user@gpu-box`) — call **`connect_ssh_worker(session_id, "user@gpu-box")`**. It
+installs the worker on the box if needed, opens a secure tunnel, and makes that
+box the default, so subsequent cells run there, still cached by provenance.
+A remote cell runs on the **box's** filesystem, so its file paths and mounts are
+the box's, not this machine's; keep a specific cell local with `# @worker local`.
+Needs key-based SSH (no password prompts) and may take a moment on first connect
+while it installs. `list_workers` shows what's connected;
+`disconnect_ssh_worker(session_id, name)` tears one down.
 """
 
 
@@ -351,6 +397,8 @@ def agent_main(args: argparse.Namespace) -> int:
             return 2
 
         _write_agent_config(notebook_dir, server_url, session_id)
+        if args.worker_ssh:
+            _establish_ssh_worker(server_url, session_id, args.worker_ssh)
         _print_ready(notebook_dir, server_url, session_id)
 
         if args.no_tui:
@@ -395,4 +443,11 @@ def add_agent_arguments(parser: argparse.ArgumentParser) -> None:
         "--no-tui",
         action="store_true",
         help="Set up and open the session but don't launch the TUI spectator",
+    )
+    parser.add_argument(
+        "--worker-ssh",
+        dest="worker_ssh",
+        default=None,
+        metavar="SSH_TARGET",
+        help="Provision a remote worker over SSH (user@host) and route cells to it",
     )
