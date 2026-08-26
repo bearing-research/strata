@@ -2871,6 +2871,16 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Run notebook cells on a remote machine over SSH.</strong> Hand a coding agent an SSH
+  target (a GPU box, a bigger machine, one closer to the data) and it provisions a
+  <code>strata-worker</code> there, opens a secure tunnel, and registers it — so heavy cells
+  run on that box, cached by provenance, while light ones stay local
+  (<code># @worker local</code>). The agent reaches for it through the <code>connect_ssh_worker</code>
+  MCP tool (it's in the managed working agreement now); <code>strata agent
+  --worker-ssh user@host</code> wires it up front. Key-based SSH only; the worker binds
+  remote-localhost and is reachable only through the tunnel, and its generated
+  token never touches <code>notebook.toml</code>. See
+  <a href="../notebook/agent/">Driving a notebook with a coding agent</a>.</li>
 <li><strong>Register a worker without hand-editing <code>notebook.toml</code>.</strong> New
   <code>strata worker add|ls|rm|default</code> CLI writes notebook-scoped <code>[[workers]]</code>
   definitions (e.g. a remote executor's <code>/v1/execute</code> endpoint), and matching
