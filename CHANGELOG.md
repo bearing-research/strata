@@ -72,6 +72,32 @@ exhaustive commit history.
   [Cell Annotations](docs/notebook/annotations.md#nocache) and
   [Driving a notebook with a coding agent](docs/notebook/agent.md).
 
+- **`strata agent <notebook-dir>` - one command to drive a notebook with a
+  coding agent.** The MCP server, the CLI ops, and the terminal viewer already
+  existed, but wiring them together by hand was a fiddly, ordered dance nobody
+  did - so a coding agent never actually reached for the notebook. This command
+  collapses it: it creates-or-opens the notebook, starts (or reuses) a server
+  with the MCP endpoint enabled, opens a session (the one step an agent can't do
+  itself), drops a `.mcp.json` + a managed `CLAUDE.md` working agreement into the
+  notebook directory, and attaches the read-only TUI. Then you run `claude` in
+  that directory in another pane: it auto-connects, reads the agreement, and
+  drives cells that light up **live** in the TUI. Needs the `[mcp]` and `[tui]`
+  extras. See [Driving a notebook with a coding agent](docs/notebook/agent.md).
+- **`agent_demo` example - a coding agent's notebook, and the recipe to record
+  it.** A small, runnable notebook (`examples/agent_demo/`) that trains a model
+  once and reuses it from cache when only the evaluation changes - the
+  content-addressed payoff. `examples/agent_demo/RECORDING.md` documents the
+  exact `strata agent` flow to capture it as a demo.
+
+### Performance
+
+- **Cache reads skip the Rust mmap path below 4 MB.** `read_file_mmap` routed
+  every cache read through the Rust mmap path, but mmap loses to
+  `Path.read_bytes()` below ~4-6 MB (syscall + FFI + copy overhead), and a single
+  row-group cache entry is often that small. Reads under `STRATA_MMAP_MIN_BYTES`
+  (default 4 MB) and any mmap error now fall back to the plain read; larger reads
+  still take the faster mmap path.
+
 ### Fixed
 
 - **Case-differing variables no longer share one artifact on a case-insensitive
@@ -93,25 +119,6 @@ exhaustive commit history.
   extra looked "mounted", the agent got no notebook tools, and it fell back to
   driving the REST API by hand. The check now probes `/mcp/` and distinguishes
   the JSON MCP endpoint from the HTML SPA, failing fast with a clear hint.
-
-### Added
-
-- **`agent_demo` example - a coding agent's notebook, and the recipe to record
-  it.** A small, runnable notebook (`examples/agent_demo/`) that trains a model
-  once and reuses it from cache when only the evaluation changes - the
-  content-addressed payoff. `examples/agent_demo/RECORDING.md` documents the
-  exact `strata agent` flow to capture it as a demo.
-- **`strata agent <notebook-dir>` - one command to drive a notebook with a
-  coding agent.** The MCP server, the CLI ops, and the terminal viewer already
-  existed, but wiring them together by hand was a fiddly, ordered dance nobody
-  did - so a coding agent never actually reached for the notebook. This command
-  collapses it: it creates-or-opens the notebook, starts (or reuses) a server
-  with the MCP endpoint enabled, opens a session (the one step an agent can't do
-  itself), drops a `.mcp.json` + a managed `CLAUDE.md` working agreement into the
-  notebook directory, and attaches the read-only TUI. Then you run `claude` in
-  that directory in another pane: it auto-connects, reads the agreement, and
-  drives cells that light up **live** in the TUI. Needs the `[mcp]` and `[tui]`
-  extras. See [Driving a notebook with a coding agent](docs/notebook/agent.md).
 
 ## 0.5.0 - 2026-07-15
 
