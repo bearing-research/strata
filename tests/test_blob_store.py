@@ -35,6 +35,32 @@ class TestLocalBlobStore:
 
         assert result is None
 
+    def test_blob_key_is_case_collision_proof(self, tmp_path: Path):
+        """Ids differing only in case must not collapse to one file.
+
+        On a case-insensitive filesystem (macOS/APFS, Windows) ``…_var_Widget``
+        and ``…_var_widget`` would otherwise map to the same blob, so a class and
+        its same-named instance share an artifact. Asserted at the key level so it
+        catches the bug on any host (Linux CI won't reproduce the FS collision).
+        """
+        store = LocalBlobStore(tmp_path / "blobs")
+        k_upper = store._blob_key("nb_x_cell_c_var_Widget", 1)
+        k_lower = store._blob_key("nb_x_cell_c_var_widget", 1)
+        assert k_upper != k_lower
+        # The real bug: they must not collide under case folding.
+        assert k_upper.lower() != k_lower.lower()
+        # All-lowercase ids keep their stable name (cached blobs survive upgrades).
+        assert k_lower == "nb_x_cell_c_var_widget@v=1.arrow"
+
+    def test_case_differing_ids_round_trip_to_distinct_data(self, tmp_path: Path):
+        """Writing two case-differing ids and reading them back yields distinct
+        data (would fail on a case-insensitive FS before the key fix)."""
+        store = LocalBlobStore(tmp_path / "blobs")
+        store.write_blob("nb_var_Widget", 1, b"the class")
+        store.write_blob("nb_var_widget", 1, b"the instance")
+        assert store.read_blob("nb_var_Widget", 1) == b"the class"
+        assert store.read_blob("nb_var_widget", 1) == b"the instance"
+
     def test_blob_exists(self, tmp_path: Path):
         """Test checking if a blob exists."""
         store = LocalBlobStore(tmp_path / "blobs")

@@ -18,6 +18,7 @@ Implementations:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import tempfile
 from abc import ABC, abstractmethod
@@ -174,7 +175,17 @@ class BlobStore(ABC):
     def _blob_key(self, artifact_id: str, version: int) -> str:
         """Generate storage key for a blob.
 
-        Default key format: {artifact_id}@v={version}.arrow
+        Key format: ``{artifact_id}@v={version}.arrow`` — with a short hash of the
+        exact-case ``artifact_id`` appended when the id contains uppercase.
+
+        Without the suffix, two artifact ids that differ only in case — e.g.
+        ``…_var_Widget`` vs ``…_var_widget`` (the idiomatic ``Tikhonov`` class +
+        ``tikhonov`` instance pattern) — map to the same filename on a
+        case-insensitive filesystem (macOS/APFS, Windows), so the store writes one
+        blob and both variables read whichever was written last. The suffix keys
+        off the exact bytes, so distinct-case ids get distinct files regardless of
+        filesystem. All-lowercase ids (the common case) are left unchanged, so
+        their existing cached blobs keep resolving after an upgrade.
 
         Args:
             artifact_id: Unique artifact identifier
@@ -183,7 +194,10 @@ class BlobStore(ABC):
         Returns:
             Storage key string
         """
-        return f"{artifact_id}@v={version}.arrow"
+        key = artifact_id
+        if key != key.lower():
+            key = f"{key}-{hashlib.sha256(artifact_id.encode()).hexdigest()[:8]}"
+        return f"{key}@v={version}.arrow"
 
     @staticmethod
     @contextmanager
