@@ -353,16 +353,7 @@ REST `/v1/notebooks`: `POST /create`, `POST /open`, `GET /{id}/cells`,
 `GET /{id}/dag`. **`{id}` in routes is the session ID, not the
 `notebook.toml` id.**
 
-WebSocket `/v1/notebooks/ws/{notebook_id}`:
-- C→S: `cell_execute`, `cell_execute_cascade`, `cell_execute_force`,
-  `cell_execute_rerun`, `cell_source_update`, `notebook_sync`,
-  `notebook_run_all`, `notebook_rerun_all`, `impact_preview_request`,
-  `inspect_open|eval|close`
-- S→C: `cell_status`, `cell_output`, `cell_output_delta`, `cell_error`,
-  `cell_console`, `cell_iteration_progress`, `cascade_prompt`,
-  `cascade_progress`, `dag_update`, `impact_preview`, `notebook_state`
-
-Frame-type strings are owned by the `MessageType` StrEnum in
+WebSocket `/v1/notebooks/ws/{notebook_id}`. Frame-type strings are owned by the `MessageType` StrEnum in
 `src/strata/notebook/protocol.py`. The full client-author reference
 (bootstrap, auth model, reconnect grace, cold-start payload, every
 message type) is `docs/reference/notebook-protocol.md` — keep that doc
