@@ -13,7 +13,7 @@ import tomllib
 import uuid
 import zipfile
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -64,10 +64,18 @@ from strata.notebook.writer import (
     write_cell,
 )
 
+if TYPE_CHECKING:
+    from strata.notebook.remote_worker_supervisor import RemoteWorkerSupervisor
+
 logger = logging.getLogger(__name__)
 
 # Global session manager (shared with WebSocket handler)
 _session_manager = SessionManager()
+
+# Server-owned supervisor for SSH-tunneled workers. The `ssh -L` forwards it
+# holds must be reachable from this process (dispatch runs in-server), so it
+# lives here for the server's lifetime and is torn down in the lifespan.
+_worker_supervisor: RemoteWorkerSupervisor | None = None
 
 router = APIRouter(prefix="/v1/notebooks", tags=["notebooks"])
 
@@ -75,6 +83,24 @@ router = APIRouter(prefix="/v1/notebooks", tags=["notebooks"])
 def get_session_manager() -> SessionManager:
     """Export session manager for WebSocket handler."""
     return _session_manager
+
+
+def get_worker_supervisor() -> RemoteWorkerSupervisor:
+    """Return the process-wide SSH-worker supervisor, creating it on first use."""
+    global _worker_supervisor
+    if _worker_supervisor is None:
+        from strata.notebook.remote_worker_supervisor import RemoteWorkerSupervisor
+
+        _worker_supervisor = RemoteWorkerSupervisor()
+    return _worker_supervisor
+
+
+def shutdown_worker_supervisor() -> None:
+    """Tear down all SSH tunnels on server shutdown (called from the lifespan)."""
+    global _worker_supervisor
+    if _worker_supervisor is not None:
+        _worker_supervisor.shutdown()
+        _worker_supervisor = None
 
 
 def get_notebook_session(notebook_id: str, request: Request) -> NotebookSession:
@@ -649,6 +675,19 @@ class WorkersConfigRequest(BaseModel):
     """Request to replace notebook-scoped worker definitions."""
 
     workers: list[WorkerSpec] = Field(default_factory=list)
+
+
+class SshWorkerRequest(BaseModel):
+    """Request to provision + tunnel a worker over SSH and register it."""
+
+    ssh_target: str = Field(..., min_length=1, max_length=255)
+    name: str | None = Field(default=None, max_length=64)
+    remote_port: int | None = Field(default=None, ge=1, le=65535)
+    local_port: int | None = Field(default=None, ge=1, le=65535)
+    extras: str = Field(default="notebook", max_length=200)
+    pin: str | None = Field(default=None, max_length=100)
+    install: bool = True
+    set_default: bool = False
 
 
 class TimeoutConfigRequest(BaseModel):
@@ -2100,6 +2139,76 @@ async def update_notebook_workers_endpoint(
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/{notebook_id}/workers/ssh")
+async def list_ssh_workers(notebook_id: str, session: SessionDep) -> dict:
+    """List the live SSH-tunnel status for this server's remote workers."""
+    from dataclasses import asdict
+
+    records = get_worker_supervisor().status()
+    return {"tunnels": [asdict(record) for record in records]}
+
+
+@router.post("/{notebook_id}/workers/ssh")
+async def establish_ssh_worker_endpoint(
+    notebook_id: str, session: SessionDep, req: SshWorkerRequest
+) -> dict:
+    """Provision a strata-worker over SSH, tunnel to it, and register it.
+
+    Personal-mode only (worker definitions must be editable). The provisioning +
+    tunnel run in a worker thread since SSH blocks.
+    """
+    import asyncio
+    from dataclasses import asdict
+
+    from strata.notebook.ops import NotebookOpsError
+    from strata.notebook.ssh_worker import SshWorkerError
+    from strata.notebook.ssh_worker_service import establish_ssh_worker
+
+    supervisor = get_worker_supervisor()
+    try:
+        record = await asyncio.to_thread(
+            establish_ssh_worker,
+            session,
+            supervisor,
+            ssh_target=req.ssh_target,
+            name=req.name,
+            remote_port=req.remote_port,
+            local_port=req.local_port,
+            extras=req.extras,
+            pin=req.pin,
+            install=req.install,
+            set_default=req.set_default,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
+    except (SshWorkerError, NotebookOpsError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    return {"worker": asdict(record), **await _serialize_worker_catalog(session)}
+
+
+@router.delete("/{notebook_id}/workers/ssh/{worker_name}")
+async def teardown_ssh_worker_endpoint(
+    notebook_id: str, session: SessionDep, worker_name: str, stop_remote: bool = False
+) -> dict:
+    """Close a worker's SSH tunnel and remove its notebook registration."""
+    import asyncio
+
+    from strata.notebook.ssh_worker_service import teardown_ssh_worker
+
+    supervisor = get_worker_supervisor()
+    try:
+        existed = await asyncio.to_thread(
+            teardown_ssh_worker, session, supervisor, worker_name, stop_remote=stop_remote
+        )
+    except Exception:
+        logger.exception("Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    return {"torn_down": existed, **await _serialize_worker_catalog(session)}
 
 
 @router.put("/{notebook_id}/worker")
