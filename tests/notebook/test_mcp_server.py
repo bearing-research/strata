@@ -15,7 +15,9 @@ from strata.notebook.mcp_server import (
     _add_cell,
     _add_dependency,
     _add_worker,
+    _connect_ssh_worker,
     _dag,
+    _disconnect_ssh_worker,
     _edit_cell,
     _get_cell,
     _get_notebook,
@@ -408,6 +410,34 @@ async def test_worker_tools_missing_session_raises(sm_with_session):
     sm, _, _ = sm_with_session
     with pytest.raises(ValueError, match="no open notebook session"):
         await _add_worker(sm, "nope", "gpu", "http://127.0.0.1:9000/v1/execute")
+
+
+@pytest.mark.asyncio
+async def test_connect_and_disconnect_ssh_worker(sm_with_session, monkeypatch):
+    from tests.notebook.test_ssh_worker_service import FakeSupervisor
+
+    sm, session_id, _ = sm_with_session
+    fake = FakeSupervisor()
+    monkeypatch.setattr("strata.notebook.routes.get_worker_supervisor", lambda: fake)
+    broadcasts = []
+
+    async def fake_sync(notebook_id, session):
+        broadcasts.append(notebook_id)
+
+    monkeypatch.setattr("strata.notebook.ws.broadcast_notebook_sync", fake_sync)
+
+    result = await _connect_ssh_worker(sm, session_id, "user@gpu-box")
+    assert result["worker"]["ssh_target"] == "user@gpu-box"
+    assert result["worker"]["executor_url"] == "http://127.0.0.1:6000/v1/execute"
+    assert fake.established == [("gpu-box", "user@gpu-box")]
+    # Registered + made default; a plain read tool now sees it.
+    assert result["default"] == "gpu-box"
+    assert "gpu-box" in [w["name"] for w in _list_workers(sm, session_id)["workers"]]
+
+    dis = await _disconnect_ssh_worker(sm, session_id, "gpu-box")
+    assert dis["torn_down"] is True
+    assert [w["name"] for w in dis["workers"]] == ["local"]
+    assert broadcasts == [session_id, session_id]  # connect + disconnect each synced
 
 
 def test_build_mcp_app_returns_mountable_app(sm_with_session):
