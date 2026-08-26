@@ -11,6 +11,16 @@ The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com
 
 ### Added
 
+- **Run notebook cells on a remote machine over SSH.** Hand a coding agent an SSH
+  target (a GPU box, a bigger machine, one closer to the data) and it provisions a
+  `strata-worker` there, opens a secure tunnel, and registers it — so heavy cells
+  run on that box, cached by provenance, while light ones stay local
+  (`# @worker local`). The agent reaches for it through the `connect_ssh_worker`
+  MCP tool (it's in the managed working agreement now); `strata agent
+  --worker-ssh user@host` wires it up front. Key-based SSH only; the worker binds
+  remote-localhost and is reachable only through the tunnel, and its generated
+  token never touches `notebook.toml`. See
+  [Driving a notebook with a coding agent](notebook/agent.md).
 - **Register a worker without hand-editing `notebook.toml`.** New
   `strata worker add|ls|rm|default` CLI writes notebook-scoped `[[workers]]`
   definitions (e.g. a remote executor's `/v1/execute` endpoint), and matching
