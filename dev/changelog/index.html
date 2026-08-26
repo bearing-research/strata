@@ -2871,6 +2871,15 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Register a worker without hand-editing <code>notebook.toml</code>.</strong> New
+  <code>strata worker add|ls|rm|default</code> CLI writes notebook-scoped <code>[[workers]]</code>
+  definitions (e.g. a remote executor's <code>/v1/execute</code> endpoint), and matching
+  <code>add_worker</code> / <code>set_default_worker</code> / <code>list_workers</code> / <code>remove_worker</code> MCP
+  tools let a coding agent register a worker and route cells to it in a live
+  session — the session reloads and the change appears in any attached viewer.
+  Previously the only way to point a cell at a worker was to edit the TOML by
+  hand; the <code># @worker &lt;name&gt;</code> annotation could only reference a pre-declared
+  one. Groundwork for the SSH remote-worker path.</li>
 <li><strong>Add-and-run returns the cell's rendered outputs.</strong> <code>strata cell add … --run</code>
   and the <code>run_snippet</code> MCP tool now return the <strong>post-run</strong> cell view, so a cell
   ending in a bare expression (<code>df.describe()</code>, <code>total</code>) hands its value back in
