@@ -75,7 +75,7 @@ class NotebookExecutionState:
         Cell ID the user has asked to run, queued before execution starts.
     cascade_plan : CascadePlan or None
         Active cascade plan when a multi-cell cascade is in flight.
-    execution_task : asyncio.Task[None] or None
+    execution_task : asyncio.Task[Any] or None
         Background task running the cell; cleared once it completes.
     control_lock : asyncio.Lock
         Serializes execution-control transitions (start / stop / requeue).
@@ -85,7 +85,9 @@ class NotebookExecutionState:
     running_cell: str | None = None
     requested_cell: str | None = None
     cascade_plan: CascadePlan | None = None
-    execution_task: asyncio.Task[None] | None = None
+    # Task[Any]: WS-scheduled runs resolve to None; REST/MCP exclusive
+    # runs resolve to the CellExecutionResult the caller awaits.
+    execution_task: asyncio.Task[Any] | None = None
     control_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def next_sequence(self) -> int:
@@ -93,7 +95,7 @@ class NotebookExecutionState:
         self.sequence += 1
         return self.sequence
 
-    def active_task(self) -> asyncio.Task[None] | None:
+    def active_task(self) -> asyncio.Task[Any] | None:
         """Return the live execution task, clearing fields if it's already done."""
         task = self.execution_task
         if task is not None and task.done():
