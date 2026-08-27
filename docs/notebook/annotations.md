@@ -243,7 +243,7 @@ the run fails with a clear error.
 
 ## @nocache
 
-Force the cell to **always re-execute** — never serve a provenance cache hit.
+Force the cell to **always re-execute**: never serve a provenance cache hit.
 
 ```python
 # @nocache
@@ -254,15 +254,15 @@ print(latest)
 ```
 
 By default every cell is cached by provenance
-(`sha256(inputs + source + env)`), including a leaf cell that only `print`s —
+(`sha256(inputs + source + env)`), including a leaf cell that only `print`s,
 an unchanged rerun replays its output instantly instead of recomputing. That is
 exactly what you want for deterministic work, and it makes the notebook a good
 **scratchpad** (see [Driving a notebook with an agent](agent.md)). But it is
 wrong for a cell whose *point* is a side effect or fresh value:
 
-- writes a file, sends a request, mutates external state — replaying the cached
+- writes a file, sends a request, mutates external state: replaying the cached
   result would **skip the effect**;
-- reads the clock, `random`, a live API — you want a **fresh value** each run.
+- reads the clock, `random`, a live API: you want a **fresh value** each run.
 
 `# @nocache` opts such a cell out. `# @nocache off` re-enables caching (useful to
 override a default you set elsewhere). It applies to every language and sits
@@ -552,7 +552,7 @@ group-level status rollup. Provenance includes the sorted
 variant→artifact map, so **adding a variant only runs that one** and
 renaming/removing a variant restalens the downstream as expected.
 
-Caveats worth knowing: a variant that fails is simply dropped from the
+Caveats worth knowing: a variant that fails is dropped from the
 dict (the downstream still runs once with the partial set), and a sweep
 group of one is legal but pointless - you'd get a one-key dict. Sweep-group
 members and their downstream consumers always run as **single-cell**

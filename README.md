@@ -31,7 +31,7 @@ blobs or execution metadata bleeding into the history.
 
 ## Give your coding agent a cached scratchpad
 
-Coding agents explore by writing throwaway `python -c` and `/tmp` scripts —
+Coding agents explore by writing throwaway `python -c` and `/tmp` scripts:
 invisible, uncached, redone every session. Point one at Strata instead and it
 uses a **persistent, cached notebook** as its scratchpad: every snippet becomes a
 content-addressed cell, so the expensive step it ran ten turns ago is still a
@@ -39,7 +39,7 @@ cache hit now, a human can watch it work live, and the work is a git-diffable
 directory instead of discarded scripts.
 
 Install it as a one-command [Claude Code plugin](plugins/strata-scratchpad/)
-(needs the `strata` CLI on `PATH` — `uv tool install strata-notebook`):
+(needs the `strata` CLI on `PATH`; `uv tool install strata-notebook`):
 
 ```
 /plugin marketplace add bearing-research/strata
@@ -48,11 +48,11 @@ Install it as a one-command [Claude Code plugin](plugins/strata-scratchpad/)
 
 <!-- Demo GIF slot. Record with examples/agent_demo/RECORDING.md, save to
      docs/assets/agent-demo.gif, then uncomment the line below:
-![A coding agent builds a Strata notebook live — the model stays cached when only the evaluation changes](docs/assets/agent-demo.gif)
+![A coding agent builds a Strata notebook live; the model stays cached when only the evaluation changes](docs/assets/agent-demo.gif)
 -->
 
-Does the agent actually reach for it instead of a scratch script? There's an eval
-that measures exactly that (`evals/agent_notebook/`) — in the un-primed sessions
+Does the agent reach for it instead of a scratch script? There's an eval
+that measures exactly that (`evals/agent_notebook/`): in the un-primed sessions
 tested so far it reaches for the notebook every time, and building the eval
 caught real bugs. Small sample, and honest about it. See
 [Driving a notebook with a coding agent](https://bearing-research.github.io/strata/notebook/agent/).
@@ -71,7 +71,7 @@ caught real bugs. Small sample, and honest about it. See
 - **SQL cells:** named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery
 - **R cells (0.2.0):** Python and R cells share a DAG; cross-language Arrow exchange means a `pandas.DataFrame` is a `data.frame` for the next cell. First-class in the UI - Add-R-cell menu, an R environment panel with one-click renv bootstrap + package install, automatic `renv::restore()` on open, and inline plots (ggplot2 / base graphics render to PNG). Runs headlessly too - `strata run` executes R cells for CI
 - **loop cells:** `# @loop max_iter=N carry=state` iterates a cell with explicit carry between steps - each iteration is its own artifact
-- **variant sweep (0.4.0):** a variant group can run in sweep mode - every variant executes and the downstream cell receives a `{variant_name: value}` dict, for comparing models / hyperparameters / prompts side by side in one cell (switch mode runs just the active variant)
+- **variant sweep (0.4.0):** a variant group can run in sweep mode - every variant executes and the downstream cell receives a `{variant_name: value}` dict, for comparing models / hyperparameters / prompts side by side in one cell (switch mode runs only the active variant)
 - **cell unit tests (0.4.0):** a 🧪 Tests panel on any Python cell runs **real pytest** against the cell's defs and upstream inputs (`def test_x(cell): assert cell.featurize(cell.trips)…`) - assertion rewriting, fixtures, and parametrize all work; the toggle doubles as a health badge (`✓ 4/4`, red on fail, `· stale` when the cell changed)
 - **MCP server (0.5.0):** expose a running notebook session to an external coding agent (Claude Code, any MCP client) at `/mcp` - the agent reads, runs, authors, and manages dependencies against a **warm session**, and you watch it happen live in the browser or the terminal viewer. `claude mcp add --transport http strata http://localhost:8765/mcp`. Personal-mode only, behind the `[mcp]` extra
 - **interactive widgets + app view (0.5.0):** a `widget` cell is a declarative control panel (slider / number / dropdown / checkbox / text); each control is an input downstream cells consume, and with **⚡ Live** on, dragging one recomputes the cells that depend on it. Open a notebook as a read-only **app** (`/app/<id>`), **embed** that app view in another site as an `<iframe>`, or export a frozen, self-contained **snapshot** (`strata export --app-view`)
@@ -86,7 +86,7 @@ caught real bugs. Small sample, and honest about it. See
 - **auto-install:** missing import in a cell? one click adds the package via uv and re-runs
 - **headless:** `strata run ./my-notebook` for CI and scheduled execution - same DAG, same cache
 - **also a library:** the materialization layer is exposed via HTTP + a `StrataClient`, usable from any Python process
-- **slim client package (0.3.0):** `pip install strata-client` pulls just httpx + pyarrow - use the store from any pipeline or service, no server install
+- **slim client package (0.3.0):** `pip install strata-client` pulls only httpx + pyarrow - use the store from any pipeline or service, no server install
 - **production-ready:** Iceberg-aware scans, trusted-proxy auth, multi-tenancy, S3 / GCS / Azure / local blob backends
 
 ## Quick Start

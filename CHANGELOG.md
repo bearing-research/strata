@@ -11,7 +11,7 @@ exhaustive commit history.
 
 - **Run notebook cells on a remote machine over SSH.** Hand a coding agent an SSH
   target (a GPU box, a bigger machine, one closer to the data) and it provisions a
-  `strata-worker` there, opens a secure tunnel, and registers it — so heavy cells
+  `strata-worker` there, opens a secure tunnel, and registers it, so heavy cells
   run on that box, cached by provenance, while light ones stay local
   (`# @worker local`). The agent reaches for it through the `connect_ssh_worker`
   MCP tool (it's in the managed working agreement now); `strata agent
@@ -24,21 +24,21 @@ exhaustive commit history.
   definitions (e.g. a remote executor's `/v1/execute` endpoint), and matching
   `add_worker` / `set_default_worker` / `list_workers` / `remove_worker` MCP
   tools let a coding agent register a worker and route cells to it in a live
-  session — the session reloads and the change appears in any attached viewer.
+  session, and the session reloads and the change appears in any attached viewer.
   Previously the only way to point a cell at a worker was to edit the TOML by
   hand; the `# @worker <name>` annotation could only reference a pre-declared
   one. Groundwork for the SSH remote-worker path.
 - **Add-and-run returns the cell's rendered outputs.** `strata cell add … --run`
   and the `run_snippet` MCP tool now return the **post-run** cell view, so a cell
   ending in a bare expression (`df.describe()`, `total`) hands its value back in
-  `outputs` — an agent gets the result without a separate `cell show` or a
+  `outputs`. An agent gets the result without a separate `cell show` or a
   `print()`.
-- **Variable-addressed lookup — "do I already have this?" for a scratchpad.**
+- **Variable-addressed lookup: "do I already have this?" for a scratchpad.**
   `strata cell show <dir> --var NAME` (and the `get_variable` MCP tool) return the
-  cell that defines a variable — its source, status, and outputs — or, if it's not
+  cell that defines a variable (its source, status, and outputs), or, if it's not
   defined, the list of variables that are. Lets an agent reference a value it
   already computed instead of recomputing it. See [Notebook CLI](docs/notebook/cli.md#inspecting-a-notebook-cell-dag-status).
-- **`strata new --project-mount` — read project files from a scratchpad without
+- **`strata new --project-mount`: read project files from a scratchpad without
   absolute paths.** Adds a pinned, read-only notebook-level mount of the project
   directory as a `project` Path variable, so a scratchpad living in a
   subdirectory reads project files as `open(project / "file")` even though a cell
@@ -49,7 +49,7 @@ exhaustive commit history.
   (marketplace `strata`, plugin `plugins/strata-scratchpad/`) bundling the
   scratchpad skill plus a `/strata-scratchpad:scratch` command. Install with
   `/plugin marketplace add bearing-research/strata` then `/plugin install
-  strata-scratchpad@strata` — the most reliable way to give any Claude Code
+  strata-scratchpad@strata`, the most reliable way to give any Claude Code
   session the scratchpad behavior. See
   [Driving a notebook with a coding agent](docs/notebook/agent.md).
 - **`strata-scratchpad` agent skill + sharpened working agreement.** The
@@ -76,7 +76,7 @@ exhaustive commit history.
   computed in its own cell - a loaded model, a `cwd`-derived path) failed to
   share it downstream ("cannot be shared across cells yet"). Now those values
   are stored and hydrated into the synthetic module at load time, so the pattern
-  just works - locally, in run-all batches, on warm pools, and on remote HTTP
+  works - locally, in run-all batches, on warm pools, and on remote HTTP
   workers (both the direct and signed/manifest transports). Only genuinely
   unresolvable names (bound nowhere in the notebook), top-level lambdas, and
   star imports still block.
@@ -94,7 +94,7 @@ exhaustive commit history.
 - **`strata agent <notebook-dir>` - one command to drive a notebook with a
   coding agent.** The MCP server, the CLI ops, and the terminal viewer already
   existed, but wiring them together by hand was a fiddly, ordered dance nobody
-  did - so a coding agent never actually reached for the notebook. This command
+  did - so a coding agent never reached for the notebook. This command
   collapses it: it creates-or-opens the notebook, starts (or reuses) a server
   with the MCP endpoint enabled, opens a session (the one step an agent can't do
   itself), drops a `.mcp.json` + a managed `CLAUDE.md` working agreement into the

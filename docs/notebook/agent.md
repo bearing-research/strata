@@ -4,8 +4,8 @@
 a coding agent (Claude Code) needs to drive a **live** Strata notebook, and
 attaches a terminal viewer so you watch it happen in real time.
 
-It exists because the pieces were already there — the [MCP server](mcp.md), the
-[`strata` CLI](cli.md) ops, the [terminal viewer](tui.md) — but wiring them
+It exists because the pieces were already there (the [MCP server](mcp.md), the
+[`strata` CLI](cli.md) ops, the [terminal viewer](tui.md)), but wiring them
 together by hand is a fiddly, ordered dance: enable the MCP endpoint *before*
 the server boots, open a session (the agent can't do that itself), point the
 agent at the right session, and only then start driving. `strata agent` does all
@@ -30,7 +30,7 @@ That single command:
 1. **creates-or-opens** the notebook directory (scaffolds a new one if needed),
 2. **starts** a notebook server with the MCP endpoint enabled (or **reuses** one
    already running on the target URL),
-3. **opens a session** — the step the agent cannot do itself, since the MCP
+3. **opens a session**, the step the agent cannot do itself, since the MCP
    tools only see notebooks that are already open,
 4. **writes** a `.mcp.json` and a managed block in `CLAUDE.md` into the notebook
    directory, and
@@ -45,7 +45,7 @@ cd ./my-notebook && claude
 
 Claude Code discovers the notebook's `.mcp.json`, connects to the `strata-notebook`
 MCP server, reads the `CLAUDE.md` working agreement, and starts building the
-notebook by adding and running cells — each of which **lights up live in the TUI**
+notebook by adding and running cells, each of which **lights up live in the TUI**
 you left running in the first terminal.
 
 When you quit the TUI, the server `strata agent` started is shut down with it. If
@@ -54,16 +54,16 @@ you pointed it at a server you started yourself, that server is left running.
 ## Why it's a good agent scratchpad
 
 Coding agents usually explore by writing throwaway `.py` scripts to a temp
-directory and running them — work that vanishes the moment it finishes, can't be
+directory and running them: work that vanishes the moment it finishes, can't be
 seen, and recomputes from scratch every time. A Strata notebook is a better home
 for exactly that kind of scratch work, and the working agreement above points the
 agent at it:
 
 - **It persists and it's visible.** Each snippet becomes a versioned,
-  content-addressed cell you can see building live in the TUI — not an invisible
+  content-addressed cell you can see building live in the TUI, not an invisible
   script in `/tmp`.
 - **Unchanged work never recomputes.** Every cell is cached by provenance
-  (`sha256(inputs + source + env)`), *including a leaf cell that only `print`s* —
+  (`sha256(inputs + source + env)`), *including a leaf cell that only `print`s*,
   so an agent that re-runs an unchanged diagnostic cell gets its output back
   instantly instead of paying for it again. The expensive step an agent ran ten
   turns ago is still a cache hit now.
@@ -73,16 +73,16 @@ agent at it:
   else stays cached.
 
 The net effect: the agent's exploration is captured, watchable, and free to
-re-derive — a durable scratchpad instead of a pile of discarded scripts.
+re-derive: a durable scratchpad instead of a pile of discarded scripts.
 
-Two things make the agent actually reach for it:
+Two things make the agent reach for it:
 
 - **One-call runs.** `run_snippet(session_id, source)` (MCP) and `strata cell add
   … -c 'src' --run` (CLI) add a cell **and** run it in a single call, returning
-  `stdout` — the same cost as `python -c`, so a cell isn't the slower path.
+  `stdout`, the same cost as `python -c`, so a cell isn't the slower path.
 - **A shipped skill.** `strata-notebook` installs a `strata-scratchpad` skill
   (under `<site-packages>/strata/.agents/skills/`) that a coding agent discovers
-  in **any** project — so it knows to use a cached notebook cell for throwaway
+  in **any** project, so it knows to use a cached notebook cell for throwaway
   Python even when it isn't launched inside a notebook directory. A human can
   attach a live viewer at any moment with [`strata watch ./scratch`](tui.md).
 
@@ -103,17 +103,17 @@ still needs to be on `PATH`). The plugin source lives in the repo at
 
 ## What gets written into the notebook
 
-- **`.mcp.json`** — registers the running server's `/mcp` endpoint as an MCP
+- **`.mcp.json`**: registers the running server's `/mcp` endpoint as an MCP
   server named `strata-notebook`, so Claude Code auto-connects when launched in
   the directory. Overwritten on each launch (it points at the current port).
-- **`CLAUDE.md`** — a working agreement telling the agent to drive the notebook
+- **`CLAUDE.md`**: a working agreement telling the agent to drive the notebook
   through the MCP tools rather than writing throwaway `.py` scripts, so its work
   is captured as versioned, content-addressed, cached cells that you can see.
   Only the region between the `<!-- strata:agent:start -->` /
   `<!-- strata:agent:end -->` markers is managed; your own notes in the same file
   are preserved and rewritten around.
 
-Both are safe to commit — they make the notebook agent-ready for anyone who
+Both are safe to commit; they make the notebook agent-ready for anyone who
 clones it.
 
 ## Options
@@ -128,8 +128,8 @@ clones it.
 
 ## Running cells on a remote machine
 
-Hand the agent an SSH target and it can run the heavy cells on that box — a GPU
-machine, a bigger instance, one closer to the data. The agent calls the
+Hand the agent an SSH target and it can run the heavy cells on that box: a GPU
+machine, a bigger instance, or one closer to the data. The agent calls the
 `connect_ssh_worker` tool (its working agreement tells it to when you give it a
 target); or wire it up as the session opens with `strata agent … --worker-ssh
 user@gpu-box`. Strata installs the worker on the box if needed, tunnels to it,
@@ -139,14 +139,14 @@ and makes it the default; keep a specific cell local with `# @worker local`. See
 ## Reusing a server you already run
 
 If a server is already listening at the target URL, `strata agent` reuses it
-instead of starting one — but it must have the MCP endpoint enabled, and it must
+instead of starting one, but it must have the MCP endpoint enabled, and it must
 be allowed to open the notebook. A server confines notebooks to its configured
 storage root, so a reused server only opens notebooks that live under that root.
 If it can't, stop it and let `strata agent` start one scoped to your notebook.
 
 ## Related
 
-- [MCP Server](mcp.md) — the full tool list and the endpoint's security model.
-- [Terminal Viewer (TUI)](tui.md) — the live spectator `strata agent` attaches.
-- [Authoring Programmatically](agent-authoring.md) — the same ops as a Python API.
-- [Distributed Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to) — running cells on a remote box over SSH.
+- [MCP Server](mcp.md): the full tool list and the endpoint's security model.
+- [Terminal Viewer (TUI)](tui.md): the live spectator `strata agent` attaches.
+- [Authoring Programmatically](agent-authoring.md): the same ops as a Python API.
+- [Distributed Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to): running cells on a remote box over SSH.

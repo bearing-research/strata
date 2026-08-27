@@ -197,7 +197,7 @@ cell's source, its upstream artifacts, and the environment lockfile.
 Re-running with the same three is always a cache hit. No `@memoize`,
 no manual invalidation, and the cached result is byte-identical to
 what produced it the first time. Even a cell that only `print`s and
-feeds nothing downstream is cached — its console output is keyed by
+feeds nothing downstream is cached: its console output is keyed by
 the same hash and replayed on a warm re-run. A cell that must always
 run (a side effect, a live API call, a fresh random draw) opts out
 with [`# @nocache`](../notebook/annotations.md#nocache).
@@ -320,7 +320,7 @@ grouped by feature.
 
 ## What's next
 
-- [Driving a notebook with a coding agent](../notebook/agent.md) — let a coding agent (Claude Code) use the notebook as a persistent, **cached scratchpad** instead of throwaway scripts; installs as a one-command plugin
+- [Driving a notebook with a coding agent](../notebook/agent.md): let a coding agent (Claude Code) use the notebook as a persistent, **cached scratchpad** instead of throwaway scripts; installs as a one-command plugin
 - [Concepts](../notebook/concepts.md) for how the DAG, caching, and cascade work
 - [Cell Types](../notebook/cells.md) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
 - [Cell Annotations](../notebook/annotations.md) for `@worker`, `@mount`, `@loop`, and friends

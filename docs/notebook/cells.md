@@ -52,7 +52,7 @@ Strata analyzes each cell's AST to extract:
 
 The DAG builder links references back to the **last** cell that defined each name (shadowing is handled by order). Edges flow producer → consumer. When you edit an upstream cell, every downstream cell that depends on it becomes stale automatically.
 
-Only variables that a downstream cell actually references get stored as artifacts. Intermediate scratch variables stay in the subprocess and are discarded when the cell finishes.
+Only variables that a downstream cell references get stored as artifacts. Intermediate scratch variables stay in the subprocess and are discarded when the cell finishes.
 
 ### The ambient `strata` client
 

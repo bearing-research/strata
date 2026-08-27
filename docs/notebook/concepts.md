@@ -214,13 +214,13 @@ The provenance hash determines cache identity. It includes:
 
 When you change a cell's source, its provenance hash changes, and all downstream cells become **stale**.
 
-This applies even to a **leaf cell** — one with no downstream consumer, like a
+This applies even to a **leaf cell**, one with no downstream consumer, like a
 cell that only `print`s a diagnostic. It has no output artifact to cache, but
 its console output is keyed by the same provenance hash and replayed on an
 unchanged re-run, so it doesn't re-execute. That is what makes the notebook a
-usable scratchpad. A cell that must always run — because it has a side effect
+usable scratchpad. A cell that must always run, because it has a side effect
 (writing a file, calling an API) or produces a fresh value (the clock,
-`random`) — opts out of caching with [`# @nocache`](annotations.md#nocache).
+`random`), opts out of caching with [`# @nocache`](annotations.md#nocache).
 
 ## Serialization
 

@@ -49,7 +49,7 @@ collection failure.
 Open the **Tests** panel on any Python cell - the `🧪` toggle next to Inspect -
 and write your tests. They're saved as a committed sibling file,
 `cells/<cell-id>.test.py`, so they version and review alongside the cell source.
-A cell with no tests simply carries no `.test.py` file.
+A cell with no tests carries no `.test.py` file.
 
 Running them (the `▶` in the panel, or see [over WebSocket](#over-websocket)
 below) shells out to `pytest` against a temporary run directory holding a copy

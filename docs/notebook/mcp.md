@@ -35,7 +35,7 @@ warning and starts normally without the endpoint.
 
 !!! tip "One-command setup"
     [`strata agent <notebook-dir>`](agent.md) does the enable-open-register-watch
-    steps below for you — it starts the server with this endpoint on, opens a
+    steps below for you: it starts the server with this endpoint on, opens a
     session, writes the `.mcp.json` an agent auto-connects to, and attaches the
     TUI. Reach for it unless you want to wire the pieces up by hand.
 
@@ -59,7 +59,7 @@ The typical loop:
 | `list_notebooks` | The sessions currently open on the server: `session_id`, `name`, `path`. |
 | `get_notebook(session_id)` | Every cell of a session, in order. |
 | `get_cell(session_id, cell_id)` | One cell: source, status, outputs. |
-| `get_variable(session_id, name)` | The cell that defines a variable — "do I already have `name`?"; else the available names. |
+| `get_variable(session_id, name)` | The cell that defines a variable, "do I already have `name`?"; else the available names. |
 | `dag(session_id)` | The dependency graph - edges, topological order, roots, leaves. |
 | `status(session_id)` | Per-cell status + staleness summary. |
 | `run_cell(session_id, cell_id, mode)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. |
