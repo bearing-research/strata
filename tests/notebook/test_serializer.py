@@ -815,6 +815,19 @@ class TestUnifiedArrowCodec:
             assert back.name == "my_series"
             assert list(back) == [1, 2, 3]
 
+    def test_roundtrip_series_falsy_and_typed_names(self):
+        """`str(name or "")` collapsed falsy names (0, "", False) to None and
+        stringified ints — the exact name (value AND type) must survive."""
+        for name in (0, "", False, 5, None, 2.5):
+            with tempfile.TemporaryDirectory() as tmp:
+                s = pd.Series([1, 2], name=name)
+                meta = serialize_value(s, tmp, "x")
+                back = deserialize_value(meta["content_type"], Path(tmp) / meta["file"])
+                assert isinstance(back, pd.Series)
+                assert back.name == name and type(back.name) is type(name), (
+                    f"name {name!r} round-tripped as {back.name!r}"
+                )
+
 
 class TestLargeDataFrames:
     """Test serialization of larger DataFrames."""

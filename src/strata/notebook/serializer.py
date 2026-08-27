@@ -445,6 +445,31 @@ def _serialize_arrow_with_fallback(
 _META_SHAPE = b"strata.arrow.shape"
 _META_SOURCE = b"strata.arrow.source"
 _META_PD_NAME = b"strata.arrow.pandas.name"  # Series name
+
+
+def _encode_series_name(name: Any) -> bytes:
+    """JSON-encode a Series name, preserving ``None`` vs ``""`` vs ``0``.
+
+    The old ``str(name or "")`` collapsed every falsy name (``0``, ``""``,
+    ``False``) to ``""`` — which decoded back to ``None`` — and stringified
+    ints (``name=5`` round-tripped as ``"5"``). JSON keeps the exact
+    scalar; non-JSON-safe names degrade to their string form.
+    """
+    if name is None or isinstance(name, (str, int, float, bool)):
+        return json.dumps(name).encode("utf-8")
+    return json.dumps(str(name)).encode("utf-8")
+
+
+def _decode_series_name(raw: bytes) -> Any:
+    """Decode a stored Series name; legacy blobs hold the plain string form
+    (where ``""`` meant ``None``)."""
+    text = raw.decode("utf-8")
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text or None
+
+
 _META_TENSOR_SHAPE = b"strata.arrow.tensor.shape"  # JSON-encoded list[int]
 _META_TENSOR_DTYPE = b"strata.arrow.tensor.dtype"  # e.g. b"int32", b"float64"
 _META_SCALAR_TYPE = b"strata.arrow.scalar.type"
@@ -602,7 +627,7 @@ def _table_from_pandas(value: Any) -> Any:
         {
             _META_SHAPE: _SHAPE_TABLE,
             _META_SOURCE: _SOURCE_PANDAS_SERIES,
-            _META_PD_NAME: str(value.name or "").encode("utf-8"),
+            _META_PD_NAME: _encode_series_name(value.name),
         },
     )
 
@@ -1546,8 +1571,7 @@ def _table_to_pandas_or_arrow(table: Any) -> Any:
     if source == _SOURCE_PANDAS_SERIES:
         try:
             series = frame.iloc[:, 0]
-            name_bytes = meta.get(_META_PD_NAME, b"")
-            series.name = name_bytes.decode("utf-8") or None
+            series.name = _decode_series_name(meta.get(_META_PD_NAME, b""))
             return series
         except Exception as exc:
             logger.warning(
