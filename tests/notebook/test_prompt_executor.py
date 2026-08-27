@@ -479,3 +479,66 @@ async def test_no_on_delta_keeps_unary_path(tmp_path):
 
     assert result["success"] is True
     assert len(unary_calls) == 1
+
+
+def test_upstream_input_hash_invalidates_cache():
+    """The rendered template truncates long variables, so an upstream edit
+    past the cut renders byte-identically — the input hashes must carry
+    the invalidation."""
+    same_render_a = compute_prompt_provenance_hash(
+        **_BASE_ARGS, output_schema=None, input_hashes={"doc": "hash-v1"}
+    )
+    same_render_b = compute_prompt_provenance_hash(
+        **_BASE_ARGS, output_schema=None, input_hashes={"doc": "hash-v2"}
+    )
+    assert same_render_a != same_render_b
+
+    stable = compute_prompt_provenance_hash(
+        **_BASE_ARGS, output_schema=None, input_hashes={"doc": "hash-v1"}
+    )
+    assert stable == same_render_a
+
+
+def test_input_hash_order_does_not_affect_hash():
+    a = compute_prompt_provenance_hash(
+        **_BASE_ARGS, output_schema=None, input_hashes={"a": "1", "b": "2"}
+    )
+    b = compute_prompt_provenance_hash(
+        **_BASE_ARGS, output_schema=None, input_hashes={"b": "2", "a": "1"}
+    )
+    assert a == b
+
+
+def test_max_tokens_change_invalidates_cache():
+    """Lowering @max_tokens asks for a different-length answer — it must
+    not be served the cached full-length response."""
+    a = compute_prompt_provenance_hash(**_BASE_ARGS, output_schema=None, max_tokens=4096)
+    b = compute_prompt_provenance_hash(**_BASE_ARGS, output_schema=None, max_tokens=256)
+    assert a != b
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_display_uses_scalar_key(tmp_path):
+    """The cache-hit display payload must use the same 'scalar' key the
+    fresh-run path uses — the frontend renders output.scalar, so the old
+    'preview' key made a cache-hit prompt cell render blank."""
+    from strata.notebook.llm import LlmConfig
+    from strata.notebook.prompt_executor import execute_prompt_cell
+
+    session = _prompt_session(tmp_path, "Tell me something.")
+    fake, _calls = _fake_stream_returning("short answer")
+    cfg = LlmConfig(base_url="https://api.openai.com/v1", api_key="sk", model="m")
+
+    on_delta, _frames = _delta_collector()
+    with mock.patch("strata.notebook.prompt_executor.chat_completion_stream", fake):
+        first = await execute_prompt_cell(
+            session, "p1", session.notebook_state.cells[0].source, cfg, on_delta=on_delta
+        )
+        second = await execute_prompt_cell(
+            session, "p1", session.notebook_state.cells[0].source, cfg, on_delta=on_delta
+        )
+
+    assert first["cache_hit"] is False and second["cache_hit"] is True
+    assert first["display_output"].get("scalar") == "short answer"
+    assert second["display_output"].get("scalar") == "short answer"
+    assert "preview" not in second["display_output"]
