@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 import tomllib
 import uuid
@@ -92,6 +94,30 @@ def _dump_notebook_toml(data: dict[str, Any], fp: Any) -> None:
             for nested_key, nested_value in nested.items():
                 fp.write(f"\n[{name}.{nested_key}]\n".encode())
                 tomli_w.dump(nested_value, fp)
+
+
+def _write_notebook_toml_atomic(notebook_toml_path: Path, toml_data: dict[str, Any]) -> None:
+    """Serialize *toml_data* and atomically replace ``notebook.toml``.
+
+    ``open(path, "wb")`` truncates the target before the dump starts, so
+    a crash / SIGKILL / full disk mid-write would leave the file empty
+    or torn — destroying the committed cell list and worker config, and
+    orphaning every artifact keyed to the notebook id. Dump to a temp
+    sibling in the same directory and ``os.replace`` it over the target
+    (atomic on POSIX and Windows), so a reader only ever sees the old
+    or the new complete file.
+    """
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(notebook_toml_path.parent), prefix=".notebook.toml.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            _dump_notebook_toml(toml_data, f)
+        os.replace(tmp_path, notebook_toml_path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_path)
+        raise
 
 
 _SENSITIVE_KEY_PATTERNS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "CREDENTIAL")
@@ -421,8 +447,7 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
         # them.
     }
 
-    with open(notebook_toml_path, "wb") as f:
-        _dump_notebook_toml(toml_data, f)
+    _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
 # Packages the notebook harness/pool_worker/serializer import directly
@@ -899,8 +924,7 @@ def add_cell_to_notebook(
     toml_data["cells"] = cells_data
     toml_data["updated_at"] = datetime.now(tz=UTC)
 
-    with open(notebook_toml_path, "wb") as f:
-        _dump_notebook_toml(toml_data, f)
+    _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
 def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
@@ -945,8 +969,7 @@ def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
     toml_data["cells"] = cells_data
     toml_data["updated_at"] = datetime.now(tz=UTC)
 
-    with open(notebook_toml_path, "wb") as f:
-        _dump_notebook_toml(toml_data, f)
+    _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
 def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
@@ -978,8 +1001,7 @@ def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
     toml_data["cells"] = new_cells
     toml_data["updated_at"] = datetime.now(tz=UTC)
 
-    with open(notebook_toml_path, "wb") as f:
-        _dump_notebook_toml(toml_data, f)
+    _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
 def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
@@ -1090,8 +1112,7 @@ def _apply_notebook_toml_update(
         return
 
     toml_data["updated_at"] = datetime.now(tz=UTC)
-    with open(notebook_toml_path, "wb") as f:
-        _dump_notebook_toml(toml_data, f)
+    _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
 def update_notebook_mounts(notebook_dir: Path, mounts: list[MountSpec]) -> None:
@@ -1218,10 +1239,8 @@ def update_notebook_env(notebook_dir: Path, env: dict[str, str]) -> None:
         toml_data.pop("env", None)
     else:
         toml_data["env"] = new_env
-    toml_data["updated_at"] = datetime.now(tz=UTC).isoformat()
-
-    with open(notebook_toml_path, "wb") as f:
-        tomli_w.dump(toml_data, f)
+    toml_data["updated_at"] = datetime.now(tz=UTC)
+    _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
 def update_cell_display_outputs(
