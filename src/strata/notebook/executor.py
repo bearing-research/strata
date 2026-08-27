@@ -1580,6 +1580,21 @@ class CellExecutor:
                 duration_ms=duration_ms,
                 execution_method="fanout",
             )
+            # Record the BASE cell provenance. Each per-variant instance
+            # records its variant-scoped hash as it runs (last one wins on
+            # last_provenance_hash), but compute_staleness recomputes the
+            # base hash — a variant-scoped value can never match it, so
+            # the fan-out cell read as perpetually stale on re-open.
+            try:
+                prov = await self._compute_cell_provenance(cell_id, source)
+                self.session.record_successful_execution_provenance(
+                    cell_id,
+                    prov.provenance_hash,
+                    compute_source_hash(source),
+                    prov.env_hash,
+                )
+            except Exception:
+                logger.exception("Failed to record fan-out base provenance for cell %s", cell_id)
         self.session.apply_execution_result_metadata(cell_id, aggregate)
         return aggregate
 

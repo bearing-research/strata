@@ -840,9 +840,14 @@ class NotebookSession:
                     # provenance hash via
                     # ``record_successful_execution_provenance`` so we
                     # preserve READY status when it matches despite a
-                    # cache miss. Same logic kicks in for leaf cells.
+                    # cache miss. Same logic kicks in for leaf cells,
+                    # and for ``# @per_variant`` fan-out cells — their
+                    # outputs live under variant-scoped ``@variant=``
+                    # artifact ids the generic lookup can't see, while
+                    # the fan-out orchestrator records the base hash.
+                    is_fanout = parse_annotations(cell.source).per_variant
                     can_preserve_uncached_ready = (
-                        (cell.is_leaf or language_executor.has_alternate_cache_scheme)
+                        (cell.is_leaf or language_executor.has_alternate_cache_scheme or is_fanout)
                         and cell.status == CellStatus.READY
                         and cell.last_provenance_hash == provenance_hash
                     )
