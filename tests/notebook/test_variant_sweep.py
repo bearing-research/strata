@@ -768,3 +768,67 @@ class TestPerVariantDag:
         assert prod2.group == "model"
         # refine depends only on the upstream fan-out cell.
         assert dag.cell_upstream["refine"] == ["eval"]
+
+
+class TestFanoutBaseProvenance:
+    """A successful fan-out must record the BASE cell provenance (review
+    finding): each variant instance records its variant-scoped hash as it
+    runs, which compute_staleness's base-hash recompute can never match —
+    so the fan-out cell read as perpetually stale on re-open."""
+
+    def _run_fanout(self, tmp_path):
+        import asyncio
+
+        from strata.notebook.executor import CellExecutionResult, CellExecutor
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        src = "# @per_variant\nscore = 1\n"
+        nb = create_notebook(tmp_path, "FanoutProv", initialize_environment=False)
+        add_cell_to_notebook(nb, "ev", None, language="python")
+        write_cell(nb, "ev", src)
+        session = NotebookSession(parse_notebook(nb), nb)
+        executor = CellExecutor(session)
+
+        async def fake_run(
+            self,
+            cell_id,
+            source,
+            timeout_seconds,
+            start_time,
+            *,
+            materialize_upstreams,
+            use_cache,
+            fanout_group=None,
+            fanout_variant=None,
+        ):
+            return CellExecutionResult(cell_id=cell_id, success=True)
+
+        executor._execute_python_cell = fake_run.__get__(executor, CellExecutor)
+
+        result = asyncio.run(
+            executor._execute_fanout_cell(
+                "ev",
+                src,
+                10.0,
+                0.0,
+                materialize_upstreams=False,
+                use_cache=False,
+                group="model",
+                variant_names=("logreg", "rf"),
+            )
+        )
+        return executor, session, src, result
+
+    def test_successful_fanout_records_base_hash(self, tmp_path):
+        import asyncio
+
+        executor, session, src, result = self._run_fanout(tmp_path)
+        assert result.success is True
+
+        cell = session.notebook_state.get_cell("ev")
+        assert cell.last_provenance_hash is not None
+        # The recorded hash is the BASE provenance — exactly what
+        # compute_staleness recomputes — not a variant-scoped subkey.
+        prov = asyncio.run(executor._compute_cell_provenance("ev", src))
+        assert cell.last_provenance_hash == prov.provenance_hash
