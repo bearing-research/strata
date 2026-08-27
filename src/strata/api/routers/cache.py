@@ -15,7 +15,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
-from strata.api.dependencies import require_scope
+from strata.api.dependencies import authorize_table_access, require_scope
 from strata.cache_metrics import get_eviction_tracker
 from strata.cache_stats import get_cache_histogram
 from strata.types import (
@@ -142,6 +142,33 @@ async def clear_cache_v1():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _authorize_warm_tables(table_uris: list[str]) -> None:
+    """Apply the table ACL to every table a warm request names.
+
+    Warming plans and reads a table into the shared cache, so it is a read of
+    that table and must clear the same deny-first gate the scan path
+    (``_authorize_table_access``) applies — previously it had none, letting a
+    principal denied ``s3:pii.*`` pull that table into cache and learn its
+    row-group count, byte size, and existence from the response.
+
+    Runs *before* planning: planning a denied table and reporting the failure
+    in ``errors[]`` would itself confirm existence.
+    """
+    from strata.iceberg import PyIcebergCatalog
+    from strata.types import TableIdentity
+
+    for table_uri in table_uris:
+        _, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
+        try:
+            identity = TableIdentity.from_table_id(table_id)
+        except ValueError:
+            # Not a well-formed ``namespace.table``: leave it to the handler's
+            # own error path, which reveals nothing about a table that cannot
+            # exist under this id anyway.
+            continue
+        authorize_table_access(table_uri, identity)
+
+
 @router.post("/v1/cache/warm", response_model=WarmResponse)
 async def warm_cache_v1(request: WarmRequest):
     """Warm the cache for specified tables.
@@ -172,6 +199,10 @@ async def warm_cache_v1(request: WarmRequest):
     from strata.server import get_state
 
     state = get_state()
+
+    # Warming reads these tables into the shared cache — same deny-first gate
+    # as the scan path, before any planning or fetching.
+    _authorize_warm_tables(request.tables)
 
     start_time = time.perf_counter()
     tables_warmed = 0
@@ -289,6 +320,10 @@ async def warm_cache_async_v1(request: WarmAsyncRequest):
     from strata.server import get_state
 
     state = get_state()
+
+    # Same gate as the synchronous endpoint: a background job must not be a
+    # way around the table ACL.
+    _authorize_warm_tables(request.tables)
 
     if state._cache_warmer is None:
         raise HTTPException(status_code=503, detail="Cache warmer not initialized")
