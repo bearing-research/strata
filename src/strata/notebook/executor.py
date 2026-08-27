@@ -3939,6 +3939,20 @@ class CellExecutor:
         source_hash = compute_source_hash(source)
         artifact_mgr = self.session.get_artifact_manager()
 
+        # Downstream-consumed variables beyond the carry. The harness
+        # serializes every defined variable each iteration, but only the
+        # carry used to be persisted — a loop cell that also defines e.g.
+        # ``final_metrics`` consumed by a later cell never materialized
+        # it, leaving the downstream cell's name unbound.
+        consumed_vars = (
+            self.session.dag.consumed_variables.get(cell_id, set()) if self.session.dag else set()
+        )
+        extra_consumed = sorted(consumed_vars - {loop.carry})
+        # var → (blob, content_type); captured every iteration (the
+        # iteration tmpdir dies with the ``with`` block) so the last
+        # capture is the final state stored after the loop.
+        extra_blobs: dict[str, tuple[bytes, str]] = {}
+
         final_artifact_uri: str | None = None
         final_result: dict[str, Any] | None = None
         combined_stdout: list[str] = []
@@ -4056,6 +4070,25 @@ class CellExecutor:
                     )
                 new_carry_blob = new_carry_path.read_bytes()
 
+                # Capture the other consumed variables' blobs while the
+                # iteration tmpdir is still alive.
+                for extra_var in extra_consumed:
+                    extra_meta = result.get("variables", {}).get(extra_var)
+                    if (
+                        not isinstance(extra_meta, dict)
+                        or extra_meta.get("content_type") == "error"
+                    ):
+                        continue
+                    extra_file = extra_meta.get("file")
+                    if not isinstance(extra_file, str):
+                        continue
+                    extra_path = output_dir / extra_file
+                    if extra_path.exists():
+                        extra_blobs[extra_var] = (
+                            extra_path.read_bytes(),
+                            str(extra_meta.get("content_type", "pickle/object")),
+                        )
+
                 # Per-iteration provenance: chains through the previous iter's
                 # carry bytes so re-runs with identical chains are detectable.
                 prev_carry_hash = hashlib.sha256(carry_blob).hexdigest()
@@ -4137,6 +4170,36 @@ class CellExecutor:
         )
         canonical_uri = f"strata://artifact/{canonical_artifact.id}@v={canonical_artifact.version}"
 
+        # Store the final iteration's other consumed variables under their
+        # canonical ids with the same per-variable provenance scheme, so
+        # downstream cells resolve them exactly like non-loop outputs.
+        extra_outputs: dict[str, Any] = {}
+        for extra_var in extra_consumed:
+            captured = extra_blobs.get(extra_var)
+            if captured is None:
+                logger.error(
+                    "Loop cell %s defines '%s' (consumed downstream) but the final "
+                    "iteration did not produce it — downstream cells will miss it.",
+                    cell_id,
+                    extra_var,
+                )
+                continue
+            extra_blob, extra_content_type = captured
+            artifact_mgr.store_cell_output(
+                cell_id=cell_id,
+                variable_name=extra_var,
+                blob_data=extra_blob,
+                content_type=extra_content_type,
+                provenance_hash=derive_subkey(cell_provenance, extra_var),
+                source_hash=source_hash,
+            )
+            extra_outputs[extra_var] = {
+                "content_type": extra_content_type,
+                "file": (
+                    f"{extra_var}{self._LOOP_CONTENT_TYPE_EXT.get(extra_content_type, '.pickle')}"
+                ),
+            }
+
         # Record the cell-level provenance on the session so
         # ``compute_staleness`` can hit the "uncached ready" path for
         # leaf loop cells that don't produce an upstream carry.
@@ -4167,7 +4230,8 @@ class CellExecutor:
                         f"{loop.carry}"
                         f"{self._LOOP_CONTENT_TYPE_EXT.get(carry_content_type, '.pickle')}"
                     ),
-                }
+                },
+                **extra_outputs,
             },
             display_outputs=display_outputs,
             duration_ms=duration_ms,

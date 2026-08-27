@@ -97,3 +97,45 @@ async def test_loop_path_persists_provenance(tmp_path: Path):
     assert loop_prov["last_provenance_hash"], "loop path must persist provenance"
     assert loop_prov["last_source_hash"]
     assert loop_prov["last_env_hash"]
+
+
+@pytest.mark.asyncio
+async def test_loop_cell_stores_non_carry_consumed_variables(tmp_path: Path):
+    """A loop cell that defines a second variable consumed downstream must
+    materialize it — only the carry used to be stored, so the downstream
+    cell ran with the name unbound (code-review finding)."""
+    nb_dir = create_notebook(tmp_path, "prov_loop_extra_var")
+    add_cell_to_notebook(nb_dir, "seed")
+    write_cell(nb_dir, "seed", "state = {'n': 0}")
+    add_cell_to_notebook(nb_dir, "loop", after_cell_id="seed")
+    loop_src = (
+        "# @loop max_iter=3 carry=state\nstate = {'n': state['n'] + 1}\nsummary = state['n'] * 10\n"
+    )
+    write_cell(nb_dir, "loop", loop_src)
+    add_cell_to_notebook(nb_dir, "use", after_cell_id="loop")
+    use_src = "final = summary + 1"
+    write_cell(nb_dir, "use", use_src)
+
+    session = SessionManager().open_notebook(nb_dir)
+    session.ensure_venv_synced()
+    executor = CellExecutor(session)
+
+    await executor.execute_cell("seed", "state = {'n': 0}")
+    loop_result = await executor.execute_cell("loop", loop_src)
+    assert loop_result.success, loop_result.error
+    assert "summary" in loop_result.outputs
+
+    # The canonical artifact for the non-carry consumed variable exists and
+    # holds the FINAL iteration's value (3 iterations → 30).
+    import json as _json
+
+    artifact_mgr = session.get_artifact_manager()
+    canonical_id = f"nb_{session.notebook_state.id}_cell_loop_var_summary"
+    latest = artifact_mgr.artifact_store.get_latest_version(canonical_id)
+    assert latest is not None
+    assert _json.loads(artifact_mgr.load_artifact_data(canonical_id, latest.version)) == 30
+
+    # And the downstream consumer resolves it and runs successfully
+    # (previously `summary` was never materialized → NameError).
+    use_result = await executor.execute_cell("use", use_src)
+    assert use_result.success, use_result.error
