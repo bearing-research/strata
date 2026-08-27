@@ -92,6 +92,7 @@ from strata.notebook.mounts import (
     resolve_cell_mounts,
 )
 from strata.notebook.process_tree import (
+    SUBPROCESS_LINE_LIMIT,
     subprocess_kwargs_for_new_group,
     terminate_subprocess_tree,
 )
@@ -4385,9 +4386,12 @@ class CellExecutor:
             stdout_task = asyncio.create_task(_drain_stream(proc.stdout))
             stderr_task = asyncio.create_task(_drain_stream(proc.stderr))
 
-            # Wrap parent-side frame pipe as an asyncio StreamReader.
+            # Wrap parent-side frame pipe as an asyncio StreamReader. The
+            # explicit limit matters: the default 64 KiB would make
+            # readline() raise on any frame embedding a big stdout capture
+            # or base64 display payload, aborting the whole batch.
             loop = asyncio.get_running_loop()
-            frame_reader = asyncio.StreamReader(loop=loop)
+            frame_reader = asyncio.StreamReader(limit=SUBPROCESS_LINE_LIMIT, loop=loop)
             frame_protocol = asyncio.StreamReaderProtocol(frame_reader, loop=loop)
             frame_file = os.fdopen(frame_r, "rb")
             frame_r = -1  # ownership transferred to file
@@ -4513,6 +4517,21 @@ class CellExecutor:
             if on_cell_event is not None:
                 await on_cell_event(result)
 
+        async def _abort_oversized_frame() -> None:
+            # readline() raised ValueError: one frame exceeded even the
+            # raised SUBPROCESS_LINE_LIMIT. Fail the batch cleanly —
+            # terminate the harness tree (an uncaught raise here used to
+            # leak it) and let the loop exit as subprocess_died.
+            logger.error(
+                "Batch harness emitted a frame over the %d-byte line limit; aborting the batch",
+                SUBPROCESS_LINE_LIMIT,
+            )
+            if watchdog_state is not None:
+                try:
+                    await terminate_subprocess_tree(watchdog_state["proc"])
+                except Exception:
+                    logger.exception("Failed terminating batch harness after oversized frame")
+
         while True:
             # Per-cell watchdog: when a cell is active, cap the readline
             # at its remaining timeout. On expiry, SIGKILL the harness,
@@ -4541,8 +4560,15 @@ class CellExecutor:
                     except Exception:
                         pass
                     break
+                except ValueError:
+                    await _abort_oversized_frame()
+                    break
             else:
-                line = await frame_reader.readline()
+                try:
+                    line = await frame_reader.readline()
+                except ValueError:
+                    await _abort_oversized_frame()
+                    break
             if not line:
                 # Pipe closed without batch_end — subprocess died.
                 break

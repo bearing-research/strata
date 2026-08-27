@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from strata.notebook.process_tree import (
+    SUBPROCESS_LINE_LIMIT,
     kill_subprocess_tree_nowait,
     subprocess_kwargs_for_new_group,
     terminate_subprocess_tree,
@@ -132,12 +133,18 @@ class WarmProcessPool:
             # Without this, anything the worker spawns (DataLoader
             # multiprocessing children, fork servers, …) leaks when
             # we kill the worker.
+            # limit= raises the stdout StreamReader's line cap past the
+            # 64 KiB default: the worker's one result line embeds the
+            # cell's full captured stdout, and readline() raises on any
+            # longer line — which used to silently fall back to a cold
+            # re-execution (running the cell body twice).
             process = await asyncio.create_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.notebook_dir),
+                limit=SUBPROCESS_LINE_LIMIT,
                 **subprocess_kwargs_for_new_group(),
             )
 
@@ -274,6 +281,11 @@ class PooledCellExecutor:
 
         Returns:
             Result dict if successful, None if pool not available (caller should use cold)
+
+        Raises:
+            TimeoutError: the cell exceeded ``timeout_seconds`` in the warm
+                worker — a real cell timeout, not a pool-availability miss;
+                the caller's timeout handler surfaces it (no cold re-run).
         """
         # Try to acquire a warm process
         warm_proc = await pool.acquire()
@@ -316,8 +328,13 @@ class PooledCellExecutor:
                     )
             raise
         except TimeoutError:
+            # A cell that exceeds its timeout in the warm worker is a real
+            # cell timeout — surface it as one. Returning None here (the
+            # "pool not available" signal) made the caller re-run the cell
+            # cold from scratch: paying the timeout twice, and running a
+            # side-effecting cell body a second time.
             logger.warning("Warm process execution timed out")
-            return None
+            raise
         except Exception as e:
             logger.error(f"Error executing with warm process: {e}")
             return None
