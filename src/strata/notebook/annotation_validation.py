@@ -247,7 +247,7 @@ def _validate_module_export(
     # _write_module_export_outputs).
     cross_cell = frozenset(
         v
-        for v in cell.references
+        for v in (*cell.references, *cell.builtin_references)
         for other in notebook_state.cells
         if other.id != cell.id and v in other.defines
     )
@@ -271,6 +271,7 @@ def _validate_module_export(
         if other.id == cell.id:
             continue
         referenced_elsewhere.update(other.references)
+        referenced_elsewhere.update(other.builtin_references)
     if not referenced_elsewhere.intersection(blocked):
         return []
 
@@ -876,7 +877,7 @@ def _sweep_groups_read_by(
     only ``notebook_state`` (defines/references + variant_modes), so validation
     stays independent of a rebuilt DAG.
     """
-    refs = set(cell.references)
+    refs = set(cell.references) | set(cell.builtin_references)
     groups: dict[str, int] = {}
     for group_id, mode in notebook_state.variant_modes.items():
         if mode != "sweep":

@@ -104,6 +104,10 @@ class CellAnalysisWithId:
     id: str
     defines: list[str]
     references: list[str]
+    # Free names shadowing a Python builtin, kept out of ``references``
+    # for display but resolved against the producer map the same way —
+    # a name no cell shadows has no producer and wires nothing.
+    builtin_references: list[str] = field(default_factory=list)
     after: list[str] = field(default_factory=list)
     variant_group: str | None = None
     variant_name: str | None = None
@@ -275,8 +279,11 @@ class NotebookDag:
             if cell.id in inactive:
                 continue
             # Resolve references against the producer map as it stands before
-            # this cell's defines are applied.
-            for var in cell.references:
+            # this cell's defines are applied. Builtin-shadowing names ride
+            # along: ``input = load_data()`` upstream makes ``input`` a real
+            # producer, and the consumer's ``builtin_references`` carries the
+            # read that plain ``references`` filters out for display.
+            for var in (*cell.references, *cell.builtin_references):
                 producer = dag.variable_producer.get(var)
                 if producer is None or producer == cell.id:
                     # Either the variable is external (no prior producer) or
@@ -332,7 +339,9 @@ class NotebookDag:
             fanout_group: str | None = None
             if cell.per_variant:
                 read_groups = {
-                    var_to_sweep_group[ref] for ref in cell.references if ref in var_to_sweep_group
+                    var_to_sweep_group[ref]
+                    for ref in (*cell.references, *cell.builtin_references)
+                    if ref in var_to_sweep_group
                 }
                 named = cell.per_variant_group
                 if named is not None:

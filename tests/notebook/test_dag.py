@@ -18,6 +18,7 @@ def _analyzed_cell(cell_id: str, source: str) -> CellAnalysisWithId:
         id=cell_id,
         defines=analysis.defines,
         references=analysis.references,
+        builtin_references=analysis.builtin_references,
     )
 
 
@@ -743,3 +744,40 @@ class TestVariantGroups:
 
         assert dag_a.cell_upstream["post"] == ["model_a"]
         assert dag_b.cell_upstream["post"] == ["model_b"]
+
+
+class TestBuiltinShadowingEdges:
+    """A variable named after a builtin (``input``, ``type``, ``id``) must
+    still wire producer → consumer edges. ``references`` filters builtin
+    names for display, so the DAG resolves the companion
+    ``builtin_references`` list against the producer map — a name no cell
+    shadows has no producer and wires nothing."""
+
+    def test_shadowed_builtin_wires_edge_and_consumption(self):
+        cells = [
+            _analyzed_cell("load", "input = load_data()"),
+            _analyzed_cell("fit", "model = fit(input)"),
+        ]
+        dag = NotebookDag.from_cells(cells)
+        assert dag.cell_upstream["fit"] == ["load"]
+        assert "input" in dag.consumed_variables["load"]
+        assert DagEdge(from_cell_id="load", to_cell_id="fit", variable="input") in dag.edges
+
+    def test_unshadowed_builtin_wires_nothing(self):
+        cells = [
+            _analyzed_cell("a", "x = 1"),
+            _analyzed_cell("b", "print(x)"),  # print: builtin, no producer
+        ]
+        dag = NotebookDag.from_cells(cells)
+        assert dag.cell_upstream["b"] == ["a"]  # only the x edge
+        assert dag.consumed_variables["a"] == {"x"}
+
+    def test_common_ml_names(self):
+        # id / type / filter are all builtins users routinely shadow.
+        cells = [
+            _analyzed_cell("a", "id = next_run_id()\ntype = pick_model()"),
+            _analyzed_cell("b", "run = launch(id, type)"),
+        ]
+        dag = NotebookDag.from_cells(cells)
+        assert dag.cell_upstream["b"] == ["a"]
+        assert dag.consumed_variables["a"] == {"id", "type"}

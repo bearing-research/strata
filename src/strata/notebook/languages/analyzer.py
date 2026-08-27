@@ -39,6 +39,11 @@ class AnalyzedCell:
     defines: list[str] = field(default_factory=list)
     references: list[str] = field(default_factory=list)
     mutation_defines: list[str] = field(default_factory=list)
+    # Python only: free names that shadow a builtin (``input``, ``type``).
+    # Kept out of ``references`` for display, but the DAG resolves them
+    # against the producer map so a cell that shadows a builtin still
+    # wires its edge. Other languages leave this empty.
+    builtin_references: list[str] = field(default_factory=list)
 
 
 class LanguageAnalyzer(Protocol):
@@ -121,6 +126,7 @@ class _PythonAnalyzer:
             defines=list(result.defines),
             references=list(result.references),
             mutation_defines=list(result.mutation_defines),
+            builtin_references=list(result.builtin_references),
         )
 
 

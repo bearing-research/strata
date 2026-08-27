@@ -510,11 +510,13 @@ class NotebookSession:
 
             variant_group = annotations.variant.group if annotations.variant is not None else None
             variant_name = annotations.variant.name if annotations.variant is not None else None
+            builtin_references = list(analyzed.builtin_references)
             cell_analyses.append(
                 CellAnalysisWithId(
                     id=cell.id,
                     defines=defines,
                     references=references,
+                    builtin_references=builtin_references,
                     after=list(annotations.after),
                     variant_group=variant_group,
                     variant_name=variant_name,
@@ -526,6 +528,7 @@ class NotebookSession:
             cell.defines = defines
             cell.references = references
             cell.mutation_defines = mutation_defines
+            cell.builtin_references = builtin_references
             cell.variant_group = variant_group
             cell.variant_name = variant_name
             # Default to active until the DAG resolution proves otherwise.
@@ -667,6 +670,7 @@ class NotebookSession:
         analyzed = analyze_cell_by_language(cell, self)
         cell.defines = list(analyzed.defines)
         cell.references = list(analyzed.references)
+        cell.builtin_references = list(analyzed.builtin_references)
 
         # Rebuild full DAG (since one cell changed, downstream may be affected)
         self._analyze_and_build_dag()

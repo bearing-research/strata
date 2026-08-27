@@ -572,6 +572,15 @@ class CellState(BaseModel):
             "even when id() is preserved across execution."
         ),
     )
+    builtin_references: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Free names that shadow a Python builtin (input, type, id ...). "
+            "Kept out of references for display, but resolved against the "
+            "producer map so a cell that shadows a builtin still wires "
+            "its DAG edge."
+        ),
+    )
     upstream_ids: list[str] = Field(
         default_factory=list, description="Cell IDs this cell depends on"
     )

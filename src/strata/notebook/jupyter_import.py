@@ -302,6 +302,7 @@ def _check_openable(notebook_dir: Path, result: ImportResult) -> None:
                 id=cell.id,
                 defines=cell_analysis.defines,
                 references=cell_analysis.references,
+                builtin_references=cell_analysis.builtin_references,
             )
         )
 
