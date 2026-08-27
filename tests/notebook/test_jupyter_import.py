@@ -379,7 +379,9 @@ def test_strips_line_timeit_keeps_body(tmp_path: Path) -> None:
     assert "%timeit" not in src
 
 
-def test_translates_cell_magic_bash_to_subprocess(tmp_path: Path) -> None:
+def test_cell_magic_bash_is_dropped_with_body_preserved(tmp_path: Path) -> None:
+    """%%bash matches the !cmd policy: never auto-run shell from an import.
+    The body survives as comments so re-enabling is a deliberate edit."""
     ipynb = _make_ipynb(
         tmp_path,
         [_code_cell("%%bash\necho hello\nls -la\n")],
@@ -387,10 +389,14 @@ def test_translates_cell_magic_bash_to_subprocess(tmp_path: Path) -> None:
     result = import_notebook(ipynb)
     nb = parse_notebook(result.notebook_dir)
     src = nb.cells[0].source
-    assert "subprocess" in src
-    assert "shell=True" in src
-    assert "echo hello" in src
-    assert "%%bash" not in src
+    # No live shell in the imported cell.
+    assert "subprocess" not in src
+    assert "shell=True" not in src
+    # Body preserved, commented out.
+    assert "# echo hello" in src
+    assert "# ls -la" in src
+    # Surfaced in the import report as a dropped shell.
+    assert "%%bash" in result.dropped_shells
 
 
 def test_translates_cell_magic_writefile(tmp_path: Path) -> None:
