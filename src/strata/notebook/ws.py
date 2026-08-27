@@ -667,6 +667,15 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
         await websocket.close(code=1008, reason="Notebook not found")
         return
 
+    # If a previous client disconnected within the grace window and the
+    # cell is still running, abort the pending teardown so we keep the
+    # execution alive for this reconnect. Must happen BEFORE the accept
+    # await: a grace task expiring exactly then could run during the
+    # await, see an empty connections list (we haven't registered yet),
+    # and cancel the running cell — defeating the grace window for the
+    # reconnect it exists to protect.
+    _cancel_pending_grace_teardown(notebook_id)
+
     # Accept connection
     await websocket.accept()
 
@@ -674,11 +683,6 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     # widgets + outputs and may drive controls, but cannot edit or run the
     # notebook. Enforced per-frame in the dispatch loop below.
     read_only = websocket.query_params.get("role") == "viewer"
-
-    # If a previous client disconnected within the grace window and the
-    # cell is still running, abort the pending teardown so we keep the
-    # execution alive for this reconnect.
-    _cancel_pending_grace_teardown(notebook_id)
 
     # Add to connections list
     if notebook_id not in _notebook_connections:
@@ -787,6 +791,30 @@ async def _handle_cell_execute(
         )
         return
 
+    # From here to schedule/terminal-release, any exception must release
+    # the reservation: an unhandled raise (e.g. from CascadePlanner.plan)
+    # propagates to the dispatch loop, which only tears execution state
+    # down when this was the LAST connection — with another tab open,
+    # requested_cell stayed set forever and every later run was refused
+    # as busy.
+    try:
+        await _handle_cell_execute_reserved(
+            websocket, session, execution_state, notebook_id, cell_id, seq
+        )
+    except BaseException:
+        await _release_execution_request(execution_state, cell_id)
+        raise
+
+
+async def _handle_cell_execute_reserved(
+    websocket: WebSocket,
+    session: NotebookSession,
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+    cell_id: str,
+    seq: int,
+) -> None:
+    """The post-reservation body of ``_handle_cell_execute``."""
     environment_block_reason = session.environment_execution_block_message()
     if environment_block_reason:
         await _release_execution_request(execution_state, cell_id)
@@ -1207,6 +1235,26 @@ async def _handle_cell_execute_rerun(
         )
         return
 
+    # Same release-on-exception guard as _handle_cell_execute: a raise
+    # between reserve and schedule must not leave requested_cell set.
+    try:
+        await _handle_cell_execute_rerun_reserved(
+            websocket, session, execution_state, notebook_id, cell_id, seq
+        )
+    except BaseException:
+        await _release_execution_request(execution_state, cell_id)
+        raise
+
+
+async def _handle_cell_execute_rerun_reserved(
+    websocket: WebSocket,
+    session: NotebookSession,
+    execution_state: NotebookExecutionState,
+    notebook_id: str,
+    cell_id: str,
+    seq: int,
+) -> None:
+    """The post-reservation body of ``_handle_cell_execute_rerun``."""
     environment_block_reason = session.environment_execution_block_message()
     if environment_block_reason:
         await _release_execution_request(execution_state, cell_id)
@@ -3051,7 +3099,12 @@ async def _broadcast_message(notebook_id: str, message: dict[str, Any]) -> None:
     message_text = _json_encode(message)
     disconnected = []
 
-    for ws in connections:
+    # Snapshot before iterating: each send awaits, and during that await
+    # another coroutine (a disconnect cleanup, a concurrent broadcast's
+    # removal pass) can mutate the live list — mutating a list mid-iteration
+    # skips the element after the removed one, silently dropping a frame
+    # for a healthy client.
+    for ws in list(connections):
         try:
             await ws.send_text(message_text)
         except Exception:
