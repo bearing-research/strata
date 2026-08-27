@@ -329,21 +329,29 @@ class MountResolver:
             import fsspec
 
             fs = fsspec.filesystem(protocol, **storage_options)
+            staging_root = staging.resolve()
             remote_uri = f"{protocol}://{remote_path}"
             if fs.exists(remote_uri):
-                fs.get(remote_uri, str(staging), recursive=True)
+                # Validate-then-fetch per file, same pattern as the RO
+                # path: fsspec's ``recursive=True`` is opaque about the
+                # local paths it writes, so a post-hoc scan of the
+                # staging dir cannot see a file a traversal name already
+                # placed OUTSIDE it. Checking each relative name before
+                # any bytes land is the only ordering that guards.
+                for remote_name in _list_remote_files(fs, protocol, remote_path):
+                    rel = _relative_remote_path(remote_name, protocol, remote_path)
+                    local_file = staging / rel
+                    _assert_within(local_file, staging_root, mount.name, remote_name)
+                    local_file.parent.mkdir(parents=True, exist_ok=True)
+                    fs.get(f"{protocol}://{remote_name}", str(local_file))
         except Exception as e:
             raise RuntimeError(
                 f"Failed to stage RW mount '{mount.name}' from {mount.uri}: {e}"
             ) from e
 
-        # Defence-in-depth path-traversal scan: fsspec's recursive=True
-        # is opaque about the local paths it writes; if the remote
-        # backend returned names with ``..`` segments or symlinks
-        # pointing outside, files could land outside the staging dir
-        # and the harness wouldn't know. Walk after the fact and
-        # reject the mount if anything escaped.
-        staging_root = staging.resolve()
+        # Defence-in-depth for what per-file validation can't cover:
+        # a fetched entry that is itself a symlink pointing outside the
+        # staging dir resolves outside and is rejected here.
         for entry in staging.rglob("*"):
             _assert_within(entry, staging_root, mount.name, str(entry))
 

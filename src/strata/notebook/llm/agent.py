@@ -522,7 +522,10 @@ async def execute_tool(
 
                 await broadcast_notebook_sync(notebook_id, session)
             except Exception:
-                pass
+                # A broadcast failure must not fail the agent's tool call,
+                # but a silent drop hid real serialization bugs — the UI
+                # desynced with no diagnostic trace.
+                logger.exception("Agent notebook_sync broadcast failed for %s", notebook_id)
 
     try:
         if tool_name == "get_notebook_state":
