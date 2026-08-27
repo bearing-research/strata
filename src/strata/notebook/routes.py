@@ -3166,17 +3166,19 @@ async def execute_cell(
     # Go through the one shared execute path so a CLI/MCP-driven run broadcasts
     # the same live frames to WS spectators (the TUI) that a Vue WS-driven run
     # does — and so REST and WS agree on the running → ready/error transitions.
-    from strata.notebook.ws import _ensure_execution_state, execute_cell_and_broadcast
+    # The exclusive wrapper takes the same reservation the WS handlers hold, so
+    # a REST/MCP run can't race a browser Run click on the same session.
+    from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive
 
-    execution_state = _ensure_execution_state(notebook_id)
     try:
-        result = await execute_cell_and_broadcast(
+        result = await execute_cell_exclusive(
             session,
             cell_id,
-            execution_state,
             notebook_id,
             mode=cast(Literal["normal", "force", "rerun"], mode),  # validated above
         )
+    except NotebookBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     except Exception:
         session.mark_cell_error(cell_id)
         logger.exception("Cell execution failed")

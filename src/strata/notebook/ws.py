@@ -75,7 +75,7 @@ class NotebookExecutionState:
         Cell ID the user has asked to run, queued before execution starts.
     cascade_plan : CascadePlan or None
         Active cascade plan when a multi-cell cascade is in flight.
-    execution_task : asyncio.Task[None] or None
+    execution_task : asyncio.Task[Any] or None
         Background task running the cell; cleared once it completes.
     control_lock : asyncio.Lock
         Serializes execution-control transitions (start / stop / requeue).
@@ -85,7 +85,9 @@ class NotebookExecutionState:
     running_cell: str | None = None
     requested_cell: str | None = None
     cascade_plan: CascadePlan | None = None
-    execution_task: asyncio.Task[None] | None = None
+    # Task[Any]: WS-scheduled runs resolve to None; REST/MCP exclusive
+    # runs resolve to the CellExecutionResult the caller awaits.
+    execution_task: asyncio.Task[Any] | None = None
     control_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def next_sequence(self) -> int:
@@ -93,7 +95,7 @@ class NotebookExecutionState:
         self.sequence += 1
         return self.sequence
 
-    def active_task(self) -> asyncio.Task[None] | None:
+    def active_task(self) -> asyncio.Task[Any] | None:
         """Return the live execution task, clearing fields if it's already done."""
         task = self.execution_task
         if task is not None and task.done():
@@ -1793,6 +1795,65 @@ def _make_executor_with_progress(
     executor.on_prompt_delta = _broadcast_prompt_delta
     executor.on_variant_complete = _broadcast_variant_progress
     return executor
+
+
+class NotebookBusyError(RuntimeError):
+    """The notebook is already executing a cell (raised on the REST/MCP drive)."""
+
+    def __init__(self, busy_cell: str | None) -> None:
+        self.busy_cell = busy_cell
+        super().__init__(
+            f"Notebook is already executing cell {busy_cell}"
+            if busy_cell
+            else "Notebook is already executing another cell"
+        )
+
+
+async def execute_cell_exclusive(
+    session: NotebookSession,
+    cell_id: str,
+    notebook_id: str,
+    mode: Literal["normal", "force", "rerun"] = "normal",
+) -> CellExecutionResult | None:
+    """Reserve → execute → release for the non-WS drivers (REST, MCP).
+
+    The WS handlers serialize runs through ``_reserve_execution_request`` /
+    ``_schedule_execution`` under ``control_lock``. REST and MCP used to call
+    ``execute_cell_and_broadcast`` directly with no reservation, so an
+    agent-driven run and a browser Run click could execute concurrently on
+    one session — racing ``running_cell``, artifact writes, and leaving the
+    run uncancellable (no ``execution_task`` registered). This wrapper takes
+    the same reservation, registers the run as the execution task (so
+    ``cell_cancel`` and grace teardown can reach it), and raises
+    :class:`NotebookBusyError` when a run is already active.
+    """
+    execution_state = _ensure_execution_state(notebook_id)
+    busy_cell = await _reserve_execution_request(execution_state, cell_id)
+    if busy_cell is not None:
+        raise NotebookBusyError(busy_cell)
+
+    task = asyncio.create_task(
+        execute_cell_and_broadcast(session, cell_id, execution_state, notebook_id, mode=mode),
+        name=f"notebook-exec-{notebook_id}-{cell_id}",
+    )
+    async with execution_state.control_lock:
+        execution_state.execution_task = task
+    try:
+        return await task
+    except asyncio.CancelledError:
+        if task.cancelled():
+            # The run was cancelled out from under us (cell_cancel / grace
+            # teardown) — surface it as "no result", same as an executor
+            # failure, rather than tearing down the caller.
+            return None
+        # The *caller* (HTTP request) was cancelled: leave the registered
+        # task running for spectators, exactly like a WS-driven run
+        # surviving its socket. State clears via active_task() when done.
+        raise
+    finally:
+        async with execution_state.control_lock:
+            if execution_state.execution_task is task and task.done():
+                execution_state.reset_execution()
 
 
 async def execute_cell_and_broadcast(

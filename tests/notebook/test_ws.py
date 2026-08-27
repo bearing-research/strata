@@ -2299,3 +2299,109 @@ async def test_editor_connection_allows_mutations(tmp_path):
 
     codes = [f["payload"].get("code") for f in editor.sent if f["type"] == "error"]
     assert "read_only" not in codes
+
+
+# ---------------------------------------------------------------------------
+# execute_cell_exclusive — the REST/MCP drive's reservation
+# ---------------------------------------------------------------------------
+
+
+class _GatedStubExecutor:
+    """Executor stub whose execute blocks on an event, so tests can hold a
+    run "in flight" while asserting the reservation excludes others."""
+
+    started: asyncio.Event
+    release: asyncio.Event
+
+    def __init__(self, session, warm_pool=None):
+        self.on_iteration_complete = None
+        self.on_prompt_delta = None
+
+    async def execute_cell(self, cell_id, source):
+        from strata.notebook.executor import CellExecutionResult
+
+        type(self).started.set()
+        await type(self).release.wait()
+        return CellExecutionResult(cell_id=cell_id, success=True)
+
+
+@pytest.mark.asyncio
+async def test_exclusive_run_rejects_concurrent_run(notebook_session, monkeypatch):
+    """A second REST/MCP-driven run while one is in flight must raise
+    NotebookBusyError, not execute concurrently on the session."""
+    from strata.notebook import ws as ws_module
+    from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive
+
+    _, session = notebook_session
+    _GatedStubExecutor.started = asyncio.Event()
+    _GatedStubExecutor.release = asyncio.Event()
+    monkeypatch.setattr(ws_module, "CellExecutor", _GatedStubExecutor)
+
+    first = asyncio.create_task(execute_cell_exclusive(session, "root", session.id))
+    await _GatedStubExecutor.started.wait()
+
+    with pytest.raises(NotebookBusyError, match="already executing"):
+        await execute_cell_exclusive(session, "middle", session.id)
+
+    _GatedStubExecutor.release.set()
+    result = await first
+    assert result is not None and result.success
+
+    # Reservation fully released — a follow-up run is admitted again.
+    _GatedStubExecutor.started = asyncio.Event()
+    _GatedStubExecutor.release = asyncio.Event()
+    _GatedStubExecutor.release.set()
+    result2 = await execute_cell_exclusive(session, "middle", session.id)
+    assert result2 is not None and result2.success
+
+
+@pytest.mark.asyncio
+async def test_exclusive_run_blocks_ws_reservation(notebook_session, monkeypatch):
+    """While a REST/MCP run is in flight, the WS reservation path must see
+    the notebook as busy (previously the REST run was invisible to it)."""
+    from strata.notebook import ws as ws_module
+    from strata.notebook.ws import (
+        _ensure_execution_state,
+        _reserve_execution_request,
+        execute_cell_exclusive,
+    )
+
+    _, session = notebook_session
+    _GatedStubExecutor.started = asyncio.Event()
+    _GatedStubExecutor.release = asyncio.Event()
+    monkeypatch.setattr(ws_module, "CellExecutor", _GatedStubExecutor)
+
+    task = asyncio.create_task(execute_cell_exclusive(session, "root", session.id))
+    await _GatedStubExecutor.started.wait()
+
+    state = _ensure_execution_state(session.id)
+    busy = await _reserve_execution_request(state, "middle")
+    assert busy == "root"
+
+    _GatedStubExecutor.release.set()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_exclusive_run_is_cancellable(notebook_session, monkeypatch):
+    """The REST/MCP run registers as the execution task, so cell_cancel /
+    grace teardown can cancel it (previously active_task() was None)."""
+    from strata.notebook import ws as ws_module
+    from strata.notebook.ws import _ensure_execution_state, execute_cell_exclusive
+
+    _, session = notebook_session
+    _GatedStubExecutor.started = asyncio.Event()
+    _GatedStubExecutor.release = asyncio.Event()
+    monkeypatch.setattr(ws_module, "CellExecutor", _GatedStubExecutor)
+
+    caller = asyncio.create_task(execute_cell_exclusive(session, "root", session.id))
+    await _GatedStubExecutor.started.wait()
+
+    state = _ensure_execution_state(session.id)
+    active = state.active_task()
+    assert active is not None  # visible to cell_cancel
+
+    active.cancel()
+    result = await caller  # cancelled run surfaces as "no result", not a crash
+    assert result is None
+    assert state.active_task() is None  # state fully reset
