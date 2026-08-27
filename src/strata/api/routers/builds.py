@@ -152,6 +152,34 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
 
     state = get_state()
 
+    # This route MINTS capabilities: it returns a signed upload URL plus a
+    # finalize URL, and nothing downstream binds the uploaded bytes to the
+    # executor's identity. Service mode has no loopback restriction and
+    # deployment_mode="service" with auth_mode="none" is a combination the
+    # coherence validator accepts, so without trusted-proxy auth any caller who
+    # reached the port and learned a build id could PUT arbitrary Arrow IPC and
+    # finalize it — and because the artifact is keyed by the build's provenance
+    # hash, every later identical materialize would serve the forged bytes as a
+    # dedup cache *hit*. ``_authorize_build_access`` below cannot cover this: it
+    # returns immediately when auth_mode != "trusted_proxy".
+    #
+    # Only minting is gated. Redeeming (upload / finalize) stays authorized by
+    # the signature itself — a worker holds a capability, not a principal, which
+    # is the whole point of the pull model (and is how the notebook's signed
+    # remote workers operate: the notebook assembles the manifest in-process and
+    # the worker only redeems the URLs).
+    #
+    # Personal mode is unaffected: single-operator trust boundary, loopback-bound
+    # unless the operator explicitly opts out.
+    if not state.config.writes_enabled and state.config.auth_mode != "trusted_proxy":
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Build manifests are only issued with trusted-proxy auth in "
+                "service mode (they carry upload/finalize capabilities)"
+            ),
+        )
+
     build = build_store.get_build(build_id)
     if build is None:
         raise HTTPException(status_code=404, detail="Build not found")

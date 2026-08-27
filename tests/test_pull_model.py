@@ -56,6 +56,13 @@ def config(temp_dir):
         transforms_config={"enabled": True},
         artifact_dir=temp_dir / "artifacts",
         signed_url_expiry_seconds=600.0,
+        # The signed build-transport routes mint upload + finalize
+        # capabilities, so in service mode they require trusted-proxy auth
+        # (an unauthenticated, network-reachable server would let anyone who
+        # learned a build id forge an artifact). The client below sends the
+        # matching headers.
+        auth_mode="trusted_proxy",
+        proxy_token="test-token",
     )
 
 
@@ -96,7 +103,16 @@ def client(config, artifact_store, build_store):
     original_state = server_module._state
     server_module._state = mock_state
 
-    yield TestClient(app)
+    # admin:* so these transport tests exercise the routes rather than the
+    # per-build ownership rules (builds here are created without an owner).
+    yield TestClient(
+        app,
+        headers={
+            "X-Strata-Proxy-Token": "test-token",
+            "X-Strata-Principal": "test-executor",
+            "X-Strata-Scopes": "admin:*",
+        },
+    )
 
     # Restore
     server_module._state = original_state
@@ -988,3 +1004,82 @@ class TestPullModelEndToEnd:
         )
         assert finalize_response.status_code == 200
         assert finalize_response.json()["status"] == "finalized"
+
+
+@pytest.fixture
+def unauthenticated_service_client(temp_dir, artifact_store, build_store):
+    """A service-mode server with ``auth_mode="none"`` — a config the coherence
+    validator accepts, and one with no loopback restriction."""
+    config = StrataConfig(
+        cache_dir=temp_dir / "cache-noauth",
+        deployment_mode="service",
+        transforms_config={"enabled": True},
+        artifact_dir=temp_dir / "artifacts",
+        signed_url_expiry_seconds=600.0,
+    )
+
+    mock_state = MagicMock()
+    mock_state.config = config
+    mock_state.planner = MagicMock()
+    mock_state.fetcher = MagicMock()
+    mock_state.scans = {}
+    mock_state.metrics = MagicMock()
+    mock_state.url_signer = _TEST_SIGNER
+
+    original_state = server_module._state
+    server_module._state = mock_state
+    yield TestClient(app)
+    server_module._state = original_state
+
+
+class TestManifestMintingRequiresAuth:
+    """The manifest route MINTS capabilities — a signed upload URL plus a
+    finalize URL, with nothing binding the uploaded bytes to the executor's
+    identity. In an unauthenticated service-mode deployment (no loopback
+    restriction), anyone who learned a build id could PUT arbitrary Arrow IPC
+    and finalize it; the forged artifact is keyed by the build's provenance
+    hash, so every later identical materialize serves it as a dedup cache hit.
+    """
+
+    def _seed_build(self, build_store, artifact_store, build_id="build-mint"):
+        output_version = create_test_artifact(artifact_store, "mint-out", finalize=False)
+        build_store.create_build(
+            build_id=build_id,
+            artifact_id="mint-out",
+            version=output_version,
+            executor_ref="duckdb_sql@v1",
+            input_uris=[],
+            params={},
+        )
+
+    def test_unauthenticated_service_mode_cannot_mint(
+        self, unauthenticated_service_client, build_store, artifact_store
+    ):
+        self._seed_build(build_store, artifact_store)
+        resp = unauthenticated_service_client.get("/v1/builds/build-mint/manifest")
+        assert resp.status_code == 404
+        # An error body, not a manifest: no signed capability of any kind.
+        assert "signature=" not in resp.text
+        assert "output" not in resp.json()
+        assert "inputs" not in resp.json()
+
+    def test_trusted_proxy_service_mode_can_mint(self, client, build_store, artifact_store):
+        """The authenticated client (see the ``config`` fixture) still mints."""
+        self._seed_build(build_store, artifact_store, build_id="build-mint-ok")
+        resp = client.get("/v1/builds/build-mint-ok/manifest")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["output"]["url"]
+
+    def test_redeeming_stays_signature_authed(
+        self, unauthenticated_service_client, build_store, artifact_store
+    ):
+        """Redeeming a capability must NOT require a principal — a worker holds
+        a signed URL, not an identity. That is the whole point of the pull
+        model, and is how the notebook's signed remote workers operate: the
+        notebook assembles the manifest in-process and the worker only redeems.
+        An unsigned redeem is still refused, by the signature check."""
+        self._seed_build(build_store, artifact_store, build_id="build-redeem")
+        resp = unauthenticated_service_client.post("/v1/builds/build-redeem/finalize")
+        # Refused for want of a signature (401/403), not for want of a principal
+        # and not with the manifest route's 404.
+        assert resp.status_code in (400, 401, 403), resp.text
