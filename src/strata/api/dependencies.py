@@ -322,7 +322,12 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
         HTTPException: 400/404 for an unresolvable URI; 401/403/404 for an
         ACL-denied table.
     """
-    from strata.server import _get_artifact_store, get_state
+    from strata.server import (
+        _authorize_artifact_read,
+        _ensure_artifact_access,
+        _get_artifact_store,
+        get_state,
+    )
     from strata.services.materialize import InputResolutionError, materialize_service
 
     store = _get_artifact_store(allow_server_mode=True)
@@ -338,4 +343,11 @@ def resolve_input_version(input_uri: str, tenant: str | None = None) -> str:
     # error mapping) so a 401/403/404 isn't rewritten into a 400.
     if resolved.table_identity is not None:
         authorize_table_access(input_uri, resolved.table_identity)
+    # Gate artifact inputs through the same tenant + provenance-ACL checks a
+    # direct GET /v1/artifacts/{id} runs. Without this, naming another
+    # tenant's artifact as a transform input read its blob with no check at
+    # any layer — and in pull mode handed back a signed URL for it.
+    if resolved.artifact is not None:
+        _ensure_artifact_access(resolved.artifact, tenant)
+        _authorize_artifact_read(resolved.artifact)
     return resolved.version

@@ -40,15 +40,17 @@ class InputResolutionError(Exception):
 
 
 class ResolvedInput(NamedTuple):
-    """A resolved input version, plus the table identity when the input is a table.
+    """A resolved input version, plus what the caller needs to authorize it.
 
-    ``table_identity`` is ``None`` for artifact/name inputs and set for table
-    URIs — the wrapper uses it to run the table ACL (deny-first on every table
-    input) as a visible step, which the pure resolver deliberately does not do.
+    ``table_identity`` is set for table URIs and ``artifact`` for
+    artifact/name inputs — the wrapper uses them to run the table ACL
+    (deny-first on every table input) and the artifact tenant/ACL gate as
+    visible steps, which the pure resolver deliberately does not do.
     """
 
     version: str
     table_identity: object | None = None
+    artifact: ArtifactVersion | None = None
 
 
 class MaterializeService:
@@ -77,7 +79,16 @@ class MaterializeService:
         if input_uri.startswith("strata://artifact/"):
             match = re.match(r"^strata://artifact/([^@]+)@v=(\d+)$", input_uri)
             if match:
-                return ResolvedInput(f"{match.group(1)}@v={int(match.group(2))}")
+                # Look the artifact up rather than trusting the URI's shape:
+                # the version string alone reaches the runner, which reads the
+                # blob with no further check, so a bare regex parse let a
+                # caller name ANY artifact id — including another tenant's.
+                # The record is returned for the wrapper's tenant/ACL gate.
+                artifact_id, version = match.group(1), int(match.group(2))
+                artifact = store.get_artifact(artifact_id, version)
+                if artifact is None:
+                    raise InputResolutionError(404, f"Artifact not found: {input_uri}")
+                return ResolvedInput(f"{artifact_id}@v={version}", artifact=artifact)
             raise InputResolutionError(400, f"Invalid artifact URI: {input_uri}")
 
         # Name URI: strata://name/{name}
@@ -86,7 +97,7 @@ class MaterializeService:
             artifact = store.resolve_name(name, tenant=tenant)
             if artifact is None:
                 raise InputResolutionError(404, f"Name not found: {name}")
-            return ResolvedInput(f"{artifact.id}@v={artifact.version}")
+            return ResolvedInput(f"{artifact.id}@v={artifact.version}", artifact=artifact)
 
         # Table URI: file:// or s3://
         if input_uri.startswith("file://") or input_uri.startswith("s3://"):

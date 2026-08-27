@@ -1370,6 +1370,11 @@ class TestServiceModeReviewFindings:
         Regression: ``create_build`` was called without ``input_uris`` / ``params``,
         producing an empty-input, empty-param manifest.
         """
+        # Seed a real input artifact: artifact inputs are now resolved through
+        # the store (and tenant-gated), so a fictional id is a 404.
+        store = get_artifact_store()
+        store.create_artifact(artifact_id="seed", provenance_hash="seed-prov")
+
         create = server_mode_app.post(
             "/v1/artifacts/materialize",
             json={
