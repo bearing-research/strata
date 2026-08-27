@@ -108,7 +108,7 @@ runtime_id = "fly-cpu-v1"
 
 [workers.config]
 url = "https://my-strata-worker.fly.dev/v1/execute"
-transport = "http"
+transport = "direct"
 token_env = "STRATA_FLY_WORKER_TOKEN"
 ```
 
@@ -117,7 +117,7 @@ token_env = "STRATA_FLY_WORKER_TOKEN"
 | `name` | string (required) | Worker name referenced in `# @worker <name>` annotations. Must match `[a-zA-Z0-9][a-zA-Z0-9._-]*`. |
 | `backend` | `"local"` \| `"executor"` | Default `"local"`. `"executor"` for HTTP workers; `"local"` for in-process. |
 | `runtime_id` | string \| absent | Stable fingerprint hashed into cell provenance. Bump to invalidate the cache for cells using this worker. |
-| `config` | table | Backend-specific. For `"executor"`: `url`, `transport` (`"http"` or `"signed"`), `token` (literal - dev only), `token_env` (env var name - preferred). See [Distributed Workers](../notebook/workers.md). |
+| `config` | table | Backend-specific. For `"executor"`: `url`, `transport` (`"direct"` push, the default, or `"signed"` pull-model), `token` (literal - dev only), `token_env` (env var name - preferred). See [Distributed Workers](../notebook/workers.md). |
 
 ## `[connections.<name>]` - Named database connections
 
@@ -146,7 +146,7 @@ SQL cells reference these by name via `# @sql connection=<name>`.
 | `options` | table | Driver-specific runtime tunables that don't change which objects the connection sees (`application_name`, `connect_timeout`, etc.). |
 | (driver-specific top-level keys) | varies | `uri`, `host`, `account`, `database`, `role`, `path`, ... - interpreted by the driver adapter. |
 
-**Malformed connection preservation.** If a `[connections.<name>]` block fails validation (bad name, missing `driver`, etc.), it's preserved verbatim under `[[malformed_connection]]` on save so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.
+**Malformed connection preservation.** If a `[connections.<name>]` block fails validation (bad name, missing `driver`, etc.), its body is written back verbatim under the same `[connections.<name>]` table on save, so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.
 
 ## `[[variant_group]]` - Active-variant pointers
 
@@ -224,4 +224,4 @@ Runtime writers never touch `notebook.toml`; structural-edit writers never touch
 
 ## Round-trip safety
 
-The writer preserves unknown top-level keys verbatim. If you hand-edit the file with a key the parser doesn't know about, it survives saves - useful for experimental settings or external tooling. Known-but-malformed blocks (a `[connections.<name>]` with no `driver`, a typoed worker name) are also preserved under `[[malformed_connection]]` / `[[malformed_worker]]` so you don't lose the data while you debug.
+The writer preserves unknown top-level keys verbatim. If you hand-edit the file with a key the parser doesn't know about, it survives saves - useful for experimental settings or external tooling. A malformed `[connections.<name>]` block (no `driver`, etc.) is likewise written back verbatim under its own `[connections.<name>]` table so you don't lose the data while you debug.

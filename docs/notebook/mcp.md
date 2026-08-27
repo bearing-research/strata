@@ -72,6 +72,12 @@ The typical loop:
 | `add_dependency(session_id, package)` | `uv add` a dependency. |
 | `remove_dependency(session_id, package)` | `uv remove` a dependency. |
 | `note(session_id, message)` | Post a line into the Agent panel for the human watching. |
+| `list_workers(session_id)` | The notebook's registered workers and which is the default. |
+| `add_worker(session_id, name, url, transport?, token_env?, runtime_id?, set_default?)` | Register a remote executor worker so cells can run on it. |
+| `set_default_worker(session_id, name?)` | Set the notebook's default worker (`name` omitted/`local` clears it). |
+| `remove_worker(session_id, name)` | Remove a notebook-scoped worker. |
+| `connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)` | Provision + tunnel + register a worker on a machine you reach over SSH (see [Distributed Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to)). |
+| `disconnect_ssh_worker(session_id, name, stop_remote?)` | Close an SSH worker's tunnel and unregister it. |
 
 `run_cell` modes match the UI and CLI: `normal` uses the cache and re-runs stale
 upstreams first; `rerun` bypasses the target's cache but still refreshes

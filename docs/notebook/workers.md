@@ -75,7 +75,7 @@ runtime_id = "local-dev"
 
 [workers.config]
 url = "http://127.0.0.1:9000/v1/execute"
-transport = "http"
+transport = "direct"
 ```
 
 **4. Use it in a cell:**
@@ -234,7 +234,7 @@ runtime_id = "fly-cpu-v1"
 
 [workers.config]
 url = "https://my-strata-worker.fly.dev/v1/execute"
-transport = "http"
+transport = "direct"
 ```
 
 ### Modal (GPU worker)
@@ -304,7 +304,7 @@ runtime_id = "modal-a10g-v1"
 
 [workers.config]
 url = "https://your-username--my-gpu-worker-gpu-executor.modal.run/v1/execute"
-transport = "http"
+transport = "direct"
 ```
 
 ## Registering workers
@@ -317,7 +317,7 @@ Workers live in `notebook.toml` under `[[workers]]`. You can add them through th
 | `backend` | Always `"executor"` for HTTP workers |
 | `runtime_id` | Stable identifier hashed into cell provenance - see [Caching](#caching-and-provenance) below |
 | `config.url` | The HTTP endpoint for the executor protocol |
-| `config.transport` | `"http"` for direct push, `"signed"` for pull-model with signed URLs |
+| `config.transport` | `"direct"` for direct push (the default), `"signed"` for the pull-model with signed URLs |
 | `config.token` | Literal bearer token (dev only) - see [Authentication](#authentication) |
 | `config.token_env` | Env var name holding the bearer token (preferred for prod) |
 
@@ -330,7 +330,7 @@ backend = "executor"
 runtime_id = "fly-cpu-v1"
 [workers.config]
 url = "https://my-strata-worker.fly.dev/v1/execute"
-transport = "http"
+transport = "direct"
 token_env = "STRATA_FLY_WORKER_TOKEN"
 
 [[workers]]
@@ -339,7 +339,7 @@ backend = "executor"
 runtime_id = "modal-a10g-v1"
 [workers.config]
 url = "https://...--my-gpu-worker-gpu-executor.modal.run/v1/execute"
-transport = "http"
+transport = "direct"
 token_env = "STRATA_MODAL_WORKER_TOKEN"
 ```
 
@@ -388,7 +388,7 @@ uv run strata-notebook
 ```toml
 [workers.config]
 url = "https://my-strata-worker.fly.dev/v1/execute"
-transport = "http"
+transport = "direct"
 token_env = "STRATA_FLY_WORKER_TOKEN"
 ```
 
