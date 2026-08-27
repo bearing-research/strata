@@ -60,6 +60,7 @@ caught real bugs. Small sample, and honest about it. See
 ## Highlights
 
 - **agent scratchpad:** a Claude Code plugin makes a coding agent use a cached notebook cell for throwaway Python instead of `/tmp` scripts - one-call add-and-run, and unchanged work is never recomputed
+- **remote cells over SSH (0.6.0):** hand a coding agent an SSH target and it provisions a `strata-worker` on the box, opens a secure tunnel, and routes heavy cells there, cached by provenance like everything else - `connect_ssh_worker` in-tool or `strata agent --worker-ssh user@host`, with `# @worker local` to keep a cell on this machine
 - **content-addressed:** every cell output is keyed by source + inputs + environment - identical work hits the cache forever
 - **reactive:** edit a cell, the cascade re-runs only the downstream cells that depend on it
 - **dag-from-ast:** Strata reads each cell's AST to wire upstream/downstream - no decorators, no manual edges

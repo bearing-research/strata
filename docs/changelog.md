@@ -7,7 +7,17 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
-## Unreleased
+## 0.6.0 - 2026-08-27
+
+0.6.0 makes the notebook a **coding agent's cached scratchpad** and lets it reach
+**remote compute**. The headline is **running cells on a machine you reach over
+SSH**: hand a coding agent an SSH target and it provisions a `strata-worker` on
+the box, opens a secure tunnel, and routes heavy cells there, cached by
+provenance like everything else. Around it the agent story matures: a shipped
+**scratchpad skill + Claude Code plugin**, the one-command **`strata agent`**
+on-ramp, one-call **add-and-run** with **leaf-cell console caching**, and
+**runtime-hydrated module export** for sharing defs that close over runtime
+values. No breaking changes.
 
 ### Added
 

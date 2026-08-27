@@ -5,7 +5,17 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
-## Unreleased
+## 0.6.0 - 2026-08-27
+
+0.6.0 makes the notebook a **coding agent's cached scratchpad** and lets it reach
+**remote compute**. The headline is **running cells on a machine you reach over
+SSH**: hand a coding agent an SSH target and it provisions a `strata-worker` on
+the box, opens a secure tunnel, and routes heavy cells there, cached by
+provenance like everything else. Around it the agent story matures: a shipped
+**scratchpad skill + Claude Code plugin**, the one-command **`strata agent`**
+on-ramp, one-call **add-and-run** with **leaf-cell console caching**, and
+**runtime-hydrated module export** for sharing defs that close over runtime
+values. No breaking changes.
 
 ### Added
 
