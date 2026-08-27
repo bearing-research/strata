@@ -108,7 +108,7 @@ runtime_id = "df-cluster"
 
 [workers.config]
 url = "https://my-datafusion-worker.fly.dev/v1/execute"
-transport = "http"
+transport = "direct"
 ```
 
 During execution, the UI shows a pulsing "dispatching → df-cluster" badge on the cell. After completion, the worker name appears in the cell's metadata.
