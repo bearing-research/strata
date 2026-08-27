@@ -984,3 +984,61 @@ def test_worker_config_model_round_trips_through_toml(tmp_path):
     assert by_name["gpu"].config.model_extra.get("region") == "us"  # extra preserved
     # empty config serializes to nothing meaningful
     assert by_name["local"].config.url is None
+
+
+class TestAtomicNotebookTomlWrites:
+    """notebook.toml rewrites must be atomic: a crash mid-dump (or a full
+    disk) must leave the previous complete file in place, never an empty
+    or torn one — the committed cell list and worker config live there."""
+
+    def test_failed_dump_leaves_previous_file_intact(self, monkeypatch):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            notebook_dir = create_notebook(Path(tmpdir), "Atomic")
+            toml_path = notebook_dir / "notebook.toml"
+            before = toml_path.read_bytes()
+            assert before  # sanity
+
+            def torn_dump(data, fp):
+                fp.write(b"[partial")  # simulate a mid-write crash
+                raise OSError("disk full")
+
+            monkeypatch.setattr(writer_module, "_dump_notebook_toml", torn_dump)
+            with pytest.raises(OSError, match="disk full"):
+                writer_module.update_notebook_timeout(notebook_dir, 9.0)
+
+            # The original file is untouched and no temp litter remains.
+            assert toml_path.read_bytes() == before
+            assert not list(notebook_dir.glob(".notebook.toml.*"))
+
+    def test_successful_write_replaces_and_cleans_up(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            notebook_dir = create_notebook(Path(tmpdir), "Atomic OK")
+            update_notebook_timeout(notebook_dir, 4.0)
+            assert parse_notebook(notebook_dir).timeout == 4.0
+            assert not list(notebook_dir.glob(".notebook.toml.*"))
+
+
+def test_update_notebook_env_keeps_writer_conventions():
+    """The env writer must match every other notebook.toml writer: native
+    TOML datetime for updated_at (not an ISO string) and [[workers]]
+    array-of-tables form preserved (not collapsed to inline)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Env Conventions")
+        update_notebook_workers(
+            notebook_dir,
+            [
+                WorkerSpec(
+                    name="gpu",
+                    backend=WorkerBackendType.EXECUTOR,
+                    config={"url": "http://localhost:9000"},
+                )
+            ],
+        )
+
+        update_notebook_env(notebook_dir, {"DATABASE_URL": "postgres://localhost/db"})
+
+        raw = (notebook_dir / "notebook.toml").read_text(encoding="utf-8")
+        assert "[[workers]]" in raw  # array-of-tables survived the env save
+        with open(notebook_dir / "notebook.toml", "rb") as f:
+            data = tomllib.load(f)
+        assert isinstance(data["updated_at"], datetime)  # not an ISO string
