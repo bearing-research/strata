@@ -1733,7 +1733,13 @@ class TestWebSocketOwnerGate:
         monkeypatch.setattr(
             "strata.server._state",
             SimpleNamespace(
-                config=SimpleNamespace(personal_mode_user_header=self.HEADER, transforms_config={})
+                config=SimpleNamespace(
+                    personal_mode_user_header=self.HEADER,
+                    transforms_config={},
+                    # These tests exercise the owner gate, not the auth gate;
+                    # personal mode is what per-user scoping implies anyway.
+                    auth_mode="none",
+                )
             ),
         )
 
@@ -2474,3 +2480,191 @@ async def test_broadcast_survives_mid_iteration_removal(notebook_session):
     await _broadcast_message(session.id, {"type": "cell_status", "payload": {}})
 
     assert received == ["first", "second"]  # nobody skipped
+
+
+# ---------------------------------------------------------------------------
+# WS authentication + notebook scopes (code-review round 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _server_state(monkeypatch, tmp_path):
+    """Install a minimal ServerState so the WS endpoint can read config.
+
+    The WS auth gate consults ``get_state().config`` — in production state
+    always exists, but these unit tests call the endpoint directly. Autouse so
+    every test gets the default (``auth_mode="none"``, i.e. unchanged
+    pass-through behavior); the auth tests override the mode on top.
+    """
+    import strata.server as server_module
+    from strata.config import StrataConfig
+    from strata.server import ServerState
+
+    config = StrataConfig(artifact_dir=str(tmp_path / "artifacts"))
+    monkeypatch.setattr(server_module, "_state", ServerState(config), raising=False)
+    return config
+
+
+@pytest.fixture
+def personal_mode(_server_state):
+    """Default no-auth deployment (personal mode)."""
+    _server_state.auth_mode = "none"
+    return _server_state
+
+
+@pytest.fixture
+def trusted_proxy_mode(_server_state):
+    """Put the server in service/trusted-proxy mode for the duration of a test."""
+    _server_state.auth_mode = "trusted_proxy"
+    _server_state.proxy_token = "sekrit"
+    return _server_state
+
+
+def _auth_headers(scopes: str, *, token: str = "sekrit", principal: str = "alice") -> dict:
+    return {
+        "x-strata-proxy-token": token,
+        "x-strata-principal": principal,
+        "x-strata-scopes": scopes,
+    }
+
+
+@pytest.mark.asyncio
+async def test_ws_upgrade_rejected_without_proxy_token(notebook_session, trusted_proxy_mode):
+    """No HTTP middleware runs for a WS upgrade, so the endpoint must verify
+    the proxy token itself — otherwise anything that can open a socket in
+    service mode gets arbitrary code execution."""
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    fake = FakeNotebookWebSocket(inbound=[_envelope("notebook_sync")])
+
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+
+    assert fake.closed == (1008, "Unauthorized")
+    assert fake.accepted is False  # closed before the upgrade completed
+
+
+@pytest.mark.asyncio
+async def test_ws_upgrade_rejected_with_wrong_proxy_token(notebook_session, trusted_proxy_mode):
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    fake = FakeNotebookWebSocket(
+        inbound=[_envelope("notebook_sync")],
+        headers=_auth_headers("notebook:read", token="wrong"),
+    )
+
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+    assert fake.closed == (1008, "Unauthorized")
+
+
+@pytest.mark.asyncio
+async def test_ws_upgrade_rejected_without_principal(notebook_session, trusted_proxy_mode):
+    """A valid proxy token but no principal header must not authenticate."""
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    fake = FakeNotebookWebSocket(
+        inbound=[_envelope("notebook_sync")],
+        headers={"x-strata-proxy-token": "sekrit"},
+    )
+
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+    assert fake.closed == (1008, "Unauthorized")
+
+
+@pytest.mark.asyncio
+async def test_ws_read_scope_cannot_execute(notebook_session, trusted_proxy_mode):
+    """The advertised notebook:read/write/execute scopes must actually gate:
+    a read-only principal could previously run arbitrary Python."""
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    fake = FakeNotebookWebSocket(
+        inbound=[_envelope("cell_execute", {"cell_id": "root"})],
+        headers=_auth_headers("notebook:read"),
+    )
+
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+
+    errors = [f for f in fake.sent if f["type"] == "error"]
+    assert errors, "expected the execute frame to be refused"
+    assert errors[0]["payload"]["code"] == "insufficient_scope"
+    assert "notebook:execute" in errors[0]["payload"]["error"]
+    # No cell ever transitioned to running.
+    assert not _running_frames(fake, "root")
+
+
+@pytest.mark.asyncio
+async def test_ws_read_scope_allows_sync(notebook_session, trusted_proxy_mode):
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    fake = FakeNotebookWebSocket(
+        inbound=[_envelope("notebook_sync")],
+        headers=_auth_headers("notebook:read"),
+    )
+
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+
+    assert fake.accepted is True
+    assert fake.frames_of("notebook_state"), "read scope must still observe state"
+    assert not [f for f in fake.sent if f["type"] == "error"]
+
+
+@pytest.mark.asyncio
+async def test_ws_write_scope_cannot_execute_but_can_edit(notebook_session, trusted_proxy_mode):
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    fake = FakeNotebookWebSocket(
+        inbound=[
+            _envelope("cell_source_update", {"cell_id": "root", "source": "x = 99"}),
+            _envelope("cell_execute", {"cell_id": "root"}),
+        ],
+        headers=_auth_headers("notebook:read notebook:write"),
+    )
+
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+
+    codes = [f["payload"].get("code") for f in fake.sent if f["type"] == "error"]
+    assert codes == ["insufficient_scope"]  # only the execute frame was refused
+
+
+@pytest.mark.asyncio
+async def test_ws_admin_wildcard_grants_every_frame(notebook_session, trusted_proxy_mode):
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    fake = FakeNotebookWebSocket(
+        inbound=[_envelope("notebook_sync")],
+        headers=_auth_headers("admin:*"),
+    )
+
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+    assert not [f for f in fake.sent if f["type"] == "error"]
+
+
+@pytest.mark.asyncio
+async def test_ws_personal_mode_unchanged(notebook_session, personal_mode):
+    """auth_mode='none' deployments must keep connecting with no headers."""
+    from strata.notebook.ws import notebook_websocket
+
+    _, session = notebook_session
+    fake = FakeNotebookWebSocket(inbound=[_envelope("notebook_sync")])
+
+    await notebook_websocket(cast(WebSocket, fake), session.id)
+
+    assert fake.accepted is True
+    assert fake.closed is None
+    assert fake.frames_of("notebook_state")
+
+
+def test_unknown_frames_default_to_execute_scope():
+    """Fail closed: a newly added frame is privileged until classified."""
+    from strata.notebook.ws import required_scope_for_frame
+
+    assert required_scope_for_frame("some_new_frame_nobody_classified") == "notebook:execute"
+    assert required_scope_for_frame("notebook_sync") == "notebook:read"
+    assert required_scope_for_frame("cell_source_update") == "notebook:write"
+    assert required_scope_for_frame("inspect_eval") == "notebook:execute"
