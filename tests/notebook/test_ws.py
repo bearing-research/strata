@@ -2405,3 +2405,72 @@ async def test_exclusive_run_is_cancellable(notebook_session, monkeypatch):
     result = await caller  # cancelled run surfaces as "no result", not a crash
     assert result is None
     assert state.active_task() is None  # state fully reset
+
+
+# ---------------------------------------------------------------------------
+# WS lifecycle hardening (code-review fixes)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reservation_released_when_plan_raises(notebook_session, monkeypatch):
+    """An exception between reserve and schedule (e.g. CascadePlanner.plan
+    raising) must release the reservation — previously requested_cell
+    stayed set and, with a second tab keeping execution state alive,
+    every later run was refused as busy."""
+    from strata.notebook import ws as ws_module
+    from strata.notebook.ws import (
+        _handle_cell_execute,
+        _release_execution_request,
+        _reserve_execution_request,
+    )
+
+    _, session = notebook_session
+    fake, execution_state = _make_fake_ws(session)
+
+    class _BoomPlanner:
+        def __init__(self, session):
+            pass
+
+        def plan(self, cell_id):
+            raise RuntimeError("planner exploded")
+
+    monkeypatch.setattr(ws_module, "CascadePlanner", _BoomPlanner)
+
+    with pytest.raises(RuntimeError, match="planner exploded"):
+        await _handle_cell_execute(
+            cast(WebSocket, fake), session, {"cell_id": "root"}, execution_state, session.id
+        )
+
+    # The reservation is free again: a fresh reserve succeeds.
+    assert await _reserve_execution_request(execution_state, "middle") is None
+    await _release_execution_request(execution_state, "middle")
+
+
+@pytest.mark.asyncio
+async def test_broadcast_survives_mid_iteration_removal(notebook_session):
+    """A client removed from the live connections list during a broadcast's
+    send await must not make the NEXT client miss the frame (list mutation
+    during iteration skips an element)."""
+    from strata.notebook.ws import _broadcast_message, _notebook_connections
+
+    _, session = notebook_session
+    connections = _notebook_connections.setdefault(session.id, [])
+
+    received: list[str] = []
+
+    class _SelfRemovingWs:
+        async def send_text(self, text):
+            # Simulates a concurrent cleanup landing mid-broadcast.
+            connections.remove(self)
+            received.append("first")
+
+    class _HealthyWs:
+        async def send_text(self, text):
+            received.append("second")
+
+    connections.extend([cast(WebSocket, _SelfRemovingWs()), cast(WebSocket, _HealthyWs())])
+
+    await _broadcast_message(session.id, {"type": "cell_status", "payload": {}})
+
+    assert received == ["first", "second"]  # nobody skipped
