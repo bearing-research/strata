@@ -135,6 +135,8 @@ def compute_prompt_provenance_hash(
     system_prompt: str | None,
     output_type: str,
     output_schema: dict[str, Any] | None,
+    max_tokens: int | None = None,
+    input_hashes: dict[str, str] | None = None,
 ) -> str:
     """Stable cache key for a prompt-cell invocation.
 
@@ -142,12 +144,21 @@ def compute_prompt_provenance_hash(
     invalidates cached responses even when the template body and model
     params are unchanged — a schema change means the user wants a
     differently-shaped answer.
+
+    ``input_hashes`` folds each referenced upstream artifact's provenance
+    hash (var name → hash). The rendered template alone is NOT a
+    sufficient input fingerprint: rendering truncates each interpolated
+    variable (``max_tokens_per_var``), so an upstream edit past the cut
+    produced a byte-identical render and silently returned the stale
+    cached answer. ``max_tokens`` is folded for the same reason —
+    lowering ``@max_tokens`` asks for a different-length answer.
     """
     schema_fp = (
         json.dumps(output_schema, sort_keys=True, separators=(",", ":"))
         if output_schema is not None
         else ""
     )
+    inputs_fp = json.dumps(sorted((input_hashes or {}).items()), separators=(",", ":"))
     parts = [
         rendered,
         model,
@@ -155,6 +166,8 @@ def compute_prompt_provenance_hash(
         system_prompt or "",
         output_type,
         schema_fp,
+        str(max_tokens) if max_tokens is not None else "",
+        inputs_fp,
     ]
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
@@ -195,7 +208,7 @@ async def execute_prompt_cell(
     system_prompt = analysis.system_prompt
 
     # Load upstream variables from artifacts
-    variables = _load_upstream_variables(session, cell_id)
+    variables, input_hashes = _load_upstream_variables(session, cell_id)
 
     # Render template
     rendered = render_prompt_template(
@@ -214,6 +227,8 @@ async def execute_prompt_cell(
         system_prompt=system_prompt,
         output_type=output_type,
         output_schema=output_schema,
+        max_tokens=max_tokens,
+        input_hashes=input_hashes,
     )
 
     # Cache check
@@ -247,9 +262,12 @@ async def execute_prompt_cell(
                     "bytes": len(blob),
                 }
                 display_text = str(preview) if not isinstance(preview, str) else preview
+                # Same key as the fresh-run path: the frontend renders
+                # ``output.scalar`` — a cache hit built with ``preview``
+                # here rendered blank for single-line values.
                 display_output = {
                     "content_type": "text/markdown" if "\n" in display_text else "json/object",
-                    "preview": display_text,
+                    "scalar": display_text,
                     "markdown_text": display_text if "\n" in display_text else None,
                 }
 
@@ -600,12 +618,20 @@ async def _stream_completion(
 def _load_upstream_variables(
     session: NotebookSession,
     cell_id: str,
-) -> dict[str, Any]:
-    """Load upstream variable values from artifacts."""
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Load upstream variable values from artifacts.
+
+    Returns ``(variables, input_hashes)`` — the values for template
+    rendering plus each artifact's provenance hash (var name → hash) for
+    the cell's cache key, mirroring the SQL executor. The hashes matter
+    because rendering truncates long variables, so the rendered text
+    alone can't fingerprint the inputs.
+    """
     variables: dict[str, Any] = {}
+    input_hashes: dict[str, str] = {}
     cell = session.notebook_state.get_cell(cell_id)
     if cell is None:
-        return variables
+        return variables, input_hashes
 
     artifact_mgr = session.get_artifact_manager()
     notebook_id = session.notebook_state.id
@@ -634,10 +660,11 @@ def _load_upstream_variables(
                     except (ValueError, KeyError):
                         pass
                 variables[var_name] = _parse_output(blob, content_type)
+                input_hashes[var_name] = artifact.provenance_hash
             except Exception as e:
                 logger.warning("Failed to load upstream %s: %s", var_name, e)
 
-    return variables
+    return variables, input_hashes
 
 
 def _parse_output(blob: bytes, content_type: str) -> Any:

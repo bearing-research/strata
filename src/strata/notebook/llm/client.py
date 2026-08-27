@@ -138,8 +138,12 @@ async def _chat_completion_openai_compat(
 
     choice = data["choices"][0]
     usage = data.get("usage", {})
+    # ``content`` can legitimately be null (an empty/refusal turn on
+    # OpenAI-compat providers). Coerce to "" so downstream JSON parsing
+    # raises its handled JSONDecodeError instead of an unhandled
+    # TypeError from json.loads(None).
     return LlmCompletionResult(
-        content=choice["message"]["content"],
+        content=choice["message"]["content"] or "",
         model=data.get("model", config.model),
         input_tokens=usage.get("prompt_tokens", 0),
         output_tokens=usage.get("completion_tokens", 0),
