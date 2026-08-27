@@ -796,3 +796,63 @@ class TestImportedNames:
         from strata.notebook.analyzer import imported_names
 
         assert imported_names("import (((") == set()
+
+
+class TestBuiltinShadowReferences:
+    """Builtin-named free vars are partitioned into ``builtin_references``
+    (kept out of ``references`` for display) so the DAG can still wire an
+    edge when an upstream cell shadows the builtin."""
+
+    def test_builtin_read_lands_in_builtin_references(self):
+        result = analyze_cell("model.fit(input)")
+        assert result.references == ["model"]
+        assert "input" in result.builtin_references
+
+    def test_shadowing_define_is_kept(self):
+        result = analyze_cell("input = load_data()")
+        assert result.defines == ["input"]
+        assert result.builtin_references == []
+
+    def test_intra_cell_shadow_is_not_a_reference(self):
+        # Pure-defined earlier in the cell — no upstream read.
+        result = analyze_cell("input = 1\ny = input + 1")
+        assert result.builtin_references == []
+
+    def test_plain_builtin_calls_are_recorded_but_not_references(self):
+        result = analyze_cell("y = len(x)")
+        assert result.references == ["x"]
+        assert result.builtin_references == ["len"]
+
+
+class TestModuleLevelAnnotations:
+    """A module-scope annotation is evaluated at runtime, so its names are
+    genuine references (unless the cell opts into PEP 563)."""
+
+    def test_annotated_assign_references_the_annotation(self):
+        result = analyze_cell("result: MyType = compute()")
+        assert sorted(result.references) == ["MyType", "compute"]
+
+    def test_bare_annotation_references_the_annotation(self):
+        result = analyze_cell("x: MyType")
+        assert result.references == ["MyType"]
+
+    def test_future_annotations_suppress_the_reference(self):
+        result = analyze_cell("from __future__ import annotations\nresult: MyType = compute()")
+        assert result.references == ["compute"]
+
+
+class TestLambdaDefaults:
+    """Lambda defaults are evaluated in the enclosing scope at creation
+    time, so a free variable there is a real reference."""
+
+    def test_lambda_default_is_a_reference(self):
+        result = analyze_cell("f = lambda x=base_value: x")
+        assert result.references == ["base_value"]
+
+    def test_lambda_kwonly_default_is_a_reference(self):
+        result = analyze_cell("f = lambda *, x=base_value: x")
+        assert result.references == ["base_value"]
+
+    def test_lambda_params_still_local(self):
+        result = analyze_cell("f = lambda x=1: x + y")
+        assert result.references == ["y"]

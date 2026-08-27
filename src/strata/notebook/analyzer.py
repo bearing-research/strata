@@ -25,6 +25,17 @@ class CellAnalysis:
     # and re-produces these names; the harness uses this to force
     # serialization even when the mutation preserved ``id()``.
     mutation_defines: list[str] = field(default_factory=list)
+    # Free names that shadow a Python builtin (``input``, ``type``,
+    # ``id`` …), kept out of ``references`` so every cell calling
+    # ``print``/``len`` doesn't list them. ``defines`` is *not*
+    # builtin-filtered, so a cell CAN produce ``input = load_data()``;
+    # the DAG resolves these against the producer map exactly like
+    # references — a name no cell shadows has no producer and wires
+    # nothing, while a shadowed one gets its edge. Without this
+    # companion list the edge silently vanished: the consumer never
+    # restaled and single-cell execution hit NameError because the
+    # artifact was never stored.
+    builtin_references: list[str] = field(default_factory=list)
     error: str | None = None
 
 
@@ -196,6 +207,13 @@ class VariableAnalyzer(ast.NodeVisitor):
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         """Handle: x: int = ... or x: int (without value)."""
         self._add_assign_target(node.target)
+        # A module-scope annotation is evaluated at runtime (PEP 563 only
+        # stringifies it under ``from __future__ import annotations``), so
+        # a name in it — ``result: MyType = compute()`` — is a genuine
+        # reference to whatever cell defines ``MyType``. Same gate as
+        # function signature annotations.
+        if not self._future_annotations:
+            self.visit(node.annotation)
         if node.value:
             self.visit(node.value)
 
@@ -457,6 +475,15 @@ class VariableAnalyzer(ast.NodeVisitor):
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
         """Lambda expression — arguments are local scope."""
+        # Defaults are evaluated in the *enclosing* scope at creation time
+        # (``lambda x=base_value: x`` reads ``base_value`` now), so visit
+        # them before the parameters shadow anything. Mirrors the
+        # FunctionDef default handling.
+        for default in node.args.defaults:
+            self.visit(default)
+        for default in node.args.kw_defaults:
+            if default is not None:
+                self.visit(default)
         # Save current local vars
         old_local_vars = self._local_vars
         # Add lambda parameters to local scope
@@ -727,6 +754,17 @@ def analyze_cell(source: str) -> CellAnalysis:
         for v in combined_refs
         if not v.startswith("_") and v not in builtin_names and v not in pure_defined_names
     ]
+    # Builtin-named free vars, partitioned out of ``references`` (same
+    # filter otherwise). ``defines`` keeps builtin-shadowing names, so
+    # the DAG must see these as potential references too — otherwise
+    # ``input = load_data()`` upstream and ``model.fit(input)``
+    # downstream never get an edge. Producer-map resolution drops the
+    # unshadowed ones (``print``, ``len``) for free.
+    builtin_references = [
+        v
+        for v in combined_refs
+        if not v.startswith("_") and v in builtin_names and v not in pure_defined_names
+    ]
 
     # Remove duplicates and sort for consistency
     defines = sorted(set(defines))
@@ -737,5 +775,6 @@ def analyze_cell(source: str) -> CellAnalysis:
         defines=defines,
         references=references,
         mutation_defines=mutation_defines,
+        builtin_references=sorted(set(builtin_references)),
         error=None,
     )

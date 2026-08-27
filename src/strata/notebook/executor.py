@@ -3185,7 +3185,14 @@ class CellExecutor:
             if upstream_cell is None:
                 continue
 
-            referenced_vars = [v for v in cell.references if v in upstream_cell.defines]
+            # builtin_references carries builtin-shadowing names (``input``)
+            # that the display-facing references list filters out; the
+            # intersect with upstream defines gates them the same way.
+            referenced_vars = [
+                v
+                for v in (*cell.references, *cell.builtin_references)
+                if v in upstream_cell.defines
+            ]
 
             for var_name in referenced_vars:
                 producer = dag.variable_producer.get(var_name) if dag else None
@@ -3546,7 +3553,7 @@ class CellExecutor:
         this_cell = cells_by_id.get(cell_id)
         cross_cell = frozenset(
             v
-            for v in (this_cell.references if this_cell else [])
+            for v in ([*this_cell.references, *this_cell.builtin_references] if this_cell else [])
             if isinstance(producer.get(v), str) and producer[v] != cell_id
         )
         # Same-cell runtime values (a loaded model, a cwd-derived path) can be
@@ -4997,7 +5004,8 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
         if cell.variant_group and modes.get(cell.variant_group) == "sweep":
             return False
         if any(
-            isinstance(dag.variable_producer.get(ref), SweepProducer) for ref in cell.references
+            isinstance(dag.variable_producer.get(ref), SweepProducer)
+            for ref in (*cell.references, *cell.builtin_references)
         ):
             return False
 
