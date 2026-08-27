@@ -115,7 +115,7 @@ async def _run_cell(
     The result is mapped to the agent-facing ``RunResult`` view.
     """
     from strata.notebook.ops import NotebookOpsError, _run_result_from_wire
-    from strata.notebook.ws import _ensure_execution_state, execute_cell_and_broadcast
+    from strata.notebook.ws import NotebookBusyError, execute_cell_exclusive
 
     if mode not in ("normal", "rerun", "force"):
         raise ValueError(f"unknown run mode {mode!r} (normal|rerun|force)")
@@ -130,14 +130,17 @@ async def _run_cell(
     if block_reason:
         raise ValueError(block_reason)
 
-    execution_state = _ensure_execution_state(session_id)
-    result = await execute_cell_and_broadcast(
-        session,
-        cell_id,
-        execution_state,
-        session_id,
-        mode=mode,  # type: ignore[arg-type]
-    )
+    # Same reservation the WS handlers hold — an agent-driven run can't
+    # race a browser Run click on the same session.
+    try:
+        result = await execute_cell_exclusive(
+            session,
+            cell_id,
+            session_id,
+            mode=mode,  # type: ignore[arg-type]
+        )
+    except NotebookBusyError as exc:
+        raise NotebookOpsError(f"{exc} Retry after the current run finishes.")
     if result is None:
         raise NotebookOpsError(f"cell {cell_id!r} could not be executed")
     run = _run_result_from_wire(result.to_dict()).model_dump(mode="json")
