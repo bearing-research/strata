@@ -14,7 +14,18 @@ from strata.notebook.remote_worker_supervisor import (
     RemoteWorkerSupervisor,
     SshWorkerError,
 )
+from strata.notebook.worker_secrets import clear_runtime_worker_token
 from tests.notebook.test_ssh_worker import ScriptedSshRunner, _ok
+
+
+@pytest.fixture(autouse=True)
+def _clear_worker_tokens():
+    """The supervisor publishes tokens into the process-global
+    worker_secrets registry; clear them so tests in other modules
+    (test_worker_secrets) don't observe leftovers under xdist."""
+    yield
+    for name in ("gpu", "a", "b"):
+        clear_runtime_worker_token(name)
 
 _INSTALLED = "worker=/usr/bin/strata-worker\nuv=/usr/bin/uv\nplatform=Linux x86_64\nversion=0.6.0\n"
 _MISSING = "worker=\nuv=/usr/bin/uv\nplatform=Linux x86_64\nversion=\n"
