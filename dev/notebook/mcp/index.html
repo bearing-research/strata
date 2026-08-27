@@ -2072,6 +2072,30 @@ The typical loop:</p>
 <td><code>note(session_id, message)</code></td>
 <td>Post a line into the Agent panel for the human watching.</td>
 </tr>
+<tr>
+<td><code>list_workers(session_id)</code></td>
+<td>The notebook's registered workers and which is the default.</td>
+</tr>
+<tr>
+<td><code>add_worker(session_id, name, url, transport?, token_env?, runtime_id?, set_default?)</code></td>
+<td>Register a remote executor worker so cells can run on it.</td>
+</tr>
+<tr>
+<td><code>set_default_worker(session_id, name?)</code></td>
+<td>Set the notebook's default worker (<code>name</code> omitted/<code>local</code> clears it).</td>
+</tr>
+<tr>
+<td><code>remove_worker(session_id, name)</code></td>
+<td>Remove a notebook-scoped worker.</td>
+</tr>
+<tr>
+<td><code>connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)</code></td>
+<td>Provision + tunnel + register a worker on a machine you reach over SSH (see <a href="../workers/#run-cells-on-a-machine-you-can-ssh-to">Distributed Workers</a>).</td>
+</tr>
+<tr>
+<td><code>disconnect_ssh_worker(session_id, name, stop_remote?)</code></td>
+<td>Close an SSH worker's tunnel and unregister it.</td>
+</tr>
 </tbody>
 </table>
 <p><code>run_cell</code> modes match the UI and CLI: <code>normal</code> uses the cache and re-runs stale

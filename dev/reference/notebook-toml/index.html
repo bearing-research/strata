@@ -2271,7 +2271,7 @@
 <a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
 <a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="k">[workers.config]</span>
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://my-strata-worker.fly.dev/v1/execute&quot;</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http&quot;</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
 <a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;STRATA_FLY_WORKER_TOKEN&quot;</span>
 </code></pre></div>
 <table>
@@ -2301,7 +2301,7 @@
 <tr>
 <td><code>config</code></td>
 <td>table</td>
-<td>Backend-specific. For <code>"executor"</code>: <code>url</code>, <code>transport</code> (<code>"http"</code> or <code>"signed"</code>), <code>token</code> (literal - dev only), <code>token_env</code> (env var name - preferred). See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
+<td>Backend-specific. For <code>"executor"</code>: <code>url</code>, <code>transport</code> (<code>"direct"</code> push, the default, or <code>"signed"</code> pull-model), <code>token</code> (literal - dev only), <code>token_env</code> (env var name - preferred). See <a href="../../notebook/workers/">Distributed Workers</a>.</td>
 </tr>
 </tbody>
 </table>
@@ -2356,7 +2356,7 @@
 </tr>
 </tbody>
 </table>
-<p><strong>Malformed connection preservation.</strong> If a <code>[connections.&lt;name&gt;]</code> block fails validation (bad name, missing <code>driver</code>, etc.), it's preserved verbatim under <code>[[malformed_connection]]</code> on save so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.</p>
+<p><strong>Malformed connection preservation.</strong> If a <code>[connections.&lt;name&gt;]</code> block fails validation (bad name, missing <code>driver</code>, etc.), its body is written back verbatim under the same <code>[connections.&lt;name&gt;]</code> table on save, so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.</p>
 <h2 id="variant_group-active-variant-pointers"><code>[[variant_group]]</code> - Active-variant pointers<a class="headerlink" href="#variant_group-active-variant-pointers" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[[variant_group]]</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;model_choice&quot;</span>
@@ -2499,7 +2499,7 @@
 </table>
 <p>Runtime writers never touch <code>notebook.toml</code>; structural-edit writers never touch <code>.strata/</code>. The invariant is enforced at the writer layer.</p>
 <h2 id="round-trip-safety">Round-trip safety<a class="headerlink" href="#round-trip-safety" title="Permanent link">&para;</a></h2>
-<p>The writer preserves unknown top-level keys verbatim. If you hand-edit the file with a key the parser doesn't know about, it survives saves - useful for experimental settings or external tooling. Known-but-malformed blocks (a <code>[connections.&lt;name&gt;]</code> with no <code>driver</code>, a typoed worker name) are also preserved under <code>[[malformed_connection]]</code> / <code>[[malformed_worker]]</code> so you don't lose the data while you debug.</p>
+<p>The writer preserves unknown top-level keys verbatim. If you hand-edit the file with a key the parser doesn't know about, it survives saves - useful for experimental settings or external tooling. A malformed <code>[connections.&lt;name&gt;]</code> block (no <code>driver</code>, etc.) is likewise written back verbatim under its own <code>[connections.&lt;name&gt;]</code> table so you don't lose the data while you debug.</p>
 
 
 

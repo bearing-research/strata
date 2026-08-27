@@ -2197,6 +2197,10 @@ and CLI binary are both named <code>strata</code>.</p>
 <td>Agent-facing notebook tooling: inspect (<code>cell list/show</code>, <code>dag</code>, <code>status</code>), execute (<code>cell run/test</code>), and author (<code>cell add/edit/rm/mv</code>, <code>dep add/rm</code>) - offline against a directory or <code>--server/--session</code> against a running server. See <a href="../../notebook/cli/#inspecting-a-notebook-cell-dag-status">Notebook CLI</a>.</td>
 </tr>
 <tr>
+<td><code>uv run strata worker &lt;action&gt;</code></td>
+<td>Manage a notebook's workers: <code>ls</code>, <code>add</code>/<code>rm</code>/<code>default</code> (local, edits <code>notebook.toml</code>), and <code>add-ssh</code>/<code>rm-ssh</code> (provision + tunnel a worker over SSH, against a running server). See <a href="../../notebook/workers/#run-cells-on-a-machine-you-can-ssh-to">Distributed Workers</a>.</td>
+</tr>
+<tr>
 <td><code>uv run strata agent &lt;notebook-dir&gt;</code></td>
 <td>One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the <code>.mcp.json</code> + <code>CLAUDE.md</code> the agent needs, and attach the TUI. Then run <code>claude</code> in the notebook directory to drive it live. Needs the <code>[mcp]</code> and <code>[tui]</code> extras. See <a href="../../notebook/agent/">Driving a notebook with a coding agent</a>.</td>
 </tr>
@@ -2211,6 +2215,10 @@ and CLI binary are both named <code>strata</code>.</p>
 <tr>
 <td><code>uv run strata artifact &lt;cmd&gt; [dir]</code></td>
 <td>Inspect a local artifact store without a server: <code>list</code>, <code>show &lt;ref&gt;</code>, <code>lineage &lt;ref&gt;</code> (renders model ← features ← scan ← table @ snapshot), <code>pull &lt;ref&gt; --to FILE</code>, <code>audit [name]</code> (registry history), <code>pending</code> (approval queue), <code>verify</code>. <code>&lt;ref&gt;</code> is a name, <code>id@v=N</code>, or bare id.</td>
+</tr>
+<tr>
+<td><code>uv run strata watch [dir\|--session]</code></td>
+<td>Attach the read-only terminal viewer to a live notebook session without writing any config (unlike <code>strata agent</code>). Needs the <code>[tui]</code> extra. See <a href="../../notebook/tui/">Terminal Viewer</a>.</td>
 </tr>
 <tr>
 <td><code>uv run strata-notebook-tui</code></td>
