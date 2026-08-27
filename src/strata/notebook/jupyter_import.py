@@ -761,9 +761,24 @@ def _cm_drop(name: str, args: str, body: str) -> _CellConversion:
 
 
 def _cm_bash(name: str, args: str, body: str) -> _CellConversion:
-    """``%%bash``/``%%sh`` → wrap the body in ``subprocess.run(..., shell=True)``."""
-    wrapped = f"import subprocess as _strata_sp\n_strata_sp.run({body!r}, shell=True, check=True)\n"
-    return _CellConversion(source=wrapped, translated_magics=[f"%%{name}"])
+    """``%%bash``/``%%sh``/``%%script`` — dropped; body preserved as comments.
+
+    Same policy as ``!cmd`` lines: auto-running arbitrary shell from an
+    imported notebook is a real hazard (untrusted-corpus imports are a
+    primary use case), and translating the whole-cell forms to a live
+    ``subprocess.run(..., shell=True)`` while stubbing the single-line
+    forms was an inconsistent threat model. The body is kept as comments
+    so re-enabling is a deliberate uncomment in the cell, not a paste
+    from the import report.
+    """
+    commented = "".join(f"# {line}\n" for line in body.splitlines())
+    return _CellConversion(
+        source=(
+            f"# strata: %%{name} cell dropped (shell is not auto-run on import); "
+            "body preserved below\n" + commented
+        ),
+        dropped_shells=[f"%%{name}"],
+    )
 
 
 def _cm_writefile(name: str, args: str, body: str) -> _CellConversion:
@@ -787,10 +802,11 @@ _CELL_MAGIC_TABLE = {
     "timeit": _cm_strip,
     "time": _cm_strip,
     "capture": _cm_strip,
-    # Shell-out cell magics, translated to subprocess.run
+    # Shell-out cell magics: dropped with the body preserved as comments,
+    # matching the ``!cmd`` policy (no auto-run shell from imports)
     "bash": _cm_bash,
     "sh": _cm_bash,
-    "script": _cm_bash,  # ``%%script python`` and friends, best-effort as shell
+    "script": _cm_bash,
     # File-writing magic
     "writefile": _cm_writefile,
     "file": _cm_writefile,  # alias for %%writefile in older IPython
