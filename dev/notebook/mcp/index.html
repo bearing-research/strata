@@ -1983,7 +1983,7 @@ warning and starts normally without the endpoint.</p>
 <div class="admonition tip">
 <p class="admonition-title">One-command setup</p>
 <p><a href="../agent/"><code>strata agent &lt;notebook-dir&gt;</code></a> does the enable-open-register-watch
-steps below for you — it starts the server with this endpoint on, opens a
+steps below for you: it starts the server with this endpoint on, opens a
 session, writes the <code>.mcp.json</code> an agent auto-connects to, and attaches the
 TUI. Reach for it unless you want to wire the pieces up by hand.</p>
 </div>
@@ -2022,7 +2022,7 @@ The typical loop:</p>
 </tr>
 <tr>
 <td><code>get_variable(session_id, name)</code></td>
-<td>The cell that defines a variable — "do I already have <code>name</code>?"; else the available names.</td>
+<td>The cell that defines a variable, "do I already have <code>name</code>?"; else the available names.</td>
 </tr>
 <tr>
 <td><code>dag(session_id)</code></td>

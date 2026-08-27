@@ -3181,7 +3181,7 @@
 <li><strong>References</strong>: free variables used but not defined locally</li>
 </ul>
 <p>The DAG builder links references back to the <strong>last</strong> cell that defined each name (shadowing is handled by order). Edges flow producer → consumer. When you edit an upstream cell, every downstream cell that depends on it becomes stale automatically.</p>
-<p>Only variables that a downstream cell actually references get stored as artifacts. Intermediate scratch variables stay in the subprocess and are discarded when the cell finishes.</p>
+<p>Only variables that a downstream cell references get stored as artifacts. Intermediate scratch variables stay in the subprocess and are discarded when the cell finishes.</p>
 <h3 id="the-ambient-strata-client">The ambient <code>strata</code> client<a class="headerlink" href="#the-ambient-strata-client" title="Permanent link">&para;</a></h3>
 <p>Every <strong>locally-executed</strong> Python cell gets a ready <code>strata</code> client in its namespace, already bound to the running server - no import or construction needed:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># no `from strata_client import StrataClient` / `StrataClient(base_url=...)`</span>

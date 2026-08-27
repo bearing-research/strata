@@ -2360,13 +2360,13 @@ work</em>, not <em>what happened during the last run</em>.</p>
 </tbody>
 </table>
 <p>When you change a cell's source, its provenance hash changes, and all downstream cells become <strong>stale</strong>.</p>
-<p>This applies even to a <strong>leaf cell</strong> — one with no downstream consumer, like a
+<p>This applies even to a <strong>leaf cell</strong>, one with no downstream consumer, like a
 cell that only <code>print</code>s a diagnostic. It has no output artifact to cache, but
 its console output is keyed by the same provenance hash and replayed on an
 unchanged re-run, so it doesn't re-execute. That is what makes the notebook a
-usable scratchpad. A cell that must always run — because it has a side effect
+usable scratchpad. A cell that must always run, because it has a side effect
 (writing a file, calling an API) or produces a fresh value (the clock,
-<code>random</code>) — opts out of caching with <a href="../annotations/#nocache"><code># @nocache</code></a>.</p>
+<code>random</code>), opts out of caching with <a href="../annotations/#nocache"><code># @nocache</code></a>.</p>
 <h2 id="serialization">Serialization<a class="headerlink" href="#serialization" title="Permanent link">&para;</a></h2>
 <p>Cell outputs are serialized based on their Python type:</p>
 <table>

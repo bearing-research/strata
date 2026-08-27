@@ -2853,7 +2853,7 @@ To use the snapshot id downstream, export it as a real variable:
 conservatively treated as stale; if it is still unreachable at execution time,
 the run fails with a clear error.</p>
 <h2 id="nocache">@nocache<a class="headerlink" href="#nocache" title="Permanent link">&para;</a></h2>
-<p>Force the cell to <strong>always re-execute</strong> — never serve a provenance cache hit.</p>
+<p>Force the cell to <strong>always re-execute</strong>: never serve a provenance cache hit.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># @nocache</span>
 <a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">urllib.request</span>
 <a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
@@ -2861,15 +2861,15 @@ the run fails with a clear error.</p>
 <a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="nb">print</span><span class="p">(</span><span class="n">latest</span><span class="p">)</span>
 </code></pre></div>
 <p>By default every cell is cached by provenance
-(<code>sha256(inputs + source + env)</code>), including a leaf cell that only <code>print</code>s —
+(<code>sha256(inputs + source + env)</code>), including a leaf cell that only <code>print</code>s,
 an unchanged rerun replays its output instantly instead of recomputing. That is
 exactly what you want for deterministic work, and it makes the notebook a good
 <strong>scratchpad</strong> (see <a href="../agent/">Driving a notebook with an agent</a>). But it is
 wrong for a cell whose <em>point</em> is a side effect or fresh value:</p>
 <ul>
-<li>writes a file, sends a request, mutates external state — replaying the cached
+<li>writes a file, sends a request, mutates external state: replaying the cached
   result would <strong>skip the effect</strong>;</li>
-<li>reads the clock, <code>random</code>, a live API — you want a <strong>fresh value</strong> each run.</li>
+<li>reads the clock, <code>random</code>, a live API: you want a <strong>fresh value</strong> each run.</li>
 </ul>
 <p><code># @nocache</code> opts such a cell out. <code># @nocache off</code> re-enables caching (useful to
 override a default you set elsewhere). It applies to every language and sits
@@ -3093,7 +3093,7 @@ shows that variant's source; it no longer changes what runs), with a
 group-level status rollup. Provenance includes the sorted
 variant→artifact map, so <strong>adding a variant only runs that one</strong> and
 renaming/removing a variant restalens the downstream as expected.</p>
-<p>Caveats worth knowing: a variant that fails is simply dropped from the
+<p>Caveats worth knowing: a variant that fails is dropped from the
 dict (the downstream still runs once with the partial set), and a sweep
 group of one is legal but pointless - you'd get a one-key dict. Sweep-group
 members and their downstream consumers always run as <strong>single-cell</strong>

@@ -2089,7 +2089,7 @@
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>uv<span class="w"> </span>sync<span class="w">       </span><span class="c1"># rebuilds .venv from pyproject.toml + uv.lock</span>
 </code></pre></div>
 <p>The <code>uv.lock</code> ensures the rebuilt venv pins identical versions to the source machine. The Rust toolchain on the destination needs to match Strata's source requirements only if you're upgrading Strata at the same time; for an existing wheel install it's not needed.</p>
-<p><strong>What doesn't transfer.</strong> Mounted external storage (<code>s3://</code>, <code>gs://</code>) is referenced by URI, so cells that use mounts work on any machine with the right credentials. Mounts with <code>file://</code> URIs pointing at machine-local paths obviously don't.</p>
+<p><strong>What doesn't transfer.</strong> Mounted external storage (<code>s3://</code>, <code>gs://</code>) is referenced by URI, so cells that use mounts work on any machine with the right credentials. Mounts with <code>file://</code> URIs pointing at machine-local paths don't.</p>
 <h2 id="deleting-a-notebook">Deleting a notebook<a class="headerlink" href="#deleting-a-notebook" title="Permanent link">&para;</a></h2>
 <p>Three options, depending on the surface:</p>
 <table>
