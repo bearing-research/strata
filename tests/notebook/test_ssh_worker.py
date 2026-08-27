@@ -31,9 +31,13 @@ class ScriptedSshRunner:
     def __init__(self, rules: list[tuple[str | Callable[[str], bool], CommandResult]]) -> None:
         self.rules = rules
         self.calls: list[str] = []
+        self.stdin_writes: list[str | None] = []
 
-    def run(self, command: str, *, timeout: float | None = None) -> CommandResult:
+    def run(
+        self, command: str, *, timeout: float | None = None, stdin_data: str | None = None
+    ) -> CommandResult:
         self.calls.append(command)
+        self.stdin_writes.append(stdin_data)
         for match, result in self.rules:
             hit = match(command) if callable(match) else match in command
             if hit:
@@ -172,7 +176,57 @@ def test_launch_starts_and_parses_pid():
     assert worker == RunningWorker(pid=4321, port=9000)
     launch_cmd = next(c for c in runner.calls if "nohup strata-worker" in c)
     assert "--host 127.0.0.1 --port 9000" in launch_cmd
-    assert "STRATA_WORKER_TOKEN=secret" in launch_cmd
+    # The token travels over stdin, never in the command (a command-string
+    # token would sit in the local ssh argv, visible in ps, and be echoed
+    # in timeout error messages that reach HTTP responses).
+    assert "secret" not in launch_cmd
+    assert "read -r STRATA_WORKER_TOKEN" in launch_cmd
+    assert "secret\n" in runner.stdin_writes
+
+
+def test_launch_never_puts_token_in_any_command():
+    runner = ScriptedSshRunner(
+        [
+            ("cat ", _ok("")),
+            ("nohup strata-worker", _ok("4321\n")),
+        ]
+    )
+    RemoteWorker("gpu", runner).launch(port=9000, token="hunter2-bearer")
+    assert all("hunter2-bearer" not in c for c in runner.calls)
+
+
+def test_launch_without_token_skips_the_stdin_read():
+    runner = ScriptedSshRunner(
+        [
+            ("cat ", _ok("")),
+            ("nohup strata-worker", _ok("4321\n")),
+        ]
+    )
+    RemoteWorker("gpu", runner).launch(port=9000, token=None)
+    launch_cmd = next(c for c in runner.calls if "nohup strata-worker" in c)
+    assert "read -r" not in launch_cmd
+    assert runner.stdin_writes[-1] is None
+
+
+def test_launch_rejects_token_with_newline():
+    runner = ScriptedSshRunner([("cat ", _ok(""))])
+    with pytest.raises(SshWorkerError, match="newline"):
+        RemoteWorker("gpu", runner).launch(port=9000, token="bad\ntoken")
+
+
+def test_timeout_error_never_contains_stdin_data(monkeypatch):
+    """A launch timeout's message reaches HTTP 400 bodies and logs — the
+    token (fed via stdin) must never appear in it."""
+    import subprocess
+
+    def fake_run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=30)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    runner = SubprocessSshRunner(["ssh", "host"])
+    with pytest.raises(SshWorkerError) as excinfo:
+        runner.run("nohup strata-worker", timeout=30, stdin_data="sekrit-token\n")
+    assert "sekrit-token" not in str(excinfo.value)
 
 
 def test_launch_adopts_a_live_worker_on_same_port():
