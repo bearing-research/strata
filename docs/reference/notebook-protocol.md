@@ -126,7 +126,7 @@ further calls are required before showing a useful UI. The shape is
 ### What is *not* in the cold-start payload
 
 Some Vue panels lazy-fetch additional data only when the user opens them.
-A non-Vue client can ignore these until it actually needs to render the
+A non-Vue client can ignore these until it needs to render the
 corresponding panel:
 
 | Lazy fetch | Triggered by | Why deferred |

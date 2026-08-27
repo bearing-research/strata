@@ -157,7 +157,7 @@ any existing cells are preserved, so re-running it never orphans artifacts.
 
 `--project-mount [NAME]` adds a notebook-level **read-only mount of `--parent`**
 (the project directory) as a `Path` variable `NAME` (default `project`) in every
-cell — so cells read project files as `open(project / "file")` without absolute
+cell, so cells read project files as `open(project / "file")` without absolute
 paths, even though a cell runs with its working directory set to the notebook
 dir. The mount is **pinned**, so it never gets fingerprinted (no directory
 hashing, and the project's own churn never re-stales cells). This is the
@@ -265,8 +265,8 @@ strata dep rm        <notebook_dir> <package>                     # uv remove
 `--file -` reads cell source from stdin; `-c 'src'` passes the source inline
 (the two are mutually exclusive). `cell add` mints a backend-style 8-char id (the
 same scheme the server uses) and prints the new cell; `mv` prints the new order.
-Pass **`--run`** to execute the cell right after adding it — the one-call
-scratchpad primitive — and the run outcome (`status`, `cache_hit`, `stdout`,
+Pass **`--run`** to execute the cell right after adding it (the one-call
+scratchpad primitive), and the run outcome (`status`, `cache_hit`, `stdout`,
 `stderr`) is folded into the output under `run`. The returned cell is the
 **post-run** view, so its rendered `outputs` (a trailing bare expression's value)
 ride along without a separate `cell show` (`--no-sync` skips the venv sync, as
@@ -291,6 +291,6 @@ server, then sets its source.)
 Together with inspect (`cell list/show`, `dag`, `status`) and execution (`cell
 run/test`), this is the full agent surface - and **all of it** works either
 offline against a directory or `--server/--session` against a running server. An
-MCP server wrapping the same operations is also available — see
+MCP server wrapping the same operations is also available; see
 [MCP Server](mcp.md), or [`strata agent`](agent.md) for the one-command on-ramp
 that stands it up and points a coding agent at a live session.

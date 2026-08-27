@@ -61,7 +61,7 @@ uv sync       # rebuilds .venv from pyproject.toml + uv.lock
 
 The `uv.lock` ensures the rebuilt venv pins identical versions to the source machine. The Rust toolchain on the destination needs to match Strata's source requirements only if you're upgrading Strata at the same time; for an existing wheel install it's not needed.
 
-**What doesn't transfer.** Mounted external storage (`s3://`, `gs://`) is referenced by URI, so cells that use mounts work on any machine with the right credentials. Mounts with `file://` URIs pointing at machine-local paths obviously don't.
+**What doesn't transfer.** Mounted external storage (`s3://`, `gs://`) is referenced by URI, so cells that use mounts work on any machine with the right credentials. Mounts with `file://` URIs pointing at machine-local paths don't.
 
 ## Deleting a notebook
 

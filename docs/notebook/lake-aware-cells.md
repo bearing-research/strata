@@ -166,7 +166,7 @@ snapshot id is immutable and content-addressed, a cached result for a given
 provenance is valid forever - and a moved snapshot is a different provenance,
 hence a different (missing) cache entry, hence a recompute. This is the same
 provenance machinery that makes ordinary cells stale when their source or
-inputs change; `@table` simply adds the lake snapshot to the mix.
+inputs change; `@table` adds the lake snapshot to the mix.
 
 ## Gotchas
 

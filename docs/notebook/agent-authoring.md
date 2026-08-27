@@ -61,7 +61,7 @@ my_analysis/
 **`.strata/` is hands-off.** Display outputs, provenance hashes, console
 snapshots, and the artifact store live there; the server and CLI manage
 it entirely. It's gitignored. If you are generating a notebook from
-scratch, simply don't create it.
+scratch, don't create it.
 
 ## notebook.toml - the minimum that works
 
@@ -75,7 +75,7 @@ cells = [
 ]
 ```
 
-**What `strata new` actually writes is a superset of this.** The scaffold
+**What `strata new` writes is a superset of this.** The scaffold
 emits a UUID `notebook_id`, `created_at` / `updated_at` timestamps, and
 empty `workers = []` / `mounts = []` arrays. **Edit the generated file in
 place** - replace `cells = []` with your cell list and leave the other
@@ -113,7 +113,7 @@ Practical consequences for generated code:
 - Put producers before consumers in `order`. A reference with no earlier
   definer isn't an error at validate time (it could be an import or a
   builtin), but it will `NameError` at run time.
-- Only variables that downstream cells actually reference are persisted.
+- Only variables that downstream cells reference are persisted.
 - Re-running with unchanged source + inputs + environment is a cache hit;
   cells re-execute only when something upstream changed.
 - Values cross cells by serialization (Arrow for tabular/numpy, JSON for
@@ -185,7 +185,7 @@ strata run my_analysis --format json | jq -r '.cells[] | select(.id == "stats").
 One caveat: for a cell that produces an output artifact, a **cache hit
 replays the stored artifact without re-running the cell**, so `stdout` can be
 absent on warm runs. Pass `--force` when you need fresh console output. (A
-leaf cell that only `print`s is the exception — its console is cached by
+leaf cell that only `print`s is the exception: its console is cached by
 provenance and replayed on a warm hit.) Don't read `.strata/` directly - it's
 machine-managed runtime state with no stability guarantees.
 
