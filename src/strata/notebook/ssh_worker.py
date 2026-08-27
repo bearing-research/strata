@@ -93,8 +93,16 @@ class SshRunner(Protocol):
     fake to assert the command sequence without a live host.
     """
 
-    def run(self, command: str, *, timeout: float | None = None) -> CommandResult:
-        """Execute *command* on the remote host."""
+    def run(
+        self, command: str, *, timeout: float | None = None, stdin_data: str | None = None
+    ) -> CommandResult:
+        """Execute *command* on the remote host.
+
+        ``stdin_data`` is fed to the remote command's stdin — the channel for
+        secrets (the worker token), which must never appear in *command* (it
+        would land in the local ``ssh`` argv, visible in ``ps``, and in error
+        messages that echo the command).
+        """
         ...
 
 
@@ -104,7 +112,9 @@ class SubprocessSshRunner:
     def __init__(self, ssh_argv: Sequence[str]) -> None:
         self._ssh_argv = list(ssh_argv)
 
-    def run(self, command: str, *, timeout: float | None = None) -> CommandResult:
+    def run(
+        self, command: str, *, timeout: float | None = None, stdin_data: str | None = None
+    ) -> CommandResult:
         import subprocess
 
         try:
@@ -113,8 +123,12 @@ class SubprocessSshRunner:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                input=stdin_data,
             )
         except subprocess.TimeoutExpired as exc:
+            # ``command`` is safe to echo — secrets travel via ``stdin_data``,
+            # which must never be included here (this message reaches HTTP
+            # error bodies and logs).
             raise SshWorkerError(f"ssh command timed out after {timeout}s: {command!r}") from exc
         except OSError as exc:
             raise SshWorkerError(f"could not run ssh: {exc}") from exc
@@ -259,16 +273,24 @@ class RemoteWorker:
                 return existing
         pidfile = self._pidfile()
         logfile = f"{_REMOTE_STATE_DIR}/worker-{shlex.quote(self.name)}.log"
-        env = f"STRATA_WORKER_TOKEN={shlex.quote(token)} " if token else ""
+        # The token goes over stdin, not into the command: a token in the
+        # command string would sit in the local ``ssh`` argv (visible in
+        # ``ps``) and be echoed back in timeout error messages that reach
+        # HTTP responses and logs. The remote shell reads it into the
+        # worker's env before launching.
+        if token and "\n" in token:
+            raise SshWorkerError("worker token must not contain newlines")
+        read_token = "IFS= read -r STRATA_WORKER_TOKEN && export STRATA_WORKER_TOKEN && "
         cmd = (
+            f"{read_token if token else ''}"
             f"mkdir -p {_REMOTE_STATE_DIR} && "
-            f"{env}nohup strata-worker --host {shlex.quote(host)} --port {port} "
+            f"nohup strata-worker --host {shlex.quote(host)} --port {port} "
             f"> {logfile} 2>&1 & "
             "pid=$!; "
             f'printf \'{{"pid": %s, "port": %s}}\\n\' "$pid" {port} > {pidfile}; '
             "echo $pid"
         )
-        res = self.runner.run(cmd, timeout=30)
+        res = self.runner.run(cmd, timeout=30, stdin_data=f"{token}\n" if token else None)
         if not res.ok:
             raise SshWorkerError(
                 f"failed to launch remote worker: {res.stderr.strip() or f'exit {res.returncode}'}"
