@@ -33,6 +33,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Line limit for the newline-delimited JSON protocols the notebook speaks
+# to its subprocesses (the batch frame pipe, the warm-pool result line).
+# asyncio's StreamReader default is 64 KiB, and readline() raises
+# ValueError on any longer line — but harness frames legitimately embed
+# full captured stdout and base64 display payloads (a cached PNG blows
+# 64 KiB easily). 256 MiB is a ceiling, not an allocation; readers that
+# hit it should fail the run cleanly, not crash the caller.
+SUBPROCESS_LINE_LIMIT = 256 * 1024 * 1024
+
 
 def subprocess_kwargs_for_new_group() -> dict[str, Any]:
     """Spawn kwargs that put the child into its own process group.
