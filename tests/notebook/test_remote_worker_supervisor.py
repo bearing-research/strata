@@ -27,6 +27,7 @@ def _clear_worker_tokens():
     for name in ("gpu", "a", "b"):
         clear_runtime_worker_token(name)
 
+
 _INSTALLED = "worker=/usr/bin/strata-worker\nuv=/usr/bin/uv\nplatform=Linux x86_64\nversion=0.6.0\n"
 _MISSING = "worker=\nuv=/usr/bin/uv\nplatform=Linux x86_64\nversion=\n"
 _NO_UV = "worker=\nuv=\nplatform=Linux x86_64\nversion=\n"
