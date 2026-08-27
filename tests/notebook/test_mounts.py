@@ -412,14 +412,18 @@ async def test_remote_rw_mount_rejects_path_traversal_via_symlink(
 
     class _SymlinkFakeFS(_FakeRemoteFS):
         def get(self, uri: str, local_path: str, recursive: bool = False) -> None:
-            staging = Path(local_path)
-            staging.mkdir(parents=True, exist_ok=True)
-            (staging / "leak").symlink_to(sentinel)
+            # The per-file fetch plants a symlink instead of file bytes —
+            # models a backend/localfs copy preserving a hostile link.
+            target = Path(local_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.symlink_to(sentinel)
 
         def exists(self, uri: str) -> bool:  # noqa: ARG002
             return True
 
-    _install_fake_fsspec(monkeypatch, _SymlinkFakeFS({}))
+    _install_fake_fsspec(
+        monkeypatch, _SymlinkFakeFS({"bucket/output/leak": {"size": 1, "type": "file"}})
+    )
 
     resolver = MountResolver(cache_dir=tmp_path / "cache")
     mount = MountSpec(name="m", uri="s3://bucket/output", mode=MountMode.READ_WRITE)
@@ -444,3 +448,35 @@ def test_remote_fingerprint_without_fsspec_is_non_deterministic(
     fp2 = MountFingerprinter.fingerprint_remote_sync("s3", "bucket/prefix")
 
     assert fp1 != fp2, "fingerprint must be unique per call when fsspec is missing"
+
+
+@pytest.mark.asyncio
+async def test_remote_rw_mount_rejects_traversal_name_before_any_fetch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A remote name with `..` segments must be rejected BEFORE any bytes
+    land: the old post-hoc rglob scan only enumerated paths inside the
+    staging dir, so a file written outside it was never even seen."""
+    fetched: list[str] = []
+
+    class _TraversalFakeFS(_FakeRemoteFS):
+        def get(self, uri: str, local_path: str, recursive: bool = False) -> None:
+            fetched.append(uri)
+            Path(local_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(local_path).write_text("x", encoding="utf-8")
+
+        def exists(self, uri: str) -> bool:  # noqa: ARG002
+            return True
+
+    _install_fake_fsspec(
+        monkeypatch,
+        _TraversalFakeFS({"bucket/output/../../escape.txt": {"size": 1, "type": "file"}}),
+    )
+
+    resolver = MountResolver(cache_dir=tmp_path / "cache")
+    mount = MountSpec(name="m", uri="s3://bucket/output", mode=MountMode.READ_WRITE)
+
+    with pytest.raises(RuntimeError, match="path-traversal|outside the mount root"):
+        await resolver.prepare_mounts([mount])
+    assert fetched == []  # rejected before a single byte was written

@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import ipaddress
 import json
+import logging
 import os
 import shutil
 import socket
@@ -27,6 +28,8 @@ from strata.notebook.models import MountSpec
 from strata.notebook.mounts import MountResolver, parse_mount_uri
 from strata.notebook.remote_bundle import pack_notebook_output_bundle
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
+
+logger = logging.getLogger(__name__)
 
 NOTEBOOK_EXECUTOR_PROTOCOL_VERSION = "notebook-cell-v1"
 NOTEBOOK_EXECUTOR_TRANSFORM_REF = "notebook_cell@v1"
@@ -811,6 +814,23 @@ def main(argv: list[str] | None = None) -> int:
         help="Uvicorn log level",
     )
     args = parser.parse_args(argv)
+
+    # The worker executes arbitrary cell source by design. Binding a
+    # non-loopback interface without a bearer token means anyone who can
+    # reach the port can run code as this user — make that trade-off
+    # loud rather than silent.
+    if (
+        args.host not in ("127.0.0.1", "localhost", "::1")
+        and not os.environ.get("STRATA_WORKER_TOKEN", "").strip()
+    ):
+        logger.warning(
+            "strata-worker is binding %s WITHOUT authentication - anyone who can "
+            "reach port %d can execute code on this machine. Set "
+            "STRATA_WORKER_TOKEN (see docs/notebook/workers.md) or bind "
+            "--host 127.0.0.1.",
+            args.host,
+            args.port,
+        )
 
     app = create_notebook_executor_app()
     uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
