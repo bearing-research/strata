@@ -2487,14 +2487,13 @@ async def test_broadcast_survives_mid_iteration_removal(notebook_session):
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _server_state(monkeypatch, tmp_path):
-    """Install a minimal ServerState so the WS endpoint can read config.
+    """Install a ServerState so the WS auth gate has a config to read.
 
-    The WS auth gate consults ``get_state().config`` — in production state
-    always exists, but these unit tests call the endpoint directly. Autouse so
-    every test gets the default (``auth_mode="none"``, i.e. unchanged
-    pass-through behavior); the auth tests override the mode on top.
+    Not autouse: with no state the gate treats the process as unconfigured
+    (see ``ws._configured_auth_mode``), which is what every other notebook
+    test wants and already got before the gate existed.
     """
     import strata.server as server_module
     from strata.config import StrataConfig

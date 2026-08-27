@@ -669,6 +669,23 @@ def required_scope_for_frame(msg_type: str) -> str:
     return NOTEBOOK_SCOPE_EXECUTE
 
 
+def _configured_auth_mode() -> str:
+    """The server's configured auth mode, or ``"none"`` when unconfigured.
+
+    A process with no ``ServerState`` has no auth configuration to enforce —
+    it isn't a running server (the app installs state in its lifespan, so a
+    live deployment always has it). Mirrors the existing convention in
+    ``routes._get_notebook_storage_root``, which treats the same condition as
+    "no configured boundary" rather than erroring.
+    """
+    from strata.server import get_state
+
+    try:
+        return get_state().config.auth_mode
+    except RuntimeError:
+        return "none"
+
+
 def _frame_scope_error(msg_type: str) -> str | None:
     """Return an error message when the caller lacks the frame's scope.
 
@@ -676,9 +693,8 @@ def _frame_scope_error(msg_type: str) -> str | None:
     no principal to check (mirrors ``require_scope``'s trusted-proxy-only gate).
     """
     from strata.auth import get_principal
-    from strata.server import get_state
 
-    if get_state().config.auth_mode != "trusted_proxy":
+    if _configured_auth_mode() != "trusted_proxy":
         return None
     required = required_scope_for_frame(msg_type)
     principal = get_principal()
@@ -704,9 +720,9 @@ async def _authenticate_websocket(websocket: WebSocket) -> bool:
     from strata.auth import AuthError, parse_principal, set_principal, verify_proxy_token
     from strata.server import get_state
 
-    config = get_state().config
-    if config.auth_mode != "trusted_proxy":
+    if _configured_auth_mode() != "trusted_proxy":
         return True
+    config = get_state().config
 
     # ``WebSocket.headers`` is the same case-insensitive mapping
     # ``auth_middleware`` reads via ``request.headers``.
