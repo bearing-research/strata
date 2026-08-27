@@ -219,3 +219,89 @@ def test_shutdown_clears_runtime_tokens():
         assert get_runtime_worker_token("gpu") is None
     finally:
         clear_runtime_worker_token("gpu")
+
+
+# ---------------------------------------------------------------------------
+# Thread-safety (the supervisor is a process-wide singleton driven from
+# asyncio.to_thread workers — genuinely concurrent OS threads)
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_establish_same_name_is_rejected():
+    """Two concurrent establishes for one name must not double-launch (the
+    second used to pass the existence check too, orphaning the first
+    ssh -L). The name is reserved for the whole establish."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    launcher = FakeTunnelLauncher()
+    first_in_preflight = threading.Event()
+    release_first = threading.Event()
+
+    class _BlockingRunner(ScriptedSshRunner):
+        def run(self, command, *, timeout=None, stdin_data=None):
+            if command == "true":  # preflight — hold the first establish here
+                first_in_preflight.set()
+                assert release_first.wait(timeout=10)
+            return super().run(command, timeout=timeout, stdin_data=stdin_data)
+
+    runner = _BlockingRunner(
+        [
+            (lambda c: c == "true", _ok()),
+            (lambda c: "command -v strata-worker" in c, _ok(_INSTALLED)),
+            (lambda c: c.startswith("cat "), _ok("")),
+            (lambda c: "nohup strata-worker" in c, _ok("4321\n")),
+        ]
+    )
+    sup = RemoteWorkerSupervisor(
+        tunnel_launcher=launcher,
+        health_probe=lambda port: True,
+        port_picker=lambda: 55001,
+        runner_factory=lambda target: runner,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(sup.establish, "gpu", "user@box")
+        assert first_in_preflight.wait(timeout=10)
+        # Second establish for the same name while the first is mid-flight.
+        with pytest.raises(SshWorkerError, match="already in progress"):
+            sup.establish("gpu", "user@box")
+        release_first.set()
+        record = first.result(timeout=10)
+
+    assert record.name == "gpu"
+    assert len(launcher.spawns) == 1  # exactly one tunnel — no orphan
+
+
+def test_failed_establish_releases_the_name():
+    """A failed establish must clear its reservation so a retry is allowed."""
+    runner = ScriptedSshRunner([(lambda c: c == "true", _ok())])  # preflight ok
+    # detect probe returns default ok("") → parses as missing worker+uv
+    sup = RemoteWorkerSupervisor(
+        tunnel_launcher=FakeTunnelLauncher(),
+        health_probe=lambda port: True,
+        port_picker=lambda: 55001,
+        runner_factory=lambda target: runner,
+    )
+    with pytest.raises(SshWorkerError):
+        sup.establish("gpu", "user@box")  # no uv, no worker → refuses
+    # The name is free again — a second attempt gets past the reservation
+    # (and fails the same way, not with "already in progress").
+    with pytest.raises(SshWorkerError) as excinfo:
+        sup.establish("gpu", "user@box")
+    assert "already in progress" not in str(excinfo.value)
+
+
+def test_shutdown_snapshot_tolerates_concurrent_teardown():
+    """shutdown() iterates a snapshot, so a concurrent teardown can't make
+    it die with 'dictionary changed size during iteration'."""
+    sup, launcher, _ = _supervisor()
+    sup.establish("a", "user@box")
+    sup.establish("b", "user@box")
+    # Interleave: teardown one while shutdown holds its snapshot. (The
+    # snapshot semantics make the interleaving safe regardless of timing;
+    # this asserts both paths complete and everything is terminated.)
+    sup.teardown("a")
+    sup.shutdown()
+    assert sup.status() == []
+    assert all(h.terminated >= 1 for h in launcher.handles)

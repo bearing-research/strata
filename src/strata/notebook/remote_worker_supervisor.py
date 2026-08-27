@@ -18,6 +18,7 @@ follow-up; this module is the supervisor core.
 from __future__ import annotations
 
 import secrets
+import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -162,6 +163,16 @@ class RemoteWorkerSupervisor:
     port_picker: Callable[[], int] = _pick_free_port
     runner_factory: Callable[[SshTarget], SshRunner] | None = None
     _tunnels: dict[str, _ActiveTunnel] = field(default_factory=dict, init=False)
+    # The supervisor is a process-wide singleton whose methods run on
+    # asyncio.to_thread workers — genuinely concurrent OS threads. The
+    # lock guards every ``_tunnels`` access with SHORT critical sections
+    # (never held across ssh/provisioning), so a server shutdown is
+    # never blocked behind a minutes-long remote install. ``_pending``
+    # reserves a name for the duration of its (slow) establish so two
+    # concurrent establishes can't both pass the existence check and
+    # double-launch, orphaning the first tunnel.
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+    _pending: set[str] = field(default_factory=set, init=False)
 
     def establish(
         self,
@@ -180,9 +191,45 @@ class RemoteWorkerSupervisor:
 
         Idempotent per ``name``: re-establishing tears the previous tunnel down
         first. Raises :class:`SshWorkerError` if any step fails (the tunnel is
-        cleaned up before the error propagates).
+        cleaned up before the error propagates). A concurrent establish for the
+        same ``name`` is rejected rather than double-launched.
         """
-        if name in self._tunnels:
+        with self._lock:
+            if name in self._pending:
+                raise SshWorkerError(f"{name}: an establish is already in progress")
+            self._pending.add(name)
+        try:
+            return self._establish_locked_out(
+                name,
+                ssh_target,
+                remote_port=remote_port,
+                local_port=local_port,
+                token=token,
+                extras=extras,
+                pin=pin,
+                install=install,
+                health_timeout=health_timeout,
+            )
+        finally:
+            with self._lock:
+                self._pending.discard(name)
+
+    def _establish_locked_out(
+        self,
+        name: str,
+        ssh_target: str,
+        *,
+        remote_port: int | None,
+        local_port: int | None,
+        token: str | None,
+        extras: str,
+        pin: str | None,
+        install: bool,
+        health_timeout: float,
+    ) -> TunnelRecord:
+        """The slow body of :meth:`establish`, run with ``name`` reserved in
+        ``_pending`` (never holding ``_lock`` across ssh round-trips)."""
+        if self.get(name) is not None:
             self.teardown(name)
 
         target = SshTarget(ssh_target)
@@ -220,14 +267,15 @@ class RemoteWorkerSupervisor:
             healthy=True,
             executor_url=f"http://127.0.0.1:{lport}/v1/execute",
         )
-        self._tunnels[name] = _ActiveTunnel(
-            handle=handle,
-            worker=worker,
-            record=record,
-            token=token,
-            local_port=lport,
-            remote_port=running.port,
-        )
+        with self._lock:
+            self._tunnels[name] = _ActiveTunnel(
+                handle=handle,
+                worker=worker,
+                record=record,
+                token=token,
+                local_port=lport,
+                remote_port=running.port,
+            )
         # Publish the token so the executor can authenticate dispatch to this
         # worker by name, without ever writing the secret to notebook.toml.
         set_runtime_worker_token(name, token)
@@ -235,17 +283,21 @@ class RemoteWorkerSupervisor:
 
     def token_for(self, name: str) -> str | None:
         """Return the generated bearer token for *name* (held in memory, not on disk)."""
-        active = self._tunnels.get(name)
+        with self._lock:
+            active = self._tunnels.get(name)
         return active.token if active is not None else None
 
     def get(self, name: str) -> TunnelRecord | None:
         """Return the record for *name*, or None if not established."""
-        active = self._tunnels.get(name)
+        with self._lock:
+            active = self._tunnels.get(name)
         return active.record if active is not None else None
 
     def status(self) -> list[TunnelRecord]:
         """Return every established worker's record (with a fresh liveness flag)."""
-        return [self._refresh(active) for active in self._tunnels.values()]
+        with self._lock:
+            actives = list(self._tunnels.values())
+        return [self._refresh(active) for active in actives]
 
     def reconcile(self) -> list[TunnelRecord]:
         """Health-check every tunnel; respawn any whose forward or worker is down.
@@ -254,8 +306,12 @@ class RemoteWorkerSupervisor:
         ``ssh -L`` (or an unresponsive worker behind a live forward) is torn down
         and re-opened on the same ports; ``healthy`` reflects the result.
         """
-        for active in list(self._tunnels.values()):
+        with self._lock:
+            actives = list(self._tunnels.items())
+        records: list[TunnelRecord] = []
+        for name, active in actives:
             if active.handle.is_alive() and self.health_probe(active.local_port):
+                records.append(active.record)
                 continue
             active.handle.terminate()
             new_handle = self.tunnel_launcher.spawn(
@@ -263,10 +319,17 @@ class RemoteWorkerSupervisor:
                 local_port=active.local_port,
                 remote_port=active.remote_port,
             )
-            active.handle = new_handle
+            with self._lock:
+                if self._tunnels.get(name) is not active:
+                    # Torn down (or replaced) while we respawned — don't
+                    # orphan the fresh forward or resurrect the entry.
+                    new_handle.terminate()
+                    continue
+                active.handle = new_handle
             healthy = self._await_health(active.local_port, _HEALTH_POLL_INTERVAL)
             active.record = _replace_health(active.record, healthy)
-        return [active.record for active in self._tunnels.values()]
+            records.append(active.record)
+        return records
 
     def teardown(self, name: str, *, stop_remote: bool = False) -> bool:
         """Close *name*'s tunnel (and optionally stop the remote worker).
@@ -274,7 +337,8 @@ class RemoteWorkerSupervisor:
         Returns whether a tunnel was present. ``stop_remote`` also kills the
         ``strata-worker`` on the box; by default it's left running for reuse.
         """
-        active = self._tunnels.pop(name, None)
+        with self._lock:
+            active = self._tunnels.pop(name, None)
         if active is None:
             return False
         clear_runtime_worker_token(name)
@@ -292,10 +356,12 @@ class RemoteWorkerSupervisor:
         Wired to the server lifespan's shutdown so no ``ssh -L`` children outlive
         the server.
         """
-        for name, active in self._tunnels.items():
+        with self._lock:
+            actives = list(self._tunnels.items())
+            self._tunnels.clear()
+        for name, active in actives:
             clear_runtime_worker_token(name)
             active.handle.terminate()
-        self._tunnels.clear()
 
     def _await_health(self, local_port: int, timeout: float) -> bool:
         import time
