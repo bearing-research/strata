@@ -87,6 +87,24 @@ def _table_to_ipc(table: pa.Table) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
+_JSON_BLOB_KEY = b"strata.json.blob"
+
+
+def _is_json_blob(table: "pa.Table") -> bool:
+    """Whether *table* holds a JSON document rather than columnar data.
+
+    New writes carry an explicit marker. Artifacts written before the marker
+    existed are recognised the way they always were — one column named
+    ``data`` — but only with a single row, which is the shape the blob
+    encoding actually produces. That narrowing is what stops a genuine
+    columnar ``{"data": [...]}`` being misread as a document.
+    """
+    metadata = table.schema.metadata or {}
+    if _JSON_BLOB_KEY in metadata:
+        return metadata[_JSON_BLOB_KEY] == b"1"
+    return table.num_columns == 1 and table.column_names[0] == "data" and table.num_rows == 1
+
+
 def _dict_to_ipc(data: JsonArtifactInput) -> bytes:
     """Convert a dict to Arrow IPC stream bytes.
 
@@ -99,12 +117,23 @@ def _dict_to_ipc(data: JsonArtifactInput) -> bytes:
         if len(set(lengths)) == 1:
             try:
                 table = pa.Table.from_pydict(dict(data))
+                # Mark the columnar encoding too. Without it a new
+                # ``{"data": ["only"]}`` — one column, one row — is
+                # indistinguishable from the legacy blob shape, so the reader
+                # would parse the cell as JSON and raise.
+                table = table.replace_schema_metadata({_JSON_BLOB_KEY: b"0"})
                 return _table_to_ipc(table)
             except Exception:
                 pass  # Fall through to JSON storage
 
     json_str = json.dumps(dict(data))
     table = pa.Table.from_pydict({"data": [json_str]})
+    # Mark the encoding instead of leaving the reader to guess from the column
+    # name. ``{"data": [...]}`` is a perfectly ordinary columnar dict, and it
+    # satisfies the old "one column called data" heuristic too, so it was
+    # written columnar and read back as a JSON blob: put_json three strings in,
+    # get_json an int out, with no error.
+    table = table.replace_schema_metadata({_JSON_BLOB_KEY: b"1"})
     return _table_to_ipc(table)
 
 
@@ -1039,7 +1068,7 @@ class StrataClient:
         table = self.fetch(artifact_uri)
 
         # Check if this is a single-column JSON artifact
-        if table.num_columns == 1 and table.column_names[0] == "data":
+        if _is_json_blob(table):
             import json
 
             json_str = table.column("data")[0].as_py()
@@ -1753,7 +1782,7 @@ class AsyncStrataClient:
         table = await self.fetch(artifact_uri)
 
         # Check if this is a single-column JSON artifact
-        if table.num_columns == 1 and table.column_names[0] == "data":
+        if _is_json_blob(table):
             import json
 
             json_str = table.column("data")[0].as_py()

@@ -199,3 +199,63 @@ class TestOptionalExtrasAreIndependentlyUsable:
 
         with pytest.raises(AttributeError):
             integration.no_such_export
+
+
+class TestJsonArtifactRoundTrip:
+    """``put_json`` and ``get_json`` disagreed about the encoding.
+
+    ``_dict_to_ipc`` stores a dict *columnar* when every value is an
+    equal-length list. ``get_json`` used a different discriminator — "one
+    column named ``data`` means it's a JSON blob" — and a dict whose only key
+    is ``data`` satisfies both. So the columnar write was read back through
+    the blob branch: three strings in, the integer ``1`` out, no error. With
+    non-numeric strings it raised ``JSONDecodeError`` from a call that has no
+    documented failure mode.
+
+    The encoding is now marked in the schema metadata rather than guessed.
+    """
+
+    def _roundtrip(self, payload):
+        import json
+
+        from strata_client.client import _dict_to_ipc, _is_json_blob
+
+        table = ipc.open_stream(pa.py_buffer(_dict_to_ipc(payload))).read_all()
+        if _is_json_blob(table):
+            return json.loads(table.column("data")[0].as_py())
+        return table.to_pydict()
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"data": ["1", "2", "3"]},  # the collision, numeric-looking
+            {"data": ["a", "b"]},  # the collision, used to raise
+            {"data": ["only"]},  # single row: ambiguous with the blob shape
+            {"a": [1, 2], "b": [3, 4]},  # ordinary columnar
+            {"nested": {"x": 1}, "n": 5},  # a genuine JSON document
+        ],
+    )
+    def test_it_round_trips(self, payload):
+        assert self._roundtrip(payload) == payload
+
+    def test_a_legacy_blob_without_the_marker_still_decodes(self):
+        """Artifacts written before the marker existed must keep working."""
+        import json
+
+        from strata_client.client import _is_json_blob
+
+        legacy = pa.Table.from_pydict({"data": [json.dumps({"model": "v2"})]})
+        assert _is_json_blob(legacy)
+        assert json.loads(legacy.column("data")[0].as_py()) == {"model": "v2"}
+
+    def test_a_legacy_columnar_table_is_not_mistaken_for_a_document(self):
+        from strata_client.client import _is_json_blob
+
+        assert not _is_json_blob(pa.Table.from_pydict({"a": [1, 2], "b": [3, 4]}))
+
+    def test_a_scanned_table_with_a_data_column_is_not_a_document(self):
+        """A scan result that happens to have one column called ``data`` is
+        columnar, and multiple rows are what distinguish it from a blob."""
+        from strata_client.client import _is_json_blob
+
+        assert not _is_json_blob(pa.Table.from_pydict({"data": [1, 2, 3]}))
