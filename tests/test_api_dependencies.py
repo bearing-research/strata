@@ -118,3 +118,58 @@ def test_runtime_build_store_resolves_when_artifact_dir_set(tmp_path):
     _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
 
     assert runtime_build_store() is not None
+
+
+class TestArtifactInputTenantGate:
+    """Artifact transform-inputs must clear the same tenant gate a direct
+    ``GET /v1/artifacts/{id}`` runs.
+
+    Before this, ``strata://artifact/{id}@v={n}`` was parsed by regex with no
+    store lookup and no tenant filter at any layer, so naming another tenant's
+    artifact as a transform input read its blob — and in pull mode handed back
+    a signed download URL for it.
+    """
+
+    def _seed(self, tmp_path, *, tenant):
+        from strata.artifact_store import get_artifact_store
+
+        artifact_dir = tmp_path / "artifacts"
+        artifact_dir.mkdir(exist_ok=True)
+        _set_state(
+            deployment_mode="service",
+            multi_tenant_enabled=True,
+            # Coherence: multi-tenant requires trusted-proxy auth.
+            auth_mode="trusted_proxy",
+            proxy_token="test-token",
+            artifact_dir=artifact_dir,
+            # resolve_input_version reaches the store via
+            # _get_artifact_store(allow_server_mode=True), which in service
+            # mode needs the transforms allowlist enabled.
+            transforms_config={"enabled": True, "registry": []},
+        )
+        store = get_artifact_store(server._state.config.artifact_dir)
+        assert store is not None
+        version = store.create_artifact(artifact_id="secret", provenance_hash="p1", tenant=tenant)
+        return f"strata://artifact/secret@v={version}"
+
+    def test_cross_tenant_artifact_input_is_refused(self, tmp_path):
+        from strata.api.dependencies import resolve_input_version
+
+        uri = self._seed(tmp_path, tenant="tenant-b")
+        with pytest.raises(HTTPException) as exc:
+            resolve_input_version(uri, tenant="tenant-a")
+        assert exc.value.status_code in (403, 404)
+
+    def test_same_tenant_artifact_input_resolves(self, tmp_path):
+        from strata.api.dependencies import resolve_input_version
+
+        uri = self._seed(tmp_path, tenant="tenant-b")
+        assert resolve_input_version(uri, tenant="tenant-b") == "secret@v=1"
+
+    def test_unknown_artifact_input_is_404(self, tmp_path):
+        from strata.api.dependencies import resolve_input_version
+
+        self._seed(tmp_path, tenant="tenant-b")
+        with pytest.raises(HTTPException) as exc:
+            resolve_input_version("strata://artifact/ghost@v=1", tenant="tenant-b")
+        assert exc.value.status_code == 404

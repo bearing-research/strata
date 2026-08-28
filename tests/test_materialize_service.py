@@ -156,16 +156,30 @@ class TestComputeProvenance:
         )
 
 
-class _FakeResolveStore:
-    """Store stub for resolve_input_version: only ``resolve_name`` is touched."""
+_UNSET = object()
 
-    def __init__(self, *, named=None):
+
+class _FakeResolveStore:
+    """Store stub for resolve_input_version: ``resolve_name`` + ``get_artifact``.
+
+    ``get_artifact`` backs the artifact-URI branch, which now looks the record
+    up (rather than trusting the URI's shape) so the caller can tenant-gate it.
+    """
+
+    def __init__(self, *, named=None, artifact=_UNSET):
         self._named = named
+        self._artifact = (
+            SimpleNamespace(id="abc", version=3, tenant=None) if artifact is _UNSET else artifact
+        )
         self.calls = []
 
     def resolve_name(self, name, *, tenant=None):
         self.calls.append((name, tenant))
         return self._named
+
+    def get_artifact(self, artifact_id, version):
+        self.calls.append((artifact_id, version))
+        return self._artifact
 
 
 class _FakePlanner:
@@ -281,3 +295,44 @@ class TestRebuildArtifactId:
         # A non-refresh miss (e.g. a building row) mints a fresh id, not a reuse.
         existing = SimpleNamespace(id="old", version=2)
         assert service.rebuild_artifact_id(existing, refresh=False, new_id="new") == "new"
+
+
+class TestArtifactInputLookup:
+    """The artifact-URI branch must resolve through the store, not a regex —
+    a bare parse let a caller name any artifact id (including another
+    tenant's) and the runner then read its blob with no check."""
+
+    def test_missing_artifact_is_404(self):
+        from strata.services.materialize import materialize_service
+
+        with pytest.raises(InputResolutionError) as exc:
+            materialize_service.resolve_input_version(
+                "strata://artifact/ghost@v=1",
+                store=_FakeResolveStore(artifact=None),
+                planner=_FakePlanner(),
+            )
+        assert exc.value.status_code == 404
+
+    def test_resolved_artifact_is_returned_for_authorization(self):
+        from strata.services.materialize import materialize_service
+
+        record = SimpleNamespace(id="abc", version=3, tenant="tenant-b")
+        resolved = materialize_service.resolve_input_version(
+            "strata://artifact/abc@v=3",
+            store=_FakeResolveStore(artifact=record),
+            planner=_FakePlanner(),
+        )
+        # The wrapper needs the record to run the tenant + provenance gates.
+        assert resolved.artifact is record
+        assert resolved.version == "abc@v=3"
+
+    def test_name_input_also_returns_its_artifact(self):
+        from strata.services.materialize import materialize_service
+
+        named = SimpleNamespace(id="xyz", version=7, tenant=None)
+        resolved = materialize_service.resolve_input_version(
+            "strata://name/champion",
+            store=_FakeResolveStore(named=named),
+            planner=_FakePlanner(),
+        )
+        assert resolved.artifact is named
