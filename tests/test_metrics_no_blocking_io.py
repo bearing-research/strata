@@ -70,6 +70,8 @@ async def test_prometheus_reports_the_offloaded_values(monkeypatch, tmp_path):
 
     assert "strata_cache_bytes_current 4242" in text
     assert "strata_cache_entries_current 17" in text
+
+
 class TestPrometheusLabelEscaping:
     """Label values must be escaped per the exposition format.
 

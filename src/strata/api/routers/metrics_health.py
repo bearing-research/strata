@@ -835,10 +835,8 @@ async def metrics_prometheus():
             ]
         )
         for tm in table_metrics:
-            table_id = tm["table_id"]
-            lines.append(
-                f'strata_table_scans_total{{table="{_prom_label(table_id)}"}} {tm["scan_count"]}'
-            )
+            table_id = _prom_label(tm["table_id"])
+            lines.append(f'strata_table_scans_total{{table="{table_id}"}} {tm["scan_count"]}')
 
         lines.extend(
             [
@@ -848,10 +846,8 @@ async def metrics_prometheus():
             ]
         )
         for tm in table_metrics:
-            table_id = tm["table_id"]
-            lines.append(
-                f'strata_table_latency_p95_ms{{table="{_prom_label(table_id)}"}} {tm["p95_ms"]}'
-            )
+            table_id = _prom_label(tm["table_id"])
+            lines.append(f'strata_table_latency_p95_ms{{table="{table_id}"}} {tm["p95_ms"]}')
 
         lines.extend(
             [
@@ -878,10 +874,8 @@ async def metrics_prometheus():
             ]
         )
         for tm in tenant_metrics:
-            tenant_id = tm["tenant_id"]
-            lines.append(
-                f'strata_tenant_scans_total{{tenant="{_prom_label(tenant_id)}"}} {tm["total_scans"]}'
-            )
+            tenant_id = _prom_label(tm["tenant_id"])
+            lines.append(f'strata_tenant_scans_total{{tenant="{tenant_id}"}} {tm["total_scans"]}')
 
         lines.extend(
             [
@@ -891,9 +885,9 @@ async def metrics_prometheus():
             ]
         )
         for tm in tenant_metrics:
-            tenant_id = tm["tenant_id"]
+            tenant_id = _prom_label(tm["tenant_id"])
             lines.append(
-                f'strata_tenant_cache_hit_rate{{tenant="{_prom_label(tenant_id)}"}} {tm["cache_hit_rate"]}'
+                f'strata_tenant_cache_hit_rate{{tenant="{tenant_id}"}} {tm["cache_hit_rate"]}'
             )
 
         lines.extend(
@@ -904,11 +898,9 @@ async def metrics_prometheus():
             ]
         )
         for tm in tenant_metrics:
-            tenant_id = tm["tenant_id"]
+            tenant_id = _prom_label(tm["tenant_id"])
             total_bytes = tm["bytes_from_cache"] + tm["bytes_from_storage"]
-            lines.append(
-                f'strata_tenant_bytes_total{{tenant="{_prom_label(tenant_id)}"}} {total_bytes}'
-            )
+            lines.append(f'strata_tenant_bytes_total{{tenant="{tenant_id}"}} {total_bytes}')
 
     # Add build metrics (if server transforms are enabled)
     try:
