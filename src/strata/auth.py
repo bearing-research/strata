@@ -192,8 +192,13 @@ class AclEvaluator:
         """
         from strata.config import AclRule  # noqa: F401 - for type checking
 
-        # Check principal match
-        if rule.principal != "*" and rule.principal != principal.id:
+        # Check principal match. ``principal`` is documented as a "Principal ID
+        # pattern", and tables are fnmatched two lines below — but this used
+        # exact string equality, so a rule like ``principal = "svc-*"`` never
+        # fired. For a deny rule that fails OPEN, silently, with no startup
+        # warning. fnmatch keeps "*" working exactly as before and makes the
+        # documented pattern form behave.
+        if not fnmatch.fnmatch(principal.id, rule.principal):
             return False
 
         # Check tenant match (if specified in rule)
