@@ -350,3 +350,29 @@ class TestHealthEndpointIntegration:
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
             server_module._state = None
+
+
+class TestReportedVersionIsTheInstalledOne:
+    """``/health`` reports the running version so an operator can confirm what
+    a rollout actually landed. It was hardcoded to ``"0.2.0"`` and stayed there
+    through three releases, so the field read the same before and after a
+    deploy — worse than absent, because it looks authoritative.
+    """
+
+    def test_version_matches_package_metadata(self):
+        import time
+        from importlib.metadata import version as metadata_version
+
+        from strata.health import HealthReport, HealthStatus
+
+        report = HealthReport(status=HealthStatus.HEALTHY, checks=[], timestamp=time.time())
+        assert report.version == metadata_version("strata-notebook")
+
+    def test_version_is_not_the_stale_hardcoded_string(self):
+        import time
+
+        from strata.health import HealthReport, HealthStatus
+
+        report = HealthReport(status=HealthStatus.HEALTHY, checks=[], timestamp=time.time())
+        assert report.version != "0.2.0"
+        assert report.to_dict()["version"] == report.version

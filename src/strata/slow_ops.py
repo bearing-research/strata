@@ -23,6 +23,7 @@ Thresholds (configurable):
 """
 
 import logging
+import math
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
@@ -194,7 +195,14 @@ class LatencyHistogram:
         cumsum = 0
         percentiles = {}
         for pct, name in [(0.50, "p50_ms"), (0.95, "p95_ms"), (0.99, "p99_ms")]:
-            target = int(total * pct)
+            # Nearest-rank: the target is the 1-based index of the sample at
+            # this percentile, so it must round UP and never reach 0. ``int()``
+            # truncated instead, and a target of 0 is satisfied by the very
+            # first (empty) bucket -- so a stage with a single sample reported
+            # the FASTEST bucket at every percentile. One 9-second scan came
+            # back as "p99 = 5ms", which is exactly backwards for the operator
+            # reading it.
+            target = max(1, math.ceil(total * pct))
             for i, count in enumerate(counts):
                 cumsum += count
                 if cumsum >= target:

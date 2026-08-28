@@ -862,3 +862,55 @@ class TestDebugEndpoints:
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
             server_module._state = None
+
+
+class TestPercentilesUseNearestRank:
+    """The percentile target is a 1-based sample index, so it must round UP
+    and never reach 0.
+
+    ``int(total * pct)`` truncated instead, and a target of 0 is satisfied by
+    the very first bucket before any count is added — so a stage with a single
+    sample reported the FASTEST bucket at every percentile. One 9-second scan
+    came back as ``p99 = 5ms``: exactly backwards for the operator reading it
+    to decide whether a stage is slow.
+    """
+
+    def test_a_lone_slow_sample_is_not_reported_as_the_fastest_bucket(self):
+        from strata.slow_ops import LatencyHistogram
+
+        hist = LatencyHistogram()
+        hist.record("scan", 9000.0)
+
+        assert hist.get_percentiles("scan") == {
+            "p50_ms": 7500,
+            "p95_ms": 7500,
+            "p99_ms": 7500,
+        }
+
+    def test_a_lone_fast_sample_is_still_fast(self):
+        from strata.slow_ops import LatencyHistogram
+
+        hist = LatencyHistogram()
+        hist.record("scan", 3.0)
+
+        assert hist.get_percentiles("scan") == {"p50_ms": 5, "p95_ms": 5, "p99_ms": 5}
+
+    def test_a_split_distribution_separates_p50_from_the_tail(self):
+        from strata.slow_ops import LatencyHistogram
+
+        hist = LatencyHistogram()
+        for _ in range(50):
+            hist.record("scan", 1.0)
+        for _ in range(50):
+            hist.record("scan", 9000.0)
+
+        stats = hist.get_percentiles("scan")
+        assert stats["p50_ms"] == 5
+        assert stats["p95_ms"] == 7500
+        assert stats["p99_ms"] == 7500
+
+    def test_no_samples_still_reports_zeros(self):
+        from strata.slow_ops import LatencyHistogram
+
+        hist = LatencyHistogram()
+        assert hist.get_percentiles("scan") == {"p50_ms": 0, "p95_ms": 0, "p99_ms": 0}
