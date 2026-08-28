@@ -1376,9 +1376,11 @@ class TestServiceModeReviewFindings:
         producing an empty-input, empty-param manifest.
         """
         # Seed a real input artifact: artifact inputs are now resolved through
-        # the store (and tenant-gated), so a fictional id is a 404.
+        # the store (and tenant-gated), so a fictional id is a 404. It must
+        # carry the caller's tenant — a tenantless artifact is persisted with
+        # tenant='' and the gate compares that against the request's tenant.
         store = get_artifact_store()
-        store.create_artifact(artifact_id="seed", provenance_hash="seed-prov")
+        store.create_artifact(artifact_id="seed", provenance_hash="seed-prov", tenant="team-a")
 
         create = server_mode_auth_app.post(
             "/v1/artifacts/materialize",
