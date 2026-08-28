@@ -107,11 +107,18 @@ async def get_cache_histogram_v1():
     return histogram.get_summary()
 
 
-@router.get("/v1/cache/entries")
+@router.get("/v1/cache/entries", dependencies=[require_scope("admin:cache")])
 async def list_cache_entries_v1():
-    """List all cache entries with metadata.
+    """List all cache entries with metadata (requires ``admin:cache``).
 
     Returns detailed information about each cached entry.
+
+    Scope-gated because the listing is deliberately cache-wide: entries are
+    written under a per-tenant hash prefix for isolation, but this walks all of
+    them and returns each entry's table identity, snapshot id, column
+    projection and on-disk path. Unauthenticated, that undid the directory
+    isolation at the read side; it is operator introspection, so it takes the
+    same scope as ``/v1/cache/clear``.
     """
     from strata.cache import DiskCache
     from strata.server import get_state

@@ -14,6 +14,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
+from strata.api.dependencies import require_scope
 from strata.gc_tracker import get_gc_stats, get_recent_gc_pauses
 from strata.memory_profiler import get_detailed_memory_report, get_memory_snapshot
 from strata.pool_metrics import get_connection_metrics, get_pool_tracker
@@ -189,7 +190,7 @@ async def get_circuit_breakers_v1():
     return {"breakers": registry.get_all_stats()}
 
 
-@router.get("/v1/debug/cache/inspect")
+@router.get("/v1/debug/cache/inspect", dependencies=[require_scope("admin:cache")])
 async def inspect_cache_v1(
     prefix: Annotated[
         str | None, Query(description="Hash prefix to filter entries (hex, e.g., 'a1b2')")
@@ -246,10 +247,16 @@ async def inspect_cache_v1(
         # Normalize to lowercase
         prefix = prefix.lower()
         # Build search paths based on prefix length
+        # The on-disk layout is versioned_dir/{tenant_prefix}/hash[:2]/hash[2:4]
+        # (see DiskCache._data_path). Searching versioned_dir/hash[:2]/... skipped
+        # the tenant level, so every prefix of 2+ chars hit a path that cannot
+        # exist and this endpoint always returned zero entries. Glob across the
+        # tenant prefixes instead.
         if len(prefix) >= 4:
-            # Can go directly to specific subdirectory
-            search_dir = versioned_dir / prefix[:2] / prefix[2:4]
-            if not search_dir.exists():
+            search_paths = [
+                d for d in versioned_dir.glob(f"*/{prefix[:2]}/{prefix[2:4]}") if d.is_dir()
+            ]
+            if not search_paths:
                 return {
                     "cache_version": CACHE_VERSION,
                     "cache_dir": str(cache.cache_dir),
@@ -258,11 +265,9 @@ async def inspect_cache_v1(
                     "total_matched": 0,
                     "truncated": False,
                 }
-            search_paths = [search_dir]
         elif len(prefix) >= 2:
-            # Search within first-level subdirectory
-            search_dir = versioned_dir / prefix[:2]
-            if not search_dir.exists():
+            search_paths = [d for d in versioned_dir.glob(f"*/{prefix[:2]}") if d.is_dir()]
+            if not search_paths:
                 return {
                     "cache_version": CACHE_VERSION,
                     "cache_dir": str(cache.cache_dir),
@@ -271,7 +276,6 @@ async def inspect_cache_v1(
                     "total_matched": 0,
                     "truncated": False,
                 }
-            search_paths = [search_dir]
         else:
             # Search everything but filter by prefix
             search_paths = [versioned_dir]

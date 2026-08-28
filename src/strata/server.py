@@ -1503,6 +1503,24 @@ def _authorize_artifact_read(artifact) -> None:
         _authorize_table_access(input_uri, identity)
 
 
+def _table_identity_from_uri(table_uri: str):
+    """Resolve a table URI to its canonical identity without planning.
+
+    Lets the ACL run before any manifest work, so a denied caller learns
+    nothing about the table's existence or size (and cannot force unbounded
+    Iceberg reads). Returns ``None`` when the URI does not parse as a table
+    id, in which case the caller falls through to the post-plan check.
+    """
+    from strata.iceberg import PyIcebergCatalog
+    from strata.types import TableIdentity
+
+    _, table_id = PyIcebergCatalog.parse_table_uri(table_uri)
+    try:
+        return TableIdentity.from_table_id(table_id)
+    except ValueError:
+        return None
+
+
 def _authorize_artifact_write() -> None:
     """Gate a write endpoint (put / set_name / set_alias / tags).
 
@@ -1934,6 +1952,24 @@ async def _handle_identity_materialize(
     # Convert to internal filter format
     filters = identity_params.to_strata_filters()
 
+    # Authorize the table BEFORE planning.
+    #
+    # The ACL check used to run after the planner, the max-tasks 400 and the
+    # pre-flight 413, so a principal denied a table still learned from the
+    # response whether it exists, how many row groups it has, and its exact
+    # estimated size ("Estimated response size (N bytes) exceeds limit") —
+    # defeating the point of ``hide_forbidden_as_not_found``. It also let a
+    # denied caller force unbounded Iceberg manifest reads.
+    #
+    # The identity is parsed from the URI rather than taken from the plan, so
+    # no manifest work happens for a request that is about to be refused.
+    if state.config.auth_mode == "trusted_proxy":
+        if principal is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        early_identity = _table_identity_from_uri(table_uri)
+        if early_identity is not None:
+            _authorize_table_access(table_uri, early_identity)
+
     # Plan the scan using existing planner
     plan_timeout = state.config.plan_timeout_seconds
 
@@ -1986,11 +2022,14 @@ async def _handle_identity_materialize(
             detail=f"Estimated response size ({plan.estimated_bytes:,} bytes) exceeds limit.",
         )
 
-    # Authorization check (when auth_mode=trusted_proxy)
+    # Ownership stamping (authorization itself ran before planning, above).
     if state.config.auth_mode == "trusted_proxy":
         if principal is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
+        # Re-check against the identity the planner actually resolved. The
+        # pre-plan gate uses the identity parsed from the URI; this catches any
+        # case where the catalog resolves it to something else.
         _authorize_table_access(table_uri, plan.table_identity)
 
         plan.owner_principal = principal.id
