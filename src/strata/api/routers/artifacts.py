@@ -720,8 +720,16 @@ async def finalize_artifact(request: UploadFinalizeRequest, store: PersonalModeS
             detail="Blob not uploaded. Call upload endpoint first.",
         )
 
-    # Get blob size without materializing the payload
+    # Get blob size without materializing the payload.
+    #
+    # ``blob_size`` returns None both when the object is absent and when the
+    # backend call simply failed, so ``or 0`` could stamp byte_size=0 onto an
+    # artifact this call is about to mark READY — a ready row claiming an
+    # empty blob. The sibling build-finalize route already refuses that; do
+    # the same here rather than record a figure we know is wrong.
     byte_size = store.blob_size(request.artifact_id, request.version) or 0
+    if byte_size == 0:
+        raise HTTPException(status_code=500, detail="Failed to read uploaded blob")
 
     # Finalize artifact
     try:

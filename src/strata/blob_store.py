@@ -19,6 +19,7 @@ Implementations:
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import tempfile
 from abc import ABC, abstractmethod
@@ -26,6 +27,8 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -430,6 +433,12 @@ class S3BlobStore(BlobStore):
             info = self._fs.get_file_info(key)
             return info.type == pafs.FileType.File
         except Exception:
+            # A backend error is not the same as "absent", but callers treat
+            # this as a boolean fact — so at minimum make the difference
+            # visible rather than reporting a confident False.
+            logger.exception(
+                "blob_exists failed for %s@v=%d; reporting absent", artifact_id, version
+            )
             return False
 
     def blob_size(self, artifact_id: str, version: int) -> int | None:
@@ -440,6 +449,9 @@ class S3BlobStore(BlobStore):
         try:
             info = self._fs.get_file_info(key)
         except Exception:
+            logger.exception(
+                "blob_size failed for %s@v=%d; reporting unknown", artifact_id, version
+            )
             return None
         if info.type != pafs.FileType.File:
             return None
@@ -454,6 +466,12 @@ class S3BlobStore(BlobStore):
             self._fs.delete_file(key)
             return True
         except Exception:
+            # The caller (GC / delete_artifact) removes the metadata row
+            # regardless, so a silent False here orphans the object with no
+            # row left to ever retry it.
+            logger.exception(
+                "delete_blob failed for %s@v=%d; object orphaned", artifact_id, version
+            )
             return False
 
     @classmethod
@@ -613,6 +631,12 @@ class GCSBlobStore(BlobStore):
             self._fs.delete_file(key)
             return True
         except Exception:
+            # The caller (GC / delete_artifact) removes the metadata row
+            # regardless, so a silent False here orphans the object with no
+            # row left to ever retry it.
+            logger.exception(
+                "delete_blob failed for %s@v=%d; object orphaned", artifact_id, version
+            )
             return False
 
     @classmethod
