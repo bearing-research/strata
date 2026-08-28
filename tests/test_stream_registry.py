@@ -55,7 +55,17 @@ async def test_schedule_cleanup_expires_stream_and_runs_on_expire():
     assert expired == ["scan-s1"]
 
 
-async def test_schedule_cleanup_without_scan_skips_on_expire():
+async def test_schedule_cleanup_recovers_the_scan_id_when_omitted():
+    """Omitting scan_id used to leak the ReadPlan for the process lifetime.
+
+    ``schedule_cleanup`` cancels any pending cleanup for the stream first, so a
+    call without a scan_id *replaced* the scan-aware cleanup registered at
+    stream creation with one that only pops ``_streams``. ``expire_scan`` — the
+    only caller of ``pop_scan`` / ``discard_prefetch`` — runs from
+    ``on_expire``, which fires only when scan_id is not None, so the plan's
+    tasks, schema and any prefetched row group stayed resident forever. The
+    registry now recovers the id from the registered stream.
+    """
     expired: list[str] = []
     reg = StreamRegistry(ttl_seconds=0.01, on_expire=expired.append)
     reg.register(_stream())
@@ -64,7 +74,19 @@ async def test_schedule_cleanup_without_scan_skips_on_expire():
     await asyncio.sleep(0.05)
 
     assert reg.get("s1") is None
-    assert expired == []  # on_expire only fires when a scan id is supplied
+    assert expired == ["scan-s1"], "the scan must still be expired, not leaked"
+
+
+@pytest.mark.asyncio
+async def test_schedule_cleanup_without_a_registered_stream_is_a_noop():
+    """Nothing to recover an id from — must not raise."""
+    expired: list[str] = []
+    reg = StreamRegistry(ttl_seconds=0.01, on_expire=expired.append)
+
+    reg.schedule_cleanup("unknown")
+    await asyncio.sleep(0.05)
+
+    assert expired == []
 
 
 async def test_cancel_cleanup_keeps_the_stream():
