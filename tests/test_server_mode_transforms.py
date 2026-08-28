@@ -204,12 +204,17 @@ def server_mode_auth_app(server_mode_auth_config):
 
     from unittest.mock import MagicMock
 
+    from strata.transforms.signed_urls import URLSigner
+
     mock_state = MagicMock()
     mock_state.config = server_mode_auth_config
     mock_state.planner = MagicMock()
     mock_state.fetcher = MagicMock()
     mock_state.scans = {}
     mock_state.metrics = MagicMock()
+    # A real signer so signed-URL routes produce a verifiable manifest (a bare
+    # MagicMock would serialize to a non-manifest blob).
+    mock_state.url_signer = URLSigner(b"test-secret-key-12345678901234")
 
     original_state = server_module._state
     server_module._state = mock_state
@@ -1363,7 +1368,7 @@ class TestServiceModeReviewFindings:
         assert response.status_code == 200
         assert response.json()["build_id"] is not None
 
-    def test_materialize_build_carries_inputs_and_params_into_manifest(self, server_mode_app):
+    def test_materialize_build_carries_inputs_and_params_into_manifest(self, server_mode_auth_app):
         """The build created by the materialize route must carry input_uris and
         params, so the pull-model manifest isn't empty.
 
@@ -1371,11 +1376,13 @@ class TestServiceModeReviewFindings:
         producing an empty-input, empty-param manifest.
         """
         # Seed a real input artifact: artifact inputs are now resolved through
-        # the store (and tenant-gated), so a fictional id is a 404.
+        # the store (and tenant-gated), so a fictional id is a 404. It must
+        # carry the caller's tenant — a tenantless artifact is persisted with
+        # tenant='' and the gate compares that against the request's tenant.
         store = get_artifact_store()
-        store.create_artifact(artifact_id="seed", provenance_hash="seed-prov")
+        store.create_artifact(artifact_id="seed", provenance_hash="seed-prov", tenant="team-a")
 
-        create = server_mode_app.post(
+        create = server_mode_auth_app.post(
             "/v1/artifacts/materialize",
             json={
                 "inputs": ["strata://artifact/seed@v=1"],
@@ -1384,12 +1391,15 @@ class TestServiceModeReviewFindings:
                     "params": {"sql": "SELECT * FROM input"},
                 },
             },
+            headers=_auth_headers(),
         )
         assert create.status_code == 200, create.text
         build_id = create.json()["build_id"]
         assert build_id is not None
 
-        manifest = server_mode_app.get(f"/v1/builds/{build_id}/manifest")
+        manifest = server_mode_auth_app.get(
+            f"/v1/builds/{build_id}/manifest", headers=_auth_headers()
+        )
         assert manifest.status_code == 200, manifest.text
         data = manifest.json()
 
