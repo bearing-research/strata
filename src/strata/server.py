@@ -586,6 +586,29 @@ async def _graceful_shutdown(state: ServerState) -> None:
 _mcp_app: Starlette | None = None
 
 
+def _init_configured_artifact_store(config: StrataConfig) -> None:
+    """Create the artifact-store singleton using the configured blob backend.
+
+    ``get_artifact_store`` caches on first call, so doing this at lifespan
+    start means every later ``get_artifact_store(artifact_dir)`` returns the
+    store bound to the operator's chosen backend (S3 / GCS / Azure) rather than
+    the ``LocalBlobStore`` fallback.
+
+    A backend that can't be constructed (missing bucket, absent SDK) is fatal:
+    silently degrading to local disk is what made the misconfiguration
+    invisible in the first place, and it loses every artifact when the pod is
+    replaced.
+    """
+    from strata.artifact_store import get_artifact_store
+
+    backend = (config.artifact_blob_backend or "local").lower()
+    blob_store = None
+    if backend != "local":
+        blob_store = config.create_blob_store()
+        logger.info("artifact_blob_backend_initialized", backend=backend)
+    get_artifact_store(config.artifact_dir, blob_store=blob_store)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize server state on startup, graceful shutdown on exit."""
@@ -656,6 +679,18 @@ async def lifespan(app: FastAPI):
     # Create state only if not pre-configured (allows tests to inject custom state)
     if _state is None:
         _state = ServerState(config)
+
+    # Initialize the artifact-store singleton with the CONFIGURED blob backend,
+    # before anything else can create it with the default.
+    #
+    # ``ArtifactStore`` falls back to ``LocalBlobStore`` whenever ``blob_store``
+    # is omitted, and every call site omitted it — so ``create_blob_store`` had
+    # no production caller and ``STRATA_ARTIFACT_BLOB_BACKEND=s3`` (documented,
+    # with a full S3/GCS/Azure implementation behind it) silently wrote every
+    # artifact to local disk instead. Nothing errored; the bucket just stayed
+    # empty and blobs vanished with the pod.
+    if config.artifact_dir is not None:
+        _init_configured_artifact_store(config)
 
     # Initialize rate limiter
     rate_limit_config = RateLimitConfig(

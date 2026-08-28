@@ -1055,3 +1055,83 @@ class TestConfigCreateBlobStore:
 
         with pytest.raises(ValueError, match="requires artifact_azure_container"):
             config.create_blob_store()
+
+
+class TestConfiguredBackendIsActuallyWired:
+    """The configured blob backend must reach the artifact store.
+
+    ``ArtifactStore`` falls back to ``LocalBlobStore`` whenever ``blob_store``
+    is omitted, and every production call site omitted it — so
+    ``create_blob_store`` had no caller outside tests and
+    ``STRATA_ARTIFACT_BLOB_BACKEND=s3`` silently wrote every artifact to local
+    disk. Nothing errored; the bucket stayed empty and blobs vanished with the
+    pod.
+    """
+
+    def _init(self, config):
+        from strata.artifact_store import reset_artifact_store
+        from strata.server import _init_configured_artifact_store
+
+        reset_artifact_store()
+        try:
+            _init_configured_artifact_store(config)
+            from strata.artifact_store import get_artifact_store
+
+            return get_artifact_store(config.artifact_dir)
+        finally:
+            pass
+
+    def test_s3_backend_reaches_the_artifact_store(self, tmp_path: Path):
+        pytest.importorskip("moto")
+        import boto3
+        from moto import mock_aws
+
+        from strata.artifact_store import reset_artifact_store
+
+        with mock_aws():
+            boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="wired-bucket")
+            config = StrataConfig(
+                deployment_mode="personal",
+                artifact_dir=tmp_path / "artifacts",
+                artifact_blob_backend="s3",
+                artifact_s3_bucket="wired-bucket",
+                s3_region="us-east-1",
+            )
+            try:
+                store = self._init(config)
+                assert isinstance(store.blob_store, S3BlobStore)
+                assert store.blob_store.bucket == "wired-bucket"
+            finally:
+                reset_artifact_store()
+
+    def test_local_backend_is_unchanged(self, tmp_path: Path):
+        from strata.artifact_store import reset_artifact_store
+
+        config = StrataConfig(
+            deployment_mode="personal",
+            artifact_dir=tmp_path / "artifacts",
+        )
+        assert config.artifact_blob_backend == "local"
+        try:
+            store = self._init(config)
+            assert isinstance(store.blob_store, LocalBlobStore)
+        finally:
+            reset_artifact_store()
+
+    def test_misconfigured_backend_raises_rather_than_degrading(self, tmp_path: Path):
+        """Silently falling back to local disk is what made the
+        misconfiguration invisible — and it loses every artifact when the pod
+        is replaced. Fail the startup instead."""
+        from strata.artifact_store import reset_artifact_store
+
+        config = StrataConfig(
+            deployment_mode="personal",
+            artifact_dir=tmp_path / "artifacts",
+            artifact_blob_backend="s3",
+            artifact_s3_bucket=None,
+        )
+        try:
+            with pytest.raises(ValueError, match="requires artifact_s3_bucket"):
+                self._init(config)
+        finally:
+            reset_artifact_store()
