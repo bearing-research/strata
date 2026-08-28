@@ -337,6 +337,19 @@ class StrataConfig(BaseSettings):
     # operators get clear errors if anything's misconfigured.
     deployment_mode: Literal["service", "personal"] = "personal"
     allow_remote_clients_in_personal: bool = False
+    # Extra browser origins allowed to make cross-origin calls to this server.
+    #
+    # Same-origin is always allowed, so the bundled frontend needs nothing here.
+    # This exists for `npm run dev`, where Vite serves the UI from another port
+    # and talks to this server via VITE_STRATA_URL — set it to that dev origin,
+    # e.g. ["http://localhost:5173"].
+    #
+    # It defaults to EMPTY on purpose. The server used to send
+    # Access-Control-Allow-Origin: * , which let any page the user happened to
+    # visit drive the loopback API: personal mode has no auth, so a page could
+    # enumerate notebooks, add a cell containing arbitrary Python and execute
+    # it. Binding to loopback is no defence, because the browser runs there too.
+    cors_allow_origins: list[str] = []
     # Mount the MCP server at ``/mcp`` so an external coding agent (Claude Code,
     # etc.) can drive the live notebook session over streamable HTTP. Opt-in and
     # PERSONAL MODE ONLY — it exposes the same warm-session read/run/author
