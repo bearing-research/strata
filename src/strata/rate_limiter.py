@@ -243,9 +243,8 @@ class RateLimiter:
         overflow = len(self._client_buckets) - self.config.max_tracked_clients
         if overflow < 0:
             return
-        for client_id in sorted(self._client_last_seen, key=self._client_last_seen.get)[
-            : overflow + 1
-        ]:
+        by_age = sorted(self._client_last_seen, key=lambda cid: self._client_last_seen[cid])
+        for client_id in by_age[: overflow + 1]:
             self._client_buckets.pop(client_id, None)
             self._client_last_seen.pop(client_id, None)
 
