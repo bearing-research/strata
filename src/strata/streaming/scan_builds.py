@@ -321,7 +321,16 @@ class ScanBuildManager:
             if stream_state.build_slot is not None:
                 await stream_state.build_slot.release()
             stream_state.completed_at = time.time()
-            state.streams.schedule_cleanup(stream_state.stream_id)
+            # Pass the scan_id: schedule_cleanup() cancels any pending cleanup
+            # for this stream first, so omitting it here destroyed the
+            # scan-aware cleanup registered when the stream was created and
+            # replaced it with one that only pops _streams. ``expire_scan`` —
+            # the sole caller of pop_scan/discard_prefetch — runs from
+            # ``on_expire``, which fires only when scan_id is not None, so the
+            # ReadPlan (every Task, the pa.Schema, and any prefetched first row
+            # group) stayed resident for the life of the process. Nothing else
+            # ever removes it.
+            state.streams.schedule_cleanup(stream_state.stream_id, stream_state.plan.scan_id)
 
     async def finalize_written_blob(
         self,

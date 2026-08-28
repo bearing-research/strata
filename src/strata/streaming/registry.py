@@ -103,7 +103,20 @@ class StreamRegistry:
             task.cancel()
 
     def schedule_cleanup(self, stream_id: str, scan_id: str | None = None) -> None:
-        """Remove completed or abandoned stream state after the configured TTL."""
+        """Remove completed or abandoned stream state after the configured TTL.
+
+        Always pass ``scan_id`` when one exists. This first cancels any pending
+        cleanup for the stream, so a call that omits it *replaces* a
+        scan-aware cleanup with one that only pops ``_streams`` — and
+        ``expire_scan`` (the only caller of ``pop_scan`` / ``discard_prefetch``)
+        runs from ``on_expire``, which fires only when ``scan_id`` is not None.
+        The ReadPlan then leaks for the life of the process.
+        """
+        if scan_id is None and stream_id in self._streams:
+            existing = self._streams[stream_id]
+            plan = getattr(existing, "plan", None)
+            if plan is not None:
+                scan_id = getattr(plan, "scan_id", None)
         self.cancel_cleanup(stream_id)
 
         async def _cleanup() -> None:
