@@ -364,3 +364,71 @@ class TestDamagedEntriesSelfHeal:
         DiskCache(strata_config).put(cache_key, sample_batch)
         # The data file and its metadata sidecar.
         assert len(synced) == 2
+
+
+class TestClearPreservesTheMetadataDatabase:
+    """``clear`` documents itself as preserving ``metadata.sqlite``, but it
+    matched that name exactly and so deleted the ``-wal`` and ``-shm``
+    sidecars beside it.
+
+    Under WAL mode — which ``MetadataStore`` enables — those two files are
+    part of the database, not scratch next to it. The ``-wal`` holds committed
+    transactions not yet checkpointed into the main file, and the ``-shm`` is
+    the shared index into it that every live connection maps (the store keeps
+    one per thread). Removing them from under an open database can discard
+    committed metadata and can leave a connection raising SQLITE_IOERR.
+
+    SQLite checkpoints and removes the sidecars itself when the *last*
+    connection closes, so the live connection here is what makes the
+    difference observable — and it is also the state a running server is
+    always in.
+    """
+
+    def _live_store(self, cache_dir):
+        import sqlite3
+
+        from strata.metadata_store import MetadataStore
+
+        db = cache_dir / "metadata.sqlite"
+        store = MetadataStore(db)
+        store.put_manifest("cat", "db.t", 1, [("a.parquet", "/w/a.parquet")])
+
+        held = sqlite3.connect(str(db))
+        held.execute("PRAGMA journal_mode=WAL")
+        held.execute("SELECT count(*) FROM manifest_cache").fetchone()
+        return store, held
+
+    def test_the_wal_sidecars_survive_a_clear(self, strata_config):
+        cache_dir = strata_config.cache_dir
+        store, held = self._live_store(cache_dir)
+        try:
+            assert {"metadata.sqlite-wal", "metadata.sqlite-shm"} <= {
+                p.name for p in cache_dir.iterdir()
+            }
+
+            DiskCache(strata_config).clear()
+
+            names = {p.name for p in cache_dir.iterdir()}
+            assert "metadata.sqlite" in names
+            assert "metadata.sqlite-wal" in names
+            assert "metadata.sqlite-shm" in names
+        finally:
+            held.close()
+
+    def test_the_metadata_is_still_readable_after_a_clear(self, strata_config):
+        cache_dir = strata_config.cache_dir
+        store, held = self._live_store(cache_dir)
+        try:
+            DiskCache(strata_config).clear()
+            assert store.get_manifest("cat", "db.t", 1) is not None
+        finally:
+            held.close()
+
+    def test_clear_still_removes_cached_row_groups(self, strata_config, sample_batch, cache_key):
+        """The preservation must not cost ``clear`` its actual job."""
+        cache = DiskCache(strata_config)
+        cache.put(cache_key, sample_batch)
+        assert cache.get_as_stream_bytes(cache_key) is not None
+
+        cache.clear()
+        assert cache.get_as_stream_bytes(cache_key) is None

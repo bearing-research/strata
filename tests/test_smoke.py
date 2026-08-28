@@ -631,8 +631,6 @@ class TestEndToEnd:
 
     def test_cache_warm_endpoint(self, server_with_client):
         """Test the /v1/cache/warm endpoint."""
-        import time as _time
-
         import requests
 
         config = server_with_client["config"]
@@ -649,33 +647,17 @@ class TestEndToEnd:
         response = requests.post(f"http://127.0.0.1:{config.port}/v1/cache/clear")
         assert response.status_code == 200
 
-        # Warm the cache for our table. On Linux + Python 3.13/3.14 + tmpfs
-        # the first warm against a freshly-written catalog.db
-        # intermittently hits SQLITE_IOERR ("disk I/O error") inside
-        # pyiceberg's catalog read — the server's SqlCatalog opens a
-        # connection on the same path the fixture just wrote, and the
-        # combo of tmpfs and 3.x GC ordering occasionally trips
-        # ADBC's cursor finalizer ("Underflow in closing this
-        # AdbcStatement") before the read completes. The endpoint is
-        # already idempotent (cache warm safely retries on its own
-        # internally and again on the next call); the second warm
-        # below verifies that behaviour. Retry with backoff on that
-        # specific symptom so this test absorbs the known environmental
-        # flake — a single retry has been seen to lose both attempts —
-        # without ever retrying past a real (non-I/O) error.
-        result = None
-        io_backoffs = (0.5, 1.0, 2.0)
-        for attempt in range(len(io_backoffs) + 1):
-            response = requests.post(warm_url, json=warm_payload)
-            assert response.status_code == 200
-            result = response.json()
-            if not result["errors"]:
-                break
-            io_flake = any("disk I/O error" in err for err in result["errors"])
-            if io_flake and attempt < len(io_backoffs):
-                _time.sleep(io_backoffs[attempt])
-                continue
-            break
+        # This clear-then-warm sequence is what used to make this test flaky
+        # with "disk I/O error". It was never environmental: ``cache/clear``
+        # deleted the metadata database's -wal and -shm sidecars, and the warm
+        # that followed read that database through a now-broken connection.
+        # The retry-with-backoff that used to live here could not have helped,
+        # because SQLITE_IOERR poisons the connection for good. Fixed in
+        # ``DiskCache.clear``; no retry, so a recurrence is visible instead of
+        # absorbed.
+        response = requests.post(warm_url, json=warm_payload)
+        assert response.status_code == 200
+        result = response.json()
 
         # Surface the planner / fetcher error first so a CI failure
         # shows the actual exception text instead of just "0 == 1".
