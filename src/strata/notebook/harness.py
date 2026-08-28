@@ -248,6 +248,8 @@ def execute_cell(
     inputs: dict,
     mutation_defines: list[str] | None = None,
     loop_until_expr: str | None = None,
+    stdout_capture: io.StringIO | None = None,
+    stderr_capture: io.StringIO | None = None,
 ) -> tuple[dict, list[Any], str, str, list[dict], dict[str, Any] | None]:
     """Execute a cell and return its outputs, displays, captured streams, mutations, and loop state.
 
@@ -262,6 +264,11 @@ def execute_cell(
     dict carries ``until_reached`` (truthy result of the expression) and,
     on failure to compile/evaluate, an ``error`` field. When the caller
     passes ``None``, ``loop_state`` is ``None`` and no loop work happens.
+
+    ``stdout_capture`` / ``stderr_capture`` let the caller own the buffers. The
+    return value only carries the captured text on success, so a caller that
+    wants the print trail of a cell that *raised* has to hold the buffers
+    itself — which is what the batch and pool paths already do.
     """
     namespace = dict(inputs)
     display_capture = _display.DisplayCapture()
@@ -269,8 +276,8 @@ def execute_cell(
     mutation_set = set(mutation_defines or [])
 
     old_stdout, old_stderr = sys.stdout, sys.stderr
-    stdout_capture = io.StringIO()
-    stderr_capture = io.StringIO()
+    stdout_capture = io.StringIO() if stdout_capture is None else stdout_capture
+    stderr_capture = io.StringIO() if stderr_capture is None else stderr_capture
 
     try:
         sys.stdout = stdout_capture
@@ -763,6 +770,11 @@ def main():
     manifest: dict = {}
     stdout_text = ""
     stderr_text = ""
+    # Owned here, not inside execute_cell: a cell that raises never returns its
+    # captured streams, and the print trail is exactly what's wanted when the
+    # cell failed. The batch and pool paths already keep theirs this way.
+    stdout_buffer = io.StringIO()
+    stderr_buffer = io.StringIO()
     ambient_client: Any = None
 
     try:
@@ -789,6 +801,8 @@ def main():
                 inputs,
                 mutation_defines=manifest.get("mutation_defines") or [],
                 loop_until_expr=loop_until_expr,
+                stdout_capture=stdout_buffer,
+                stderr_capture=stderr_buffer,
             )
 
         serialized: dict[str, Any] = {}
@@ -834,8 +848,8 @@ def main():
             "error": str(e),
             "traceback": traceback.format_exc(),
             "variables": {},
-            "stdout": stdout_text,
-            "stderr": stderr_text,
+            "stdout": stdout_buffer.getvalue() or stdout_text,
+            "stderr": stderr_buffer.getvalue() or stderr_text,
             "mutation_warnings": [],
         }
         sys.exit(1)
