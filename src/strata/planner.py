@@ -129,6 +129,38 @@ def _join_s3_path(base: str, relative: str) -> str:
     return _normalize_s3_path(f"{base}/{relative}")
 
 
+class UnsupportedTableFormatError(RuntimeError):
+    """The table uses an Iceberg feature Strata cannot read correctly."""
+
+
+def _assert_no_row_level_deletes(data_files, table_identity: str) -> None:
+    """Raise when any scan task carries positional / equality delete files.
+
+    Strata reads Parquet row groups directly and applies no delete files, so a
+    merge-on-read table would return rows that have been deleted — and cache
+    them under an immutable snapshot key, where they are served forever. Fail
+    loudly instead; a wrong answer is worse than no answer.
+    """
+    affected = 0
+    for file_task in data_files:
+        # ``delete_files`` is a pyiceberg FileScanTask field. Guard with
+        # getattr so a catalog implementation that omits it (or a future
+        # pyiceberg rename) degrades to "no deletes" rather than crashing the
+        # planner on every scan.
+        if getattr(file_task, "delete_files", None):
+            affected += 1
+    if not affected:
+        return
+    raise UnsupportedTableFormatError(
+        f"Table {table_identity} uses Iceberg merge-on-read deletes "
+        f"({affected} data file(s) have positional or equality delete files). "
+        "Strata reads Parquet row groups directly and does not apply delete "
+        "files yet, so scanning this table would return deleted rows and cache "
+        "them under the snapshot key. Compact the table (rewrite_data_files) "
+        "to copy-on-write, or scan a snapshot taken before the deletes."
+    )
+
+
 class ReadPlanner:
     """Plans reads from Iceberg tables with row-group pruning.
 
@@ -251,6 +283,23 @@ class ReadPlanner:
                     # fall back to unfiltered scan - row-group pruning will still work
                     scan = table.scan(snapshot_id=resolved_snapshot_id)
                     data_files = list(scan.plan_files())
+
+                # Refuse merge-on-read tables rather than return wrong rows.
+                #
+                # pyiceberg attaches each data file's positional / equality
+                # delete files to the scan task, but the planner reads only
+                # ``file.file_path`` and the fetcher does a raw
+                # ``read_row_group``, so deletes were never applied: a scan of
+                # a table with a pending DELETE returned the deleted rows. And
+                # because the row group is then cached under an immutable
+                # snapshot key, the wrong rows are served from cache forever
+                # (there is no invalidation by design).
+                #
+                # Silently returning deleted rows is the one outcome this
+                # codebase's conservative-correctness posture rules out, so
+                # until deletes are applied (see the tracking issue) a MOR
+                # table is a hard error, not a quiet approximation.
+                _assert_no_row_level_deletes(data_files, table_identity_str)
 
                 # Build manifest entries with resolved paths
                 entries = []

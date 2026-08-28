@@ -466,3 +466,70 @@ class TestIcebergExpressionFallback:
 
         # Should still get all data files (no pruning possible)
         assert plan.snapshot_id > 0
+
+
+class TestMergeOnReadDeletesRefused:
+    """Strata reads Parquet row groups directly and applies no Iceberg delete
+    files, so a merge-on-read table would return rows that have been deleted —
+    and cache them under an immutable snapshot key, where they are served
+    forever (there is no invalidation by design). Until deletes are applied,
+    such a table must be a hard error rather than a quiet wrong answer.
+    """
+
+    def _task(self, deletes):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            file=SimpleNamespace(file_path="s3://b/data.parquet"), delete_files=deletes
+        )
+
+    def test_raises_when_any_task_carries_delete_files(self):
+        from strata.planner import UnsupportedTableFormatError, _assert_no_row_level_deletes
+
+        tasks = [self._task(set()), self._task({"pos-delete.parquet"})]
+        with pytest.raises(UnsupportedTableFormatError) as exc:
+            _assert_no_row_level_deletes(tasks, "db.events")
+        message = str(exc.value)
+        assert "db.events" in message
+        assert "merge-on-read" in message
+        # The message must tell the operator what to do about it.
+        assert "rewrite_data_files" in message
+
+    def test_passes_when_no_task_has_deletes(self):
+        from strata.planner import _assert_no_row_level_deletes
+
+        _assert_no_row_level_deletes([self._task(set()), self._task(None)], "db.events")
+
+    def test_tolerates_tasks_without_the_attribute(self):
+        """A catalog implementation that omits delete_files (or a pyiceberg
+        rename) must degrade to 'no deletes', not crash every scan."""
+        from types import SimpleNamespace
+
+        from strata.planner import _assert_no_row_level_deletes
+
+        _assert_no_row_level_deletes(
+            [SimpleNamespace(file=SimpleNamespace(file_path="x"))], "db.events"
+        )
+
+    def test_planner_refuses_a_mor_table(self, temp_warehouse, strata_config, monkeypatch):
+        """The guard is actually wired into planning (pyiceberg's own delete()
+        rewrites copy-on-write, so a real MOR table needs Spark/Flink — the
+        scan tasks are faked here instead)."""
+        from strata.planner import ReadPlanner, UnsupportedTableFormatError
+
+        planner = ReadPlanner(strata_config)
+
+        real_plan_files = None
+
+        def fake_plan_files(self_scan):
+            task = list(real_plan_files(self_scan))[0]
+            task.delete_files = {"pos-delete.parquet"}
+            return [task]
+
+        import pyiceberg.table as ib_table
+
+        real_plan_files = ib_table.DataScan.plan_files
+        monkeypatch.setattr(ib_table.DataScan, "plan_files", fake_plan_files)
+
+        with pytest.raises(UnsupportedTableFormatError, match="merge-on-read"):
+            planner.plan(temp_warehouse["table_uri"])
