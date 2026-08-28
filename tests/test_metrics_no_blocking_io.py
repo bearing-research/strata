@@ -70,3 +70,35 @@ async def test_prometheus_reports_the_offloaded_values(monkeypatch, tmp_path):
 
     assert "strata_cache_bytes_current 4242" in text
     assert "strata_cache_entries_current 17" in text
+
+
+class TestPrometheusLabelEscaping:
+    """Label values must be escaped per the exposition format.
+
+    The table-metric lines carried a comment claiming to escape ``table_id``
+    and then interpolated it raw. A table or tenant name containing a quote
+    emits ``…{table="a"b"} 5``, which fails the scrape parse and drops the
+    **entire** metrics payload — not just that series. A newline could inject
+    fabricated series into the operator's TSDB.
+    """
+
+    def test_quote_is_escaped(self):
+        from strata.api.routers.metrics_health import _prom_label
+
+        assert _prom_label('ns.a"b') == 'ns.a\\"b'
+
+    def test_backslash_is_escaped(self):
+        from strata.api.routers.metrics_health import _prom_label
+
+        assert _prom_label("a\\b") == "a\\\\b"
+
+    def test_newline_is_escaped(self):
+        from strata.api.routers.metrics_health import _prom_label
+
+        assert _prom_label("line1\nline2") == "line1\\nline2"
+        assert "\n" not in _prom_label("line1\nline2")
+
+    def test_ordinary_names_are_unchanged(self):
+        from strata.api.routers.metrics_health import _prom_label
+
+        assert _prom_label("test_db.events") == "test_db.events"
