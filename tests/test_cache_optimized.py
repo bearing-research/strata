@@ -300,3 +300,67 @@ class TestMmapFileReading:
         # Should raise an exception (IOError from Rust or FileNotFoundError from Python)
         with pytest.raises(Exception):
             fast_io.read_file_mmap(str(nonexistent))
+
+
+class TestDamagedEntriesSelfHeal:
+    """A damaged entry on the zero-parse path used to poison a key forever.
+
+    ``get`` parses Arrow and drops an entry that fails, so it recovers on its
+    own. ``get_as_stream_bytes`` deliberately skips parsing — that is the point
+    of the hot path — and so noticed nothing: the damaged bytes went straight
+    to the network, and because cache keys are immutable snapshot IDs that are
+    never invalidated, the *same* damaged entry was served again on every later
+    request for that row group. There is no expiry to eventually clear it.
+
+    The stream's fixed head and end-of-stream markers make the check free: the
+    bytes are already in memory.
+    """
+
+    @pytest.mark.parametrize(
+        "label,damage",
+        [
+            ("truncated", lambda raw: raw[: len(raw) // 2]),
+            ("zeroed", lambda raw: b"\x00" * len(raw)),
+            ("tail_lost", lambda raw: raw[:64] + b"\x00" * (len(raw) - 64)),
+            ("emptied", lambda raw: b""),
+        ],
+    )
+    def test_damaged_entry_is_a_miss_and_is_dropped(
+        self, strata_config, sample_batch, cache_key, label, damage
+    ):
+        cache = DiskCache(strata_config)
+        cache.put(cache_key, sample_batch)
+        path = cache._key_path(cache_key)
+        path.write_bytes(damage(path.read_bytes()))
+
+        assert cache.get_as_stream_bytes(cache_key) is None, label
+        # Dropped, so the next fetch repopulates it instead of re-serving damage.
+        assert not path.exists(), label
+        assert not path.with_suffix(CACHE_META_EXTENSION).exists(), label
+
+    def test_an_intact_entry_round_trips(self, strata_config, sample_batch, cache_key):
+        cache = DiskCache(strata_config)
+        cache.put(cache_key, sample_batch)
+
+        raw = cache.get_as_stream_bytes(cache_key)
+        assert raw is not None
+        assert ipc.open_stream(pa.py_buffer(raw)).read_all().num_rows == sample_batch.num_rows
+
+    def test_writes_are_flushed_before_the_rename(
+        self, strata_config, sample_batch, cache_key, monkeypatch
+    ):
+        # os.replace is atomic for observers but not durable: without the flush
+        # a crash can apply the rename and lose the data blocks behind it.
+        import strata.cache as cache_module
+
+        synced = []
+        real_fsync = cache_module.os.fsync
+        monkeypatch.setattr(
+            cache_module.os,
+            "fsync",
+            lambda fd: (synced.append(fd), real_fsync(fd))[1],
+        )
+
+        DiskCache(strata_config).put(cache_key, sample_batch)
+        # The data file and its metadata sidecar.
+        assert len(synced) == 2
