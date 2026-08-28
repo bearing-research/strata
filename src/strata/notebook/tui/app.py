@@ -65,6 +65,21 @@ def _glyph(status: str) -> str:
     return _STATUS_GLYPHS.get(status, "?")
 
 
+def _literal(value: Any) -> Any:
+    """Wrap a bare string so Rich/Textual render it verbatim.
+
+    Everything the TUI shows — console text, tracebacks, previews, cell source,
+    data values — is arbitrary user content, and a bare ``str`` handed to a
+    ``Static`` or a table cell is parsed as console markup. That is not
+    cosmetic: the traceback line ``print(data[key])`` renders as ``print(data)``
+    (``key`` is read as a style name), and a path such as ``counts[/tmp/x]``
+    raises ``MarkupError`` and takes the whole panel down. Renderables (Syntax,
+    Text, Markdown, tables, images) already carry their own styling and pass
+    through untouched.
+    """
+    return Text(value) if isinstance(value, str) else value
+
+
 def _source_preview(source: str) -> str:
     """First line of actual code for the cell-list label.
 
@@ -554,7 +569,7 @@ class NotebookTUI(App[None]):
 
     def _render_agent(self) -> None:
         body = "\n".join(self.vm.agent_feed) if self.vm.agent_feed else "(no agent activity)"
-        self.query_one("#agent", Static).update(body)
+        self.query_one("#agent", Static).update(_literal(body))
         # Reflect agent status on the tab label; the header banner has it too.
         label = f"Agent · {self.vm.agent_status}" if self.vm.agent_status else "Agent"
         try:
@@ -590,7 +605,9 @@ class NotebookTUI(App[None]):
         table.clear()
         for cid in self.vm.cell_order:
             cell = self.vm.cells[cid]
-            table.add_row(_glyph(cell.status), self._cell_label(cell), _time_str(cell), key=cid)
+            table.add_row(
+                _glyph(cell.status), _literal(self._cell_label(cell)), _time_str(cell), key=cid
+            )
         if self.vm.cell_order:
             if self._selected not in self.vm.cells:
                 self._selected = self.vm.cell_order[0]
@@ -621,7 +638,7 @@ class NotebookTUI(App[None]):
         status_col, cell_col, time_col = self._col_keys
         try:
             table.update_cell(cid, status_col, _glyph(cell.status))
-            table.update_cell(cid, cell_col, self._cell_label(cell))
+            table.update_cell(cid, cell_col, _literal(self._cell_label(cell)))
             table.update_cell(cid, time_col, _time_str(cell))
         except Exception:  # noqa: BLE001 — row may not exist yet (pre-snapshot frame)
             return
@@ -638,8 +655,8 @@ class NotebookTUI(App[None]):
         cell = self.vm.cells.get(cid)
         if cell is None:
             return
-        self.query_one("#source", Static).update(_source_renderable(cell))
-        self.query_one("#testsrc-body", Static).update(_test_source_renderable(cell))
+        self.query_one("#source", Static).update(_literal(_source_renderable(cell)))
+        self.query_one("#testsrc-body", Static).update(_literal(_test_source_renderable(cell)))
         # Render a pure-markdown output with Rich, a single tabular output as an
         # interactive (paged/sortable) DataTable when it has a backing artifact,
         # a single image inline; otherwise the static preview / plain-text summary.
@@ -668,10 +685,12 @@ class NotebookTUI(App[None]):
             elif image is not None:
                 output.update(image)
             else:
-                output.update(_render_outputs(cell))
+                output.update(_literal(_render_outputs(cell)))
 
-        self.query_one("#console-body", Static).update(cell.console or "(no console output)")
-        self.query_one("#results-body", Static).update(_render_tests(cell))
+        self.query_one("#console-body", Static).update(
+            _literal(cell.console or "(no console output)")
+        )
+        self.query_one("#results-body", Static).update(_literal(_render_tests(cell)))
 
     # -- data viewer ---------------------------------------------------------
 
@@ -722,9 +741,9 @@ class NotebookTUI(App[None]):
         table = self.query_one("#output-table", DataTable)
         table.clear(columns=True)
         if columns:
-            table.add_columns(*columns)
+            table.add_columns(*[_literal(c) for c in columns])
         for row in rows:
-            table.add_row(*[_cell_str(v) for v in row])
+            table.add_row(*[_literal(_cell_str(v)) for v in row])
         start = view.offset + 1 if rows else 0
         end = view.offset + len(rows)
         sort_note = f"  ·  sort {view.sort_by} {view.sort_dir}" if view.sort_by else ""
@@ -963,14 +982,14 @@ def _render_table(columns: list[str], preview: list[Any], total: int | None) -> 
     shown = columns[:_MAX_TABLE_COLS]
     extra_cols = len(columns) - len(shown)
     for name in shown:
-        table.add_column(name, overflow="ellipsis", max_width=24, no_wrap=True)
+        table.add_column(_literal(name), overflow="ellipsis", max_width=24, no_wrap=True)
     if extra_cols:
         table.add_column("…")
     for row in preview[:20]:
         if isinstance(row, list):
-            cells = [_cell_str(v) for v in row[: len(shown)]]
+            cells = [_literal(_cell_str(v)) for v in row[: len(shown)]]
         elif isinstance(row, dict):  # defensive: map by column name
-            cells = [_cell_str(row.get(name)) for name in shown]
+            cells = [_literal(_cell_str(row.get(name))) for name in shown]
         else:
             continue
         if extra_cols:
