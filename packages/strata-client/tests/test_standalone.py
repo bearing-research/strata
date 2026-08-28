@@ -199,6 +199,8 @@ class TestOptionalExtrasAreIndependentlyUsable:
 
         with pytest.raises(AttributeError):
             integration.no_such_export
+
+
 class TestJsonArtifactRoundTrip:
     """``put_json`` and ``get_json`` disagreed about the encoding.
 
