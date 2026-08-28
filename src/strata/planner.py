@@ -161,6 +161,54 @@ def _assert_no_row_level_deletes(data_files, table_identity: str) -> None:
     )
 
 
+def _assert_file_satisfies_scan(
+    *,
+    expected,
+    actual,
+    columns: list[str] | None,
+    file_path: str,
+    table_identity: str,
+) -> None:
+    """Raise when *actual* can't serve the same scan as *expected*.
+
+    With an explicit projection only the requested columns have to be present
+    in every file — that is the common, still-safe case after an
+    ``ADD COLUMN`` (scanning the pre-existing columns keeps working). Without a
+    projection every file must expose the same field names, because the
+    per-row-group segments are concatenated by ``IncrementalIpcMerger``, which
+    requires identical schemas.
+    """
+    if expected is None or actual is None:
+        return
+    expected_names = set(expected.names)
+    actual_names = set(actual.names)
+
+    if columns:
+        missing = [c for c in columns if c not in actual_names]
+        if missing:
+            raise UnsupportedTableFormatError(
+                f"Table {table_identity} has files with differing schemas "
+                f"(Iceberg schema evolution): {file_path} is missing requested "
+                f"column(s) {missing}. Strata does not reconcile per-file "
+                f"schemas yet; project only columns present in every data file, "
+                f"or compact the table (rewrite_data_files) so all files share "
+                f"one schema."
+            )
+        return
+
+    if expected_names != actual_names:
+        added = sorted(expected_names - actual_names)
+        removed = sorted(actual_names - expected_names)
+        raise UnsupportedTableFormatError(
+            f"Table {table_identity} has files with differing schemas "
+            f"(Iceberg schema evolution): {file_path} differs from the first "
+            f"data file (missing {added}, extra {removed}). An unprojected scan "
+            f"concatenates row groups and requires one schema. Project an "
+            f"explicit column list common to all files, or compact the table "
+            f"(rewrite_data_files)."
+        )
+
+
 class ReadPlanner:
     """Plans reads from Iceberg tables with row-group pruning.
 
@@ -339,9 +387,29 @@ class ReadPlanner:
             if pq_meta is None:
                 raise RuntimeError(f"Failed to load Parquet metadata for {actual_path}")
 
-            # Capture schema from first file (all files should have same schema)
+            # Capture the schema from the first file, then verify every later
+            # file can actually satisfy this scan.
+            #
+            # Iceberg schema evolution does NOT rewrite existing data files, so
+            # after ALTER TABLE ADD COLUMN the older files lack the new column.
+            # Nothing here reconciled that: a projection naming the new column
+            # raised KeyError from read_row_group on the old files, and an
+            # unprojected scan produced row groups with differing schemas that
+            # IncrementalIpcMerger rejects — both *after* the 200 and the first
+            # chunks were already on the wire, i.e. a truncated response rather
+            # than an error the client can act on.
+            #
+            # Detect it while planning, where it can still be a clean failure.
             if arrow_schema is None:
                 arrow_schema = pq_meta.arrow_schema
+            else:
+                _assert_file_satisfies_scan(
+                    expected=arrow_schema,
+                    actual=pq_meta.arrow_schema,
+                    columns=columns,
+                    file_path=file_path,
+                    table_identity=table_identity_str,
+                )
 
             # Build column index map once per file and compile filters
             # This avoids O(num_columns × num_filters × num_row_groups) scanning
