@@ -449,19 +449,26 @@ async def garbage_collect_artifacts(
     store: PersonalModeStore,
     tenant_filter: CurrentTenant,
     max_age_days: float = 7.0,
+    collect_latest: bool = False,
 ):
-    """Garbage collect unreferenced artifacts (personal mode only).
+    """Garbage collect unreachable artifacts (personal mode only).
 
-    Deletes artifacts that:
-    1. Have no name pointer referencing them
-    2. Are older than max_age_days
-    3. Are in "ready" or "failed" state
+    Deletes artifact versions that:
+    1. Have no name **or alias** pointing at them
+    2. Are not the latest version of their id (unless ``collect_latest``)
+    3. Are older than ``max_age_days``
+    4. Are in "ready", "superseded" or "failed" state
 
-    This is safe to run periodically to clean up temporary artifacts
-    that were never named or whose names were deleted.
+    The latest version of an id is spared because that is the artifact's
+    *current value*: ``get_latest_version(id)`` is how the store resolves it,
+    and for some producers it is the only handle that exists — notebook cell
+    outputs are stored under a canonical id and never named, so the previous
+    rule treated every live notebook variable as garbage.
 
     Args:
-        max_age_days: Maximum age in days for unreferenced artifacts (default 7)
+        max_age_days: Maximum age in days for unreachable artifacts (default 7)
+        collect_latest: Also reclaim current values (see above). Off by
+            default because it deletes live state.
 
     Returns:
         GC statistics including deleted count and bytes freed
@@ -472,6 +479,7 @@ async def garbage_collect_artifacts(
     result = store.garbage_collect(
         max_age_days=max_age_days,
         tenant=tenant_filter,
+        collect_latest=collect_latest,
     )
     return result
 

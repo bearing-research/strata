@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -37,6 +38,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from strata.blob_store import BlobStore
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -2684,17 +2687,26 @@ class ArtifactStore:
         self,
         max_age_days: float = 7.0,
         tenant: str | None = None,
+        collect_latest: bool = False,
     ) -> dict:
-        """Delete unreferenced artifacts older than max_age.
+        """Delete unreachable artifacts older than max_age.
 
-        An artifact is "unreferenced" if no name pointer points to it.
-        Only deletes artifacts in "ready", "superseded", or "failed" state
-        older than max_age.
+        An artifact version is reachable when a name or alias points at it, or
+        when it is the latest version of its id — ``get_latest_version(id)`` is
+        how the store resolves "the current value", and for some producers it
+        is the only handle that ever exists (notebook cell outputs are stored
+        as ``nb_…_var_…`` and never named). Only "ready", "superseded" or
+        "failed" versions older than ``max_age_days`` are considered.
 
         Args:
-            max_age_days: Maximum age in days for unreferenced artifacts
+            max_age_days: Maximum age in days for unreachable artifacts
             tenant: Optional tenant filter. When provided, includes legacy
                 tenantless artifacts for backwards compatibility.
+            collect_latest: Also collect current values — the latest version of
+                an unnamed id. Off by default because it deletes live state
+                (this is what made a routine GC wipe week-old notebooks); turn
+                it on only for a store you are deliberately reclaiming, where
+                "unnamed and old" really does mean garbage.
 
         Returns:
             Dictionary with GC statistics
@@ -2703,11 +2715,28 @@ class ArtifactStore:
         try:
             cutoff = time.time() - (max_age_days * 86400)
 
-            # Find unreferenced artifacts older than cutoff. "Referenced"
-            # means a NAME or an ALIAS points at the version — aliases pin
-            # registry entries (e.g. champion on a superseded version), and
-            # collecting an aliased artifact would leave a dangling pointer
-            # to a deleted model.
+            # Find unreachable artifacts older than cutoff.
+            #
+            # "Reachable" is deliberately wider than "has a name pointer":
+            #
+            # - a NAME or an ALIAS points at the version — aliases pin registry
+            #   entries (e.g. champion on a superseded version), and collecting
+            #   an aliased artifact would leave a dangling pointer;
+            # - it is the LATEST version of its artifact id. ``get_latest_version(id)``
+            #   is how the store resolves "the current value" and is the ONLY
+            #   handle some producers ever use — notebook cell outputs are stored
+            #   as ``nb_{notebook}_cell_{cell}_var_{name}`` and never given a name
+            #   or alias, so the old rule classified every one of them as garbage.
+            #   A GC run with the default 7-day cutoff deleted the live state of
+            #   any notebook older than a week, and the next cell run found its
+            #   upstream missing. Collecting superseded versions is still fine —
+            #   that is what makes GC useful — but never the current one.
+            #
+            # Deliberately NOT covered here: artifacts reachable only through
+            # another artifact's ``input_versions`` lineage. Those are protected
+            # in practice by the latest-version rule (a pipeline's inputs are
+            # the latest versions of their own ids); a full lineage walk is
+            # tracked separately.
             query = """
                 SELECT av.id, av.version, av.byte_size
                 FROM artifact_versions av
@@ -2718,6 +2747,14 @@ class ArtifactStore:
                   AND av.state IN ('ready', 'superseded', 'failed')
                   AND av.created_at < ?
             """
+            if not collect_latest:
+                query += """
+                  AND av.version < (
+                      SELECT MAX(latest.version)
+                      FROM artifact_versions latest
+                      WHERE latest.id = av.id
+                  )
+                """
             params: list[float | str] = [cutoff]
             if tenant is not None:
                 query += " AND (av.tenant = ? OR av.tenant IS NULL)"
@@ -2729,22 +2766,41 @@ class ArtifactStore:
             deleted_count = 0
             deleted_bytes = 0
 
+            # Metadata first, then blobs — the same ordering ``delete_artifact``
+            # uses. The reverse order left a window where a crash (or a raising
+            # blob backend) mid-loop had already removed blobs while the
+            # metadata DELETEs were still uncommitted and rolled back, leaving
+            # rows in state 'ready' whose blob no longer exists: every later
+            # read returns a ready artifact with no data, and verify_artifacts
+            # reports it as missing_blob. Losing a blob whose row is gone is
+            # merely wasted bytes; the reverse is a corrupt store.
+            collected: list[tuple[str, int]] = []
             for row in rows:
                 artifact_id, version, byte_size = row["id"], row["version"], row["byte_size"] or 0
 
-                # Delete blob via blob store
-                self.blob_store.delete_blob(artifact_id, version)
-
-                # Delete metadata
                 conn.execute(
                     "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
                     (artifact_id, version),
                 )
 
+                collected.append((artifact_id, version))
                 deleted_count += 1
                 deleted_bytes += byte_size
 
             conn.commit()
+
+            # Best-effort blob cleanup after the metadata is durably gone. A
+            # failure here only orphans bytes, so it must not abort the run.
+            for artifact_id, version in collected:
+                try:
+                    self.blob_store.delete_blob(artifact_id, version)
+                except Exception:
+                    logger.exception(
+                        "garbage_collect: failed to delete blob for %s@v=%d "
+                        "(metadata already removed; bytes orphaned)",
+                        artifact_id,
+                        version,
+                    )
 
             return {
                 "deleted_count": deleted_count,

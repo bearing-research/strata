@@ -606,7 +606,9 @@ class TestArtifactLifecycle:
             assert usage_before["unreferenced_count"] >= 1
 
             # GC with max_age_days=0 should delete the unreferenced one immediately
-            gc_result = client.garbage_collect(max_age_days=0)
+            # collect_latest: the unnamed artifact above is a single-version
+            # current value, which GC now spares by default.
+            gc_result = client.garbage_collect(max_age_days=0, collect_latest=True)
             assert gc_result["deleted_count"] >= 1
 
             # Named artifact should still exist
