@@ -1066,6 +1066,24 @@ class TestPreflightSizeRespectsProjection:
 
         assert warm == cold
 
+    def test_a_projection_below_the_limit_is_no_longer_rejected(self, temp_warehouse, tmp_path):
+        """The user-visible symptom: the pre-flight 413 fires on
+        ``plan.estimated_bytes > max_response_bytes``. With a limit set
+        between the projected and unprojected sizes, the projected scan used
+        to trip it because it was measured as the whole row group."""
+        from strata.config import StrataConfig
+        from strata.planner import ReadPlanner
+
+        planner = ReadPlanner(StrataConfig(cache_dir=tmp_path / "c"))
+        uri = temp_warehouse["table_uri"]
+
+        full = planner.plan(uri).estimated_bytes
+        projected = planner.plan(uri, columns=["id"]).estimated_bytes
+
+        # A limit the narrow scan fits under and the wide scan does not.
+        limit = (full + projected) // 2
+        assert projected <= limit < full
+
     def test_an_unprojected_scan_is_unchanged(self, temp_warehouse, tmp_path):
         from strata.config import StrataConfig
         from strata.planner import ReadPlanner
