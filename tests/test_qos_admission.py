@@ -141,3 +141,72 @@ async def test_per_client_cap_rejects_second_concurrent_admit(monkeypatch):
     # The first admission still releases cleanly.
     await first.release()
     assert qos.active_scans == 0
+
+
+@pytest.mark.asyncio
+async def test_two_admissions_sharing_a_scan_id_both_release_their_slot(monkeypatch):
+    """``_scan_client`` is keyed by scan_id, and nothing stops two admissions
+    sharing one — ``GET /v1/streams/{id}`` has no already-consumed guard, so a
+    client retry or a proxy retry produces two handlers for the same stream.
+
+    Release used to re-derive the semaphore from that table, so the first
+    release popped the entry and the second found nothing and never released
+    its slot: the client permanently lost capacity and was eventually 429'd
+    forever."""
+    _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter())
+    qos = QoSAdmission(StrataConfig(per_client_interactive=2))
+
+    first = await qos.admit(_FakePlan(), _FakeRequest(), "same-scan")
+    second = await qos.admit(_FakePlan(), _FakeRequest(), "same-scan")
+
+    await first.release()
+    await second.release()
+
+    # Both per-client slots are back: a fresh pair of admits still succeeds.
+    third = await qos.admit(_FakePlan(), _FakeRequest(), "scan-a")
+    fourth = await qos.admit(_FakePlan(), _FakeRequest(), "scan-b")
+    await third.release()
+    await fourth.release()
+
+    assert qos.active_scans == 0
+
+
+@pytest.mark.asyncio
+async def test_release_survives_client_semaphore_eviction(monkeypatch):
+    """``_get_client_semaphore`` *creates* one when the entry is missing, so a
+    release after an LRU eviction landed on a brand-new semaphore and ratcheted
+    its value above the cap — repeatable, so the per-client limit grew without
+    bound. Releasing the held object instead is immune."""
+    _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter())
+    qos = QoSAdmission(StrataConfig(per_client_interactive=1))
+
+    admission = await qos.admit(_FakePlan(), _FakeRequest(), "scan-evict")
+
+    # Simulate the LRU dropping this client's entry while the scan is in flight.
+    qos._client_interactive_semaphores.clear()
+    qos._client_bulk_semaphores.clear()
+
+    await admission.release()
+
+    # The cap still holds: one concurrent admit, and the second is rejected.
+    held = await qos.admit(_FakePlan(), _FakeRequest(), "scan-after-1")
+    with pytest.raises(QoSRejected) as excinfo:
+        await qos.admit(_FakePlan(), _FakeRequest(), "scan-after-2")
+    assert excinfo.value.error == "per_client_limit"
+    await held.release()
+
+
+@pytest.mark.asyncio
+async def test_double_release_is_idempotent(monkeypatch):
+    """A second release would otherwise drive the counters negative and hand
+    the same slot back twice."""
+    limiter = _FakeLimiter()
+    _install_registry(monkeypatch, limiter, _FakeLimiter())
+    qos = QoSAdmission(StrataConfig(per_client_interactive=1))
+
+    admission = await qos.admit(_FakePlan(), _FakeRequest(), "scan-double")
+    await admission.release()
+    await admission.release()
+
+    assert limiter.released == 1
+    assert qos.active_scans == 0
