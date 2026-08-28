@@ -456,6 +456,7 @@ class ArtifactStore:
         conn = sqlite3.connect(str(self.db_path), timeout=30.0)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys = ON;")
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -2778,6 +2779,12 @@ class ArtifactStore:
             for row in rows:
                 artifact_id, version, byte_size = row["id"], row["version"], row["byte_size"] or 0
 
+                # Clean up child table entries before deleting the version
+                conn.execute(
+                    "DELETE FROM artifact_tags WHERE artifact_id = ? AND version = ?",
+                    (artifact_id, version),
+                )
+
                 conn.execute(
                     "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
                     (artifact_id, version),
@@ -2786,8 +2793,6 @@ class ArtifactStore:
                 collected.append((artifact_id, version))
                 deleted_count += 1
                 deleted_bytes += byte_size
-
-            conn.commit()
 
             # Best-effort blob cleanup after the metadata is durably gone. A
             # failure here only orphans bytes, so it must not abort the run.
