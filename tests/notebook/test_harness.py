@@ -89,6 +89,22 @@ class TestHarness:
         assert "error" in result
         assert len(result["error"]) > 0
 
+    def test_harness_keeps_the_print_trail_of_a_failing_cell(self, harness_script):
+        """The captured streams only come back in ``execute_cell``'s return
+        value, so a cell that raised used to report an empty ``stdout`` — losing
+        exactly the print trail that explains the failure. The batch and pool
+        paths both keep theirs; single-cell was the odd one out."""
+        manifest = {
+            "source": 'print("checkpoint A")\nprint("checkpoint B")\nraise KeyError("boom")',
+            "inputs": {},
+        }
+
+        result = run_harness(harness_script, manifest)
+
+        assert result["success"] is False
+        assert "checkpoint A" in result["stdout"]
+        assert "checkpoint B" in result["stdout"]
+
     def test_harness_dataframe(self, harness_script):
         """Test harness with DataFrame creation."""
         manifest = {
