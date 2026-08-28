@@ -2542,7 +2542,7 @@ class ArtifactStore:
                 params: list = [name_prefix + "%"]
 
                 if tenant is not None:
-                    query += " AND (av.tenant = ? OR av.tenant IS NULL)"
+                    query += " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
                     params.append(tenant)
                     query += " AND (an.tenant = ? OR an.tenant = '')"
                     params.append(tenant)
@@ -2568,7 +2568,7 @@ class ArtifactStore:
 
                 conditions: list[str] = []
                 if tenant is not None:
-                    conditions.append("(tenant = ? OR tenant IS NULL)")
+                    conditions.append("(tenant = ? OR tenant = '' OR tenant IS NULL)")
                     params.append(tenant)
                 if state is not None:
                     conditions.append("state = ?")
@@ -2757,7 +2757,7 @@ class ArtifactStore:
                 """
             params: list[float | str] = [cutoff]
             if tenant is not None:
-                query += " AND (av.tenant = ? OR av.tenant IS NULL)"
+                query += " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
                 params.append(tenant)
 
             cursor = conn.execute(query, params)
@@ -2833,7 +2833,7 @@ class ArtifactStore:
             """
             usage_params: list[str] = []
             if tenant is not None:
-                usage_query += " WHERE tenant = ? OR tenant IS NULL"
+                usage_query += " WHERE tenant = ? OR tenant = '' OR tenant IS NULL"
                 usage_params.append(tenant)
 
             cursor = conn.execute(usage_query, usage_params)
@@ -2857,7 +2857,7 @@ class ArtifactStore:
             """
             unreferenced_params: list[str] = []
             if tenant is not None:
-                unreferenced_query += " AND (av.tenant = ? OR av.tenant IS NULL)"
+                unreferenced_query += " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
                 unreferenced_params.append(tenant)
             cursor = conn.execute(unreferenced_query, unreferenced_params)
             unreferenced_count = cursor.fetchone()["count"]
@@ -2946,7 +2946,7 @@ class ArtifactStore:
             """
             params: list[str] = []
             if tenant is not None:
-                query += " AND (tenant = ? OR tenant IS NULL)"
+                query += " AND (tenant = ? OR tenant = '' OR tenant IS NULL)"
                 params.append(tenant)
             rows = conn.execute(query, params).fetchall()
         finally:
@@ -3048,7 +3048,7 @@ class ArtifactStore:
             """
             stats_params: list[str] = []
             if tenant is not None:
-                stats_query += " WHERE tenant = ? OR tenant IS NULL"
+                stats_query += " WHERE tenant = ? OR tenant = '' OR tenant IS NULL"
                 stats_params.append(tenant)
 
             cursor = conn.execute(stats_query, stats_params)

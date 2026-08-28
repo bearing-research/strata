@@ -1344,3 +1344,59 @@ class TestGcDeletesMetadataBeforeBlobs:
         # pointing at a blob we may or may not have removed.
         assert result["deleted_count"] == 1
         assert store.get_artifact("model", 1) is None
+
+class TestTenantlessArtifactsAreVisibleToScopedQueries:
+    """Tenantless rows are stored as ``''``, not NULL.
+
+    The schema declares ``tenant TEXT NOT NULL DEFAULT ''`` and a migration
+    normalizes any legacy NULLs to ``''``, so ``tenant IS NULL`` matches
+    nothing. Seven tenant filters used only that test, while
+    ``find_by_provenance`` correctly checks ``(tenant = '' OR tenant IS NULL)``.
+
+    The result was a set of artifacts that dedup still resolved against but no
+    listing, usage, stats, verify or GC query could see — invisible and
+    uncollectable, i.e. a permanent leak, despite every one of those call sites
+    documenting that it "includes legacy tenantless artifacts".
+    """
+
+    def _seed(self, store):
+        _make_ready_artifact(store, "legacy", "prov-legacy")  # tenantless ('')
+        version = store.create_artifact("scoped", "prov-scoped", tenant="team-a")
+        store.write_blob("scoped", version, _ipc_bytes(1))
+        store.finalize_artifact("scoped", version, "{}", 1, 10)
+
+    def test_tenantless_rows_are_stored_as_empty_string_not_null(self, store):
+        self._seed(store)
+        artifact = store.get_artifact("legacy", 1)
+        assert artifact.tenant == "", "schema stores '' for tenantless rows"
+
+    def test_list_artifacts_includes_legacy_rows(self, store):
+        self._seed(store)
+        ids = {a.id for a in store.list_artifacts(tenant="team-a")}
+        assert "scoped" in ids
+        assert "legacy" in ids, "legacy tenantless artifact was invisible to the tenant"
+
+    def test_usage_and_stats_count_legacy_rows(self, store):
+        self._seed(store)
+        assert store.get_usage(tenant="team-a")["total_versions"] >= 2
+        assert store.stats(tenant="team-a")["total_versions"] >= 2
+
+    def test_verify_sees_legacy_rows(self, store):
+        self._seed(store)
+        # verify walks the same filter; it must not skip legacy rows.
+        store.verify_artifacts(tenant="team-a")
+
+    def test_gc_can_finally_reach_legacy_rows(self, store):
+        """Previously no tenant-scoped GC could ever reach them, so they leaked
+        forever regardless of age. Asserted on reachability rather than an
+        exact count so this doesn't encode the surrounding GC policy."""
+        self._seed(store)
+        store.create_artifact("legacy", "prov-legacy-v2")  # supersede v1
+        store.write_blob("legacy", 2, _ipc_bytes(1))
+        store.finalize_artifact("legacy", 2, "{}", 1, 10)
+
+        store.garbage_collect(max_age_days=0, tenant="team-a")
+
+        assert store.get_artifact("legacy", 1) is None, (
+            "tenant-scoped GC still cannot reach a tenantless artifact"
+        )
