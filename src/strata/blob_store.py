@@ -899,29 +899,21 @@ class AzureBlobStore(BlobStore):
 
 
 def create_blob_store(config: StrataConfig) -> BlobStore:
-    """Create appropriate blob store based on configuration.
+    """Create a blob store from the ``STRATA_ARTIFACT_*`` environment variables.
 
-    Factory function that creates the correct blob store implementation
-    based on configuration settings.
+    .. warning::
 
-    Configuration options (in pyproject.toml or environment):
-        # Local filesystem (default)
-        artifact_dir = "/path/to/artifacts"
+       This reads the environment **only** — it ignores ``config``'s own
+       ``artifact_blob_backend`` / bucket fields, so a backend set in
+       ``pyproject.toml`` under ``[tool.strata]`` is not honored here and the
+       result silently falls back to local disk. Which loses every artifact
+       when the pod is replaced.
 
-        # S3 storage
-        artifact_blob_backend = "s3"
-        artifact_s3_bucket = "my-bucket"
-        artifact_s3_prefix = "artifacts"
-
-        # GCS storage
-        artifact_blob_backend = "gcs"
-        artifact_gcs_bucket = "my-bucket"
-        artifact_gcs_prefix = "artifacts"
-
-        # Azure Blob Storage
-        artifact_blob_backend = "azure"
-        artifact_azure_container = "my-container"
-        artifact_azure_prefix = "artifacts"
+       The server does not use this function; it calls
+       :meth:`StrataConfig.create_blob_store`, which reads the config fields
+       (and therefore both ``pyproject.toml`` and the environment, since
+       ``StrataConfig.load`` populates fields from ``STRATA_*``). Prefer that
+       method. ``config`` is used here only for backend credentials.
 
     Environment variables:
         STRATA_ARTIFACT_BLOB_BACKEND: "local" | "s3" | "gcs" | "azure"
