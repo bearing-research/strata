@@ -169,10 +169,17 @@ class ColumnStatistics:
 
 @dataclass
 class ColumnChunkMeta:
-    """Minimal column chunk metadata for pruning."""
+    """Minimal column chunk metadata for pruning and size estimation.
+
+    ``total_uncompressed_size`` mirrors pyarrow's field of the same name so
+    the planner can read it off either this or a real
+    ``ColumnChunkMetaData``. 0 means "not recorded" (a cache entry written
+    before this field existed), which the planner treats as unknown.
+    """
 
     is_stats_set: bool
     statistics: ColumnStatistics | None
+    total_uncompressed_size: int = 0
 
 
 @dataclass
@@ -285,8 +292,13 @@ def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "Persisted
     row_groups = []
     for row_group in metadata.row_group_metadata:
         column_stats: dict[str, dict[str, object]] = {}
+        column_sizes: dict[str, int] = {}
         for idx, column_name in enumerate(column_names):
             column_meta = row_group.column(idx)
+            # Recorded for every column, including ones without statistics:
+            # the pre-flight size estimate needs the projected columns'
+            # sizes whether or not they happen to be prunable.
+            column_sizes[column_name] = column_meta.total_uncompressed_size
             if not column_meta.is_stats_set or column_meta.statistics is None:
                 continue
 
@@ -306,6 +318,7 @@ def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "Persisted
                 num_rows=row_group.num_rows,
                 total_byte_size=row_group.total_byte_size,
                 column_stats=column_stats,
+                column_sizes=column_sizes,
             )
         )
 
@@ -530,9 +543,17 @@ class ParquetMetadataCache:
                             max=stats_dict.get("max"),
                             null_count=stats_dict.get("null_count"),
                         )
-                        columns[idx] = ColumnChunkMeta(is_stats_set=True, statistics=stats)
+                        columns[idx] = ColumnChunkMeta(
+                            is_stats_set=True,
+                            statistics=stats,
+                            total_uncompressed_size=rg.column_sizes.get(col_name, 0),
+                        )
                     else:
-                        columns[idx] = ColumnChunkMeta(is_stats_set=False, statistics=None)
+                        columns[idx] = ColumnChunkMeta(
+                            is_stats_set=False,
+                            statistics=None,
+                            total_uncompressed_size=rg.column_sizes.get(col_name, 0),
+                        )
 
                 row_group_meta.append(
                     RowGroupMeta(
@@ -582,9 +603,17 @@ class ParquetMetadataCache:
                             max=stats_dict.get("max"),
                             null_count=stats_dict.get("null_count"),
                         )
-                        columns[idx] = ColumnChunkMeta(is_stats_set=True, statistics=stats)
+                        columns[idx] = ColumnChunkMeta(
+                            is_stats_set=True,
+                            statistics=stats,
+                            total_uncompressed_size=rg.column_sizes.get(col_name, 0),
+                        )
                     else:
-                        columns[idx] = ColumnChunkMeta(is_stats_set=False, statistics=None)
+                        columns[idx] = ColumnChunkMeta(
+                            is_stats_set=False,
+                            statistics=None,
+                            total_uncompressed_size=rg.column_sizes.get(col_name, 0),
+                        )
 
                 row_group_meta.append(
                     RowGroupMeta(

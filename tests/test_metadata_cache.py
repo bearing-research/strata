@@ -1011,3 +1011,165 @@ class TestNestedColumnStatsUsePaths:
         assert _persisted_meta_is_legacy_leaf_named(_meta(["id", "id"])) is True
         assert _persisted_meta_is_legacy_leaf_named(_meta(["id", "user.id"])) is False
         assert _persisted_meta_is_legacy_leaf_named(_meta(["a", "b", "c"])) is False
+
+
+class TestPreflightSizeRespectsProjection:
+    """The pre-flight 413 compares an estimate against ``max_response_bytes``,
+    so the estimate has to describe the response the limit governs.
+
+    It was ``total_byte_size`` — the size of the WHOLE row group — regardless
+    of the projection. Scanning two columns of a forty-column table was
+    estimated as if all forty were read, so a legitimate projected scan was
+    rejected as oversized and the only workaround (raising the limit) defeats
+    the guard.
+    """
+
+    def test_a_projected_scan_is_estimated_far_smaller(self, temp_warehouse, tmp_path):
+        from strata.config import StrataConfig
+        from strata.planner import ReadPlanner
+
+        planner = ReadPlanner(StrataConfig(cache_dir=tmp_path / "c"))
+        uri = temp_warehouse["table_uri"]
+
+        full = planner.plan(uri).estimated_bytes
+        projected = planner.plan(uri, columns=["id"]).estimated_bytes
+
+        assert projected < full
+
+    def test_the_estimate_still_covers_the_real_response(self, temp_warehouse, tmp_path):
+        """Over-estimating is the safe direction for a guard; under-estimating
+        lets an oversized response through."""
+        from strata.cache import CachedFetcher
+        from strata.config import StrataConfig
+        from strata.planner import ReadPlanner
+
+        config = StrataConfig(cache_dir=tmp_path / "c")
+        planner, fetcher = ReadPlanner(config), CachedFetcher(config)
+
+        plan = planner.plan(temp_warehouse["table_uri"], columns=["id"])
+        actual = sum(b.nbytes for b in fetcher.execute_plan(plan))
+
+        assert plan.estimated_bytes >= actual
+
+    def test_it_survives_a_restart(self, temp_warehouse, tmp_path):
+        """The sizes go through the persisted metadata cache, so a second
+        planner over the same cache dir must still see them. Persisted
+        metadata is exactly where the column-keying bug in #533 hid."""
+        from strata.config import StrataConfig
+        from strata.planner import ReadPlanner
+
+        config = StrataConfig(cache_dir=tmp_path / "c")
+        uri = temp_warehouse["table_uri"]
+
+        cold = ReadPlanner(config).plan(uri, columns=["id"]).estimated_bytes
+        warm = ReadPlanner(config).plan(uri, columns=["id"]).estimated_bytes
+
+        assert warm == cold
+
+    def test_an_unprojected_scan_is_unchanged(self, temp_warehouse, tmp_path):
+        from strata.config import StrataConfig
+        from strata.planner import ReadPlanner
+
+        plan = ReadPlanner(StrataConfig(cache_dir=tmp_path / "c")).plan(temp_warehouse["table_uri"])
+
+        meta = pq.ParquetFile(plan.tasks[0].file_path).metadata
+        assert plan.estimated_bytes == sum(
+            meta.row_group(i).total_byte_size for i in range(meta.num_row_groups)
+        )
+
+
+class TestRowGroupEstimateFallsBack:
+    """Whole-row-group size is the safe answer whenever per-column sizes
+    cannot be trusted, since over-estimating only makes the guard stricter."""
+
+    def _rg(self, sizes):
+        from strata.metadata_cache import ColumnChunkMeta, RowGroupMeta
+
+        return RowGroupMeta(
+            num_rows=10,
+            total_byte_size=1000,
+            _columns={
+                i: ColumnChunkMeta(is_stats_set=False, statistics=None, total_uncompressed_size=s)
+                for i, s in enumerate(sizes)
+            },
+        )
+
+    def test_sums_only_the_projected_columns(self):
+        from strata.planner import _estimate_row_group_bytes
+
+        rg = self._rg([100, 200, 300])
+        assert _estimate_row_group_bytes(rg, ["a", "c"], {"a": 0, "b": 1, "c": 2}) == 400
+
+    def test_no_projection_uses_the_whole_row_group(self):
+        from strata.planner import _estimate_row_group_bytes
+
+        assert _estimate_row_group_bytes(self._rg([100, 200]), None, {"a": 0, "b": 1}) == 1000
+
+    def test_a_column_outside_the_index_map_falls_back(self):
+        """A nested projection: ``_build_column_index_map`` skips dotted paths."""
+        from strata.planner import _estimate_row_group_bytes
+
+        rg = self._rg([100, 200])
+        assert _estimate_row_group_bytes(rg, ["user.id"], {"a": 0, "b": 1}) == 1000
+
+    def test_a_legacy_entry_without_recorded_sizes_falls_back(self):
+        """Cache entries written before the sizes existed report 0, which must
+        read as "unknown", not as "this column is free"."""
+        from strata.planner import _estimate_row_group_bytes
+
+        rg = self._rg([0, 0])
+        assert _estimate_row_group_bytes(rg, ["a"], {"a": 0, "b": 1}) == 1000
+
+
+class TestPersistedColumnSizes:
+    """Sizes ride along in the row-group JSON, so old rows stay readable."""
+
+    def test_round_trips(self, tmp_path):
+        from strata.metadata_store import (
+            MetadataStore,
+            PersistedParquetMeta,
+            PersistedRowGroupMeta,
+        )
+
+        store = MetadataStore(tmp_path / "meta.sqlite")
+        target = tmp_path / "x.parquet"
+        target.write_bytes(b"not really parquet, only stat'd")
+        meta = PersistedParquetMeta(
+            arrow_schema_bytes=b"",
+            num_row_groups=1,
+            row_groups=[
+                PersistedRowGroupMeta(
+                    num_rows=5,
+                    total_byte_size=900,
+                    column_stats={},
+                    column_sizes={"a": 100, "b": 200},
+                )
+            ],
+            column_names=["a", "b"],
+        )
+        store.put_parquet_meta(str(target), meta)
+
+        loaded = store.get_parquet_meta(str(target))
+        assert loaded.row_groups[0].column_sizes == {"a": 100, "b": 200}
+
+    def test_a_row_written_without_sizes_still_loads(self, tmp_path):
+        import json
+
+        from strata.metadata_store import MetadataStore
+
+        store = MetadataStore(tmp_path / "meta.sqlite")
+        target = tmp_path / "legacy.parquet"
+        target.write_bytes(b"not really parquet, only stat'd")
+        legacy = json.dumps([{"num_rows": 5, "total_byte_size": 900, "column_stats": {}}])
+        conn = store._get_conn()
+        conn.execute(
+            """INSERT INTO parquet_meta
+               (file_path, schema_ipc, num_row_groups, row_groups_json,
+                column_names_json, file_mtime, file_size)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (str(target), b"", 1, legacy, json.dumps(["a"]), None, None),
+        )
+        conn.commit()
+
+        loaded = store.get_parquet_meta(str(target))
+        assert loaded.row_groups[0].column_sizes == {}

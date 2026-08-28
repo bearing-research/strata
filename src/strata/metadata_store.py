@@ -11,7 +11,7 @@ This makes post-restart planning fast by avoiding:
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlparse
@@ -31,6 +31,10 @@ class PersistedRowGroupMeta:
     total_byte_size: int
     # Column statistics: {col_name: {min: val, max: val, null_count: int}}
     column_stats: dict[str, dict]
+    # Per-column uncompressed sizes: {col_name: bytes}. Empty for entries
+    # written before this field existed; readers must treat a missing column
+    # as unknown rather than as zero bytes.
+    column_sizes: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -258,6 +262,7 @@ class MetadataStore:
                     num_rows=rg["num_rows"],
                     total_byte_size=rg["total_byte_size"],
                     column_stats=rg.get("column_stats", {}),
+                    column_sizes=rg.get("column_sizes", {}),
                 )
                 for rg in row_groups_data
             ]
@@ -283,6 +288,7 @@ class MetadataStore:
                     "num_rows": rg.num_rows,
                     "total_byte_size": rg.total_byte_size,
                     "column_stats": rg.column_stats,
+                    "column_sizes": rg.column_sizes,
                 }
                 for rg in meta.row_groups
             ]
@@ -355,6 +361,7 @@ class MetadataStore:
                         num_rows=rg["num_rows"],
                         total_byte_size=rg["total_byte_size"],
                         column_stats=rg.get("column_stats", {}),
+                        column_sizes=rg.get("column_sizes", {}),
                     )
                     for rg in row_groups_data
                 ]
@@ -393,6 +400,7 @@ class MetadataStore:
                         "num_rows": rg.num_rows,
                         "total_byte_size": rg.total_byte_size,
                         "column_stats": rg.column_stats,
+                        "column_sizes": rg.column_sizes,
                     }
                     for rg in meta.row_groups
                 ]
