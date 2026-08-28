@@ -1345,6 +1345,7 @@ class TestGcDeletesMetadataBeforeBlobs:
         assert result["deleted_count"] == 1
         assert store.get_artifact("model", 1) is None
 
+
 class TestTenantlessArtifactsAreVisibleToScopedQueries:
     """Tenantless rows are stored as ``''``, not NULL.
 
