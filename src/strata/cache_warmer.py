@@ -324,21 +324,32 @@ class CacheWarmer:
         # Concurrency control for fetches within job
         fetch_semaphore = asyncio.Semaphore(request.concurrent)
 
-        async def fetch_task(task: Task) -> tuple[bool, int]:
-            """Fetch a single row group."""
+        async def fetch_task(task: Task) -> tuple[str, int, str | None]:
+            """Fetch one row group, returning ``(outcome, bytes_written, error)``.
+
+            Named outcomes because three different endings used to return the
+            same ``(False, 0)``: written, failed, and cancelled. Only the first
+            is a success, but the caller read all three as "cached", so a job
+            that failed or was cancelled still reported row groups cached.
+            """
             async with fetch_semaphore:
                 if job.cancelled:
-                    return (False, 0)
+                    return ("cancelled", 0, None)
 
                 try:
                     loop = asyncio.get_event_loop()
                     await loop.run_in_executor(None, self._fetcher.fetch_as_stream_bytes, task)
                     if task.cached:
-                        return (True, 0)
-                    else:
-                        return (False, task.bytes_read)
-                except Exception:
-                    return (False, 0)
+                        return ("skipped", 0, None)
+                    return ("cached", task.bytes_read, None)
+                except Exception as exc:
+                    logger.exception(
+                        "cache warm job %s failed for %s row group %s",
+                        job.job_id,
+                        task.file_path,
+                        task.row_group_id,
+                    )
+                    return ("failed", 0, str(exc))
 
         for table_uri in request.tables:
             if job.cancelled:
@@ -372,20 +383,34 @@ class CacheWarmer:
                     return_exceptions=True,
                 )
 
+                failures: list[str] = []
                 for result in results:
                     # Handle exceptions that may be raised during gather
                     if isinstance(result, BaseException) and not isinstance(result, Exception):
                         continue
                     if isinstance(result, Exception):
+                        failures.append(str(result))
                         continue
-                    # At this point, result is the tuple (bool, int)
-                    was_cached, written = result
+                    outcome, written, error = result
+                    if outcome == "cancelled":
+                        continue
                     job.row_groups_completed += 1
-                    if was_cached:
+                    if outcome == "skipped":
                         job.row_groups_skipped += 1
-                    else:
+                    elif outcome == "cached":
                         job.row_groups_cached += 1
                         job.bytes_written += written
+                    else:
+                        failures.append(error or "unknown error")
+
+                if failures:
+                    # Summarised: a wide table can fail thousands of row groups
+                    # and the job record has to stay bounded.
+                    distinct = sorted(set(failures))[:3]
+                    job.errors.append(
+                        f"{table_uri}: {len(failures)} row group(s) failed to warm: "
+                        + "; ".join(distinct)
+                    )
 
                 job.tables_completed += 1
 

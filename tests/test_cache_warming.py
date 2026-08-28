@@ -686,3 +686,93 @@ class TestCacheWarmingRealTables:
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
             server_module._state = None
+
+
+class TestAsyncWarmDoesNotReportFailuresAsSuccess:
+    """The background job collapsed three different endings onto ``(False, 0)``:
+    written, failed, and cancelled.
+
+    Only the first is a success, but the aggregation loop read every ``False``
+    as ``row_groups_cached += 1``. So a job whose fetches all raised — or one
+    that was cancelled — still reported row groups cached, with nothing in
+    ``errors``. A background job's record is the only thing an operator can
+    poll, so there was no other signal that the warm did nothing.
+    """
+
+    def _warmer_with(self, fetch_impl, task_count=3):
+        from types import SimpleNamespace
+
+        from strata.cache_warmer import CacheWarmer
+
+        tasks = [
+            SimpleNamespace(
+                file_path=f"/w/f{i}.parquet", row_group_id=i, cached=False, bytes_read=10
+            )
+            for i in range(task_count)
+        ]
+        planner = SimpleNamespace(plan=lambda **kw: SimpleNamespace(tasks=tasks))
+        fetcher = SimpleNamespace(fetch_as_stream_bytes=fetch_impl)
+        metrics = SimpleNamespace(log_event=lambda *a, **k: None)
+        return CacheWarmer(planner=planner, fetcher=fetcher, metrics=metrics)
+
+    def _job(self, warmer):
+        from strata.cache_warmer import WarmingJob
+        from strata.types import WarmAsyncRequest
+
+        return WarmingJob(
+            job_id="job-test",
+            request=WarmAsyncRequest(tables=["file:///w#ns.t"], concurrent=2),
+        )
+
+    @pytest.mark.asyncio
+    async def test_failed_fetches_are_not_counted_as_cached(self):
+        def boom(task):
+            raise RuntimeError("storage unreachable")
+
+        warmer = self._warmer_with(boom)
+        job = self._job(warmer)
+
+        await warmer._execute_warming(job)
+
+        assert job.row_groups_cached == 0
+        assert job.bytes_written == 0
+        assert job.errors, "a job that cached nothing must say so"
+        assert any("storage unreachable" in e for e in job.errors)
+
+    @pytest.mark.asyncio
+    async def test_row_groups_skipped_by_cancellation_are_not_counted_as_cached(self):
+        """Cancellation has to land *during* the fetches to be interesting.
+
+        The table loop breaks on an already-cancelled job before any fetch
+        runs, so a job cancelled up front never reaches the branch. The real
+        case is a cancel arriving while a table's row groups are in flight:
+        the remaining ones return early, and that early return used to be
+        indistinguishable from a successful write.
+        """
+        job_box = {}
+
+        def cancel_partway(task):
+            job_box["job"].cancelled = True
+            return b""
+
+        warmer = self._warmer_with(cancel_partway, task_count=6)
+        job = self._job(warmer)
+        job_box["job"] = job
+
+        await warmer._execute_warming(job)
+
+        # Whatever actually completed may be counted; what was skipped by the
+        # cancel must not be, and nothing may be billed as bytes it never wrote.
+        assert job.row_groups_cached < 6
+        assert job.bytes_written == job.row_groups_cached * 10
+
+    @pytest.mark.asyncio
+    async def test_a_healthy_job_still_counts_cached_row_groups(self):
+        warmer = self._warmer_with(lambda task: b"")
+        job = self._job(warmer)
+
+        await warmer._execute_warming(job)
+
+        assert job.row_groups_cached == 3
+        assert job.bytes_written == 30
+        assert job.errors == []
