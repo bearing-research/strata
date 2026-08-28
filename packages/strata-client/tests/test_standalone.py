@@ -106,12 +106,14 @@ class TestSnapshotPinReachesTheWire:
     """
 
     def test_arrow_puts_the_snapshot_in_the_transform(self) -> None:
+        pytest.importorskip("pyarrow")
         from strata_client.integration.arrow import _build_scan_transform
 
         params = _build_scan_transform(["id"], None, 12345)["params"]
         assert params["snapshot_id"] == 12345
 
     def test_datafusion_puts_the_snapshot_in_the_transform(self) -> None:
+        pytest.importorskip("pyarrow")
         from strata_client.integration.datafusion import _build_scan_transform
 
         params = _build_scan_transform(["id"], None, 12345)["params"]
@@ -119,6 +121,7 @@ class TestSnapshotPinReachesTheWire:
 
     def test_an_unpinned_scan_sends_no_snapshot(self) -> None:
         """Omitting the key is what makes the server read the current snapshot."""
+        pytest.importorskip("pyarrow")
         from strata_client.integration.arrow import _build_scan_transform as arrow_build
         from strata_client.integration.datafusion import _build_scan_transform as df_build
 
@@ -126,6 +129,10 @@ class TestSnapshotPinReachesTheWire:
         assert "snapshot_id" not in df_build(["id"])["params"]
 
     def test_it_matches_the_integrations_that_were_already_correct(self) -> None:
+        # The minimal-deps client job installs neither; this comparison is
+        # only meaningful where both integrations can import.
+        pytest.importorskip("duckdb")
+        pytest.importorskip("pyarrow")
         from strata_client.integration.arrow import _build_scan_transform as arrow_build
         from strata_client.integration.duckdb import _build_scan_transform as duckdb_build
 
