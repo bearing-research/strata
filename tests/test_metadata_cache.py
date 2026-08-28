@@ -925,3 +925,89 @@ class TestMetadataStore:
         store.put_manifest("default", "ns.table", 1, [])
         result = store.get_manifest("default", "ns.table", 1)
         assert result == []
+
+
+class TestNestedColumnStatsUsePaths:
+    """Persisted Parquet stats must be keyed by the column's dotted PATH.
+
+    A struct field ``user.id`` has Parquet leaf name ``id``, colliding with a
+    top-level ``id``. Keying persisted stats by leaf name (a) let the nested
+    column's stats overwrite the top-level column's and (b) stripped the dot
+    that the planner's ``"." in col.path`` guard uses to skip nested columns —
+    so after metadata round-tripped through SQLite (i.e. after any restart)
+    row-group pruning compared a filter against the WRONG column's min/max and
+    silently dropped matching rows. That breaks the conservative-pruning
+    invariant in the unsafe direction.
+    """
+
+    def _nested_file(self, tmp_path: Path) -> Path:
+        fp = tmp_path / "nested.parquet"
+        pq.write_table(
+            pa.table(
+                {
+                    "id": pa.array([1, 2, 3]),
+                    "user": pa.array([{"id": 100}, {"id": 200}, {"id": 300}]),
+                }
+            ),
+            fp,
+        )
+        return fp
+
+    def test_persisted_column_names_are_unique_paths(self, tmp_path):
+        from strata.metadata_store import extract_parquet_meta
+
+        persisted = extract_parquet_meta(str(self._nested_file(tmp_path)))
+        assert persisted.column_names == ["id", "user.id"]
+
+    def test_top_level_stats_survive_a_nested_name_collision(self, tmp_path):
+        from strata.metadata_store import extract_parquet_meta
+
+        persisted = extract_parquet_meta(str(self._nested_file(tmp_path)))
+        stats = persisted.row_groups[0].column_stats
+        # Both columns keep their own stats (the nested one used to clobber).
+        assert stats["id"]["min"] == 1 and stats["id"]["max"] == 3
+        assert stats["user.id"]["min"] == 100 and stats["user.id"]["max"] == 300
+
+    def test_restored_schema_excludes_nested_from_the_column_map(self, tmp_path):
+        from strata.metadata_cache import ParquetSchema
+        from strata.metadata_store import extract_parquet_meta
+        from strata.planner import _build_column_index_map
+
+        persisted = extract_parquet_meta(str(self._nested_file(tmp_path)))
+        col_map = _build_column_index_map(ParquetSchema(_column_names=persisted.column_names))
+        # The nested column must not shadow the top-level one.
+        assert col_map == {"id": 0}
+
+    def test_restored_stats_do_not_prune_a_matching_row_group(self, tmp_path):
+        """The end-to-end symptom: `id = 2` must not prune a group holding 1-3."""
+        from strata.metadata_cache import ParquetSchema
+        from strata.metadata_store import extract_parquet_meta
+        from strata.planner import _build_column_index_map
+
+        persisted = extract_parquet_meta(str(self._nested_file(tmp_path)))
+        col_map = _build_column_index_map(ParquetSchema(_column_names=persisted.column_names))
+        stats = persisted.row_groups[0].column_stats[persisted.column_names[col_map["id"]]]
+        assert stats["min"] <= 2 <= stats["max"]
+
+    def test_schema_shim_splits_name_from_path(self):
+        from strata.metadata_cache import ParquetSchema
+
+        col = ParquetSchema(_column_names=["id", "user.id"]).column(1)
+        assert col.path == "user.id"
+        assert col.name == "id"
+
+    def test_legacy_leaf_named_rows_are_treated_as_a_miss(self):
+        """Rows persisted before this fix hold leaf names; duplicates are the
+        signature. They must be re-read rather than trusted — flat-schema rows
+        (no duplicates) stay valid."""
+        from strata.metadata_cache import _persisted_meta_is_legacy_leaf_named
+        from strata.metadata_store import PersistedParquetMeta
+
+        def _meta(names):
+            return PersistedParquetMeta(
+                arrow_schema_bytes=b"", num_row_groups=1, row_groups=[], column_names=names
+            )
+
+        assert _persisted_meta_is_legacy_leaf_named(_meta(["id", "id"])) is True
+        assert _persisted_meta_is_legacy_leaf_named(_meta(["id", "user.id"])) is False
+        assert _persisted_meta_is_legacy_leaf_named(_meta(["a", "b", "c"])) is False

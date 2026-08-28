@@ -543,7 +543,10 @@ def extract_parquet_meta(
 
         for j in range(rg.num_columns):
             col = rg.column(j)
-            col_name = metadata.schema.column(j).name
+            # Key stats by the column's dotted PATH, not its leaf name: a
+            # struct field ``user.id`` has leaf name ``id``, which collides
+            # with a top-level ``id`` and silently overwrote its stats.
+            col_name = metadata.schema.column(j).path
 
             if col.is_stats_set:
                 stats = col.statistics
@@ -588,7 +591,9 @@ def extract_parquet_meta(
         arrow_schema_bytes=schema_bytes,
         num_row_groups=metadata.num_row_groups,
         row_groups=row_groups,
-        column_names=[metadata.schema.column(i).name for i in range(len(metadata.schema))],
+        # Dotted paths (unique per physical column), not leaf names — see
+        # the column_stats comment above.
+        column_names=[metadata.schema.column(i).path for i in range(len(metadata.schema))],
     )
 
 

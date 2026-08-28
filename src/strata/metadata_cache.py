@@ -205,8 +205,15 @@ class ParquetSchema:
         return len(self._column_names)
 
     def column(self, idx: int):
-        """Get column info by index."""
-        return type("Col", (), {"name": self._column_names[idx], "path": self._column_names[idx]})()
+        """Get column info by index.
+
+        ``_column_names`` holds dotted **paths** (``user.id``); ``name`` is the
+        leaf segment, matching pyarrow's own ``ColumnSchema`` split. The
+        planner relies on ``path`` carrying the dot so it can skip nested
+        columns when building its column-index map.
+        """
+        path = self._column_names[idx]
+        return type("Col", (), {"name": path.rsplit(".", 1)[-1], "path": path})()
 
 
 @dataclass
@@ -265,8 +272,14 @@ def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "Persisted
         serialize_arrow_schema,
     )
 
+    # Dotted PATHS, not leaf names. A struct field ``user.id`` has leaf name
+    # ``id``; keying by that collides with a top-level ``id`` — the nested
+    # column's stats overwrote the top-level column's, and on restore the
+    # planner's ``"." in col.path`` guard could no longer tell them apart, so
+    # pruning compared a filter against the WRONG column's min/max and dropped
+    # matching rows.
     column_names = [
-        metadata.parquet_schema.column(i).name  # type: ignore[union-attr]
+        metadata.parquet_schema.column(i).path  # type: ignore[union-attr]
         for i in range(len(metadata.parquet_schema))  # type: ignore[arg-type]
     ]
     row_groups = []
@@ -302,6 +315,26 @@ def _persisted_parquet_meta_from_loaded(metadata: ParquetMetadata) -> "Persisted
         row_groups=row_groups,
         column_names=column_names,
     )
+
+
+def _persisted_meta_is_legacy_leaf_named(persisted: "PersistedParquetMeta") -> bool:
+    """True when a persisted row predates path-keyed column stats.
+
+    Older rows stored Parquet **leaf** names in ``column_names``. For a flat
+    schema leaf name == path, so those rows stay valid. But when a file has
+    nested columns the leaf names collide (a struct ``user.id`` and a
+    top-level ``id`` both stored as ``"id"``), which both dropped one
+    column's stats and defeated the planner's nested-column guard — pruning
+    then compared a filter against the wrong column's min/max and silently
+    dropped rows.
+
+    Duplicates in the list are exactly that signature: real paths are unique
+    per physical column, so a duplicate can only come from a legacy
+    leaf-named row. Such rows are treated as a miss and re-read (which
+    re-persists them correctly) rather than trusted.
+    """
+    names = persisted.column_names
+    return len(set(names)) != len(names)
 
 
 class ParquetMetadataCache:
@@ -478,6 +511,9 @@ class ParquetMetadataCache:
         """Convert persisted metadata to ParquetMetadata."""
         from strata.metadata_store import deserialize_arrow_schema
 
+        if _persisted_meta_is_legacy_leaf_named(persisted):
+            return None
+
         try:
             arrow_schema = deserialize_arrow_schema(persisted.arrow_schema_bytes)
 
@@ -523,6 +559,9 @@ class ParquetMetadataCache:
             return None
         persisted = self._store.get_parquet_meta(file_path)
         if persisted is None:
+            return None
+
+        if _persisted_meta_is_legacy_leaf_named(persisted):
             return None
 
         # Convert persisted metadata to our compatible types
