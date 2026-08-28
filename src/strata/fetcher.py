@@ -4,6 +4,7 @@ This module provides a clean seam for future Rust acceleration.
 The Fetcher protocol defines the interface that any implementation must satisfy.
 """
 
+import threading
 import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Protocol
@@ -67,8 +68,15 @@ class PyArrowFetcher:
         self.metrics = metrics or MetricsCollector()
         self._max_file_cache_size = max_file_cache_size
         self._s3_filesystem = s3_filesystem
-        # OrderedDict for LRU eviction of file handles
+        # OrderedDict for LRU eviction of file handles.
+        #
+        # One Fetcher instance is shared by the whole fetch thread pool
+        # (``max_fetch_workers``, 32 by default), so every mutation of this
+        # dict is concurrent and must hold the lock. Unsynchronized
+        # ``move_to_end`` / ``__setitem__`` / ``popitem`` on an OrderedDict can
+        # also lose or duplicate entries outright, leaking handles.
         self._file_cache: OrderedDict[str, pq.ParquetFile] = OrderedDict()
+        self._file_cache_lock = threading.Lock()
 
     @staticmethod
     def _close_parquet_file(parquet_file: pq.ParquetFile) -> None:
@@ -79,10 +87,16 @@ class PyArrowFetcher:
 
     def _get_parquet_file(self, file_path: str) -> pq.ParquetFile:
         """Get a cached ParquetFile handle with LRU eviction."""
-        if file_path in self._file_cache:
-            # Move to end (most recently used)
-            self._file_cache.move_to_end(file_path)
-            return self._file_cache[file_path]
+        with self._file_cache_lock:
+            if file_path in self._file_cache:
+                # Move to end (most recently used)
+                self._file_cache.move_to_end(file_path)
+                return self._file_cache[file_path]
+
+        # Open outside the lock: opening an S3 file is a network round-trip and
+        # holding the lock across it would serialize the whole fetch pool. A
+        # concurrent open of the same path just means one redundant handle,
+        # which the insert below resolves.
 
         # Open new file (with S3 filesystem if needed)
         if file_path.startswith("s3://"):
@@ -96,12 +110,25 @@ class PyArrowFetcher:
             pf = pq.ParquetFile(s3_path, filesystem=self._s3_filesystem)
         else:
             pf = pq.ParquetFile(file_path)
-        self._file_cache[file_path] = pf
+        with self._file_cache_lock:
+            existing = self._file_cache.get(file_path)
+            if existing is not None:
+                # Another thread opened it first; keep one handle and let ours
+                # be closed when this frame drops the last reference.
+                self._file_cache.move_to_end(file_path)
+                return existing
+            self._file_cache[file_path] = pf
 
-        # Evict oldest if over limit
-        while len(self._file_cache) > self._max_file_cache_size:
-            _, evicted = self._file_cache.popitem(last=False)
-            self._close_parquet_file(evicted)
+            # Evict oldest if over limit.
+            #
+            # Deliberately does NOT close the evicted handle. Another thread may
+            # be inside ``pf.read_row_group(...)`` with it right now — closing
+            # it there raised "I/O operation on closed file" mid-stream, after
+            # the 200 had already been sent. Dropping the reference is enough:
+            # CPython closes the file once the last user releases it, so the fd
+            # bound is honoured a moment later instead of a moment too early.
+            while len(self._file_cache) > self._max_file_cache_size:
+                self._file_cache.popitem(last=False)
 
         return pf
 
@@ -146,10 +173,16 @@ class PyArrowFetcher:
         return pa.Table.from_batches(batches)
 
     def close(self) -> None:
-        """Close cached file handles."""
-        for parquet_file in self._file_cache.values():
+        """Close cached file handles.
+
+        Unlike eviction, this is a shutdown path: no fetch is in flight, so
+        closing eagerly is safe and releases the fds immediately.
+        """
+        with self._file_cache_lock:
+            handles = list(self._file_cache.values())
+            self._file_cache.clear()
+        for parquet_file in handles:
             self._close_parquet_file(parquet_file)
-        self._file_cache.clear()
 
 
 def create_fetcher(

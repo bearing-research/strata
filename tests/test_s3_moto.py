@@ -264,8 +264,18 @@ class TestS3Fetcher:
         batch = fetcher.fetch(task)
         assert batch.num_rows == 5
 
-    def test_fetcher_closes_evicted_file_handles(self, monkeypatch):
-        """LRU eviction should close the evicted ParquetFile."""
+    def test_fetcher_evicts_without_closing_a_handle_still_in_use(self, monkeypatch):
+        """LRU eviction drops the reference but must NOT close the handle.
+
+        The Fetcher is shared by the whole fetch thread pool, so an evicted
+        handle may be one another thread is currently inside
+        ``read_row_group`` with — closing it there raised "I/O operation on
+        closed file" mid-stream, after the 200 had already gone out. Dropping
+        the reference is enough: CPython closes the file once the last user
+        releases it, so the fd bound is honoured a moment later instead of a
+        moment too early. (This test deliberately holds a reference in
+        ``created``, standing in for that in-flight reader.)
+        """
         import strata.fetcher as fetcher_module
 
         created = []
@@ -290,7 +300,11 @@ class TestS3Fetcher:
         fetcher._get_parquet_file("/tmp/one.parquet")
         fetcher._get_parquet_file("/tmp/two.parquet")
 
-        assert created[0].closed is True
+        # Evicted from the cache …
+        assert "/tmp/one.parquet" not in fetcher._file_cache
+        assert "/tmp/two.parquet" in fetcher._file_cache
+        # … but not closed out from under whoever still holds it.
+        assert created[0].closed is False
         assert created[1].closed is False
 
     def test_fetcher_close_closes_cached_file_handles(self, monkeypatch):
