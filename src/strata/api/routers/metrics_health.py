@@ -861,9 +861,9 @@ async def metrics_prometheus():
             ]
         )
         for tm in table_metrics:
-            table_id = tm["table_id"]
+            table_id = _prom_label(tm["table_id"])
             lines.append(
-                f'strata_table_cache_hit_rate{{table="{_prom_label(table_id)}"}} {tm["cache_hit_rate"]}'
+                f'strata_table_cache_hit_rate{{table="{table_id}"}} {tm["cache_hit_rate"]}'
             )
 
     # Add per-tenant metrics (multi-tenancy support)
