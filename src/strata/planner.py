@@ -201,6 +201,44 @@ def _project_schema(schema, columns: list[str] | None):
     return pa.schema([schema.field(name) for name in columns])
 
 
+def _estimate_row_group_bytes(
+    rg_meta, columns: list[str] | None, col_index_map: dict[str, int]
+) -> int:
+    """Estimate the bytes a row group contributes to the response.
+
+    This feeds the pre-flight 413, so it has to describe the response the
+    limit governs. It used to be ``total_byte_size``, the size of the WHOLE
+    row group, which ignores the projection entirely: scanning two columns of
+    a forty-column table was estimated as if all forty were read, and a
+    perfectly reasonable projected scan was rejected as oversized.
+
+    Summing only the projected columns' chunks fixes that exactly. It falls
+    back to the whole-row-group size whenever the per-column sizes are not
+    available -- a nested projection (absent from ``col_index_map``), or a
+    metadata cache entry written before the sizes were recorded -- because
+    over-estimating is the safe direction for a guard.
+
+    Note this is Parquet's uncompressed-but-ENCODED size, which still
+    under-states Arrow's in-memory size for dictionary-encoded columns.
+    Narrowing that gap is a separate question about how strict the limit
+    should be, not something to settle inside an estimator.
+    """
+    total = getattr(rg_meta, "total_byte_size", 0)
+    if not columns:
+        return total
+
+    projected = 0
+    for name in columns:
+        idx = col_index_map.get(name)
+        if idx is None:
+            return total
+        size = getattr(rg_meta.column(idx), "total_uncompressed_size", 0)
+        if not size:
+            return total
+        projected += size
+    return projected
+
+
 def _assert_file_satisfies_scan(
     *,
     expected,
@@ -477,9 +515,9 @@ class ReadPlanner:
                     projection_fingerprint=proj_fingerprint,
                 )
 
-                # Get estimated size from Parquet metadata
-                # Works with both our RowGroupMeta and PyArrow's RowGroupMetaData
-                rg_size = getattr(rg_meta, "total_byte_size", 0)
+                # Estimated size, projection-aware. Works with both our
+                # RowGroupMeta and PyArrow's RowGroupMetaData.
+                rg_size = _estimate_row_group_bytes(rg_meta, columns, col_index_map)
 
                 task = Task(
                     file_path=actual_path,
