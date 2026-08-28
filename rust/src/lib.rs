@@ -105,10 +105,24 @@ fn concat_streams_fast(segments: &[&[u8]]) -> Result<Vec<u8>, StrataError> {
     // Copy first segment without EOS
     result.extend_from_slice(&first[..first.len() - 8]);
 
-    // For subsequent segments, we need to skip the schema message and copy only record batches
+    // For subsequent segments, we need to skip the schema message and copy only record batches.
+    //
+    // Every malformed shape below returns Err rather than skipping the segment.
+    // Returning Ok having copied nothing from it silently drops its rows: the
+    // caller gets a well-formed stream that is simply short, with no error
+    // anywhere. Err is what hands the input to the Arrow fallback further down,
+    // which either parses it properly or fails loudly.
     for segment in &segments[1..] {
-        if segment.len() < 8 {
+        // An empty segment is legitimate — the pyarrow implementation in
+        // fast_io skips those too. Anything nonempty but too small to even
+        // hold an EOS marker is corrupt.
+        if segment.is_empty() {
             continue;
+        }
+        if segment.len() < 8 {
+            return Err(StrataError::InvalidFile(
+                "segment too small to contain an EOS marker".into(),
+            ));
         }
 
         // Verify EOS marker
@@ -129,7 +143,9 @@ fn concat_streams_fast(segments: &[&[u8]]) -> Result<Vec<u8>, StrataError> {
 
         // Read schema message size
         if offset + 4 > segment.len() {
-            continue;
+            return Err(StrataError::InvalidFile(
+                "segment truncated before its schema-message length".into(),
+            ));
         }
         let schema_size = u32::from_le_bytes([
             segment[offset],
@@ -137,14 +153,31 @@ fn concat_streams_fast(segments: &[&[u8]]) -> Result<Vec<u8>, StrataError> {
             segment[offset + 2],
             segment[offset + 3],
         ]) as usize;
-        offset += 4 + schema_size;
 
-        // Align to 8 bytes
-        offset = (offset + 7) & !7;
+        // Checked throughout: schema_size comes off disk, so a damaged entry can
+        // put any u32 here, and wrapping would turn a bogus length into a
+        // plausible in-range offset.
+        offset = offset
+            .checked_add(4)
+            .and_then(|o| o.checked_add(schema_size))
+            .and_then(|o| o.checked_add(7))
+            .ok_or_else(|| {
+                StrataError::InvalidFile("schema-message length overflows the segment".into())
+            })?;
 
-        // Copy record batches (everything from offset to len-8)
-        if offset < segment.len() - 8 {
-            result.extend_from_slice(&segment[offset..segment.len() - 8]);
+        // Align to 8 bytes (the +7 above is folded into the checked chain)
+        offset &= !7;
+
+        // Record batches run from the end of the schema message to the EOS marker.
+        let batches_end = segment.len() - 8;
+        if offset > batches_end {
+            return Err(StrataError::InvalidFile(
+                "schema-message length runs past the segment's record batches".into(),
+            ));
+        }
+        // offset == batches_end is a schema-only segment: nothing to copy.
+        if offset < batches_end {
+            result.extend_from_slice(&segment[offset..batches_end]);
         }
     }
 
