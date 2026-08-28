@@ -129,10 +129,8 @@ class TestSnapshotPinReachesTheWire:
         assert "snapshot_id" not in df_build(["id"])["params"]
 
     def test_it_matches_the_integrations_that_were_already_correct(self) -> None:
-        # The minimal-deps client job installs neither; this comparison is
-        # only meaningful where both integrations can import.
+        # This one genuinely needs duckdb: it compares against that builder.
         pytest.importorskip("duckdb")
-        pytest.importorskip("pyarrow")
         from strata_client.integration.arrow import _build_scan_transform as arrow_build
         from strata_client.integration.duckdb import _build_scan_transform as duckdb_build
 
@@ -140,3 +138,64 @@ class TestSnapshotPinReachesTheWire:
             arrow_build(["id"], None, 999)["params"]["snapshot_id"]
             == duckdb_build(["id"], None, 999)["params"]["snapshot_id"]
         )
+
+
+class TestOptionalExtrasAreIndependentlyUsable:
+    """The package declares four separate extras — duckdb, pandas, polars,
+    datafusion — but ``integration/__init__`` imported all five integrations
+    eagerly, and importing any submodule runs that file first.
+
+    So ``pip install "strata-client[pandas]"`` then ``from
+    strata_client.integration.pandas import scan_to_pandas`` raised
+    ``ModuleNotFoundError: No module named 'duckdb'``. Only ``[all]`` worked,
+    which made the separate extras misleading.
+    """
+
+    def _import_with_blocked(self, blocked: str, statement: str) -> str:
+        import subprocess
+        import sys
+        import textwrap
+
+        code = textwrap.dedent(f"""
+            import sys
+            class Blocker:
+                def find_spec(self, name, path=None, target=None):
+                    if name == {blocked!r}:
+                        raise ImportError("No module named {blocked!r}")
+                    return None
+            sys.meta_path.insert(0, Blocker())
+            {statement}
+            print("OK")
+        """)
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd="packages/strata-client/src",
+            capture_output=True,
+            text=True,
+        )
+        return proc.stdout.strip() or proc.stderr.strip()
+
+    def test_pandas_integration_imports_without_duckdb(self):
+        out = self._import_with_blocked(
+            "duckdb", "from strata_client.integration.pandas import scan_to_pandas"
+        )
+        assert out == "OK", out
+
+    def test_arrow_integration_imports_without_duckdb(self):
+        out = self._import_with_blocked(
+            "duckdb", "from strata_client.integration.arrow import StrataDataset"
+        )
+        assert out == "OK", out
+
+    def test_the_re_exports_still_resolve(self):
+        pytest.importorskip("duckdb")
+        pytest.importorskip("pandas")
+        from strata_client.integration import StrataDataset, scan_to_pandas, strata_query
+
+        assert all(x is not None for x in (StrataDataset, scan_to_pandas, strata_query))
+
+    def test_an_unknown_name_still_raises_attribute_error(self):
+        import strata_client.integration as integration
+
+        with pytest.raises(AttributeError):
+            integration.no_such_export
