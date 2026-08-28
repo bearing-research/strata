@@ -256,12 +256,14 @@ class TestRateLimiter:
         # Advance time past TTL
         clock.advance(61.0)
 
-        # Add a new client
+        # Adding a new client now sweeps the idle ones on the request path —
+        # cleanup_stale_clients used to have no caller at all, so buckets
+        # accumulated forever.
         limiter.check("client3")
+        assert limiter.get_stats()["active_clients"] == 1
 
-        # Cleanup should remove client1 and client2
-        removed = limiter.cleanup_stale_clients()
-        assert removed == 2
+        # The explicit sweep is still available and idempotent.
+        assert limiter.cleanup_stale_clients() == 0
         assert limiter.get_stats()["active_clients"] == 1
 
     def test_reset_stats(self):
@@ -431,3 +433,71 @@ class TestRateLimiterIntegration:
             server_module._state._fetch_executor.shutdown(wait=False)
             server_module._state = None
             reset_rate_limiter()
+
+
+class TestClientBucketGrowthIsBounded:
+    """The per-client bucket tables must not grow without bound.
+
+    ``cleanup_stale_clients`` existed with a TTL config but had **no caller**
+    anywhere in the codebase, and nothing else bounded the two dicts. The
+    client id is derived from ``X-Forwarded-For``, which the caller controls
+    whenever a proxy appends rather than replaces it — so a client sending a
+    distinct forwarded address per request created a permanent bucket plus a
+    timestamp entry every time: unbounded RSS growth, and (because each new id
+    starts with a full burst) a per-client limit that never limited.
+    """
+
+    def test_idle_buckets_are_reclaimed_without_an_explicit_call(self):
+        from strata.rate_limiter import RateLimitConfig, RateLimiter
+
+        clock = MockClock()
+        limiter = RateLimiter(
+            RateLimitConfig(client_ttl_seconds=60.0, cleanup_interval_seconds=10.0),
+            clock=clock,
+        )
+
+        for i in range(50):
+            limiter.check(f"client-{i}")
+        assert limiter.get_stats()["active_clients"] == 50
+
+        clock.advance(61.0)
+        limiter.check("fresh")
+
+        assert limiter.get_stats()["active_clients"] == 1
+
+    def test_distinct_ids_cannot_grow_past_the_ceiling(self):
+        """The TTL sweep alone is not a bound — ids can be minted faster than
+        they age out, which is exactly what a spoofed X-Forwarded-For does."""
+        from strata.rate_limiter import RateLimitConfig, RateLimiter
+
+        clock = MockClock()
+        limiter = RateLimiter(
+            RateLimitConfig(
+                client_ttl_seconds=3600.0,  # nothing ages out during the test
+                max_tracked_clients=25,
+            ),
+            clock=clock,
+        )
+
+        for i in range(500):
+            limiter.check(f"10.0.0.{i}")
+
+        assert limiter.get_stats()["active_clients"] <= 25
+
+    def test_active_client_keeps_its_bucket_under_eviction_pressure(self):
+        """Eviction drops the least-recently-seen, so a steadily active client
+        is not the one sacrificed."""
+        from strata.rate_limiter import RateLimitConfig, RateLimiter
+
+        clock = MockClock()
+        limiter = RateLimiter(
+            RateLimitConfig(client_ttl_seconds=3600.0, max_tracked_clients=10),
+            clock=clock,
+        )
+
+        for i in range(40):
+            limiter.check("steady")  # touched throughout
+            clock.advance(1.0)
+            limiter.check(f"churn-{i}")
+
+        assert "steady" in limiter._client_buckets

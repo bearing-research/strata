@@ -965,7 +965,23 @@ async def rate_limit_middleware(request: Request, call_next):
         return await call_next(request)
 
     path = request.url.path
-    if path in ("/health", "/ready", "/metrics", "/v1/debug/pools", "/v1/debug/memory"):
+    # These must never be rate limited: a traffic spike that exhausts the
+    # GLOBAL bucket would otherwise 429 the readiness probe, Kubernetes would
+    # pull the pod out of the load balancer precisely while it is serving, and
+    # the overload would amplify across the fleet. The previous list missed the
+    # real route paths — the registered routes are /health/ready,
+    # /health/dependencies and /metrics/prometheus, none of which it matched
+    # (the tenant and auth middlewares list them correctly).
+    if path in (
+        "/health",
+        "/health/ready",
+        "/health/dependencies",
+        "/ready",
+        "/metrics",
+        "/metrics/prometheus",
+        "/v1/debug/pools",
+        "/v1/debug/memory",
+    ):
         return await call_next(request)
 
     # Use client IP as identifier (X-Forwarded-For if behind proxy)
