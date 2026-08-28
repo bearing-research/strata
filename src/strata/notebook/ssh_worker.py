@@ -266,11 +266,20 @@ class RemoteWorker:
         on the same ``port`` returns it instead of starting a second. The worker
         binds ``host`` (remote-localhost by default) so it's reachable only over
         the SSH channel.
+
+        A worker enforces the token it was *started* with, and that token isn't
+        recorded anywhere we can read back. So a live worker is only adopted
+        when no token has to apply: otherwise it is stopped and replaced, since
+        adopting it would mean publishing a token the worker rejects — and
+        ``/health`` is unauthenticated, so nothing would notice until the first
+        cell dispatch came back 401.
         """
         if adopt:
             existing = self.is_running()
             if existing is not None and existing.port == port:
-                return existing
+                if token is None:
+                    return existing
+                self.stop()
         pidfile = self._pidfile()
         logfile = f"{_REMOTE_STATE_DIR}/worker-{shlex.quote(self.name)}.log"
         # The token goes over stdin, not into the command: a token in the

@@ -242,6 +242,26 @@ def test_launch_adopts_a_live_worker_on_same_port():
     assert not any("nohup" in c for c in runner.calls)
 
 
+def test_launch_replaces_an_adopted_worker_when_a_token_must_apply():
+    """A live worker enforces the token it was *started* with, and that token
+    can't be read back off the box. Adopting it while publishing a freshly
+    generated token locally makes every dispatch 401 — and ``/health`` is
+    unauthenticated, so the establish still reports the worker healthy. When a
+    token is in play the old process is replaced instead of adopted."""
+    runner = ScriptedSshRunner(
+        [
+            ("kill -0 111", _ok("up")),
+            (lambda c: "kill" in c and "kill -0" not in c, _ok("stopped\n")),
+            ("nohup strata-worker", _ok("222\n")),
+            ("cat ", _ok('{"pid": 111, "port": 9000}')),
+        ]
+    )
+    worker = RemoteWorker("gpu", runner).launch(port=9000, token="fresh-token")
+    assert worker == RunningWorker(pid=222, port=9000)
+    assert any("kill" in c and "kill -0" not in c for c in runner.calls)
+    assert "fresh-token\n" in runner.stdin_writes
+
+
 def test_launch_does_not_adopt_a_different_port():
     runner = ScriptedSshRunner(
         [
