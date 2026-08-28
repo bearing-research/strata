@@ -729,6 +729,21 @@ class StrataConfig(BaseSettings):
             conflicts.append(
                 "require_tenant_header=True (personal mode has no tenants to require a header for)"
             )
+        if self.mcp_enabled and self.personal_mode_user_header:
+            # personal_mode_user_header is the proxy-fronted multi-user shim:
+            # `discover` and `delete` filter by owner, and every REST notebook
+            # route runs `_require_owner`. The MCP mount has no per-request
+            # identity to check against, and no owner filtering anywhere — its
+            # `list_notebooks` returns every open session with its path, and
+            # any tool call accepts any session id. Combining the two lets one
+            # user enumerate and execute code in another user's notebook,
+            # which the REST API on the same server would 404.
+            conflicts.append(
+                "mcp_enabled=True with personal_mode_user_header set (the MCP "
+                "endpoint has no per-request identity and does not filter by "
+                "owner, so it would expose every user's sessions; use one or "
+                "the other)"
+            )
 
         if conflicts:
             raise ValueError(

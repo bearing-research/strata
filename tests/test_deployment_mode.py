@@ -245,6 +245,36 @@ class TestModeCoherence:
             )
         assert "mcp_enabled" in str(exc_info.value)
 
+    def test_personal_mcp_with_per_user_header_rejected(self, tmp_path):
+        """MCP plus the multi-user shim would expose every user's notebooks.
+
+        ``personal_mode_user_header`` is the proxy-fronted multi-user
+        deployment: ``discover`` and ``delete`` filter by owner, and every
+        REST notebook route runs ``_require_owner``. The MCP mount has no
+        per-request identity and no owner filtering — ``list_notebooks``
+        returns every open session with its path, and any tool accepts any
+        session id — so one user could enumerate and execute code in another
+        user's notebook, which REST on the same server would 404.
+        """
+        with pytest.raises(ValueError) as exc_info:
+            StrataConfig(
+                cache_dir=tmp_path / "cache",
+                deployment_mode="personal",
+                mcp_enabled=True,
+                personal_mode_user_header="X-Auth-User",
+            )
+        assert "mcp_enabled" in str(exc_info.value)
+        assert "personal_mode_user_header" in str(exc_info.value)
+
+    def test_personal_with_per_user_header_alone_allowed(self, tmp_path):
+        """Each feature on its own stays supported."""
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            deployment_mode="personal",
+            personal_mode_user_header="X-Auth-User",
+        )
+        assert config.personal_mode_user_header == "X-Auth-User"
+
     def test_personal_with_mcp_enabled_allowed(self, tmp_path):
         """Personal mode + mcp_enabled=True is coherent — the supported combination."""
         config = StrataConfig(
