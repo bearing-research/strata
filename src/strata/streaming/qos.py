@@ -60,6 +60,7 @@ class Admission:
         limiter: Any,
         client_id: str,
         client_semaphore_acquired: bool,
+        client_semaphore: Any = None,
     ) -> None:
         self._qos = qos
         self.scan_id = scan_id
@@ -67,6 +68,12 @@ class Admission:
         self.limiter = limiter
         self.client_id = client_id
         self.client_semaphore_acquired = client_semaphore_acquired
+        # The exact semaphore object this admission acquired. Releasing THIS
+        # object (rather than re-deriving one from client_id at release time)
+        # is what makes release correct under both an LRU eviction and two
+        # admissions sharing a scan_id — see ``QoSAdmission._release``.
+        self.client_semaphore = client_semaphore
+        self._released = False
 
     async def release(self) -> None:
         """Release the tenant limiter + per-client semaphore and clear counters."""
@@ -220,22 +227,50 @@ class QoSAdmission:
             self._active_bulk += 1
         self._active_scans += 1
 
-        return Admission(self, scan_id, tier, limiter, client_id, client_semaphore_acquired)
+        return Admission(
+            self,
+            scan_id,
+            tier,
+            limiter,
+            client_id,
+            client_semaphore_acquired,
+            client_semaphore,
+        )
 
     async def _release(self, admission: Admission) -> None:
         """Reverse an :meth:`admit`: release the limiter + client semaphore once.
 
         Runs on every exit path including cancellation — the #238 leak fix.
+
+        Releases exactly what this admission acquired. The previous version
+        re-derived both from ``scan_id`` / ``client_id`` at release time, which
+        leaked a per-client slot two ways:
+
+        - ``_scan_client`` is keyed by ``scan_id``, and nothing stops two
+          admissions sharing one (``GET /v1/streams/{id}`` has no
+          already-consumed guard, so a client retry or a proxy retry produces
+          two handlers for the same stream). The first release popped the
+          entry; the second found ``None`` and never released its semaphore.
+          That client permanently loses a slot, and after
+          ``per_client_interactive`` such events it is 429'd forever.
+        - ``_get_client_semaphore`` *creates* a semaphore when the entry is
+          missing, so if the LRU evicted it between acquire and release, the
+          release landed on a brand-new ``Semaphore(max_concurrent)`` and
+          ratcheted its value to ``max_concurrent + 1`` — repeatable, so the
+          per-client cap grew without bound.
+
+        Idempotent: a double release would otherwise drive the counters
+        negative and hand back a slot twice.
         """
+        if admission._released:
+            return
+        admission._released = True
+
         await admission.limiter.release()
         self._scan_tier.pop(admission.scan_id, None)
-        scan_client = self._scan_client.pop(admission.scan_id, None)
-        if scan_client is not None:
-            client_id_cleanup, client_sem_acquired = scan_client
-            if client_sem_acquired:
-                client_sem = self._get_client_semaphore(client_id_cleanup, admission.tier)
-                if client_sem is not None:
-                    client_sem.release()
+        self._scan_client.pop(admission.scan_id, None)
+        if admission.client_semaphore_acquired and admission.client_semaphore is not None:
+            admission.client_semaphore.release()
         if admission.tier == "interactive":
             self._active_interactive -= 1
         else:
