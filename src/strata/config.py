@@ -434,8 +434,6 @@ class StrataConfig(BaseSettings):
     build_runner_default_timeout: Annotated[float, Field(gt=0)] = 300.0
     build_runner_default_max_output: Annotated[int, Field(gt=0)] = 1024 * 1024 * 1024  # 1 GB
 
-    # Pull model configuration
-    pull_model_enabled: bool = False
     signed_url_expiry_seconds: Annotated[float, Field(gt=0)] = 600.0
     # HMAC secret for signing pull-model build URLs (env STRATA_TRANSFORM_SIGNING_SECRET).
     # If unset, a random per-process secret is used — fine for single-instance dev,
