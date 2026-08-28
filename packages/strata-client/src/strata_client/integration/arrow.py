@@ -42,8 +42,15 @@ if TYPE_CHECKING:
 def _build_scan_transform(
     columns: list[str] | None = None,
     filters: list[Filter] | None = None,
+    snapshot_id: int | None = None,
 ) -> dict:
-    """Build a scan@v1 transform specification."""
+    """Build a scan@v1 transform specification.
+
+    ``snapshot_id`` used to be missing here while the surrounding classes
+    accepted, stored and documented it, so a scan pinned to a snapshot
+    silently read the current one — and the provenance hash recorded the
+    current snapshot too, so nothing downstream flagged the divergence.
+    """
     params: dict = {}
     if columns is not None:
         params["columns"] = columns
@@ -52,6 +59,8 @@ def _build_scan_transform(
             {"column": f.column, "op": f.op.value, "value": serialize_filter_value(f.value)}
             for f in filters
         ]
+    if snapshot_id is not None:
+        params["snapshot_id"] = snapshot_id
     return {"executor": "scan@v1", "params": params}
 
 
@@ -101,7 +110,7 @@ class StrataScanner:
         # Use the unified materialize API
         artifact = self._client.materialize(
             inputs=[self._table_uri],
-            transform=_build_scan_transform(self._columns, self._filters),
+            transform=_build_scan_transform(self._columns, self._filters, self._snapshot_id),
         )
         table = artifact.to_table()
         yield from table.to_batches()
@@ -115,7 +124,7 @@ class StrataScanner:
         # Use the unified materialize API
         artifact = self._client.materialize(
             inputs=[self._table_uri],
-            transform=_build_scan_transform(self._columns, self._filters),
+            transform=_build_scan_transform(self._columns, self._filters, self._snapshot_id),
         )
         return artifact.to_table()
 
@@ -257,7 +266,9 @@ class StrataDataset:
             # Fetch schema by reading data using the unified materialize API
             artifact = self._client.materialize(
                 inputs=[self._table_uri],
-                transform=_build_scan_transform(),
+                # The schema probe must read the same snapshot the data reads,
+                # or a pinned dataset can describe itself with a newer schema.
+                transform=_build_scan_transform(snapshot_id=self._snapshot_id),
             )
             table = artifact.to_table()
             self._schema = table.schema if table.num_rows > 0 else pa.schema([])
