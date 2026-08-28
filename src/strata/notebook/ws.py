@@ -602,6 +602,147 @@ _VIEWER_ALLOWED_FRAMES = frozenset(
 )
 
 
+# --- Scope model for the WS frame vocabulary -------------------------------
+#
+# ``notebook:read`` / ``notebook:write`` / ``notebook:execute`` are the scopes
+# the service-mode proxy config and the deployment docs have always advertised.
+# Until now nothing in the codebase read them, so a principal holding only
+# ``notebook:read`` could execute arbitrary Python. Each C→S frame is mapped to
+# the least scope that covers what it can actually do; anything unlisted
+# defaults to ``notebook:execute`` (fail closed — a new frame is
+# privileged until someone classifies it).
+NOTEBOOK_SCOPE_READ = "notebook:read"
+NOTEBOOK_SCOPE_WRITE = "notebook:write"
+NOTEBOOK_SCOPE_EXECUTE = "notebook:execute"
+
+# Read-only: observe state, compute previews. No mutation, no code runs.
+_READ_FRAMES = frozenset(
+    {
+        MessageType.NOTEBOOK_SYNC,
+        MessageType.IMPACT_PREVIEW_REQUEST,
+        MessageType.PROFILING_REQUEST,
+    }
+)
+
+# Mutate committed notebook content, but don't themselves run code.
+_WRITE_FRAMES = frozenset(
+    {
+        MessageType.CELL_SOURCE_UPDATE,
+        MessageType.VARIANT_SET_ACTIVE,
+        MessageType.VARIANT_ADD,
+    }
+)
+
+# Everything else runs code or mutates the environment — cell execution, the
+# inspect REPL (evals arbitrary expressions), widget updates (re-run the
+# widget cell and cascade), dependency changes (invoke uv), and the agent
+# confirm/cancel controls. Listed explicitly for documentation value even
+# though the default is already ``notebook:execute``.
+_EXECUTE_FRAMES = frozenset(
+    {
+        MessageType.CELL_EXECUTE,
+        MessageType.CELL_EXECUTE_CASCADE,
+        MessageType.CELL_EXECUTE_FORCE,
+        MessageType.CELL_EXECUTE_RERUN,
+        MessageType.CELL_RUN_TESTS,
+        MessageType.NOTEBOOK_RUN_ALL,
+        MessageType.NOTEBOOK_RERUN_ALL,
+        MessageType.CELL_CANCEL,
+        MessageType.WIDGET_UPDATE,
+        MessageType.INSPECT_OPEN,
+        MessageType.INSPECT_EVAL,
+        MessageType.INSPECT_CLOSE,
+        MessageType.DEPENDENCY_ADD,
+        MessageType.DEPENDENCY_REMOVE,
+        MessageType.AGENT_CANCEL,
+        MessageType.AGENT_CONFIRM_RESPONSE,
+    }
+)
+
+
+def required_scope_for_frame(msg_type: str) -> str:
+    """Return the notebook scope a C→S frame requires (fail-closed default)."""
+    if msg_type in _READ_FRAMES:
+        return NOTEBOOK_SCOPE_READ
+    if msg_type in _WRITE_FRAMES:
+        return NOTEBOOK_SCOPE_WRITE
+    return NOTEBOOK_SCOPE_EXECUTE
+
+
+def _configured_auth_mode() -> str:
+    """The server's configured auth mode, or ``"none"`` when unconfigured.
+
+    A process with no ``ServerState`` has no auth configuration to enforce —
+    it isn't a running server (the app installs state in its lifespan, so a
+    live deployment always has it). Mirrors the existing convention in
+    ``routes._get_notebook_storage_root``, which treats the same condition as
+    "no configured boundary" rather than erroring.
+    """
+    from strata.server import get_state
+
+    try:
+        return get_state().config.auth_mode
+    except RuntimeError:
+        return "none"
+
+
+def _frame_scope_error(msg_type: str) -> str | None:
+    """Return an error message when the caller lacks the frame's scope.
+
+    ``None`` means allowed — including every no-auth deployment, where there is
+    no principal to check (mirrors ``require_scope``'s trusted-proxy-only gate).
+    """
+    from strata.auth import get_principal
+
+    if _configured_auth_mode() != "trusted_proxy":
+        return None
+    required = required_scope_for_frame(msg_type)
+    principal = get_principal()
+    if principal is not None and principal.has_scope(required):
+        return None
+    return f"'{msg_type}' requires the {required} scope"
+
+
+async def _authenticate_websocket(websocket: WebSocket) -> bool:
+    """Apply the trusted-proxy gate to a WS upgrade; False ⇒ already closed.
+
+    ``auth_middleware`` and ``tenant_context_middleware`` are registered with
+    ``@app.middleware("http")``, and Starlette's ``BaseHTTPMiddleware`` passes
+    non-``http`` scopes straight through — so **no** HTTP middleware runs for a
+    WebSocket upgrade. This endpoint therefore has to verify the proxy token and
+    parse the principal itself, exactly as the HTTP path does; without it, in
+    service mode anything that can open a socket could send ``cell_execute`` and
+    run arbitrary Python with no token and no principal.
+
+    In personal / ``auth_mode="none"`` deployments there is no principal and the
+    socket stays open, matching the HTTP middleware's own early return.
+    """
+    from strata.auth import AuthError, parse_principal, set_principal, verify_proxy_token
+    from strata.server import get_state
+
+    if _configured_auth_mode() != "trusted_proxy":
+        return True
+    config = get_state().config
+
+    # ``WebSocket.headers`` is the same case-insensitive mapping
+    # ``auth_middleware`` reads via ``request.headers``.
+    headers = dict(websocket.headers)
+    header_name = config.proxy_token_header
+    token = headers.get(header_name) or headers.get(header_name.lower())
+    if not verify_proxy_token(token, config.proxy_token):
+        logger.warning("ws_auth_failed reason=invalid_proxy_token")
+        await websocket.close(code=1008, reason="Unauthorized")
+        return False
+
+    try:
+        set_principal(parse_principal(headers, config))
+    except AuthError:
+        logger.warning("ws_auth_failed reason=missing_principal")
+        await websocket.close(code=1008, reason="Unauthorized")
+        return False
+    return True
+
+
 @router.websocket("/ws/{notebook_id}")
 async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     """WebSocket endpoint for real-time notebook updates.
@@ -644,6 +785,13 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     - profiling_summary         Per-cell duration summary
     - error                     Generic error frame
     """
+    # Trusted-proxy gate. No HTTP middleware runs for a WS upgrade, so this
+    # endpoint authenticates itself (see ``_authenticate_websocket``). Must be
+    # first: an unauthenticated caller shouldn't even learn whether a
+    # notebook_id exists.
+    if not await _authenticate_websocket(websocket):
+        return
+
     # Get or create session
     session_manager = _get_session_manager()
     session = session_manager.get_session(notebook_id)
@@ -710,6 +858,21 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                             MessageType.ERROR,
                             execution_state.sequence,
                             {"error": f"Unknown message type: {msg_type}"},
+                        )
+                    )
+                )
+                continue
+            # Scope gate: under trusted-proxy auth every frame requires the
+            # notebook scope matching what it can do (read / write / execute).
+            # No-auth deployments have no principal and stay open.
+            scope_error = _frame_scope_error(msg_type)
+            if scope_error is not None:
+                await websocket.send_text(
+                    _json_encode(
+                        _make_message(
+                            MessageType.ERROR,
+                            execution_state.sequence,
+                            {"error": scope_error, "code": "insufficient_scope"},
                         )
                     )
                 )
