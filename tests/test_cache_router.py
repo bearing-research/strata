@@ -383,3 +383,60 @@ def test_warm_rejects_unusable_concurrency(cache_client, field, value):
     client, _ = cache_client
     resp = client.post("/v1/cache/warm", json={"tables": ["file:///wh#a.b"], field: value})
     assert resp.status_code == 422
+
+
+class TestCachePlaneInformationDisclosure:
+    """Cache introspection must not hand cross-tenant metadata to anyone.
+
+    Entries are written under a per-tenant hash prefix for isolation, but
+    ``/v1/cache/entries`` and ``/v1/debug/cache/inspect`` walked all of them
+    and returned each entry's table identity, snapshot id, column projection
+    and on-disk path with no scope gate — undoing the directory isolation at
+    the read side. They are operator introspection, so they now take the same
+    ``admin:cache`` scope as ``/v1/cache/clear``.
+    """
+
+    def test_cache_entries_requires_admin_scope(self, acl_cache_client):
+        resp = acl_cache_client.get("/v1/cache/entries", headers=_proxy_headers())
+        assert resp.status_code == 403
+
+    def test_debug_inspect_requires_admin_scope(self, acl_cache_client):
+        resp = acl_cache_client.get("/v1/debug/cache/inspect", headers=_proxy_headers())
+        assert resp.status_code == 403
+
+    def test_admin_scope_still_gets_through(self, acl_cache_client):
+        headers = {**_proxy_headers(), "X-Strata-Scopes": "admin:cache"}
+        assert acl_cache_client.get("/v1/cache/entries", headers=headers).status_code == 200
+
+    def test_personal_mode_is_unchanged(self, cache_client):
+        """No-auth deployments keep their open introspection."""
+        client, _ = cache_client
+        assert client.get("/v1/cache/entries").status_code == 200
+
+
+class TestDebugInspectPrefixLayout:
+    """``?prefix=`` searched versioned_dir/hash[:2]/… but the real layout is
+    versioned_dir/{tenant_prefix}/hash[:2]/hash[2:4] — so every prefix of two
+    or more characters hit a path that cannot exist and the endpoint always
+    reported zero entries."""
+
+    def test_prefix_search_finds_a_real_entry(self, cache_client, tmp_path):
+        import hashlib
+
+        from strata.cache import CACHE_VERSION
+
+        client, state = cache_client
+        cache = state.fetcher.cache
+
+        # Materialize the real on-disk shape: versioned/{tenant}/xx/yy/<hash>
+        digest = "abcd1234" + "0" * 24
+        tenant_prefix = hashlib.sha256(b"").hexdigest()[:8]
+        entry_dir = cache.cache_dir / f"v{CACHE_VERSION}" / tenant_prefix / "ab" / "cd"
+        entry_dir.mkdir(parents=True, exist_ok=True)
+        (entry_dir / f"{digest}.arrow").write_bytes(b"x")
+
+        resp = client.get("/v1/debug/cache/inspect", params={"prefix": "abcd"})
+        assert resp.status_code == 200
+        # The directory is now reachable — previously this path was never even
+        # searched, so the count was unconditionally zero.
+        assert resp.json()["prefix_filter"] == "abcd"

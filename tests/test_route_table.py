@@ -66,7 +66,9 @@ EXPECTED_ROUTES = [
     ("/v1/builds/{build_id}/finalize", "POST", 0),
     ("/v1/builds/{build_id}/manifest", "GET", 0),
     ("/v1/cache/clear", "POST", 1),
-    ("/v1/cache/entries", "GET", 0),
+    # 1 dependency: require_scope("admin:cache") — the listing is cache-wide
+    # and exposes every tenant's entry metadata.
+    ("/v1/cache/entries", "GET", 1),
     ("/v1/cache/evictions", "GET", 0),
     ("/v1/cache/histogram", "GET", 0),
     ("/v1/cache/stats", "GET", 0),
@@ -76,7 +78,8 @@ EXPECTED_ROUTES = [
     ("/v1/cache/warm/jobs/{job_id}", "DELETE", 0),
     ("/v1/cache/warm/jobs/{job_id}", "GET", 0),
     ("/v1/config/timeouts", "GET", 0),
-    ("/v1/debug/cache/inspect", "GET", 0),
+    # 1 dependency: require_scope("admin:cache") — same cross-tenant exposure.
+    ("/v1/debug/cache/inspect", "GET", 1),
     ("/v1/debug/circuit-breakers", "GET", 0),
     ("/v1/debug/connections", "GET", 0),
     ("/v1/debug/gc/pauses", "GET", 0),
