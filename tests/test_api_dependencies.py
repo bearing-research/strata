@@ -173,3 +173,24 @@ class TestArtifactInputTenantGate:
         with pytest.raises(HTTPException) as exc:
             resolve_input_version("strata://artifact/ghost@v=1", tenant="tenant-b")
         assert exc.value.status_code == 404
+
+
+class TestArtifactListPaginationIsBounded:
+    """``limit`` / ``offset`` flowed straight into "LIMIT ? OFFSET ?", and
+    SQLite treats a NEGATIVE limit as unbounded — so ``?limit=-1``
+    materialized every artifact_versions row into a single response. On a
+    store with millions of versions that is an OOM, not a slow query."""
+
+    def test_negative_and_oversized_limits_are_rejected(self, tmp_path):
+        from fastapi.testclient import TestClient
+
+        from strata.server import app
+
+        _set_state(deployment_mode="personal", artifact_dir=str(tmp_path / "artifacts"))
+        client = TestClient(app)
+
+        assert client.get("/v1/artifacts", params={"limit": -1}).status_code == 422
+        assert client.get("/v1/artifacts", params={"limit": 10_000_000}).status_code == 422
+        assert client.get("/v1/artifacts", params={"offset": -5}).status_code == 422
+        # A sane request still works.
+        assert client.get("/v1/artifacts", params={"limit": 10}).status_code == 200

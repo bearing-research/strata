@@ -348,8 +348,12 @@ async def get_artifact_usage(store: PersonalModeStore, tenant_filter: CurrentTen
 async def list_artifacts(
     store: PersonalModeStore,
     tenant_filter: CurrentTenant,
-    limit: int = 100,
-    offset: int = 0,
+    # Bounded: these flow straight into "LIMIT ? OFFSET ?", and SQLite treats a
+    # NEGATIVE limit as unbounded — so ?limit=-1 materialized every
+    # artifact_versions row into one response. The sibling lineage/dependents
+    # params already carry ge/le.
+    limit: int = Query(default=100, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     state: str | None = None,
     name_prefix: str | None = None,
     since: float | None = None,
@@ -573,13 +577,19 @@ async def get_artifact_lineage(
     Returns:
         ArtifactLineageResponse with nodes and edges representing the lineage graph
     """
-    from strata.server import _ensure_artifact_access
+    from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
     # Get the root artifact
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
         tenant_filter,
     )
+    # Same table-ACL re-check the sibling read endpoints run. Without it a
+    # principal denied a table could still read the lineage graph naming it —
+    # the response carries every upstream table URI, the snapshot pinned in
+    # input_version, and each transform ref, which is most of what the deny
+    # rule exists to withhold.
+    _authorize_artifact_read(artifact)
 
     if artifact.state not in ("ready", "superseded"):
         raise HTTPException(
@@ -626,13 +636,14 @@ async def get_artifact_dependents(
     Returns:
         ArtifactDependentsResponse with list of dependent artifacts
     """
-    from strata.server import _ensure_artifact_access
+    from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
     # Verify the artifact exists
     artifact = _ensure_artifact_access(
         store.get_artifact(artifact_id, version),
         tenant_filter,
     )
+    _authorize_artifact_read(artifact)
 
     if artifact.state not in ("ready", "superseded"):
         raise HTTPException(

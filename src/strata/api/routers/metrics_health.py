@@ -26,6 +26,21 @@ from strata.tenant_registry import get_tenant_registry
 router = APIRouter(tags=["metrics"])
 
 
+def _prom_label(value: object) -> str:
+    """Escape a Prometheus label value per the exposition format.
+
+    Backslash, double quote and newline must be escaped. The table-metric
+    lines carried a comment claiming to escape ``table_id`` and then
+    interpolated it raw, so a table (or tenant) name containing a quote
+    emitted ``…{table="a"b"} 5``, which fails the scrape parse and drops the
+    **entire** metrics payload — not just that series. A name containing a
+    newline could inject arbitrary fabricated series into the operator's TSDB.
+    Tenant ids are validated elsewhere; table identities are not.
+    """
+    text = str(value)
+    return text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
 @router.get("/health")
 async def health():
     """Basic health check endpoint (liveness probe).
@@ -820,9 +835,10 @@ async def metrics_prometheus():
             ]
         )
         for tm in table_metrics:
-            # Escape table_id for Prometheus label (replace dots with underscores for label)
             table_id = tm["table_id"]
-            lines.append(f'strata_table_scans_total{{table="{table_id}"}} {tm["scan_count"]}')
+            lines.append(
+                f'strata_table_scans_total{{table="{_prom_label(table_id)}"}} {tm["scan_count"]}'
+            )
 
         lines.extend(
             [
@@ -833,7 +849,9 @@ async def metrics_prometheus():
         )
         for tm in table_metrics:
             table_id = tm["table_id"]
-            lines.append(f'strata_table_latency_p95_ms{{table="{table_id}"}} {tm["p95_ms"]}')
+            lines.append(
+                f'strata_table_latency_p95_ms{{table="{_prom_label(table_id)}"}} {tm["p95_ms"]}'
+            )
 
         lines.extend(
             [
@@ -845,7 +863,7 @@ async def metrics_prometheus():
         for tm in table_metrics:
             table_id = tm["table_id"]
             lines.append(
-                f'strata_table_cache_hit_rate{{table="{table_id}"}} {tm["cache_hit_rate"]}'
+                f'strata_table_cache_hit_rate{{table="{_prom_label(table_id)}"}} {tm["cache_hit_rate"]}'
             )
 
     # Add per-tenant metrics (multi-tenancy support)
@@ -861,7 +879,9 @@ async def metrics_prometheus():
         )
         for tm in tenant_metrics:
             tenant_id = tm["tenant_id"]
-            lines.append(f'strata_tenant_scans_total{{tenant="{tenant_id}"}} {tm["total_scans"]}')
+            lines.append(
+                f'strata_tenant_scans_total{{tenant="{_prom_label(tenant_id)}"}} {tm["total_scans"]}'
+            )
 
         lines.extend(
             [
@@ -873,7 +893,7 @@ async def metrics_prometheus():
         for tm in tenant_metrics:
             tenant_id = tm["tenant_id"]
             lines.append(
-                f'strata_tenant_cache_hit_rate{{tenant="{tenant_id}"}} {tm["cache_hit_rate"]}'
+                f'strata_tenant_cache_hit_rate{{tenant="{_prom_label(tenant_id)}"}} {tm["cache_hit_rate"]}'
             )
 
         lines.extend(
@@ -886,7 +906,9 @@ async def metrics_prometheus():
         for tm in tenant_metrics:
             tenant_id = tm["tenant_id"]
             total_bytes = tm["bytes_from_cache"] + tm["bytes_from_storage"]
-            lines.append(f'strata_tenant_bytes_total{{tenant="{tenant_id}"}} {total_bytes}')
+            lines.append(
+                f'strata_tenant_bytes_total{{tenant="{_prom_label(tenant_id)}"}} {total_bytes}'
+            )
 
     # Add build metrics (if server transforms are enabled)
     try:
