@@ -170,6 +170,47 @@ async def test_run_cell_broadcasts_and_maps(sm_with_session, monkeypatch):
     )
 
 
+@pytest.mark.asyncio
+async def test_run_cell_caps_console_returned_to_the_agent(sm_with_session, monkeypatch):
+    """A cell's stdout is captured whole and travels uncapped to here, so a
+    print-heavy cell would return megabytes straight into an agent's context.
+    The agent-facing result caps each stream and says how much it dropped."""
+    sm, session_id, _ = sm_with_session
+    flood = "x" * 50_000
+
+    async def fake_broadcast(session, cell_id, execution_state, notebook_id, mode="normal"):
+        class _Result:
+            def to_dict(self):
+                return {
+                    "cell_id": cell_id,
+                    "status": "ready",
+                    "cache_hit": False,
+                    "execution_method": "subprocess",
+                    "duration_ms": 1.0,
+                    "stdout": flood,
+                    "stderr": flood,
+                    "error": None,
+                }
+
+        return _Result()
+
+    monkeypatch.setattr("strata.notebook.ws.execute_cell_and_broadcast", fake_broadcast)
+    monkeypatch.setattr(
+        sm.get_session(session_id), "environment_execution_block_message", lambda: None
+    )
+
+    async def fake_note_broadcast(notebook_id, message):
+        return None
+
+    monkeypatch.setattr("strata.notebook.ws._broadcast_message", fake_note_broadcast)
+
+    result = await _run_cell(sm, session_id, "a")
+    for stream in ("stdout", "stderr"):
+        assert len(result[stream]) < len(flood)
+        assert result[stream].startswith("x" * 100)
+        assert "chars truncated" in result[stream]
+
+
 def test_get_variable_defined_and_undefined(sm_with_session):
     sm, session_id, _ = sm_with_session
     # sm_with_session: cell `a` defines x, cell `b` defines y (= x + 1).

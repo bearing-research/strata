@@ -31,7 +31,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, JsonValue, field_validator
 
 if TYPE_CHECKING:
     import httpx
@@ -120,6 +120,20 @@ class DagView(BaseModel):
     error: str | None = None
 
 
+# Per-stream cap on the console text handed back to an agent. A cell's stdout
+# is captured whole and travels uncapped all the way to here, so one
+# print-heavy cell would otherwise return megabytes into an agent's context.
+# Matches the cap the CLI applies on its own (separate, executor-level) path.
+MAX_AGENT_CONSOLE_CHARS = 10_000
+
+
+def _cap_console(text: str) -> str:
+    if len(text) <= MAX_AGENT_CONSOLE_CHARS:
+        return text
+    omitted = len(text) - MAX_AGENT_CONSOLE_CHARS
+    return text[:MAX_AGENT_CONSOLE_CHARS] + f"… [+{omitted} chars truncated]"
+
+
 class RunResult(BaseModel):
     """The outcome of running a single cell, agent-facing."""
 
@@ -131,6 +145,13 @@ class RunResult(BaseModel):
     error: str | None = None
     stdout: str = ""
     stderr: str = ""
+
+    # Capped here rather than at each caller: this is the one type every
+    # agent-facing run result is projected into, local and remote alike.
+    @field_validator("stdout", "stderr")
+    @classmethod
+    def _truncate_console(cls, value: str) -> str:
+        return _cap_console(value)
 
 
 class TestRunResult(BaseModel):
