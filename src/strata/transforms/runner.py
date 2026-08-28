@@ -464,9 +464,18 @@ class BuildRunner:
                 output_bytes = output_path.stat().st_size
                 schema_json, row_count = self._read_arrow_metadata(output_path)
 
-                # Move output to final artifact location
-                final_path = self.artifact_store._blob_path(build.artifact_id, build.version)
-                output_path.rename(final_path)
+                # Publish the output through the blob store rather than
+                # renaming into ``_blob_path``. That helper is documented
+                # local-only/deprecated: with a remote backend configured,
+                # ``blobs_dir`` is a local directory the backend never reads,
+                # so the rename either raised FileNotFoundError or dropped the
+                # output on local disk while ``finalize_artifact`` below still
+                # marked the artifact ready — a ready artifact whose blob does
+                # not exist in the configured store. Every other writer already
+                # goes through this API.
+                self.artifact_store.publish_blob_from_path(
+                    build.artifact_id, build.version, output_path
+                )
 
                 # Finalize artifact
                 finalized_artifact = self.artifact_store.finalize_artifact(
