@@ -3,6 +3,7 @@
 import time
 from pathlib import Path
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 from strata.config import StrataConfig
@@ -159,6 +160,45 @@ def _assert_no_row_level_deletes(data_files, table_identity: str) -> None:
         "them under the snapshot key. Compact the table (rewrite_data_files) "
         "to copy-on-write, or scan a snapshot taken before the deletes."
     )
+
+
+def _assert_projection_exists(
+    columns: list[str] | None,
+    table_schema,
+    table_identity: str,
+) -> None:
+    """Raise when a requested column is absent from the table schema.
+
+    Nothing checked this. ``_assert_file_satisfies_scan`` only runs for the
+    SECOND and later files (the first file's schema is what it compares
+    against), so a single-file table — the common case — validated nothing at
+    all. The projection was then applied by ``CachedFetcher._project_batch``
+    via ``schema.get_field_index(name)``, which returns ``-1`` for a name it
+    does not know, and ``batch.column(-1)`` is the LAST column. So scanning a
+    column that does not exist returned the last column's data under the
+    requested name, silently and with no error: exactly the "quietly wrong
+    rows" outcome this codebase refuses everywhere else.
+    """
+    if not columns:
+        return
+    known = set(table_schema.names)
+    missing = [c for c in columns if c not in known]
+    if missing:
+        raise ValueError(
+            f"Table {table_identity} has no column(s) {missing}. "
+            f"Available columns: {sorted(known)}."
+        )
+
+
+def _project_schema(schema, columns: list[str] | None):
+    """Return ``schema`` narrowed to ``columns``, in the requested order."""
+    if not columns or schema is None:
+        return schema
+    if list(schema.names) == columns:
+        return schema
+    # ``field(name)`` raises for a name it does not know; ``get_field_index``
+    # would return -1 and silently pick the last field instead.
+    return pa.schema([schema.field(name) for name in columns])
 
 
 def _assert_file_satisfies_scan(
@@ -367,6 +407,9 @@ class ReadPlanner:
                 filter_fingerprint,
             )
 
+        table_arrow_schema = table.schema().as_arrow()
+        _assert_projection_exists(columns, table_arrow_schema, table_identity_str)
+
         total_row_groups = 0
         pruned_row_groups = 0
         arrow_schema = None
@@ -454,14 +497,17 @@ class ReadPlanner:
         plan.estimated_bytes = estimated_bytes
         plan.planning_time_ms = elapsed_ms(start_time)
 
-        # Set schema: prefer Parquet schema (may have column projection),
-        # fall back to Iceberg table schema for empty tables/scans
-        if arrow_schema is not None:
-            plan.schema = arrow_schema
-        else:
-            # No data files - get schema from Iceberg table metadata
-            # This ensures empty scans still have a valid schema
-            plan.schema = table.schema().as_arrow()
+        # Set schema: the Parquet file schema when there was a file to read,
+        # the Iceberg table schema for empty tables / fully-pruned scans.
+        #
+        # Then apply the projection. Neither source is projected on its own,
+        # and ``plan.schema`` IS the response schema when there are no tasks:
+        # a scan for ``columns=["id"]`` that matched rows streamed one column,
+        # while the same scan matching none streamed every column. Same query,
+        # different shape depending on the data — which breaks anything that
+        # concatenates partitioned scans or asserts on the schema.
+        base_schema = arrow_schema if arrow_schema is not None else table_arrow_schema
+        plan.schema = _project_schema(base_schema, columns)
 
         return plan
 
