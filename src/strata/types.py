@@ -529,10 +529,19 @@ class TransformSpec(BaseModel):
 
 
 class FilterSpec(BaseModel):
-    """Row filter specification for identity transform.
+    """A pruning hint for a scan. It does NOT filter rows.
+
+    Strata is not a query engine. A filter skips whole data files (Iceberg
+    manifest stats) and whole row groups (Parquet min/max), which is what
+    makes a large scan cheap, but every row of a row group that survives
+    pruning is returned. The result is a **superset** of the matching rows;
+    callers apply the predicate themselves if they need only the matches.
+
+    Pruning is conservative by design: when safety cannot be proved the data
+    is read, so a filter never drops a row the caller asked for.
 
     Attributes:
-        column: Column name to filter on
+        column: Column to prune on
         op: Comparison operator
         value: Value to compare against
     """
