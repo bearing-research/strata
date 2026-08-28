@@ -403,8 +403,18 @@ class DiskCache:
         import shutil
 
         for item in self.cache_dir.iterdir():
-            # Skip metadata database - it's managed by MetadataStore
-            if item.name == "metadata.sqlite":
+            # Skip the metadata database - it's managed by MetadataStore.
+            #
+            # That means the -wal and -shm sidecars too. MetadataStore runs in
+            # WAL mode, where those two files are part of the database, not
+            # scratch beside it: the -wal holds committed transactions that
+            # have not been checkpointed into the main file yet, and the -shm
+            # is the shared index into it, mapped by every live connection
+            # (the store keeps one per thread). Matching only the exact name
+            # deleted both out from under an open database that this method
+            # says it preserves, which risks losing committed metadata and can
+            # leave a connection raising SQLITE_IOERR ("disk I/O error").
+            if item.name.startswith("metadata.sqlite"):
                 continue
             if item.is_dir():
                 shutil.rmtree(item)
