@@ -590,3 +590,86 @@ class TestSchemaEvolutionDetectedAtPlanTime:
         that predate the evolution."""
         plan = ReadPlanner(strata_config).plan(evolved_warehouse, columns=["id"])
         assert plan.tasks, "a projection present in every file should still plan"
+
+
+class TestScanProjectionContract:
+    """A scan's ``columns`` list was neither validated nor reflected."""
+
+    def test_a_column_that_does_not_exist_is_refused(self, temp_warehouse, strata_config):
+        """It used to return another column's data under the requested name.
+
+        ``_assert_file_satisfies_scan`` only runs for the SECOND and later
+        files — the first file's schema is what it compares against — so a
+        single-file table validated nothing. ``_project_batch`` then resolves
+        each name with ``schema.get_field_index(name)``, which returns ``-1``
+        for an unknown name, and ``batch.column(-1)`` is the LAST column. So
+        ``columns=["id", "nope"]`` came back as a two-column batch whose
+        ``nope`` held the final column's values, with no error anywhere.
+        """
+        planner = ReadPlanner(strata_config)
+
+        with pytest.raises(ValueError, match="no column"):
+            planner.plan(temp_warehouse["table_uri"], columns=["id", "nope"])
+
+    def test_the_error_names_the_available_columns(self, temp_warehouse, strata_config):
+        planner = ReadPlanner(strata_config)
+
+        with pytest.raises(ValueError) as exc:
+            planner.plan(temp_warehouse["table_uri"], columns=["nope"])
+        assert "nope" in str(exc.value)
+        assert "value" in str(exc.value)
+
+    def test_an_empty_result_advertises_the_same_columns_as_a_full_one(
+        self, temp_warehouse, strata_config
+    ):
+        """``plan.schema`` IS the response schema when there are no tasks.
+
+        Neither the Parquet file schema nor the Iceberg table schema is
+        projected, so a scan for one column that matched rows streamed one
+        column, while the same scan matching none streamed every column —
+        the shape depended on the data, which breaks anything concatenating
+        partitioned scans or asserting on the schema.
+        """
+        planner = ReadPlanner(strata_config)
+        uri = temp_warehouse["table_uri"]
+
+        matched = planner.plan(uri, columns=["id"])
+        pruned = planner.plan(
+            uri,
+            columns=["id"],
+            filters=[Filter(column="id", op=FilterOp.GT, value=10**12)],
+        )
+
+        assert matched.tasks and not pruned.tasks
+        assert matched.schema.names == ["id"]
+        assert pruned.schema.names == ["id"]
+
+    def test_the_projection_order_is_the_requested_order(self, temp_warehouse, strata_config):
+        planner = ReadPlanner(strata_config)
+
+        plan = planner.plan(temp_warehouse["table_uri"], columns=["name", "id"])
+        assert plan.schema.names == ["name", "id"]
+
+    def test_the_fetcher_helper_is_loud_rather_than_wrong(self):
+        """Defense in depth for the same hazard.
+
+        The planner now rejects an unknown column before a task exists, so
+        this should be unreachable — but the helper indexed by
+        ``get_field_index``, whose -1 for an unknown name silently selected
+        the last column. Indexing by name costs the same and raises.
+        """
+        import pyarrow as pa
+
+        from strata.cache import CachedFetcher
+
+        batch = pa.RecordBatch.from_pydict({"id": [1, 2], "value": [9.0, 8.0]})
+
+        assert CachedFetcher._project_batch(batch, ["id"]).schema.names == ["id"]
+        with pytest.raises(KeyError):
+            CachedFetcher._project_batch(batch, ["id", "nope"])
+
+    def test_an_unprojected_scan_still_reports_every_column(self, temp_warehouse, strata_config):
+        planner = ReadPlanner(strata_config)
+
+        plan = planner.plan(temp_warehouse["table_uri"])
+        assert plan.schema.names == ["id", "value", "name", "timestamp"]

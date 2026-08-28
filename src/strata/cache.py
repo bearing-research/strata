@@ -562,8 +562,13 @@ class CachedFetcher:
             return batch
         if batch.schema.names == columns:
             return batch
+        # Index by NAME, not by ``get_field_index``: that returns -1 for a name
+        # it does not know, and ``batch.column(-1)`` is the last column, so an
+        # unknown column silently came back holding another column's values.
+        # The planner now rejects those before a task is ever built; this keeps
+        # the helper itself loud rather than wrong, at identical cost.
         return pa.RecordBatch.from_arrays(
-            [batch.column(batch.schema.get_field_index(name)) for name in columns],
+            [batch.column(name) for name in columns],
             names=columns,
         )
 
