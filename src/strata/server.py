@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 import pyarrow as pa
 import pyarrow.ipc as ipc
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -905,13 +904,85 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow cross-origin requests (needed for dev and when frontend served separately)
-app.add_middleware(
-    cast(type, CORSMiddleware),
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+_CORS_MAX_AGE = "600"
+
+
+def _configured_cors_origins() -> list[str]:
+    """Extra allowed browser origins, or [] before the server is configured."""
+    try:
+        return list(get_state().config.cors_allow_origins)
+    except RuntimeError:
+        # No ServerState yet (import-time probes, some tests). Same-origin only.
+        return []
+
+
+def _origin_is_allowed(request: Request, origin: str) -> bool:
+    """Whether *origin* may make cross-origin calls to this server.
+
+    Same-origin is always allowed so the bundled frontend keeps working; the
+    rest come from ``cors_allow_origins`` for separate dev servers.
+    """
+    host = request.headers.get("host")
+    if host and origin in (f"http://{host}", f"https://{host}"):
+        return True
+    return origin in _configured_cors_origins()
+
+
+@app.middleware("http")
+async def cors_and_origin_guard(request: Request, call_next):
+    """Answer CORS preflights and refuse cross-origin writes.
+
+    This replaces a blanket ``Access-Control-Allow-Origin: *``. Personal mode
+    runs with no auth on loopback, and the browser is on loopback too, so that
+    header let any page the user visited drive the whole notebook API: read
+    ``/v1/notebooks/discover``, open a notebook, add a cell holding arbitrary
+    Python and execute it. Restricting the header stops responses being read
+    and stops anything that needs a preflight.
+
+    Preflights alone are not enough, though. ``POST .../cells/{id}/execute``
+    takes no body (``mode`` is a query parameter), which makes it a CORS
+    *simple request* that a page can fire without any preflight to block. So
+    a disallowed Origin also fails closed on every unsafe method.
+
+    Requests with no ``Origin`` header are untouched: that is the CLI, the MCP
+    server, the SDK and every other non-browser caller.
+    """
+    origin = request.headers.get("origin")
+    if origin is None:
+        return await call_next(request)
+
+    allowed = _origin_is_allowed(request, origin)
+
+    if request.method == "OPTIONS" and "access-control-request-method" in request.headers:
+        if not allowed:
+            # No CORS headers: the browser fails the preflight and never sends
+            # the real request.
+            return Response(status_code=403)
+        requested = request.headers.get("access-control-request-headers", "")
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Methods": "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT",
+                "Access-Control-Allow-Headers": requested or "content-type",
+                "Access-Control-Max-Age": _CORS_MAX_AGE,
+                "Vary": "Origin",
+            },
+        )
+
+    if not allowed and request.method not in _SAFE_METHODS:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": f"Cross-origin request from {origin} is not allowed."},
+        )
+
+    response = await call_next(request)
+    if allowed:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    return response
+
 
 # Add request context middleware (sets request_id, adds to response headers)
 app.middleware("http")(request_context_middleware)
