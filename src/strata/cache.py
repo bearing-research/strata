@@ -31,6 +31,25 @@ CACHE_META_EXTENSION = ".meta.json"
 #   3: created_at / stats timestamps are epoch floats (were ISO-8601 strings)
 CACHE_VERSION = 3
 
+# Every Arrow IPC stream opens with a continuation marker and, once its writer
+# is closed (``put`` always closes), ends with an end-of-stream marker. Both are
+# fixed, so a head+tail check validates an entry Strata wrote itself for free.
+_IPC_STREAM_HEAD = b"\xff\xff\xff\xff"
+_IPC_STREAM_TAIL = b"\xff\xff\xff\xff\x00\x00\x00\x00"
+
+
+def _write_durably(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` and flush it to disk before returning.
+
+    Used for cache temp files, which are then ``os.replace``-d into place.
+    The rename is atomic but not durable on its own: without this flush a
+    crash can leave the rename applied and the data blocks unwritten.
+    """
+    with open(path, "wb") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+
 
 @dataclass
 class CacheEntryMetadata:
@@ -258,13 +277,32 @@ class DiskCache:
             # and OS page cache reuse on repeated access
             from strata import fast_io
 
-            return fast_io.read_file_mmap(str(path))
+            data = fast_io.read_file_mmap(str(path))
         except OSError:
             # The file vanished or could not be read (read_file_mmap returns
             # raw bytes, so this is an I/O error, not Arrow corruption). Drop
             # the unreadable entry and treat it as a miss.
             self._delete_entry_files(path)
             return None
+
+        # This path deliberately does not parse Arrow, so nothing here noticed
+        # a damaged entry: the bytes went straight to the network and — because
+        # cache keys are immutable snapshot IDs that are never invalidated —
+        # the same damaged entry was served again on every later request. The
+        # sibling ``get`` self-heals (it parses, and drops the entry on any
+        # failure); this one poisoned a key permanently.
+        #
+        # An Arrow IPC stream opens with the 0xFFFFFFFF continuation marker and
+        # closes with an end-of-stream marker, both fixed. The bytes are already
+        # in memory, so checking twelve of them costs nothing and catches the
+        # damage that matters: a zeroed or empty entry at the head, a truncated
+        # one at the tail. ``put`` also fsyncs, so a crash is far less likely to
+        # produce either shape to begin with.
+        if not (data.startswith(_IPC_STREAM_HEAD) and data.endswith(_IPC_STREAM_TAIL)):
+            self._delete_entry_files(path)
+            return None
+
+        return data
 
     def get_path(self, key: CacheKey) -> Path | None:
         """Return the cache file path for ``key`` if it exists.
@@ -318,8 +356,15 @@ class DiskCache:
             writer.close()
             stream_bytes = sink.getvalue().to_pybytes()
 
-            # Write to temp file first
-            tmp_path.write_bytes(stream_bytes)
+            # Write to temp file first, and fsync before the rename below.
+            # os.replace is atomic for *observers*, but atomicity is not
+            # durability: after a power loss the rename can survive while the
+            # data blocks it points at do not, leaving a correctly-named entry
+            # full of garbage. That is unrecoverable here, because cache keys
+            # are immutable snapshot IDs and nothing ever invalidates an entry.
+            # This costs one flush on the miss path only, which has already
+            # paid for a Parquet read from object storage.
+            _write_durably(tmp_path, stream_bytes)
 
             # Write metadata sidecar
             metadata = CacheEntryMetadata(
@@ -332,7 +377,7 @@ class DiskCache:
                 size_bytes=len(stream_bytes),
                 created_at=time.time(),
             )
-            meta_tmp_path.write_text(json.dumps(asdict(metadata)))
+            _write_durably(meta_tmp_path, json.dumps(asdict(metadata)).encode())
 
             # Atomic rename both files
             # If another thread already wrote, that's fine - we just overwrite with same data
