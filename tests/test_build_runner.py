@@ -264,6 +264,26 @@ class TestBuildRunnerBasics:
         await build_runner.stop()
 
 
+def _send_from_post(mock_post):
+    """Adapt a ``client.post`` mock to the streaming ``client.send`` call.
+
+    The runner streams the executor response (``build_request`` +
+    ``send(..., stream=True)``) so the output size limit is enforced during
+    transfer rather than after the whole body is already in memory. These
+    mocks predate that and script ``post``; this bridges them.
+    """
+
+    async def _send(request, *args, **kwargs):
+        response = await mock_post()
+        # Always assign: these are MagicMocks, so hasattr is unconditionally
+        # True and a guard would leave a non-awaitable in place.
+        response.aclose = AsyncMock()
+        response.aread = AsyncMock(return_value=b"")
+        return response
+
+    return _send
+
+
 class TestBuildExecution:
     """Tests for build execution with mocked executor."""
 
@@ -295,6 +315,8 @@ class TestBuildExecution:
         with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post = mock_post
+            mock_client.build_request = MagicMock(return_value=MagicMock())
+            mock_client.send = _send_from_post(mock_post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client
@@ -347,6 +369,8 @@ class TestBuildExecution:
             with patch("httpx.AsyncClient") as MockClient:
                 mock_client = AsyncMock()
                 mock_client.post = mock_post
+                mock_client.build_request = MagicMock(return_value=MagicMock())
+                mock_client.send = _send_from_post(mock_post)
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock(return_value=None)
                 MockClient.return_value = mock_client
@@ -417,6 +441,8 @@ class TestBuildExecution:
         with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post = mock_post
+            mock_client.build_request = MagicMock(return_value=MagicMock())
+            mock_client.send = _send_from_post(mock_post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client
@@ -466,6 +492,8 @@ class TestBuildExecution:
         with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post = mock_post
+            mock_client.build_request = MagicMock(return_value=MagicMock())
+            mock_client.send = _send_from_post(mock_post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client
@@ -508,6 +536,8 @@ class TestBuildExecution:
         with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post = mock_post
+            mock_client.build_request = MagicMock(return_value=MagicMock())
+            mock_client.send = _send_from_post(mock_post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client
@@ -543,6 +573,8 @@ class TestBuildExecution:
         with patch("httpx.AsyncClient") as MockClient:
             mock_client = AsyncMock()
             mock_client.post = mock_post
+            mock_client.build_request = MagicMock(return_value=MagicMock())
+            mock_client.send = _send_from_post(mock_post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             MockClient.return_value = mock_client
@@ -873,3 +905,111 @@ class TestArrowMetadataExtraction:
         assert "name" in schema_json
 
         temp_file.unlink()
+
+
+class TestV1PushMemoryBounds:
+    """The push protocol must not buffer unbounded data.
+
+    ``client.post`` reads the entire response body into memory before
+    returning, so the ``max_output_bytes`` check ran only *after* the whole
+    payload had been allocated — an executor returning 50 GB OOM'd the server
+    despite a 1 GB limit. Streaming makes the check fire during transfer.
+    """
+
+    @pytest.mark.asyncio
+    async def test_output_limit_aborts_mid_transfer(self, build_runner, artifact_dir):
+        """The download stops at the limit instead of consuming the whole body."""
+        chunks_yielded = 0
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.raise_for_status = MagicMock()
+
+        async def endless_chunks(chunk_size=65536):
+            nonlocal chunks_yielded
+            while True:
+                chunks_yielded += 1
+                yield b"x" * 1024
+
+        mock_response.aiter_bytes = endless_chunks
+
+        async def mock_post(*args, **kwargs):
+            return mock_response
+
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.post = mock_post
+            mock_client.build_request = MagicMock(return_value=MagicMock())
+            mock_client.send = _send_from_post(mock_post)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            MockClient.return_value = mock_client
+
+            with pytest.raises(ValueError, match="exceeds maximum size"):
+                await build_runner._call_executor(
+                    executor_url="http://executor:8080",
+                    metadata={},
+                    input_files=[],
+                    timeout=30.0,
+                    max_output_bytes=4096,
+                    temp_files=[],
+                )
+
+        # Aborted after a handful of 1 KiB chunks rather than draining an
+        # unbounded body.
+        assert chunks_yielded < 20, f"read {chunks_yielded} chunks past the 4 KiB limit"
+
+    @pytest.mark.asyncio
+    async def test_inputs_are_streamed_not_slurped(self, build_runner, artifact_dir, monkeypatch):
+        """Inputs are handed to httpx as file objects; the bytes form loaded
+        every input fully into RAM and httpx then built the whole multipart
+        body on top of that."""
+        payload = artifact_dir / "big-input.arrow"
+        payload.write_bytes(b"y" * 4096)
+
+        from pathlib import Path as _Path
+
+        monkeypatch.setattr(
+            _Path, "read_bytes", lambda self: pytest.fail(f"input slurped into memory: {self}")
+        )
+
+        captured = {}
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {}
+        mock_response.raise_for_status = MagicMock()
+
+        async def one_chunk(chunk_size=65536):
+            yield b""
+
+        mock_response.aiter_bytes = one_chunk
+
+        async def mock_post(*args, **kwargs):
+            return mock_response
+
+        def build_request(method, url, files=None, headers=None):
+            captured["files"] = files
+            return MagicMock()
+
+        with patch("httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.post = mock_post
+            mock_client.build_request = build_request
+            mock_client.send = _send_from_post(mock_post)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            MockClient.return_value = mock_client
+
+            await build_runner._call_executor(
+                executor_url="http://executor:8080",
+                metadata={},
+                input_files=[("input0", payload)],
+                timeout=30.0,
+                max_output_bytes=1024 * 1024,
+                temp_files=[],
+            )
+
+        _name, handle, _ctype = captured["files"]["input0"]
+        assert hasattr(handle, "read"), "input should be a file object, not bytes"

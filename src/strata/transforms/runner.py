@@ -41,6 +41,7 @@ Executor HTTP Protocol v1 (Push Model):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -50,7 +51,7 @@ import traceback
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -428,6 +429,18 @@ class BuildRunner:
                 executor_url = transform_defn.executor_url
                 timeout = transform_defn.timeout_seconds or self.config.default_timeout_seconds
                 max_output = transform_defn.max_output_bytes or self.config.default_max_output_bytes
+
+                # Enforce the configured input ceiling. ``max_input_bytes`` was
+                # parsed from the registry and stored on the definition but read
+                # nowhere — an operator could set it and it did nothing.
+                max_input = transform_defn.max_input_bytes or 0
+                if max_input > 0:
+                    total_input_bytes = sum(p.stat().st_size for _, p in input_files)
+                    if total_input_bytes > max_input:
+                        raise ValueError(
+                            f"Total input size {total_input_bytes} exceeds "
+                            f"max_input_bytes {max_input} for {build.executor_ref}"
+                        )
 
                 # Prepare executor request metadata (protocol v1)
                 from strata.types import EXECUTOR_PROTOCOL_VERSION
@@ -880,17 +893,16 @@ class BuildRunner:
         # Import protocol constants
         from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
-        # Prepare multipart files
-        files: dict[str, tuple[str, str | bytes, str]] = {
+        # Prepare multipart files.
+        #
+        # Inputs are handed to httpx as open file objects rather than
+        # ``path.read_bytes()``: the bytes form loaded every input fully into
+        # RAM and then httpx built the whole multipart body in memory on top of
+        # that, so N inputs cost roughly 2x their total size regardless of any
+        # configured limit.
+        files: dict[str, tuple[str, Any, str]] = {
             "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
         }
-
-        for name, path in input_files:
-            files[name] = (
-                f"{name}.arrow",
-                path.read_bytes(),
-                "application/vnd.apache.arrow.stream",
-            )
 
         # Create output temp file
         _fd, _tmp_path = tempfile.mkstemp(suffix=".arrow", dir=self.artifact_dir)
@@ -903,44 +915,71 @@ class BuildRunner:
             EXECUTOR_PROTOCOL_HEADER: EXECUTOR_PROTOCOL_VERSION,
         }
 
-        # Make request with timeout
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await asyncio.wait_for(
-                client.post(
+        # Make request with timeout.
+        #
+        # ``client.stream`` rather than ``client.post``: post() reads the entire
+        # response body into memory before returning, so the size check below
+        # ran only *after* the whole payload had already been allocated — an
+        # executor returning 50 GB OOM'd the server despite a 1 GB limit. With
+        # streaming the check fires during transfer and aborts the download.
+        with contextlib.ExitStack() as input_handles:
+            for name, path in input_files:
+                files[name] = (
+                    f"{name}.arrow",
+                    input_handles.enter_context(open(path, "rb")),
+                    "application/vnd.apache.arrow.stream",
+                )
+
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                request = client.build_request(
+                    "POST",
                     f"{executor_url}/v1/execute",
                     files=files,
                     headers=headers,
-                ),
-                timeout=timeout,
-            )
-
-            response.raise_for_status()
-
-            # Capture executor logs from response header (if present)
-            # Executors can include logs in EXECUTOR_LOGS_HEADER (base64 encoded)
-            from strata.types import EXECUTOR_LOGS_HEADER
-
-            executor_logs = None
-            logs_header = response.headers.get(EXECUTOR_LOGS_HEADER)
-            if logs_header:
-                import base64
+                )
+                response = await asyncio.wait_for(
+                    client.send(request, stream=True),
+                    timeout=timeout,
+                )
 
                 try:
-                    executor_logs = base64.b64decode(logs_header).decode("utf-8")
-                except Exception:
-                    # If we can't decode, store the raw header value
-                    executor_logs = logs_header
+                    # A streamed error response has no body yet; read it so the
+                    # raised HTTPStatusError carries the executor's message.
+                    if response.status_code >= 400:
+                        await response.aread()
+                    response.raise_for_status()
 
-            # Stream response to file with size limit
-            bytes_written = 0
-            with open(output_path, "wb") as f:
-                async for chunk in response.aiter_bytes(chunk_size=65536):
-                    bytes_written += len(chunk)
-                    if bytes_written > max_output_bytes:
-                        raise ValueError(
-                            f"Output exceeds maximum size: {bytes_written} > {max_output_bytes}"
-                        )
-                    f.write(chunk)
+                    # Capture executor logs from response header (if present).
+                    # Executors can include logs in EXECUTOR_LOGS_HEADER
+                    # (base64 encoded).
+                    from strata.types import EXECUTOR_LOGS_HEADER
+
+                    executor_logs = None
+                    logs_header = response.headers.get(EXECUTOR_LOGS_HEADER)
+                    if logs_header:
+                        import base64
+
+                        try:
+                            executor_logs = base64.b64decode(logs_header).decode("utf-8")
+                        except Exception:
+                            # If we can't decode, store the raw header value
+                            executor_logs = logs_header
+
+                    # Stream response to file with size limit. The check now
+                    # fires DURING transfer, so an oversized payload is aborted
+                    # rather than allocated in full and rejected afterwards.
+                    bytes_written = 0
+                    with open(output_path, "wb") as f:
+                        async for chunk in response.aiter_bytes(chunk_size=65536):
+                            bytes_written += len(chunk)
+                            if bytes_written > max_output_bytes:
+                                raise ValueError(
+                                    f"Output exceeds maximum size: "
+                                    f"{bytes_written} > {max_output_bytes}"
+                                )
+                            f.write(chunk)
+                finally:
+                    await response.aclose()
 
         return output_path, executor_logs
 
