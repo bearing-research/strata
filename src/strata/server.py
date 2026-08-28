@@ -631,21 +631,6 @@ async def lifespan(app: FastAPI):
     transform_registry = TransformRegistry.from_config(config.transforms_config)
     set_transform_registry(transform_registry)
 
-    # The signing secret is pinned from config when ServerState is built (so
-    # signed build URLs survive restarts and match across replicas). Without it
-    # the secret is a random per-process value and in-flight signed URLs die on
-    # restart — warn only when the pull model is actually in use.
-    if not config.transform_signing_secret and config.pull_model_enabled:
-        logger.warning(
-            "pull_model_signing_secret_unset",
-            detail=(
-                "pull_model_enabled but transform_signing_secret is not set; using "
-                "a random per-process secret. Signed build URLs will break on "
-                "restart and differ across replicas. Set "
-                "STRATA_TRANSFORM_SIGNING_SECRET for a stable deployment."
-            ),
-        )
-
     # Authenticated write-back is a preview feature in this release — re-opening
     # writes in service mode is security-sensitive. Surface it at startup so an
     # operator knows the surface is new and may change.
