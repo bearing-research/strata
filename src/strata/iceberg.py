@@ -1,5 +1,6 @@
 """Iceberg snapshot resolution using pyiceberg."""
 
+import logging
 from pathlib import Path
 from threading import Lock
 from typing import Protocol
@@ -12,6 +13,8 @@ from pyiceberg.table import Table
 
 from strata.config import StrataConfig
 
+logger = logging.getLogger(__name__)
+
 
 class CatalogProvider(Protocol):
     """Catalog-provider interface, to allow alternative backends."""
@@ -23,6 +26,18 @@ class CatalogProvider(Protocol):
     def get_snapshot_id(self, table: Table, snapshot_id: int | None) -> int:
         """Resolve the snapshot id to read (the current snapshot if ``None``)."""
         ...
+
+
+def _is_connection_io_error(exc: BaseException) -> bool:
+    """Whether *exc* looks like a dead catalog connection rather than a real error.
+
+    Matches the I/O-level failures that leave the connection unusable
+    (SQLITE_IOERR and the ADBC cursor-finalizer fallout seen alongside it), and
+    deliberately nothing else — a missing table or a malformed URI must still
+    surface on the first attempt.
+    """
+    text = str(exc).lower()
+    return "disk i/o error" in text or "sqlite_ioerr" in text or "adbcstatement" in text
 
 
 class PyIcebergCatalog:
@@ -159,6 +174,11 @@ class PyIcebergCatalog:
             self._catalogs[cache_key] = catalog
             return catalog
 
+    def _invalidate_catalog(self, warehouse_path: str | None) -> None:
+        """Drop a cached catalog so the next access rebuilds its connection."""
+        with self._lock:
+            self._catalogs.pop(warehouse_path or "default", None)
+
     @staticmethod
     def parse_table_uri(table_uri: str) -> tuple[str | None, str]:
         """Split a table URI into ``(warehouse_path, table_id)``.
@@ -208,7 +228,29 @@ class PyIcebergCatalog:
         """
         warehouse_path, table_id = self.parse_table_uri(table_uri)
         catalog = self._get_catalog(warehouse_path)
-        return catalog.load_table(table_id)
+        try:
+            return catalog.load_table(table_id)
+        except Exception as exc:
+            # A catalog whose backing connection has gone bad stays cached, so
+            # every later read of that warehouse fails the same way until the
+            # process restarts. The observed case is a SqlCatalog on SQLite
+            # returning "disk I/O error" (SQLITE_IOERR): the connection is done,
+            # but the object lives on in ``_catalogs`` and retrying through it
+            # can never succeed — which is why a bounded retry loop at the call
+            # site did not help.
+            #
+            # Drop the poisoned entry and rebuild once. Narrow on purpose: only
+            # connection-level I/O failures are retried, so a genuinely missing
+            # table or a bad URI still raises immediately.
+            if not _is_connection_io_error(exc):
+                raise
+            logger.warning(
+                "Iceberg catalog connection for %s failed with %s; rebuilding",
+                warehouse_path or "default",
+                exc,
+            )
+            self._invalidate_catalog(warehouse_path)
+            return self._get_catalog(warehouse_path).load_table(table_id)
 
     def get_snapshot_id(self, table: Table, snapshot_id: int | None) -> int:
         """Resolve the snapshot id to read.
