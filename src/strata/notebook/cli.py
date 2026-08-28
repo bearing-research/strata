@@ -214,9 +214,12 @@ async def _run_async(args: argparse.Namespace) -> int:
         return 2
 
     if session.dag is None:
+        detail = getattr(session, "dag_error", None)
         print(
-            "error: notebook DAG has a cycle or failed to build — "
-            "inspect the notebook in the UI and resolve the cycle first",
+            f"error: notebook DAG could not be built: {detail}"
+            if detail
+            else "error: notebook DAG could not be built — inspect the notebook "
+            "in the UI and resolve the conflicting cells first",
             file=sys.stderr,
         )
         return 2
@@ -540,13 +543,20 @@ def validate_main(args: argparse.Namespace) -> int:
         )
 
     if session is not None and session.dag is None:
+        # Report what actually went wrong. This used to hardcode "cycle" for
+        # every build failure, so a duplicate `# @variant` name — the other,
+        # more common way the build fails — sent the reader hunting a cycle
+        # that does not exist. ``validate`` is the only command that reports
+        # the failure at all, which makes the wrong diagnosis expensive.
+        detail = getattr(session, "dag_error", None)
         notebook_errors.append(
             {
-                "code": "dag_cycle",
+                "code": "dag_build_failed",
                 "message": (
-                    "notebook DAG has a cycle — two or more cells consume "
-                    "each other's variables; break the cycle by renaming or "
-                    "removing one of the circular references"
+                    f"notebook DAG could not be built: {detail}"
+                    if detail
+                    else "notebook DAG could not be built — inspect the notebook and "
+                    "resolve the conflicting cells"
                 ),
             }
         )
