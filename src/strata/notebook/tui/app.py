@@ -143,7 +143,9 @@ class DagScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         yield Static("DAG  (Esc/d/q to close · arrows to scroll)", classes="panel-title")
         with VerticalScroll(id="dag-box"):
-            yield Static(self._dag_text, id="dag-art")
+            # The art embeds cell names, so it is user content like any other
+            # panel — see _literal.
+            yield Static(_literal(self._dag_text), id="dag-art")
 
 
 class ImageScreen(ModalScreen[None]):
