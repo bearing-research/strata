@@ -8,7 +8,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Filter types live in the dependency-free ``strata.filters`` module so the
 # client can use them without importing this (pydantic-laden) module. Re-export
@@ -437,8 +437,11 @@ class WarmRequest(BaseModel):
 
     tables: list[str]  # Table URIs to warm (e.g., "file:///warehouse#ns.table")
     columns: list[str] | None = None  # Columns to cache (None = all)
-    max_row_groups: int | None = None  # Limit row groups per table (None = all)
-    concurrent: int = 4  # Max concurrent fetches
+    max_row_groups: int | None = Field(default=None, ge=1)  # Limit per table (None = all)
+    # ge=1: ``concurrent=0`` built an ``asyncio.Semaphore(0)`` that every fetch
+    # blocked on forever, hanging the request; the async twin wedged a warm-job
+    # slot permanently (its cleanup only reaps jobs that completed).
+    concurrent: int = Field(default=4, ge=1, le=64)  # Max concurrent fetches
 
 
 class WarmResponse(BaseModel):
@@ -462,8 +465,8 @@ class WarmAsyncRequest(BaseModel):
     tables: list[str]  # Table URIs to warm
     columns: list[str] | None = None  # Columns to cache (None = all)
     snapshot_id: int | None = None  # Specific snapshot (None = current)
-    max_row_groups: int | None = None  # Limit row groups per table
-    concurrent: int = 4  # Max concurrent fetches
+    max_row_groups: int | None = Field(default=None, ge=1)  # Limit per table
+    concurrent: int = Field(default=4, ge=1, le=64)  # Max concurrent fetches
     priority: int = 0  # Higher = more urgent (affects queue order)
 
 

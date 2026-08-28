@@ -288,3 +288,98 @@ class TestAsyncWarmerPresent:
 
     def test_cancel_unknown_job_404(self, warmer_client):
         assert warmer_client.delete("/v1/cache/warm/jobs/other").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Table ACL on the warm endpoints (code-review round 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def acl_cache_client(tmp_path):
+    """Service mode + trusted proxy with a deny rule on ``*:denied.*``."""
+    import strata.server as server_module
+    from strata.artifact_store import reset_artifact_store
+    from strata.config import AclConfig, AclRule, StrataConfig
+    from strata.server import ServerState, app
+
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    config = StrataConfig(
+        host="127.0.0.1",
+        port=8765,
+        deployment_mode="service",
+        auth_mode="trusted_proxy",
+        proxy_token="test-token",
+        cache_dir=tmp_path / "cache",
+        artifact_dir=artifact_dir,
+        acl_config=AclConfig(
+            default="allow",
+            deny_rules=[AclRule(principal="*", tables=["*:denied.*"])],
+        ),
+    )
+
+    reset_artifact_store()
+    original = server_module._state
+    server_module._state = ServerState(config)
+    try:
+        yield TestClient(app)
+    finally:
+        server_module._state = original
+        reset_artifact_store()
+
+
+def _proxy_headers() -> dict[str, str]:
+    return {
+        "X-Strata-Proxy-Token": "test-token",
+        "X-Strata-Principal": "analyst",
+        "X-Strata-Scopes": "notebook:read",
+    }
+
+
+def test_warm_refuses_acl_denied_table(acl_cache_client):
+    """Warming reads a table into the shared cache, so it must clear the same
+    deny-first gate as the scan path — previously it had none, letting a
+    denied principal pull the table into cache and learn its size."""
+    resp = acl_cache_client.post(
+        "/v1/cache/warm",
+        json={"tables": ["file:///wh#denied.salaries"]},
+        headers=_proxy_headers(),
+    )
+    assert resp.status_code in (403, 404), resp.text
+    # And nothing about the table leaked through the success shape.
+    assert "row_groups_cached" not in resp.text
+
+
+def test_warm_async_refuses_acl_denied_table(acl_cache_client):
+    """The background job must not be a way around the ACL."""
+    resp = acl_cache_client.post(
+        "/v1/cache/warm/async",
+        json={"tables": ["file:///wh#denied.salaries"]},
+        headers=_proxy_headers(),
+    )
+    assert resp.status_code in (403, 404), resp.text
+    assert "job_id" not in resp.text
+
+
+def test_warm_allows_permitted_table(acl_cache_client):
+    """A table the ACL permits still reaches the handler (which then fails on
+    the missing warehouse, not on authorization)."""
+    resp = acl_cache_client.post(
+        "/v1/cache/warm",
+        json={"tables": ["file:///wh#allowed.events"]},
+        headers=_proxy_headers(),
+    )
+    assert resp.status_code == 200, resp.text
+    # Planning fails (no such warehouse) — but as a per-table error, not a 403.
+    assert resp.json()["errors"]
+
+
+@pytest.mark.parametrize("field,value", [("concurrent", 0), ("concurrent", -1)])
+def test_warm_rejects_unusable_concurrency(cache_client, field, value):
+    """``concurrent=0`` built a Semaphore(0) that every fetch blocked on
+    forever — hanging the sync request and permanently wedging an async job
+    slot (its cleanup only reaps jobs that completed)."""
+    client, _ = cache_client
+    resp = client.post("/v1/cache/warm", json={"tables": ["file:///wh#a.b"], field: value})
+    assert resp.status_code == 422
