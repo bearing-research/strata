@@ -1083,3 +1083,64 @@ class TestManifestMintingRequiresAuth:
         # Refused for want of a signature (401/403), not for want of a principal
         # and not with the manifest route's 404.
         assert resp.status_code in (400, 401, 403), resp.text
+
+
+class TestManifestClaimsTheBuild:
+    """Issuing a manifest must take the build, so the local runner can't also
+    execute it.
+
+    Previously the manifest route left the build in ``pending`` and recorded
+    nothing, so ``BuildRunner``'s poll loop picked the same build up and ran it
+    via v1-push while the pull executor was uploading — two writers on the same
+    ``(artifact_id, version)`` blob, with ``finalize_build`` then validating one
+    blob's schema/row-count while completing a different one.
+    ``_is_runner_managed_build`` only skips builds whose *user-supplied* params
+    carry ``_dispatch_mode == "external"``, which only the notebook path sets.
+    """
+
+    def _pending(self, build_store, artifact_store, build_id):
+        version = create_test_artifact(artifact_store, f"out-{build_id}", finalize=False)
+        build_store.create_build(
+            build_id=build_id,
+            artifact_id=f"out-{build_id}",
+            version=version,
+            executor_ref="duckdb_sql@v1",
+            input_uris=[],
+            params={},
+        )
+
+    def test_manifest_moves_the_build_out_of_pending(self, client, build_store, artifact_store):
+        self._pending(build_store, artifact_store, "claim-1")
+        assert build_store.get_build("claim-1").state == "pending"
+
+        assert client.get("/v1/builds/claim-1/manifest").status_code == 200
+
+        claimed = build_store.get_build("claim-1")
+        assert claimed.state == "building", "runner would still have polled this build"
+        assert claimed.lease_owner == "external:manifest"
+
+    def test_runner_cannot_claim_a_build_handed_to_an_executor(
+        self, client, build_store, artifact_store
+    ):
+        """The runner's own claim must now fail — it is the same atomic
+        ``WHERE state = 'pending'`` update the manifest route used."""
+        self._pending(build_store, artifact_store, "claim-2")
+        client.get("/v1/builds/claim-2/manifest")
+
+        assert build_store.claim_build("claim-2", lease_owner="runner-abc") is False
+
+    def test_manifest_refused_once_the_runner_holds_the_lease(
+        self, client, build_store, artifact_store
+    ):
+        self._pending(build_store, artifact_store, "claim-3")
+        assert build_store.claim_build("claim-3", lease_owner="runner-abc") is True
+
+        resp = client.get("/v1/builds/claim-3/manifest")
+        assert resp.status_code == 409
+        assert "local runner" in resp.text
+
+    def test_refetching_our_own_manifest_still_works(self, client, build_store, artifact_store):
+        """An executor retrying its fetch is not a second writer."""
+        self._pending(build_store, artifact_store, "claim-4")
+        assert client.get("/v1/builds/claim-4/manifest").status_code == 200
+        assert client.get("/v1/builds/claim-4/manifest").status_code == 200

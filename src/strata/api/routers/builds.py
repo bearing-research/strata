@@ -36,6 +36,10 @@ from strata.types import BuildStatusResponse
 
 router = APIRouter(tags=["builds"])
 
+# Lease owner recorded when a build is handed to an external (pull-model)
+# executor, so BuildRunner's poll loop does not also claim and run it.
+_EXTERNAL_LEASE_OWNER = "external:manifest"
+
 
 @router.get("/v1/artifacts/builds/{build_id}", response_model=BuildStatusResponse)
 async def get_build_status(build_id: str):
@@ -196,6 +200,49 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
         owner_principal=build.principal_id,
         owner_tenant=build.tenant_id,
     )
+
+    # Claim the build for the external executor before handing out its
+    # capabilities.
+    #
+    # Issuing a manifest used to leave the build in 'pending' and record
+    # nothing, so BuildRunner's poll loop happily picked the same build up and
+    # ran it via v1-push while the pull executor was uploading: two writers
+    # renaming/publishing onto the same (artifact_id, version) blob, and
+    # finalize_build then validating one blob's schema and row count while
+    # completing a different one. _is_runner_managed_build only skips builds
+    # whose *user-supplied* params carry _dispatch_mode == "external", which
+    # only the notebook remote path sets.
+    #
+    # claim_build is the existing atomic primitive (UPDATE ... WHERE state =
+    # 'pending'), so exactly one of manifest-issue and runner-claim can win,
+    # and the lease expiry reclaims the build if the executor never returns.
+    # The lease outlives the signed URLs it is handed alongside.
+    if build.state == "pending":
+        claimed = build_store.claim_build(
+            build_id,
+            lease_owner=_EXTERNAL_LEASE_OWNER,
+            lease_duration_seconds=state.config.signed_url_expiry_seconds,
+        )
+        if not claimed:
+            # The runner claimed it in between — don't hand out a second
+            # writer's worth of capabilities.
+            raise HTTPException(
+                status_code=409,
+                detail="Build was claimed by the local runner; retry is not safe",
+            )
+    elif build.lease_owner not in (None, _EXTERNAL_LEASE_OWNER):
+        # Someone else holds the lease — that is BuildRunner, which claims with
+        # its own runner id. Handing out capabilities now would put a second
+        # writer on the same (artifact_id, version) blob.
+        #
+        # A lease_owner of None is not the runner: it means the deprecated
+        # start_build() transition, used by the notebook's signed path (which
+        # assembles its manifest in-process) and by legacy rows. Those keep
+        # working, as does re-fetching a manifest this route already issued.
+        raise HTTPException(
+            status_code=409,
+            detail="Build is already being executed by the local runner",
+        )
 
     # The server-mode store gate here never 403s — _build_transport_available()
     # above already guaranteed it — so this is just the store handle.
