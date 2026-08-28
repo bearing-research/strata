@@ -287,6 +287,8 @@ async def metrics_prometheus():
     - Request latency histograms (TODO: requires histogram support)
     - Resource utilization gauges
     """
+    import asyncio
+
     from strata.metadata_cache import get_metadata_store
     from strata.server import (
         _get_cache_entry_count,
@@ -298,6 +300,19 @@ async def metrics_prometheus():
     state = get_state()
     stats = state.metrics.get_aggregate_stats()
     prefetch = state.scan_builds.prefetch_metrics()
+
+    # Both of these walk the whole cache directory — get_size_bytes rglobs and
+    # stats every file, get_entry_count rglobs and read_text()s every .meta
+    # sidecar. Called inline from this async handler they blocked the event
+    # loop for the duration on every scrape (Prometheus polls every ~15s), so a
+    # large cache stalled in-flight Arrow streams and could time out
+    # /health/ready. The sibling /metrics handler already offloads exactly
+    # these two calls for this reason.
+    loop = asyncio.get_event_loop()
+    cache_bytes, cache_entries = await asyncio.gather(
+        loop.run_in_executor(None, _get_cache_size_bytes, state),
+        loop.run_in_executor(None, _get_cache_entry_count, state),
+    )
 
     lines = [
         "# HELP strata_cache_hits_total Total number of cache hits",
@@ -366,11 +381,11 @@ async def metrics_prometheus():
         "",
         "# HELP strata_cache_bytes_current Current cache size in bytes",
         "# TYPE strata_cache_bytes_current gauge",
-        f"strata_cache_bytes_current {_get_cache_size_bytes(state)}",
+        f"strata_cache_bytes_current {cache_bytes}",
         "",
         "# HELP strata_cache_entries_current Current number of cache entries",
         "# TYPE strata_cache_entries_current gauge",
-        f"strata_cache_entries_current {_get_cache_entry_count(state)}",
+        f"strata_cache_entries_current {cache_entries}",
         "",
         "# HELP strata_cache_max_bytes Maximum cache size limit in bytes",
         "# TYPE strata_cache_max_bytes gauge",
