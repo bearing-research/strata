@@ -76,6 +76,19 @@ Cache hit: False
 
 Re-running the same call returns the same URI with `Cache hit: True`.
 
+!!! note "`filters` prune, they do not filter rows"
+
+    Strata is not a query engine. A filter is a **pruning hint**: it skips
+    whole data files (via Iceberg manifest stats) and whole row groups (via
+    Parquet min/max), which is what makes a large scan cheap. Rows inside a
+    row group that survives pruning are returned as they are, so the result
+    is a **superset** of the rows matching your predicate. Apply the
+    predicate yourself on the result if you need exactly the matching rows.
+
+    Pruning is deliberately conservative: when Strata cannot prove a file or
+    row group is safe to skip, it reads it. That keeps a filter from ever
+    dropping a row you asked for.
+
 ## 4. Fetch the result
 
 ```python
@@ -84,7 +97,7 @@ df = table.to_pandas()
 print(df.head())
 ```
 
-```text title="Output (illustrative)"
+```text title="Output (illustrative; pruning keeps whole row groups, so rows outside the filter can appear)"
      id    value
 0   101   142.50
 1   102   178.30
