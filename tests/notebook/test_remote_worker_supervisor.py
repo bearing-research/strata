@@ -146,6 +146,36 @@ def test_establish_is_idempotent_per_name():
     assert sup.get("gpu").local_port == 55001
 
 
+def test_re_establish_publishes_a_token_the_remote_worker_actually_has():
+    """Re-establish tears the tunnel down but deliberately leaves the remote
+    worker running, so the relaunch used to adopt it — while publishing a newly
+    generated token locally. The worker enforces the token it was started with,
+    so every dispatch 401s, and the unauthenticated ``/health`` probe still
+    reports it healthy. The published token must be one a worker was given."""
+    runner = ScriptedSshRunner(
+        [
+            (lambda c: c == "true", _ok()),
+            (lambda c: "command -v strata-worker" in c, _ok(_INSTALLED)),
+            ("kill -0 ", _ok("up")),
+            (lambda c: "kill" in c and "kill -0" not in c, _ok("stopped\n")),
+            ("nohup strata-worker", _ok("4321\n")),
+            # A live worker is recorded on the default port → adoptable.
+            (lambda c: "cat " in c, _ok('{"pid": 4321, "port": 9000}')),
+        ]
+    )
+    sup, _, _ = _supervisor(runner=runner)
+    sup.establish("gpu", "user@box")
+    sup.establish("gpu", "user@box")
+
+    launched = [
+        token
+        for command, token in zip(runner.calls, runner.stdin_writes)
+        if "nohup strata-worker" in command
+    ]
+    assert launched, "no worker was ever launched with a token"
+    assert launched[-1].strip() == sup.token_for("gpu")
+
+
 # ---------------------------------------------------------------------------
 # reconcile / status / teardown / shutdown
 # ---------------------------------------------------------------------------
