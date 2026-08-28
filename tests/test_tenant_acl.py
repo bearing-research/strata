@@ -649,7 +649,9 @@ class TestDirectArtifactEndpointIsolation:
 
         response = direct_artifact_client.post(
             "/v1/artifacts/gc",
-            params={"max_age_days": 0},
+            # collect_latest: these fixtures are single-version unnamed
+            # artifacts, i.e. current values, which GC now spares by default.
+            params={"max_age_days": 0, "collect_latest": True},
             headers=_auth_headers("team-a"),
         )
         assert response.status_code == 200

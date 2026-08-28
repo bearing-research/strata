@@ -893,8 +893,10 @@ class TestAliasedArtifactProtection:
         assert champion is not None and champion.version == 1
 
     def test_gc_still_collects_unreferenced(self, store):
+        """A lone unnamed artifact is a *current value* (get_latest_version
+        resolves it), so reclaiming it now takes the explicit opt-in."""
         _make_ready_artifact(store, "loose", "prov-l")
-        result = store.garbage_collect(max_age_days=0)
+        result = store.garbage_collect(max_age_days=0, collect_latest=True)
         assert result["deleted_count"] == 1
         assert store.get_artifact("loose", 1) is None
 
@@ -1277,3 +1279,68 @@ class TestTenantNormalization:
         conn.close()
         assert n_null == 0  # all normalized to ''
         assert n_ready == 1  # duplicate collapsed
+
+
+class TestGcSparesCurrentValues:
+    """GC must not delete the *current value* of an artifact id.
+
+    ``get_latest_version(id)`` is how the store resolves "the current value",
+    and for some producers it is the only handle that ever exists: notebook
+    cell outputs are stored as ``nb_{notebook}_cell_{cell}_var_{name}`` and are
+    never given a name or an alias. The old "unreferenced = no name pointer"
+    rule therefore classified every live notebook variable as garbage, so a
+    routine ``POST /v1/artifacts/gc`` (default cutoff 7 days) deleted the state
+    of any notebook older than a week and the next cell run found its upstream
+    missing.
+    """
+
+    def test_gc_spares_an_unnamed_notebook_cell_artifact(self, store):
+        _make_ready_artifact(store, "nb_abc_cell_def_var_model", "prov-nb")
+
+        result = store.garbage_collect(max_age_days=0)
+
+        assert result["deleted_count"] == 0
+        assert store.get_latest_version("nb_abc_cell_def_var_model") is not None
+
+    def test_gc_still_collects_superseded_versions(self, store):
+        """The useful half of GC is unaffected: older versions still go."""
+        _make_ready_artifact(store, "model", "prov-v1")
+        store.create_artifact("model", "prov-v2")
+        store.write_blob("model", 2, _ipc_bytes(1))
+        store.finalize_artifact("model", 2, "{}", 1, 10)  # supersedes v1
+
+        result = store.garbage_collect(max_age_days=0)
+
+        assert result["deleted_count"] == 1
+        assert store.get_artifact("model", 1) is None
+        assert store.get_artifact("model", 2) is not None  # current value kept
+
+    def test_collect_latest_opt_in_still_reclaims(self, store):
+        _make_ready_artifact(store, "loose", "prov-loose")
+        assert store.garbage_collect(max_age_days=0)["deleted_count"] == 0
+        assert store.garbage_collect(max_age_days=0, collect_latest=True)["deleted_count"] == 1
+
+
+class TestGcDeletesMetadataBeforeBlobs:
+    """A crash or a raising blob backend mid-GC must not leave ready rows
+    whose blob is gone. Metadata is deleted and committed first; blob removal
+    is best-effort after, so the worst case is orphaned bytes rather than a
+    corrupt store."""
+
+    def test_blob_failure_does_not_abort_gc_or_strand_ready_rows(self, store, monkeypatch):
+        _make_ready_artifact(store, "model", "prov-v1")
+        store.create_artifact("model", "prov-v2")
+        store.write_blob("model", 2, _ipc_bytes(1))
+        store.finalize_artifact("model", 2, "{}", 1, 10)
+
+        def boom(artifact_id, version):
+            raise OSError("backend unavailable")
+
+        monkeypatch.setattr(store.blob_store, "delete_blob", boom)
+
+        result = store.garbage_collect(max_age_days=0)
+
+        # The run completed and the metadata is gone — no ready row survives
+        # pointing at a blob we may or may not have removed.
+        assert result["deleted_count"] == 1
+        assert store.get_artifact("model", 1) is None

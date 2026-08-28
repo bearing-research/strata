@@ -1097,23 +1097,31 @@ class StrataClient:
         response.raise_for_status()
         return response.json()
 
-    def garbage_collect(self, max_age_days: float = 7.0) -> dict:
-        """Garbage collect unreferenced artifacts.
+    def garbage_collect(self, max_age_days: float = 7.0, collect_latest: bool = False) -> dict:
+        """Garbage collect unreachable artifacts.
 
-        Deletes artifacts that:
-        1. Have no name pointer referencing them
-        2. Are older than max_age_days
-        3. Are in "ready" or "failed" state
+        Deletes artifact versions that:
+        1. Have no name or alias pointing at them
+        2. Are not the latest version of their id (unless ``collect_latest``)
+        3. Are older than ``max_age_days``
+        4. Are in "ready", "superseded" or "failed" state
+
+        The latest version of an id is its *current value* — the handle
+        ``get_latest_version`` resolves, and the only one some producers ever
+        have (notebook cell outputs are never named) — so it is spared unless
+        you explicitly ask for it.
 
         Args:
-            max_age_days: Maximum age in days for unreferenced artifacts (default 7)
+            max_age_days: Maximum age in days for unreachable artifacts (default 7)
+            collect_latest: Also reclaim current values. Off by default because
+                it deletes live state.
 
         Returns:
             Dict with GC statistics (deleted_count, deleted_bytes, cutoff_timestamp)
         """
         response = self._client.post(
             "/v1/artifacts/gc",
-            params={"max_age_days": max_age_days},
+            params={"max_age_days": max_age_days, "collect_latest": collect_latest},
         )
         response.raise_for_status()
         return response.json()
