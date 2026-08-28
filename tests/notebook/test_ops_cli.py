@@ -426,3 +426,51 @@ def test_cli_dag_and_status_json(chain_nb, capsys):
     assert main(["status", str(chain_nb), "--format", "json"]) == 0
     status = json.loads(capsys.readouterr().out)
     assert status["notebook_id"]
+
+
+class TestMoveCellDoesNotLoseConcurrentEdits:
+    """``move_cell`` built its order from the snapshot taken when the ops
+    object was constructed, and ``reorder_cells`` then wrote only those ids.
+
+    The documented ``strata agent`` workflow has a server session open on the
+    notebook while an agent drives the CLI, so this is the normal case, not a
+    corner: the human adds a cell, the agent's next reorder erases it from
+    committed config and orphans ``cells/<id>.py``.
+    """
+
+    def _notebook(self, tmp_path):
+        from strata.notebook.writer import create_notebook
+
+        return create_notebook(tmp_path, name="nb", initialize_environment=False)
+
+    def test_a_cell_added_by_someone_else_survives_a_move(self, tmp_path):
+        import tomllib
+
+        from strata.notebook.ops import LocalNotebookOps
+
+        notebook_dir = self._notebook(tmp_path)
+        agent = LocalNotebookOps(notebook_dir)
+        ids = [agent.add_cell(source=f"x{i} = {i}").id for i in range(3)]
+
+        # A live session / TUI / second CLI process adds a cell.
+        other = LocalNotebookOps(notebook_dir)
+        added = other.add_cell(source="added_elsewhere = 1").id
+
+        # The agent reorders using its now-stale view.
+        agent.move_cell(ids[2], 0)
+
+        with open(notebook_dir / "notebook.toml", "rb") as handle:
+            on_disk = [c["id"] for c in tomllib.load(handle)["cells"]]
+        assert added in on_disk, "an unrelated reorder deleted a cell"
+        assert (notebook_dir / "cells" / f"{added}.py").exists()
+
+    def test_the_requested_move_still_happens(self, tmp_path):
+        from strata.notebook.ops import LocalNotebookOps
+
+        notebook_dir = self._notebook(tmp_path)
+        ops = LocalNotebookOps(notebook_dir)
+        ids = [ops.add_cell(source=f"x{i} = {i}").id for i in range(3)]
+
+        ops.move_cell(ids[2], 0)
+
+        assert [c.id for c in ops.list_cells()][0] == ids[2]

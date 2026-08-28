@@ -992,11 +992,26 @@ def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
 
     # Reorder and update order field
     new_cells = []
-    for i, cell_id in enumerate(cell_ids):
+    for cell_id in cell_ids:
         if cell_id in cell_map:
-            cell = cell_map[cell_id]
-            cell["order"] = i
-            new_cells.append(cell)
+            new_cells.append(cell_map[cell_id])
+
+    # Keep every cell that is on disk but absent from ``cell_ids``.
+    #
+    # This used to rebuild the list from ``cell_ids`` alone, so anything the
+    # caller had not seen was DELETED from notebook.toml — committed config —
+    # with no error, orphaning its source file and making its artifacts
+    # unreachable. Callers pass a snapshot taken when they opened the
+    # notebook, so any cell added since (by a live server session, the TUI, or
+    # a second CLI process) was silently destroyed by an unrelated reorder.
+    #
+    # Reordering must never be able to lose a cell. Unknown ones keep their
+    # relative order and land after the explicitly ordered ones.
+    named = set(cell_ids)
+    new_cells.extend(cell for cell in cells_data if cell.get("id") not in named)
+
+    for i, cell in enumerate(new_cells):
+        cell["order"] = i
 
     toml_data["cells"] = new_cells
     toml_data["updated_at"] = datetime.now(tz=UTC)
