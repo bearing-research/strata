@@ -577,3 +577,33 @@ class TestAclRuleMatchingFailsClosed:
 
         with pytest.raises(pydantic.ValidationError, match="at least one table pattern"):
             AclRule(principal="bob")
+
+
+class TestNonAsciiTokensAreRejectedNotCrashed:
+    """A non-ASCII token must be a rejection, not a 500.
+
+    ASGI decodes header values as latin-1, so any non-ASCII byte in
+    ``X-Strata-Proxy-Token`` reaches us as a non-ASCII ``str`` —  and
+    ``hmac.compare_digest`` refuses to compare non-ASCII strings, raising
+    ``TypeError``. That turned a trivially-attacker-triggerable "wrong token"
+    into an unhandled 500: the request is still refused (fail-closed), but any
+    unauthenticated client could spike the server's error rate at will.
+    Comparing UTF-8 bytes keeps the comparison constant-time and total.
+    """
+
+    def test_non_ascii_token_returns_false(self):
+        assert verify_proxy_token("tökén", "expected-token") is False
+
+    def test_non_ascii_expected_token_returns_false(self):
+        assert verify_proxy_token("presented", "expected-tökén") is False
+
+    def test_latin1_decoded_header_byte_returns_false(self):
+        # What Starlette hands us for the raw byte 0xC3.
+        assert verify_proxy_token(b"\xc3".decode("latin-1"), "expected-token") is False
+
+    def test_a_matching_non_ascii_token_still_matches(self):
+        assert verify_proxy_token("tökén", "tökén") is True
+
+    def test_ascii_behaviour_is_unchanged(self):
+        assert verify_proxy_token("secret", "secret") is True
+        assert verify_proxy_token("secret", "other") is False

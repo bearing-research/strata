@@ -236,7 +236,9 @@ def create_notebook_executor_app() -> FastAPI:
         presented = header[len("Bearer ") :]
         # Constant-time compare; the public-facing comparison shouldn't
         # leak token length via timing.
-        if not hmac.compare_digest(presented, expected_token):
+        # Bytes, not str: a non-ASCII byte in the header decodes to a
+        # non-ASCII str, which makes ``compare_digest`` raise TypeError.
+        if not hmac.compare_digest(presented.encode(), expected_token.encode()):
             raise HTTPException(status_code=401, detail="Invalid worker token")
 
     def _input_extension(content_type: str) -> str:

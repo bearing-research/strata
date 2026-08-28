@@ -378,3 +378,38 @@ class TestFinalizeURL:
         )
 
         assert valid is False
+
+
+class TestNonAsciiSignaturesAreRejectedNotCrashed:
+    """A signature is a URL query parameter, so its content is entirely
+    attacker-chosen. ``hmac.compare_digest`` refuses to compare non-ASCII
+    ``str`` values and raises ``TypeError``, so ``?signature=ü`` produced an
+    unhandled 500 instead of a clean rejection — an error-rate spike anyone
+    could trigger without credentials. Comparing UTF-8 bytes is still
+    constant-time and never raises.
+    """
+
+    def test_non_ascii_download_signature_is_rejected(self):
+        signer = URLSigner(_SECRET)
+        assert (
+            signer.verify_download_signature("art", 1, "build-1", time.time() + 60, "ü" * 8)
+            is False
+        )
+
+    def test_non_ascii_upload_signature_is_rejected(self):
+        signer = URLSigner(_SECRET)
+        assert (
+            signer.verify_upload_signature("build-1", 1024, time.time() + 60, "sïgnature") is False
+        )
+
+    def test_non_ascii_finalize_signature_is_rejected(self):
+        signer = URLSigner(_SECRET)
+        assert signer.verify_finalize_signature("build-1", time.time() + 60, "Ã¿") is False
+
+    def test_a_genuine_signature_still_verifies(self):
+        signer = URLSigner(_SECRET)
+        url = signer.generate_download_url("http://x", "art", 1, "build-1")
+        signature = parse_qs(urlparse(url.url).query)["signature"][0]
+        assert (
+            signer.verify_download_signature("art", 1, "build-1", url.expires_at, signature) is True
+        )

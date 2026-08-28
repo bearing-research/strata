@@ -109,8 +109,11 @@ def verify_proxy_token(request_token: str | None, expected_token: str | None) ->
     if request_token is None:
         return False
 
-    # Constant-time comparison to prevent timing attacks
-    return hmac.compare_digest(request_token, expected_token)
+    # Constant-time comparison to prevent timing attacks. Compare the UTF-8
+    # bytes, not the strings: ASGI decodes header values as latin-1, so any
+    # non-ASCII byte in the header makes ``compare_digest`` raise TypeError
+    # on str inputs — a 500 where the answer is plainly "token doesn't match".
+    return hmac.compare_digest(request_token.encode(), expected_token.encode())
 
 
 def parse_principal(headers: dict[str, str], config: StrataConfig) -> Principal:
