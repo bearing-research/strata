@@ -440,3 +440,50 @@ class TestDebugInspectPrefixLayout:
         # The directory is now reachable — previously this path was never even
         # searched, so the count was unconditionally zero.
         assert resp.json()["prefix_filter"] == "abcd"
+
+
+class TestWarmDoesNotReportFailuresAsSuccess:
+    """A row group that failed to fetch was counted as one that was cached.
+
+    ``fetch_task`` returned ``(False, 0)`` on any exception, and ``False`` is
+    the same value it returns for "fetched and written" — the aggregation loop
+    reads it as ``row_groups_cached += 1``. So a warm where every fetch raised
+    still reported row groups cached, with an empty ``errors`` list. An
+    operator warming a cache ahead of peak traffic was told it worked.
+    """
+
+    def test_a_failing_fetch_is_not_counted_as_cached(self, cache_client, warehouse_uri):
+        client, state = cache_client
+
+        def boom(task):
+            raise RuntimeError("storage unreachable")
+
+        state.fetcher.fetch_as_stream_bytes = boom
+
+        resp = client.post("/v1/cache/warm", json={"tables": [warehouse_uri]})
+        assert resp.status_code == 200
+        body = resp.json()
+
+        assert body["row_groups_cached"] == 0, body
+        assert body["bytes_written"] == 0, body
+
+    def test_a_failing_fetch_is_surfaced(self, cache_client, warehouse_uri):
+        client, state = cache_client
+
+        def boom(task):
+            raise RuntimeError("storage unreachable")
+
+        state.fetcher.fetch_as_stream_bytes = boom
+
+        body = client.post("/v1/cache/warm", json={"tables": [warehouse_uri]}).json()
+
+        assert body["errors"], "a warm that cached nothing must say so"
+        assert any("storage unreachable" in e for e in body["errors"]), body
+
+    def test_a_healthy_warm_is_unchanged(self, cache_client, warehouse_uri):
+        client, _ = cache_client
+        body = client.post("/v1/cache/warm", json={"tables": [warehouse_uri]}).json()
+
+        assert body["errors"] == []
+        assert body["row_groups_cached"] >= 1
+        assert body["bytes_written"] > 0

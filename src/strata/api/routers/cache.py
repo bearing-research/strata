@@ -9,6 +9,7 @@ here — it belongs to the future ``debug`` router.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import asdict
 from typing import Annotated
@@ -27,6 +28,8 @@ from strata.types import (
     WarmRequest,
     WarmResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["cache"])
 
@@ -221,19 +224,29 @@ async def warm_cache_v1(request: WarmRequest):
     # Limit concurrency for cache warming
     warming_semaphore = asyncio.Semaphore(request.concurrent)
 
-    async def fetch_task(task: Task) -> tuple[bool, int]:
-        """Fetch a single task, return (was_cached, bytes_written)."""
+    async def fetch_task(task: Task) -> tuple[str, int, str | None]:
+        """Fetch one row group, returning ``(outcome, bytes_written, error)``.
+
+        The outcome is named rather than boolean because a failure used to be
+        indistinguishable from a success: this returned ``(False, 0)`` when it
+        raised, and ``False`` is also what it returns for "fetched and
+        written", so the caller counted every failed row group as cached.
+        """
         async with warming_semaphore:
             try:
                 # Run fetch in thread pool to avoid blocking
                 loop = asyncio.get_event_loop()
                 await loop.run_in_executor(None, state.fetcher.fetch_as_stream_bytes, task)
                 if task.cached:
-                    return (True, 0)  # Already cached
-                else:
-                    return (False, task.bytes_read)
-            except Exception:
-                return (False, 0)
+                    return ("skipped", 0, None)  # Already cached
+                return ("cached", task.bytes_read, None)
+            except Exception as exc:
+                logger.exception(
+                    "cache warm failed for %s row group %s",
+                    task.file_path,
+                    task.row_group_id,
+                )
+                return ("failed", 0, str(exc))
 
     for table_uri in request.tables:
         try:
@@ -260,15 +273,28 @@ async def warm_cache_v1(request: WarmRequest):
                 return_exceptions=True,
             )
 
+            failures: list[str] = []
             for result in results:
                 if isinstance(result, BaseException):
+                    failures.append(str(result))
                     continue
-                was_cached, written = result
-                if was_cached:
+                outcome, written, error = result
+                if outcome == "skipped":
                     row_groups_skipped += 1
-                else:
+                elif outcome == "cached":
                     row_groups_cached += 1
                     bytes_written += written
+                else:
+                    failures.append(error or "unknown error")
+
+            if failures:
+                # Summarised, not one entry per row group: a wide table can
+                # fail thousands of them and the response has to stay bounded.
+                distinct = sorted(set(failures))[:3]
+                errors.append(
+                    f"{table_uri}: {len(failures)} row group(s) failed to warm: "
+                    + "; ".join(distinct)
+                )
 
             tables_warmed += 1
 
