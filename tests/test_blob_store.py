@@ -1,9 +1,11 @@
 """Tests for blob storage backends."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from strata import blob_store as blob_store_module
 from strata.blob_store import (
     BlobStore,
     GCSBlobStore,
@@ -1135,3 +1137,79 @@ class TestConfiguredBackendIsActuallyWired:
                 self._init(config)
         finally:
             reset_artifact_store()
+
+
+class TestBackendFailuresAreVisible:
+    """``blob_exists`` / ``blob_size`` / ``delete_blob`` swallowed every
+    exception and returned a confident answer — "absent", "unknown", "nothing
+    deleted" — so a transient backend error was indistinguishable from fact.
+
+    ``delete_blob`` is the worst of the three: GC and ``delete_artifact``
+    remove the metadata row regardless, so a silent False orphans the object
+    with no row left to ever retry it.
+
+    The logger is monkeypatched rather than read through ``caplog``: the
+    package configures its own logging, so records do not reliably reach
+    pytest's capture handler.
+    """
+
+    def _store(self, *, info_error=None, delete_error=None):
+        import pyarrow.fs as pafs
+
+        store = S3BlobStore.__new__(S3BlobStore)
+        store.bucket = "b"
+        store.prefix = "p"
+
+        class _Fs:
+            def get_file_info(self, key):
+                if info_error is not None:
+                    raise info_error
+                return SimpleNamespace(type=pafs.FileType.File, size=123)
+
+            def delete_file(self, key):
+                if delete_error is not None:
+                    raise delete_error
+
+        store._fs = _Fs()
+        return store
+
+    def _capture(self, monkeypatch):
+        messages: list[str] = []
+        monkeypatch.setattr(
+            blob_store_module.logger,
+            "exception",
+            lambda msg, *a, **k: messages.append(msg % a if a else msg),
+        )
+        return messages
+
+    def test_blob_exists_logs_the_backend_error(self, monkeypatch):
+        messages = self._capture(monkeypatch)
+        store = self._store(info_error=OSError("connection reset"))
+
+        assert store.blob_exists("a", 1) is False
+        assert any("blob_exists failed" in m for m in messages)
+
+    def test_blob_size_logs_the_backend_error(self, monkeypatch):
+        messages = self._capture(monkeypatch)
+        store = self._store(info_error=OSError("connection reset"))
+
+        assert store.blob_size("a", 1) is None
+        assert any("blob_size failed" in m for m in messages)
+
+    def test_delete_blob_logs_the_orphaned_object(self, monkeypatch):
+        """The object exists, so the delete is attempted — and its failure is
+        what leaves an object no metadata row will ever point at again."""
+        messages = self._capture(monkeypatch)
+        store = self._store(delete_error=OSError("connection reset"))
+
+        assert store.delete_blob("a", 1) is False
+        assert any("orphaned" in m for m in messages)
+
+    def test_a_healthy_backend_logs_nothing(self, monkeypatch):
+        messages = self._capture(monkeypatch)
+        store = self._store()
+
+        assert store.blob_exists("a", 1) is True
+        assert store.blob_size("a", 1) == 123
+        assert store.delete_blob("a", 1) is True
+        assert messages == []
