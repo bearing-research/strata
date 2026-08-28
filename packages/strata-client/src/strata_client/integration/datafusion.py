@@ -41,8 +41,15 @@ if TYPE_CHECKING:
 def _build_scan_transform(
     columns: list[str] | None = None,
     filters: list[Filter] | None = None,
+    snapshot_id: int | None = None,
 ) -> dict:
-    """Build a scan@v1 transform specification."""
+    """Build a scan@v1 transform specification.
+
+    ``snapshot_id`` used to be missing here while the surrounding classes
+    accepted, stored and documented it, so a scan pinned to a snapshot
+    silently read the current one — and the provenance hash recorded the
+    current snapshot too, so nothing downstream flagged the divergence.
+    """
     params: dict = {}
     if columns is not None:
         params["columns"] = columns
@@ -51,6 +58,8 @@ def _build_scan_transform(
             {"column": f.column, "op": f.op.value, "value": serialize_filter_value(f.value)}
             for f in filters
         ]
+    if snapshot_id is not None:
+        params["snapshot_id"] = snapshot_id
     return {"executor": "scan@v1", "params": params}
 
 
@@ -105,7 +114,7 @@ def register_strata_table(
         # Fetch data as Arrow table using unified materialize API
         artifact = client.materialize(
             inputs=[table_uri],
-            transform=_build_scan_transform(columns, filters),
+            transform=_build_scan_transform(columns, filters, snapshot_id),
         )
         arrow_table = artifact.to_table()
 
@@ -168,7 +177,7 @@ def strata_query(
         for name, uri in tables.items():
             artifact = client.materialize(
                 inputs=[uri],
-                transform=_build_scan_transform(columns.get(name), filters.get(name)),
+                transform=_build_scan_transform(columns.get(name), filters.get(name), snapshot_id),
             )
             arrow_table = artifact.to_table()
             ctx.register_record_batches(name, [arrow_table.to_batches()])
@@ -245,7 +254,7 @@ class StrataDataFusionContext:
         # Fetch data using unified materialize API
         artifact = self.client.materialize(
             inputs=[table_uri],
-            transform=_build_scan_transform(columns, filters),
+            transform=_build_scan_transform(columns, filters, snapshot_id),
         )
         arrow_table = artifact.to_table()
 

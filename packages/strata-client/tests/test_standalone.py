@@ -90,3 +90,46 @@ def test_retry_config_backoff() -> None:
     assert rc.calculate_delay(0) == 1.0
     assert rc.calculate_delay(1) == 2.0
     assert rc.calculate_delay(10) == 30.0  # capped
+
+
+class TestSnapshotPinReachesTheWire:
+    """``snapshot_id`` is the reproducibility control: it pins a scan to one
+    Iceberg snapshot.
+
+    The arrow and datafusion integrations accepted it, stored it, exposed it
+    as a property and documented it as "Pin to specific snapshot" — but their
+    ``_build_scan_transform`` did not take the parameter, so it never reached
+    the request. A pinned read silently returned the *current* snapshot, and
+    because the provenance hash is computed from what was actually sent, it
+    recorded the current snapshot too. Nothing downstream could flag the
+    divergence. ``duckdb``/``polars``/``pandas`` always did this correctly.
+    """
+
+    def test_arrow_puts_the_snapshot_in_the_transform(self) -> None:
+        from strata_client.integration.arrow import _build_scan_transform
+
+        params = _build_scan_transform(["id"], None, 12345)["params"]
+        assert params["snapshot_id"] == 12345
+
+    def test_datafusion_puts_the_snapshot_in_the_transform(self) -> None:
+        from strata_client.integration.datafusion import _build_scan_transform
+
+        params = _build_scan_transform(["id"], None, 12345)["params"]
+        assert params["snapshot_id"] == 12345
+
+    def test_an_unpinned_scan_sends_no_snapshot(self) -> None:
+        """Omitting the key is what makes the server read the current snapshot."""
+        from strata_client.integration.arrow import _build_scan_transform as arrow_build
+        from strata_client.integration.datafusion import _build_scan_transform as df_build
+
+        assert "snapshot_id" not in arrow_build(["id"])["params"]
+        assert "snapshot_id" not in df_build(["id"])["params"]
+
+    def test_it_matches_the_integrations_that_were_already_correct(self) -> None:
+        from strata_client.integration.arrow import _build_scan_transform as arrow_build
+        from strata_client.integration.duckdb import _build_scan_transform as duckdb_build
+
+        assert (
+            arrow_build(["id"], None, 999)["params"]["snapshot_id"]
+            == duckdb_build(["id"], None, 999)["params"]["snapshot_id"]
+        )
