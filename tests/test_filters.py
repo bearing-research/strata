@@ -533,3 +533,60 @@ class TestMergeOnReadDeletesRefused:
 
         with pytest.raises(UnsupportedTableFormatError, match="merge-on-read"):
             planner.plan(temp_warehouse["table_uri"])
+
+
+class TestSchemaEvolutionDetectedAtPlanTime:
+    """Iceberg schema evolution does not rewrite existing data files, so after
+    ``ADD COLUMN`` the older files lack the new column.
+
+    Nothing reconciled that: a projection naming the new column raised
+    ``KeyError`` from ``read_row_group`` on the old files, and an unprojected
+    scan produced row groups with differing schemas that
+    ``IncrementalIpcMerger`` rejects — both *after* the 200 and the first
+    chunks were already on the wire, i.e. a truncated response rather than an
+    error the client can act on. Planning is where this can still fail cleanly.
+    """
+
+    @pytest.fixture
+    def evolved_warehouse(self, tmp_path):
+        if sys.platform == "win32":
+            pytest.skip("pyiceberg + pyarrow LocalFileSystem path handling broken on Windows")
+        wh = tmp_path / "wh"
+        wh.mkdir()
+        catalog = SqlCatalog(
+            "strata",
+            uri=f"sqlite:///{(wh / 'catalog.db').as_posix()}",
+            warehouse=wh.as_uri(),
+        )
+        catalog.create_namespace("test_db")
+        table = catalog.create_table(
+            "test_db.evolved", Schema(NestedField(1, "id", LongType(), required=False))
+        )
+        table.append(pa.table({"id": pa.array([1, 2, 3], type=pa.int64())}))
+        with table.update_schema() as update:
+            update.add_column("label", StringType())
+        table = catalog.load_table("test_db.evolved")
+        table.append(
+            pa.table({"id": pa.array([4, 5], type=pa.int64()), "label": pa.array(["a", "b"])})
+        )
+        return f"{wh.as_uri()}#test_db.evolved"
+
+    def test_unprojected_scan_fails_at_plan_time(self, evolved_warehouse, strata_config):
+        from strata.planner import ReadPlanner, UnsupportedTableFormatError
+
+        with pytest.raises(UnsupportedTableFormatError, match="differing schemas"):
+            ReadPlanner(strata_config).plan(evolved_warehouse)
+
+    def test_projection_naming_the_new_column_fails_at_plan_time(
+        self, evolved_warehouse, strata_config
+    ):
+        from strata.planner import ReadPlanner, UnsupportedTableFormatError
+
+        with pytest.raises(UnsupportedTableFormatError, match="missing requested column"):
+            ReadPlanner(strata_config).plan(evolved_warehouse, columns=["label"])
+
+    def test_projection_common_to_every_file_still_plans(self, evolved_warehouse, strata_config):
+        """The still-safe case must keep working: scanning only the columns
+        that predate the evolution."""
+        plan = ReadPlanner(strata_config).plan(evolved_warehouse, columns=["id"])
+        assert plan.tasks, "a projection present in every file should still plan"
