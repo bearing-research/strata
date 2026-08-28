@@ -126,6 +126,14 @@ class RateLimitConfig:
 
     # Cleanup settings
     client_ttl_seconds: float = 300.0  # Remove idle clients after 5 minutes
+    # Hard ceiling on tracked clients. ``client_ttl_seconds`` alone cannot
+    # bound memory: the client id is derived from X-Forwarded-For, so a single
+    # caller can mint an unbounded number of distinct ids far faster than the
+    # TTL reclaims them. When the ceiling is hit the least-recently-seen
+    # buckets are dropped.
+    max_tracked_clients: int = 10_000
+    # How often the idle sweep runs, at most (seconds).
+    cleanup_interval_seconds: float = 60.0
 
     # Whether rate limiting is enabled
     enabled: bool = True
@@ -176,6 +184,7 @@ class RateLimiter:
         # Per-client buckets
         self._client_buckets: dict[str, TokenBucket] = {}
         self._client_last_seen: dict[str, float] = {}
+        self._last_cleanup: float = self._clock.time()
 
         # Per-endpoint buckets
         self._endpoint_buckets: dict[str, TokenBucket] = {}
@@ -190,8 +199,20 @@ class RateLimiter:
         }
 
     def _get_client_bucket(self, client_id: str) -> TokenBucket:
-        """Get or create a bucket for a client."""
+        """Get or create a bucket for a client, reclaiming idle ones first.
+
+        ``cleanup_stale_clients`` existed with a TTL config but had no caller
+        anywhere in the codebase, and nothing else bounded these two dicts. The
+        client id comes from ``X-Forwarded-For``, which the caller controls
+        whenever a proxy appends rather than replaces it — so a client sending
+        a distinct forwarded address per request created a permanent bucket
+        plus a timestamp entry every time. Unbounded RSS growth, and (because
+        each new id starts with a full burst) a per-client limit that never
+        actually limited.
+        """
+        self._maybe_cleanup()
         if client_id not in self._client_buckets:
+            self._evict_if_over_capacity()
             self._client_buckets[client_id] = TokenBucket(
                 capacity=self.config.client_burst,
                 refill_rate=self.config.client_requests_per_second,
@@ -199,6 +220,47 @@ class RateLimiter:
             )
         self._client_last_seen[client_id] = self._clock.time()
         return self._client_buckets[client_id]
+
+    def _maybe_cleanup(self) -> None:
+        """Run the idle sweep at most once per ``cleanup_interval_seconds``.
+
+        Called on the request path rather than from a background task so the
+        reclamation cannot be forgotten again — the previous sweep was correct
+        code that simply nothing invoked. Caller holds ``self._lock``.
+        """
+        now = self._clock.time()
+        if now - self._last_cleanup < self.config.cleanup_interval_seconds:
+            return
+        self._last_cleanup = now
+        self._drop_stale_clients_locked()
+
+    def _evict_if_over_capacity(self) -> None:
+        """Drop least-recently-seen clients once the ceiling is reached.
+
+        The TTL sweep alone is not a bound: ids can be minted faster than they
+        age out. Caller holds ``self._lock``.
+        """
+        overflow = len(self._client_buckets) - self.config.max_tracked_clients
+        if overflow < 0:
+            return
+        for client_id in sorted(self._client_last_seen, key=self._client_last_seen.get)[
+            : overflow + 1
+        ]:
+            self._client_buckets.pop(client_id, None)
+            self._client_last_seen.pop(client_id, None)
+
+    def _drop_stale_clients_locked(self) -> int:
+        """Idle-bucket reclamation; caller holds ``self._lock``."""
+        now = self._clock.time()
+        stale = [
+            client_id
+            for client_id, last_seen in self._client_last_seen.items()
+            if now - last_seen > self.config.client_ttl_seconds
+        ]
+        for client_id in stale:
+            self._client_buckets.pop(client_id, None)
+            self._client_last_seen.pop(client_id, None)
+        return len(stale)
 
     def _get_endpoint_bucket(self, endpoint: str) -> TokenBucket | None:
         """Get or create a bucket for an endpoint (if configured)."""
@@ -296,16 +358,7 @@ class RateLimiter:
             Number of client buckets removed.
         """
         with self._lock:
-            now = self._clock.time()
-            stale = [
-                client_id
-                for client_id, last_seen in self._client_last_seen.items()
-                if now - last_seen > self.config.client_ttl_seconds
-            ]
-            for client_id in stale:
-                del self._client_buckets[client_id]
-                del self._client_last_seen[client_id]
-            return len(stale)
+            return self._drop_stale_clients_locked()
 
     def get_stats(self) -> dict[str, Any]:
         """Return request/rejection counters and current bucket state.
