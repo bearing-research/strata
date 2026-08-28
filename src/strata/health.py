@@ -12,12 +12,27 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as metadata_version
 from pathlib import Path
 from typing import TypedDict
 
 import pyarrow as pa
 
 from strata.json_types import JsonObject
+
+
+def _package_version() -> str:
+    """The installed package version, for the version field of /health.
+
+    This was hardcoded to "0.2.0" and stayed there through three releases, so
+    an operator watching a rollout saw the same string before and after it.
+    """
+    try:
+        return metadata_version("strata-notebook")
+    except PackageNotFoundError:
+        # Running from a source tree that was never installed.
+        return "unknown"
 
 
 class HealthStatus(str, Enum):
@@ -87,7 +102,7 @@ class HealthReport:
     status: HealthStatus
     checks: list[DependencyCheck]
     timestamp: float
-    version: str = "0.2.0"
+    version: str = field(default_factory=lambda: _package_version())
 
     def to_dict(self) -> HealthReportDict:
         return {
