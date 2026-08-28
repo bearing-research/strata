@@ -512,6 +512,29 @@ class BuildRunner:
                         finalized_artifact.version,
                     )
 
+                # Mark build as complete (include executor logs for debugging).
+                #
+                # Lease-checked, and BEFORE the name pointer: this is the
+                # commit point that decides which runner won, the mirror of
+                # ``claim_build`` deciding which one started. A runner whose
+                # lease was stolen keeps executing by design (see the
+                # heartbeat loop), so it arrives here too — and setting the
+                # name first let it repoint a registry name at its own result
+                # after another runner had legitimately taken the build over.
+                won = self.build_store.complete_build(
+                    build_id=build_id,
+                    output_byte_count=output_bytes,
+                    logs=executor_logs,
+                    lease_owner=self._runner_id,
+                )
+                if not won:
+                    logger.warning(
+                        f"Build {build_id} completed without its lease; "
+                        "discarding the result and leaving the name pointer alone",
+                        extra={"runner_id": self._runner_id},
+                    )
+                    return
+
                 # Set the requested name pointer now that the artifact is
                 # ready — the materialize endpoint can't (the build is async).
                 if build.name:
@@ -521,13 +544,6 @@ class BuildRunner:
                         finalized_artifact.version,
                         tenant=build.tenant_id,
                     )
-
-                # Mark build as complete (include executor logs for debugging)
-                self.build_store.complete_build(
-                    build_id=build_id,
-                    output_byte_count=output_bytes,
-                    logs=executor_logs,
-                )
                 from strata.transforms.build_qos import get_build_qos
 
                 build_qos = get_build_qos()

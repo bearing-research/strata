@@ -21,7 +21,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     pass
@@ -588,6 +588,7 @@ class BuildStore:
         build_id: str,
         output_byte_count: int | None = None,
         logs: str | None = None,
+        lease_owner: str | None = None,
     ) -> bool:
         """Mark build as completed (building -> ready).
 
@@ -595,20 +596,31 @@ class BuildStore:
             build_id: Build ID to update
             output_byte_count: Output size in bytes
             logs: Executor stdout/stderr logs (optional)
+            lease_owner: When given, the update only applies if this owner
+                still holds the lease. This is the counterpart to
+                ``claim_build``: claiming decides who starts a build,
+                completing decides who is allowed to publish its result. A
+                runner whose lease was stolen (a GC pause or a partition
+                longer than the lease) keeps executing by design, so without
+                this check it published over the runner that legitimately
+                took the build over.
 
         Returns:
-            True if updated, False if not found or wrong state
+            True if updated, False if not found, wrong state, or the lease is
+            held by someone else
         """
         conn = self._get_connection()
         try:
-            cursor = conn.execute(
-                """
+            sql = """
                 UPDATE artifact_builds
                 SET state = 'ready', completed_at = ?, output_byte_count = ?, logs = ?
                 WHERE build_id = ? AND state = 'building'
-                """,
-                (time.time(), output_byte_count, logs, build_id),
-            )
+            """
+            params: list[Any] = [time.time(), output_byte_count, logs, build_id]
+            if lease_owner is not None:
+                sql += " AND lease_owner = ?"
+                params.append(lease_owner)
+            cursor = conn.execute(sql, params)
             conn.commit()
             return cursor.rowcount > 0
         finally:

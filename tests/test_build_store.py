@@ -416,3 +416,62 @@ class TestSingletons:
         # After reset, returns None
         store = get_build_store()
         assert store is None
+
+
+class TestCompletionIsLeaseChecked:
+    """``claim_build`` decides which runner *starts* a build; completion has to
+    decide which one is allowed to *publish* its result.
+
+    When a lease expires (a GC pause or a partition longer than
+    ``lease_duration_seconds``) ``reclaim_expired_build`` hands the build to
+    another runner. The original runner keeps executing — that is deliberate,
+    the heartbeat loop declines to cancel it — and it used to be able to walk
+    all the way through completion, marking the build ready and repointing the
+    requested registry name at its own output, after the takeover.
+    """
+
+    def test_a_runner_that_lost_its_lease_cannot_complete(self, build_store):
+        build_id = str(uuid.uuid4())
+        build_store.create_build(
+            build_id=build_id,
+            artifact_id="art-123",
+            version=1,
+            executor_ref="duckdb_sql@v1",
+        )
+        build_store.claim_build(build_id, "runner-a", lease_duration_seconds=-1)
+        assert build_store.reclaim_expired_build(build_id, "runner-b") is True
+
+        # runner-a is still executing and reaches completion.
+        assert build_store.complete_build(build_id, lease_owner="runner-a") is False
+        assert build_store.get_build(build_id).state == "building"
+
+    def test_the_current_lease_holder_can_complete(self, build_store):
+        build_id = str(uuid.uuid4())
+        build_store.create_build(
+            build_id=build_id,
+            artifact_id="art-123",
+            version=1,
+            executor_ref="duckdb_sql@v1",
+        )
+        build_store.claim_build(build_id, "runner-a", lease_duration_seconds=-1)
+        build_store.reclaim_expired_build(build_id, "runner-b")
+
+        assert build_store.complete_build(build_id, output_byte_count=7, lease_owner="runner-b")
+        state = build_store.get_build(build_id)
+        assert state.state == "ready"
+        assert state.output_byte_count == 7
+
+    def test_omitting_the_owner_keeps_the_unchecked_behaviour(self, build_store):
+        # The deprecated ``start_build`` path leaves lease_owner NULL, so the
+        # check stays opt-in rather than breaking builds that never had a lease.
+        build_id = str(uuid.uuid4())
+        build_store.create_build(
+            build_id=build_id,
+            artifact_id="art-123",
+            version=1,
+            executor_ref="duckdb_sql@v1",
+        )
+        build_store.start_build(build_id)
+
+        assert build_store.complete_build(build_id) is True
+        assert build_store.get_build(build_id).state == "ready"
