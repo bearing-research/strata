@@ -195,7 +195,9 @@ class URLSigner:
             ``True`` if the signature matches.
         """
         expected = self._sign(data)
-        return hmac.compare_digest(expected, signature)
+        # Bytes, not str: ``signature`` arrives from a query parameter, and
+        # ``compare_digest`` raises TypeError comparing non-ASCII strings.
+        return hmac.compare_digest(expected.encode(), signature.encode())
 
     def generate_download_url(
         self,
