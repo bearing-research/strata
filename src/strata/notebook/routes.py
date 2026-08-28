@@ -3100,12 +3100,17 @@ def _format_dag(session) -> dict:
     from strata.notebook.dag import producer_cell_label
 
     if not session.dag:
+        # An empty graph and an unbuildable one are not the same answer.
+        # Reporting the first for the second told every consumer -- the REST
+        # API, the frontend, the CLI and MCP -- that a notebook full of
+        # dependencies had none.
         return {
             "edges": [],
             "topological_order": [],
             "leaves": [],
             "roots": [],
             "variable_producer": {},
+            "error": getattr(session, "dag_error", None) or "notebook DAG could not be built",
         }
 
     return {

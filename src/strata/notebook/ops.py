@@ -111,6 +111,13 @@ class DagView(BaseModel):
     leaves: list[str]
     roots: list[str]
     variable_producer: dict[str, str]
+    # Why the graph could not be computed, or None when it is trustworthy.
+    #
+    # Without this a failed build was projected as an EMPTY graph, which is
+    # byte-identical to a notebook that genuinely has no dependencies. An
+    # agent asking "is this variable defined?" got a confident no for a
+    # variable that is defined, and recreated work that already existed.
+    error: str | None = None
 
 
 class RunResult(BaseModel):
@@ -442,7 +449,7 @@ class LocalNotebookOps:
 
     def dag(self) -> DagView:
         """Build the DAG view (see :meth:`NotebookOps.dag`)."""
-        return _dag_view(self._session.dag)
+        return _dag_view(self._session.dag, getattr(self._session, "dag_error", None))
 
     def status(self) -> NotebookStatus:
         """Summarize per-cell status (see :meth:`NotebookOps.status`)."""
@@ -1237,7 +1244,7 @@ def _worker_view(worker: WorkerSpec, default: str | None) -> WorkerView:
     )
 
 
-def _dag_view(dag: NotebookDag | None) -> DagView:
+def _dag_view(dag: NotebookDag | None, error: str | None = None) -> DagView:
     from strata.notebook.dag import producer_cell_label
 
     if dag is None:
@@ -1247,6 +1254,7 @@ def _dag_view(dag: NotebookDag | None) -> DagView:
             leaves=[],
             roots=[],
             variable_producer={},
+            error=error or "notebook DAG could not be built",
         )
     return DagView(
         edges=[

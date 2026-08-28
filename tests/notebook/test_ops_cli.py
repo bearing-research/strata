@@ -474,3 +474,54 @@ class TestMoveCellDoesNotLoseConcurrentEdits:
         ops.move_cell(ids[2], 0)
 
         assert [c.id for c in ops.list_cells()][0] == ids[2]
+
+
+class TestAFailedDagBuildIsNotReportedAsAnEmptyGraph:
+    """``session.dag`` is set to ``None`` when the build raises, and every
+    consumer projected that as an empty graph.
+
+    An empty graph is a legitimate answer for a notebook with no dependencies,
+    so the two were indistinguishable: ``strata dag`` reported no edges for a
+    notebook full of them, and the "is this variable defined?" lookup answered
+    a confident no for a variable that is defined — leading an agent to
+    recreate work that already existed. The real reason was logged to stderr
+    and discarded.
+    """
+
+    def _broken_notebook(self, tmp_path):
+        from strata.notebook.ops import LocalNotebookOps
+        from strata.notebook.writer import create_notebook
+
+        notebook_dir = create_notebook(tmp_path, name="nb", initialize_environment=False)
+        ops = LocalNotebookOps(notebook_dir)
+        ops.add_cell(source="df = 1")
+        # Two cells reusing one variant name raises VariantNameCollisionError,
+        # a ValueError, which is what collapses the build.
+        ops.add_cell(source="# @variant g v1\na = 1")
+        ops.add_cell(source="# @variant g v1\nb = 2")
+        return LocalNotebookOps(notebook_dir)
+
+    def test_the_session_keeps_the_reason(self, tmp_path):
+        ops = self._broken_notebook(tmp_path)
+        assert ops._session.dag is None
+        assert ops._session.dag_error
+
+    def test_the_dag_view_says_it_failed(self, tmp_path):
+        ops = self._broken_notebook(tmp_path)
+        dag = ops.dag()
+
+        assert dag.error is not None
+        assert "v1" in dag.error, "the reason must name the actual conflict"
+
+    def test_a_healthy_notebook_reports_no_error(self, tmp_path):
+        from strata.notebook.ops import LocalNotebookOps
+        from strata.notebook.writer import create_notebook
+
+        notebook_dir = create_notebook(tmp_path, name="ok", initialize_environment=False)
+        ops = LocalNotebookOps(notebook_dir)
+        ops.add_cell(source="df = 1")
+        ops.add_cell(source="total = df + 1")
+
+        dag = LocalNotebookOps(notebook_dir).dag()
+        assert dag.error is None
+        assert dag.edges, "a real dependency should still be reported"

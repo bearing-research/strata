@@ -215,6 +215,9 @@ class NotebookSession:
         self.path = Path(path)
         self.venv_python: Path | None = None
         self.dag: NotebookDag | None = None
+        # Why the last DAG build failed, or None when it succeeded. Consumers
+        # must distinguish "no dependencies" from "could not be computed".
+        self.dag_error: str | None = None
         # Environment backend — Phase 1 always resolves to UvBackend.
         # Phase 2 will use detection + notebook.toml override to pick
         # between UvBackend and AttachedBackend.
@@ -536,6 +539,7 @@ class NotebookSession:
 
         # Build DAG
         try:
+            self.dag_error = None
             self.dag = NotebookDag.from_cells(
                 cell_analyses,
                 variant_active_selections=self.notebook_state.variant_active_selections,
@@ -570,8 +574,17 @@ class NotebookSession:
 
         except ValueError as e:
             # Cycle detected or variant collision — log but don't crash.
+            #
+            # Keep the reason. Without it every consumer projected ``dag is
+            # None`` as an EMPTY graph, which is byte-identical to a notebook
+            # that genuinely has no dependencies: ``strata dag`` reported no
+            # edges, and "is this variable defined?" answered a confident no
+            # for a variable that is defined, so an agent would recreate work
+            # that already existed. The accurate message was logged here and
+            # thrown away, leaving callers to guess "cycle".
             logger.warning("DAG build failed: %s", e)
             self.dag = None
+            self.dag_error = str(e)
 
     def _restore_execution_history(self, previous_cells: dict[str, Any]) -> None:
         """Restore per-cell execution history that's not persisted to notebook.toml.
