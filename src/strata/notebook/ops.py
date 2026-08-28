@@ -594,9 +594,21 @@ class LocalNotebookOps:
 
     def move_cell(self, cell_id: str, index: int) -> list[CellView]:
         """Reorder a cell (see :meth:`NotebookOps.move_cell`)."""
+        import tomllib
+
         from strata.notebook.writer import reorder_cells
 
-        order = [cell.id for cell in self._session.notebook_state.cells]
+        # Read the CURRENT order off disk rather than the snapshot taken when
+        # this ops object was constructed. A live server session, the TUI or a
+        # second CLI process may have added or removed cells since, and moving
+        # one cell should not be deciding the fate of those.
+        with open(self.notebook_dir / "notebook.toml", "rb") as handle:
+            on_disk = tomllib.load(handle)
+        order = [
+            cell["id"]
+            for cell in sorted(on_disk.get("cells", []), key=lambda c: c.get("order", 0))
+            if cell.get("id")
+        ]
         if cell_id not in order:
             raise NotebookOpsError(f"no cell with id {cell_id!r}")
         order.remove(cell_id)

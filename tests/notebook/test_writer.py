@@ -1042,3 +1042,43 @@ def test_update_notebook_env_keeps_writer_conventions():
         with open(notebook_dir / "notebook.toml", "rb") as f:
             data = tomllib.load(f)
         assert isinstance(data["updated_at"], datetime)  # not an ISO string
+
+
+def test_reorder_cells_keeps_cells_the_caller_never_saw():
+    """Reordering must never be able to delete a cell.
+
+    ``reorder_cells`` rebuilt ``notebook.toml``'s cell list from ``cell_ids``
+    alone, so anything absent from it was dropped — silently, from committed
+    config, orphaning the cell's source file and making its artifacts
+    unreachable. Callers pass a snapshot taken when they opened the notebook,
+    so any cell added since (by a live server session, the TUI, or a second
+    CLI process) was destroyed by an unrelated reorder.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Concurrent Reorder")
+        for cell_id in ("cell-1", "cell-2", "cell-3"):
+            add_cell_to_notebook(notebook_dir, cell_id)
+
+        # A cell the reordering caller has never heard of.
+        add_cell_to_notebook(notebook_dir, "added-elsewhere")
+
+        reorder_cells(notebook_dir, ["cell-3", "cell-1", "cell-2"])
+
+        cell_ids = [c.id for c in parse_notebook(notebook_dir).cells]
+        assert "added-elsewhere" in cell_ids
+        # The requested order still holds for the cells that were named.
+        assert cell_ids[:3] == ["cell-3", "cell-1", "cell-2"]
+
+
+def test_reorder_cells_renumbers_every_cell_contiguously():
+    """Preserved cells must get an order too, or they sort unpredictably."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        notebook_dir = create_notebook(Path(tmpdir), "Renumber")
+        for cell_id in ("a", "b", "c"):
+            add_cell_to_notebook(notebook_dir, cell_id)
+
+        reorder_cells(notebook_dir, ["c", "a"])
+
+        with open(notebook_dir / "notebook.toml", "rb") as handle:
+            orders = [cell["order"] for cell in tomllib.load(handle)["cells"]]
+        assert orders == list(range(len(orders)))
