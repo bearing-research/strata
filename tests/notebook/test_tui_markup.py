@@ -89,6 +89,21 @@ async def test_agent_feed_keeps_bracketed_text(monkeypatch):
         assert "[/etc/hosts]" in _plain(app.query_one("#agent", Static))
 
 
+@pytest.mark.asyncio
+async def test_dag_view_keeps_a_bracketed_cell_name(monkeypatch):
+    """The DAG art is built from cell names, so it is user content too. A name
+    like ``load[raw]`` was rendered as ``load`` inside a box still sized for the
+    full name, and ``load[/raw]`` crashed the modal outright."""
+    app = await _app(monkeypatch)
+    async with app.run_test(size=(100, 40)) as pilot:
+        app.vm.cells["c1"] = CellView(id="c1", name="load[raw]", status="ready")
+        app.vm.cell_order = ["c1"]
+        app._selected = "c1"
+        app.action_show_dag()
+        await pilot.pause()
+        assert "load[raw]" in _plain(app.screen.query_one("#dag-art", Static))
+
+
 # The two table tests below assert a renderable rather than the rendered text.
 # ``DataTable`` formats a cell only when its row scrolls into view, and the
 # headless pilot lays the table out two lines tall, so the rows never render and
