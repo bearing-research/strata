@@ -48,6 +48,29 @@ class AclRule(BaseModel):
     tenant: str | None = None
     tables: tuple[str, ...] = ()
 
+    @model_validator(mode="after")
+    def _reject_unmatchable_rule(self) -> AclRule:
+        """A rule with no table patterns can never match — reject it loudly.
+
+        ``tables`` defaulted to ``()`` and the matcher returns False on an
+        empty tuple, so ``{ principal = "bob" }`` — the natural way to write
+        "deny bob everything" — was silently inert. For a deny rule that fails
+        OPEN, and ``validate_mode_coherence`` still counted it as "acl
+        configured", so the operator got a clean boot and a false sense of
+        protection.
+
+        Defaulting empty to "all tables" would fix deny rules but silently
+        widen every *allow* rule written the same way, so the safe reading is
+        that this is a configuration error: say so, and let the operator write
+        ``tables = ["*"]`` when that is what they mean.
+        """
+        if not self.tables:
+            raise ValueError(
+                "ACL rule must list at least one table pattern; a rule with no "
+                'patterns can never match. Use tables = ["*"] to mean all tables.'
+            )
+        return self
+
     @field_validator("tables", mode="before")
     @classmethod
     def convert_tables_to_tuple(cls, v: Any) -> tuple[str, ...]:

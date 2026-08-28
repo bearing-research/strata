@@ -510,3 +510,70 @@ class TestArtifactReadAcl:
             server_module._authorize_artifact_read(art)  # no raise
         finally:
             set_principal(None)
+
+
+class TestAclRuleMatchingFailsClosed:
+    """Two ways an ACL rule could silently never match — both failing OPEN.
+
+    A deny rule that never fires grants the access it was written to refuse,
+    and nothing warned at startup: ``validate_mode_coherence`` still counted
+    such a rule as "acl configured", so the operator booted clean and believed
+    the deny applied.
+    """
+
+    def _principal(self, principal_id: str):
+        from strata.types import Principal
+
+        return Principal(id=principal_id, tenant=None, scopes=frozenset())
+
+    def _ref(self):
+        from strata.types import TableIdentity, TableRef
+
+        return TableRef.from_table_identity(
+            TableIdentity.from_table_id("pii.events"), table_uri="s3://wh#pii.events"
+        )
+
+    def test_wildcard_principal_pattern_now_matches(self):
+        """``principal`` is documented as a pattern and tables are fnmatched,
+        but principals used exact equality — so ``svc-*`` never fired."""
+        from strata.auth import AclEvaluator
+        from strata.config import AclConfig, AclRule
+
+        acl = AclConfig(
+            default="allow",
+            deny_rules=[AclRule(principal="svc-*", tables=("s3:pii.*",))],
+        )
+        evaluator = AclEvaluator(acl)
+
+        assert evaluator.authorize(self._principal("svc-etl"), self._ref()) is False
+        # A principal outside the pattern is unaffected.
+        assert evaluator.authorize(self._principal("analyst"), self._ref()) is True
+
+    def test_plain_star_principal_still_matches_everyone(self):
+        from strata.auth import AclEvaluator
+        from strata.config import AclConfig, AclRule
+
+        evaluator = AclEvaluator(
+            AclConfig(default="allow", deny_rules=[AclRule(principal="*", tables=("s3:pii.*",))])
+        )
+        assert evaluator.authorize(self._principal("anyone"), self._ref()) is False
+
+    def test_exact_principal_still_matches_only_itself(self):
+        from strata.auth import AclEvaluator
+        from strata.config import AclConfig, AclRule
+
+        evaluator = AclEvaluator(
+            AclConfig(default="allow", deny_rules=[AclRule(principal="bob", tables=("s3:pii.*",))])
+        )
+        assert evaluator.authorize(self._principal("bob"), self._ref()) is False
+        assert evaluator.authorize(self._principal("bobby"), self._ref()) is True
+
+    def test_rule_without_table_patterns_is_rejected_at_config_time(self):
+        """``{ principal = "bob" }`` — the natural way to write "deny bob
+        everything" — could never match. Rejected loudly instead of ignored."""
+        import pydantic
+
+        from strata.config import AclRule
+
+        with pytest.raises(pydantic.ValidationError, match="at least one table pattern"):
+            AclRule(principal="bob")
