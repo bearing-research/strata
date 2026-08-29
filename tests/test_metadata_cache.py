@@ -1191,3 +1191,52 @@ class TestPersistedColumnSizes:
 
         loaded = store.get_parquet_meta(str(target))
         assert loaded.row_groups[0].column_sizes == {}
+
+
+class TestNoArgLookupKeepsTheConfiguredStore:
+    """``get_metadata_store()`` must mean "the store in use", not "the home one".
+
+    ``/health/ready`` and the metadata routes call it with no argument. That
+    used to resolve to ``~/.strata/cache``, and because the path-mismatch
+    branch rebuilds the singleton for a different path, the readiness probe
+    swapped the global store out from under a server configured with any other
+    cache_dir — on every probe, so the store thrashed between the two while the
+    readiness check reported on a database nothing was serving from.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_singleton(self, monkeypatch, tmp_path):
+        import strata.metadata_cache as metadata_cache
+
+        monkeypatch.setattr(metadata_cache, "_metadata_store", None)
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
+        yield
+        metadata_cache._metadata_store = None
+
+    def test_no_arg_returns_the_configured_store(self, tmp_path):
+        from strata.metadata_cache import get_metadata_store
+
+        configured = tmp_path / "configured"
+        served = get_metadata_store(configured)
+
+        assert get_metadata_store() is served
+        # And a later configured lookup is still the same object, so the
+        # singleton never churned.
+        assert get_metadata_store(configured) is served
+
+    def test_no_arg_does_not_create_a_home_cache_dir(self, tmp_path):
+        from strata.metadata_cache import get_metadata_store
+
+        get_metadata_store(tmp_path / "configured")
+        get_metadata_store()
+
+        assert not (tmp_path / "home" / ".strata" / "cache").exists()
+
+    def test_no_arg_still_falls_back_when_nothing_is_initialized(self, tmp_path):
+        """Personal-mode and CLI callers with no server-initialized store keep
+        the home default."""
+        from strata.metadata_cache import get_metadata_store
+
+        store = get_metadata_store()
+
+        assert store.db_path == tmp_path / "home" / ".strata" / "cache" / "metadata.sqlite"

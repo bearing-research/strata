@@ -828,6 +828,15 @@ def get_metadata_store(cache_dir: Path | None = None) -> "MetadataStore":
     from strata.metadata_store import MetadataStore
 
     if cache_dir is None:
+        # No cache_dir means "the store already in use", not "the personal-mode
+        # default". /health/ready and the metadata routes call it this way, and
+        # resolving to the home directory there did not just read the wrong
+        # store — the path-mismatch branch below swapped the global singleton
+        # out from under a server configured with any other cache_dir, on every
+        # readiness probe.
+        with _cache_lock:
+            if _metadata_store is not None:
+                return _metadata_store
         cache_dir = Path.home() / ".strata" / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     expected_db_path = cache_dir / "metadata.sqlite"
