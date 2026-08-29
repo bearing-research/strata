@@ -605,9 +605,7 @@ def _table_from_pyarrow(value: Any) -> Any:
             pa.Table.from_batches([value]),
             {_META_SHAPE: _SHAPE_TABLE, _META_SOURCE: _SOURCE_PYARROW_RECORD_BATCH},
         )
-    return _stamp_metadata(
-        value, {_META_SHAPE: _SHAPE_TABLE, _META_SOURCE: _SOURCE_PYARROW_TABLE}
-    )
+    return _stamp_metadata(value, {_META_SHAPE: _SHAPE_TABLE, _META_SOURCE: _SOURCE_PYARROW_TABLE})
 
 
 def _matches_pandas(value: Any) -> bool:
