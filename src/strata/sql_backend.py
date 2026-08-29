@@ -38,7 +38,7 @@ remains is:
 One divergence is deliberately *not* papered over. SQLite's ``LIKE`` is
 case-insensitive for ASCII; Postgres's is case-sensitive. So a prefix search
 for ``"Model"`` matches a stored ``model_v1`` on SQLite and nothing on
-Postgres (``list_artifacts``, ``find_artifacts_by_input``,
+Postgres (``list_artifacts``, ``find_dependents``,
 ``list_latest_by_id_prefix``). Postgres is the stricter and more predictable
 side, and forcing either engine to imitate the other would change behavior
 personal mode has today. Callers that need case-insensitive matching should
@@ -56,6 +56,12 @@ import sqlite3
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
+
+# Mirrors ``sqlite3.connect(timeout=30.0)``: a contended writer gives up after
+# the same interval rather than blocking forever.
+_LOCK_TIMEOUT_MS = 30_000
+_CONNECT_TIMEOUT_SECONDS = 10
+
 
 # Characters that open a region where ``?`` is data, not a placeholder.
 _SINGLE_QUOTE = "'"
@@ -258,6 +264,16 @@ class SqlDialect(Protocol):
         """
         ...
 
+    def schema_exists(self, conn: StoreConnection) -> bool:
+        """Whether the store's tables are already present.
+
+        Lets ``_init_schema`` skip the global schema lock on every subsequent
+        construction; several call sites build an ``ArtifactStore`` per
+        session, so taking it unconditionally would funnel them all through
+        one mutex.
+        """
+        ...
+
     def begin_write(self, conn: StoreConnection, key: str) -> None:
         """Open a transaction that serializes writers contending on ``key``.
 
@@ -319,6 +335,12 @@ class SqliteDialect:
     @property
     def supports_legacy_migration(self) -> bool:
         return True
+
+    def schema_exists(self, conn: StoreConnection) -> bool:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_versions'"
+        ).fetchone()
+        return row is not None
 
     def begin_write(self, conn: StoreConnection, key: str) -> None:
         # SQLite locks the whole database file, so the key is not needed: any
@@ -421,8 +443,29 @@ class PostgresDialect:
     def connect(self) -> StoreConnection:
         import psycopg
 
-        conn = psycopg.connect(self.dsn, row_factory=_row_factory)
+        # Timeouts, because the SQLite dialect has them and this one inherited
+        # none. ``sqlite3.connect(timeout=30.0)`` made a contended writer fail
+        # loudly after 30s; ``pg_advisory_xact_lock`` waits forever, so a node
+        # that stalls while holding a lock -- a paused container, a partition
+        # leaving the backend "idle in transaction" -- would hang every other
+        # node behind it with no error and no bound. ``lock_timeout`` restores
+        # the same 30s ceiling on the same failure.
+        #
+        # Deliberately no ``statement_timeout``: the hazard here is waiting on
+        # a lock, not running a long query, and capping query time would break
+        # legitimately slow maintenance work like ``garbage_collect`` over a
+        # large store.
+        conn = psycopg.connect(
+            self.dsn,
+            row_factory=_row_factory,
+            connect_timeout=_CONNECT_TIMEOUT_SECONDS,
+            options=f"-c lock_timeout={_LOCK_TIMEOUT_MS}",
+        )
         return _PostgresConnection(conn)
+
+    def schema_exists(self, conn: StoreConnection) -> bool:
+        row = conn.execute("SELECT to_regclass('artifact_versions')").fetchone()
+        return row is not None and row[0] is not None
 
     def adapt_ddl(self, sql: str) -> str:
         for pattern, attribute in _DDL_TYPE_REWRITES:

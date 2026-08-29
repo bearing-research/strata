@@ -380,6 +380,13 @@ _MIGRATION_SQL = """
 """
 
 
+# Bound on force_finalize_canonical's retry. A conflict means a competing
+# writer committed a ready row with our provenance; one retry supersedes it
+# and wins. More than two rounds means sustained contention on a single
+# provenance, where failing loudly beats spinning.
+_CANONICAL_PROMOTE_ATTEMPTS = 3
+
+
 # Sentinel for read_audit's tenant param: distinguishes "no tenant filter at
 # all" (the direct-store CLI / admin view of the whole store) from an
 # explicit tenant filter of None — which normalizes to the '' default tenant.
@@ -487,14 +494,21 @@ class ArtifactStore:
             # those versions has no such history, so it goes straight to the
             # current schema rather than paying to have this made portable.
             if not self._dialect.supports_legacy_migration:
-                # Serialized, and both scripts share the one transaction.
+                # Fast path first: an ArtifactStore is constructed per session
+                # in several places, and the lock below is *global*, so taking
+                # it unconditionally would funnel every store construction in
+                # the cluster through one mutex. Once the schema exists there
+                # is nothing to serialize.
+                if self._dialect.schema_exists(conn):
+                    return
+
                 # CREATE TABLE IF NOT EXISTS is not concurrency-safe in
                 # Postgres: it checks and then creates without holding a lock,
                 # so simultaneous creators race in the system catalog and all
                 # but one fail with a duplicate key on pg_type_typname_nsp_index.
-                # Every node runs this at startup, and several call sites build
-                # an ArtifactStore per session, so a multi-node boot against one
-                # database hits it immediately -- observed 7 of 8 failing.
+                # Observed 7 of 8 nodes failing on a shared first boot, which is
+                # exactly the multi-node case this backend exists to enable.
+                # Both scripts share the one transaction so the lock covers them.
                 self._dialect.begin_write(conn, "__schema__")
                 conn.executescript(self._dialect.adapt_ddl(_SCHEMA_SQL))
                 conn.executescript(self._dialect.adapt_ddl(_REGISTRY_SCHEMA_SQL))
@@ -859,54 +873,64 @@ class ArtifactStore:
         Returns the canonical ``ArtifactVersion`` after promotion, or
         ``None`` if it can't be found post-update.
         """
-        conn = self._get_connection()
-        row = None  # bound before the try so the handler below can read it
-        try:
-            self._dialect.begin_write(conn, artifact_id)
-            row = conn.execute(
-                "SELECT provenance_hash, tenant FROM artifact_versions "
-                "WHERE id = ? AND version = ?",
-                (artifact_id, version),
-            ).fetchone()
-            if row is not None:
-                # Supersede any other ready row with the same provenance in the
-                # same tenant so the canonical row can be promoted without
-                # violating the uniqueness index.
+        # Retried, because a conflict here means the work is still to be done.
+        #
+        # Under SQLite a conflict was impossible: BEGIN IMMEDIATE locks the
+        # whole file, so no second writer was ever in flight. A keyed advisory
+        # lock is narrower -- it serializes writers sharing an artifact id, and
+        # rows sharing a provenance hash across *different* ids do not contend
+        # on it -- so a competing writer can commit its own ready row between
+        # our supersede and our promote, and the uniqueness index rejects us.
+        #
+        # Returning the winner would be wrong. The only caller reaches this
+        # method precisely *because* finalize landed under a foreign id
+        # (`notebook/artifact_integration.py`), so handing that same foreign id
+        # back leaves the canonical row 'failed' and the caller none the wiser.
+        # Retrying does what the method is for: the next pass sees the winner's
+        # now-committed row, supersedes it, and promotes ours.
+        for attempt in range(_CANONICAL_PROMOTE_ATTEMPTS):
+            conn = self._get_connection()
+            try:
+                self._dialect.begin_write(conn, artifact_id)
+                row = conn.execute(
+                    "SELECT provenance_hash, tenant FROM artifact_versions "
+                    "WHERE id = ? AND version = ?",
+                    (artifact_id, version),
+                ).fetchone()
+                if row is not None:
+                    # Supersede any other ready row with the same provenance in
+                    # the same tenant so the canonical row can be promoted
+                    # without violating the uniqueness index.
+                    conn.execute(
+                        """
+                        UPDATE artifact_versions SET state = 'superseded'
+                        WHERE provenance_hash = ? AND state = 'ready'
+                          AND COALESCE(tenant, '') = COALESCE(?, '')
+                          AND NOT (id = ? AND version = ?)
+                        """,
+                        (row["provenance_hash"], row["tenant"], artifact_id, version),
+                    )
                 conn.execute(
                     """
-                    UPDATE artifact_versions SET state = 'superseded'
-                    WHERE provenance_hash = ? AND state = 'ready'
-                      AND COALESCE(tenant, '') = COALESCE(?, '')
-                      AND NOT (id = ? AND version = ?)
+                    UPDATE artifact_versions
+                    SET state = 'ready',
+                        schema_json = ?,
+                        row_count = ?,
+                        byte_size = ?
+                    WHERE id = ? AND version = ? AND state = 'failed'
                     """,
-                    (row["provenance_hash"], row["tenant"], artifact_id, version),
+                    (schema_json, row_count, byte_size, artifact_id, version),
                 )
-            conn.execute(
-                """
-                UPDATE artifact_versions
-                SET state = 'ready',
-                    schema_json = ?,
-                    row_count = ?,
-                    byte_size = ?
-                WHERE id = ? AND version = ? AND state = 'failed'
-                """,
-                (schema_json, row_count, byte_size, artifact_id, version),
-            )
-            conn.commit()
-        except self._dialect.integrity_error:
-            # Another writer promoted a row with this provenance first. Under
-            # SQLite this could not happen -- BEGIN IMMEDIATE locks the whole
-            # file, so no second writer was ever in flight. A keyed advisory
-            # lock is narrower: it serializes writers sharing an artifact id,
-            # and rows sharing a provenance hash across *different* ids do not
-            # contend on it. The uniqueness index catches that case, so treat
-            # it the way finalize_artifact does and hand back the row that won.
-            conn.rollback()
-            if row is None:
-                raise
-            return self.find_by_provenance(row["provenance_hash"], tenant=row["tenant"])
-        finally:
-            conn.close()
+                conn.commit()
+                break
+            except self._dialect.integrity_error:
+                conn.rollback()
+                # Out of attempts: let it surface rather than report a
+                # promotion that did not happen.
+                if attempt == _CANONICAL_PROMOTE_ATTEMPTS - 1:
+                    raise
+            finally:
+                conn.close()
         return self.get_artifact(artifact_id, version)
 
     def finalize_and_set_name(
@@ -2921,8 +2945,11 @@ class ArtifactStore:
                 "ready_versions": row["ready_versions"],
                 "building_versions": row["building_versions"],
                 "failed_versions": row["failed_versions"],
-                "total_bytes": row["total_bytes"],
-                "total_rows": row["total_rows"],
+                # int(): SUM over a BIGINT column is numeric in Postgres and
+                # arrives as Decimal, which breaks arithmetic like
+                # total_bytes / 1024**3 for in-process callers.
+                "total_bytes": int(row["total_bytes"]),
+                "total_rows": int(row["total_rows"]),
                 "name_count": names_count,
                 "unreferenced_count": unreferenced_count,
                 "oldest_artifact": row["oldest_artifact"],
@@ -3121,8 +3148,11 @@ class ArtifactStore:
                 "ready_versions": row["ready_versions"],
                 "building_versions": row["building_versions"],
                 "failed_versions": row["failed_versions"],
-                "total_bytes": row["total_bytes"],
-                "total_rows": row["total_rows"],
+                # int(): SUM over a BIGINT column is numeric in Postgres and
+                # arrives as Decimal, which breaks arithmetic like
+                # total_bytes / 1024**3 for in-process callers.
+                "total_bytes": int(row["total_bytes"]),
+                "total_rows": int(row["total_rows"]),
                 "name_count": names_count,
             }
         finally:

@@ -204,6 +204,76 @@ class TestConcurrentSchemaInitialization:
         assert errors == []
 
 
+class TestAggregateReturnTypes:
+    """Postgres aggregates do not have SQLite's return types."""
+
+    def test_stats_totals_are_ints_not_decimals(self, store):
+        # SUM over a BIGINT column is `numeric` in Postgres and arrives as
+        # Decimal, so an in-process caller doing total_bytes / 1024**3 gets
+        # TypeError where the SQLite backend gave a float.
+        version = store.create_artifact("a1", "prov-1", _spec())
+        store.finalize_artifact("a1", version, "{}", row_count=7, byte_size=11)
+
+        stats = store.stats()
+        assert isinstance(stats["total_bytes"], int)
+        assert isinstance(stats["total_rows"], int)
+        assert stats["total_bytes"] / 1024**3 > 0
+
+    def test_usage_totals_are_ints_not_decimals(self, store):
+        version = store.create_artifact("a1", "prov-1", _spec())
+        store.finalize_artifact("a1", version, "{}", row_count=7, byte_size=11)
+
+        usage = store.get_usage()
+        assert isinstance(usage["total_bytes"], int)
+        assert isinstance(usage["total_rows"], int)
+
+
+class TestConnectionLimits:
+    """SQLite's timeouts had to be carried over, not dropped."""
+
+    def test_lock_timeout_matches_the_sqlite_busy_timeout(self, postgres_dsn):
+        # pg_advisory_xact_lock waits forever by default, so a node stalling
+        # while holding the global schema lock would hang every other node
+        # with no error and no bound. sqlite3.connect(timeout=30.0) failed
+        # loudly after 30s; this restores the same ceiling.
+        conn = PostgresDialect(postgres_dsn).connect()
+        try:
+            assert conn.execute("SHOW lock_timeout").fetchone()[0] == "30s"
+        finally:
+            conn.close()
+
+    def test_schema_lock_is_skipped_once_the_schema_exists(self, postgres_dsn, store):
+        # The schema lock is global. An ArtifactStore is constructed per
+        # session in several places, so taking it on every construction would
+        # funnel the whole cluster through one mutex.
+        dialect = PostgresDialect(postgres_dsn)
+        conn = dialect.connect()
+        try:
+            assert dialect.schema_exists(conn) is True
+        finally:
+            conn.close()
+
+
+class TestCanonicalPromotion:
+    def test_promotion_returns_the_canonical_id_never_a_foreign_one(self, store):
+        # The only caller reaches force_finalize_canonical *because* finalize
+        # landed under a different id, so returning that foreign id back would
+        # leave the canonical row 'failed' and the caller unaware.
+        first = store.create_artifact("a1", "shared-prov", _spec())
+        store.finalize_artifact("a1", first, "{}", row_count=0, byte_size=0)
+
+        second = store.create_artifact("a2", "shared-prov", _spec())
+        deduped = store.finalize_artifact("a2", second, "{}", row_count=0, byte_size=0)
+        assert deduped is not None and deduped.id == "a1"  # dedup put us on a1
+
+        promoted = store.force_finalize_canonical(
+            artifact_id="a2", version=second, schema_json="{}", row_count=0, byte_size=0
+        )
+        assert promoted is not None
+        assert promoted.id == "a2"
+        assert promoted.state == "ready"
+
+
 class TestTimestampPrecision:
     """The REAL-vs-DOUBLE PRECISION trap, checked against a live server."""
 
