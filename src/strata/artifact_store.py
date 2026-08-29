@@ -36,6 +36,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from strata.sql_backend import SqlDialect, SqliteDialect
+
 if TYPE_CHECKING:
     from strata.blob_store import BlobStore
 
@@ -448,16 +450,18 @@ class ArtifactStore:
         # Ensure artifact_dir exists (for metadata DB)
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
 
+        # Every query in this class reaches the database through _get_connection,
+        # so the dialect is the one place a second backend has to be taught
+        # about. SQLite stays the default and behaves exactly as before; see
+        # strata/sql_backend.py for what actually differs between backends.
+        self._dialect: SqlDialect = SqliteDialect(self.db_path)
+
         # Initialize schema
         self._init_schema()
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get a new database connection with WAL mode."""
-        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.row_factory = sqlite3.Row
-        return conn
+        return self._dialect.connect()
 
     def _init_schema(self) -> None:
         """Initialize database schema with migrations for tenant columns."""

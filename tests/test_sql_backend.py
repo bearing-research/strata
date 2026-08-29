@@ -1,0 +1,168 @@
+"""Tests for the SQL dialect seam."""
+
+from __future__ import annotations
+
+import struct
+from pathlib import Path
+
+import pytest
+
+from strata.sql_backend import (
+    PostgresDialect,
+    SqliteDialect,
+    translate_placeholders,
+)
+
+
+class TestTranslatePlaceholders:
+    """Qmark to pyformat, without corrupting data that looks like syntax."""
+
+    def test_bare_placeholders_convert(self):
+        assert (
+            translate_placeholders("SELECT * FROM t WHERE id = ? AND v = ?")
+            == "SELECT * FROM t WHERE id = %s AND v = %s"
+        )
+
+    def test_statement_without_placeholders_is_unchanged(self):
+        sql = "SELECT COUNT(*) FROM artifact_versions"
+        assert translate_placeholders(sql) == sql
+
+    def test_question_mark_inside_a_string_literal_is_data(self):
+        assert (
+            translate_placeholders("SELECT * FROM t WHERE name = 'why?' AND id = ?")
+            == "SELECT * FROM t WHERE name = 'why?' AND id = %s"
+        )
+
+    def test_question_mark_inside_a_quoted_identifier_is_data(self):
+        assert (
+            translate_placeholders('SELECT "odd?col" FROM t WHERE id = ?')
+            == 'SELECT "odd?col" FROM t WHERE id = %s'
+        )
+
+    def test_doubled_quote_does_not_end_the_literal(self):
+        # 'it''s ?' is one literal containing an apostrophe, so its question
+        # mark stays data. Treating '' as a close would convert it.
+        assert (
+            translate_placeholders("SELECT * FROM t WHERE s = 'it''s ?' AND id = ?")
+            == "SELECT * FROM t WHERE s = 'it''s ?' AND id = %s"
+        )
+
+    def test_percent_is_escaped_outside_literals(self):
+        assert translate_placeholders("SELECT 5 % 2") == "SELECT 5 %% 2"
+
+    def test_percent_is_escaped_inside_literals(self):
+        # The driver scans the whole statement, so a percent is a substitution
+        # marker even inside quotes.
+        assert (
+            translate_placeholders("SELECT * FROM t WHERE n LIKE 'nb_%'")
+            == "SELECT * FROM t WHERE n LIKE 'nb_%%'"
+        )
+
+    def test_line_comment_contents_are_not_translated(self):
+        sql = "SELECT 1 -- is this a ? placeholder\nWHERE id = ?"
+        assert translate_placeholders(sql) == "SELECT 1 -- is this a ? placeholder\nWHERE id = %s"
+
+    def test_block_comment_contents_are_not_translated(self):
+        sql = "SELECT /* a ? here */ 1 WHERE id = ?"
+        assert translate_placeholders(sql) == "SELECT /* a ? here */ 1 WHERE id = %s"
+
+    def test_unterminated_literal_does_not_raise(self):
+        # A translator should not be the thing that reports a syntax error --
+        # the driver gives a far better message. It just must not crash.
+        assert translate_placeholders("SELECT 'oops") == "SELECT 'oops"
+
+    def test_real_statement_from_the_store(self):
+        # artifact_store.py:1231, the one place the store mixes a placeholder
+        # with a quoted literal in the same statement.
+        sql = "WHERE id LIKE ? ESCAPE '\\' AND state = 'ready'"
+        assert translate_placeholders(sql) == "WHERE id LIKE %s ESCAPE '\\' AND state = 'ready'"
+
+    def test_multiline_ddl(self):
+        sql = """
+            INSERT INTO artifact_versions
+                (id, version, state, provenance_hash)
+            VALUES (?, ?, 'building', ?)
+        """
+        translated = translate_placeholders(sql)
+        assert translated.count("%s") == 3
+        # The inline state literal is data and must survive intact.
+        assert "'building'" in translated
+
+
+class TestSqliteDialectPreservesTodaysBehavior:
+    """Personal mode must not notice the seam exists."""
+
+    def test_sql_is_identity(self):
+        # The store is already written in qmark; rewriting it would be churn.
+        sql = "SELECT * FROM t WHERE id = ?"
+        assert SqliteDialect(Path("x.sqlite")).sql(sql) == sql
+
+    def test_connect_sets_wal_and_a_name_indexable_row_factory(self, tmp_path):
+        dialect = SqliteDialect(tmp_path / "artifacts.sqlite")
+        conn = dialect.connect()
+        try:
+            assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+            conn.execute("CREATE TABLE t (tenant TEXT)")
+            conn.execute("INSERT INTO t VALUES ('acme')")
+            # The store reads columns by name throughout.
+            assert conn.execute("SELECT tenant FROM t").fetchone()["tenant"] == "acme"
+        finally:
+            conn.close()
+
+    def test_begin_write_serializes_writers(self, tmp_path):
+        dialect = SqliteDialect(tmp_path / "artifacts.sqlite")
+        conn = dialect.connect()
+        try:
+            dialect.begin_write(conn)
+            assert conn.in_transaction
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def test_legacy_migration_is_supported(self):
+        # SQLite is the only backend with deployed history to upgrade.
+        assert SqliteDialect(Path("x.sqlite")).supports_legacy_migration is True
+
+
+class TestPostgresDialectRendering:
+    """What SQL to emit, settled before the connection work lands."""
+
+    def test_sql_translates_placeholders(self):
+        assert (
+            PostgresDialect("postgresql:///x").sql("SELECT * FROM t WHERE id = ?")
+            == "SELECT * FROM t WHERE id = %s"
+        )
+
+    def test_autoincrement_differs_from_sqlite(self):
+        assert PostgresDialect("postgresql:///x").autoincrement_pk == "BIGSERIAL PRIMARY KEY"
+        assert SqliteDialect(Path("x")).autoincrement_pk == "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+    def test_float_type_is_double_precision(self):
+        # Not REAL: see test_real_would_lose_timestamp_precision below.
+        assert PostgresDialect("postgresql:///x").float_type == "DOUBLE PRECISION"
+
+    def test_real_would_lose_timestamp_precision(self):
+        # Why float_type exists. Postgres REAL is single precision, and the
+        # store keeps epoch seconds in these columns. Round-tripping a
+        # realistic created_at through 32 bits loses the sub-second part
+        # entirely -- silently, and only visible much later as artifacts that
+        # appear to have been created at the same instant.
+        created_at = 1787000000.123456
+        through_single = struct.unpack("f", struct.pack("f", created_at))[0]
+        assert through_single != created_at
+        assert abs(through_single - created_at) > 1.0
+
+    def test_legacy_migration_is_not_supported(self):
+        # No deployed Postgres history exists, so the sqlite_master / PRAGMA /
+        # rowid migration path never runs there.
+        assert PostgresDialect("postgresql:///x").supports_legacy_migration is False
+
+    def test_connect_explains_that_it_is_not_wired(self):
+        with pytest.raises(NotImplementedError, match="not wired yet"):
+            PostgresDialect("postgresql:///x").connect()
+
+    def test_begin_write_names_the_unresolved_choice(self):
+        # BEGIN IMMEDIATE has no Postgres equivalent; failing loudly beats
+        # silently running the MAX(version)+1 read unserialized.
+        with pytest.raises(NotImplementedError, match="advisory lock|SERIALIZABLE"):
+            PostgresDialect("postgresql:///x").begin_write(None)
