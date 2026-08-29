@@ -501,3 +501,84 @@ class TestClientBucketGrowthIsBounded:
             limiter.check(f"churn-{i}")
 
         assert "steady" in limiter._client_buckets
+
+
+class TestRetryAfterIsNeverZero:
+    """A 429 must never tell the client to retry immediately.
+
+    ``Retry-After``'s grammar is whole seconds, and the middleware used to
+    render the limiter's precise wait with ``int()``. The largest wait the
+    limiter can ever compute is one token's worth of refill -- 0.01s at the
+    default 100 requests/sec -- so truncation did not merely lose precision,
+    it produced ``Retry-After: 0`` on every single rejection. The one existing
+    middleware test used a 1 req/sec limit, the only rate whose wait survives
+    truncation, and asserted the header was present rather than what it said.
+    """
+
+    def test_subsecond_waits_round_up(self):
+        from strata.server import _retry_after_header
+
+        assert _retry_after_header(0.001, 1.0) == "1"  # global default
+        assert _retry_after_header(0.01, 1.0) == "1"  # per-client default
+        assert _retry_after_header(0.1, 1.0) == "1"  # warm endpoint default
+
+    def test_whole_and_partial_seconds_round_up(self):
+        from strata.server import _retry_after_header
+
+        assert _retry_after_header(1.0, 5.0) == "1"
+        assert _retry_after_header(1.2, 5.0) == "2"
+        assert _retry_after_header(30.0, 5.0) == "30"
+
+    def test_missing_wait_uses_the_fallback(self):
+        from strata.server import _retry_after_header
+
+        assert _retry_after_header(None, 5.0) == "5"
+
+    def test_zero_wait_still_floors_at_one_second(self):
+        """``time_until_available`` can refill to 0.0 between the failed
+        acquire and the header being built."""
+        from strata.server import _retry_after_header
+
+        assert _retry_after_header(0.0, 1.0) == "1"
+
+    @pytest.mark.asyncio
+    async def test_middleware_sends_a_usable_retry_after(self, tmp_path):
+        from httpx import ASGITransport, AsyncClient
+
+        import strata.server as server_module
+        from strata.config import StrataConfig
+        from strata.pool_metrics import reset_metrics
+        from strata.rate_limiter import RateLimitConfig, init_rate_limiter, reset_rate_limiter
+        from strata.server import ServerState, app
+
+        reset_metrics()
+        reset_rate_limiter()
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        config = StrataConfig(cache_dir=cache_dir)
+        server_module._state = ServerState(config)
+
+        # The default refill rate, not the 1/sec the older test uses -- the bug
+        # only appears once the rate is above one token per second.
+        init_rate_limiter(
+            RateLimitConfig(
+                client_requests_per_second=100.0,
+                client_burst=1.0,
+            )
+        )
+
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                assert (await client.get("/v1/debug/rate-limits")).status_code == 200
+
+                response = await client.get("/v1/debug/rate-limits")
+                assert response.status_code == 429
+                assert int(response.headers["Retry-After"]) >= 1
+                assert "Retry after 0s" not in response.text
+        finally:
+            server_module._state._planning_executor.shutdown(wait=False)
+            server_module._state._fetch_executor.shutdown(wait=False)
+            server_module._state = None
+            reset_rate_limiter()
