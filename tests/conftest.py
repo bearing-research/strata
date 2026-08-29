@@ -79,11 +79,20 @@ def _reset_process_globals():
 
     server_module._state = None
     from strata.artifact_store import reset_artifact_store
+    from strata.metadata_cache import reset_caches
     from strata.rate_limiter import reset_rate_limiter
     from strata.tenant_registry import reset_tenant_registry
 
     reset_artifact_store()
     reset_tenant_registry()
+    # The metadata store is a process global, and a no-arg
+    # ``get_metadata_store()`` now returns whatever store is already installed
+    # rather than rebuilding from ``~/.strata/cache``. So a test that installs
+    # one for its own tmp_path would otherwise stay in force for every later
+    # no-arg caller on the same worker — including ``GET /metrics`` and
+    # ``POST /v1/metadata/cleanup``, which would then report on (and delete
+    # rows from) an unrelated database.
+    reset_caches()
     # The rate limiter is a process global. A server test that initializes it
     # (e.g. via lifespan) leaves a token bucket that a later test using the app
     # without lifespan inherits — surfacing as a spurious 429 once the bucket is

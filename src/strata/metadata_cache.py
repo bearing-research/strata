@@ -821,32 +821,32 @@ def get_metadata_store(cache_dir: Path | None = None) -> "MetadataStore":
     If cache_dir is provided and differs from existing store's path,
     a new store is created for the new path.
 
-    Thread-safe: uses a lock to prevent multiple threads from racing
-    to create MetadataStore instances simultaneously.
+    Thread-safe: the whole body runs under one acquisition of ``_cache_lock``.
+    Splitting it into two acquisitions leaves a window where a no-arg caller
+    that saw no store can be overtaken by a caller passing the configured
+    cache_dir, and then clobber it on the way out. ``get_parquet_cache`` and
+    ``get_manifest_cache`` deliberately call this before taking the lock
+    themselves, so holding it across the whole function cannot deadlock.
     """
     global _metadata_store
     from strata.metadata_store import MetadataStore
 
-    if cache_dir is None:
-        # No cache_dir means "the store already in use", not "the personal-mode
-        # default". /health/ready and the metadata routes call it this way, and
-        # resolving to the home directory there did not just read the wrong
-        # store — the path-mismatch branch below swapped the global singleton
-        # out from under a server configured with any other cache_dir, on every
-        # readiness probe.
-        with _cache_lock:
+    with _cache_lock:
+        if cache_dir is None:
+            # No cache_dir means "the store already in use", not "the
+            # personal-mode default". /health/ready and the metadata routes
+            # call it this way, and resolving to the home directory there did
+            # not just read the wrong store — the path-mismatch branch below
+            # swapped the global singleton out from under a server configured
+            # with any other cache_dir, on every readiness probe.
             if _metadata_store is not None:
                 return _metadata_store
-        cache_dir = Path.home() / ".strata" / "cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    expected_db_path = cache_dir / "metadata.sqlite"
+            cache_dir = Path.home() / ".strata" / "cache"
 
-    with _cache_lock:
-        # Check if existing store uses the same path
-        if _metadata_store is not None and _metadata_store.db_path != expected_db_path:
-            # Different path requested, create new store
-            _metadata_store = MetadataStore(expected_db_path)
-        elif _metadata_store is None:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        expected_db_path = cache_dir / "metadata.sqlite"
+
+        if _metadata_store is None or _metadata_store.db_path != expected_db_path:
             _metadata_store = MetadataStore(expected_db_path)
 
         return _metadata_store
