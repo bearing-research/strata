@@ -204,6 +204,50 @@ class TestArrowSerialization:
         assert isinstance(_table_to_pandas_or_arrow(legacy), pd.DataFrame)
         assert isinstance(_table_to_pandas_or_arrow(pa.table({"a": [1]})), pd.DataFrame)
 
+    def test_json_encoding_is_not_used_when_it_would_change_the_value(self):
+        """``json.dumps`` coerces rather than failing, so the encode probe
+        can't see these.
+
+        Non-string dict keys become strings and tuples become lists, so a cell
+        that stored ``{1: "a"}`` handed the next one ``{"1": "a"}`` and a
+        ``counts[1]`` downstream raised KeyError. Both now take the pickle
+        path, which preserves them.
+        """
+        lossy = [
+            {1: "a", 2: "b"},
+            {1.5: "a"},
+            {True: "a"},
+            {"outer": {2: "b"}},
+            {"a": (1, 2)},
+            [(1, 2)],
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            for index, value in enumerate(lossy):
+                meta = serialize_value(value, tmpdir, f"v{index}")
+                back = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+                assert back == value, f"{value!r} did not survive the round trip"
+                assert type(back) is type(value)
+
+    def test_json_stays_the_encoding_for_values_it_preserves(self):
+        """The guard must not push ordinary values onto the pickle path.
+
+        NaN and Inf matter here: the JSON writer round-trips both, so they are
+        deliberately not treated as losses even though ``nan != nan`` would
+        make an equality-based probe say otherwise.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            for index, value in enumerate([{"a": [1, {"b": 2}]}, [1, 2, 3], {"x": float("inf")}]):
+                meta = serialize_value(value, tmpdir, f"keep{index}")
+                assert meta["content_type"] == "json/object", value
+
+            nan_meta = serialize_value({"x": float("nan")}, tmpdir, "nan")
+            assert nan_meta["content_type"] == "json/object"
+            back = deserialize_value(nan_meta["content_type"], tmpdir / nan_meta["file"])
+            assert back["x"] != back["x"]  # still NaN
+
     def test_roundtrip_dataframe(self):
         """Test round-trip: serialize and deserialize a DataFrame."""
         df_orig = pd.DataFrame({"id": [1, 2, 3], "value": [1.5, 2.5, 3.5], "name": ["a", "b", "c"]})

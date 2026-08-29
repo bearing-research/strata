@@ -261,6 +261,32 @@ def _unwrap_codec_payload(obj: Any) -> tuple[str, bytes] | None:
 # ---------------------------------------------------------------------------
 
 
+def _survives_json(value: Any) -> bool:
+    """Whether JSON encoding would return *value* unchanged.
+
+    ``json.dumps`` does not fail on these — it coerces, which is why the encode
+    probe alone can't see them:
+
+    * non-string dict keys become strings, so ``{1: "a"}`` decodes as
+      ``{"1": "a"}`` and a downstream ``counts[1]`` raises KeyError;
+    * tuples become lists, so a cell expecting ``(1, 2)`` receives ``[1, 2]``.
+
+    Only called after ``json.dumps`` has succeeded, so *value* is finite and
+    acyclic and this walk terminates. NaN and Inf are deliberately not treated
+    as losses: the JSON writer round-trips both, and ``nan != nan`` would make
+    an equality-based probe reroute them for no reason.
+    """
+    if isinstance(value, dict):
+        return all(isinstance(key, str) for key in value) and all(
+            _survives_json(item) for item in value.values()
+        )
+    if isinstance(value, tuple):
+        return False
+    if isinstance(value, list):
+        return all(_survives_json(item) for item in value)
+    return True
+
+
 def detect_content_type(value: Any, variable_name: str | None = None) -> ContentType:
     """Return the content type for *value*.
 
@@ -295,10 +321,13 @@ def detect_content_type(value: Any, variable_name: str | None = None) -> Content
     if isinstance(value, (dict, list, int, float, str, bool, type(None))):
         # Typed structurally JSON-safe but could still contain NaN, Inf,
         # non-string dict keys, or nested non-primitives. A probe write
-        # confirms the value survives the actual JSON writer.
+        # confirms the value survives the actual JSON writer, and
+        # ``_survives_json`` covers what the writer silently coerces instead
+        # of rejecting.
         try:
             json.dumps(value)
-            return ContentType.JSON_OBJECT
+            if _survives_json(value):
+                return ContentType.JSON_OBJECT
         except (TypeError, ValueError):
             pass
 
