@@ -147,6 +147,63 @@ class TestArrowSerialization:
             assert result["rows"] == 3
             assert result["columns"] == ["x", "y"]
 
+    def test_roundtrip_pyarrow_table_stays_a_table(self):
+        """A pa.Table handed to the next cell must still be a pa.Table.
+
+        Every other table source stamps ``strata.arrow.source`` so the reader
+        can reconstruct the exact type; pyarrow values stamped only the shape,
+        so they fell through to the reader's ``to_pandas()`` default. A cell
+        that did ``t.column("a")`` on its upstream's table got
+        ``AttributeError: 'DataFrame' object has no attribute 'column'``.
+        """
+        table = pa.table({"a": [1, 2], "b": ["x", "y"]})
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(table, tmpdir, "tbl")
+            back = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+
+        assert isinstance(back, pa.Table)
+        assert back.equals(table)
+
+    def test_roundtrip_pyarrow_record_batch_stays_a_record_batch(self):
+        batch = pa.RecordBatch.from_pydict({"a": [1, 2]})
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            meta = serialize_value(batch, tmpdir, "batch")
+            back = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+
+        assert isinstance(back, pa.RecordBatch)
+        assert back.equals(batch)
+
+    def test_roundtrip_empty_pyarrow_values(self):
+        """An empty table has no batches to take, so the RecordBatch path has
+        to rebuild one from the schema rather than index into an empty list."""
+        table = pa.table({"a": pa.array([], type=pa.int64())})
+        batch = pa.RecordBatch.from_pydict({"a": pa.array([], type=pa.int64())})
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            for name, value in (("t", table), ("b", batch)):
+                meta = serialize_value(value, tmpdir, name)
+                back = deserialize_value(meta["content_type"], tmpdir / meta["file"])
+                assert type(back) is type(value)
+                assert back.equals(value)
+
+    def test_an_untagged_table_still_reads_back_as_pandas(self):
+        """Artifacts written before the source tag existed — and core scan
+        results, which carry no source — must keep their pandas behaviour."""
+        from strata.notebook.serializer import (
+            _SHAPE_TABLE,
+            _stamp_shape,
+            _table_to_pandas_or_arrow,
+        )
+
+        legacy = _stamp_shape(pa.table({"a": [1, 2]}), _SHAPE_TABLE)
+        assert isinstance(_table_to_pandas_or_arrow(legacy), pd.DataFrame)
+        assert isinstance(_table_to_pandas_or_arrow(pa.table({"a": [1]})), pd.DataFrame)
+
     def test_roundtrip_dataframe(self):
         """Test round-trip: serialize and deserialize a DataFrame."""
         df_orig = pd.DataFrame({"id": [1, 2, 3], "value": [1.5, 2.5, 3.5], "name": ["a", "b", "c"]})
