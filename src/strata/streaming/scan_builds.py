@@ -27,6 +27,7 @@ import pyarrow.ipc as ipc
 
 from strata.fast_io import IncrementalIpcMerger, validate_ipc_stream_reader
 from strata.logging import get_logger
+from strata.pool_metrics import get_pool_tracker
 
 if TYPE_CHECKING:
     from strata.server import ServerState
@@ -109,11 +110,12 @@ class ScanBuildManager:
             self._in_flight += 1
             try:
                 loop = asyncio.get_running_loop()
-                plan.prefetched_first = await loop.run_in_executor(
-                    state._fetch_executor,
-                    state.fetcher.fetch_as_stream_bytes,
-                    plan.tasks[0],
-                )
+                with get_pool_tracker().track("fetch"):
+                    plan.prefetched_first = await loop.run_in_executor(
+                        state._fetch_executor,
+                        state.fetcher.fetch_as_stream_bytes,
+                        plan.tasks[0],
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -272,11 +274,12 @@ class ScanBuildManager:
                         chunk = await self.consume_prefetched_first(plan, scan_id)
 
                     if chunk is None:
-                        chunk = await loop.run_in_executor(
-                            state._fetch_executor,
-                            state.fetcher.fetch_as_stream_bytes,
-                            task,
-                        )
+                        with get_pool_tracker().track("fetch"):
+                            chunk = await loop.run_in_executor(
+                                state._fetch_executor,
+                                state.fetcher.fetch_as_stream_bytes,
+                                task,
+                            )
                     out = merger.feed(chunk) if merger is not None else chunk
                     if out:
                         blob.write(out)

@@ -2078,10 +2078,11 @@ async def _handle_identity_materialize(
             return plan
 
     try:
-        plan = await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(state._planning_executor, do_plan),
-            timeout=plan_timeout,
-        )
+        with get_pool_tracker().track("planning"):
+            plan = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(state._planning_executor, do_plan),
+                timeout=plan_timeout,
+            )
     except TimeoutError:
         raise HTTPException(
             status_code=504,
@@ -2383,11 +2384,12 @@ async def get_stream(stream_id: str, request: Request):
                             raise RuntimeError(
                                 f"Scan timed out after {state.config.scan_timeout_seconds}s"
                             )
-                        chunk = await asyncio.get_running_loop().run_in_executor(
-                            state._fetch_executor,
-                            state.fetcher.fetch_as_stream_bytes,
-                            task,
-                        )
+                        with get_pool_tracker().track("fetch"):
+                            chunk = await asyncio.get_running_loop().run_in_executor(
+                                state._fetch_executor,
+                                state.fetcher.fetch_as_stream_bytes,
+                                task,
+                            )
                         out = merger.feed(chunk) if merger is not None else chunk
                         if out:
                             yield out
