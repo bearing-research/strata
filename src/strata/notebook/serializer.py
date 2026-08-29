@@ -484,6 +484,8 @@ _SHAPE_SCALAR = b"scalar"
 # isn't installed on the read side). Table-shape: pandas / polars frames and
 # series. Tensor-shape: torch / jax arrays (reconstructed from the shared numpy
 # tensor codec).
+_SOURCE_PYARROW_TABLE = b"pyarrow.Table"
+_SOURCE_PYARROW_RECORD_BATCH = b"pyarrow.RecordBatch"
 _SOURCE_PANDAS_DATAFRAME = b"pandas.DataFrame"
 _SOURCE_PANDAS_SERIES = b"pandas.Series"
 _SOURCE_POLARS_DATAFRAME = b"polars.DataFrame"
@@ -595,9 +597,15 @@ def _matches_pyarrow(value: Any) -> bool:
 def _table_from_pyarrow(value: Any) -> Any:
     import pyarrow as pa
 
+    # Tagged like every other table source. Without it these are the one table
+    # type that loses its identity: the reader's default is to_pandas(), so a
+    # pa.Table handed to the next cell arrived as a DataFrame.
     if isinstance(value, pa.RecordBatch):
-        return _stamp_shape(pa.Table.from_batches([value]), _SHAPE_TABLE)
-    return _stamp_shape(value, _SHAPE_TABLE)  # pa.Table
+        return _stamp_metadata(
+            pa.Table.from_batches([value]),
+            {_META_SHAPE: _SHAPE_TABLE, _META_SOURCE: _SOURCE_PYARROW_RECORD_BATCH},
+        )
+    return _stamp_metadata(value, {_META_SHAPE: _SHAPE_TABLE, _META_SOURCE: _SOURCE_PYARROW_TABLE})
 
 
 def _matches_pandas(value: Any) -> bool:
@@ -1547,6 +1555,16 @@ def _table_to_pandas_or_arrow(table: Any) -> Any:
     """
     meta = table.schema.metadata or {}
     source = meta.get(_META_SOURCE, b"")
+
+    if source == _SOURCE_PYARROW_TABLE:
+        return table
+    if source == _SOURCE_PYARROW_RECORD_BATCH:
+        import pyarrow as pa
+
+        # combine_chunks leaves at most one chunk per column, so this is the
+        # single batch the value was stored from (none at all when it's empty).
+        batches = table.combine_chunks().to_batches()
+        return batches[0] if batches else pa.RecordBatch.from_pylist([], schema=table.schema)
 
     if source in (_SOURCE_POLARS_DATAFRAME, _SOURCE_POLARS_SERIES):
         polars_value = _table_to_polars(table, source)
