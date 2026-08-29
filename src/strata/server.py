@@ -172,8 +172,8 @@ class ServerState:
 
         # Signs pull-model build URLs. Pin the secret from config so signed URLs
         # survive restarts and match across replicas; fall back to a random
-        # per-process secret when unset (the lifespan logs a warning if the pull
-        # model is enabled without a configured secret).
+        # per-process secret when unset (the lifespan warns about that in
+        # service mode).
         signing_secret = (
             config.transform_signing_secret.encode("utf-8")
             if config.transform_signing_secret
@@ -608,6 +608,23 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
     get_artifact_store(config.artifact_dir, blob_store=blob_store)
 
 
+def _should_warn_unset_signing_secret(config: StrataConfig) -> bool:
+    """Whether pull-model URLs are being signed with a throwaway secret.
+
+    The signing secret is pinned from config when ServerState is built, so
+    signed build URLs survive restarts and match across replicas. Without it the
+    secret is a random per-process value: an executor handed a manifest by one
+    replica gets 403 "Invalid or expired signature" when its callback lands on
+    another, and every in-flight URL dies on restart.
+
+    The pull-model routes (download / upload / finalize) are registered
+    unconditionally, so nothing gates the hazard except the deployment shape.
+    Personal mode is a single loopback process, where a per-process secret is
+    fine; service mode is where restarts and replicas matter.
+    """
+    return not config.transform_signing_secret and config.deployment_mode == "service"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize server state on startup, graceful shutdown on exit."""
@@ -629,6 +646,18 @@ async def lifespan(app: FastAPI):
 
     transform_registry = TransformRegistry.from_config(config.transforms_config)
     set_transform_registry(transform_registry)
+
+    if _should_warn_unset_signing_secret(config):
+        logger.warning(
+            "transform_signing_secret_unset",
+            detail=(
+                "transform_signing_secret is not set; using a random per-process "
+                "secret. Signed build URLs will break on restart and differ across "
+                "replicas, surfacing as 403 'Invalid or expired signature' on "
+                "executor callbacks. Set STRATA_TRANSFORM_SIGNING_SECRET for a "
+                "stable deployment."
+            ),
+        )
 
     # Authenticated write-back is a preview feature in this release — re-opening
     # writes in service mode is security-sensitive. Surface it at startup so an
