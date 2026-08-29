@@ -12,7 +12,9 @@ Key metrics:
 
 import threading
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TypedDict
 
@@ -96,6 +98,9 @@ class PoolMetricsTracker:
     _tasks_submitted: dict[str, int] = field(default_factory=dict)
     _tasks_completed: dict[str, int] = field(default_factory=dict)
 
+    # Submitted minus completed: the work the pool is carrying right now.
+    _in_flight: dict[str, int] = field(default_factory=dict)
+
     def register_pool(self, name: str, executor: ThreadPoolExecutor) -> None:
         """Register a thread pool for metrics tracking.
 
@@ -107,18 +112,42 @@ class PoolMetricsTracker:
             self._pools[name] = executor
             self._tasks_submitted[name] = 0
             self._tasks_completed[name] = 0
+            self._in_flight[name] = 0
 
     def record_task_submitted(self, pool_name: str) -> None:
         """Record that a task was submitted to a pool."""
         with self._lock:
             if pool_name in self._tasks_submitted:
                 self._tasks_submitted[pool_name] += 1
+                self._in_flight[pool_name] += 1
 
     def record_task_completed(self, pool_name: str) -> None:
         """Record that a task completed in a pool."""
         with self._lock:
             if pool_name in self._tasks_completed:
                 self._tasks_completed[pool_name] += 1
+                self._in_flight[pool_name] = max(0, self._in_flight[pool_name] - 1)
+
+    @contextmanager
+    def track(self, pool_name: str) -> Iterator[None]:
+        """Count one unit of work against ``pool_name`` for the block's life.
+
+        Wrap the ``await loop.run_in_executor(...)`` that hands work to the
+        pool. The pair of counters this maintains is what makes
+        ``active_workers`` mean "workers busy now"; without a caller it read
+        the pool's thread count instead, which only ever grows.
+
+        If the awaiting coroutine is cancelled while its callable is still
+        running in a worker, the block exits and stops counting slightly
+        early. That under-reports for the length of one task, which is the
+        right direction to be wrong in: the failure it replaces was a
+        utilization figure that latched high permanently.
+        """
+        self.record_task_submitted(pool_name)
+        try:
+            yield
+        finally:
+            self.record_task_completed(pool_name)
 
     def get_pool_stats(self, name: str) -> ThreadPoolStats | None:
         """Get statistics for a specific thread pool.
@@ -136,9 +165,21 @@ class PoolMetricsTracker:
 
             max_workers = executor._max_workers
 
-            # Get active worker count from the threads set
-            # ThreadPoolExecutor tracks threads in _threads
-            active_workers = len([t for t in executor._threads if t.is_alive()])
+            # Workers busy right now, from the tasks this tracker is carrying.
+            #
+            # This used to count live threads in ``executor._threads``, which
+            # is every thread the pool has ever created. Pool threads park on
+            # the work queue instead of exiting, so that number never falls:
+            # once a pool had seen ``max_workers`` concurrent submissions it
+            # reported 100% utilization for the rest of the process's life,
+            # and ``check_thread_pools`` (DEGRADED above 90%) latched the whole
+            # /health/dependencies report to degraded after a single burst.
+            #
+            # In-flight includes tasks still queued, so it is capped at
+            # ``max_workers`` to keep utilization a percentage; ``queue_depth``
+            # reports the backlog separately.
+            in_flight = self._in_flight.get(name, 0)
+            active_workers = min(in_flight, max_workers)
 
             # Queue depth from the work queue
             # This is the number of pending tasks waiting for a worker

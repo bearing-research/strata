@@ -357,26 +357,24 @@ class TestPoolMetrics:
         executor.shutdown(wait=False)
 
     def test_pool_tracker_utilization(self):
-        """Test tracking pool utilization."""
+        """Utilization reflects work the tracker is carrying.
+
+        Callers wrap the handoff to the pool in ``tracker.track(...)``; a bare
+        ``executor.submit`` is invisible to the tracker by design. Utilization
+        used to be read off ``executor._threads`` instead, which counts every
+        thread the pool ever created and so never fell back down.
+        """
         from strata.pool_metrics import PoolMetricsTracker
 
         tracker = PoolMetricsTracker()
         executor = ThreadPoolExecutor(max_workers=4)
         tracker.register_pool("test", executor)
 
-        # Submit work that takes some time
-        futures = [executor.submit(time.sleep, 0.05) for _ in range(4)]
-
-        # Check while running
-        time.sleep(0.01)  # Let tasks start
-        stats = tracker.get_pool_stats("test")
-        assert stats is not None
-        assert stats.active_workers >= 1
-        assert stats.utilization_pct > 0
-
-        # Wait for completion
-        for f in futures:
-            f.result()
+        with tracker.track("test"), tracker.track("test"):
+            stats = tracker.get_pool_stats("test")
+            assert stats is not None
+            assert stats.active_workers == 2
+            assert stats.utilization_pct == 50.0
 
         executor.shutdown(wait=True)
 
@@ -914,3 +912,129 @@ class TestPercentilesUseNearestRank:
 
         hist = LatencyHistogram()
         assert hist.get_percentiles("scan") == {"p50_ms": 0, "p95_ms": 0, "p99_ms": 0}
+
+
+class TestPoolUtilizationFallsBackToZero:
+    """Utilization must describe now, not the busiest moment so far.
+
+    ``active_workers`` was ``len([t for t in executor._threads if
+    t.is_alive()])`` -- every thread the pool had ever created. Pool threads
+    park on the work queue rather than exiting, so the count only ever rose.
+    Once a pool had seen ``max_workers`` concurrent submissions it reported
+    100% utilization for the rest of the process's life, and because
+    ``check_thread_pools`` returns DEGRADED above 90% and the overall
+    dependency status is the worst of all checks, one traffic burst latched
+    /health/dependencies to degraded until the server restarted.
+    """
+
+    def test_utilization_returns_to_zero_when_work_finishes(self):
+        from strata.pool_metrics import PoolMetricsTracker
+
+        tracker = PoolMetricsTracker()
+        executor = ThreadPoolExecutor(max_workers=4)
+        tracker.register_pool("test", executor)
+
+        with (
+            tracker.track("test"),
+            tracker.track("test"),
+            tracker.track("test"),
+            tracker.track("test"),
+        ):
+            saturated = tracker.get_pool_stats("test")
+            assert saturated.utilization_pct == 100.0
+
+        idle = tracker.get_pool_stats("test")
+        assert idle.active_workers == 0
+        assert idle.utilization_pct == 0.0
+
+        executor.shutdown(wait=True)
+
+    def test_health_check_recovers_after_a_burst(self):
+        from strata.health import HealthStatus, check_thread_pools
+        from strata.pool_metrics import get_pool_tracker, reset_metrics
+
+        reset_metrics()
+        tracker = get_pool_tracker()
+        planning = ThreadPoolExecutor(max_workers=2)
+        fetch = ThreadPoolExecutor(max_workers=2)
+        tracker.register_pool("planning", planning)
+        tracker.register_pool("fetch", fetch)
+
+        try:
+            assert check_thread_pools(planning, fetch).status == HealthStatus.HEALTHY
+
+            with (
+                tracker.track("planning"),
+                tracker.track("planning"),
+                tracker.track("fetch"),
+                tracker.track("fetch"),
+            ):
+                burst = check_thread_pools(planning, fetch)
+                assert burst.status == HealthStatus.DEGRADED
+                assert burst.details["overall_utilization"] == 100.0
+
+            recovered = check_thread_pools(planning, fetch)
+            assert recovered.status == HealthStatus.HEALTHY
+            assert recovered.details["overall_utilization"] == 0.0
+        finally:
+            planning.shutdown(wait=False)
+            fetch.shutdown(wait=False)
+            reset_metrics()
+
+    def test_in_flight_is_capped_so_utilization_stays_a_percentage(self):
+        """Queued work counts as in-flight; ``queue_depth`` reports the backlog."""
+        from strata.pool_metrics import PoolMetricsTracker
+
+        tracker = PoolMetricsTracker()
+        executor = ThreadPoolExecutor(max_workers=2)
+        tracker.register_pool("test", executor)
+
+        with (
+            tracker.track("test"),
+            tracker.track("test"),
+            tracker.track("test"),
+            tracker.track("test"),
+        ):
+            stats = tracker.get_pool_stats("test")
+            assert stats.active_workers == 2
+            assert stats.utilization_pct == 100.0
+
+        executor.shutdown(wait=True)
+
+    def test_task_counters_are_no_longer_dead(self):
+        """``record_task_submitted``/``_completed`` had no callers anywhere.
+
+        Both counters shipped in the /v1/debug/pools payload as a constant 0.
+        """
+        from strata.pool_metrics import PoolMetricsTracker
+
+        tracker = PoolMetricsTracker()
+        executor = ThreadPoolExecutor(max_workers=2)
+        tracker.register_pool("test", executor)
+
+        for _ in range(3):
+            with tracker.track("test"):
+                pass
+
+        stats = tracker.get_pool_stats("test")
+        assert stats.tasks_submitted == 3
+        assert stats.tasks_completed == 3
+
+        executor.shutdown(wait=True)
+
+    def test_the_counter_is_released_when_the_body_raises(self):
+        from strata.pool_metrics import PoolMetricsTracker
+
+        tracker = PoolMetricsTracker()
+        executor = ThreadPoolExecutor(max_workers=2)
+        tracker.register_pool("test", executor)
+
+        with pytest.raises(RuntimeError):
+            with tracker.track("test"):
+                raise RuntimeError("fetch failed")
+
+        stats = tracker.get_pool_stats("test")
+        assert stats.active_workers == 0
+        assert stats.tasks_completed == 1
+
+        executor.shutdown(wait=True)
