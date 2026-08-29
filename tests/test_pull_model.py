@@ -11,6 +11,7 @@ Tests the complete pull model flow:
 from __future__ import annotations
 
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlparse
@@ -1128,6 +1129,90 @@ class TestManifestClaimsTheBuild:
         client.get("/v1/builds/claim-2/manifest")
 
         assert build_store.claim_build("claim-2", lease_owner="runner-abc") is False
+
+    def test_refetching_a_manifest_extends_the_lease_past_the_new_urls(
+        self, client, build_store, artifact_store
+    ):
+        """A re-fetch mints a fresh set of signed URLs, so the lease has to be
+        pushed out to cover them.
+
+        The claim only runs while the build is still 'pending', so a re-fetch
+        used to leave the lease on its original deadline while handing out URLs
+        good for a full window past it. That gap is the orphan sweep's window to
+        reclaim the build while the executor can still finalize it.
+        """
+        self._pending(build_store, artifact_store, "claim-refetch")
+        assert client.get("/v1/builds/claim-refetch/manifest").status_code == 200
+        first_lease = build_store.get_build("claim-refetch").lease_expires_at
+
+        # Simulate the executor working most of its window before re-fetching.
+        conn = build_store._get_connection()
+        conn.execute(
+            "UPDATE artifact_builds SET lease_expires_at = ? WHERE build_id = ?",
+            (time.time() + 5.0, "claim-refetch"),
+        )
+        conn.commit()
+        conn.close()
+        near_expiry = build_store.get_build("claim-refetch").lease_expires_at
+        assert near_expiry < first_lease
+
+        assert client.get("/v1/builds/claim-refetch/manifest").status_code == 200
+
+        renewed = build_store.get_build("claim-refetch")
+        assert renewed.lease_owner == "external:manifest"
+        # The lease now covers the freshly minted URLs rather than expiring
+        # while they are still usable.
+        assert renewed.lease_expires_at > near_expiry
+        assert renewed.lease_expires_at > time.time() + 5.0
+
+    def test_finalize_refused_once_the_lease_was_reclaimed(
+        self, client, build_store, artifact_store, monkeypatch
+    ):
+        """An executor whose lease was reclaimed must not publish its result.
+
+        complete_build takes a fencing owner for exactly this ("a runner whose
+        lease was stolen ... published over the runner that legitimately took
+        the build over"), but the finalize route called it without one, so a
+        late executor still recorded its result as authoritative.
+        """
+        version = create_test_artifact(artifact_store, "fin-fenced", finalize=False)
+        build_store.create_build(
+            build_id="fin-fenced-001",
+            artifact_id="fin-fenced",
+            version=version,
+            executor_ref="test@v1",
+        )
+        artifact_store.write_blob("fin-fenced", version, create_test_arrow_blob())
+
+        # The executor holds the build when its finalize request starts.
+        assert build_store.claim_build("fin-fenced-001", lease_owner="external:manifest")
+
+        # The sweep reclaims it *while* that request is in flight. Artifact
+        # finalization is the real work in the middle of the handler, so a
+        # takeover landing there is the interleaving the fence exists for.
+        store = artifact_store
+        real_finalize = store.finalize_and_set_name
+
+        def reclaim_then_finalize(*args, **kwargs):
+            conn = build_store._get_connection()
+            conn.execute(
+                "UPDATE artifact_builds SET lease_expires_at = ? WHERE build_id = ?",
+                (time.time() - 1.0, "fin-fenced-001"),
+            )
+            conn.commit()
+            conn.close()
+            build_store.reclaim_expired_build("fin-fenced-001", new_lease_owner="runner-9")
+            return real_finalize(*args, **kwargs)
+
+        monkeypatch.setattr(store, "finalize_and_set_name", reclaim_then_finalize)
+
+        response = client.post("/v1/builds/fin-fenced-001/finalize")
+
+        assert response.status_code == 409
+        # The build still belongs to the runner that took it over.
+        build = build_store.get_build("fin-fenced-001")
+        assert build.state == "building"
+        assert build.lease_owner == "runner-9"
 
     def test_manifest_refused_once_the_runner_holds_the_lease(
         self, client, build_store, artifact_store
