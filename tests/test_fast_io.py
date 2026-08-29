@@ -1023,3 +1023,51 @@ class TestValidateIpcStreamReader:
         data = create_stream_bytes(batch)
         rows, _ = fast_io.validate_ipc_stream_reader(io.BytesIO(data))
         assert rows == fast_io.validate_ipc_stream(data)
+
+
+class TestConcatRefusesDamagedSegments:
+    """A damaged segment must fail loudly, never shorten the result silently.
+
+    The byte-level fast path locates each segment's record batches by reading
+    the schema message's length field. When that field is nonsense it used to
+    skip the segment and return success, so the caller received a well-formed
+    stream that was simply missing rows — with nothing raised anywhere.
+
+    That shape is reachable: the disk cache validates only a segment's leading
+    continuation marker and trailing EOS marker, so an entry damaged in the
+    middle passes validation and reaches concat.
+    """
+
+    @staticmethod
+    def _damaged_interior(segment: bytes) -> bytes:
+        """Corrupt the schema-message length, leaving head and tail markers intact."""
+        damaged = bytearray(segment)
+        damaged[4:8] = (0xFFFFFF00).to_bytes(4, "little")
+        return bytes(damaged)
+
+    def test_a_damaged_segment_raises_instead_of_dropping_its_rows(self):
+        good = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1, 2, 3]}))
+        damaged = self._damaged_interior(
+            create_stream_bytes(pa.RecordBatch.from_pydict({"id": [4, 5, 6, 7]}))
+        )
+        # Still passes the head/tail check the cache performs.
+        assert damaged[:4] == b"\xff\xff\xff\xff"
+        assert damaged[-8:] == b"\xff\xff\xff\xff\x00\x00\x00\x00"
+
+        with pytest.raises((OSError, ValueError)):
+            fast_io.concat_stream_bytes([good, damaged])
+
+    def test_a_segment_too_small_for_an_eos_marker_raises(self):
+        good = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1, 2, 3]}))
+        with pytest.raises((OSError, ValueError)):
+            fast_io.concat_stream_bytes([good, b"\xff\xff\xff\xff"])
+
+    def test_well_formed_segments_are_unaffected(self):
+        """The guard must not disturb the ordinary multi-segment path."""
+        first = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [1, 2, 3]}))
+        second = create_stream_bytes(pa.RecordBatch.from_pydict({"id": [4, 5]}))
+
+        result = fast_io.concat_stream_bytes([first, b"", second])
+
+        table = ipc.open_stream(pa.BufferReader(result)).read_all()
+        assert table.column("id").to_pylist() == [1, 2, 3, 4, 5]
