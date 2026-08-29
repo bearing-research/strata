@@ -5,7 +5,6 @@ providing insight into cache effectiveness over time.
 """
 
 import time
-from collections import deque
 from dataclasses import dataclass
 from threading import Lock
 from typing import TypedDict
@@ -15,6 +14,7 @@ class WindowStatsDict(TypedDict):
     """JSON-serializable cache statistics for a single time window."""
 
     window_seconds: int
+    covered_seconds: int
     hits: int
     misses: int
     total: int
@@ -54,20 +54,17 @@ class CacheSummaryDict(TypedDict):
 
 
 @dataclass
-class CacheEvent:
-    """A single cache access event."""
-
-    timestamp: float
-    is_hit: bool
-    bytes_accessed: int
-    table_id: str | None = None
-
-
-@dataclass
 class WindowStats:
-    """Statistics for a single time window."""
+    """Statistics for a single time window.
+
+    ``covered_seconds`` is how much of ``window_seconds`` the counters
+    actually span. It equals ``window_seconds`` for every configured window;
+    it is smaller only when a caller asks ``get_window_stats`` for a window
+    deeper than the retained history.
+    """
 
     window_seconds: int
+    covered_seconds: int
     hits: int
     misses: int
     bytes_from_cache: int
@@ -92,6 +89,7 @@ class WindowStats:
     def to_dict(self) -> WindowStatsDict:
         return {
             "window_seconds": self.window_seconds,
+            "covered_seconds": self.covered_seconds,
             "hits": self.hits,
             "misses": self.misses,
             "total": self.total,
@@ -107,22 +105,40 @@ class CacheStatsHistogram:
 
     Maintains rolling statistics for configurable time windows
     (e.g., 1 minute, 5 minutes, 1 hour) to show cache hit rate trends.
+
+    Counts are aggregated into one bucket per second, and a window sums the
+    buckets it spans. The previous implementation retained the last 10,000
+    individual events and answered every window by scanning whatever was still
+    in that buffer. One event is recorded per *row group* rather than per
+    request (``cache.py``), so the buffer drains in a handful of scans: at a
+    steady 33 row groups/sec the "1 hour" window reported 8% of the hour's
+    accesses, and the 5-minute and 1-hour windows returned byte-identical
+    numbers because both were simply "everything still buffered". The bucket
+    ring makes each window exact and its memory a function of the largest
+    window rather than of traffic.
     """
 
     def __init__(
         self,
         windows: list[int] | None = None,
-        max_events: int = 10000,
     ) -> None:
         """Initialize the histogram.
 
         Args:
             windows: List of window sizes in seconds. Default: [60, 300, 3600]
-            max_events: Maximum events to retain in memory
         """
         self.windows = windows or [60, 300, 3600]  # 1m, 5m, 1h
         self._lock = Lock()
-        self._events: deque[CacheEvent] = deque(maxlen=max_events)
+
+        # One bucket per second, indexed by ``epoch_second % depth``. A bucket
+        # carries the second it holds so a wrapped-around slot reads as absent
+        # rather than as stale counts.
+        self._depth = max(self.windows)
+        self._bucket_second = [-1] * self._depth
+        self._bucket_hits = [0] * self._depth
+        self._bucket_misses = [0] * self._depth
+        self._bucket_bytes_cache = [0] * self._depth
+        self._bucket_bytes_storage = [0] * self._depth
 
         # Lifetime counters
         self._total_hits = 0
@@ -133,26 +149,47 @@ class CacheStatsHistogram:
         # Per-table stats (table_id -> {hits, misses})
         self._table_stats: dict[str, dict[str, int]] = {}
 
+    def _record(
+        self,
+        *,
+        is_hit: bool,
+        bytes_accessed: int,
+        table_id: str | None,
+    ) -> None:
+        """Fold one access into the current second's bucket and the totals."""
+        second = int(time.time())
+        with self._lock:
+            slot = second % self._depth
+            if self._bucket_second[slot] != second:
+                self._bucket_second[slot] = second
+                self._bucket_hits[slot] = 0
+                self._bucket_misses[slot] = 0
+                self._bucket_bytes_cache[slot] = 0
+                self._bucket_bytes_storage[slot] = 0
+
+            if is_hit:
+                self._bucket_hits[slot] += 1
+                self._bucket_bytes_cache[slot] += bytes_accessed
+                self._total_hits += 1
+                self._total_bytes_cache += bytes_accessed
+            else:
+                self._bucket_misses[slot] += 1
+                self._bucket_bytes_storage[slot] += bytes_accessed
+                self._total_misses += 1
+                self._total_bytes_storage += bytes_accessed
+
+            if table_id:
+                if table_id not in self._table_stats:
+                    self._table_stats[table_id] = {"hits": 0, "misses": 0}
+                self._table_stats[table_id]["hits" if is_hit else "misses"] += 1
+
     def record_hit(
         self,
         bytes_accessed: int,
         table_id: str | None = None,
     ) -> None:
         """Record a cache hit."""
-        event = CacheEvent(
-            timestamp=time.time(),
-            is_hit=True,
-            bytes_accessed=bytes_accessed,
-            table_id=table_id,
-        )
-        with self._lock:
-            self._events.append(event)
-            self._total_hits += 1
-            self._total_bytes_cache += bytes_accessed
-            if table_id:
-                if table_id not in self._table_stats:
-                    self._table_stats[table_id] = {"hits": 0, "misses": 0}
-                self._table_stats[table_id]["hits"] += 1
+        self._record(is_hit=True, bytes_accessed=bytes_accessed, table_id=table_id)
 
     def record_miss(
         self,
@@ -160,25 +197,16 @@ class CacheStatsHistogram:
         table_id: str | None = None,
     ) -> None:
         """Record a cache miss."""
-        event = CacheEvent(
-            timestamp=time.time(),
-            is_hit=False,
-            bytes_accessed=bytes_accessed,
-            table_id=table_id,
-        )
-        with self._lock:
-            self._events.append(event)
-            self._total_misses += 1
-            self._total_bytes_storage += bytes_accessed
-            if table_id:
-                if table_id not in self._table_stats:
-                    self._table_stats[table_id] = {"hits": 0, "misses": 0}
-                self._table_stats[table_id]["misses"] += 1
+        self._record(is_hit=False, bytes_accessed=bytes_accessed, table_id=table_id)
 
     def get_window_stats(self, window_seconds: int) -> WindowStats:
-        """Get statistics for a specific time window."""
-        now = time.time()
-        cutoff = now - window_seconds
+        """Get statistics for a specific time window.
+
+        A window deeper than the retained history is answered with what is
+        retained, and ``covered_seconds`` says how much that was.
+        """
+        now_second = int(time.time())
+        covered = min(window_seconds, self._depth)
 
         hits = 0
         misses = 0
@@ -186,17 +214,19 @@ class CacheStatsHistogram:
         bytes_storage = 0
 
         with self._lock:
-            for event in self._events:
-                if event.timestamp >= cutoff:
-                    if event.is_hit:
-                        hits += 1
-                        bytes_cache += event.bytes_accessed
-                    else:
-                        misses += 1
-                        bytes_storage += event.bytes_accessed
+            for offset in range(covered):
+                second = now_second - offset
+                slot = second % self._depth
+                if self._bucket_second[slot] != second:
+                    continue
+                hits += self._bucket_hits[slot]
+                misses += self._bucket_misses[slot]
+                bytes_cache += self._bucket_bytes_cache[slot]
+                bytes_storage += self._bucket_bytes_storage[slot]
 
         return WindowStats(
             window_seconds=window_seconds,
+            covered_seconds=covered,
             hits=hits,
             misses=misses,
             bytes_from_cache=bytes_cache,
@@ -253,7 +283,11 @@ class CacheStatsHistogram:
     def reset(self) -> None:
         """Reset all statistics."""
         with self._lock:
-            self._events.clear()
+            self._bucket_second = [-1] * self._depth
+            self._bucket_hits = [0] * self._depth
+            self._bucket_misses = [0] * self._depth
+            self._bucket_bytes_cache = [0] * self._depth
+            self._bucket_bytes_storage = [0] * self._depth
             self._total_hits = 0
             self._total_misses = 0
             self._total_bytes_cache = 0
