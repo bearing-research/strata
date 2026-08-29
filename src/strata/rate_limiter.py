@@ -403,13 +403,22 @@ def get_rate_limiter() -> RateLimiter | None:
     return _rate_limiter
 
 
-def init_rate_limiter(config: RateLimitConfig | None = None) -> RateLimiter:
+def init_rate_limiter(
+    config: RateLimitConfig | None = None,
+    clock: Clock | None = None,
+) -> RateLimiter:
     """Create and install the global rate limiter.
 
     Parameters
     ----------
     config : RateLimitConfig or None, optional
         Configuration; defaults are used when ``None``.
+    clock : Clock or None, optional
+        Time source, forwarded to ``RateLimiter``. The system clock is used
+        when ``None``. Passing a fixed clock is how a test pins a bucket's
+        refill: buckets refill on wall-clock time, so a test that drains one
+        and expects the next request to be rejected is otherwise racing the
+        refill interval.
 
     Returns
     -------
@@ -417,7 +426,7 @@ def init_rate_limiter(config: RateLimitConfig | None = None) -> RateLimiter:
         The newly installed limiter.
     """
     global _rate_limiter
-    _rate_limiter = RateLimiter(config)
+    _rate_limiter = RateLimiter(config, clock=clock)
     return _rate_limiter
 
 

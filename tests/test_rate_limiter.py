@@ -559,12 +559,16 @@ class TestRetryAfterIsNeverZero:
         server_module._state = ServerState(config)
 
         # The default refill rate, not the 1/sec the older test uses -- the bug
-        # only appears once the rate is above one token per second.
+        # only appears once the rate is above one token per second. At 100/sec
+        # the single token refills in 10ms, so a fixed clock pins the bucket
+        # empty rather than racing the refill between the two requests (this
+        # test failed on a slow Windows runner when it used the real clock).
         init_rate_limiter(
             RateLimitConfig(
                 client_requests_per_second=100.0,
                 client_burst=1.0,
-            )
+            ),
+            clock=MockClock(start_time=1000.0),
         )
 
         try:
