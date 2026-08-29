@@ -193,20 +193,48 @@ class TestRowBehavesLikeSqliteRow:
         # read_audit and list_pending_changes do `dict(row)`.
         assert dict(self._row()) == {"id": "a1", "tenant": "acme"}
 
+    def test_get_returns_the_default_for_a_missing_column(self):
+        # Mapping's mixin get() catches KeyError only, so a raw ValueError out
+        # of list.index would propagate instead of returning the default.
+        assert self._row().get("principal", "fallback") == "fallback"
+
+    def test_membership_test_does_not_raise(self):
+        assert "principal" not in self._row()
+        assert "tenant" in self._row()
+
 
 class TestPostgresDialectRendering:
     """What SQL to emit."""
 
     def test_adapt_ddl_rewrites_the_types_that_differ(self):
-        ddl = "CREATE TABLE t (seq INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL)"
+        ddl = (
+            "CREATE TABLE t (seq INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "at REAL NOT NULL, byte_size INTEGER)"
+        )
         adapted = PostgresDialect("postgresql:///x").adapt_ddl(ddl)
         assert "BIGSERIAL PRIMARY KEY" in adapted
         assert "at DOUBLE PRECISION NOT NULL" in adapted
+        assert "byte_size BIGINT" in adapted
         assert "AUTOINCREMENT" not in adapted
 
-    def test_adapt_ddl_leaves_other_types_alone(self):
-        ddl = "CREATE TABLE t (id TEXT NOT NULL, version INTEGER NOT NULL)"
+    def test_autoincrement_is_rewritten_before_bare_integer(self):
+        # Order dependence: the autoincrement rule has to consume its own
+        # INTEGER first, or the bare-INTEGER rule turns the column into
+        # "BIGINT PRIMARY KEY AUTOINCREMENT" and the rule never matches.
+        adapted = PostgresDialect("postgresql:///x").adapt_ddl(
+            "CREATE TABLE t (seq INTEGER PRIMARY KEY AUTOINCREMENT)"
+        )
+        assert adapted == "CREATE TABLE t (seq BIGSERIAL PRIMARY KEY)"
+
+    def test_adapt_ddl_leaves_portable_types_alone(self):
+        ddl = "CREATE TABLE t (id TEXT NOT NULL, tenant TEXT DEFAULT '')"
         assert PostgresDialect("postgresql:///x").adapt_ddl(ddl) == ddl
+
+    def test_integer_widens_to_bigint(self):
+        # Postgres INTEGER is int4 (max 2147483647), which is smaller than
+        # byte_size for any artifact at or above 2 GiB.
+        assert PostgresDialect("postgresql:///x").integer_type == "BIGINT"
+        assert SqliteDialect(Path("x")).integer_type == "INTEGER"
 
     def test_autoincrement_differs_from_sqlite(self):
         assert PostgresDialect("postgresql:///x").autoincrement_pk == "BIGSERIAL PRIMARY KEY"

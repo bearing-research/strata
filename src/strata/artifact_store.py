@@ -471,7 +471,10 @@ class ArtifactStore:
         self._init_schema()
 
     def _get_connection(self) -> StoreConnection:
-        """Get a new database connection with WAL mode."""
+        """Open a connection configured by the active dialect.
+
+        WAL and the other PRAGMAs are SQLite's; see ``SqliteDialect.connect``.
+        """
         return self._dialect.connect()
 
     def _init_schema(self) -> None:
@@ -484,8 +487,16 @@ class ArtifactStore:
             # those versions has no such history, so it goes straight to the
             # current schema rather than paying to have this made portable.
             if not self._dialect.supports_legacy_migration:
+                # Serialized, and both scripts share the one transaction.
+                # CREATE TABLE IF NOT EXISTS is not concurrency-safe in
+                # Postgres: it checks and then creates without holding a lock,
+                # so simultaneous creators race in the system catalog and all
+                # but one fail with a duplicate key on pg_type_typname_nsp_index.
+                # Every node runs this at startup, and several call sites build
+                # an ArtifactStore per session, so a multi-node boot against one
+                # database hits it immediately -- observed 7 of 8 failing.
+                self._dialect.begin_write(conn, "__schema__")
                 conn.executescript(self._dialect.adapt_ddl(_SCHEMA_SQL))
-                conn.commit()
                 conn.executescript(self._dialect.adapt_ddl(_REGISTRY_SCHEMA_SQL))
                 conn.commit()
                 return
@@ -849,6 +860,7 @@ class ArtifactStore:
         ``None`` if it can't be found post-update.
         """
         conn = self._get_connection()
+        row = None  # bound before the try so the handler below can read it
         try:
             self._dialect.begin_write(conn, artifact_id)
             row = conn.execute(
@@ -881,6 +893,18 @@ class ArtifactStore:
                 (schema_json, row_count, byte_size, artifact_id, version),
             )
             conn.commit()
+        except self._dialect.integrity_error:
+            # Another writer promoted a row with this provenance first. Under
+            # SQLite this could not happen -- BEGIN IMMEDIATE locks the whole
+            # file, so no second writer was ever in flight. A keyed advisory
+            # lock is narrower: it serializes writers sharing an artifact id,
+            # and rows sharing a provenance hash across *different* ids do not
+            # contend on it. The uniqueness index catches that case, so treat
+            # it the way finalize_artifact does and hand back the row that won.
+            conn.rollback()
+            if row is None:
+                raise
+            return self.find_by_provenance(row["provenance_hash"], tenant=row["tenant"])
         finally:
             conn.close()
         return self.get_artifact(artifact_id, version)

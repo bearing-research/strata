@@ -17,13 +17,32 @@ remains is:
   none of the 103 ``conn.execute`` call sites change.
 - **Autoincrement.** One ``INTEGER PRIMARY KEY AUTOINCREMENT`` in the audit
   table.
-- **Float width.** The store declares timestamps ``REAL``. In SQLite that is a
-  64-bit double; in Postgres ``REAL`` is *single* precision, which cannot hold
-  a ``time.time()`` value without losing sub-second resolution. Mapping this
-  correctly is the least visible and most damaging difference of the set.
+- **Integer and float width.** Both of the store's numeric column types are
+  narrower in Postgres than in SQLite, and both lose data silently at the
+  boundary rather than failing early.
+
+  ``REAL`` is a 64-bit double in SQLite and *single* precision in Postgres,
+  which cannot hold a ``time.time()`` value without losing sub-second
+  resolution.
+
+  ``INTEGER`` is up to 64 bits in SQLite and exactly 32 in Postgres, so
+  ``byte_size`` overflows on any artifact at or above 2 GiB. That one is
+  worse than it first looks: Postgres raises ``NumericValueOutOfRange``,
+  which is a ``DataError`` and *not* an ``IntegrityError``, so the store's
+  finalize handler does not catch it -- the blob is already written and the
+  row is left in ``building`` forever.
 - **Writer serialization.** ``BEGIN IMMEDIATE`` guards two read-modify-writes.
   Postgres has no such statement; see :meth:`SqlDialect.begin_write`.
-- **The integrity-error type**, which the store catches by name in two places.
+- **The integrity-error type**, which the store catches by name.
+
+One divergence is deliberately *not* papered over. SQLite's ``LIKE`` is
+case-insensitive for ASCII; Postgres's is case-sensitive. So a prefix search
+for ``"Model"`` matches a stored ``model_v1`` on SQLite and nothing on
+Postgres (``list_artifacts``, ``find_artifacts_by_input``,
+``list_latest_by_id_prefix``). Postgres is the stricter and more predictable
+side, and forcing either engine to imitate the other would change behavior
+personal mode has today. Callers that need case-insensitive matching should
+normalize explicitly rather than rely on the backend.
 
 Personal mode keeps SQLite and is unaffected: :class:`SqliteDialect` reproduces
 today's behavior exactly, including the connection PRAGMAs.
@@ -44,9 +63,13 @@ _DOUBLE_QUOTE = '"'
 
 # Column-type tokens that mean different things to different engines. Applied
 # only to this package's own DDL constants, never to arbitrary SQL.
+#
+# Order matters: the autoincrement rewrite has to consume its own INTEGER
+# before the bare-INTEGER rule runs, or it would never match.
 _DDL_TYPE_REWRITES = (
     ("INTEGER PRIMARY KEY AUTOINCREMENT", "autoincrement_pk"),
     (r"\bREAL\b", "float_type"),
+    (r"\bINTEGER\b", "integer_type"),
 )
 
 
@@ -207,6 +230,15 @@ class SqlDialect(Protocol):
         ...
 
     @property
+    def integer_type(self) -> str:
+        """Column type for a 64-bit integer.
+
+        Same hazard as :attr:`float_type`. ``byte_size`` and ``row_count`` are
+        declared with it, and a 2 GiB artifact exceeds a 32-bit column.
+        """
+        ...
+
+    @property
     def integrity_error(self) -> type[Exception]:
         """Exception raised when a constraint is violated.
 
@@ -276,6 +308,11 @@ class SqliteDialect:
         return "REAL"
 
     @property
+    def integer_type(self) -> str:
+        # SQLite INTEGER widens to 8 bytes as needed.
+        return "INTEGER"
+
+    @property
     def integrity_error(self) -> type[Exception]:
         return sqlite3.IntegrityError
 
@@ -308,7 +345,13 @@ class _Row(Mapping):
     def __getitem__(self, key: str | int) -> Any:
         if isinstance(key, int):
             return self._values[key]
-        return self._values[self._columns.index(key)]
+        try:
+            return self._values[self._columns.index(key)]
+        except ValueError:
+            # Mapping's mixin get() and __contains__ catch KeyError only, so
+            # letting list.index's ValueError escape would make row.get("x")
+            # raise instead of returning the default.
+            raise KeyError(key) from None
 
     def keys(self) -> tuple[str, ...]:  # type: ignore[override]
         return self._columns
@@ -397,6 +440,12 @@ class PostgresDialect:
         return "DOUBLE PRECISION"
 
     @property
+    def integer_type(self) -> str:
+        # Postgres INTEGER is int4, capped at 2147483647 -- smaller than
+        # byte_size for any artifact at or above 2 GiB.
+        return "BIGINT"
+
+    @property
     def integrity_error(self) -> type[Exception]:
         import psycopg
 
@@ -417,10 +466,16 @@ class PostgresDialect:
         lock makes them.
 
         Scope, stated precisely: the lock serializes writers passing the *same*
-        key. ``force_finalize_canonical`` also touches rows sharing a
-        provenance hash across other artifact ids, which this does not cover --
-        the ``idx_tenant_provenance_unique`` partial index remains the
-        correctness guard there, exactly as it is under SQLite. The lock
-        removes the common collision; the index rejects the rare one.
+        key, and nothing else. ``force_finalize_canonical`` also touches rows
+        sharing a provenance hash across *other* artifact ids, which those
+        writers do not contend on. The ``idx_tenant_provenance_unique`` partial
+        index rejects that case, and the caller catches
+        :attr:`integrity_error` and returns the row that won.
+
+        Note this is genuinely weaker than SQLite, not merely different: under
+        ``BEGIN IMMEDIATE`` the whole file is locked, so a second writer is
+        never in flight and the index never fires. Narrower locking is the
+        price of not serializing every artifact-store write in the cluster
+        behind one mutex, and it is why that handler had to be added.
         """
         conn.execute("SELECT pg_advisory_xact_lock(?)", (advisory_lock_id(key),))

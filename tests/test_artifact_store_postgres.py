@@ -140,6 +140,70 @@ class TestRoundTrip:
         assert any(entry.get("name") == "model" for entry in audit)
 
 
+class TestColumnWidths:
+    """Both numeric column types are narrower in Postgres than in SQLite."""
+
+    def test_byte_size_holds_an_artifact_over_two_gigabytes(self, store):
+        # Postgres INTEGER is int4, capped at 2147483647. Under it this raises
+        # NumericValueOutOfRange -- a DataError, not an IntegrityError, so the
+        # finalize handler does not catch it: the blob is already written and
+        # the row is stranded in 'building' forever.
+        version = store.create_artifact("big", "prov-big", _spec())
+        three_gib = 3 * 1024**3
+        store.finalize_artifact("big", version, "{}", row_count=1, byte_size=three_gib)
+
+        artifact = store.get_artifact("big", version)
+        assert artifact is not None
+        assert artifact.byte_size == three_gib
+        assert artifact.state == "ready"
+
+    def test_row_count_holds_more_than_two_billion_rows(self, store):
+        version = store.create_artifact("wide", "prov-wide", _spec())
+        rows = 5_000_000_000
+        store.finalize_artifact("wide", version, "{}", row_count=rows, byte_size=1)
+        assert store.get_artifact("wide", version).row_count == rows
+
+
+class TestConcurrentSchemaInitialization:
+    """Every node runs _init_schema at startup, against one database."""
+
+    def test_simultaneous_first_boots_all_succeed(self, postgres_dsn, tmp_path):
+        # CREATE TABLE IF NOT EXISTS is not concurrency-safe in Postgres: it
+        # checks and then creates without a lock, so simultaneous creators race
+        # in the system catalog and all but one fail with a duplicate key on
+        # pg_type_typname_nsp_index. Observed 7 of 8 failing before the schema
+        # advisory lock; multi-node boot is the whole point of this backend.
+        dialect = PostgresDialect(postgres_dsn)
+        conn = dialect.connect()
+        try:
+            conn.executescript(
+                "DROP TABLE IF EXISTS artifact_versions, artifact_names, "
+                "artifact_aliases, artifact_tags, registry_audit, "
+                "registry_pending CASCADE;"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        errors: list[Exception] = []
+        barrier = threading.Barrier(8)
+
+        def boot(i: int) -> None:
+            barrier.wait()
+            try:
+                ArtifactStore(tmp_path / f"node{i}", dialect=PostgresDialect(postgres_dsn))
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=boot, args=(i,)) for i in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert errors == []
+
+
 class TestTimestampPrecision:
     """The REAL-vs-DOUBLE PRECISION trap, checked against a live server."""
 
