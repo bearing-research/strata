@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import re
 import time
@@ -1039,6 +1040,26 @@ async def frame_ancestors_middleware(request: Request, call_next):
     return response
 
 
+def _retry_after_header(seconds: float | None, fallback: float) -> str:
+    """Render a wait as a ``Retry-After`` value.
+
+    ``Retry-After``'s delta-seconds grammar is whole seconds, so a sub-second
+    wait has to round somewhere, and it has to round *up*. Truncating with
+    ``int()`` emitted ``Retry-After: 0`` -- "retry immediately", the one
+    instruction a throttle must never give -- and not just occasionally: the
+    rate limiter's largest possible wait is one token's worth of refill, which
+    is 0.001s globally, 0.01s per client, 0.02s for materialize and 0.1s for
+    warm. Every configured rate is above 1/s, so *every* rejection truncated to
+    zero. Clients that honour the header literally (urllib3's ``Retry`` with
+    ``respect_retry_after_header``, or a curl loop) then spin, and
+    ``strata-client`` took the header branch over its own exponential backoff.
+    ``streaming/qos.py`` already floors its own ``retry_after`` at 1.
+
+    ``fallback`` applies only when the caller has no computed wait at all.
+    """
+    return str(max(1, math.ceil(fallback if seconds is None else seconds)))
+
+
 # Rate limiting middleware
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
@@ -1077,12 +1098,12 @@ async def rate_limit_middleware(request: Request, call_next):
     result = rate_limiter.check(client_id=client_ip, endpoint=path)
 
     if not result.allowed:
-        retry_after = int(result.retry_after_seconds or 1)
+        retry_after = _retry_after_header(result.retry_after_seconds, 1.0)
         return Response(
             content=f"Rate limit exceeded ({result.limit_type}). Retry after {retry_after}s.",
             status_code=429,
             headers={
-                "Retry-After": str(retry_after),
+                "Retry-After": retry_after,
                 "X-RateLimit-Limit-Type": result.limit_type or "unknown",
             },
         )
@@ -1784,7 +1805,7 @@ async def materialize_artifact(request: MaterializeRequest):
                 return JSONResponse(
                     status_code=e.status_code,
                     content=e.to_dict(),
-                    headers={"Retry-After": str(int(e.retry_after or 5))},
+                    headers={"Retry-After": _retry_after_header(e.retry_after, 5.0)},
                 )
 
             # Acquire build slot (early rejection if at capacity)
@@ -1796,7 +1817,7 @@ async def materialize_artifact(request: MaterializeRequest):
                 return JSONResponse(
                     status_code=e.status_code,
                     content=e.to_dict(),
-                    headers={"Retry-After": str(int(e.retry_after or 5))},
+                    headers={"Retry-After": _retry_after_header(e.retry_after, 5.0)},
                 )
 
         try:
@@ -2271,7 +2292,7 @@ async def _handle_identity_materialize(
                 return JSONResponse(
                     status_code=e.status_code,
                     content=e.to_dict(),
-                    headers={"Retry-After": str(int(e.retry_after or 5))},
+                    headers={"Retry-After": _retry_after_header(e.retry_after, 5.0)},
                 )
 
         state.streams.register(stream_state)
