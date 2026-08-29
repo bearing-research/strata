@@ -1240,3 +1240,26 @@ class TestNoArgLookupKeepsTheConfiguredStore:
         store = get_metadata_store()
 
         assert store.db_path == tmp_path / "home" / ".strata" / "cache" / "metadata.sqlite"
+
+
+class TestGlobalStoreDoesNotLeakBetweenTests:
+    """The autouse teardown in ``conftest`` must clear the store singleton.
+
+    Now that a no-arg ``get_metadata_store()`` returns whatever is already
+    installed, a test that installs one for its own tmp_path would stay in
+    force for every later no-arg caller on the same xdist worker. These two
+    run in definition order: the first installs a store, the second asserts it
+    was torn down before it started.
+    """
+
+    def test_a_installs_a_store(self, tmp_path):
+        import strata.metadata_cache as metadata_cache
+
+        metadata_cache.get_metadata_store(tmp_path / "leaky")
+
+        assert metadata_cache._metadata_store is not None
+
+    def test_b_starts_with_no_store(self):
+        import strata.metadata_cache as metadata_cache
+
+        assert metadata_cache._metadata_store is None
