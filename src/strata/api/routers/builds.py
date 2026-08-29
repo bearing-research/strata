@@ -40,6 +40,11 @@ router = APIRouter(tags=["builds"])
 # executor, so BuildRunner's poll loop does not also claim and run it.
 _EXTERNAL_LEASE_OWNER = "external:manifest"
 
+# How much longer than the signed URLs a manifest's lease runs. The lease is
+# what stops BuildRunner reclaiming a build out from under an executor, so it
+# has to still be held while any URL handed to that executor is usable.
+_LEASE_MARGIN_SECONDS = 60.0
+
 
 @router.get("/v1/artifacts/builds/{build_id}", response_model=BuildStatusResponse)
 async def get_build_status(build_id: str):
@@ -217,11 +222,18 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
     # 'pending'), so exactly one of manifest-issue and runner-claim can win,
     # and the lease expiry reclaims the build if the executor never returns.
     # The lease outlives the signed URLs it is handed alongside.
+    #
+    # The lease has to outlive the URLs minted below, or the orphan sweep can
+    # hand the build to BuildRunner while the executor still holds valid
+    # capabilities — two writers again, by a different route. The margin makes
+    # that ordering hold by construction rather than by the two durations
+    # happening to be equal.
+    lease_seconds = state.config.signed_url_expiry_seconds + _LEASE_MARGIN_SECONDS
     if build.state == "pending":
         claimed = build_store.claim_build(
             build_id,
             lease_owner=_EXTERNAL_LEASE_OWNER,
-            lease_duration_seconds=state.config.signed_url_expiry_seconds,
+            lease_duration_seconds=lease_seconds,
         )
         if not claimed:
             # The runner claimed it in between — don't hand out a second
@@ -230,7 +242,18 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
                 status_code=409,
                 detail="Build was claimed by the local runner; retry is not safe",
             )
-    elif build.lease_owner not in (None, _EXTERNAL_LEASE_OWNER):
+    elif build.lease_owner == _EXTERNAL_LEASE_OWNER:
+        # A re-fetch of a manifest this route already issued. It mints a fresh
+        # set of signed URLs, so the lease has to be pushed out to cover them:
+        # otherwise the lease keeps its original deadline while the new URLs run
+        # a full window past it, leaving a long stretch where the sweep can
+        # reclaim the build and the executor can still finalize it.
+        build_store.renew_lease(
+            build_id,
+            _EXTERNAL_LEASE_OWNER,
+            lease_duration_seconds=lease_seconds,
+        )
+    elif build.lease_owner is not None:
         # Someone else holds the lease — that is BuildRunner, which claims with
         # its own runner id. Handing out capabilities now would put a second
         # writer on the same (artifact_id, version) blob.
@@ -610,7 +633,16 @@ async def finalize_build(
             finalized_artifact.id,
             finalized_artifact.version,
         )
-    build_store.complete_build(build_id)
+    # Fenced on the owner we observed when this request started: completing
+    # decides who publishes, and an executor whose lease was reclaimed mid-flight
+    # must not record its result over the runner that took the build over. A
+    # ``lease_owner`` of None keeps the old unfenced behaviour, which is what the
+    # deprecated ``start_build`` path and legacy rows rely on.
+    if not build_store.complete_build(build_id, lease_owner=build.lease_owner):
+        raise HTTPException(
+            status_code=409,
+            detail="Build lease is no longer held by this caller; result not recorded",
+        )
     await record_build_output_bytes(build.tenant_id, byte_size)
 
     artifact_uri = f"strata://artifact/{finalized_artifact.id}@v={finalized_artifact.version}"
