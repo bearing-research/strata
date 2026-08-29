@@ -30,13 +30,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from strata.sql_backend import SqlDialect, SqliteDialect
+from strata.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
 if TYPE_CHECKING:
     from strata.blob_store import BlobStore
@@ -419,13 +418,25 @@ class ArtifactStore:
         artifact = store.resolve_name("daily_revenue")
     """
 
-    def __init__(self, artifact_dir: Path, blob_store: BlobStore | None = None):
+    def __init__(
+        self,
+        artifact_dir: Path,
+        blob_store: BlobStore | None = None,
+        dialect: SqlDialect | None = None,
+    ):
         """Initialize artifact store.
 
         Args:
             artifact_dir: Directory for artifacts (contains metadata DB)
             blob_store: Optional blob storage backend. If None, creates a
                 LocalBlobStore in {artifact_dir}/blobs.
+            dialect: Optional metadata backend. Defaults to SQLite under
+                artifact_dir, which is what personal mode wants. Pass a
+                PostgresDialect to put the metadata on a shared server;
+                artifact_dir then only holds blobs, and blob_store should
+                usually be a remote backend too, since a store split across
+                a shared database and a local blobs directory is only
+                coherent on one machine.
         """
         self.artifact_dir = artifact_dir
         self.db_path = artifact_dir / "artifacts.sqlite"
@@ -454,12 +465,12 @@ class ArtifactStore:
         # so the dialect is the one place a second backend has to be taught
         # about. SQLite stays the default and behaves exactly as before; see
         # strata/sql_backend.py for what actually differs between backends.
-        self._dialect: SqlDialect = SqliteDialect(self.db_path)
+        self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(self.db_path)
 
         # Initialize schema
         self._init_schema()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    def _get_connection(self) -> StoreConnection:
         """Get a new database connection with WAL mode."""
         return self._dialect.connect()
 
@@ -467,6 +478,18 @@ class ArtifactStore:
         """Initialize database schema with migrations for tenant columns."""
         conn = self._get_connection()
         try:
+            # The migration below upgrades databases written by older Strata
+            # versions, and is expressed in SQLite's own introspection
+            # vocabulary (sqlite_master, PRAGMA, rowid). A backend added after
+            # those versions has no such history, so it goes straight to the
+            # current schema rather than paying to have this made portable.
+            if not self._dialect.supports_legacy_migration:
+                conn.executescript(self._dialect.adapt_ddl(_SCHEMA_SQL))
+                conn.commit()
+                conn.executescript(self._dialect.adapt_ddl(_REGISTRY_SCHEMA_SQL))
+                conn.commit()
+                return
+
             # Check if this is a fresh database or needs migration
             cursor = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_versions'"
@@ -621,11 +644,13 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
-            # BEGIN IMMEDIATE serializes writers so the MAX(version)+1 read
-            # can't race a concurrent create for the same artifact id (two
-            # refresh rebuilds used to both read MAX=N and collide on the
-            # (id, version) primary key with an uncaught IntegrityError).
-            conn.execute("BEGIN IMMEDIATE")
+            # Serialize writers so the MAX(version)+1 read can't race a
+            # concurrent create for the same artifact id (two refresh rebuilds
+            # used to both read MAX=N and collide on the (id, version) primary
+            # key with an uncaught IntegrityError). The key names what is
+            # contended so a backend can lock narrowly; SQLite ignores it and
+            # locks the file.
+            self._dialect.begin_write(conn, artifact_id)
             cursor = conn.execute(
                 "SELECT COALESCE(MAX(version), 0) + 1 FROM artifact_versions WHERE id = ?",
                 (artifact_id,),
@@ -765,7 +790,7 @@ class ArtifactStore:
                     return self.get_artifact(artifact_id, version)
                 conn.commit()
                 return self.get_artifact(artifact_id, version)
-            except sqlite3.IntegrityError:
+            except self._dialect.integrity_error:
                 # Unique constraint violation - duplicate (tenant, provenance_hash)
                 # Another artifact was finalized first, return it
                 conn.rollback()
@@ -825,7 +850,7 @@ class ArtifactStore:
         """
         conn = self._get_connection()
         try:
-            conn.execute("BEGIN IMMEDIATE")
+            self._dialect.begin_write(conn, artifact_id)
             row = conn.execute(
                 "SELECT provenance_hash, tenant FROM artifact_versions "
                 "WHERE id = ? AND version = ?",
@@ -994,7 +1019,7 @@ class ArtifactStore:
                 conn.commit()
                 return self.get_artifact(artifact_id, version)
 
-            except sqlite3.IntegrityError:
+            except self._dialect.integrity_error:
                 # Unique constraint violation - duplicate provenance
                 conn.rollback()
                 existing = self.find_by_provenance(provenance_hash, tenant=artifact_tenant)
@@ -1020,7 +1045,7 @@ class ArtifactStore:
 
     @staticmethod
     def _audit_in_connection(
-        conn: sqlite3.Connection,
+        conn: StoreConnection,
         *,
         action: str,
         name: str | None = None,
@@ -1065,7 +1090,7 @@ class ArtifactStore:
 
     def _set_name_in_connection(
         self,
-        conn: sqlite3.Connection,
+        conn: StoreConnection,
         name: str,
         artifact_id: str,
         version: int,

@@ -5,11 +5,10 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
-import pytest
-
 from strata.sql_backend import (
     PostgresDialect,
     SqliteDialect,
+    advisory_lock_id,
     translate_placeholders,
 )
 
@@ -92,10 +91,11 @@ class TestTranslatePlaceholders:
 class TestSqliteDialectPreservesTodaysBehavior:
     """Personal mode must not notice the seam exists."""
 
-    def test_sql_is_identity(self):
-        # The store is already written in qmark; rewriting it would be churn.
-        sql = "SELECT * FROM t WHERE id = ?"
-        assert SqliteDialect(Path("x.sqlite")).sql(sql) == sql
+    def test_adapt_ddl_is_identity(self):
+        # The schema is already written in this dialect; rewriting it would be
+        # churn.
+        ddl = "CREATE TABLE t (seq INTEGER PRIMARY KEY AUTOINCREMENT, at REAL)"
+        assert SqliteDialect(Path("x.sqlite")).adapt_ddl(ddl) == ddl
 
     def test_connect_sets_wal_and_a_name_indexable_row_factory(self, tmp_path):
         dialect = SqliteDialect(tmp_path / "artifacts.sqlite")
@@ -113,7 +113,8 @@ class TestSqliteDialectPreservesTodaysBehavior:
         dialect = SqliteDialect(tmp_path / "artifacts.sqlite")
         conn = dialect.connect()
         try:
-            dialect.begin_write(conn)
+            # SQLite locks the whole file, so the key is accepted and ignored.
+            dialect.begin_write(conn, "a1")
             assert conn.in_transaction
         finally:
             conn.rollback()
@@ -124,14 +125,88 @@ class TestSqliteDialectPreservesTodaysBehavior:
         assert SqliteDialect(Path("x.sqlite")).supports_legacy_migration is True
 
 
-class TestPostgresDialectRendering:
-    """What SQL to emit, settled before the connection work lands."""
+class _FakeInner:
+    """Records what the wrapper would send to psycopg.
 
-    def test_sql_translates_placeholders(self):
-        assert (
-            PostgresDialect("postgresql:///x").sql("SELECT * FROM t WHERE id = ?")
-            == "SELECT * FROM t WHERE id = %s"
-        )
+    Lets the connection adapter be tested without a server, so these stay in
+    the main CI job rather than the container-backed integration one.
+    """
+
+    def __init__(self):
+        self.executed: list[tuple[str, tuple]] = []
+
+    def execute(self, sql, params=()):
+        self.executed.append((sql, tuple(params)))
+        return self
+
+
+class TestPostgresConnectionAdapter:
+    """The wrapper is what keeps the store's 103 call sites unchanged."""
+
+    def _wrap(self):
+        from strata.sql_backend import _PostgresConnection
+
+        inner = _FakeInner()
+        return _PostgresConnection(inner), inner
+
+    def test_execute_translates_placeholders(self):
+        conn, inner = self._wrap()
+        conn.execute("SELECT * FROM t WHERE id = ?", ("a1",))
+        assert inner.executed == [("SELECT * FROM t WHERE id = %s", ("a1",))]
+
+    def test_execute_accepts_a_list_of_params(self):
+        # The store builds params as a list where filters are optional.
+        conn, inner = self._wrap()
+        conn.execute("SELECT ? , ?", ["a", "b"])
+        assert inner.executed[0][1] == ("a", "b")
+
+    def test_executescript_sends_ddl_unchanged(self):
+        # Multi-statement schema DDL, no parameters, no percent signs.
+        conn, inner = self._wrap()
+        conn.executescript("CREATE TABLE a (x TEXT); CREATE TABLE b (y TEXT);")
+        assert inner.executed == [("CREATE TABLE a (x TEXT); CREATE TABLE b (y TEXT);", ())]
+
+    def test_begin_write_takes_an_advisory_lock_on_the_key(self):
+        conn, inner = self._wrap()
+        PostgresDialect("postgresql:///x").begin_write(conn, "a1")
+        sql, params = inner.executed[0]
+        assert "pg_advisory_xact_lock" in sql
+        assert params == (advisory_lock_id("a1"),)
+
+
+class TestRowBehavesLikeSqliteRow:
+    """The store reads results by name, by position, and via dict()."""
+
+    def _row(self):
+        from strata.sql_backend import _Row
+
+        return _Row(("id", "tenant"), ("a1", "acme"))
+
+    def test_indexable_by_name(self):
+        assert self._row()["tenant"] == "acme"
+
+    def test_indexable_by_position(self):
+        # create_artifact reads `cursor.fetchone()[0]`.
+        assert self._row()[0] == "a1"
+
+    def test_convertible_to_dict(self):
+        # read_audit and list_pending_changes do `dict(row)`.
+        assert dict(self._row()) == {"id": "a1", "tenant": "acme"}
+
+
+class TestPostgresDialectRendering:
+    """What SQL to emit."""
+
+    def test_adapt_ddl_rewrites_the_types_that_differ(self):
+        ddl = "CREATE TABLE t (seq INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL)"
+        adapted = PostgresDialect("postgresql:///x").adapt_ddl(ddl)
+        assert "BIGSERIAL PRIMARY KEY" in adapted
+        assert "at DOUBLE PRECISION NOT NULL" in adapted
+        assert "AUTOINCREMENT" not in adapted
+
+    def test_adapt_ddl_leaves_other_types_alone(self):
+        ddl = "CREATE TABLE t (id TEXT NOT NULL, version INTEGER NOT NULL)"
+        assert PostgresDialect("postgresql:///x").adapt_ddl(ddl) == ddl
 
     def test_autoincrement_differs_from_sqlite(self):
         assert PostgresDialect("postgresql:///x").autoincrement_pk == "BIGSERIAL PRIMARY KEY"
@@ -157,12 +232,9 @@ class TestPostgresDialectRendering:
         # rowid migration path never runs there.
         assert PostgresDialect("postgresql:///x").supports_legacy_migration is False
 
-    def test_connect_explains_that_it_is_not_wired(self):
-        with pytest.raises(NotImplementedError, match="not wired yet"):
-            PostgresDialect("postgresql:///x").connect()
-
-    def test_begin_write_names_the_unresolved_choice(self):
-        # BEGIN IMMEDIATE has no Postgres equivalent; failing loudly beats
-        # silently running the MAX(version)+1 read unserialized.
-        with pytest.raises(NotImplementedError, match="advisory lock|SERIALIZABLE"):
-            PostgresDialect("postgresql:///x").begin_write(None)
+    def test_lock_ids_are_stable_and_distinct(self):
+        # Recomputed at every call site, so drift would silently stop
+        # serializing the writers the lock exists to serialize.
+        assert advisory_lock_id("a1") == advisory_lock_id("a1")
+        assert advisory_lock_id("a1") != advisory_lock_id("a2")
+        assert -(2**63) <= advisory_lock_id("a1") < 2**63

@@ -13,18 +13,17 @@ Postgres deployment has no such history, so it never runs that path. What
 remains is:
 
 - **Placeholders.** The store writes ``?``; Postgres drivers want ``%s``.
-  Handled by :func:`translate_placeholders` rather than by rewriting 99 call
-  sites, so the diff stays proportional to the dialect difference instead of to
-  the number of queries.
+  Handled by :func:`translate_placeholders` inside the connection wrapper, so
+  none of the 103 ``conn.execute`` call sites change.
 - **Autoincrement.** One ``INTEGER PRIMARY KEY AUTOINCREMENT`` in the audit
   table.
 - **Float width.** The store declares timestamps ``REAL``. In SQLite that is a
   64-bit double; in Postgres ``REAL`` is *single* precision, which cannot hold
   a ``time.time()`` value without losing sub-second resolution. Mapping this
   correctly is the least visible and most damaging difference of the set.
-- **Writer serialization.** ``BEGIN IMMEDIATE`` guards the ``MAX(version)+1``
-  read-modify-write in ``create_artifact``. Postgres has no such statement and
-  needs a different strategy; see :meth:`SqlDialect.begin_write`.
+- **Writer serialization.** ``BEGIN IMMEDIATE`` guards two read-modify-writes.
+  Postgres has no such statement; see :meth:`SqlDialect.begin_write`.
+- **The integrity-error type**, which the store catches by name in two places.
 
 Personal mode keeps SQLite and is unaffected: :class:`SqliteDialect` reproduces
 today's behavior exactly, including the connection PRAGMAs.
@@ -32,13 +31,23 @@ today's behavior exactly, including the connection PRAGMAs.
 
 from __future__ import annotations
 
+import hashlib
+import re
 import sqlite3
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 # Characters that open a region where ``?`` is data, not a placeholder.
 _SINGLE_QUOTE = "'"
 _DOUBLE_QUOTE = '"'
+
+# Column-type tokens that mean different things to different engines. Applied
+# only to this package's own DDL constants, never to arbitrary SQL.
+_DDL_TYPE_REWRITES = (
+    ("INTEGER PRIMARY KEY AUTOINCREMENT", "autoincrement_pk"),
+    (r"\bREAL\b", "float_type"),
+)
 
 
 def translate_placeholders(sql: str) -> str:
@@ -128,6 +137,38 @@ def _scan_quoted(sql: str, start: int, quote: str) -> int:
     return n
 
 
+def advisory_lock_id(key: str) -> int:
+    """Map a lock key to the signed 64-bit integer Postgres advisory locks use.
+
+    Deliberately computed here rather than with Postgres's ``hashtext()``: that
+    function is an internal whose output is not contracted across major
+    versions, and a lock id that changes under an upgrade would silently stop
+    serializing the writers it was added to serialize.
+    """
+    digest = hashlib.blake2b(key.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, "big", signed=True)
+
+
+class StoreConnection(Protocol):
+    """The connection surface ``artifact_store`` actually uses.
+
+    Narrower than either driver's real API, and deliberately shaped like
+    ``sqlite3.Connection`` because that is what the store was written against.
+    :class:`_PostgresConnection` adapts psycopg to fit, which is what keeps the
+    103 ``conn.execute`` call sites unchanged.
+    """
+
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> Any: ...
+
+    def executescript(self, sql: str) -> Any: ...
+
+    def commit(self) -> None: ...
+
+    def rollback(self) -> None: ...
+
+    def close(self) -> None: ...
+
+
 class SqlDialect(Protocol):
     """The parts of ``artifact_store`` that differ between databases.
 
@@ -138,16 +179,16 @@ class SqlDialect(Protocol):
 
     name: str
 
-    def connect(self) -> sqlite3.Connection:
+    def connect(self) -> StoreConnection:
         """Open a connection configured the way the store expects.
 
-        Returns rows indexable by column name, since the store reads
-        ``row["tenant"]`` throughout.
+        Returns rows indexable by both column name and position, since the
+        store uses ``row["tenant"]`` and ``fetchone()[0]`` interchangeably.
         """
         ...
 
-    def sql(self, statement: str) -> str:
-        """Adapt a qmark-style statement to this dialect."""
+    def adapt_ddl(self, sql: str) -> str:
+        """Rewrite column types in this package's own schema DDL."""
         ...
 
     @property
@@ -166,6 +207,15 @@ class SqlDialect(Protocol):
         ...
 
     @property
+    def integrity_error(self) -> type[Exception]:
+        """Exception raised when a constraint is violated.
+
+        The store catches this to make finalize idempotent, so it has to be a
+        driver-specific type rather than a bare ``Exception``.
+        """
+        ...
+
+    @property
     def supports_legacy_migration(self) -> bool:
         """Whether pre-tenant-column databases can exist for this backend.
 
@@ -176,13 +226,18 @@ class SqlDialect(Protocol):
         """
         ...
 
-    def begin_write(self, conn: sqlite3.Connection) -> None:
-        """Open a transaction that serializes concurrent writers.
+    def begin_write(self, conn: StoreConnection, key: str) -> None:
+        """Open a transaction that serializes writers contending on ``key``.
 
-        ``create_artifact`` reads ``MAX(version)+1`` and then inserts that
-        version. Two concurrent rebuilds of the same artifact must not both
-        read ``N`` and collide on the ``(id, version)`` primary key, which is
-        a bug this store has already been bitten by once.
+        Two call sites need this. ``create_artifact`` reads ``MAX(version)+1``
+        and then inserts that version; two concurrent rebuilds of the same
+        artifact must not both read ``N`` and collide on the ``(id, version)``
+        primary key, a bug this store has already been bitten by once.
+        ``force_finalize_canonical`` promotes one row to canonical while
+        superseding others.
+
+        ``key`` names the contended resource so a backend can lock narrowly
+        rather than globally.
         """
         ...
 
@@ -200,16 +255,16 @@ class SqliteDialect:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
 
-    def connect(self) -> sqlite3.Connection:
+    def connect(self) -> StoreConnection:
         conn = sqlite3.connect(str(self.db_path), timeout=30.0)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.row_factory = sqlite3.Row
-        return conn
+        return conn  # type: ignore[return-value]
 
-    def sql(self, statement: str) -> str:
-        # The store is already written in this dialect.
-        return statement
+    def adapt_ddl(self, sql: str) -> str:
+        # The DDL is already written in this dialect.
+        return sql
 
     @property
     def autoincrement_pk(self) -> str:
@@ -221,20 +276,98 @@ class SqliteDialect:
         return "REAL"
 
     @property
+    def integrity_error(self) -> type[Exception]:
+        return sqlite3.IntegrityError
+
+    @property
     def supports_legacy_migration(self) -> bool:
         return True
 
-    def begin_write(self, conn: sqlite3.Connection) -> None:
+    def begin_write(self, conn: StoreConnection, key: str) -> None:
+        # SQLite locks the whole database file, so the key is not needed: any
+        # writer excludes any other regardless of what it intends to touch.
         conn.execute("BEGIN IMMEDIATE")
 
 
-class PostgresDialect:
-    """Rendering rules for Postgres.
+class _Row(Mapping):
+    """A psycopg row that behaves like ``sqlite3.Row``.
 
-    Connection handling is deliberately absent: it needs a driver dependency
-    and a pool, and landing those is a separate reviewable step. Everything
-    that decides *what SQL to emit* is here and unit-testable now, so the
-    rendering can be settled before the infrastructure arrives.
+    The store reads results both ways -- ``row["tenant"]`` in most places,
+    ``cursor.fetchone()[0]`` where the query selects a single computed value --
+    and converts two of them with ``dict(row)``. psycopg's stock factories give
+    one access style or the other, so this supplies both. Implementing
+    ``Mapping`` is what makes ``dict(row)`` work without a special case.
+    """
+
+    __slots__ = ("_columns", "_values")
+
+    def __init__(self, columns: tuple[str, ...], values: tuple[Any, ...]) -> None:
+        self._columns = columns
+        self._values = values
+
+    def __getitem__(self, key: str | int) -> Any:
+        if isinstance(key, int):
+            return self._values[key]
+        return self._values[self._columns.index(key)]
+
+    def keys(self) -> tuple[str, ...]:  # type: ignore[override]
+        return self._columns
+
+    def __iter__(self):
+        return iter(self._columns)
+
+    def __len__(self) -> int:
+        return len(self._columns)
+
+    def __repr__(self) -> str:
+        return f"_Row({dict(zip(self._columns, self._values, strict=True))!r})"
+
+
+def _row_factory(cursor: Any) -> Any:
+    """psycopg row factory producing :class:`_Row`."""
+    description = cursor.description
+    if description is None:
+        return lambda values: values
+    columns = tuple(column.name for column in description)
+    return lambda values: _Row(columns, tuple(values))
+
+
+class _PostgresConnection:
+    """Adapts a psycopg connection to the surface the store expects.
+
+    Two adaptations, both mechanical:
+
+    - ``execute`` translates qmark to pyformat on the way through, which is why
+      the store's SQL does not have to be rewritten.
+    - ``executescript`` exists on ``sqlite3.Connection`` but not on psycopg.
+      The store uses it only for its own multi-statement schema DDL.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:
+        return self._inner.execute(translate_placeholders(sql), params)
+
+    def executescript(self, sql: str) -> Any:
+        # No parameters, so the percent-escaping in translate_placeholders
+        # would be the only effect; the DDL contains none. Sent as-is.
+        return self._inner.execute(sql)
+
+    def commit(self) -> None:
+        self._inner.commit()
+
+    def rollback(self) -> None:
+        self._inner.rollback()
+
+    def close(self) -> None:
+        self._inner.close()
+
+
+class PostgresDialect:
+    """Postgres backing for the artifact store.
+
+    Requires the ``postgres`` extra (``pip install strata-notebook[postgres]``).
     """
 
     name = "postgres"
@@ -242,15 +375,16 @@ class PostgresDialect:
     def __init__(self, dsn: str) -> None:
         self.dsn = dsn
 
-    def connect(self) -> sqlite3.Connection:
-        raise NotImplementedError(
-            "PostgresDialect.connect is not wired yet. The driver dependency "
-            "and connection pool land separately; this class currently exists "
-            "so SQL rendering can be settled and tested first."
-        )
+    def connect(self) -> StoreConnection:
+        import psycopg
 
-    def sql(self, statement: str) -> str:
-        return translate_placeholders(statement)
+        conn = psycopg.connect(self.dsn, row_factory=_row_factory)
+        return _PostgresConnection(conn)
+
+    def adapt_ddl(self, sql: str) -> str:
+        for pattern, attribute in _DDL_TYPE_REWRITES:
+            sql = re.sub(pattern, getattr(self, attribute), sql)
+        return sql
 
     @property
     def autoincrement_pk(self) -> str:
@@ -263,14 +397,30 @@ class PostgresDialect:
         return "DOUBLE PRECISION"
 
     @property
+    def integrity_error(self) -> type[Exception]:
+        import psycopg
+
+        return psycopg.IntegrityError
+
+    @property
     def supports_legacy_migration(self) -> bool:
         return False
 
-    def begin_write(self, conn: sqlite3.Connection) -> None:
-        raise NotImplementedError(
-            "Writer serialization for Postgres is unresolved. BEGIN IMMEDIATE "
-            "has no equivalent; the candidates are a transaction-scoped "
-            "advisory lock keyed on the artifact id, or SERIALIZABLE with a "
-            "retry on serialization failure. The choice belongs with the "
-            "connection work, since it depends on the pool's retry behavior."
-        )
+    def begin_write(self, conn: StoreConnection, key: str) -> None:
+        """Serialize writers with a transaction-scoped advisory lock.
+
+        Postgres has no ``BEGIN IMMEDIATE``. Of the two candidates, an advisory
+        lock beats ``SERIALIZABLE`` here: it needs no retry loop (the second
+        writer blocks rather than aborting), it releases automatically at
+        commit or rollback, and it is keyed, so writers touching different
+        artifacts do not queue behind each other the way SQLite's whole-file
+        lock makes them.
+
+        Scope, stated precisely: the lock serializes writers passing the *same*
+        key. ``force_finalize_canonical`` also touches rows sharing a
+        provenance hash across other artifact ids, which this does not cover --
+        the ``idx_tenant_provenance_unique`` partial index remains the
+        correctness guard there, exactly as it is under SQLite. The lock
+        removes the common collision; the index rejects the rare one.
+        """
+        conn.execute("SELECT pg_advisory_xact_lock(?)", (advisory_lock_id(key),))
