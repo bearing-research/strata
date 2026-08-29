@@ -14,6 +14,7 @@ from typing import Any, cast
 import pytest
 
 from strata.config import StrataConfig
+from strata.server import _should_warn_unset_signing_secret
 
 
 class TestDeploymentModeConfig:
@@ -442,3 +443,45 @@ class TestModeCoherence:
             service_writes_enabled=True,
         )
         assert config.service_writes_enabled is True
+
+
+class TestUnsetSigningSecretIsSurfaced:
+    """Service mode warns when pull-model URLs get a throwaway signing secret.
+
+    Without a configured secret the signer falls back to `secrets.token_bytes`,
+    which is per-process. The pull-model routes are registered unconditionally,
+    so an executor handed a manifest by one replica gets 403 "Invalid or expired
+    signature" when its callback lands on another, and in-flight URLs die on
+    every restart.
+
+    This warning was removed as collateral when the dead `pull_model_enabled`
+    flag went (#567): it was the only thing reading the flag, so it went with
+    it. But the flag never gated the routes -- that was the point of #550 -- so
+    removing the condition removed the operator's only signal for a hazard that
+    is in fact unconditional. Nothing pinned it, which is why it could vanish.
+    """
+
+    def test_service_mode_without_a_secret_warns(self, tmp_path):
+        config = StrataConfig(
+            deployment_mode="service",
+            artifact_dir=tmp_path / "artifacts",
+            cache_dir=tmp_path / "cache",
+        )
+        assert _should_warn_unset_signing_secret(config) is True
+
+    def test_a_configured_secret_is_quiet(self, tmp_path):
+        config = StrataConfig(
+            deployment_mode="service",
+            artifact_dir=tmp_path / "artifacts",
+            cache_dir=tmp_path / "cache",
+            transform_signing_secret="a-stable-secret",
+        )
+        assert _should_warn_unset_signing_secret(config) is False
+
+    def test_personal_mode_is_quiet(self, tmp_path):
+        """One loopback process: a per-process secret is correct there."""
+        config = StrataConfig(
+            deployment_mode="personal",
+            cache_dir=tmp_path / "cache",
+        )
+        assert _should_warn_unset_signing_secret(config) is False
