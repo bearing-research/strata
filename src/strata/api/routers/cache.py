@@ -100,6 +100,13 @@ async def get_cache_histogram_v1():
     - hits/misses: Access counts
     - hit_rate: Hits / total (0.0 to 1.0)
     - bytes_from_cache/bytes_from_storage: Data served from each source
+    - covered_seconds: How much of the window the counts actually span.
+      Equal to window_seconds for every window listed here; it differs only
+      if a caller asks for a window deeper than the retained history.
+
+    Counts are exact for the full window regardless of traffic volume. One
+    access is recorded per row group, not per request, so a busy scan can
+    contribute thousands of accesses in a second.
 
     Use this to:
     - Track cache warm-up progress (watch hit rate climb)

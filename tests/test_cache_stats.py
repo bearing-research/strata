@@ -12,6 +12,7 @@ class TestWindowStats:
 
         stats = WindowStats(
             window_seconds=60,
+            covered_seconds=60,
             hits=80,
             misses=20,
             bytes_from_cache=1000,
@@ -28,6 +29,7 @@ class TestWindowStats:
 
         stats = WindowStats(
             window_seconds=60,
+            covered_seconds=60,
             hits=0,
             misses=0,
             bytes_from_cache=0,
@@ -44,6 +46,7 @@ class TestWindowStats:
 
         stats = WindowStats(
             window_seconds=60,
+            covered_seconds=60,
             hits=75,
             misses=25,
             bytes_from_cache=1500,
@@ -200,20 +203,16 @@ class TestCacheStatsHistogram:
         assert stats["misses"] == 0
         assert stats["total"] == 0
 
-    def test_max_events_limit(self):
-        """Test events are limited to max_events."""
+    def test_lifetime_counters_are_not_bounded_by_the_windows(self):
+        """Retention bounds the windows, never the lifetime totals."""
         from strata.cache_stats import CacheStatsHistogram
 
-        histogram = CacheStatsHistogram(max_events=5)
+        histogram = CacheStatsHistogram(windows=[2])
 
-        # Record 10 events
-        for i in range(10):
+        for _ in range(10):
             histogram.record_hit(bytes_accessed=100)
 
-        # Only last 5 should be in window stats, but lifetime counters
-        # should still reflect all 10
-        stats = histogram.get_lifetime_stats()
-        assert stats["hits"] == 10  # Lifetime counter unaffected by max_events
+        assert histogram.get_lifetime_stats()["hits"] == 10
 
 
 class TestGlobalHistogram:
@@ -284,3 +283,85 @@ class TestCacheHistogramIntegration:
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)
             server_module._state = None
+
+
+class TestWindowsCoverTheirFullDuration:
+    """A window must count everything in it, not everything still buffered.
+
+    The histogram used to retain the last 10,000 individual events and answer
+    every window by scanning that buffer. One event is recorded per row group
+    rather than per request, so a busy server drained the buffer in a handful
+    of scans -- the "1 hour" window then reported a few seconds of traffic
+    under an hour's label, and the 5-minute and 1-hour windows returned
+    identical numbers because both were just "everything buffered".
+    """
+
+    def test_a_window_counts_more_than_the_old_event_cap(self):
+        from strata.cache_stats import CacheStatsHistogram
+
+        histogram = CacheStatsHistogram()
+
+        # Comfortably past the old 10,000-event buffer. These all land within
+        # a second or two, so every one of them is inside the 60s window.
+        for i in range(25_000):
+            if i % 10:
+                histogram.record_hit(bytes_accessed=100)
+            else:
+                histogram.record_miss(bytes_accessed=100)
+
+        window = histogram.get_window_stats(60)
+
+        assert window.total == 25_000
+        assert window.hits == 22_500
+        assert window.misses == 2_500
+        assert window.bytes_from_cache == 22_500 * 100
+        assert window.bytes_from_storage == 2_500 * 100
+        # And it agrees with the lifetime counters, which were always exact.
+        assert window.total == histogram.get_lifetime_stats()["total"]
+
+    def test_buckets_older_than_the_window_are_excluded(self):
+        """Seed a bucket at the far edge of the ring and check it is dropped.
+
+        A slot is reused every ``depth`` seconds, so the ring has to reject a
+        wrapped-around slot rather than read its stale counts as current.
+        """
+        import time
+
+        from strata.cache_stats import CacheStatsHistogram
+
+        histogram = CacheStatsHistogram(windows=[60])
+        histogram.record_hit(bytes_accessed=100)
+
+        now_second = int(time.time())
+        # The slot for "one full ring ago" is the same slot as now, one lap
+        # back. Stamp it as that older second with counts nothing should see.
+        stale_second = now_second - histogram._depth
+        slot = stale_second % histogram._depth
+        histogram._bucket_second[slot] = stale_second
+        histogram._bucket_hits[slot] = 999
+        histogram._bucket_bytes_cache[slot] = 999_000
+
+        window = histogram.get_window_stats(60)
+
+        assert window.hits == 0
+        assert window.bytes_from_cache == 0
+
+    def test_covered_seconds_reports_a_clamped_window(self):
+        from strata.cache_stats import CacheStatsHistogram
+
+        histogram = CacheStatsHistogram(windows=[60])
+
+        assert histogram.get_window_stats(60).covered_seconds == 60
+        # Deeper than anything retained: answer with what exists, and say so.
+        assert histogram.get_window_stats(3600).covered_seconds == 60
+        assert histogram.get_window_stats(3600).to_dict()["covered_seconds"] == 60
+
+    def test_configured_windows_report_their_own_duration(self):
+        from strata.cache_stats import CacheStatsHistogram
+
+        histogram = CacheStatsHistogram()
+        histogram.record_hit(bytes_accessed=100)
+
+        covered = {w.window_seconds: w.covered_seconds for w in histogram.get_all_window_stats()}
+
+        assert covered == {60: 60, 300: 300, 3600: 3600}
