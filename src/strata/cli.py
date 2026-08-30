@@ -109,6 +109,44 @@ def _build_parser() -> argparse.ArgumentParser:
     add_import_arguments(import_parser)
     import_parser.set_defaults(func=_dispatch_import)
 
+    migrate_parser = subparsers.add_parser(
+        "migrate",
+        help="Copy an existing SQLite artifact store onto Postgres",
+        description=(
+            "Copy artifact-store metadata from SQLite to Postgres. Setting "
+            "STRATA_ARTIFACT_METADATA_DSN alone starts an empty store; this "
+            "carries an existing one across. Metadata only -- blobs are "
+            "configured separately and are not copied."
+        ),
+    )
+    migrate_parser.add_argument(
+        "--artifact-dir",
+        dest="artifact_dir",
+        default=None,
+        help="Source artifact store directory (default: ~/.strata/artifacts)",
+    )
+    migrate_parser.add_argument(
+        "--to-dsn",
+        dest="to_dsn",
+        default=None,
+        help="Target postgresql:// DSN (default: STRATA_ARTIFACT_METADATA_DSN)",
+    )
+    migrate_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what would be copied and exit without writing",
+    )
+    migrate_parser.add_argument(
+        "--allow-nonempty-target",
+        action="store_true",
+        help=(
+            "Write into a target that already holds rows. Safe for resuming an "
+            "interrupted migration (the copy skips rows already present); unsafe "
+            "for merging two different stores."
+        ),
+    )
+    migrate_parser.set_defaults(func=_dispatch_migrate)
+
     key_parser = subparsers.add_parser(
         "apikey",
         help="Mint, list, and revoke API keys",
@@ -416,6 +454,12 @@ def _dispatch_artifact(command: str):
         return getattr(artifact_cli, command)(args)
 
     return _dispatch
+
+
+def _dispatch_migrate(args: argparse.Namespace) -> int:
+    from strata import migrate_cli
+
+    return migrate_cli.cmd_migrate(args)
 
 
 def _dispatch_apikey(command: str):

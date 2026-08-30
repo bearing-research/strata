@@ -296,6 +296,17 @@ class SqlDialect(Protocol):
         """
         ...
 
+    def resync_autoincrement(self, conn: StoreConnection, table: str, column: str) -> None:
+        """Point a synthetic key's generator past the largest existing value.
+
+        Only matters after rows are inserted with explicit ids -- migration.
+        Postgres keeps a sequence *beside* a ``BIGSERIAL`` column, and an
+        explicit insert does not advance it, so a migrated table hands out
+        ids starting at 1 again and every insert collides until it catches up.
+        SQLite derives the next rowid from the table itself and needs nothing.
+        """
+        ...
+
     def begin_write(self, conn: StoreConnection, key: str) -> None:
         """Open a transaction that serializes writers contending on ``key``.
 
@@ -366,6 +377,11 @@ class SqliteDialect:
 
     def close(self) -> None:
         # Nothing pooled: each connection is a file handle closed by its caller.
+        return
+
+    def resync_autoincrement(self, conn: StoreConnection, table: str, column: str) -> None:
+        # SQLite derives the next rowid from the table, so there is nothing
+        # standing beside it to fall out of step.
         return
 
     def begin_write(self, conn: StoreConnection, key: str) -> None:
@@ -638,6 +654,15 @@ class PostgresDialect:
     @property
     def supports_legacy_migration(self) -> bool:
         return False
+
+    def resync_autoincrement(self, conn: StoreConnection, table: str, column: str) -> None:
+        # setval with is_called=false so the next nextval() returns exactly
+        # this value; coalesce covers an empty table, where the sequence must
+        # start at 1 rather than 0.
+        conn.execute(
+            f"SELECT setval(pg_get_serial_sequence('{table}', '{column}'), "  # noqa: S608
+            f"COALESCE((SELECT MAX({column}) FROM {table}), 0) + 1, false)"  # noqa: S608
+        )
 
     def begin_write(self, conn: StoreConnection, key: str) -> None:
         """Serialize writers with a transaction-scoped advisory lock.
