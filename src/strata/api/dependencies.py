@@ -217,6 +217,7 @@ def runtime_build_store() -> BuildStore | None:
     The signed-transport build store is the SQLite registry under the artifact
     directory; a deployment without one has nowhere to track builds.
     """
+    from strata.artifact_store import get_artifact_store
     from strata.server import get_state
     from strata.transforms.build_store import get_build_store
 
@@ -225,7 +226,13 @@ def runtime_build_store() -> BuildStore | None:
     if artifact_dir is None:
         return None
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    return get_build_store(artifact_dir / "artifacts.sqlite")
+    # Build rows live in the artifact store's database, so they follow
+    # whichever backend it is on.
+    artifact_store = get_artifact_store(artifact_dir)
+    return get_build_store(
+        artifact_dir / "artifacts.sqlite",
+        dialect=artifact_store.dialect if artifact_store else None,
+    )
 
 
 def require_build_store() -> BuildStore:

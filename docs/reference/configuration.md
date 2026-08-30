@@ -121,8 +121,19 @@ would be shared while the bytes stayed on one node's disk, so another node
 would resolve an artifact and then fail to read it — at fetch time, long
 after the request that created it appeared to succeed.
 
+Build state follows the same backend, since build rows live in the artifact
+store's database. That is what makes a build started on one node visible to
+`GET /v1/builds/{id}` on another.
+
 The schema is created on first connection. Existing SQLite stores are not
 migrated; a DSN starts an empty store.
+
+One behavioral difference worth knowing: `artifact_builds` carries a foreign
+key to `artifact_versions`, and **Postgres enforces it while SQLite does not**
+(Strata never enables `PRAGMA foreign_keys`). A build row for an artifact
+version that does not exist is rejected on Postgres and silently accepted on
+SQLite. Strata's own flow creates the artifact version first, so this only
+affects callers writing build rows directly.
 
 ## Authentication
 

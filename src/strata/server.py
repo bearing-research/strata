@@ -834,7 +834,14 @@ async def lifespan(app: FastAPI):
 
         # Initialize stores
         artifact_store = get_artifact_store(artifact_dir)
-        build_store = get_build_store(artifact_dir / "artifacts.sqlite")
+        # Share the artifact store's dialect: build rows live in its
+        # database, so on Postgres they must land there too rather than
+        # in a node-local SQLite file nobody else can see.
+        artifact_store = get_artifact_store(artifact_dir)
+        build_store = get_build_store(
+            artifact_dir / "artifacts.sqlite",
+            dialect=artifact_store.dialect if artifact_store else None,
+        )
 
         if artifact_store and build_store:
             runner_config = RunnerConfig(
@@ -1765,6 +1772,7 @@ async def materialize_artifact(request: MaterializeRequest):
     # Create build record for async execution by the build runner
     # (service mode with transforms enabled, or personal mode embedded).
     if state.config.transforms_runtime_enabled:
+        from strata.artifact_store import get_artifact_store
         from strata.transforms.build_qos import (
             BuildQoSError,
             get_build_qos,
@@ -1777,7 +1785,11 @@ async def materialize_artifact(request: MaterializeRequest):
         # Get build store (uses same directory as artifact store)
         if state.config.artifact_dir is None:
             raise HTTPException(status_code=500, detail="Artifact directory not configured")
-        build_store = get_build_store(state.config.artifact_dir / "artifacts.sqlite")
+        artifact_store = get_artifact_store(state.config.artifact_dir)
+        build_store = get_build_store(
+            state.config.artifact_dir / "artifacts.sqlite",
+            dialect=artifact_store.dialect if artifact_store else None,
+        )
         if build_store is None:
             raise HTTPException(
                 status_code=500,

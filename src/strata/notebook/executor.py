@@ -2221,7 +2221,11 @@ class CellExecutor:
             raise RuntimeError("Artifact store is not configured for signed notebook transport")
 
         artifact_store = get_artifact_store(artifact_dir)
-        build_store = get_build_store(artifact_dir / "artifacts.sqlite")
+        artifact_store = get_artifact_store(artifact_dir)
+        build_store = get_build_store(
+            artifact_dir / "artifacts.sqlite",
+            dialect=artifact_store.dialect if artifact_store else None,
+        )
         if artifact_store is None or build_store is None:
             raise RuntimeError("Build store is not initialized")
 
