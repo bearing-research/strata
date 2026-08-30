@@ -251,6 +251,18 @@ class StrataConfig(BaseSettings):
     # mutating server state).
     stream_state_ttl_seconds: Annotated[float, Field(gt=0)] = 300.0
 
+    # How other nodes reach this one, e.g. "https://strata-3.internal:8765".
+    # Unset means single-node: nothing is written to or read from the stream
+    # ownership table, so the common case pays nothing.
+    #
+    # Setting it is the operator asserting two things: that this deployment
+    # runs several nodes behind one address, and that this URL actually
+    # reaches this node. Streams cannot move between nodes -- a live
+    # asyncio.Task and an in-memory ReadPlan are not shareable -- so a node
+    # asked for someone else's stream redirects to the owner instead of
+    # returning a 404 that is indistinguishable from "expired".
+    node_advertised_url: str | None = None
+
     # QoS: Two-tier admission control
     interactive_slots: Annotated[int, Field(ge=1)] = 32
     bulk_slots: Annotated[int, Field(ge=1)] = 8

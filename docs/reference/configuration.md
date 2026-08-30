@@ -98,6 +98,7 @@ ai_model = "claude-sonnet-4-6"
 | `STRATA_ARTIFACT_AZURE_CONTAINER` | `None`      | Azure container                  |
 | `STRATA_ARTIFACT_AZURE_PREFIX`    | `artifacts` | Azure prefix                     |
 | `STRATA_ARTIFACT_METADATA_DSN`    | `None`      | `postgresql://` URL for the artifact store's metadata. Unset keeps SQLite under `STRATA_ARTIFACT_DIR` |
+| `STRATA_NODE_ADVERTISED_URL`      | `None`      | URL that reaches this node. Set only in multi-node deployments; enables stream redirects instead of 404s |
 
 ### Sharing one artifact store across nodes
 
@@ -185,6 +186,33 @@ metadata lives on Postgres, so the CLI writes where the server reads.
 
 **Revocation is immediate**: verification reads the row on each request, so a
 revoked key stops working at once rather than after a cache expiry.
+
+### Running several nodes behind one address
+
+Streams cannot move between nodes. A stream holds a live task and an in-memory
+read plan, so only the node that planned it can serve it — a request for it
+that lands elsewhere used to return a bare `404`, indistinguishable from an
+expired stream.
+
+Set `STRATA_NODE_ADVERTISED_URL` to the address that reaches *this* node:
+
+```bash
+export STRATA_NODE_ADVERTISED_URL='https://strata-3.internal:8765'
+```
+
+Each node then records which streams it is serving, in the artifact store's
+database, and a node asked for a sibling's stream answers `307` pointing at the
+owner instead of `404`. This removes the need for session affinity on the
+stream-fetch step; the URL must be one clients can actually reach.
+
+Leave it unset for a single-node deployment: nothing is written or read, so
+there is no cost. Claims expire with `STRATA_STREAM_STATE_TTL_SECONDS`, which
+is what stops a node that died from being advertised indefinitely.
+
+Note this makes stream *fetches* routable, not stream *survival*. A node lost
+mid-stream still ends that stream; the artifact behind it is durable and its
+build is reclaimable by another node, so the client re-requests and gets a
+cache hit or joins the in-flight build.
 
 ## Multi-Tenancy
 

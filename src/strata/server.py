@@ -19,7 +19,13 @@ if TYPE_CHECKING:
 import pyarrow as pa
 import pyarrow.ipc as ipc
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 
 from strata.api.dependencies import (
@@ -253,7 +259,52 @@ class ServerState:
         self.streams = StreamRegistry(
             config.stream_state_ttl_seconds,
             on_expire=self.scan_builds.expire_scan,
+            on_claim=self._claim_stream_ownership,
+            on_release=self._release_stream_ownership,
         )
+
+    def _ownership_store(self):
+        """The stream ownership store, or None outside a multi-node setup.
+
+        ``node_advertised_url`` is the gate: unset means single node, and then
+        nothing here reads or writes, so the common case is untouched.
+        """
+        if not self.config.node_advertised_url:
+            return None
+
+        from strata.streaming.ownership import get_stream_ownership_store
+
+        return get_stream_ownership_store()
+
+    def _claim_stream_ownership(self, stream_id: str, ttl_seconds: float) -> None:
+        """Advertise that this node is serving ``stream_id``.
+
+        Best-effort: failing to record a claim costs a redirect that would
+        have been possible, which is the behavior before this existed. It must
+        not fail the materialize request that triggered it.
+        """
+        store = self._ownership_store()
+        if store is None:
+            return
+        try:
+            store.claim(stream_id, self.config.node_advertised_url or "", ttl_seconds)
+        except Exception:
+            logger.warning("stream_ownership_claim_failed", stream_id=stream_id, exc_info=True)
+
+    def _release_stream_ownership(self, stream_id: str) -> None:
+        """Drop the claim when the stream ends. Best-effort for the same reason.
+
+        A claim that outlives its stream expires on its own, so the cost of a
+        missed release is a redirect to a node that answers 404 -- worse than
+        nothing, better than failing the request that was ending anyway.
+        """
+        store = self._ownership_store()
+        if store is None:
+            return
+        try:
+            store.release(stream_id)
+        except Exception:
+            logger.warning("stream_ownership_release_failed", stream_id=stream_id, exc_info=True)
 
 
 # ``StreamState`` moved to ``strata.streaming.registry`` (#302); imported above.
@@ -626,6 +677,18 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
             config.artifact_dir / "artifacts.sqlite",
             dialect=store.dialect if store else None,
         )
+
+    # Stream ownership, only for a multi-node deployment. Streams themselves
+    # stay node-local (their plan and task are in-process); this records which
+    # node holds which stream so a sibling can redirect instead of 404ing.
+    if config.node_advertised_url and config.artifact_dir is not None:
+        from strata.streaming.ownership import get_stream_ownership_store
+
+        get_stream_ownership_store(
+            config.artifact_dir / "artifacts.sqlite",
+            dialect=store.dialect if store else None,
+        )
+        logger.info("stream_ownership_enabled", node_url=config.node_advertised_url)
 
 
 def _should_warn_unset_signing_secret(config: StrataConfig) -> bool:
@@ -2354,6 +2417,31 @@ async def _handle_transform_materialize(request: MaterializeRequest) -> Material
     return await materialize_artifact(request)
 
 
+def _resolve_stream_owner(state: ServerState, stream_id: str) -> str | None:
+    """URL of another node serving ``stream_id``, or None.
+
+    Returns None whenever a redirect would be wrong or impossible: this is a
+    single-node deployment, there is no claim, the claim expired, or this node
+    holds it (in which case the stream really is gone). A lookup failure is
+    also None -- a database hiccup should degrade to today's 404 rather than
+    turn a missing stream into a 500.
+    """
+    node_url = state.config.node_advertised_url
+    if not node_url:
+        return None
+
+    from strata.streaming.ownership import get_stream_ownership_store
+
+    store = get_stream_ownership_store()
+    if store is None:
+        return None
+    try:
+        return store.resolve(stream_id, exclude_node_url=node_url)
+    except Exception:
+        logger.warning("stream_owner_lookup_failed", stream_id=stream_id, exc_info=True)
+        return None
+
+
 @app.get("/v1/streams/{stream_id}")
 async def get_stream(stream_id: str, request: Request):
     """Stream Arrow IPC data for a materialize request.
@@ -2373,6 +2461,19 @@ async def get_stream(stream_id: str, request: Request):
     # Look up stream state
     stream_state = state.streams.get(stream_id)
     if stream_state is None:
+        # Not here. In a multi-node deployment it may be live on a sibling:
+        # a stream cannot move between nodes, because its plan and its task
+        # are in-process, so the request has to go where the stream already
+        # is. Returning a bare 404 makes a routing problem look identical to
+        # an expired stream, which is the failure this resolves.
+        owner_url = _resolve_stream_owner(state, stream_id)
+        if owner_url is not None:
+            logger.info("stream_redirected", stream_id=stream_id, owner=owner_url)
+            return RedirectResponse(
+                url=f"{owner_url.rstrip('/')}/v1/streams/{stream_id}",
+                # 307 rather than 302: the method must survive the redirect.
+                status_code=307,
+            )
         raise HTTPException(status_code=404, detail=f"Stream {stream_id} not found")
 
     plan = stream_state.plan

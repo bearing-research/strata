@@ -68,11 +68,18 @@ class StreamRegistry:
         ttl_seconds: float,
         *,
         on_expire: Callable[[str], None] | None = None,
+        on_claim: Callable[[str, float], None] | None = None,
+        on_release: Callable[[str], None] | None = None,
     ) -> None:
         self._streams: dict[str, StreamState] = {}
         self._cleanup_tasks: dict[str, asyncio.Task[None]] = {}
         self._ttl_seconds = ttl_seconds
         self._on_expire = on_expire
+        # Injected the same way as on_expire, so this module stays unaware of
+        # where ownership is recorded. Both are None in a single-node
+        # deployment, which is what keeps that case free.
+        self._on_claim = on_claim
+        self._on_release = on_release
 
     # --- lookup -------------------------------------------------------------
 
@@ -90,9 +97,14 @@ class StreamRegistry:
 
     def register(self, stream_state: StreamState) -> None:
         self._streams[stream_state.stream_id] = stream_state
+        if self._on_claim is not None:
+            self._on_claim(stream_state.stream_id, self._ttl_seconds)
 
     def pop(self, stream_id: str) -> StreamState | None:
-        return self._streams.pop(stream_id, None)
+        popped = self._streams.pop(stream_id, None)
+        if popped is not None and self._on_release is not None:
+            self._on_release(stream_id)
+        return popped
 
     # --- cleanup lifecycle --------------------------------------------------
 
@@ -130,7 +142,12 @@ class StreamRegistry:
 
             if scan_id is not None and self._on_expire is not None:
                 self._on_expire(scan_id)
-            self._streams.pop(stream_id, None)
+            if self._streams.pop(stream_id, None) is not None and self._on_release is not None:
+                # This path pops the dict directly rather than through pop(),
+                # so the claim has to be dropped here as well or an expired
+                # stream would keep advertising this node until its row's own
+                # expiry caught up.
+                self._on_release(stream_id)
 
         self._cleanup_tasks[stream_id] = asyncio.create_task(_cleanup())
 
