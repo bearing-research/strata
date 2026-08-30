@@ -484,6 +484,15 @@ class ArtifactStore:
         """
         return self._dialect.connect()
 
+    @property
+    def dialect(self) -> SqlDialect:
+        """The metadata backend this store is using.
+
+        Public so the build store can share it: build rows live in the same
+        database, and sharing the dialect shares its connection pool too.
+        """
+        return self._dialect
+
     def close(self) -> None:
         """Release backend resources. Idempotent, and safe to skip on SQLite.
 

@@ -17,11 +17,12 @@ Database schema stored in artifact_store's artifacts.sqlite for consistency.
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from strata.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
 if TYPE_CHECKING:
     pass
@@ -143,7 +144,7 @@ class BuildState:
         }
 
 
-def _row_to_build_state(row: sqlite3.Row) -> BuildState:
+def _row_to_build_state(row: Any) -> BuildState:
     """Convert a database row to BuildState.
 
     Args:
@@ -207,32 +208,53 @@ def _row_to_build_state(row: sqlite3.Row) -> BuildState:
 
 
 class BuildStore:
-    """SQLite-backed build state store.
+    """Build state store, on whichever backend the artifact store uses.
 
-    Thread-safe: uses connection per operation with WAL mode.
+    Thread-safe: a connection per operation, from the dialect.
+
+    Build rows live in the artifact store's database, so this shares its
+    dialect rather than owning one. That is not only tidiness: with metadata
+    on Postgres, a build claimed on one node has to be visible to
+    ``GET /v1/builds/{id}`` on another, which is the whole reason the
+    artifact store moved off a local file.
     """
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, dialect: SqlDialect | None = None):
         """Initialize build store.
 
         Args:
-            db_path: Path to SQLite database (shared with artifact store)
+            db_path: Path to the SQLite database (shared with the artifact
+                store). Ignored when ``dialect`` is given, since the backend
+                then decides where state lives.
+            dialect: Optional metadata backend. Defaults to SQLite at
+                ``db_path``, which is what personal mode wants. Pass the
+                artifact store's dialect to share its database and pool.
         """
         self.db_path = db_path
+        self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(db_path)
         self._init_schema()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get a new database connection with WAL mode."""
-        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _get_connection(self) -> StoreConnection:
+        """Open a connection configured by the active dialect."""
+        return self._dialect.connect()
 
     def _init_schema(self) -> None:
         """Initialize build state schema with migrations for lease columns."""
         conn = self._get_connection()
         try:
+            # The migration below upgrades databases written by older Strata
+            # versions and speaks SQLite's introspection vocabulary. A backend
+            # added after those versions has no such history. The schema lock
+            # matters for the same reason it does in the artifact store:
+            # CREATE TABLE IF NOT EXISTS races in Postgres, and every node runs
+            # this at startup.
+            if not self._dialect.supports_legacy_migration:
+                if not self._dialect.schema_exists(conn, "artifact_builds"):
+                    self._dialect.begin_write(conn, "__build_schema__")
+                    conn.executescript(self._dialect.adapt_ddl(_BUILD_SCHEMA_SQL))
+                    conn.commit()
+                return
+
             # Check if table exists and needs migration
             cursor = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_builds'"
@@ -808,18 +830,24 @@ class BuildStore:
 _build_store: BuildStore | None = None
 
 
-def get_build_store(db_path: Path | None = None) -> BuildStore | None:
+def get_build_store(
+    db_path: Path | None = None,
+    dialect: SqlDialect | None = None,
+) -> BuildStore | None:
     """Get the build store singleton.
 
     Args:
-        db_path: Path to SQLite database (required on first call)
+        db_path: Path to the SQLite database (required on first call)
+        dialect: Optional metadata backend, normally the artifact store's so
+            both share one database and one pool. Like the artifact-store
+            factory, this only applies on the call that creates the singleton.
 
     Returns:
         BuildStore instance, or None if not initialized
     """
     global _build_store
     if _build_store is None and db_path is not None:
-        _build_store = BuildStore(db_path)
+        _build_store = BuildStore(db_path, dialect=dialect)
     return _build_store
 
 

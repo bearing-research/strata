@@ -484,6 +484,104 @@ class TestConfigurationSelectsTheBackend:
             reset_artifact_store()
 
 
+class TestBuildStoreSharesTheBackend:
+    """Build rows live in the artifact store's database, so they follow it.
+
+    Left on a node-local SQLite file, a build claimed on one node would be
+    invisible to ``GET /v1/builds/{id}`` on another -- which defeats the point
+    of moving the artifact store off local disk in the first place.
+    """
+
+    def test_build_created_on_one_node_is_visible_on_another(self, postgres_dsn, tmp_path):
+        from strata.transforms.build_store import BuildStore
+
+        dialect_a = PostgresDialect(postgres_dsn)
+        dialect_b = PostgresDialect(postgres_dsn)
+        try:
+            conn = dialect_a.connect()
+            conn.executescript(
+                "DROP TABLE IF EXISTS artifact_builds, artifact_versions, "
+                "artifact_names, artifact_aliases, artifact_tags, "
+                "registry_audit, registry_pending CASCADE;"
+            )
+            conn.commit()
+            conn.close()
+
+            # The artifact store first: artifact_builds carries a FOREIGN KEY
+            # to artifact_versions, and Postgres both requires the referenced
+            # table to exist at CREATE time and enforces the reference on
+            # insert. SQLite did neither -- it never turns foreign_keys on
+            # (issue #555) -- so this ordering is newly load-bearing. The
+            # server's call sites now build the artifact store first for
+            # exactly this reason.
+            store_a = ArtifactStore(tmp_path / "a", dialect=dialect_a)
+            version = store_a.create_artifact("art-1", "prov-1", _spec())
+
+            node_a = BuildStore(tmp_path / "a.sqlite", dialect=dialect_a)
+            node_b = BuildStore(tmp_path / "b.sqlite", dialect=dialect_b)
+
+            build_id = "build-cross-node"
+            node_a.create_build(
+                build_id=build_id,
+                artifact_id="art-1",
+                version=version,
+                executor_ref="duckdb_sql_v1",
+            )
+            # The node that did not create it can still see it.
+            seen = node_b.get_build(build_id)
+            assert seen is not None
+            assert seen.artifact_id == "art-1"
+
+            # And a claim made on B is observed by A.
+            assert node_b.start_build(build_id) is True
+            assert node_a.get_build(build_id).state == "building"
+
+            # No SQLite file was created for either node.
+            assert not (tmp_path / "a.sqlite").exists()
+            assert not (tmp_path / "b.sqlite").exists()
+        finally:
+            dialect_a.close()
+            dialect_b.close()
+
+    def test_build_columns_survive_postgres_widths(self, postgres_dsn, tmp_path):
+        # Same INTEGER/REAL traps as the artifact store: byte counts are
+        # INTEGER and timestamps are REAL in the shared schema.
+        from strata.transforms.build_store import BuildStore
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            conn = dialect.connect()
+            conn.executescript(
+                "DROP TABLE IF EXISTS artifact_builds, artifact_versions, "
+                "artifact_names, artifact_aliases, artifact_tags, "
+                "registry_audit, registry_pending CASCADE;"
+            )
+            conn.commit()
+            conn.close()
+
+            artifacts = ArtifactStore(tmp_path / "w", dialect=dialect)
+            version = artifacts.create_artifact("big", "prov-big", _spec())
+
+            store = BuildStore(tmp_path / "x.sqlite", dialect=dialect)
+            before = time.time()
+            build_id = "build-widths"
+            store.create_build(
+                build_id=build_id,
+                artifact_id="big",
+                version=version,
+                executor_ref="duckdb_sql_v1",
+            )
+            store.start_build(build_id)
+            store.complete_build(build_id, output_byte_count=3 * 1024**3)
+            after = time.time()
+
+            build = store.get_build(build_id)
+            assert build.output_byte_count == 3 * 1024**3
+            assert before <= build.created_at <= after
+        finally:
+            dialect.close()
+
+
 class TestTimestampPrecision:
     """The REAL-vs-DOUBLE PRECISION trap, checked against a live server."""
 

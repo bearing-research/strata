@@ -278,13 +278,12 @@ class SqlDialect(Protocol):
         """
         ...
 
-    def schema_exists(self, conn: StoreConnection) -> bool:
-        """Whether the store's tables are already present.
+    def schema_exists(self, conn: StoreConnection, table: str = "artifact_versions") -> bool:
+        """Whether ``table`` is already present.
 
         Lets ``_init_schema`` skip the global schema lock on every subsequent
-        construction; several call sites build an ``ArtifactStore`` per
-        session, so taking it unconditionally would funnel them all through
-        one mutex.
+        construction; several call sites build a store per session, so taking
+        it unconditionally would funnel them all through one mutex.
         """
         ...
 
@@ -359,9 +358,9 @@ class SqliteDialect:
     def supports_legacy_migration(self) -> bool:
         return True
 
-    def schema_exists(self, conn: StoreConnection) -> bool:
+    def schema_exists(self, conn: StoreConnection, table: str = "artifact_versions") -> bool:
         row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_versions'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = ?", (table,)
         ).fetchone()
         return row is not None
 
@@ -605,8 +604,8 @@ class PostgresDialect:
                 self._pool.close()
                 self._pool = None
 
-    def schema_exists(self, conn: StoreConnection) -> bool:
-        row = conn.execute("SELECT to_regclass('artifact_versions')").fetchone()
+    def schema_exists(self, conn: StoreConnection, table: str = "artifact_versions") -> bool:
+        row = conn.execute("SELECT to_regclass(?)", (table,)).fetchone()
         return row is not None and row[0] is not None
 
     def adapt_ddl(self, sql: str) -> str:
