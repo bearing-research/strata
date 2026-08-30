@@ -1674,6 +1674,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Authentication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api-key-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API key authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2144,6 +2161,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Authentication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#api-key-authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API key authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2597,7 +2631,7 @@ affects callers writing build rows directly.</p>
 <tr>
 <td><code>STRATA_AUTH_MODE</code></td>
 <td><code>none</code></td>
-<td><code>none</code> or <code>trusted_proxy</code></td>
+<td><code>none</code>, <code>trusted_proxy</code>, or <code>api_key</code></td>
 </tr>
 <tr>
 <td><code>STRATA_PROXY_TOKEN</code></td>
@@ -2626,6 +2660,35 @@ affects callers writing build rows directly.</p>
 </tr>
 </tbody>
 </table>
+<h3 id="api-key-authentication">API key authentication<a class="headerlink" href="#api-key-authentication" title="Permanent link">&para;</a></h3>
+<p><code>STRATA_AUTH_MODE=api_key</code> is the mode where Strata authenticates callers
+itself, rather than trusting a proxy to have done it. Clients present a key as
+a bearer token:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Authorization: Bearer strata_&lt;key_id&gt;_&lt;secret&gt;
+</code></pre></div>
+<p>A key resolves to the same principal a proxy header would have produced, so ACL
+rules, tenant scoping, and scope checks behave identically across both modes.</p>
+<p>Keys are stored in the artifact store's database, which means they follow
+whichever metadata backend it uses and are shared across nodes automatically.
+Service mode with <code>auth_mode='api_key'</code> therefore requires <code>artifact_dir</code>;
+personal mode rejects the mode outright, since authenticating to your own
+loopback-bound single-user server buys nothing.</p>
+<p>Mint the first key from the CLI — no running server needed, which is what
+makes bootstrapping possible:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>strata<span class="w"> </span>apikey<span class="w"> </span>create<span class="w"> </span>svc-etl<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--tenant<span class="w"> </span>acme<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--scope<span class="w"> </span>artifacts:write<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">&quot;ETL pipeline&quot;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>strata<span class="w"> </span>apikey<span class="w"> </span>list
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>strata<span class="w"> </span>apikey<span class="w"> </span>revoke<span class="w"> </span>&lt;key_id&gt;
+</code></pre></div>
+<p>The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
+shown again — by you or by us — and a database disclosure yields no usable
+credentials. Pass <code>--dsn</code> (or set <code>STRATA_ARTIFACT_METADATA_DSN</code>) when the
+metadata lives on Postgres, so the CLI writes where the server reads.</p>
+<p><strong>Revocation is immediate</strong>: verification reads the row on each request, so a
+revoked key stops working at once rather than after a cache expiry.</p>
 <h2 id="multi-tenancy">Multi-Tenancy<a class="headerlink" href="#multi-tenancy" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2968,14 +3031,14 @@ toggles <code>enabled</code> there.</p>
 <p>Provider-specific keys auto-configure <code>base_url</code> and <code>model</code> defaults.
 <code>STRATA_AI_*</code> variables override provider defaults. Notebook-level <code>[ai]</code>
 config in <code>notebook.toml</code> overrides both.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[ai]</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434/v1&quot;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;llama3&quot;</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">max_context_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">approval_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">120.0</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[ai]</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434/v1&quot;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;llama3&quot;</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">max_context_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">approval_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">120.0</span>
 </code></pre></div>
 <p>All fields are optional, set only the ones you want to override.</p>
 <h2 id="timeouts">Timeouts<a class="headerlink" href="#timeouts" title="Permanent link">&para;</a></h2>
