@@ -2573,8 +2573,17 @@ Strata nodes can share one store.</p>
 would be shared while the bytes stayed on one node's disk, so another node
 would resolve an artifact and then fail to read it — at fetch time, long
 after the request that created it appeared to succeed.</p>
+<p>Build state follows the same backend, since build rows live in the artifact
+store's database. That is what makes a build started on one node visible to
+<code>GET /v1/builds/{id}</code> on another.</p>
 <p>The schema is created on first connection. Existing SQLite stores are not
 migrated; a DSN starts an empty store.</p>
+<p>One behavioral difference worth knowing: <code>artifact_builds</code> carries a foreign
+key to <code>artifact_versions</code>, and <strong>Postgres enforces it while SQLite does not</strong>
+(Strata never enables <code>PRAGMA foreign_keys</code>). A build row for an artifact
+version that does not exist is rejected on Postgres and silently accepted on
+SQLite. Strata's own flow creates the artifact version first, so this only
+affects callers writing build rows directly.</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
