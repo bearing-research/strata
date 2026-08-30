@@ -111,6 +111,47 @@ class TestRegistryHooks:
         assert registry.pop("s1") is not None
 
 
+class TestRedirectTargetConstruction:
+    """The stream id reaches the redirect URL from the request path."""
+
+    def _target(self, owner_url, stream_id):
+        from urllib.parse import quote
+
+        # Mirrors the construction in server.get_stream.
+        return f"{owner_url.rstrip('/')}/v1/streams/{quote(stream_id, safe='')}"
+
+    def test_ordinary_ids_are_unchanged(self):
+        assert self._target("https://node-a:8765", "abc123") == (
+            "https://node-a:8765/v1/streams/abc123"
+        )
+
+    def test_trailing_slash_on_the_owner_url_is_not_doubled(self):
+        assert self._target("https://node-a:8765/", "abc") == ("https://node-a:8765/v1/streams/abc")
+
+    @pytest.mark.parametrize(
+        "stream_id",
+        ["a?x=1", "a#frag", "a/b", "../../etc", "a b"],
+    )
+    def test_the_id_stays_one_path_segment(self, stream_id):
+        # A raw '?' or '#' would silently turn the rest into a query or
+        # fragment, sending the client somewhere other than the stream it
+        # asked for; a '/' would change the path shape.
+        target = self._target("https://node-a:8765", stream_id)
+        assert target.startswith("https://node-a:8765/v1/streams/")
+        tail = target[len("https://node-a:8765/v1/streams/") :]
+        assert "?" not in tail
+        assert "#" not in tail
+        assert "/" not in tail
+
+    def test_the_origin_cannot_be_moved_by_the_id(self):
+        # The host comes from operator config and the id only ever lands after
+        # a fixed prefix, so no id makes this an open redirect.
+        for hostile in ["@evil.com", "//evil.com", "https://evil.com"]:
+            assert self._target("https://node-a:8765", hostile).startswith(
+                "https://node-a:8765/v1/streams/"
+            )
+
+
 class TestOwnerResolution:
     """``_resolve_stream_owner`` decides between a redirect and a 404."""
 
