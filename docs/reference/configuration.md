@@ -126,8 +126,29 @@ Build state follows the same backend, since build rows live in the artifact
 store's database. That is what makes a build started on one node visible to
 `GET /v1/builds/{id}` on another.
 
-The schema is created on first connection. Existing SQLite stores are not
-migrated; a DSN starts an empty store.
+The schema is created on first connection. **A DSN starts an empty store** —
+existing SQLite metadata is not carried over automatically. To move one:
+
+```bash
+# 1. Boot once against the target so the stores create their schema.
+STRATA_ARTIFACT_METADATA_DSN='postgresql://...' python -m strata   # then stop it
+
+# 2. See what would move.
+strata migrate --to-dsn 'postgresql://...' --dry-run
+
+# 3. Move it.
+strata migrate --to-dsn 'postgresql://...'
+```
+
+The copy is idempotent — rows already in the target are skipped, so an
+interrupted run can be repeated with `--allow-nonempty-target`. It refuses a
+populated target otherwise, because merging two different stores is not
+recoverable.
+
+**Blobs are not copied.** Point the target deployment at the same blob backend,
+or its metadata will resolve to bytes it cannot read. Live stream-ownership
+rows are also skipped, since they describe streams that do not survive the
+move.
 
 One behavioral difference worth knowing: `artifact_builds` carries a foreign
 key to `artifact_versions`, and **Postgres enforces it while SQLite does not**

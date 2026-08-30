@@ -82,6 +82,7 @@ jobs:
         run: |
           uv run pytest \
             tests/test_artifact_store_postgres.py \
+            tests/test_migrate_to_postgres.py \
             -v --tb=short -p no:cacheprovider
 
       - name: Run emulator-backed mount integration tests
