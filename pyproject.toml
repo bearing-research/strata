@@ -63,6 +63,13 @@ azure = [
     "azure-storage-blob>=12.20.0",
     "azure-identity>=1.15.0",
 ]
+# Postgres metadata backend for the artifact store. Only needed to run the
+# store's system of record on a shared server instead of a local SQLite
+# file — that is, to run more than one Strata node against one store.
+# Personal mode never needs this.
+postgres = [
+    "psycopg[binary]>=3.1",
+]
 # Strata Notebook runtime — DataFrame / Series / ndarray
 # serialization, display outputs (figures, images), and the
 # cloudpickle-backed object codec used for cell output values.

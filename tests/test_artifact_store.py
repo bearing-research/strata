@@ -1177,6 +1177,84 @@ class TestTenantNormalization:
         resolved = store.resolve_name("my-name")
         assert resolved.id == "none-art"
 
+    def test_force_finalize_canonical_retries_past_a_losing_race(self, store):
+        """A competing writer can commit a ready row with our provenance between
+        our supersede and our promote, and the uniqueness index then rejects us.
+
+        Returning the winner would be wrong: the only caller reaches this method
+        *because* finalize landed under a foreign id, so handing that id back
+        leaves the canonical row 'failed' and the caller none the wiser. The
+        retry is what makes the promotion actually happen.
+
+        This cannot occur under SQLite in production -- BEGIN IMMEDIATE locks
+        the whole file -- so the conflict is injected. The retry loop itself is
+        dialect-agnostic, which is what this exercises.
+        """
+        import sqlite3
+
+        store.create_artifact("equiv", "race-prov", tenant="team-a")
+        store.finalize_artifact("equiv", 1, "{}", 1, 10)
+        store.create_artifact("canonical", "race-prov", tenant="team-a")
+        store.finalize_artifact("canonical", 1, "{}", 1, 10)
+
+        real_get_connection = store._get_connection
+        # Counting commits, not connections: the trailing get_artifact opens
+        # one more connection but never commits.
+        commits = []
+
+        class _FailsCommitOnce:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+            def commit(self):
+                commits.append(1)
+                if len(commits) == 1:
+                    raise sqlite3.IntegrityError("injected UNIQUE constraint failure")
+                return self._inner.commit()
+
+        store._get_connection = lambda: _FailsCommitOnce(real_get_connection())
+        try:
+            promoted = store.force_finalize_canonical("canonical", 1, "{}", 1, 10)
+        finally:
+            store._get_connection = real_get_connection
+
+        assert len(commits) == 2, "expected exactly one retry after the conflict"
+        assert promoted is not None
+        assert promoted.id == "canonical", "must never hand back the foreign winner"
+        assert promoted.state == "ready"
+
+    def test_force_finalize_canonical_surfaces_a_persistent_conflict(self, store):
+        """Sustained contention has to stay visible rather than silently report
+        a promotion that did not happen."""
+        import sqlite3
+
+        store.create_artifact("equiv", "race-prov", tenant="team-a")
+        store.finalize_artifact("equiv", 1, "{}", 1, 10)
+        store.create_artifact("canonical", "race-prov", tenant="team-a")
+        store.finalize_artifact("canonical", 1, "{}", 1, 10)
+
+        real_get_connection = store._get_connection
+
+        class _AlwaysFailsCommit:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+            def commit(self):
+                raise sqlite3.IntegrityError("injected UNIQUE constraint failure")
+
+        store._get_connection = lambda: _AlwaysFailsCommit(real_get_connection())
+        try:
+            with pytest.raises(sqlite3.IntegrityError):
+                store.force_finalize_canonical("canonical", 1, "{}", 1, 10)
+        finally:
+            store._get_connection = real_get_connection
+
     def test_force_finalize_canonical_supersedes_conflicting_ready_row(self, store):
         """Promoting a dedup-failed canonical row supersedes the equivalent ready
         row so only one ready row per (tenant, provenance) survives (finding #3),

@@ -78,6 +78,12 @@ jobs:
       - name: Run integration tests
         run: uv run python scripts/integration_test.py --start-server
 
+      - name: Run Postgres-backed artifact store tests
+        run: |
+          uv run pytest \
+            tests/test_artifact_store_postgres.py \
+            -v --tb=short -p no:cacheprovider
+
       - name: Run emulator-backed mount integration tests
         run: |
           uv run pytest \
