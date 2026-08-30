@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from strata.migrate import migrate, plan_migration
-from strata.sql_backend import PostgresDialect, SqliteDialect
+from strata.sql_backend import SqliteDialect
 
 
 def cmd_migrate(args: argparse.Namespace) -> int:
@@ -22,17 +22,21 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         print("No target. Pass --to-dsn or set STRATA_ARTIFACT_METADATA_DSN.")
         return 1
 
-    # Open the source through ArtifactStore first. Its schema init normalizes
-    # legacy NULL tenants to '', which the Postgres schema declares NOT NULL --
-    # and a column supplied explicitly does not pick up its DEFAULT, so those
-    # rows would be rejected one by one. Reachable whenever an operator
-    # upgrades and migrates without booting the old store on this version.
-    from strata.artifact_store import ArtifactStore
+    # Validate the DSN the same way the server does, so an unsupported scheme
+    # or a missing [postgres] extra produces the established message rather
+    # than an opaque driver traceback out of the pool.
+    from strata.config import StrataConfig
 
-    ArtifactStore(artifact_dir)
+    try:
+        target = StrataConfig(artifact_metadata_dsn=dsn).create_metadata_dialect()
+    except ValueError as exc:
+        print(f"Refused: {exc}")
+        return 1
+    if target is None:  # pragma: no cover - guarded by the check above
+        print("Refused: no target dialect for that DSN.")
+        return 1
 
     source = SqliteDialect(source_db)
-    target = PostgresDialect(dsn)
     try:
         plan = plan_migration(source, target)
 
@@ -57,7 +61,21 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
         if args.dry_run:
             print(f"Dry run: {plan.total_rows} rows would be considered.")
+            if not plan.target_is_empty:
+                # The real run refuses this; saying so now is the point of a
+                # dry run. Reported rather than failed: the operator may
+                # intend to resume.
+                print("Target already holds rows; the real run needs --allow-nonempty-target.")
             return 0
+
+        # Only now, and only for a real run. ArtifactStore's schema init
+        # upgrades a legacy store in place -- adds columns, rebuilds indexes
+        # and artifact_names, switches the file to WAL -- which normalizes the
+        # NULL tenants the Postgres schema declares NOT NULL. Doing it above
+        # made --dry-run rewrite the source it promised only to read.
+        from strata.artifact_store import ArtifactStore
+
+        ArtifactStore(artifact_dir)
 
         result = migrate(source, target, allow_nonempty_target=args.allow_nonempty_target)
         print(f"Copied {result.total_copied} rows, skipped {result.total_skipped} already present.")
@@ -75,7 +93,10 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         print()
         print("Blobs are not copied. Point the target deployment at the same blob")
         print("backend, or the metadata will resolve to bytes it cannot read.")
-        return 0
+
+        # Non-zero when anything was refused, so `strata migrate && cut-over`
+        # does not switch traffic to a target that is missing rows.
+        return 1 if result.rejected else 0
     except ValueError as exc:
         print(f"Refused: {exc}")
         return 1

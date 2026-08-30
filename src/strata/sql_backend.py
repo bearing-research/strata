@@ -268,6 +268,18 @@ class SqlDialect(Protocol):
         ...
 
     @property
+    def rejectable_errors(self) -> tuple[type[Exception], ...]:
+        """Errors a bulk copy should attribute to one row, not the whole run.
+
+        Constraint violations are the obvious case, but not the only one: a
+        value SQLite stores happily can be rejected outright by a stricter
+        engine -- a NUL byte inside TEXT is the reachable example, via
+        executor logs or user-supplied tag values. Both mean "this row cannot
+        come", and neither is a reason to abandon the rows around it.
+        """
+        ...
+
+    @property
     def supports_legacy_migration(self) -> bool:
         """Whether pre-tenant-column databases can exist for this backend.
 
@@ -364,6 +376,10 @@ class SqliteDialect:
     @property
     def integrity_error(self) -> type[Exception]:
         return sqlite3.IntegrityError
+
+    @property
+    def rejectable_errors(self) -> tuple[type[Exception], ...]:
+        return (sqlite3.IntegrityError, sqlite3.DataError)
 
     @property
     def supports_legacy_migration(self) -> bool:
@@ -650,6 +666,12 @@ class PostgresDialect:
         import psycopg
 
         return psycopg.IntegrityError
+
+    @property
+    def rejectable_errors(self) -> tuple[type[Exception], ...]:
+        import psycopg
+
+        return (psycopg.IntegrityError, psycopg.DataError)
 
     @property
     def supports_legacy_migration(self) -> bool:

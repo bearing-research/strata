@@ -145,6 +145,16 @@ interrupted run can be repeated with `--allow-nonempty-target`. It refuses a
 populated target otherwise, because merging two different stores is not
 recoverable.
 
+Rows the target refuses are reported and the run continues; `strata migrate`
+then **exits non-zero**, so `strata migrate && cut-over` will not switch traffic
+to a target that is missing rows. The usual cause is a build row referencing an
+artifact version that `garbage_collect` or `delete_artifact` removed — a
+dangling reference SQLite tolerated and Postgres does not.
+
+`--dry-run` makes no schema or data changes. It does open the source with
+Strata's normal SQLite settings, which sets `journal_mode=WAL` on the file, the
+same as starting the server against it.
+
 **Blobs are not copied.** Point the target deployment at the same blob backend,
 or its metadata will resolve to bytes it cannot read. Live stream-ownership
 rows are also skipped, since they describe streams that do not survive the
