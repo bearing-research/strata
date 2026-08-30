@@ -155,6 +155,122 @@ class TestMigration:
         migrated.set_alias("daily", "candidate", "a1", 1)
         assert len(migrated.read_audit()) == before + 1
 
+    def test_the_audit_sequence_is_resynced_on_a_resumed_run(
+        self, populated_sqlite, target, tmp_path
+    ):
+        # A run killed between the last commit and the resync leaves the rows
+        # in place with the sequence still at 1. The resumed run copies
+        # nothing, so gating the resync on "did this run copy" would skip it
+        # forever and reintroduce the collision.
+        migrate(self._source(tmp_path), target)
+        conn = target.connect()
+        try:
+            # Put the sequence back where an interrupted run would have left it.
+            conn.execute("SELECT setval(pg_get_serial_sequence('registry_audit','seq'), 1, false)")
+            conn.commit()
+        finally:
+            conn.close()
+
+        second = migrate(self._source(tmp_path), target, allow_nonempty_target=True)
+        assert second.total_copied == 0
+
+        migrated = ArtifactStore(tmp_path / "tgt", dialect=target)
+        before = len(migrated.read_audit())
+        migrated.set_alias("daily", "candidate", "a1", 1)
+        assert len(migrated.read_audit()) == before + 1
+
+    def test_a_dangling_build_row_is_reported_not_fatal(self, populated_sqlite, target, tmp_path):
+        # garbage_collect, cleanup_failed, and delete_artifact all remove
+        # artifact_versions rows without touching artifact_builds, so a real
+        # store accumulates references Postgres will refuse and SQLite never
+        # checked. One bad row must not strand the whole migration.
+        from strata.transforms.build_store import BuildStore
+
+        builds = BuildStore(tmp_path / "src" / "artifacts.sqlite")
+        builds.create_build(
+            build_id="orphan",
+            artifact_id="does-not-exist",
+            version=1,
+            executor_ref="duckdb_sql_v1",
+        )
+        # The target needs the table too: a deployment with builds has booted
+        # its build store on both sides.
+        BuildStore(tmp_path / "tgt" / "artifacts.sqlite", dialect=target)
+
+        result = migrate(self._source(tmp_path), target)
+
+        assert result.total_copied > 0, "the good rows still moved"
+        assert result.total_rejected == 1
+        table, _key, _reason = result.rejected[0]
+        assert table == "artifact_builds"
+        # And the artifact itself arrived regardless.
+        assert ArtifactStore(tmp_path / "tgt", dialect=target).get_latest_version("a1") is not None
+
+    def test_a_target_missing_only_unused_tables_is_fine(
+        self, populated_sqlite, postgres_dsn, tmp_path
+    ):
+        # The documented flow: boot the artifact store against the target.
+        # Personal mode forbids auth_mode='api_key', so api_keys is never
+        # created -- and artifact_builds only appears when the build store is
+        # constructed. Refusing on those made the documented path exit 1.
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            conn = dialect.connect()
+            conn.executescript(
+                "DROP TABLE IF EXISTS artifact_builds, api_keys, artifact_versions, "
+                "artifact_names, artifact_aliases, artifact_tags, registry_audit, "
+                "registry_pending CASCADE;"
+            )
+            conn.commit()
+            conn.close()
+            ArtifactStore(tmp_path / "tgt2", dialect=dialect)
+
+            plan = plan_migration(self._source(tmp_path), dialect)
+            assert "api_keys" in plan.missing_in_target
+            assert plan.blocking_tables == [], "no source rows need those tables"
+
+            result = migrate(self._source(tmp_path), dialect)
+            assert result.total_copied > 0
+        finally:
+            dialect.close()
+
+    def test_a_blocking_table_is_refused_before_anything_is_written(
+        self, populated_sqlite, postgres_dsn, tmp_path
+    ):
+        # Discovering this mid-loop would leave earlier tables committed, so
+        # the retry would then need allow_nonempty_target for a mistake the
+        # caller never made.
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            conn = dialect.connect()
+            conn.executescript(
+                "DROP TABLE IF EXISTS artifact_builds, api_keys, artifact_versions, "
+                "artifact_names, artifact_aliases, artifact_tags, registry_audit, "
+                "registry_pending CASCADE;"
+            )
+            conn.commit()
+            conn.close()
+            ArtifactStore(tmp_path / "tgt3", dialect=dialect)
+
+            # Drop the one table the source definitely has rows for.
+            conn = dialect.connect()
+            conn.executescript("DROP TABLE artifact_versions CASCADE;")
+            conn.commit()
+            conn.close()
+
+            with pytest.raises(ValueError, match="missing"):
+                migrate(self._source(tmp_path), dialect)
+
+            # Nothing was written on the way to that refusal.
+            conn = dialect.connect()
+            try:
+                remaining = conn.execute("SELECT COUNT(*) FROM artifact_names").fetchone()[0]
+            finally:
+                conn.close()
+            assert remaining == 0
+        finally:
+            dialect.close()
+
     def test_stream_owners_is_not_migrated(self):
         # It records which node serves a live stream; none survive the move.
         assert "stream_owners" not in {table for table, _ in MIGRATED_TABLES}

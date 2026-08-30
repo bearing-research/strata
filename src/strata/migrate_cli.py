@@ -22,6 +22,15 @@ def cmd_migrate(args: argparse.Namespace) -> int:
         print("No target. Pass --to-dsn or set STRATA_ARTIFACT_METADATA_DSN.")
         return 1
 
+    # Open the source through ArtifactStore first. Its schema init normalizes
+    # legacy NULL tenants to '', which the Postgres schema declares NOT NULL --
+    # and a column supplied explicitly does not pick up its DEFAULT, so those
+    # rows would be rejected one by one. Reachable whenever an operator
+    # upgrades and migrates without booting the old store on this version.
+    from strata.artifact_store import ArtifactStore
+
+    ArtifactStore(artifact_dir)
+
     source = SqliteDialect(source_db)
     target = PostgresDialect(dsn)
     try:
@@ -35,10 +44,14 @@ def cmd_migrate(args: argparse.Namespace) -> int:
             print(f"{table:<22} {plan.source_counts[table]:>8} {plan.target_counts[table]:>8}")
         print()
 
-        if plan.missing_in_target:
+        if plan.blocking_tables:
+            # Only tables the source has rows for. api_keys exists only under
+            # auth_mode='api_key' and artifact_builds only when the build store
+            # is constructed, so a target booted the documented way lacks both
+            # -- gating on every missing table made the documented flow fail.
             # The stores create their own schema at startup; deriving the DDL
             # here would give it a second definition free to drift.
-            print(f"Target is missing: {', '.join(plan.missing_in_target)}")
+            print(f"Target is missing: {', '.join(plan.blocking_tables)}")
             print("Start Strata against the target database once, then migrate.")
             return 1
 
@@ -48,6 +61,17 @@ def cmd_migrate(args: argparse.Namespace) -> int:
 
         result = migrate(source, target, allow_nonempty_target=args.allow_nonempty_target)
         print(f"Copied {result.total_copied} rows, skipped {result.total_skipped} already present.")
+
+        if result.rejected:
+            # Usually build rows whose artifact_versions row was deleted by
+            # garbage_collect or delete_artifact: dangling references SQLite
+            # tolerated and Postgres does not.
+            print()
+            print(f"{result.total_rejected} rows were refused by the target:")
+            for table, key, reason in result.rejected[:10]:
+                print(f"  {table} {key}: {reason}")
+            if result.total_rejected > 10:
+                print(f"  ... and {result.total_rejected - 10} more")
         print()
         print("Blobs are not copied. Point the target deployment at the same blob")
         print("backend, or the metadata will resolve to bytes it cannot read.")

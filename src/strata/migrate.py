@@ -57,7 +57,7 @@ MIGRATED_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("api_keys", ("key_id",)),
 )
 
-# Copied in batches so a large store does not have to fit in memory.
+# Rows fetched from the source per round, and per commit on the target.
 _BATCH_ROWS = 500
 
 
@@ -77,6 +77,21 @@ class MigrationPlan:
     def target_is_empty(self) -> bool:
         return all(count == 0 for count in self.target_counts.values())
 
+    @property
+    def blocking_tables(self) -> list[str]:
+        """Missing target tables that actually have rows waiting for them.
+
+        Not every table in ``MIGRATED_TABLES`` exists in every deployment:
+        ``api_keys`` is created only under ``auth_mode='api_key'`` and
+        ``artifact_builds`` only when the build store is constructed. A target
+        booted the documented way legitimately lacks both, and refusing on
+        that made the documented flow exit non-zero every time.
+
+        A table missing from the target only matters when the source has rows
+        that need somewhere to go.
+        """
+        return [table for table in self.missing_in_target if self.source_counts.get(table, 0) > 0]
+
 
 @dataclass
 class MigrationResult:
@@ -84,6 +99,11 @@ class MigrationResult:
 
     copied: dict[str, int] = field(default_factory=dict)
     skipped: dict[str, int] = field(default_factory=dict)
+    # Rows the target refused, as (table, key, reason). Expected rather than
+    # exceptional: a real store accumulates build rows whose artifact_versions
+    # row was deleted by garbage_collect or delete_artifact, and Postgres
+    # enforces the foreign key that SQLite never did.
+    rejected: list[tuple[str, str, str]] = field(default_factory=list)
 
     @property
     def total_copied(self) -> int:
@@ -92,6 +112,10 @@ class MigrationResult:
     @property
     def total_skipped(self) -> int:
         return sum(self.skipped.values())
+
+    @property
+    def total_rejected(self) -> int:
+        return len(self.rejected)
 
 
 def _table_exists(dialect: SqlDialect, conn: StoreConnection, table: str) -> bool:
@@ -162,6 +186,17 @@ def migrate(
     began, and clobbering it would discard newer work.
     """
     plan = plan_migration(source, target)
+
+    # Up front, before anything is written. Discovering this mid-loop leaves
+    # the earlier tables copied and committed, so the retry then needs
+    # allow_nonempty_target for a mistake the caller never made.
+    if plan.blocking_tables:
+        raise ValueError(
+            f"target is missing {plan.blocking_tables}, which the source has rows for. "
+            "Start Strata against the target database once so it creates the schema, "
+            "then migrate."
+        )
+
     if not plan.target_is_empty and not allow_nonempty_target:
         populated = {t: n for t, n in plan.target_counts.items() if n}
         raise ValueError(
@@ -179,25 +214,21 @@ def migrate(
                 result.copied[table] = 0
                 result.skipped[table] = 0
                 continue
-            if not _table_exists(target, tgt_conn, table):
-                # The target schema is created by the stores themselves at
-                # startup. A table missing here means the operator has not
-                # booted against this database yet, and inventing the DDL from
-                # a second place is how two definitions drift apart.
-                raise ValueError(
-                    f"target is missing table {table!r}. Start Strata against the "
-                    "target database once so it creates the schema, then migrate."
-                )
-
-            copied, skipped = _copy_table(src_conn, tgt_conn, table, key_columns)
+            copied, skipped = _copy_table(src_conn, tgt_conn, table, key_columns, target, result)
             result.copied[table] = copied
             result.skipped[table] = skipped
 
             # The rows carried their own primary keys, so a backend-generated
             # key would otherwise start over at 1 and collide on the first
             # write after the migration.
+            #
+            # Not gated on `copied`: a run killed between the last batch commit
+            # and this line leaves the rows in place with the sequence still at
+            # 1, and the resumed run copies nothing, so gating here would skip
+            # the resync forever and reintroduce exactly the collision it
+            # exists to prevent. setval to MAX+1 is idempotent.
             autoincrement_column = _AUTOINCREMENT_COLUMNS.get(table)
-            if copied and autoincrement_column is not None:
+            if autoincrement_column is not None:
                 target.resync_autoincrement(tgt_conn, table, autoincrement_column)
                 tgt_conn.commit()
 
@@ -214,39 +245,62 @@ def _copy_table(
     tgt_conn: StoreConnection,
     table: str,
     key_columns: tuple[str, ...],
+    target: SqlDialect,
+    result: MigrationResult,
 ) -> tuple[int, int]:
     """Copy one table, skipping rows the target already has.
 
-    Returns ``(copied, skipped)``.
+    Streams the source with ``fetchmany`` rather than reading it whole: a
+    multi-million-row ``artifact_versions`` would otherwise be materialized
+    entirely in memory before a single row moved.
+
+    The target's existing keys are read once into a set instead of being
+    probed per row. The probe version cost a network round trip for every row
+    on top of its insert, which on a fresh target is one wasted query per row
+    of the whole store.
+
+    Returns ``(copied, skipped)``; rows the target refuses are recorded on
+    ``result.rejected`` and do not abort the run.
     """
+    existing_keys = _existing_keys(tgt_conn, table, key_columns)
+
     cursor = src_conn.execute(f"SELECT * FROM {table}")  # noqa: S608 - fixed names
-    rows = cursor.fetchall()
-    if not rows:
-        return 0, 0
-
-    columns = tuple(rows[0].keys())
-    placeholders = ", ".join("?" for _ in columns)
-    column_list = ", ".join(columns)
-    where = " AND ".join(f"{c} = ?" for c in key_columns)
-
     copied = 0
     skipped = 0
-    for start in range(0, len(rows), _BATCH_ROWS):
-        for row in rows[start : start + _BATCH_ROWS]:
-            key_values = tuple(row[c] for c in key_columns)
-            existing = tgt_conn.execute(
-                f"SELECT 1 FROM {table} WHERE {where}",  # noqa: S608 - fixed names
-                key_values,
-            ).fetchone()
-            if existing is not None:
+    columns: tuple[str, ...] | None = None
+    statement = ""
+
+    while True:
+        rows = cursor.fetchmany(_BATCH_ROWS)
+        if not rows:
+            break
+        if columns is None:
+            columns = tuple(rows[0].keys())
+            placeholders = ", ".join("?" for _ in columns)
+            statement = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"  # noqa: S608
+
+        for row in rows:
+            key = tuple(row[c] for c in key_columns)
+            if key in existing_keys:
                 skipped += 1
                 continue
-
-            tgt_conn.execute(
-                f"INSERT INTO {table} ({column_list}) VALUES ({placeholders})",  # noqa: S608
-                tuple(row[c] for c in columns),
-            )
-            copied += 1
+            try:
+                tgt_conn.execute(statement, tuple(row[c] for c in columns))
+                copied += 1
+            except target.integrity_error as exc:
+                # A constraint the source never enforced. Aborting here would
+                # strand the migration partway through with everything before
+                # it committed, so the row is reported and the run continues.
+                tgt_conn.rollback()
+                result.rejected.append((table, repr(key), str(exc).strip().splitlines()[0]))
         tgt_conn.commit()
 
     return copied, skipped
+
+
+def _existing_keys(conn: StoreConnection, table: str, key_columns: tuple[str, ...]) -> set[tuple]:
+    """Primary keys already in the target, read in one query."""
+    cursor = conn.execute(
+        f"SELECT {', '.join(key_columns)} FROM {table}"  # noqa: S608 - fixed names
+    )
+    return {tuple(row[c] for c in key_columns) for row in cursor.fetchall()}
