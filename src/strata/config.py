@@ -655,11 +655,12 @@ class StrataConfig(BaseSettings):
             # header is unauthenticated and spoofable, and direct artifact reads
             # aren't tenant-filtered — so multi-tenancy requires trusted-proxy auth
             # to mean anything.
-            if self.multi_tenant_enabled and self.auth_mode != "trusted_proxy":
+            if self.multi_tenant_enabled and not self.principal_auth_enabled:
                 conflicts.append(
-                    "multi_tenant_enabled=True with auth_mode='none' (the tenant "
-                    "header is unauthenticated and spoofable, and reads aren't "
-                    "tenant-filtered without auth; set auth_mode='trusted_proxy')"
+                    f"multi_tenant_enabled=True with auth_mode={self.auth_mode!r} "
+                    "(the tenant header is unauthenticated and spoofable, and "
+                    "reads aren't tenant-filtered without auth; set "
+                    "auth_mode='trusted_proxy' or 'api_key')"
                 )
 
             # Trusted-proxy auth without a shared token is no auth at all:
@@ -676,11 +677,17 @@ class StrataConfig(BaseSettings):
 
             # Authenticated write-back must be attributable: writes are stamped
             # with the caller's principal/tenant, which only exist under auth.
+            # Still trusted-proxy only, deliberately: the write path stamps the
+            # caller's identity into stored artifacts, and that is a wider claim
+            # than a read gate. Named the mode it actually saw, because reporting
+            # 'none' to an api_key deployment sends the operator looking for a
+            # setting that is already correct.
             if self.service_writes_enabled and self.auth_mode != "trusted_proxy":
                 conflicts.append(
-                    "service_writes_enabled=True with auth_mode='none' (writes are "
-                    "attributed to and scoped by the caller's principal/tenant, "
-                    "which require trusted-proxy auth; set auth_mode='trusted_proxy')"
+                    f"service_writes_enabled=True with auth_mode={self.auth_mode!r} "
+                    "(writes are attributed to and scoped by the caller's "
+                    "principal/tenant, which require trusted-proxy auth; set "
+                    "auth_mode='trusted_proxy')"
                 )
 
             # personal_mode_user_header is a personal-mode proxy shim; service
@@ -716,18 +723,19 @@ class StrataConfig(BaseSettings):
                     "its bytes; set artifact_blob_backend to s3, gcs, or azure)"
                 )
 
-            # ACL rules are only evaluated under trusted-proxy auth. Configured
-            # rules with auth_mode='none' would be silently ignored — an operator
-            # who wrote a deny rule would believe they were protected.
+            # ACL rules are only evaluated when a principal was authenticated.
+            # Configured rules without auth would be silently ignored — an
+            # operator who wrote a deny rule would believe they were protected.
             acl_configured = (
                 self.acl_config.default != "allow"
                 or bool(self.acl_config.deny_rules)
                 or bool(self.acl_config.allow_rules)
             )
-            if acl_configured and self.auth_mode != "trusted_proxy":
+            if acl_configured and not self.principal_auth_enabled:
                 conflicts.append(
-                    "acl_config rules with auth_mode='none' (ACL is only enforced "
-                    "under trusted-proxy auth; set auth_mode='trusted_proxy')"
+                    f"acl_config rules with auth_mode={self.auth_mode!r} (ACL is "
+                    "only enforced when the caller is authenticated; set "
+                    "auth_mode='trusted_proxy' or 'api_key')"
                 )
 
             # Transform builds persist artifacts, which require an artifact store
@@ -832,6 +840,19 @@ class StrataConfig(BaseSettings):
     def writes_enabled(self) -> bool:
         """Check if write endpoints are enabled (personal mode only)."""
         return self.deployment_mode == "personal"
+
+    @property
+    def principal_auth_enabled(self) -> bool:
+        """Whether requests carry an authenticated principal to authorize against.
+
+        Authorization gates must ask this, not ``auth_mode == "trusted_proxy"``.
+        A proxy header and a bearer key produce the same ``Principal`` — they
+        differ only in how it was established — so a gate written against one
+        mode silently opens under the other. That is what happened when
+        ``api_key`` was added: it authenticated callers and then authorized
+        none of them.
+        """
+        return self.auth_mode in ("trusted_proxy", "api_key")
 
     @property
     def server_transforms_enabled(self) -> bool:
