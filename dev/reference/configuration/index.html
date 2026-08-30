@@ -2637,8 +2637,25 @@ after the request that created it appeared to succeed.</p>
 <p>Build state follows the same backend, since build rows live in the artifact
 store's database. That is what makes a build started on one node visible to
 <code>GET /v1/builds/{id}</code> on another.</p>
-<p>The schema is created on first connection. Existing SQLite stores are not
-migrated; a DSN starts an empty store.</p>
+<p>The schema is created on first connection. <strong>A DSN starts an empty store</strong> —
+existing SQLite metadata is not carried over automatically. To move one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># 1. Boot once against the target so the stores create their schema.</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">STRATA_ARTIFACT_METADATA_DSN</span><span class="o">=</span><span class="s1">&#39;postgresql://...&#39;</span><span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata<span class="w">   </span><span class="c1"># then stop it</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># 2. See what would move.</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>strata<span class="w"> </span>migrate<span class="w"> </span>--to-dsn<span class="w"> </span><span class="s1">&#39;postgresql://...&#39;</span><span class="w"> </span>--dry-run
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># 3. Move it.</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>strata<span class="w"> </span>migrate<span class="w"> </span>--to-dsn<span class="w"> </span><span class="s1">&#39;postgresql://...&#39;</span>
+</code></pre></div>
+<p>The copy is idempotent — rows already in the target are skipped, so an
+interrupted run can be repeated with <code>--allow-nonempty-target</code>. It refuses a
+populated target otherwise, because merging two different stores is not
+recoverable.</p>
+<p><strong>Blobs are not copied.</strong> Point the target deployment at the same blob backend,
+or its metadata will resolve to bytes it cannot read. Live stream-ownership
+rows are also skipped, since they describe streams that do not survive the
+move.</p>
 <p>One behavioral difference worth knowing: <code>artifact_builds</code> carries a foreign
 key to <code>artifact_versions</code>, and <strong>Postgres enforces it while SQLite does not</strong>
 (Strata never enables <code>PRAGMA foreign_keys</code>). A build row for an artifact
@@ -2691,7 +2708,7 @@ affects callers writing build rows directly.</p>
 <p><code>STRATA_AUTH_MODE=api_key</code> is the mode where Strata authenticates callers
 itself, rather than trusting a proxy to have done it. Clients present a key as
 a bearer token:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Authorization: Bearer strata_&lt;key_id&gt;_&lt;secret&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Authorization: Bearer strata_&lt;key_id&gt;_&lt;secret&gt;
 </code></pre></div>
 <p>A key resolves to the same principal a proxy header would have produced, so ACL
 rules, tenant scoping, and scope checks behave identically across both modes.</p>
@@ -2702,13 +2719,13 @@ personal mode rejects the mode outright, since authenticating to your own
 loopback-bound single-user server buys nothing.</p>
 <p>Mint the first key from the CLI — no running server needed, which is what
 makes bootstrapping possible:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>strata<span class="w"> </span>apikey<span class="w"> </span>create<span class="w"> </span>svc-etl<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--tenant<span class="w"> </span>acme<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>--scope<span class="w"> </span>artifacts:write<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">&quot;ETL pipeline&quot;</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>strata<span class="w"> </span>apikey<span class="w"> </span>list
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>strata<span class="w"> </span>apikey<span class="w"> </span>revoke<span class="w"> </span>&lt;key_id&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>apikey<span class="w"> </span>create<span class="w"> </span>svc-etl<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--tenant<span class="w"> </span>acme<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>--scope<span class="w"> </span>artifacts:write<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">&quot;ETL pipeline&quot;</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>strata<span class="w"> </span>apikey<span class="w"> </span>list
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>strata<span class="w"> </span>apikey<span class="w"> </span>revoke<span class="w"> </span>&lt;key_id&gt;
 </code></pre></div>
 <p>The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
 shown again — by you or by us — and a database disclosure yields no usable
@@ -2722,7 +2739,7 @@ read plan, so only the node that planned it can serve it — a request for it
 that lands elsewhere used to return a bare <code>404</code>, indistinguishable from an
 expired stream.</p>
 <p>Set <code>STRATA_NODE_ADVERTISED_URL</code> to the address that reaches <em>this</em> node:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_NODE_ADVERTISED_URL</span><span class="o">=</span><span class="s1">&#39;https://strata-3.internal:8765&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_NODE_ADVERTISED_URL</span><span class="o">=</span><span class="s1">&#39;https://strata-3.internal:8765&#39;</span>
 </code></pre></div>
 <p>Each node then records which streams it is serving, in the artifact store's
 database, and a node asked for a sibling's stream answers <code>307</code> pointing at the
@@ -3077,14 +3094,14 @@ toggles <code>enabled</code> there.</p>
 <p>Provider-specific keys auto-configure <code>base_url</code> and <code>model</code> defaults.
 <code>STRATA_AI_*</code> variables override provider defaults. Notebook-level <code>[ai]</code>
 config in <code>notebook.toml</code> overrides both.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[ai]</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434/v1&quot;</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;llama3&quot;</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">max_context_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">approval_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">120.0</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[ai]</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434/v1&quot;</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;llama3&quot;</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">max_context_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">approval_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">120.0</span>
 </code></pre></div>
 <p>All fields are optional, set only the ones you want to override.</p>
 <h2 id="timeouts">Timeouts<a class="headerlink" href="#timeouts" title="Permanent link">&para;</a></h2>
