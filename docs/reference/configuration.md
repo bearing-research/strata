@@ -50,6 +50,8 @@ ai_model = "claude-sonnet-4-6"
 | `STRATA_FETCH_PARALLELISM`     | `4`     | Max concurrent fetches per scan |
 | `STRATA_MAX_FETCH_WORKERS`     | `32`    | Max threads in fetch pool       |
 | `STRATA_FETCH_TIMEOUT_SECONDS` | `60.0`  | Per-fetch timeout               |
+| `STRATA_FAST_CONCAT`           | `rust` when the extension is built, else `pyarrow` | Arrow IPC concat implementation. `pyarrow` parses (slower, handles more edge cases) |
+| `STRATA_MMAP_MIN_BYTES`        | `4194304` (4 MiB) | Cache reads at or above this size go through the Rust mmap path; `0` forces it always |
 
 ## Resource Limits
 
@@ -70,8 +72,8 @@ ai_model = "claude-sonnet-4-6"
 | `STRATA_BULK_SLOTS`              | `8`                | Bulk tier concurrency                      |
 | `STRATA_INTERACTIVE_MAX_BYTES`   | `10485760` (10 MB) | Max bytes for interactive classification   |
 | `STRATA_INTERACTIVE_MAX_COLUMNS` | `10`               | Max columns for interactive classification |
-| `STRATA_INTERACTIVE_QUEUE_TIMEOUT` | `10.0`           | Queue wait for an interactive slot (seconds) before 503 |
-| `STRATA_BULK_QUEUE_TIMEOUT`      | `30.0`             | Queue wait for a bulk slot (seconds) before 503 |
+| `STRATA_INTERACTIVE_QUEUE_TIMEOUT` | `10.0`           | Queue wait for an interactive slot (seconds); exceeding it returns 429 with `Retry-After` |
+| `STRATA_BULK_QUEUE_TIMEOUT`      | `30.0`             | Queue wait for a bulk slot (seconds); exceeding it returns 429 with `Retry-After` |
 | `STRATA_PER_CLIENT_INTERACTIVE`  | `2`                | Per-client interactive slots; `0` disables per-client caps |
 | `STRATA_PER_CLIENT_BULK`         | `1`                | Per-client bulk slots; `0` disables per-client caps |
 
@@ -130,8 +132,8 @@ Unset credentials fall back to Application Default Credentials.
 
 | Variable                        | Default | Description                                                      |
 | ------------------------------- | ------- | ---------------------------------------------------------------- |
-| `STRATA_GCS_PROJECT_ID`         | `None`  | GCP project id                                                   |
-| `STRATA_GCS_CREDENTIALS_JSON`   | `None`  | Service-account JSON, inline or a path (`GOOGLE_APPLICATION_CREDENTIALS` is also read) |
+| `STRATA_GCS_PROJECT_ID`         | `None`  | Despite the name, this is passed to PyArrow as the **default bucket location** (`US`, `europe-west1`), not a project id ([#604](https://github.com/bearing-research/strata/issues/604)) |
+| `STRATA_GCS_CREDENTIALS_JSON`   | `None`  | **Path** to a service-account key file (it is assigned to `GOOGLE_APPLICATION_CREDENTIALS`, which the Google client resolves as a path). Inline JSON does not work ([#605](https://github.com/bearing-research/strata/issues/605)) |
 | `STRATA_GCS_ANONYMOUS`          | `false` | Use anonymous access (public buckets, emulators)                 |
 | `STRATA_GCS_ENDPOINT_OVERRIDE`  | `None`  | Custom endpoint (fake-gcs-server and similar)                    |
 
@@ -280,8 +282,10 @@ never match, so it is rejected at startup rather than sitting inert. Unknown
 keys are rejected for the same reason: a mistyped `deny` would otherwise leave
 an ACL that boots clean and enforces nothing.
 
-Rules are only enforced under `auth_mode = "trusted_proxy"` or `"api_key"`;
-configuring rules with `auth_mode = "none"` is rejected at startup.
+Rules are enforced only when the caller is authenticated. Service mode rejects
+configured rules under any other auth mode, so they cannot sit inert. **Personal
+mode does not**: `auth_mode` is always `none` there, so rules are accepted at
+startup and never evaluated. Do not rely on ACL for a personal deployment.
 
 ### API key authentication
 
@@ -402,6 +406,18 @@ deployment, not only in one that opted in to something.
 | `STRATA_PERSONAL_MODE_USER_HEADER`  | `None`                      | Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and `discover`/`delete` scope to it. Intended for proxy-fronted personal deployments. |
 | `STRATA_NOTEBOOK_REMOTE_STORE_URL`  | `None`                      | Point the ambient `strata` client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Unset → the ambient client targets the local server. See [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
 | `STRATA_NOTEBOOK_REMOTE_STORE_HEADERS` | `{}`                     | Auth headers the ambient client attaches when pointed at a remote store (e.g. the trusted-proxy identity/token). JSON object; set via env so secrets stay out of committed config. |
+| `STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES` | `2147483648` (2 GiB) | Per-file cap when packing a notebook bundle for a remote worker. Values that don't parse, or are `<= 0`, fall back to the default. |
+
+## TUI
+
+Defaults for the `strata tui` client; each is also a command-line flag, and the
+flag wins.
+
+| Variable                       | Default                 | Description                                                       |
+| ------------------------------ | ----------------------- | ----------------------------------------------------------------- |
+| `STRATA_TUI_SERVER`            | `http://localhost:8765` | Server the TUI connects to                                        |
+| `STRATA_TUI_USER`              | `None`                  | Caller identity to send, for a personal deployment behind a proxy |
+| `STRATA_TUI_USER_HEADER_NAME`  | `None`                  | Header carrying that identity (matches `STRATA_PERSONAL_MODE_USER_HEADER` on the server) |
 
 ## Worker
 
@@ -432,6 +448,7 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | `STRATA_LOG_LEVEL`            | `INFO`   | Log level               |
 | `STRATA_LOG_FORMAT`           | `json`   | `json` or `text`        |
 | `STRATA_TRACING_ENABLED`      | `false`  | Enable OpenTelemetry    |
+| `STRATA_METRICS_ENABLED`      | `true`   | Set `false` to stop collecting request/cache metrics |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `None`   | OTLP collector endpoint |
 | `OTEL_SERVICE_NAME`           | `strata` | Service name for traces |
 

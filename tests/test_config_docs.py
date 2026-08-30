@@ -28,12 +28,28 @@ _SRC = _REPO / "src"
 # Vars read straight from ``os.environ`` rather than declared on StrataConfig
 # (logging and tracing initialize before config exists; the worker vars are
 # read by ``strata-worker``, a separate process with no StrataConfig at all).
-_ENV_LOOKUP = re.compile(r"""os\.environ(?:\.get)?[(\[]\s*["'](STRATA_[A-Z0-9_]+)["']""")
+_ENV_LOOKUP = re.compile(
+    r"""(?:os\.environ(?:\.get)?[(\[]|os\.getenv\()\s*["'](STRATA_[A-Z0-9_]+)["']"""
+)
 _DOCUMENTED = re.compile(r"`(STRATA_[A-Z0-9_]+)`")
+
+# Internal plumbing, not settings: the parent process hands these to its harness
+# child to wire up batch execution. An operator has nothing to set here.
+_NOT_OPERATOR_FACING = {
+    "STRATA_BATCH_FRAME_FD",
+    "STRATA_BATCH_RESP_FD",
+    "STRATA_BATCH_OUTPUT_DIR",
+}
+
+
+def _read(path: Path) -> str:
+    # Explicit encoding: the default is locale-dependent, and two TUI modules
+    # carry non-cp1252 bytes, so every Windows CI job errored on this test.
+    return path.read_text(encoding="utf-8")
 
 
 def _documented() -> set[str]:
-    return set(_DOCUMENTED.findall(_DOC.read_text()))
+    return set(_DOCUMENTED.findall(_read(_DOC)))
 
 
 def _from_config() -> set[str]:
@@ -43,7 +59,7 @@ def _from_config() -> set[str]:
 def _from_environ_lookups() -> set[str]:
     found: set[str] = set()
     for path in _SRC.rglob("*.py"):
-        found |= set(_ENV_LOOKUP.findall(path.read_text()))
+        found |= set(_ENV_LOOKUP.findall(_read(path)))
     return found
 
 
@@ -61,8 +77,8 @@ def test_every_documented_variable_exists(real):
     )
 
 
-def test_every_config_field_is_documented():
-    undocumented = sorted(_from_config() - _documented())
+def test_every_real_variable_is_documented(real):
+    undocumented = sorted(real - _documented() - _NOT_OPERATOR_FACING)
     assert not undocumented, (
         f"Real settings with no row in {_DOC.relative_to(_REPO)}: {undocumented}"
     )
