@@ -113,6 +113,59 @@ class TestAclNormalization:
         )
         self._assert_parsed(StrataConfig.load(cache_dir=tmp_path / "c"))
 
+    def test_env_acl_parses_the_same_rules(self, monkeypatch, tmp_path):
+        # STRATA_ACL_CONFIG reaches pydantic's env source directly and never
+        # passes through load()'s normalization, so the rules were dropped and
+        # only `default` survived. With `default = "allow"` that fails OPEN:
+        # the operator's deny list disappears and the boot is clean.
+        import json
+
+        _pyproject(
+            monkeypatch,
+            {"deployment_mode": "service", "auth_mode": "trusted_proxy", "proxy_token": "x"},
+        )
+        monkeypatch.setenv("STRATA_ACL_CONFIG", json.dumps(self._ACL))
+        self._assert_parsed(StrataConfig.load(cache_dir=tmp_path / "c"))
+
+    def test_env_deny_rule_actually_denies(self, monkeypatch, tmp_path):
+        # The parse above, carried through to the decision it exists to make.
+        import json
+
+        from strata.auth import AclEvaluator
+        from strata.types import Principal, TableRef
+
+        _pyproject(
+            monkeypatch,
+            {"deployment_mode": "service", "auth_mode": "trusted_proxy", "proxy_token": "x"},
+        )
+        monkeypatch.setenv(
+            "STRATA_ACL_CONFIG",
+            json.dumps({"default": "allow", "deny": [{"tables": ["file:finance.*"]}]}),
+        )
+        config = StrataConfig.load(cache_dir=tmp_path / "c")
+
+        allowed = AclEvaluator(config.acl_config).authorize(
+            Principal(id="analyst", tenant=None, scopes=frozenset({"tables:read"})),
+            TableRef(catalog="file", namespace="finance", table="salaries"),
+        )
+        assert allowed is False
+
+    @pytest.mark.parametrize("key", ["denny", "deny_rule", "rules"])
+    def test_an_unknown_acl_key_is_rejected(self, monkeypatch, tmp_path, key):
+        # A mistyped rule key used to be ignored, leaving an ACL that boots
+        # clean and enforces nothing -- the same silent-disarm shape as above.
+        _pyproject(
+            monkeypatch,
+            {
+                "deployment_mode": "service",
+                "auth_mode": "trusted_proxy",
+                "proxy_token": "x",
+                "acl": {"default": "allow", key: [{"tables": ["*"]}]},
+            },
+        )
+        with pytest.raises(ValueError, match=key):
+            StrataConfig.load(cache_dir=tmp_path / "c")
+
 
 class TestNestedConfigMerge:
     """Findings #4 and #5: env nested overrides must merge, not replace."""

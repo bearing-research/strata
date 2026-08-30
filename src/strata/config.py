@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Field,
@@ -92,11 +93,22 @@ class AclConfig(BaseModel):
         default: Default action when no rules match ("allow" or "deny")
         deny_rules: List of deny rules (checked first)
         allow_rules: List of allow rules (checked second)
+
+    Rules are written as ``deny`` / ``allow`` in both pyproject and
+    ``STRATA_ACL_CONFIG``, so those are accepted as aliases for the field
+    names. Unknown keys are rejected rather than ignored: the failure mode of
+    ignoring one is an ACL that boots clean and enforces nothing.
     """
 
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
     default: Literal["allow", "deny"] = "allow"
-    deny_rules: list[AclRule] = Field(default_factory=list)
-    allow_rules: list[AclRule] = Field(default_factory=list)
+    deny_rules: list[AclRule] = Field(
+        default_factory=list, validation_alias=AliasChoices("deny_rules", "deny")
+    )
+    allow_rules: list[AclRule] = Field(
+        default_factory=list, validation_alias=AliasChoices("allow_rules", "allow")
+    )
 
 
 def _find_pyproject() -> Path | None:
@@ -142,35 +154,14 @@ def _parse_acl_config(raw: dict) -> AclConfig:
 
     Returns:
         Parsed AclConfig object
+
+    This hand-unpacked ``deny``/``allow`` itself, which meant the wire shape
+    was understood *here* and not by the model. Anything reaching AclConfig by
+    another route — ``STRATA_ACL_CONFIG`` goes straight to pydantic's env
+    source, never through this function — had its rules dropped. The model
+    owns the shape now, so every path agrees.
     """
-    if not raw:
-        return AclConfig()
-
-    deny_rules = []
-    for rule_dict in raw.get("deny", []):
-        deny_rules.append(
-            AclRule(
-                principal=rule_dict.get("principal", "*"),
-                tenant=rule_dict.get("tenant"),
-                tables=tuple(rule_dict.get("tables", [])),
-            )
-        )
-
-    allow_rules = []
-    for rule_dict in raw.get("allow", []):
-        allow_rules.append(
-            AclRule(
-                principal=rule_dict.get("principal", "*"),
-                tenant=rule_dict.get("tenant"),
-                tables=tuple(rule_dict.get("tables", [])),
-            )
-        )
-
-    return AclConfig(
-        default=raw.get("default", "allow"),
-        deny_rules=deny_rules,
-        allow_rules=allow_rules,
-    )
+    return AclConfig.model_validate(raw)
 
 
 class StrataConfig(BaseSettings):
