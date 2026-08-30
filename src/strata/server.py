@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
     from strata.adaptive_concurrency import AdaptiveConcurrencyController
 
+from urllib.parse import quote
+
 import pyarrow as pa
 import pyarrow.ipc as ipc
 from fastapi import FastAPI, HTTPException, Request
@@ -2469,8 +2471,16 @@ async def get_stream(stream_id: str, request: Request):
         owner_url = _resolve_stream_owner(state, stream_id)
         if owner_url is not None:
             logger.info("stream_redirected", stream_id=stream_id, owner=owner_url)
+            # quote(safe="") because stream_id reaches here from the request
+            # path. The origin cannot be moved by it -- owner_url is operator
+            # config, and the id only ever lands after a fixed prefix -- but
+            # interpolating it raw still lets a '?' or '#' silently turn the
+            # rest of the path into a query or fragment, sending the client
+            # somewhere other than the stream it asked for. Encoding keeps the
+            # id a single path segment, whatever it contains.
+            target = f"{owner_url.rstrip('/')}/v1/streams/{quote(stream_id, safe='')}"
             return RedirectResponse(
-                url=f"{owner_url.rstrip('/')}/v1/streams/{stream_id}",
+                url=target,
                 # 307 rather than 302: the method must survive the redirect.
                 status_code=307,
             )
