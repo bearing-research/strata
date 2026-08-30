@@ -1688,6 +1688,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#running-several-nodes-behind-one-address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running several nodes behind one address
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2175,6 +2186,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#running-several-nodes-behind-one-address" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running several nodes behind one address
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2589,6 +2611,11 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td><code>None</code></td>
 <td><code>postgresql://</code> URL for the artifact store's metadata. Unset keeps SQLite under <code>STRATA_ARTIFACT_DIR</code></td>
 </tr>
+<tr>
+<td><code>STRATA_NODE_ADVERTISED_URL</code></td>
+<td><code>None</code></td>
+<td>URL that reaches this node. Set only in multi-node deployments; enables stream redirects instead of 404s</td>
+</tr>
 </tbody>
 </table>
 <h3 id="sharing-one-artifact-store-across-nodes">Sharing one artifact store across nodes<a class="headerlink" href="#sharing-one-artifact-store-across-nodes" title="Permanent link">&para;</a></h3>
@@ -2689,6 +2716,25 @@ credentials. Pass <code>--dsn</code> (or set <code>STRATA_ARTIFACT_METADATA_DSN<
 metadata lives on Postgres, so the CLI writes where the server reads.</p>
 <p><strong>Revocation is immediate</strong>: verification reads the row on each request, so a
 revoked key stops working at once rather than after a cache expiry.</p>
+<h3 id="running-several-nodes-behind-one-address">Running several nodes behind one address<a class="headerlink" href="#running-several-nodes-behind-one-address" title="Permanent link">&para;</a></h3>
+<p>Streams cannot move between nodes. A stream holds a live task and an in-memory
+read plan, so only the node that planned it can serve it — a request for it
+that lands elsewhere used to return a bare <code>404</code>, indistinguishable from an
+expired stream.</p>
+<p>Set <code>STRATA_NODE_ADVERTISED_URL</code> to the address that reaches <em>this</em> node:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_NODE_ADVERTISED_URL</span><span class="o">=</span><span class="s1">&#39;https://strata-3.internal:8765&#39;</span>
+</code></pre></div>
+<p>Each node then records which streams it is serving, in the artifact store's
+database, and a node asked for a sibling's stream answers <code>307</code> pointing at the
+owner instead of <code>404</code>. This removes the need for session affinity on the
+stream-fetch step; the URL must be one clients can actually reach.</p>
+<p>Leave it unset for a single-node deployment: nothing is written or read, so
+there is no cost. Claims expire with <code>STRATA_STREAM_STATE_TTL_SECONDS</code>, which
+is what stops a node that died from being advertised indefinitely.</p>
+<p>Note this makes stream <em>fetches</em> routable, not stream <em>survival</em>. A node lost
+mid-stream still ends that stream; the artifact behind it is durable and its
+build is reclaimable by another node, so the client re-requests and gets a
+cache hit or joins the in-flight build.</p>
 <h2 id="multi-tenancy">Multi-Tenancy<a class="headerlink" href="#multi-tenancy" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -3031,14 +3077,14 @@ toggles <code>enabled</code> there.</p>
 <p>Provider-specific keys auto-configure <code>base_url</code> and <code>model</code> defaults.
 <code>STRATA_AI_*</code> variables override provider defaults. Notebook-level <code>[ai]</code>
 config in <code>notebook.toml</code> overrides both.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[ai]</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434/v1&quot;</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;llama3&quot;</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">max_context_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">approval_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">120.0</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[ai]</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434/v1&quot;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;llama3&quot;</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">max_context_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">approval_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">120.0</span>
 </code></pre></div>
 <p>All fields are optional, set only the ones you want to override.</p>
 <h2 id="timeouts">Timeouts<a class="headerlink" href="#timeouts" title="Permanent link">&para;</a></h2>
