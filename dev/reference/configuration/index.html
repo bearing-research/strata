@@ -2652,6 +2652,14 @@ existing SQLite metadata is not carried over automatically. To move one:</p>
 interrupted run can be repeated with <code>--allow-nonempty-target</code>. It refuses a
 populated target otherwise, because merging two different stores is not
 recoverable.</p>
+<p>Rows the target refuses are reported and the run continues; <code>strata migrate</code>
+then <strong>exits non-zero</strong>, so <code>strata migrate &amp;&amp; cut-over</code> will not switch traffic
+to a target that is missing rows. The usual cause is a build row referencing an
+artifact version that <code>garbage_collect</code> or <code>delete_artifact</code> removed — a
+dangling reference SQLite tolerated and Postgres does not.</p>
+<p><code>--dry-run</code> makes no schema or data changes. It does open the source with
+Strata's normal SQLite settings, which sets <code>journal_mode=WAL</code> on the file, the
+same as starting the server against it.</p>
 <p><strong>Blobs are not copied.</strong> Point the target deployment at the same blob backend,
 or its metadata will resolve to bytes it cannot read. Live stream-ownership
 rows are also skipped, since they describe streams that do not survive the
