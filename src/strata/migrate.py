@@ -60,6 +60,10 @@ MIGRATED_TABLES: tuple[tuple[str, tuple[str, ...]], ...] = (
 # Rows fetched from the source per round, and per commit on the target.
 _BATCH_ROWS = 500
 
+# Named savepoint wrapping each row insert, so one rejected row cannot undo
+# the batch around it.
+_ROW_SAVEPOINT = "strata_migrate_row"
+
 
 @dataclass
 class MigrationPlan:
@@ -207,8 +211,11 @@ def migrate(
 
     result = MigrationResult()
     src_conn = source.connect()
-    tgt_conn = target.connect()
+    tgt_conn = None
     try:
+        # Opened inside the try: if this raises -- Postgres unreachable, pool
+        # timeout -- the source connection above still has to be closed.
+        tgt_conn = target.connect()
         for table, key_columns in MIGRATED_TABLES:
             if not _table_exists(source, src_conn, table) or plan.source_counts[table] == 0:
                 result.copied[table] = 0
@@ -235,7 +242,8 @@ def migrate(
             logger.info("migrated_table", extra={"table": table, "copied": copied})
     finally:
         src_conn.close()
-        tgt_conn.close()
+        if tgt_conn is not None:
+            tgt_conn.close()
 
     return result
 
@@ -257,12 +265,18 @@ def _copy_table(
     The target's existing keys are read once into a set instead of being
     probed per row. The probe version cost a network round trip for every row
     on top of its insert, which on a fresh target is one wasted query per row
-    of the whole store.
+    of the whole store. On a fresh target that set is empty and is not read at
+    all; on a resumed run it holds one tuple per already-copied row, which is
+    the honest cost of making the copy idempotent without a per-row probe.
 
     Returns ``(copied, skipped)``; rows the target refuses are recorded on
     ``result.rejected`` and do not abort the run.
     """
-    existing_keys = _existing_keys(tgt_conn, table, key_columns)
+    # Only on a resume: a fresh target has nothing to skip against, and
+    # reading an empty table's keys is a query for a set we know is empty.
+    existing_keys = (
+        _existing_keys(tgt_conn, table, key_columns) if _count(tgt_conn, table) else set()
+    )
 
     cursor = src_conn.execute(f"SELECT * FROM {table}")  # noqa: S608 - fixed names
     copied = 0
@@ -284,15 +298,24 @@ def _copy_table(
             if key in existing_keys:
                 skipped += 1
                 continue
+
+            # One savepoint per row. Without it, a rejected row rolls back the
+            # whole uncommitted batch -- every good row inserted since the last
+            # commit -- while `copied` has already counted them, so the run
+            # reports success having silently dropped up to _BATCH_ROWS rows.
+            # Measured at 99 lost out of 100 before this.
+            tgt_conn.execute(f"SAVEPOINT {_ROW_SAVEPOINT}")
             try:
                 tgt_conn.execute(statement, tuple(row[c] for c in columns))
-                copied += 1
-            except target.integrity_error as exc:
-                # A constraint the source never enforced. Aborting here would
-                # strand the migration partway through with everything before
-                # it committed, so the row is reported and the run continues.
-                tgt_conn.rollback()
+            except target.rejectable_errors as exc:
+                # A constraint or a value the source never enforced. Undo just
+                # this row and keep going: aborting would strand the migration
+                # partway through with everything before it committed.
+                tgt_conn.execute(f"ROLLBACK TO SAVEPOINT {_ROW_SAVEPOINT}")
                 result.rejected.append((table, repr(key), str(exc).strip().splitlines()[0]))
+            else:
+                copied += 1
+            tgt_conn.execute(f"RELEASE SAVEPOINT {_ROW_SAVEPOINT}")
         tgt_conn.commit()
 
     return copied, skipped

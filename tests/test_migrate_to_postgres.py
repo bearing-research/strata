@@ -271,6 +271,67 @@ class TestMigration:
         finally:
             dialect.close()
 
+    def test_a_rejected_row_does_not_take_its_batch_with_it(
+        self, populated_sqlite, target, tmp_path
+    ):
+        """The worst failure this tool can have: reporting success while losing rows.
+
+        Without a per-row savepoint, the rollback for one bad row discards
+        every uncommitted insert in the same batch, and ``copied`` has already
+        counted them. Measured at 99 of 100 lost, reported as copied.
+
+        The earlier dangling-build test used a single row -- the rejected one
+        -- so it could not see this.
+        """
+        from strata.transforms.build_store import BuildStore
+
+        builds = BuildStore(tmp_path / "src" / "artifacts.sqlite")
+        version = populated_sqlite.get_latest_version("a1").version
+        for i in range(99):
+            builds.create_build(
+                build_id=f"good-{i}", artifact_id="a1", version=version, executor_ref="x"
+            )
+        builds.create_build(
+            build_id="orphan", artifact_id="does-not-exist", version=1, executor_ref="x"
+        )
+        BuildStore(tmp_path / "tgt" / "artifacts.sqlite", dialect=target)
+
+        result = migrate(self._source(tmp_path), target)
+
+        conn = target.connect()
+        try:
+            actual = conn.execute("SELECT COUNT(*) FROM artifact_builds").fetchone()[0]
+        finally:
+            conn.close()
+
+        assert result.total_rejected == 1
+        assert result.copied["artifact_builds"] == 99
+        # The count reported has to be the count that arrived.
+        assert actual == result.copied["artifact_builds"]
+
+    def test_a_value_postgres_refuses_is_rejected_not_fatal(
+        self, populated_sqlite, target, tmp_path
+    ):
+        # A NUL byte inside TEXT: SQLite stores it, Postgres refuses it. That
+        # is a DataError, not an IntegrityError, so catching only the latter
+        # let it escape and abort the run with earlier tables committed.
+        conn = SqliteDialect(tmp_path / "src" / "artifacts.sqlite").connect()
+        try:
+            conn.execute(
+                "INSERT INTO artifact_tags (tenant, artifact_id, version, key, value, updated_at) "
+                "VALUES ('', 'a1', 1, 'bad', ?, 1.0)",
+                ("has\x00nul",),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = migrate(self._source(tmp_path), target)
+        assert result.total_rejected == 1
+        assert result.rejected[0][0] == "artifact_tags"
+        # And the run still finished the tables after it.
+        assert ArtifactStore(tmp_path / "tgt", dialect=target).get_latest_version("a1") is not None
+
     def test_stream_owners_is_not_migrated(self):
         # It records which node serves a live stream; none survive the move.
         assert "stream_owners" not in {table for table, _ in MIGRATED_TABLES}
