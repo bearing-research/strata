@@ -53,6 +53,7 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
+import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
@@ -61,6 +62,16 @@ from typing import Any, Protocol
 # the same interval rather than blocking forever.
 _LOCK_TIMEOUT_MS = 30_000
 _CONNECT_TIMEOUT_SECONDS = 10
+
+# Pool defaults. max_size is per process, and the store nests connection
+# acquisition two deep in places, so re-entrant sharing (see
+# ``PostgresDialect.connect``) is what keeps this from having to be sized at
+# twice the concurrency.
+_POOL_MIN_SIZE = 0
+_POOL_MAX_SIZE = 16
+# Bounds the wait for a free connection. Without it an exhausted pool blocks
+# forever, which is the failure this whole class exists to avoid.
+_POOL_TIMEOUT_SECONDS = 30.0
 
 
 # Characters that open a region where ``?`` is data, not a placeholder.
@@ -408,8 +419,10 @@ class _PostgresConnection:
       The store uses it only for its own multi-statement schema DDL.
     """
 
-    def __init__(self, inner: Any) -> None:
+    def __init__(self, inner: Any, release: Any) -> None:
         self._inner = inner
+        self._release = release
+        self._closed = False
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:
         return self._inner.execute(translate_placeholders(sql), params)
@@ -426,7 +439,16 @@ class _PostgresConnection:
         self._inner.rollback()
 
     def close(self) -> None:
-        self._inner.close()
+        """Hand the connection back rather than closing it.
+
+        The store calls ``close`` 41 times and means "I am done with this";
+        under a pool that has to mean "return it". Guarded against a double
+        release, which would hand the same connection to two threads.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        self._release()
 
 
 class PostgresDialect:
@@ -437,31 +459,102 @@ class PostgresDialect:
 
     name = "postgres"
 
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, *, max_size: int = _POOL_MAX_SIZE) -> None:
         self.dsn = dsn
+        self.max_size = max_size
+        self._pool: Any = None
+        self._pool_lock = threading.Lock()
+        # Per-thread (connection, depth) for re-entrant acquisition.
+        self._local = threading.local()
+
+    def _get_pool(self) -> Any:
+        """Build the pool on first use.
+
+        Lazy so that constructing a dialect -- which tests and the config
+        factory both do freely -- costs no sockets until something queries.
+        """
+        if self._pool is None:
+            with self._pool_lock:
+                if self._pool is None:
+                    from psycopg_pool import ConnectionPool
+
+                    # Timeouts, because the SQLite dialect had them and this
+                    # one inherited none. ``sqlite3.connect(timeout=30.0)``
+                    # made a contended writer fail loudly after 30s;
+                    # ``pg_advisory_xact_lock`` waits forever, so a node that
+                    # stalls while holding a lock -- a paused container, a
+                    # partition leaving the backend "idle in transaction" --
+                    # would hang every other node behind it with no bound.
+                    #
+                    # Deliberately no ``statement_timeout``: the hazard is
+                    # waiting on a lock, not running a long query, and a query
+                    # cap would break slow maintenance like ``garbage_collect``.
+                    self._pool = ConnectionPool(
+                        self.dsn,
+                        min_size=_POOL_MIN_SIZE,
+                        max_size=self.max_size,
+                        timeout=_POOL_TIMEOUT_SECONDS,
+                        kwargs={
+                            "row_factory": _row_factory,
+                            "connect_timeout": _CONNECT_TIMEOUT_SECONDS,
+                            "options": f"-c lock_timeout={_LOCK_TIMEOUT_MS}",
+                        },
+                        open=True,
+                    )
+        return self._pool
 
     def connect(self) -> StoreConnection:
-        import psycopg
+        """Take a pooled connection, re-entrantly.
 
-        # Timeouts, because the SQLite dialect has them and this one inherited
-        # none. ``sqlite3.connect(timeout=30.0)`` made a contended writer fail
-        # loudly after 30s; ``pg_advisory_xact_lock`` waits forever, so a node
-        # that stalls while holding a lock -- a paused container, a partition
-        # leaving the backend "idle in transaction" -- would hang every other
-        # node behind it with no error and no bound. ``lock_timeout`` restores
-        # the same 30s ceiling on the same failure.
-        #
-        # Deliberately no ``statement_timeout``: the hazard here is waiting on
-        # a lock, not running a long query, and capping query time would break
-        # legitimately slow maintenance work like ``garbage_collect`` over a
-        # large store.
-        conn = psycopg.connect(
-            self.dsn,
-            row_factory=_row_factory,
-            connect_timeout=_CONNECT_TIMEOUT_SECONDS,
-            options=f"-c lock_timeout={_LOCK_TIMEOUT_MS}",
-        )
-        return _PostgresConnection(conn)
+        A thread that already holds one gets the same connection back with a
+        bumped depth, and the connection returns to the pool only when the
+        outermost holder closes it.
+
+        This is not an optimization, it is what makes a bounded pool safe
+        here. ``ArtifactStore`` acquires two deep in six places -- most of
+        them ``return self.get_artifact(...)`` evaluated inside a ``try``
+        whose ``finally`` has not yet released the outer connection. Without
+        re-entrancy, ``max_size`` threads each holding one and waiting for a
+        second deadlock until the pool timeout fires, and the pool would have
+        to be sized at twice peak concurrency to be safe.
+
+        Sharing a connection means a nested call joins the outer transaction.
+        That is sound for every nesting that exists today: each one runs after
+        the outer work has been committed or rolled back, so there is no
+        pending state for a nested ``commit`` to publish early. The nested
+        ``set_name`` at ``artifact_store.py:1060`` is the only nested *write*,
+        and the line above it rolls the outer transaction back. Adding a
+        nested write while the outer holds uncommitted work would break that,
+        which is why it is written down here.
+        """
+        state = self._local
+        conn = getattr(state, "conn", None)
+        if conn is not None:
+            state.depth += 1
+            return _PostgresConnection(conn, self._release)
+
+        raw = self._get_pool().getconn()
+        state.conn = raw
+        state.depth = 1
+        return _PostgresConnection(raw, self._release)
+
+    def _release(self) -> None:
+        state = self._local
+        state.depth -= 1
+        if state.depth > 0:
+            return
+        raw = state.conn
+        state.conn = None
+        # putconn rolls back anything still open, so a caller that raised
+        # before committing cannot leak a transaction into the next borrower.
+        self._get_pool().putconn(raw)
+
+    def close(self) -> None:
+        """Close the pool and every connection in it."""
+        with self._pool_lock:
+            if self._pool is not None:
+                self._pool.close()
+                self._pool = None
 
     def schema_exists(self, conn: StoreConnection) -> bool:
         row = conn.execute("SELECT to_regclass('artifact_versions')").fetchone()

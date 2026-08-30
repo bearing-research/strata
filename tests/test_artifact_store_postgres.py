@@ -65,7 +65,12 @@ def store(postgres_dsn, tmp_path):
     finally:
         conn.close()
 
-    return ArtifactStore(tmp_path / "artifacts", dialect=dialect)
+    yield ArtifactStore(tmp_path / "artifacts", dialect=dialect)
+
+    # Each test builds its own pool against the shared container. Left open
+    # they accumulate toward Postgres's default max_connections of 100 and
+    # later tests start failing for reasons that have nothing to do with them.
+    dialect.close()
 
 
 def _spec() -> TransformSpec:
@@ -272,6 +277,87 @@ class TestCanonicalPromotion:
         assert promoted is not None
         assert promoted.id == "a2"
         assert promoted.state == "ready"
+
+
+class TestConnectionPool:
+    """A bounded pool is only safe here because acquisition is re-entrant."""
+
+    def test_nested_acquisition_reuses_one_pooled_connection(self, postgres_dsn):
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            outer = dialect.connect()
+            inner = dialect.connect()
+            try:
+                # Same underlying connection, so the nested call cannot be
+                # waiting on the pool for a second one.
+                assert outer._inner is inner._inner
+            finally:
+                inner.close()
+                # Released only by the outermost holder.
+                assert dialect._local.conn is not None
+                outer.close()
+                assert dialect._local.conn is None
+        finally:
+            dialect.close()
+
+    def test_more_threads_than_pool_slots_still_complete(self, postgres_dsn, tmp_path):
+        # The deadlock this guards: ArtifactStore acquires two deep in six
+        # places, so without re-entrancy max_size threads each holding one and
+        # waiting for a second block until the pool timeout. With max_size=2
+        # and 8 threads doing nested work, that is unmissable.
+        dialect = PostgresDialect(postgres_dsn, max_size=2)
+        try:
+            conn = dialect.connect()
+            conn.executescript(
+                "DROP TABLE IF EXISTS artifact_versions, artifact_names, "
+                "artifact_aliases, artifact_tags, registry_audit, "
+                "registry_pending CASCADE;"
+            )
+            conn.commit()
+            conn.close()
+
+            store = ArtifactStore(tmp_path / "pool", dialect=dialect)
+            errors: list[Exception] = []
+            done: list[int] = []
+            barrier = threading.Barrier(8)
+
+            def work(i: int) -> None:
+                barrier.wait()
+                try:
+                    for round_ in range(3):
+                        aid = f"a{i}-{round_}"
+                        version = store.create_artifact(aid, f"prov-{i}-{round_}", _spec())
+                        # finalize_artifact evaluates `return self.get_artifact(...)`
+                        # inside its try, so the outer connection is still held.
+                        store.finalize_artifact(aid, version, "{}", row_count=1, byte_size=1)
+                    done.append(i)
+                except Exception as exc:
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=work, args=(i,)) for i in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                # Generous but finite: a deadlock shows up as a thread that
+                # never finishes, not as an exception.
+                thread.join(timeout=90)
+
+            assert [t for t in threads if t.is_alive()] == [], "threads deadlocked on the pool"
+            assert errors == []
+            assert sorted(done) == list(range(8))
+        finally:
+            dialect.close()
+
+    def test_pool_is_not_opened_until_something_queries(self, postgres_dsn):
+        # Constructing a dialect must cost no sockets; the config factory and
+        # every test fixture build them freely.
+        dialect = PostgresDialect(postgres_dsn)
+        assert dialect._pool is None
+        try:
+            dialect.connect().close()
+            assert dialect._pool is not None
+        finally:
+            dialect.close()
 
 
 class TestTimestampPrecision:
