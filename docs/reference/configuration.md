@@ -97,6 +97,32 @@ ai_model = "claude-sonnet-4-6"
 | `STRATA_ARTIFACT_GCS_PREFIX`      | `artifacts` | GCS prefix                       |
 | `STRATA_ARTIFACT_AZURE_CONTAINER` | `None`      | Azure container                  |
 | `STRATA_ARTIFACT_AZURE_PREFIX`    | `artifacts` | Azure prefix                     |
+| `STRATA_ARTIFACT_METADATA_DSN`    | `None`      | `postgresql://` URL for the artifact store's metadata. Unset keeps SQLite under `STRATA_ARTIFACT_DIR` |
+
+### Sharing one artifact store across nodes
+
+By default the artifact store keeps its metadata in a SQLite file under
+`STRATA_ARTIFACT_DIR`, which is local to one machine. Setting
+`STRATA_ARTIFACT_METADATA_DSN` moves that metadata to Postgres so several
+Strata nodes can share one store.
+
+Requires the `postgres` extra:
+
+```bash
+uv pip install 'strata-notebook[postgres]'
+export STRATA_ARTIFACT_METADATA_DSN='postgresql://user:pass@db:5432/strata'
+export STRATA_ARTIFACT_BLOB_BACKEND=s3
+export STRATA_ARTIFACT_S3_BUCKET=my-strata-artifacts
+```
+
+**Blobs must be shared too.** In service mode, a DSN with
+`STRATA_ARTIFACT_BLOB_BACKEND=local` is rejected at startup: the metadata
+would be shared while the bytes stayed on one node's disk, so another node
+would resolve an artifact and then fail to read it — at fetch time, long
+after the request that created it appeared to succeed.
+
+The schema is created on first connection. Existing SQLite stores are not
+migrated; a DSN starts an empty store.
 
 ## Authentication
 

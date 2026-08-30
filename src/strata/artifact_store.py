@@ -3201,19 +3201,23 @@ _artifact_store: ArtifactStore | None = None
 def get_artifact_store(
     artifact_dir: Path | None = None,
     blob_store: BlobStore | None = None,
+    dialect: SqlDialect | None = None,
 ) -> ArtifactStore | None:
     """Get the artifact store singleton.
 
     Args:
         artifact_dir: Directory for artifacts (required on first call in personal mode)
         blob_store: Optional blob storage backend. If None, uses LocalBlobStore.
+        dialect: Optional metadata backend. If None, SQLite under artifact_dir.
+            Like blob_store, this only takes effect on the call that creates
+            the singleton — the server passes both at lifespan start.
 
     Returns:
         ArtifactStore instance, or None if not in personal mode
     """
     global _artifact_store
     if _artifact_store is None and artifact_dir is not None:
-        _artifact_store = ArtifactStore(artifact_dir, blob_store=blob_store)
+        _artifact_store = ArtifactStore(artifact_dir, blob_store=blob_store, dialect=dialect)
     return _artifact_store
 
 

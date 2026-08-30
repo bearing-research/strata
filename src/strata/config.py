@@ -408,6 +408,15 @@ class StrataConfig(BaseSettings):
     ai_approval_timeout_seconds: Annotated[float, Field(gt=0)] = 120.0
 
     # Artifact blob storage backend configuration
+    # Metadata backend for the artifact store. Unset means SQLite in
+    # artifact_dir, which is what personal mode wants and what every existing
+    # deployment already has. A DSN moves the store's system of record to a
+    # shared server, which is what lets more than one node share one store.
+    # Blobs are configured separately via artifact_blob_backend; a shared
+    # database paired with local blobs is only coherent on a single machine,
+    # so the two are validated together below.
+    artifact_metadata_dsn: str | None = None
+
     artifact_blob_backend: Literal["local", "s3", "gcs", "azure"] = "local"
     artifact_s3_bucket: str | None = None
     artifact_s3_prefix: str = "artifacts"
@@ -670,6 +679,21 @@ class StrataConfig(BaseSettings):
                     "mode uses auth_mode='trusted_proxy' with X-Strata-Principal)"
                 )
 
+            # A shared metadata store paired with local blobs is only coherent
+            # on one machine: node B resolves an artifact's metadata from the
+            # shared database, then looks for bytes that only exist on node A's
+            # disk. The read fails at fetch time, long after the request that
+            # created it looked successful. Moving the metadata off SQLite is
+            # done specifically to run more than one node, so this combination
+            # is always a misconfiguration in service mode.
+            if self.artifact_metadata_dsn and self.artifact_blob_backend == "local":
+                conflicts.append(
+                    "artifact_metadata_dsn with artifact_blob_backend='local' "
+                    "(the metadata is shared across nodes but the blobs are not, "
+                    "so another node resolves an artifact and then cannot read "
+                    "its bytes; set artifact_blob_backend to s3, gcs, or azure)"
+                )
+
             # ACL rules are only evaluated under trusted-proxy auth. Configured
             # rules with auth_mode='none' would be silently ignored — an operator
             # who wrote a deny rule would believe they were protected.
@@ -802,6 +826,40 @@ class StrataConfig(BaseSettings):
     def max_transform_output_bytes(self) -> int:
         """Get max transform output size in bytes."""
         return self.build_runner_default_max_output
+
+    def create_metadata_dialect(self):
+        """Build the artifact store's metadata backend, or None for SQLite.
+
+        Raises
+        ------
+        ValueError
+            If the DSN names a scheme this does not support, or the driver for
+            it is not installed. Both are raised at startup rather than at the
+            first query, because a store that fails on its first write has
+            already accepted work it cannot keep.
+        """
+        if not self.artifact_metadata_dsn:
+            return None
+
+        dsn = self.artifact_metadata_dsn
+        scheme = dsn.split("://", 1)[0].lower() if "://" in dsn else ""
+        if scheme not in ("postgres", "postgresql"):
+            raise ValueError(
+                f"artifact_metadata_dsn must be a postgresql:// URL, got {scheme or dsn!r}. "
+                "Leave it unset to keep the default SQLite metadata store."
+            )
+
+        try:
+            import psycopg  # noqa: F401
+        except ImportError as exc:
+            raise ValueError(
+                "artifact_metadata_dsn is set but the postgres extra is not "
+                "installed. Install strata-notebook[postgres]."
+            ) from exc
+
+        from strata.sql_backend import PostgresDialect
+
+        return PostgresDialect(dsn)
 
     def create_blob_store(self):
         """Create blob store based on configuration.
