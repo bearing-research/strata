@@ -30,6 +30,7 @@ from strata.artifact_uris import LATEST_VERSION, parse_artifact_uri, parse_name_
 from strata.auth import (
     AuthError,
     get_principal,
+    parse_api_key_principal,
     parse_principal,
     set_principal,
     verify_proxy_token,
@@ -612,7 +613,19 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
     if dialect is not None:
         logger.info("artifact_metadata_backend_initialized", backend=dialect.name)
 
-    get_artifact_store(config.artifact_dir, blob_store=blob_store, dialect=dialect)
+    store = get_artifact_store(config.artifact_dir, blob_store=blob_store, dialect=dialect)
+
+    # API keys live in the same database, so they follow the same backend and
+    # are shared across nodes wherever it is. Initialized here because the
+    # auth middleware runs on every request and must not be the thing that
+    # creates the schema.
+    if config.auth_mode == "api_key" and config.artifact_dir is not None:
+        from strata.api_keys import get_api_key_store
+
+        get_api_key_store(
+            config.artifact_dir / "artifacts.sqlite",
+            dialect=store.dialect if store else None,
+        )
 
 
 def _should_warn_unset_signing_secret(config: StrataConfig) -> bool:
@@ -1237,22 +1250,29 @@ async def auth_middleware(request: Request, call_next):
     ) or _is_signed_data_plane_request(request):
         return await call_next(request)
 
-    # Verify proxy token
-    proxy_token = request.headers.get(config.proxy_token_header)
-    if not verify_proxy_token(proxy_token, config.proxy_token):
-        logger.warning(
-            "auth_failed",
-            reason="invalid_proxy_token",
-            path=path,
-        )
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "Unauthorized"},
-        )
+    # Under api_key auth the key *is* the credential, so there is no proxy in
+    # front and no proxy token to verify. Under trusted_proxy the token is what
+    # establishes that the caller is the proxy, without which anyone who can
+    # reach Strata could assert any principal they liked.
+    if config.auth_mode != "api_key":
+        proxy_token = request.headers.get(config.proxy_token_header)
+        if not verify_proxy_token(proxy_token, config.proxy_token):
+            logger.warning(
+                "auth_failed",
+                reason="invalid_proxy_token",
+                path=path,
+            )
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Unauthorized"},
+            )
 
-    # Parse principal from headers
+    # Resolve the principal: from a bearer key, or from proxy headers.
     try:
-        principal = parse_principal(dict(request.headers), config)
+        if config.auth_mode == "api_key":
+            principal = parse_api_key_principal(dict(request.headers), config)
+        else:
+            principal = parse_principal(dict(request.headers), config)
         set_principal(principal)
         # list[str] would be invariant against the structured-logger's
         # list[JsonValue] kwargs; cast widens the declared element type

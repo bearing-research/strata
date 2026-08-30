@@ -109,6 +109,70 @@ def _build_parser() -> argparse.ArgumentParser:
     add_import_arguments(import_parser)
     import_parser.set_defaults(func=_dispatch_import)
 
+    key_parser = subparsers.add_parser(
+        "apikey",
+        help="Mint, list, and revoke API keys",
+        description=(
+            "Manage API keys for auth_mode='api_key'. Keys are stored in the "
+            "artifact store's database, so they follow whichever metadata "
+            "backend it uses and are shared across nodes."
+        ),
+    )
+    key_sub = key_parser.add_subparsers(dest="apikey_command", metavar="<command>")
+
+    def _add_key_store_args(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument(
+            "--artifact-dir",
+            dest="artifact_dir",
+            default=None,
+            help="Artifact store directory (default: ~/.strata/artifacts)",
+        )
+        sub.add_argument(
+            "--dsn",
+            default=None,
+            help=(
+                "Postgres DSN for the metadata backend. Defaults to "
+                "STRATA_ARTIFACT_METADATA_DSN, then SQLite under --artifact-dir."
+            ),
+        )
+
+    key_create = key_sub.add_parser(
+        "create",
+        help="Mint a new API key",
+        description="Mint a key. The secret is printed once and is not recoverable.",
+    )
+    key_create.add_argument("principal", help="Principal id the key authenticates as")
+    key_create.add_argument("--tenant", default=None, help="Tenant to scope the key to")
+    key_create.add_argument(
+        "--scope",
+        action="append",
+        dest="scopes",
+        default=None,
+        help="Grant a scope (repeatable), e.g. --scope artifacts:write",
+    )
+    key_create.add_argument("--description", default=None, help="What this key is for")
+    key_create.add_argument(
+        "--expires-in-days",
+        type=float,
+        default=None,
+        help="Expire the key after this many days (default: no expiry)",
+    )
+    _add_key_store_args(key_create)
+    key_create.set_defaults(func=_dispatch_apikey("cmd_create"))
+
+    key_list = key_sub.add_parser("list", help="List API keys (never shows secrets)")
+    key_list.add_argument("--principal", default=None, help="Filter to one principal")
+    key_list.add_argument(
+        "--format", choices=["human", "json"], default="human", help="Output format"
+    )
+    _add_key_store_args(key_list)
+    key_list.set_defaults(func=_dispatch_apikey("cmd_list"))
+
+    key_revoke = key_sub.add_parser("revoke", help="Revoke an API key by id")
+    key_revoke.add_argument("key_id", help="Key id (the middle segment of the key)")
+    _add_key_store_args(key_revoke)
+    key_revoke.set_defaults(func=_dispatch_apikey("cmd_revoke"))
+
     artifact_parser = subparsers.add_parser(
         "artifact",
         help="Artifact store inspection and maintenance",
@@ -350,6 +414,17 @@ def _dispatch_artifact(command: str):
         from strata import artifact_cli
 
         return getattr(artifact_cli, command)(args)
+
+    return _dispatch
+
+
+def _dispatch_apikey(command: str):
+    """Build a dispatcher that lazily imports the API key CLI module."""
+
+    def _dispatch(args: argparse.Namespace) -> int:
+        from strata import api_key_cli
+
+        return getattr(api_key_cli, command)(args)
 
     return _dispatch
 

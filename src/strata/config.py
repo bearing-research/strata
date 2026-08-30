@@ -309,7 +309,7 @@ class StrataConfig(BaseSettings):
     # fields were never read and were removed (issue #185).
 
     # Trusted proxy authentication settings
-    auth_mode: Literal["none", "trusted_proxy"] = "none"
+    auth_mode: Literal["none", "trusted_proxy", "api_key"] = "none"
     proxy_token_header: str = "X-Strata-Proxy-Token"
     proxy_token: str | None = None
     principal_header: str = "X-Strata-Principal"
@@ -679,6 +679,16 @@ class StrataConfig(BaseSettings):
                     "mode uses auth_mode='trusted_proxy' with X-Strata-Principal)"
                 )
 
+            # Key auth has nowhere to keep keys without an artifact directory:
+            # the api_keys table lives in the artifact store's database. Every
+            # request would then fail closed at the middleware, which is safe
+            # but useless -- reject at startup where it is diagnosable.
+            if self.auth_mode == "api_key" and self.artifact_dir is None:
+                conflicts.append(
+                    "auth_mode='api_key' without artifact_dir (API keys are stored "
+                    "in the artifact store's database; set artifact_dir)"
+                )
+
             # A shared metadata store paired with local blobs is only coherent
             # on one machine: node B resolves an artifact's metadata from the
             # shared database, then looks for bytes that only exist on node A's
@@ -743,6 +753,12 @@ class StrataConfig(BaseSettings):
             conflicts.append(
                 "auth_mode='trusted_proxy' (personal mode has no upstream "
                 "proxy; set auth_mode='none' or switch to service mode)"
+            )
+        if self.auth_mode == "api_key":
+            conflicts.append(
+                "auth_mode='api_key' (personal mode is single-user and binds to "
+                "loopback; authenticating yourself to your own machine buys "
+                "nothing. Switch to service mode to serve multiple accounts)"
             )
         if self.multi_tenant_enabled:
             conflicts.append(
