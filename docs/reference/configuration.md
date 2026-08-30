@@ -139,12 +139,52 @@ affects callers writing build rows directly.
 
 | Variable                             | Default              | Description                          |
 | ------------------------------------ | -------------------- | ------------------------------------ |
-| `STRATA_AUTH_MODE`                   | `none`               | `none` or `trusted_proxy`            |
+| `STRATA_AUTH_MODE`                   | `none`               | `none`, `trusted_proxy`, or `api_key` |
 | `STRATA_PROXY_TOKEN`                 | `None`               | Shared secret for proxy verification |
 | `STRATA_PRINCIPAL_HEADER`            | `X-Strata-Principal` | Header for user identity             |
 | `STRATA_SCOPES_HEADER`               | `X-Strata-Scopes`    | Header for permission scopes         |
 | `STRATA_HIDE_FORBIDDEN_AS_NOT_FOUND` | `true`               | Return 404 instead of 403            |
 | `STRATA_SERVICE_WRITES_ENABLED`      | `false`              | **Preview.** Opt-in: let authenticated clients write/publish in service mode (`put`, `set_name`, `set_alias`, tags), scoped to the caller's tenant and gated by the `artifacts:write` scope. Requires `trusted_proxy` auth (enforced at startup). Default keeps service mode read-only. See [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
+
+### API key authentication
+
+`STRATA_AUTH_MODE=api_key` is the mode where Strata authenticates callers
+itself, rather than trusting a proxy to have done it. Clients present a key as
+a bearer token:
+
+```
+Authorization: Bearer strata_<key_id>_<secret>
+```
+
+A key resolves to the same principal a proxy header would have produced, so ACL
+rules, tenant scoping, and scope checks behave identically across both modes.
+
+Keys are stored in the artifact store's database, which means they follow
+whichever metadata backend it uses and are shared across nodes automatically.
+Service mode with `auth_mode='api_key'` therefore requires `artifact_dir`;
+personal mode rejects the mode outright, since authenticating to your own
+loopback-bound single-user server buys nothing.
+
+Mint the first key from the CLI — no running server needed, which is what
+makes bootstrapping possible:
+
+```bash
+strata apikey create svc-etl \
+  --tenant acme \
+  --scope artifacts:write \
+  --description "ETL pipeline"
+
+strata apikey list
+strata apikey revoke <key_id>
+```
+
+The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
+shown again — by you or by us — and a database disclosure yields no usable
+credentials. Pass `--dsn` (or set `STRATA_ARTIFACT_METADATA_DSN`) when the
+metadata lives on Postgres, so the CLI writes where the server reads.
+
+**Revocation is immediate**: verification reads the row on each request, so a
+revoked key stops working at once rather than after a cache expiry.
 
 ## Multi-Tenancy
 

@@ -145,6 +145,44 @@ def parse_principal(headers: dict[str, str], config: StrataConfig) -> Principal:
     return Principal(id=principal_id, tenant=tenant, scopes=scopes)
 
 
+def parse_api_key_principal(headers: dict[str, str], config: StrataConfig) -> Principal:
+    """Resolve an ``Authorization: Bearer`` API key to a principal.
+
+    The counterpart to :func:`parse_principal` for ``auth_mode='api_key'``,
+    and it returns the same type deliberately: ACL evaluation, tenant scoping
+    and scope checks all consume only ``Principal``, so nothing downstream
+    needs to know which mode produced it.
+
+    Raises
+    ------
+    AuthError
+        If the header is absent or the key does not resolve. Both give the
+        same message -- a caller learns that they are unauthenticated, not
+        whether the key was malformed, unknown, revoked or expired.
+    """
+    from strata.api_keys import get_api_key_store
+
+    def _header(name: str) -> str | None:
+        return headers.get(name) or headers.get(name.lower())
+
+    authorization = _header("Authorization") or ""
+    scheme, _, presented = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not presented.strip():
+        raise AuthError("Missing or malformed Authorization header", 401)
+
+    store = get_api_key_store()
+    if store is None:
+        # Configured for key auth with no key store: fail closed. Falling
+        # through to anonymous would silently serve every request unauthenticated
+        # on a deployment whose operator asked for authentication.
+        raise AuthError("Unauthorized", 401)
+
+    principal = store.verify(presented.strip())
+    if principal is None:
+        raise AuthError("Unauthorized", 401)
+    return principal
+
+
 # ---------------------------------------------------------------------------
 # ACL Evaluator
 # ---------------------------------------------------------------------------
