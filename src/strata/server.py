@@ -597,7 +597,7 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
     A backend that can't be constructed (missing bucket, absent SDK) is fatal:
     silently degrading to local disk is what made the misconfiguration
     invisible in the first place, and it loses every artifact when the pod is
-    replaced.
+    replaced. The same reasoning covers the metadata backend below.
     """
     from strata.artifact_store import get_artifact_store
 
@@ -606,7 +606,13 @@ def _init_configured_artifact_store(config: StrataConfig) -> None:
     if backend != "local":
         blob_store = config.create_blob_store()
         logger.info("artifact_blob_backend_initialized", backend=backend)
-    get_artifact_store(config.artifact_dir, blob_store=blob_store)
+
+    # None keeps SQLite under artifact_dir, which is every existing deployment.
+    dialect = config.create_metadata_dialect()
+    if dialect is not None:
+        logger.info("artifact_metadata_backend_initialized", backend=dialect.name)
+
+    get_artifact_store(config.artifact_dir, blob_store=blob_store, dialect=dialect)
 
 
 def _should_warn_unset_signing_secret(config: StrataConfig) -> bool:

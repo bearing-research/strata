@@ -424,6 +424,66 @@ class TestConnectionPool:
             dialect.close()
 
 
+class TestConfigurationSelectsTheBackend:
+    """The wiring, end to end: a DSN in config produces a Postgres-backed store.
+
+    Until this existed the backend was reachable only from direct
+    instantiation, so a green test suite said nothing about whether an
+    operator could actually turn it on.
+    """
+
+    def test_a_configured_dsn_produces_a_postgres_backed_store(self, postgres_dsn, tmp_path):
+        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.config import StrataConfig
+        from strata.server import _init_configured_artifact_store
+
+        config = StrataConfig(
+            deployment_mode="personal",
+            artifact_dir=tmp_path / "artifacts",
+            artifact_metadata_dsn=postgres_dsn,
+        )
+
+        reset_artifact_store()
+        try:
+            # The same call the server's lifespan makes.
+            _init_configured_artifact_store(config)
+            store = get_artifact_store(config.artifact_dir)
+            assert store is not None
+            assert store._dialect.name == "postgres"
+
+            # And it actually works against the server, not just constructs.
+            version = store.create_artifact("wired", "prov-wired", _spec())
+            store.finalize_artifact("wired", version, "{}", row_count=1, byte_size=1)
+            assert store.get_latest_version("wired") is not None
+
+            # No SQLite file was created alongside it.
+            assert not (config.artifact_dir / "artifacts.sqlite").exists()
+        finally:
+            store = get_artifact_store()
+            if store is not None:
+                store.close()
+            reset_artifact_store()
+
+    def test_no_dsn_still_produces_a_sqlite_store(self, tmp_path):
+        from strata.artifact_store import get_artifact_store, reset_artifact_store
+        from strata.config import StrataConfig
+        from strata.server import _init_configured_artifact_store
+
+        config = StrataConfig(
+            deployment_mode="personal",
+            artifact_dir=tmp_path / "artifacts",
+        )
+        reset_artifact_store()
+        try:
+            _init_configured_artifact_store(config)
+            store = get_artifact_store(config.artifact_dir)
+            assert store is not None
+            assert store._dialect.name == "sqlite"
+            assert (config.artifact_dir / "artifacts.sqlite").exists()
+        finally:
+            reset_artifact_store()
+
+
 class TestTimestampPrecision:
     """The REAL-vs-DOUBLE PRECISION trap, checked against a live server."""
 
