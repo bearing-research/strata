@@ -100,7 +100,10 @@ class TestVerification:
 class TestSecretsAreNotRecoverable:
     def test_the_secret_is_not_stored(self, store):
         presented, record = store.create_key(principal_id="svc")
-        secret = presented.rsplit("_", 1)[1]
+        # Via parse_key, not a hand-rolled split: the secret is base64url and
+        # can contain '_', so rsplit("_", 1) sometimes yields a one-character
+        # tail that turns this into a coin flip against a hex digest.
+        _, secret = parse_key(presented)
 
         conn = store._get_connection()
         try:
@@ -117,7 +120,7 @@ class TestSecretsAreNotRecoverable:
 
     def test_listing_never_exposes_secrets(self, store):
         presented, _ = store.create_key(principal_id="svc", description="d")
-        secret = presented.rsplit("_", 1)[1]
+        _, secret = parse_key(presented)
 
         records = store.list_keys()
         assert len(records) == 1
