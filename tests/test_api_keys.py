@@ -194,6 +194,49 @@ class TestAuthModeBranch:
             parse_api_key_principal({"Authorization": "Bearer strata_a_b"}, self._config())
 
 
+class TestCliOutputStreams:
+    """The secret goes to stdout alone so shell capture is exact."""
+
+    def _args(self, tmp_path, **over):
+        import argparse
+
+        return argparse.Namespace(
+            principal="svc",
+            tenant=None,
+            scopes=None,
+            description=None,
+            expires_in_days=None,
+            artifact_dir=str(tmp_path),
+            dsn=None,
+            **over,
+        )
+
+    def test_stdout_carries_only_the_key(self, tmp_path, capsys):
+        from strata.api_key_cli import cmd_create
+        from strata.api_keys import ApiKeyStore
+
+        assert cmd_create(self._args(tmp_path)) == 0
+        captured = capsys.readouterr()
+
+        # KEY=$(strata apikey create ...) must yield a usable credential with
+        # no trimming. Folding the summary into stdout would make the captured
+        # value a broken key, surfacing later as a confusing 401.
+        key = captured.out.strip()
+        assert "\n" not in key
+        store = ApiKeyStore(tmp_path / "artifacts.sqlite")
+        assert store.verify(key) is not None
+
+    def test_human_summary_goes_to_stderr(self, tmp_path, capsys):
+        from strata.api_key_cli import cmd_create
+
+        cmd_create(self._args(tmp_path))
+        captured = capsys.readouterr()
+
+        assert "key id" in captured.err
+        assert "cannot be shown again" in captured.err
+        assert "key id" not in captured.out
+
+
 class TestConfiguration:
     def _service(self, **kwargs):
         return dict(

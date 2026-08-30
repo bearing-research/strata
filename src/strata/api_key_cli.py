@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -58,15 +59,24 @@ def cmd_create(args: argparse.Namespace) -> int:
         expires_in_seconds=expires_in,
     )
 
+    # The key alone on stdout, everything else on stderr, so
+    # ``KEY=$(strata apikey create ...)`` captures the credential and nothing
+    # else. Printing the summary to stdout too would fold it into the captured
+    # value, and the failure would be a confusing 401 rather than an obvious
+    # mistake.
     print(presented)
-    print()
-    print(f"  key id     {record.key_id}")
-    print(f"  principal  {record.principal_id}")
-    print(f"  tenant     {record.tenant or '-'}")
-    print(f"  scopes     {' '.join(sorted(record.scopes)) or '-'}")
-    print(f"  expires    {_format_time(record.expires_at)}")
-    print()
-    print("Store it now. Only the hash is kept, so it cannot be shown again.")
+
+    summary = [
+        "",
+        f"  key id     {record.key_id}",
+        f"  principal  {record.principal_id}",
+        f"  tenant     {record.tenant or '-'}",
+        f"  scopes     {' '.join(sorted(record.scopes)) or '-'}",
+        f"  expires    {_format_time(record.expires_at)}",
+        "",
+        "Store it now. Only the hash is kept, so it cannot be shown again.",
+    ]
+    print("\n".join(summary), file=sys.stderr)
     return 0
 
 
