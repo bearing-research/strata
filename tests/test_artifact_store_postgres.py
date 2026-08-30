@@ -91,7 +91,10 @@ class TestSchemaInitialization:
         store.finalize_artifact("a1", version, "{}", row_count=0, byte_size=0)
 
         reopened = ArtifactStore(tmp_path / "artifacts", dialect=PostgresDialect(postgres_dsn))
-        assert reopened.get_latest_version("a1") is not None
+        try:
+            assert reopened.get_latest_version("a1") is not None
+        finally:
+            reopened.close()
 
 
 class TestRoundTrip:
@@ -189,14 +192,18 @@ class TestConcurrentSchemaInitialization:
             conn.commit()
         finally:
             conn.close()
+            dialect.close()
 
         errors: list[Exception] = []
+        booted: list[ArtifactStore] = []
         barrier = threading.Barrier(8)
 
         def boot(i: int) -> None:
             barrier.wait()
             try:
-                ArtifactStore(tmp_path / f"node{i}", dialect=PostgresDialect(postgres_dsn))
+                booted.append(
+                    ArtifactStore(tmp_path / f"node{i}", dialect=PostgresDialect(postgres_dsn))
+                )
             except Exception as exc:
                 errors.append(exc)
 
@@ -241,22 +248,29 @@ class TestConnectionLimits:
         # while holding the global schema lock would hang every other node
         # with no error and no bound. sqlite3.connect(timeout=30.0) failed
         # loudly after 30s; this restores the same ceiling.
-        conn = PostgresDialect(postgres_dsn).connect()
+        dialect = PostgresDialect(postgres_dsn)
         try:
-            assert conn.execute("SHOW lock_timeout").fetchone()[0] == "30s"
+            conn = dialect.connect()
+            try:
+                assert conn.execute("SHOW lock_timeout").fetchone()[0] == "30s"
+            finally:
+                conn.close()
         finally:
-            conn.close()
+            dialect.close()
 
     def test_schema_lock_is_skipped_once_the_schema_exists(self, postgres_dsn, store):
         # The schema lock is global. An ArtifactStore is constructed per
         # session in several places, so taking it on every construction would
         # funnel the whole cluster through one mutex.
         dialect = PostgresDialect(postgres_dsn)
-        conn = dialect.connect()
         try:
-            assert dialect.schema_exists(conn) is True
+            conn = dialect.connect()
+            try:
+                assert dialect.schema_exists(conn) is True
+            finally:
+                conn.close()
         finally:
-            conn.close()
+            dialect.close()
 
 
 class TestCanonicalPromotion:
@@ -345,6 +359,56 @@ class TestConnectionPool:
             assert [t for t in threads if t.is_alive()] == [], "threads deadlocked on the pool"
             assert errors == []
             assert sorted(done) == list(range(8))
+        finally:
+            dialect.close()
+
+    def test_releasing_after_close_does_not_resurrect_a_pool(self, postgres_dsn):
+        # close() used to null _pool while _release() went through _get_pool(),
+        # which rebuilt one -- so returning a still-checked-out connection
+        # opened fresh sockets and then raised
+        # "can't return connection to pool 'pool-2', it comes from 'pool-1'".
+        dialect = PostgresDialect(postgres_dsn)
+        conn = dialect.connect()
+        conn.execute("SELECT 1").fetchone()
+        dialect.close()
+
+        conn.close()  # must dispose the connection, not rebuild the pool
+        assert dialect._pool is None
+
+    def test_close_is_terminal(self, postgres_dsn):
+        # A closed dialect quietly reopening defeats the connection bound that
+        # close() exists to enforce.
+        dialect = PostgresDialect(postgres_dsn)
+        dialect.connect().close()
+        dialect.close()
+
+        with pytest.raises(RuntimeError, match="closed"):
+            dialect.connect()
+
+    def test_release_from_a_non_owning_thread_is_ignored(self, postgres_dsn):
+        # Previously an AttributeError on a thread that never acquired, or a
+        # putconn(None) that lost the real connection from a bounded pool.
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            conn = dialect.connect()
+            errors: list[Exception] = []
+
+            def release_elsewhere() -> None:
+                try:
+                    conn.close()
+                except Exception as exc:  # noqa: BLE001 - recorded, then asserted
+                    errors.append(exc)
+
+            thread = threading.Thread(target=release_elsewhere)
+            thread.start()
+            thread.join()
+
+            assert errors == []
+            # The owning thread still holds it, so the pool did not lose it.
+            assert dialect._local.conn is not None
+            conn._closed = False  # the foreign close flipped the wrapper's guard
+            conn.close()
+            assert dialect._local.conn is None
         finally:
             dialect.close()
 

@@ -51,6 +51,7 @@ today's behavior exactly, including the connection PRAGMAs.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import sqlite3
 import threading
@@ -75,6 +76,8 @@ _POOL_TIMEOUT_SECONDS = 30.0
 
 
 # Characters that open a region where ``?`` is data, not a placeholder.
+logger = logging.getLogger(__name__)
+
 _SINGLE_QUOTE = "'"
 _DOUBLE_QUOTE = '"'
 
@@ -285,6 +288,15 @@ class SqlDialect(Protocol):
         """
         ...
 
+    def close(self) -> None:
+        """Release any resources the dialect holds. Idempotent.
+
+        On SQLite there are none; connections are per-operation file handles.
+        Declared here anyway so a caller can shut a store down without
+        knowing which backend is underneath.
+        """
+        ...
+
     def begin_write(self, conn: StoreConnection, key: str) -> None:
         """Open a transaction that serializes writers contending on ``key``.
 
@@ -352,6 +364,10 @@ class SqliteDialect:
             "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact_versions'"
         ).fetchone()
         return row is not None
+
+    def close(self) -> None:
+        # Nothing pooled: each connection is a file handle closed by its caller.
+        return
 
     def begin_write(self, conn: StoreConnection, key: str) -> None:
         # SQLite locks the whole database file, so the key is not needed: any
@@ -464,6 +480,7 @@ class PostgresDialect:
         self.max_size = max_size
         self._pool: Any = None
         self._pool_lock = threading.Lock()
+        self._closed = False
         # Per-thread (connection, depth) for re-entrant acquisition.
         self._local = threading.local()
 
@@ -473,6 +490,12 @@ class PostgresDialect:
         Lazy so that constructing a dialect -- which tests and the config
         factory both do freely -- costs no sockets until something queries.
         """
+        if self._closed:
+            raise RuntimeError(
+                "PostgresDialect is closed. Reopening on demand would defeat "
+                "the connection bound that close() exists to enforce, so this "
+                "raises instead of quietly building a second pool."
+            )
         if self._pool is None:
             with self._pool_lock:
                 if self._pool is None:
@@ -540,18 +563,44 @@ class PostgresDialect:
 
     def _release(self) -> None:
         state = self._local
+        if getattr(state, "conn", None) is None:
+            # A release from a thread that is not the one holding this
+            # connection: a cross-thread close, or a double release that got
+            # past the wrapper's own guard. Returning here keeps the failure
+            # from compounding -- decrementing blindly would drive depth
+            # negative and then call putconn(None), which psycopg_pool rejects
+            # while the real connection stays lost from a bounded pool.
+            logger.warning("ignoring artifact-store connection release from a non-owning thread")
+            return
+
         state.depth -= 1
         if state.depth > 0:
             return
+
         raw = state.conn
         state.conn = None
+
+        pool = self._pool
+        if self._closed or pool is None:
+            # The pool was disposed while this connection was checked out.
+            # putconn would rebuild a pool and then reject the connection as
+            # foreign, so dispose it directly instead.
+            raw.close()
+            return
+
         # putconn rolls back anything still open, so a caller that raised
         # before committing cannot leak a transaction into the next borrower.
-        self._get_pool().putconn(raw)
+        pool.putconn(raw)
 
     def close(self) -> None:
-        """Close the pool and every connection in it."""
+        """Dispose the pool. Terminal -- a closed dialect will not reopen.
+
+        Every ``ConnectionPool`` also runs worker threads, so a dialect left
+        unclosed leaks those for the process lifetime and its ``__del__``
+        raises ``PythonFinalizationError`` at interpreter shutdown.
+        """
         with self._pool_lock:
+            self._closed = True
             if self._pool is not None:
                 self._pool.close()
                 self._pool = None
