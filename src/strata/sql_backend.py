@@ -51,8 +51,10 @@ today's behavior exactly, including the connection PRAGMAs.
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import sqlite3
+import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
@@ -62,8 +64,20 @@ from typing import Any, Protocol
 _LOCK_TIMEOUT_MS = 30_000
 _CONNECT_TIMEOUT_SECONDS = 10
 
+# Pool defaults. max_size is per process, and the store nests connection
+# acquisition two deep in places, so re-entrant sharing (see
+# ``PostgresDialect.connect``) is what keeps this from having to be sized at
+# twice the concurrency.
+_POOL_MIN_SIZE = 0
+_POOL_MAX_SIZE = 16
+# Bounds the wait for a free connection. Without it an exhausted pool blocks
+# forever, which is the failure this whole class exists to avoid.
+_POOL_TIMEOUT_SECONDS = 30.0
+
 
 # Characters that open a region where ``?`` is data, not a placeholder.
+logger = logging.getLogger(__name__)
+
 _SINGLE_QUOTE = "'"
 _DOUBLE_QUOTE = '"'
 
@@ -274,6 +288,15 @@ class SqlDialect(Protocol):
         """
         ...
 
+    def close(self) -> None:
+        """Release any resources the dialect holds. Idempotent.
+
+        On SQLite there are none; connections are per-operation file handles.
+        Declared here anyway so a caller can shut a store down without
+        knowing which backend is underneath.
+        """
+        ...
+
     def begin_write(self, conn: StoreConnection, key: str) -> None:
         """Open a transaction that serializes writers contending on ``key``.
 
@@ -342,6 +365,10 @@ class SqliteDialect:
         ).fetchone()
         return row is not None
 
+    def close(self) -> None:
+        # Nothing pooled: each connection is a file handle closed by its caller.
+        return
+
     def begin_write(self, conn: StoreConnection, key: str) -> None:
         # SQLite locks the whole database file, so the key is not needed: any
         # writer excludes any other regardless of what it intends to touch.
@@ -408,8 +435,10 @@ class _PostgresConnection:
       The store uses it only for its own multi-statement schema DDL.
     """
 
-    def __init__(self, inner: Any) -> None:
+    def __init__(self, inner: Any, release: Any) -> None:
         self._inner = inner
+        self._release = release
+        self._closed = False
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> Any:
         return self._inner.execute(translate_placeholders(sql), params)
@@ -426,7 +455,16 @@ class _PostgresConnection:
         self._inner.rollback()
 
     def close(self) -> None:
-        self._inner.close()
+        """Hand the connection back rather than closing it.
+
+        The store calls ``close`` 41 times and means "I am done with this";
+        under a pool that has to mean "return it". Guarded against a double
+        release, which would hand the same connection to two threads.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        self._release()
 
 
 class PostgresDialect:
@@ -437,31 +475,135 @@ class PostgresDialect:
 
     name = "postgres"
 
-    def __init__(self, dsn: str) -> None:
+    def __init__(self, dsn: str, *, max_size: int = _POOL_MAX_SIZE) -> None:
         self.dsn = dsn
+        self.max_size = max_size
+        self._pool: Any = None
+        self._pool_lock = threading.Lock()
+        self._closed = False
+        # Per-thread (connection, depth) for re-entrant acquisition.
+        self._local = threading.local()
+
+    def _get_pool(self) -> Any:
+        """Build the pool on first use.
+
+        Lazy so that constructing a dialect -- which tests and the config
+        factory both do freely -- costs no sockets until something queries.
+        """
+        if self._closed:
+            raise RuntimeError(
+                "PostgresDialect is closed. Reopening on demand would defeat "
+                "the connection bound that close() exists to enforce, so this "
+                "raises instead of quietly building a second pool."
+            )
+        if self._pool is None:
+            with self._pool_lock:
+                if self._pool is None:
+                    from psycopg_pool import ConnectionPool
+
+                    # Timeouts, because the SQLite dialect had them and this
+                    # one inherited none. ``sqlite3.connect(timeout=30.0)``
+                    # made a contended writer fail loudly after 30s;
+                    # ``pg_advisory_xact_lock`` waits forever, so a node that
+                    # stalls while holding a lock -- a paused container, a
+                    # partition leaving the backend "idle in transaction" --
+                    # would hang every other node behind it with no bound.
+                    #
+                    # Deliberately no ``statement_timeout``: the hazard is
+                    # waiting on a lock, not running a long query, and a query
+                    # cap would break slow maintenance like ``garbage_collect``.
+                    self._pool = ConnectionPool(
+                        self.dsn,
+                        min_size=_POOL_MIN_SIZE,
+                        max_size=self.max_size,
+                        timeout=_POOL_TIMEOUT_SECONDS,
+                        kwargs={
+                            "row_factory": _row_factory,
+                            "connect_timeout": _CONNECT_TIMEOUT_SECONDS,
+                            "options": f"-c lock_timeout={_LOCK_TIMEOUT_MS}",
+                        },
+                        open=True,
+                    )
+        return self._pool
 
     def connect(self) -> StoreConnection:
-        import psycopg
+        """Take a pooled connection, re-entrantly.
 
-        # Timeouts, because the SQLite dialect has them and this one inherited
-        # none. ``sqlite3.connect(timeout=30.0)`` made a contended writer fail
-        # loudly after 30s; ``pg_advisory_xact_lock`` waits forever, so a node
-        # that stalls while holding a lock -- a paused container, a partition
-        # leaving the backend "idle in transaction" -- would hang every other
-        # node behind it with no error and no bound. ``lock_timeout`` restores
-        # the same 30s ceiling on the same failure.
-        #
-        # Deliberately no ``statement_timeout``: the hazard here is waiting on
-        # a lock, not running a long query, and capping query time would break
-        # legitimately slow maintenance work like ``garbage_collect`` over a
-        # large store.
-        conn = psycopg.connect(
-            self.dsn,
-            row_factory=_row_factory,
-            connect_timeout=_CONNECT_TIMEOUT_SECONDS,
-            options=f"-c lock_timeout={_LOCK_TIMEOUT_MS}",
-        )
-        return _PostgresConnection(conn)
+        A thread that already holds one gets the same connection back with a
+        bumped depth, and the connection returns to the pool only when the
+        outermost holder closes it.
+
+        This is not an optimization, it is what makes a bounded pool safe
+        here. ``ArtifactStore`` acquires two deep in six places -- most of
+        them ``return self.get_artifact(...)`` evaluated inside a ``try``
+        whose ``finally`` has not yet released the outer connection. Without
+        re-entrancy, ``max_size`` threads each holding one and waiting for a
+        second deadlock until the pool timeout fires, and the pool would have
+        to be sized at twice peak concurrency to be safe.
+
+        Sharing a connection means a nested call joins the outer transaction.
+        That is sound for every nesting that exists today: each one runs after
+        the outer work has been committed or rolled back, so there is no
+        pending state for a nested ``commit`` to publish early. The nested
+        ``set_name`` at ``artifact_store.py:1060`` is the only nested *write*,
+        and the line above it rolls the outer transaction back. Adding a
+        nested write while the outer holds uncommitted work would break that,
+        which is why it is written down here.
+        """
+        state = self._local
+        conn = getattr(state, "conn", None)
+        if conn is not None:
+            state.depth += 1
+            return _PostgresConnection(conn, self._release)
+
+        raw = self._get_pool().getconn()
+        state.conn = raw
+        state.depth = 1
+        return _PostgresConnection(raw, self._release)
+
+    def _release(self) -> None:
+        state = self._local
+        if getattr(state, "conn", None) is None:
+            # A release from a thread that is not the one holding this
+            # connection: a cross-thread close, or a double release that got
+            # past the wrapper's own guard. Returning here keeps the failure
+            # from compounding -- decrementing blindly would drive depth
+            # negative and then call putconn(None), which psycopg_pool rejects
+            # while the real connection stays lost from a bounded pool.
+            logger.warning("ignoring artifact-store connection release from a non-owning thread")
+            return
+
+        state.depth -= 1
+        if state.depth > 0:
+            return
+
+        raw = state.conn
+        state.conn = None
+
+        pool = self._pool
+        if self._closed or pool is None:
+            # The pool was disposed while this connection was checked out.
+            # putconn would rebuild a pool and then reject the connection as
+            # foreign, so dispose it directly instead.
+            raw.close()
+            return
+
+        # putconn rolls back anything still open, so a caller that raised
+        # before committing cannot leak a transaction into the next borrower.
+        pool.putconn(raw)
+
+    def close(self) -> None:
+        """Dispose the pool. Terminal -- a closed dialect will not reopen.
+
+        Every ``ConnectionPool`` also runs worker threads, so a dialect left
+        unclosed leaks those for the process lifetime and its ``__del__``
+        raises ``PythonFinalizationError`` at interpreter shutdown.
+        """
+        with self._pool_lock:
+            self._closed = True
+            if self._pool is not None:
+                self._pool.close()
+                self._pool = None
 
     def schema_exists(self, conn: StoreConnection) -> bool:
         row = conn.execute("SELECT to_regclass('artifact_versions')").fetchone()

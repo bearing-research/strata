@@ -147,31 +147,47 @@ class TestPostgresConnectionAdapter:
         from strata.sql_backend import _PostgresConnection
 
         inner = _FakeInner()
-        return _PostgresConnection(inner), inner
+        released = []
+        return _PostgresConnection(inner, lambda: released.append(1)), inner, released
 
     def test_execute_translates_placeholders(self):
-        conn, inner = self._wrap()
+        conn, inner, _ = self._wrap()
         conn.execute("SELECT * FROM t WHERE id = ?", ("a1",))
         assert inner.executed == [("SELECT * FROM t WHERE id = %s", ("a1",))]
 
     def test_execute_accepts_a_list_of_params(self):
         # The store builds params as a list where filters are optional.
-        conn, inner = self._wrap()
+        conn, inner, _ = self._wrap()
         conn.execute("SELECT ? , ?", ["a", "b"])
         assert inner.executed[0][1] == ("a", "b")
 
     def test_executescript_sends_ddl_unchanged(self):
         # Multi-statement schema DDL, no parameters, no percent signs.
-        conn, inner = self._wrap()
+        conn, inner, _ = self._wrap()
         conn.executescript("CREATE TABLE a (x TEXT); CREATE TABLE b (y TEXT);")
         assert inner.executed == [("CREATE TABLE a (x TEXT); CREATE TABLE b (y TEXT);", ())]
 
     def test_begin_write_takes_an_advisory_lock_on_the_key(self):
-        conn, inner = self._wrap()
+        conn, inner, _ = self._wrap()
         PostgresDialect("postgresql:///x").begin_write(conn, "a1")
         sql, params = inner.executed[0]
         assert "pg_advisory_xact_lock" in sql
         assert params == (advisory_lock_id("a1"),)
+
+    def test_close_returns_the_connection_instead_of_closing_it(self):
+        # The store calls close() 41 times meaning "done with this"; under a
+        # pool that has to mean "give it back", or the pool drains to nothing.
+        conn, inner, released = self._wrap()
+        conn.close()
+        assert released == [1]
+        assert not hasattr(inner, "closed")
+
+    def test_double_close_releases_once(self):
+        # A second release would hand the same connection to two threads.
+        conn, _, released = self._wrap()
+        conn.close()
+        conn.close()
+        assert released == [1]
 
 
 class TestRowBehavesLikeSqliteRow:

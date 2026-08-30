@@ -484,6 +484,14 @@ class ArtifactStore:
         """
         return self._dialect.connect()
 
+    def close(self) -> None:
+        """Release backend resources. Idempotent, and safe to skip on SQLite.
+
+        Exists because the Postgres dialect holds a connection pool, and each
+        pool runs worker threads that outlive the store otherwise.
+        """
+        self._dialect.close()
+
     def _init_schema(self) -> None:
         """Initialize database schema with migrations for tenant columns."""
         conn = self._get_connection()
@@ -2713,6 +2721,8 @@ class ArtifactStore:
                 artifact_tenant = row["tenant"] if row["tenant"] else None
                 if not self._can_assign_name_for_tenant(artifact_tenant, tenant):
                     return False
+            # Past this point the delete is committed to; the blob cleanup
+            # below the finally runs only for rows that actually existed.
 
             # Delete name pointers to this version
             conn.execute(
@@ -2752,13 +2762,14 @@ class ArtifactStore:
                 (artifact_id, version),
             )
             conn.commit()
-
-            # Delete blob via blob store
-            self.blob_store.delete_blob(artifact_id, version)
-
-            return True
         finally:
             conn.close()
+
+        # Blob deletion is network I/O against S3 / GCS / Azure, and it runs
+        # after the metadata is durably gone, so it needs no connection.
+        # Holding a pooled one across it parks a slot for the round trip.
+        self.blob_store.delete_blob(artifact_id, version)
+        return True
 
     def garbage_collect(
         self,
@@ -2865,27 +2876,34 @@ class ArtifactStore:
                 deleted_bytes += byte_size
 
             conn.commit()
-
-            # Best-effort blob cleanup after the metadata is durably gone. A
-            # failure here only orphans bytes, so it must not abort the run.
-            for artifact_id, version in collected:
-                try:
-                    self.blob_store.delete_blob(artifact_id, version)
-                except Exception:
-                    logger.exception(
-                        "garbage_collect: failed to delete blob for %s@v=%d "
-                        "(metadata already removed; bytes orphaned)",
-                        artifact_id,
-                        version,
-                    )
-
-            return {
-                "deleted_count": deleted_count,
-                "deleted_bytes": deleted_bytes,
-                "cutoff_timestamp": cutoff,
-            }
         finally:
             conn.close()
+
+        # Best-effort blob cleanup after the metadata is durably gone. A
+        # failure here only orphans bytes, so it must not abort the run.
+        #
+        # Outside the connection scope deliberately: a sweep deleting a few
+        # thousand blobs at 50-200ms each against a remote blob store would
+        # otherwise hold a pooled connection for minutes, and a handful of
+        # concurrent sweeps would exhaust the pool and fail unrelated requests
+        # with PoolTimeout. `collected` is already materialized, so nothing
+        # here needs the database.
+        for artifact_id, version in collected:
+            try:
+                self.blob_store.delete_blob(artifact_id, version)
+            except Exception:
+                logger.exception(
+                    "garbage_collect: failed to delete blob for %s@v=%d "
+                    "(metadata already removed; bytes orphaned)",
+                    artifact_id,
+                    version,
+                )
+
+        return {
+            "deleted_count": deleted_count,
+            "deleted_bytes": deleted_bytes,
+            "cutoff_timestamp": cutoff,
+        }
 
     def get_usage(self, tenant: str | None = None) -> dict:
         """Get artifact store usage statistics.
@@ -3095,18 +3113,32 @@ class ArtifactStore:
             )
             rows = cursor.fetchall()
 
-            # Delete blobs and metadata
+            # Metadata first, then blobs. The previous order deleted each blob
+            # before its row was committed, so a failure mid-sweep left rows
+            # pointing at bytes that were already gone. Orphaned bytes are the
+            # better failure, and it is what garbage_collect already does.
             for row in rows:
-                self.blob_store.delete_blob(row["id"], row["version"])
                 conn.execute(
                     "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
                     (row["id"], row["version"]),
                 )
-
             conn.commit()
-            return len(rows)
         finally:
             conn.close()
+
+        # Outside the connection scope: remote blob deletes are network I/O
+        # and would otherwise park a pooled slot for the whole sweep.
+        for row in rows:
+            try:
+                self.blob_store.delete_blob(row["id"], row["version"])
+            except Exception:
+                logger.exception(
+                    "cleanup_failed: failed to delete blob for %s@v=%d "
+                    "(metadata already removed; bytes orphaned)",
+                    row["id"],
+                    row["version"],
+                )
+        return len(rows)
 
     def stats(self, tenant: str | None = None) -> dict:
         """Get artifact store statistics.

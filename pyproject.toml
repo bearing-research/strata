@@ -69,6 +69,7 @@ azure = [
 # Personal mode never needs this.
 postgres = [
     "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.2",
 ]
 # Strata Notebook runtime — DataFrame / Series / ndarray
 # serialization, display outputs (figures, images), and the
