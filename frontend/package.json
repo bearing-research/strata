@@ -24,9 +24,9 @@
     "@dagrejs/dagre": "^3.1.1",
     "codemirror": "^6.0.2",
     "dompurify": "^3.4.14",
-    "markdown-it": "^15.0.0",
-    "vue": "^3.5.41",
-    "vue-router": "^5.2.0"
+    "markdown-it": "^15.0.1",
+    "vue": "^3.5.42",
+    "vue-router": "^5.3.0"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
