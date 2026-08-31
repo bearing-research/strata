@@ -364,6 +364,9 @@ class TestTransformInputAclParity:
 
         state = MagicMock()
         state.config.auth_mode = "trusted_proxy"
+        # Set explicitly: a MagicMock attribute is truthy whatever the mode is,
+        # so leaving it unset would make every "no auth" case look authenticated.
+        state.config.principal_auth_enabled = True
         state.config.hide_forbidden_as_not_found = hide_as_404
         state.config.acl_config = AclConfig(
             default="deny",
@@ -453,6 +456,7 @@ class TestArtifactReadAcl:
 
         state = MagicMock()
         state.config.auth_mode = auth
+        state.config.principal_auth_enabled = auth in ("trusted_proxy", "api_key")
         state.config.hide_forbidden_as_not_found = hide_as_404
         state.config.acl_config = AclConfig(
             default="deny",

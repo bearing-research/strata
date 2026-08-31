@@ -690,11 +690,11 @@ def _frame_scope_error(msg_type: str) -> str | None:
     """Return an error message when the caller lacks the frame's scope.
 
     ``None`` means allowed — including every no-auth deployment, where there is
-    no principal to check (mirrors ``require_scope``'s trusted-proxy-only gate).
+    no principal to check (mirrors ``require_scope``'s own gate).
     """
     from strata.auth import get_principal
 
-    if _configured_auth_mode() != "trusted_proxy":
+    if _configured_auth_mode() not in ("trusted_proxy", "api_key"):
         return None
     required = required_scope_for_frame(msg_type)
     principal = get_principal()
@@ -704,38 +704,55 @@ def _frame_scope_error(msg_type: str) -> str | None:
 
 
 async def _authenticate_websocket(websocket: WebSocket) -> bool:
-    """Apply the trusted-proxy gate to a WS upgrade; False ⇒ already closed.
+    """Authenticate a WS upgrade; False ⇒ already closed.
 
     ``auth_middleware`` and ``tenant_context_middleware`` are registered with
     ``@app.middleware("http")``, and Starlette's ``BaseHTTPMiddleware`` passes
     non-``http`` scopes straight through — so **no** HTTP middleware runs for a
-    WebSocket upgrade. This endpoint therefore has to verify the proxy token and
-    parse the principal itself, exactly as the HTTP path does; without it, in
-    service mode anything that can open a socket could send ``cell_execute`` and
-    run arbitrary Python with no token and no principal.
+    WebSocket upgrade. This endpoint therefore has to establish the principal
+    itself, exactly as the HTTP path does; without it, in service mode anything
+    that can open a socket could send ``cell_execute`` and run arbitrary Python
+    with no credential at all.
+
+    Both credentialed modes are handled, and for the same reason the HTTP
+    middleware handles both: under ``api_key`` the key *is* the credential, so
+    there is no proxy and no proxy token to verify. Checking only for
+    ``trusted_proxy`` here left every ``api_key`` deployment's WebSocket wide
+    open while its HTTP surface was authenticated.
 
     In personal / ``auth_mode="none"`` deployments there is no principal and the
     socket stays open, matching the HTTP middleware's own early return.
     """
-    from strata.auth import AuthError, parse_principal, set_principal, verify_proxy_token
+    from strata.auth import (
+        AuthError,
+        parse_api_key_principal,
+        parse_principal,
+        set_principal,
+        verify_proxy_token,
+    )
     from strata.server import get_state
 
-    if _configured_auth_mode() != "trusted_proxy":
+    mode = _configured_auth_mode()
+    if mode not in ("trusted_proxy", "api_key"):
         return True
     config = get_state().config
 
     # ``WebSocket.headers`` is the same case-insensitive mapping
     # ``auth_middleware`` reads via ``request.headers``.
     headers = dict(websocket.headers)
-    header_name = config.proxy_token_header
-    token = headers.get(header_name) or headers.get(header_name.lower())
-    if not verify_proxy_token(token, config.proxy_token):
-        logger.warning("ws_auth_failed reason=invalid_proxy_token")
-        await websocket.close(code=1008, reason="Unauthorized")
-        return False
+    if mode == "trusted_proxy":
+        header_name = config.proxy_token_header
+        token = headers.get(header_name) or headers.get(header_name.lower())
+        if not verify_proxy_token(token, config.proxy_token):
+            logger.warning("ws_auth_failed reason=invalid_proxy_token")
+            await websocket.close(code=1008, reason="Unauthorized")
+            return False
 
     try:
-        set_principal(parse_principal(headers, config))
+        if mode == "api_key":
+            set_principal(parse_api_key_principal(headers, config))
+        else:
+            set_principal(parse_principal(headers, config))
     except AuthError:
         logger.warning("ws_auth_failed reason=missing_principal")
         await websocket.close(code=1008, reason="Unauthorized")

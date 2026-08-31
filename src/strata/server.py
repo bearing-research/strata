@@ -354,7 +354,7 @@ def _authorize_build_access(
 ) -> None:
     """Authorize access to a build or identity stream under trusted proxy auth."""
     state = get_state()
-    if state.config.auth_mode != "trusted_proxy":
+    if not state.config.principal_auth_enabled:
         return
 
     principal = get_principal()
@@ -1448,7 +1448,7 @@ def _require_notebook_worker_admin_access() -> ServerState:
             detail="Server-managed notebook workers are only available in service mode",
         )
 
-    if state.config.auth_mode == "trusted_proxy":
+    if state.config.principal_auth_enabled:
         principal = get_principal()
         if principal is None or not principal.has_scope("admin:notebook-workers"):
             raise HTTPException(status_code=403, detail="Insufficient scope")
@@ -1537,7 +1537,7 @@ def _get_artifact_request_tenant() -> str | None:
     artifacts remain visible for backwards compatibility with legacy data.
     """
     state = get_state()
-    if state.config.auth_mode != "trusted_proxy":
+    if not state.config.principal_auth_enabled:
         return None
 
     principal = get_principal()
@@ -1628,7 +1628,7 @@ def _validate_transform_allowed(executor_ref: str, principal=None):
 
         if (
             defn.requires_scope
-            and state.config.auth_mode == "trusted_proxy"
+            and state.config.principal_auth_enabled
             and not (principal and principal.has_scope(defn.requires_scope))
         ):
             if principal is None:
@@ -1680,7 +1680,7 @@ def _authorize_artifact_read(artifact) -> None:
     auth (tenant scoping via `_ensure_artifact_access` still applies).
     """
     state = get_state()
-    if state.config.auth_mode != "trusted_proxy":
+    if not state.config.principal_auth_enabled:
         return
     if not getattr(artifact, "transform_spec", None):
         return
@@ -1984,7 +1984,7 @@ def _require_registry_approver():
 
     state = get_state()
     principal = get_principal()
-    if state.config.auth_mode == "trusted_proxy":
+    if state.config.principal_auth_enabled:
         if principal is None or not principal.has_scope("admin:registry"):
             raise HTTPException(
                 status_code=403,
@@ -2172,7 +2172,7 @@ async def _handle_identity_materialize(
     #
     # The identity is parsed from the URI rather than taken from the plan, so
     # no manifest work happens for a request that is about to be refused.
-    if state.config.auth_mode == "trusted_proxy":
+    if state.config.principal_auth_enabled:
         if principal is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
         early_identity = _table_identity_from_uri(table_uri)
@@ -2233,7 +2233,7 @@ async def _handle_identity_materialize(
         )
 
     # Ownership stamping (authorization itself ran before planning, above).
-    if state.config.auth_mode == "trusted_proxy":
+    if state.config.principal_auth_enabled:
         if principal is None:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -2496,7 +2496,7 @@ async def get_stream(stream_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"Stream {stream_id} not found")
 
     # Ownership check (when auth_mode=trusted_proxy)
-    if state.config.auth_mode == "trusted_proxy":
+    if state.config.principal_auth_enabled:
         from strata.auth import get_principal
 
         principal = get_principal()

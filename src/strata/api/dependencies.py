@@ -168,7 +168,7 @@ def require_scope(scope: str):
         from strata.server import get_state
 
         state = get_state()
-        if state.config.auth_mode == "trusted_proxy":
+        if state.config.principal_auth_enabled:
             principal = get_principal()
             if principal is None or not principal.has_scope(scope):
                 raise HTTPException(status_code=403, detail="Insufficient scope")
@@ -300,7 +300,7 @@ def authorize_table_access(table_uri: str, table_identity) -> None:
     from strata.types import TableRef
 
     state = get_state()
-    if state.config.auth_mode != "trusted_proxy":
+    if not state.config.principal_auth_enabled:
         return
 
     principal = get_principal()
