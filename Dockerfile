@@ -28,7 +28,7 @@ ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.3-python3.13-trixie-slim@sha256:82f018bb3
 # =============================================================================
 # Stage 1a: Frontend Builder (Node.js)
 # =============================================================================
-FROM node:26-alpine@sha256:aadf416b2cdce311a8811ba3f0608a61b77dbf997500e2eafe781b51f6a0b019 AS frontend-builder
+FROM node:26-alpine@sha256:2d984a15c9b54fd0aeb608b8e0d0d83529eb34d2966db27a1fb4f1edc3d298a3 AS frontend-builder
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
