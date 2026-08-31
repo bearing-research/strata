@@ -49,6 +49,23 @@ behaviours that follow from having no timers.
 | `store.py` | SQLite persistence; the pool process keeps no authoritative state |
 | `pool.py` | Submission, dispatch, boot, execution, metering, restart recovery |
 
+## The worker contract
+
+The pool is image-agnostic, but an image has to hold up four things:
+
+| | |
+|---|---|
+| Listen on the worker port | 8080 by default; the backend publishes it |
+| `GET /health` → 200 when ready | No auth. It is polled before the machine is trusted with anything, and it reveals nothing |
+| `POST /execute` → 200 with the result body | The request body is the job payload, opaque to the pool |
+| Require `Authorization: Bearer $STRATA_WORKER_TOKEN` on `/execute` | Reject anything else with 401 |
+
+The token is minted per machine before it boots and passed in its
+environment. Without that check, `/execute` is an unauthenticated
+remote-code-execution endpoint — survivable only while the machine is bound to
+loopback, which stops being true the moment a backend hands out a routable
+address.
+
 ## The Docker backend
 
 Talks to the Docker Engine API over its UNIX socket with httpx, so the pool

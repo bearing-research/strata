@@ -28,7 +28,10 @@ CREATE TABLE IF NOT EXISTS workers (
     session_id TEXT,
     current_job_id TEXT,
     created_at REAL NOT NULL,
-    last_active_at REAL
+    last_active_at REAL,
+    -- The pool's credential for this machine. Sensitive: it authorises code
+    -- execution there. Kept out of Worker's repr for the same reason.
+    auth_token TEXT
 );
 
 -- Partial, because a worker row exists before backend.start() has told us the
@@ -100,6 +103,7 @@ def _to_worker(row: sqlite3.Row) -> Worker:
         session_id=row["session_id"],
         current_job_id=row["current_job_id"],
         last_active_at=row["last_active_at"],
+        auth_token=row["auth_token"],
     )
 
 
@@ -151,8 +155,8 @@ class PoolStore:
                 """
                 INSERT INTO workers (id, machine_type, backend, backend_id, state,
                                      endpoint, region, session_id, current_job_id,
-                                     created_at, last_active_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     created_at, last_active_at, auth_token)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     backend_id = excluded.backend_id,
                     state = excluded.state,
@@ -160,7 +164,8 @@ class PoolStore:
                     region = excluded.region,
                     session_id = excluded.session_id,
                     current_job_id = excluded.current_job_id,
-                    last_active_at = excluded.last_active_at
+                    last_active_at = excluded.last_active_at,
+                    auth_token = excluded.auth_token
                 """,
                 (
                     worker.id,
@@ -174,6 +179,7 @@ class PoolStore:
                     worker.current_job_id,
                     worker.created_at,
                     worker.last_active_at,
+                    worker.auth_token,
                 ),
             )
             self._conn.commit()

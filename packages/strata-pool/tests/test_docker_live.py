@@ -19,10 +19,16 @@ from strata_pool.backends.docker import DEFAULT_SOCKET
 
 IMAGE = "python:3.12-slim"
 
-# A worker in nine lines: 200 on any GET (the health check), and POST /execute
-# echoes its body back so the test can prove the payload made the round trip.
+# A worker: 200 on any GET (the health check), and POST /execute echoes its
+# body back so the test can prove the payload made the round trip. It enforces
+# the bearer token, which is what makes these tests prove the credential
+# actually reaches the container and matches what the pool sends — a 401 here
+# fails the job, so every passing test below is an assertion about auth.
 WORKER_SCRIPT = """
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+TOKEN = os.environ["STRATA_WORKER_TOKEN"]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -33,6 +39,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("content-length", 0)))
+        if self.headers.get("Authorization") != "Bearer " + TOKEN:
+            self.send_response(401)
+            self.end_headers()
+            self.wfile.write(b"unauthorized")
+            return
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"ran:" + body)
