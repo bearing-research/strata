@@ -45,6 +45,52 @@ async def test_a_machine_that_did_not_survive_is_stopped_and_dropped(make_pool):
     assert backend.stopped == ["machine-1"]
 
 
+async def test_a_machine_still_running_our_orphaned_job_is_retired(make_pool):
+    """The pool died, not the worker: it may still be computing.
+
+    Nothing can tell it to stop, so returning it to the fleet would run the
+    next job alongside the orphan on hardware sized for one.
+    """
+    first = make_pool(db_name="shared.sqlite")
+    await _one_completed_job(first)
+
+    worker = first.store.list_workers()[0]
+    worker.state = WorkerState.BUSY
+    worker.current_job_id = "job-orphan"
+    first.store.save_worker(worker)
+    await first.aclose()
+
+    backend = FakeBackend()
+    restarted = make_pool(backend=backend, db_name="shared.sqlite")
+    await restarted.recover()
+
+    assert restarted.store.list_workers() == []
+    assert backend.stopped == ["machine-1"]
+
+
+async def test_a_machine_that_finished_booting_while_we_were_down_is_put_to_work(make_pool):
+    """Answering a health check is the promotion criterion, and no boot task
+    survived the restart to apply it. Left STARTING it bills forever and holds
+    a slot against max_workers without ever accepting a job."""
+    first = make_pool(db_name="shared.sqlite")
+    await _one_completed_job(first)
+
+    worker = first.store.list_workers()[0]
+    worker.state = WorkerState.STARTING
+    first.store.save_worker(worker)
+    await first.aclose()
+
+    backend = FakeBackend()
+    restarted = make_pool(backend=backend, db_name="shared.sqlite")
+    await restarted.recover()
+
+    assert [w.state for w in restarted.store.list_workers()] == [WorkerState.WARM]
+
+    job = await restarted.submit(tenant_id="acme", machine_type="cpu", payload=b"more")
+    assert (await restarted.wait(job.id)).state is JobState.COMPLETED
+    assert backend.started == []
+
+
 async def test_a_job_that_was_in_flight_is_failed_rather_than_re_run(make_pool):
     first = make_pool(db_name="shared.sqlite")
     done_id = await _one_completed_job(first)

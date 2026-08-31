@@ -226,7 +226,9 @@ class PoolStore:
         if session_id is not None:
             sql += " AND session_id = ?"
             params.append(session_id)
-        sql += " ORDER BY last_active_at DESC NULLS LAST, created_at ASC LIMIT 1"
+        # SQLite already sorts NULLs last under DESC; spelling it out would
+        # require SQLite >= 3.30 for no behavioural gain.
+        sql += " ORDER BY last_active_at DESC, created_at ASC LIMIT 1"
         with self._lock:
             row = self._conn.execute(sql, params).fetchone()
         return _to_worker(row) if row else None

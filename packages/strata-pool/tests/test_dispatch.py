@@ -1,5 +1,7 @@
 """Placing jobs on machines: reuse, affinity, and when to start one."""
 
+import sqlite3
+
 import pytest
 from conftest import FakeBackend, FakeWorkers
 from strata_pool import JobState, MachineType, WorkerState
@@ -124,6 +126,31 @@ async def test_a_machine_that_never_boots_is_stopped_and_the_work_stays_queued(m
     # No scaler yet: the next submit is what retries the start.
     await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"more")
     assert backend.started == ["machine-1", "machine-2"]
+
+
+async def test_a_machine_we_cannot_write_down_is_stopped_rather_than_leaked(make_pool):
+    """The ID is only in hand once. If it never lands in the store, nothing
+    downstream could ever stop the machine, and it bills until someone notices
+    it in a cloud console."""
+    backend = FakeBackend()
+    pool = make_pool(backend=backend)
+
+    def refuse_second_write(worker):
+        raise sqlite3.OperationalError("database is locked")
+
+    original = pool.store.save_worker
+
+    def save_once(worker):
+        pool.store.save_worker = refuse_second_write
+        original(worker)
+
+    pool.store.save_worker = save_once
+
+    await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
+
+    pool.store.save_worker = original
+    assert backend.stopped == ["machine-1"]
+    assert pool.store.list_workers() == []
 
 
 async def test_an_unknown_machine_type_is_rejected(make_pool):
