@@ -11,6 +11,7 @@ def _worker(store: PoolStore, **overrides) -> Worker:
     worker = Worker(
         id=overrides.pop("id", new_id("worker")),
         machine_type=overrides.pop("machine_type", "cpu"),
+        tenant_id=overrides.pop("tenant_id", "acme"),
         backend=overrides.pop("backend", "fake"),
         state=overrides.pop("state", WorkerState.WARM),
         created_at=overrides.pop("created_at", 100.0),
@@ -69,18 +70,18 @@ class TestWorkers:
     def test_find_warm_ignores_busy_and_starting(self, store):
         _worker(store, state=WorkerState.BUSY)
         _worker(store, state=WorkerState.STARTING)
-        assert store.find_warm_worker("cpu") is None
+        assert store.find_warm_worker("cpu", "acme") is None
 
     def test_find_warm_by_session_only_matches_that_session(self, store):
         _worker(store, session_id="other")
-        assert store.find_warm_worker("cpu", session_id="mine") is None
+        assert store.find_warm_worker("cpu", "acme", session_id="mine") is None
 
     def test_count_workers_filters_by_type_and_state(self, store):
         _worker(store, state=WorkerState.WARM)
         _worker(store, state=WorkerState.BUSY)
         _worker(store, machine_type="gpu", state=WorkerState.WARM)
-        assert store.count_workers("cpu", [WorkerState.WARM, WorkerState.BUSY]) == 2
-        assert store.count_workers("gpu", [WorkerState.WARM]) == 1
+        assert store.count_workers("cpu", "acme", [WorkerState.WARM, WorkerState.BUSY]) == 2
+        assert store.count_workers("gpu", "acme", [WorkerState.WARM]) == 1
 
 
 class TestJobs:
@@ -92,12 +93,12 @@ class TestJobs:
         _job(store, id="low-early", priority=0, submitted_at=100.0)
         _job(store, id="high-late", priority=5, submitted_at=200.0)
         _job(store, id="high-early", priority=5, submitted_at=150.0)
-        assert store.next_queued_job("cpu").id == "high-early"
+        assert store.next_queued_job("cpu", "acme").id == "high-early"
 
     def test_queue_only_holds_queued_jobs(self, store):
         _job(store, state=JobState.RUNNING)
-        assert store.next_queued_job("cpu") is None
-        assert store.count_queued("cpu") == 0
+        assert store.next_queued_job("cpu", "acme") is None
+        assert store.count_queued("cpu", "acme") == 0
 
     def test_job_history_outlives_its_worker(self, store):
         worker = _worker(store)

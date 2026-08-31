@@ -78,7 +78,7 @@ async def test_the_fleet_stops_growing_at_max_workers(make_pool):
         await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
 
     assert len(backend.started) == 2
-    assert pool.store.count_queued("cpu") == 5
+    assert pool.store.count_queued("cpu", "acme") == 5
 
 
 async def test_queued_work_drains_onto_a_machine_as_it_warms(make_pool):

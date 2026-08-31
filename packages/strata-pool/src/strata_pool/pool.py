@@ -145,7 +145,7 @@ class Pool:
         self.store.save_job(job)
 
         if not await self._try_dispatch(job):
-            await self._ensure_capacity(machine_type)
+            await self._ensure_capacity(machine_type, tenant_id)
         return job
 
     async def wait(self, job_id: str, timeout: float = 30.0) -> Job:
@@ -172,9 +172,11 @@ class Pool:
         """Assign the job to a warm worker if one is available."""
         worker = None
         if job.session_id is not None:
-            worker = self.store.find_warm_worker(job.machine_type, session_id=job.session_id)
+            worker = self.store.find_warm_worker(
+                job.machine_type, job.tenant_id, session_id=job.session_id
+            )
         if worker is None:
-            worker = self.store.find_warm_worker(job.machine_type)
+            worker = self.store.find_warm_worker(job.machine_type, job.tenant_id)
         if worker is None:
             return False
         self._assign(worker, job)
@@ -190,30 +192,35 @@ class Pool:
         self.store.save_job(job)
         self._spawn(self._execute(worker, job))
 
-    async def _drain(self, machine_type: str) -> None:
-        """Place as many queued jobs as there are warm workers."""
+    async def _drain(self, machine_type: str, tenant_id: str) -> None:
+        """Place this tenant's queued jobs onto its warm machines."""
         while True:
-            job = self.store.next_queued_job(machine_type)
+            job = self.store.next_queued_job(machine_type, tenant_id)
             if job is None:
                 return
             if not await self._try_dispatch(job):
                 return
 
-    async def _ensure_capacity(self, machine_type: str) -> None:
-        """Start workers for jobs the current fleet cannot absorb."""
+    async def _ensure_capacity(self, machine_type: str, tenant_id: str) -> None:
+        """Start machines for the jobs this tenant's fleet cannot absorb.
+
+        Counted per tenant, because a machine belonging to another tenant is
+        not capacity this one can use.
+        """
         spec = self.machine_types[machine_type]
-        queued = self.store.count_queued(machine_type)
-        starting = self.store.count_workers(machine_type, [WorkerState.STARTING])
-        warm = self.store.count_workers(machine_type, [WorkerState.WARM])
+        queued = self.store.count_queued(machine_type, tenant_id)
+        starting = self.store.count_workers(machine_type, tenant_id, [WorkerState.STARTING])
+        warm = self.store.count_workers(machine_type, tenant_id, [WorkerState.WARM])
         total = self.store.count_workers(
             machine_type,
+            tenant_id,
             [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY],
         )
         needed = min(queued - starting - warm, spec.max_workers - total)
         for _ in range(max(needed, 0)):
-            await self._start_worker(spec)
+            await self._start_worker(spec, tenant_id)
 
-    async def _start_worker(self, spec: MachineType) -> None:
+    async def _start_worker(self, spec: MachineType, tenant_id: str) -> None:
         """Provision a machine and poll it to warm in the background.
 
         The row is written before the backend call so a crash mid-start
@@ -225,6 +232,7 @@ class Pool:
         worker = Worker(
             id=new_id("worker"),
             machine_type=spec.name,
+            tenant_id=tenant_id,
             backend=self.backend.name,
             state=WorkerState.STARTING,
             created_at=self._wall(),
@@ -237,7 +245,7 @@ class Pool:
         # worker: one machine's credential must not open another's.
         env = {**spec.env, WORKER_TOKEN_ENV: token}
         try:
-            provisioned = await self.backend.start(spec.name, spec.image, env)
+            provisioned = await self.backend.start(spec, env)
         except Exception:
             logger.exception(
                 "backend failed to start a worker",
@@ -274,7 +282,7 @@ class Pool:
                     "worker is warm",
                     extra={"worker_id": worker.id, "machine_type": spec.name},
                 )
-                await self._drain(spec.name)
+                await self._drain(spec.name, worker.tenant_id)
                 return
             await asyncio.sleep(self._health_poll_seconds)
 
@@ -376,11 +384,11 @@ class Pool:
                 worker.current_job_id = None
                 worker.last_active_at = self._wall()
                 self.store.save_worker(worker)
-                await self._drain(job.machine_type)
+                await self._drain(job.machine_type, job.tenant_id)
             else:
                 await self._stop_worker(worker)
                 # The queue may still hold work this worker was going to take.
-                await self._ensure_capacity(job.machine_type)
+                await self._ensure_capacity(job.machine_type, job.tenant_id)
 
     async def _stop_worker(self, worker: Worker) -> None:
         """Deallocate a machine and forget it.
@@ -439,8 +447,9 @@ class Pool:
             self.store.save_job(job)
 
         for machine_type in self.machine_types:
-            await self._drain(machine_type)
-            await self._ensure_capacity(machine_type)
+            for tenant_id in self.store.queued_tenants(machine_type):
+                await self._drain(machine_type, tenant_id)
+                await self._ensure_capacity(machine_type, tenant_id)
 
     async def _health_or_false(self, endpoint: str) -> bool:
         try:

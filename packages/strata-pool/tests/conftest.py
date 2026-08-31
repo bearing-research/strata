@@ -23,7 +23,12 @@ class FakeBackend:
         healthy_after_polls: int = 0,
         never_healthy: bool = False,
         fail_start: bool = False,
+        id_prefix: str = "machine",
     ):
+        self.id_prefix = id_prefix
+        """Distinguishes the machines of two backends sharing one database —
+        a real provider never reissues an ID a live machine already holds."""
+
         self.healthy_after_polls = healthy_after_polls
         self.never_healthy = never_healthy
         self.fail_start = fail_start
@@ -37,14 +42,13 @@ class FakeBackend:
 
     async def start(
         self,
-        machine_type: str,
-        image: str,
+        spec: MachineType,
         env: dict[str, str] | None = None,
     ) -> ProvisionedWorker:
         if self.fail_start:
             raise RuntimeError("no capacity")
         self._counter += 1
-        backend_id = f"machine-{self._counter}"
+        backend_id = f"{self.id_prefix}-{self._counter}"
         self.started.append(backend_id)
         return ProvisionedWorker(
             backend_id=backend_id,

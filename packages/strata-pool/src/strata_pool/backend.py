@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from strata_pool.types import MachineType
+
 
 @dataclass
 class ProvisionedWorker:
@@ -31,11 +33,14 @@ class Backend(Protocol):
 
     async def start(
         self,
-        machine_type: str,
-        image: str,
+        spec: MachineType,
         env: dict[str, str] | None = None,
     ) -> ProvisionedWorker:
         """Provision and start a worker.
+
+        Takes the whole machine type rather than a name and an image: a
+        backend needs the resource limits too, and each will grow its own
+        provider-specific fields. A backend ignores what it cannot express.
 
         Returns once the machine is booting; it does not need to be ready.
         The pool polls `health()` until it is.
