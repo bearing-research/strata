@@ -18,6 +18,7 @@ Leaf module: imports only ``strata.adaptive_concurrency`` / ``strata.tenant`` /
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING, Any
 
 from strata.adaptive_concurrency import ResizableLimiter
@@ -27,6 +28,7 @@ from strata.tenant_registry import get_tenant_registry
 if TYPE_CHECKING:
     from starlette.requests import Request
 
+    from strata.adaptive_concurrency import AdaptiveConcurrencyController
     from strata.config import StrataConfig
 
 
@@ -68,6 +70,9 @@ class Admission:
         self.limiter = limiter
         self.client_id = client_id
         self.client_semaphore_acquired = client_semaphore_acquired
+        # Slot-held duration is the adaptive controller's latency signal, and
+        # release() is the one point every exit path funnels through.
+        self.admitted_at = time.perf_counter()
         # The exact semaphore object this admission acquired. Releasing THIS
         # object (rather than re-deriving one from client_id at release time)
         # is what makes release correct under both an LRU eviction and two
@@ -91,6 +96,10 @@ class QoSAdmission:
 
     def __init__(self, config: StrataConfig) -> None:
         self._config = config
+        # Attached in the lifespan once the controller exists (ServerState is
+        # built first). None = adaptive control off, and admission just keeps
+        # its own counters.
+        self._controller: AdaptiveConcurrencyController | None = None
         # scan_id -> "interactive" | "bulk"
         self._scan_tier: dict[str, str] = {}
         # scan_id -> (client_id, semaphore_acquired)
@@ -112,6 +121,16 @@ class QoSAdmission:
         self._client_interactive_semaphores: dict[str, asyncio.Semaphore] = {}
         self._client_bulk_semaphores: dict[str, asyncio.Semaphore] = {}
         self._client_semaphore_max_entries = 10000
+
+    def attach_controller(self, controller: AdaptiveConcurrencyController | None) -> None:
+        """Feed observed queue waits and slot-held durations to *controller*.
+
+        The controller cannot be constructed at ``ServerState`` time (it needs
+        the tenant registry's limiters), so the lifespan hands it over here.
+        Until it does, the control loop has no inputs at all — which is how it
+        ran as a no-op timer for eight months (#549).
+        """
+        self._controller = controller
 
     @property
     def active_scans(self) -> int:
@@ -207,17 +226,35 @@ class QoSAdmission:
         # semaphore grabbed above before propagating — CancelledError is a
         # BaseException, and the `if not acquired:` path below only handles the
         # timeout (False) case, so the semaphore would otherwise leak a slot.
+        queue_start = time.perf_counter()
         try:
             acquired = await limiter.acquire(timeout=queue_timeout)
         except BaseException:
             if client_semaphore_acquired and client_semaphore is not None:
                 client_semaphore.release()
             raise
+        queue_wait_ms = (time.perf_counter() - queue_start) * 1000
 
         if not acquired:
             if client_semaphore_acquired and client_semaphore is not None:
                 client_semaphore.release()
+            if tier == "interactive":
+                self._interactive_rejected += 1
+            else:
+                self._bulk_rejected += 1
             raise QoSRejected("too_many_requests", tier, max(1, int(queue_timeout / 2)))
+
+        # Queue wait is both an operator metric and the controller's demand
+        # signal: latency under target only justifies more slots if requests
+        # are actually waiting for them.
+        if tier == "interactive":
+            self._interactive_queue_wait_total_ms += queue_wait_ms
+            self._interactive_queue_wait_count += 1
+        else:
+            self._bulk_queue_wait_total_ms += queue_wait_ms
+            self._bulk_queue_wait_count += 1
+        if self._controller is not None:
+            self._controller.record_queue_wait(tier, queue_wait_ms)
 
         self._scan_tier[scan_id] = tier
         self._scan_client[scan_id] = (client_id, client_semaphore_acquired)
@@ -265,6 +302,10 @@ class QoSAdmission:
         if admission._released:
             return
         admission._released = True
+
+        if self._controller is not None:
+            held_ms = (time.perf_counter() - admission.admitted_at) * 1000
+            self._controller.record_latency(admission.tier, held_ms)
 
         await admission.limiter.release()
         self._scan_tier.pop(admission.scan_id, None)

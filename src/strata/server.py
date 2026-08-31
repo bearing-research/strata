@@ -847,6 +847,10 @@ async def lifespan(app: FastAPI):
         interactive_limiter=default_interactive_limiter,
         bulk_limiter=default_bulk_limiter,
     )
+    # Stream admission is where both signals are observed. Attaching only when
+    # enabled keeps the recording off the hot path of every other deployment.
+    if config.adaptive_enabled:
+        _state.qos.attach_controller(_state._adaptive_controller)
     await _state._adaptive_controller.start()
 
     # Cleanup stale metadata entries on startup

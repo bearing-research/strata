@@ -79,20 +79,31 @@ ai_model = "claude-sonnet-4-6"
 
 ### Adaptive concurrency
 
-Off by default. When enabled, a background loop is meant to resize the QoS
-slot counts from observed latency.
+Off by default. When enabled, a background loop resizes the QoS slot counts
+from what stream admission observes: queue wait when a scan acquires its tier
+slot, and slot-held duration when it releases. Latency over the target walks
+the tier down; latency well under it *plus* real queue pressure walks it up.
+Hysteresis (`STRATA_ADAPTIVE_HYSTERESIS` consecutive readings in the same
+direction) keeps it from flapping, and samples older than 60 seconds stop
+counting so an idle tier is not steered by a burst that is over.
 
-!!! warning "Not wired up"
+`STRATA_ADAPTIVE_TARGET_P95_MS` is compared against how long a scan holds its
+slot, which for a bulk scan is the whole build. Set it from observed scan
+duration on your deployment, not from a dashboard SLO, or the loop will read
+normal work as overload and walk the tier down to its floor.
 
-    The controller starts and reports, but nothing feeds it latency samples
-    ([#549](https://github.com/bearing-research/strata/issues/549)), so the
-    slot counts do not move. Enabling this changes no admission behavior
-    today. The knobs are listed because they exist and validate, not because
-    they do anything.
+Two constraints are enforced at startup rather than papered over at runtime:
+
+- `STRATA_INTERACTIVE_SLOTS` and `STRATA_BULK_SLOTS` must fall inside their
+  adaptive `[min, max]` range. The controller starts from those counts, so a
+  value outside the range means the first adjustment jumps to a bound.
+- Adaptive control cannot be combined with `STRATA_MULTI_TENANT_ENABLED`. It
+  steers the default tenant's limiters, which under multi-tenancy is a tier no
+  request acquires.
 
 | Variable                           | Default | Description                                          |
 | ---------------------------------- | ------- | ---------------------------------------------------- |
-| `STRATA_ADAPTIVE_ENABLED`          | `false` | Enable the adaptive concurrency controller           |
+| `STRATA_ADAPTIVE_ENABLED`          | `false` | Enable the adaptive concurrency controller (single-tenant only) |
 | `STRATA_ADAPTIVE_INTERVAL_SECONDS` | `5.0`   | How often the controller evaluates                   |
 | `STRATA_ADAPTIVE_TARGET_P95_MS`    | `500.0` | Latency target the controller aims to hold           |
 | `STRATA_ADAPTIVE_MIN_INTERACTIVE`  | `4`     | Floor for interactive slots                          |

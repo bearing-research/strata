@@ -9,6 +9,8 @@ with a fake limiter instead of a racy socket.
 """
 
 import asyncio
+import threading
+import time
 
 import pytest
 
@@ -37,9 +39,15 @@ class _FakeRegistry:
     def __init__(self, interactive, bulk):
         self._interactive = interactive
         self._bulk = bulk
+        # qos_metrics() reads these directly off the registry.
+        self._lock = threading.Lock()
+        self._quotas: dict[str, object] = {}
 
     def get_or_create_limiters(self, tenant_id):
         return self._interactive, self._bulk
+
+    def aggregate_limiter_usage(self):
+        return 0, 0, 0, 0
 
 
 class _FakePlan:
@@ -210,3 +218,146 @@ async def test_double_release_is_idempotent(monkeypatch):
 
     assert limiter.released == 1
     assert qos.active_scans == 0
+
+
+class _SlowLimiter(_FakeLimiter):
+    """Limiter whose acquire blocks, so queue wait is a real observable."""
+
+    def __init__(self, delay: float):
+        super().__init__()
+        self._delay = delay
+
+    async def acquire(self, timeout=None):
+        await asyncio.sleep(self._delay)
+        return True
+
+
+class _BulkPlan:
+    # No projection → all columns → classifies "bulk".
+    estimated_bytes = 100
+    columns = None
+
+
+class _RecordingController:
+    """Stands in for AdaptiveConcurrencyController, capturing both feeds."""
+
+    def __init__(self):
+        self.queue_waits: list[tuple[str, float]] = []
+        self.latencies: list[tuple[str, float]] = []
+
+    def record_queue_wait(self, tier, wait_ms):
+        self.queue_waits.append((tier, wait_ms))
+
+    def record_latency(self, tier, latency_ms):
+        self.latencies.append((tier, latency_ms))
+
+
+@pytest.mark.asyncio
+async def test_queue_wait_metric_reflects_the_actual_wait(monkeypatch):
+    """``/metrics`` reported ``queue_wait_avg_ms: 0`` under every load.
+
+    The accounting lived on ``POST /v1/scan`` and was deleted with that endpoint;
+    the fields survived on the metrics payload, so the number an operator reads
+    to size their deployment has been a constant zero since the unified
+    materialize API landed.
+
+    Asserted against the wall time the admit call actually took, not against a
+    fixed threshold: the recorded wait is a sub-interval of that call, so it can
+    be neither zero nor larger than the whole.
+    """
+    _install_registry(monkeypatch, _SlowLimiter(0.05), _FakeLimiter())
+    qos = QoSAdmission(StrataConfig())
+
+    started = time.perf_counter()
+    admission = await qos.admit(_FakePlan(), _FakeRequest(), "scan-wait")
+    observed_ms = (time.perf_counter() - started) * 1000
+
+    metrics = qos.qos_metrics()
+    assert metrics["interactive_queue_wait_count"] == 1
+    recorded = metrics["interactive_queue_wait_avg_ms"]
+    assert 0 < recorded <= observed_ms
+    await admission.release()
+
+
+@pytest.mark.asyncio
+async def test_tier_rejections_are_counted(monkeypatch):
+    """``interactive_rejected`` / ``bulk_rejected`` were never incremented, so
+    the metric that says "we are shedding load" read zero while shedding load."""
+    _install_registry(monkeypatch, _FakeLimiter(acquire_result=False), _FakeLimiter())
+    qos = QoSAdmission(StrataConfig())
+
+    with pytest.raises(QoSRejected):
+        await qos.admit(_FakePlan(), _FakeRequest(), "scan-r1")
+
+    metrics = qos.qos_metrics()
+    assert metrics["interactive_rejected"] == 1
+    assert metrics["bulk_rejected"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bulk_tier_rejections_are_counted_separately(monkeypatch):
+    _install_registry(monkeypatch, _FakeLimiter(), _FakeLimiter(acquire_result=False))
+    qos = QoSAdmission(StrataConfig())
+
+    with pytest.raises(QoSRejected) as excinfo:
+        await qos.admit(_BulkPlan(), _FakeRequest(), "scan-r2")
+    assert excinfo.value.tier == "bulk"
+
+    metrics = qos.qos_metrics()
+    assert metrics["bulk_rejected"] == 1
+    assert metrics["interactive_rejected"] == 0
+
+
+@pytest.mark.asyncio
+async def test_attached_controller_receives_both_signals(monkeypatch):
+    """The adaptive control loop has two inputs and both come from here.
+
+    Without them ``get_p95()`` returns None forever and ``_evaluate_and_adjust``
+    returns early on every tick — a 5-second timer that logs "started" and
+    adjusts nothing (#549).
+    """
+    _install_registry(monkeypatch, _SlowLimiter(0.01), _FakeLimiter())
+    qos = QoSAdmission(StrataConfig())
+    controller = _RecordingController()
+    qos.attach_controller(controller)
+
+    started = time.perf_counter()
+    admission = await qos.admit(_FakePlan(), _FakeRequest(), "scan-fed")
+    await asyncio.sleep(0.01)
+    await admission.release()
+    observed_ms = (time.perf_counter() - started) * 1000
+
+    assert [tier for tier, _ in controller.queue_waits] == ["interactive"]
+    assert [tier for tier, _ in controller.latencies] == ["interactive"]
+    # Both are sub-intervals of the same observed span.
+    assert 0 < controller.queue_waits[0][1] <= observed_ms
+    assert 0 < controller.latencies[0][1] <= observed_ms
+
+
+@pytest.mark.asyncio
+async def test_rejected_admissions_feed_no_latency(monkeypatch):
+    """A 429 never held a slot, so it has no slot-held duration to report."""
+    _install_registry(monkeypatch, _FakeLimiter(acquire_result=False), _FakeLimiter())
+    qos = QoSAdmission(StrataConfig())
+    controller = _RecordingController()
+    qos.attach_controller(controller)
+
+    with pytest.raises(QoSRejected):
+        await qos.admit(_FakePlan(), _FakeRequest(), "scan-rej")
+
+    assert controller.latencies == []
+    assert controller.queue_waits == []
+
+
+@pytest.mark.asyncio
+async def test_admission_works_with_no_controller_attached(monkeypatch):
+    """Adaptive control is opt-in; the default deployment attaches nothing."""
+    limiter = _FakeLimiter()
+    _install_registry(monkeypatch, limiter, _FakeLimiter())
+    qos = QoSAdmission(StrataConfig())
+
+    admission = await qos.admit(_FakePlan(), _FakeRequest(), "scan-none")
+    await admission.release()
+
+    assert limiter.released == 1
+    assert qos.qos_metrics()["interactive_queue_wait_count"] == 1

@@ -613,18 +613,49 @@ class StrataConfig(BaseSettings):
 
     @model_validator(mode="after")
     def validate_adaptive_ranges(self) -> StrataConfig:
-        """Validate adaptive concurrency min/max ranges."""
-        if self.adaptive_enabled:
-            if self.adaptive_min_interactive > self.adaptive_max_interactive:
-                raise ValueError(
-                    f"adaptive_min_interactive ({self.adaptive_min_interactive}) "
-                    f"cannot exceed adaptive_max_interactive ({self.adaptive_max_interactive})"
-                )
-            if self.adaptive_min_bulk > self.adaptive_max_bulk:
-                raise ValueError(
-                    f"adaptive_min_bulk ({self.adaptive_min_bulk}) "
-                    f"cannot exceed adaptive_max_bulk ({self.adaptive_max_bulk})"
-                )
+        """Validate the adaptive controller's bounds and its starting point.
+
+        The starting-point checks matter as much as the min<=max ones. The
+        controller seeds each tier from the configured slot count and then
+        clamps every adjustment into ``[min, max]``; starting outside that
+        range means the very first adjustment jumps to a bound, and a decrease
+        requested under load can land *above* where it started. Rejecting the
+        configuration is the honest fix — the operator picked those slot
+        counts on purpose.
+        """
+        if not self.adaptive_enabled:
+            return self
+        if self.adaptive_min_interactive > self.adaptive_max_interactive:
+            raise ValueError(
+                f"adaptive_min_interactive ({self.adaptive_min_interactive}) "
+                f"cannot exceed adaptive_max_interactive ({self.adaptive_max_interactive})"
+            )
+        if self.adaptive_min_bulk > self.adaptive_max_bulk:
+            raise ValueError(
+                f"adaptive_min_bulk ({self.adaptive_min_bulk}) "
+                f"cannot exceed adaptive_max_bulk ({self.adaptive_max_bulk})"
+            )
+        if not (
+            self.adaptive_min_interactive <= self.interactive_slots <= self.adaptive_max_interactive
+        ):
+            raise ValueError(
+                f"interactive_slots ({self.interactive_slots}) is outside the adaptive range "
+                f"[{self.adaptive_min_interactive}, {self.adaptive_max_interactive}]; the "
+                "controller starts from interactive_slots, so it would jump to a bound on its "
+                "first adjustment"
+            )
+        if not (self.adaptive_min_bulk <= self.bulk_slots <= self.adaptive_max_bulk):
+            raise ValueError(
+                f"bulk_slots ({self.bulk_slots}) is outside the adaptive range "
+                f"[{self.adaptive_min_bulk}, {self.adaptive_max_bulk}]; the controller starts "
+                "from bulk_slots, so it would jump to a bound on its first adjustment"
+            )
+        if self.multi_tenant_enabled:
+            raise ValueError(
+                "adaptive_enabled cannot be combined with multi_tenant_enabled: the controller "
+                "steers one tenant's limiters (the default tenant's), which in a multi-tenant "
+                "deployment is a tier no request acquires"
+            )
         return self
 
     @model_validator(mode="after")

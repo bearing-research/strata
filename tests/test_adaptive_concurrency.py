@@ -1,8 +1,10 @@
 """Tests for adaptive concurrency control."""
 
 import asyncio
+import time
 
 import pytest
+from pydantic import ValidationError
 
 from strata.adaptive_concurrency import (
     AdaptiveConcurrencyController,
@@ -11,6 +13,7 @@ from strata.adaptive_concurrency import (
     RollingLatencyWindow,
     TierState,
 )
+from strata.config import StrataConfig
 
 
 class TestResizableLimiter:
@@ -524,3 +527,174 @@ class TestTierState:
         assert state.increase_events == 0
         assert state.decrease_events == 0
         assert state.last_adjustment_direction == ""
+
+
+class TestSampleAging:
+    """A control loop must not steer off traffic that is over.
+
+    The window was count-only, so a burst of slow requests followed by an idle
+    period kept re-triggering decrease signals from stale samples until the
+    tier sat at ``min_slots`` with nothing running.
+    """
+
+    def test_stale_samples_stop_counting(self):
+        window = RollingLatencyWindow(size=100, max_age_seconds=0.05)
+        for _ in range(10):
+            window.record(900.0)
+        assert window.get_p95() == 900.0
+
+        time.sleep(0.06)
+
+        assert window.get_p95() is None
+        stats = window.get_stats()
+        assert stats["window_size"] == 0
+        assert stats["p95_ms"] is None
+        # The cumulative count is history, not a live signal — it stays.
+        assert stats["count"] == 10
+
+    def test_fresh_samples_survive_alongside_expired_ones(self):
+        window = RollingLatencyWindow(size=100, max_age_seconds=0.05)
+        for _ in range(10):
+            window.record(900.0)
+        time.sleep(0.06)
+        for _ in range(10):
+            window.record(10.0)
+
+        # The p95 describes current traffic, not the old burst.
+        assert window.get_p95() == 10.0
+
+    def test_no_max_age_keeps_every_sample(self):
+        window = RollingLatencyWindow(size=100)
+        for _ in range(10):
+            window.record(900.0)
+        time.sleep(0.06)
+        assert window.get_p95() == 900.0
+
+    def test_controller_windows_inherit_the_configured_age(self):
+        config = AdaptiveConfig(sample_max_age_seconds=7.0)
+        controller = AdaptiveConcurrencyController(
+            config=config,
+            interactive_limiter=ResizableLimiter(10),
+            bulk_limiter=ResizableLimiter(4),
+        )
+        assert controller._interactive.latency_window._max_age_seconds == 7.0
+        assert controller._interactive.queue_wait_window._max_age_seconds == 7.0
+        assert controller._bulk.latency_window._max_age_seconds == 7.0
+
+
+class TestClampDoesNotReverseDirection:
+    """Clamping bounded the result but not the *direction*.
+
+    ``current_slots`` is seeded from the limiter's configured capacity, which
+    could start outside ``[min_slots, max_slots]``. With capacity 2 and
+    ``min_slots_interactive=4``, a latency breach asked for -1, the clamp
+    answered 4, and concurrency doubled on an overloaded tier — logged as an
+    "increase" nothing had requested.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_decrease_below_min_does_not_raise_capacity(self):
+        limiter = ResizableLimiter(2)
+        controller = AdaptiveConcurrencyController(
+            config=AdaptiveConfig(min_slots_interactive=4, max_slots_interactive=20),
+            interactive_limiter=limiter,
+            bulk_limiter=ResizableLimiter(4),
+        )
+        tier = controller._interactive
+        assert tier.current_slots == 2  # below min_slots, as configured
+
+        await controller._adjust_slots(tier, limiter, -1)
+
+        assert limiter.capacity == 2
+        assert tier.current_slots == 2
+        assert tier.increase_events == 0
+        assert tier.last_adjustment_direction == ""
+
+    @pytest.mark.asyncio
+    async def test_an_increase_above_max_does_not_drop_capacity(self):
+        limiter = ResizableLimiter(100)
+        controller = AdaptiveConcurrencyController(
+            config=AdaptiveConfig(min_slots_interactive=4, max_slots_interactive=64),
+            interactive_limiter=limiter,
+            bulk_limiter=ResizableLimiter(4),
+        )
+        tier = controller._interactive
+
+        await controller._adjust_slots(tier, limiter, 1)
+
+        assert limiter.capacity == 100
+        assert tier.decrease_events == 0
+
+    @pytest.mark.asyncio
+    async def test_a_decrease_within_bounds_still_decreases(self):
+        limiter = ResizableLimiter(10)
+        controller = AdaptiveConcurrencyController(
+            config=AdaptiveConfig(min_slots_interactive=4, max_slots_interactive=20),
+            interactive_limiter=limiter,
+            bulk_limiter=ResizableLimiter(4),
+        )
+        tier = controller._interactive
+
+        await controller._adjust_slots(tier, limiter, -1)
+
+        assert limiter.capacity == 9
+        assert tier.current_slots == 9
+        assert tier.last_adjustment_direction == "decrease"
+
+
+class TestAdaptiveStartupValidation:
+    """The controller's starting point has to be inside its own bounds.
+
+    It seeds each tier from the configured slot count and clamps from there,
+    so a slot count outside ``[min, max]`` means the first adjustment jumps to
+    a bound instead of nudging. Refusing the config tells the operator; the
+    alternative silently overrides slot counts they chose deliberately.
+    """
+
+    def test_slots_below_the_adaptive_floor_are_rejected(self):
+        with pytest.raises(ValidationError, match="interactive_slots"):
+            StrataConfig(adaptive_enabled=True, interactive_slots=2)
+
+    def test_slots_above_the_adaptive_ceiling_are_rejected(self):
+        with pytest.raises(ValidationError, match="interactive_slots"):
+            StrataConfig(adaptive_enabled=True, interactive_slots=200)
+
+    def test_bulk_slots_outside_the_adaptive_range_are_rejected(self):
+        with pytest.raises(ValidationError, match="bulk_slots"):
+            StrataConfig(adaptive_enabled=True, bulk_slots=100)
+
+    def test_default_slot_counts_are_inside_the_default_bounds(self):
+        # Otherwise merely flipping the flag on would fail to boot.
+        config = StrataConfig(adaptive_enabled=True)
+        assert config.adaptive_min_interactive <= config.interactive_slots
+        assert config.interactive_slots <= config.adaptive_max_interactive
+
+    def test_adaptive_with_multi_tenancy_is_rejected(self, tmp_path):
+        # The controller holds the default tenant's limiters. Under
+        # multi-tenancy that is a tier no request acquires, so it would run as
+        # a no-op again — the exact failure #549 is about.
+        #
+        # Spelled out in full as a valid service-mode config: multi-tenancy is
+        # already incoherent in personal mode, and matching that error instead
+        # would pass whether or not this rule exists.
+        with pytest.raises(ValidationError, match="adaptive_enabled cannot be combined"):
+            StrataConfig(
+                deployment_mode="service",
+                adaptive_enabled=True,
+                multi_tenant_enabled=True,
+                auth_mode="trusted_proxy",
+                proxy_token="x" * 32,
+                artifact_dir=str(tmp_path),
+            )
+
+    def test_inverted_bounds_are_still_rejected(self):
+        with pytest.raises(ValidationError, match="adaptive_min_interactive"):
+            StrataConfig(
+                adaptive_enabled=True,
+                adaptive_min_interactive=40,
+                adaptive_max_interactive=8,
+            )
+
+    def test_none_of_this_applies_when_adaptive_is_off(self):
+        config = StrataConfig(interactive_slots=2, bulk_slots=100)
+        assert config.adaptive_enabled is False
