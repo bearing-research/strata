@@ -138,6 +138,10 @@ dev = [
     # combined test suite (client unit tests + integrations + conftest) can
     # import it. NOT a runtime dependency of strata-notebook — dev-only.
     "strata-client",
+    # The worker pool, likewise dev-only and likewise never a runtime
+    # dependency: the notebook must keep running with no pool in sight.
+    # Installed so `ty` can resolve it and the combined suite can import it.
+    "strata-pool",
     "pre-commit>=3.7.0",
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -191,16 +195,18 @@ build-backend = "maturin"
 [tool.uv]
 python-preference = "only-managed"
 
-# strata-client is an INDEPENDENT distribution — strata-notebook does NOT depend
-# on it (client and server share only the wire protocol). It's a dev-only
-# dependency (above), resolved from the workspace, so `uv sync` installs it
+# strata-client and strata-pool are INDEPENDENT distributions — strata-notebook
+# does NOT depend on either (the client shares only the wire protocol; the pool
+# is composed by the hosted proxy, never by the notebook). Both are dev-only
+# dependencies (above), resolved from the workspace, so `uv sync` installs them
 # editable for the combined test suite while the published server wheel never
-# depends on it.
+# depends on them.
 [tool.uv.workspace]
-members = ["packages/strata-client"]
+members = ["packages/strata-client", "packages/strata-pool"]
 
 [tool.uv.sources]
 strata-client = { workspace = true }
+strata-pool = { workspace = true }
 
 # Maturin configuration for building the Rust extension
 # Build with: maturin develop (dev) or maturin build (release)
@@ -246,9 +252,9 @@ python = ".venv"
 # harness at runtime, so ty can't see them (every reference reads as
 # unresolved); tests lean on SimpleNamespace stubs + pytest fixture injection
 # that ty likewise can't model. `ty check` (no args) now covers exactly the
-# code we ship — src/ and the strata-client package — and must stay clean.
+# code we ship — src/ and the packages/ distributions — and must stay clean.
 [tool.ty.src]
-include = ["src", "packages/strata-client/src"]
+include = ["src", "packages/strata-client/src", "packages/strata-pool/src"]
 
 [tool.ty.rules]
 # Optional deps (Rust ext, ADBC drivers) use guarded imports

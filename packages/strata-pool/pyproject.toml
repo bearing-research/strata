@@ -1,0 +1,44 @@
+[project]
+name = "strata-pool"
+version = "0.1.0"
+description = "Worker pool for dispatching Strata jobs to ephemeral machines."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Fangchen Li", email = "fangchen.li@outlook.com" }]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+# httpx forwards job payloads to workers; persistence is stdlib sqlite3.
+# Cloud SDKs arrive with the backends that need them, as optional extras —
+# they must never become a base dependency.
+dependencies = [
+    "httpx>=0.28.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/bearing-research/strata"
+Repository = "https://github.com/bearing-research/strata"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/strata_pool"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/strata_pool", "README.md"]
+
+# Self-contained so `pytest packages/strata-pool/tests` picks up asyncio mode
+# from this file (pytest stops at the first pyproject.toml with a pytest
+# section, which is this one, not the repo root's).
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
