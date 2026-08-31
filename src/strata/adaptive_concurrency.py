@@ -9,6 +9,14 @@ Implements Netflix-style adaptive concurrency limiting based on latency signals:
 
 The controller adjusts both interactive and bulk tier semaphores independently.
 
+Signals come from stream admission (``strata.streaming.qos.QoSAdmission``):
+queue wait when a scan acquires its tier slot, and slot-held duration when it
+releases. Without those feeds the latency windows stay empty and the control
+loop is a timer that never adjusts anything, which is what it had silently
+become (#549). It steers the limiters for one tenant — the ``_default`` one —
+so ``adaptive_enabled`` is rejected at startup alongside multi-tenancy rather
+than adjusting a tier no request in a multi-tenant deployment acquires.
+
 Key component: ResizableLimiter
     Unlike asyncio.Semaphore, ResizableLimiter tracks capacity vs in_use separately.
     This allows correct dynamic resizing - decreasing capacity takes effect as
@@ -171,6 +179,12 @@ class AdaptiveConfig:
         Consecutive signals required before adjusting.
     window_size : int
         Samples kept for the rolling p95.
+    sample_max_age_seconds : float
+        How long a sample stays eligible for the percentile. Without this the
+        window is purely count-based, so a burst of slow requests followed by
+        an idle period keeps re-triggering decrease signals off samples that
+        describe load which is long over, walking the tier down to
+        ``min_slots`` while nothing is running.
     """
 
     enabled: bool = False  # Disabled by default (opt-in)
@@ -185,26 +199,43 @@ class AdaptiveConfig:
     decrease_step: int = 1
     hysteresis_count: int = 3  # 3 consecutive signals needed
     window_size: int = 100  # Keep last 100 samples for p95
+    sample_max_age_seconds: float = 60.0  # Ignore samples older than this
 
 
 class RollingLatencyWindow:
     """Thread-safe rolling window for latency percentile calculation.
 
-    Uses a circular buffer to maintain the most recent N observations,
-    allowing accurate p95 calculation over a sliding window.
+    Bounded two ways: by count (the most recent N observations) and, when
+    ``max_age_seconds`` is set, by age. Age matters because this feeds a
+    control loop — a count-only window has no notion of "that traffic is
+    over", so an idle tier keeps being adjusted off the last burst it saw.
     """
 
-    def __init__(self, size: int = 100):
+    def __init__(self, size: int = 100, max_age_seconds: float | None = None):
         self._size = size
+        self._max_age_seconds = max_age_seconds
         self._lock = Lock()
-        self._samples: deque[float] = deque(maxlen=size)
+        # (monotonic timestamp, latency_ms) — monotonic so a clock step can
+        # never make a sample look infinitely old or infinitely fresh.
+        self._samples: deque[tuple[float, float]] = deque(maxlen=size)
         self._count = 0  # Total samples seen (for metrics)
 
     def record(self, latency_ms: float) -> None:
         """Record a latency observation."""
         with self._lock:
-            self._samples.append(latency_ms)
+            self._samples.append((time.monotonic(), latency_ms))
             self._count += 1
+
+    def _live_values(self) -> list[float]:
+        """Sorted latencies still inside the age bound. Caller holds no lock."""
+        with self._lock:
+            if self._max_age_seconds is None:
+                return sorted(value for _, value in self._samples)
+            cutoff = time.monotonic() - self._max_age_seconds
+            # Samples are appended in time order, so expiry is a prefix drop.
+            while self._samples and self._samples[0][0] < cutoff:
+                self._samples.popleft()
+            return sorted(value for _, value in self._samples)
 
     def get_p95(self) -> float | None:
         """Return the p95 latency over the current window.
@@ -212,13 +243,12 @@ class RollingLatencyWindow:
         Returns
         -------
         float or None
-            p95 latency in ms, or ``None`` with fewer than 10 samples.
+            p95 latency in ms, or ``None`` with fewer than 10 live samples.
         """
-        with self._lock:
-            if len(self._samples) < 10:
-                # Need at least 10 samples for meaningful percentile
-                return None
-            sorted_samples = sorted(self._samples)
+        sorted_samples = self._live_values()
+        if len(sorted_samples) < 10:
+            # Need at least 10 samples for meaningful percentile
+            return None
 
         n = len(sorted_samples)
         idx = max(0, math.ceil(n * 0.95) - 1)
@@ -236,20 +266,19 @@ class RollingLatencyWindow:
             ``{count, window_size, p50_ms, p95_ms, p99_ms, min_ms, max_ms,
             avg_ms}`` (latency values are ``None`` when the window is empty).
         """
-        with self._lock:
-            if not self._samples:
-                return {
-                    "count": 0,
-                    "window_size": 0,
-                    "p50_ms": None,
-                    "p95_ms": None,
-                    "p99_ms": None,
-                    "min_ms": None,
-                    "max_ms": None,
-                    "avg_ms": None,
-                }
-            sorted_samples = sorted(self._samples)
-            count = len(sorted_samples)
+        sorted_samples = self._live_values()
+        if not sorted_samples:
+            return {
+                "count": self._count,
+                "window_size": 0,
+                "p50_ms": None,
+                "p95_ms": None,
+                "p99_ms": None,
+                "min_ms": None,
+                "max_ms": None,
+                "avg_ms": None,
+            }
+        count = len(sorted_samples)
 
         def pct(p: float) -> float:
             idx = max(0, math.ceil(count * p) - 1)
@@ -329,21 +358,22 @@ class AdaptiveConcurrencyController:
         self._bulk_limiter = bulk_limiter
 
         # Per-tier state
+        max_age = config.sample_max_age_seconds
         self._interactive = TierState(
             name="interactive",
             current_slots=interactive_limiter.capacity,
             min_slots=config.min_slots_interactive,
             max_slots=config.max_slots_interactive,
-            latency_window=RollingLatencyWindow(config.window_size),
-            queue_wait_window=RollingLatencyWindow(config.window_size),
+            latency_window=RollingLatencyWindow(config.window_size, max_age),
+            queue_wait_window=RollingLatencyWindow(config.window_size, max_age),
         )
         self._bulk = TierState(
             name="bulk",
             current_slots=bulk_limiter.capacity,
             min_slots=config.min_slots_bulk,
             max_slots=config.max_slots_bulk,
-            latency_window=RollingLatencyWindow(config.window_size),
-            queue_wait_window=RollingLatencyWindow(config.window_size),
+            latency_window=RollingLatencyWindow(config.window_size, max_age),
+            queue_wait_window=RollingLatencyWindow(config.window_size, max_age),
         )
 
         # Background task handle
@@ -505,10 +535,34 @@ class AdaptiveConcurrencyController:
         - Increasing capacity immediately allows more concurrent requests
         - Decreasing capacity takes effect as active requests complete
 
-        We bound the result to [min_slots, max_slots].
+        We bound the result to [min_slots, max_slots], but never past the
+        direction asked for. ``current_slots`` is seeded from the limiter's
+        configured capacity, which can start outside those bounds: with
+        ``interactive_slots=2`` and ``min_slots_interactive=4``, a latency
+        breach asks for -1, and a plain clamp would answer by *doubling*
+        concurrency on an already-overloaded tier (and logging it as an
+        "increase" the loop never requested). Startup validation rejects that
+        configuration, but this loop is also driven directly in tests and by
+        limiters it does not own, so it refuses the reversal here too.
         """
         new_slots = tier.current_slots + delta
         new_slots = max(tier.min_slots, min(tier.max_slots, new_slots))
+
+        if (delta < 0 and new_slots > tier.current_slots) or (
+            delta > 0 and new_slots < tier.current_slots
+        ):
+            logger.warning(
+                f"Adaptive concurrency refused a clamp that reverses direction on {tier.name}",
+                extra={
+                    "tier": tier.name,
+                    "current_slots": tier.current_slots,
+                    "requested_delta": delta,
+                    "clamped_to": new_slots,
+                    "min_slots": tier.min_slots,
+                    "max_slots": tier.max_slots,
+                },
+            )
+            return
 
         if new_slots == tier.current_slots:
             return
