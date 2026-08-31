@@ -1613,6 +1613,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="QoS (Two-Tier Admission)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adaptive-concurrency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adaptive concurrency
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1627,10 +1644,43 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#s3-storage" class="md-nav__link">
     <span class="md-ellipsis">
       
         S3 Storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gcs-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GCS Storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#azure-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Azure Storage
       
     </span>
   </a>
@@ -1676,6 +1726,17 @@
   
     <nav class="md-nav" aria-label="Authentication">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#access-control-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Access control rules
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#api-key-authentication" class="md-nav__link">
@@ -1731,6 +1792,17 @@
     <span class="md-ellipsis">
       
         Notebook
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TUI
       
     </span>
   </a>
@@ -2111,6 +2183,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="QoS (Two-Tier Admission)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adaptive-concurrency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adaptive concurrency
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2125,10 +2214,43 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#s3-storage" class="md-nav__link">
     <span class="md-ellipsis">
       
         S3 Storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gcs-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GCS Storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#azure-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Azure Storage
       
     </span>
   </a>
@@ -2174,6 +2296,17 @@
   
     <nav class="md-nav" aria-label="Authentication">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#access-control-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Access control rules
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#api-key-authentication" class="md-nav__link">
@@ -2229,6 +2362,17 @@
     <span class="md-ellipsis">
       
         Notebook
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TUI
       
     </span>
   </a>
@@ -2357,6 +2501,26 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td><code>false</code></td>
 <td>Allow non-localhost clients in personal mode</td>
 </tr>
+<tr>
+<td><code>STRATA_CORS_ALLOW_ORIGINS</code></td>
+<td><em>(empty)</em></td>
+<td>Origins allowed to call the API from a browser. Empty means no cross-origin access — personal mode has no auth, so any page allowed here can author and run cells</td>
+</tr>
+<tr>
+<td><code>STRATA_EMBED_FRAME_ANCESTORS</code></td>
+<td><em>(empty)</em></td>
+<td>Origins allowed to embed a notebook's app view in an <code>&lt;iframe&gt;</code> (sets <code>Content-Security-Policy: frame-ancestors</code>). Empty means same-origin only. JSON array or comma-separated; <code>*</code> allows any host</td>
+</tr>
+<tr>
+<td><code>STRATA_MCP_ENABLED</code></td>
+<td><code>false</code></td>
+<td>Mount the MCP server at <code>/mcp</code> so a coding agent can drive the live session. <strong>Personal mode only</strong> (rejected at startup in service mode) and requires the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/">Notebook → MCP</a></td>
+</tr>
+<tr>
+<td><code>STRATA_ARROW_MEMORY_POOL</code></td>
+<td><code>None</code></td>
+<td>Arrow allocator: <code>default</code>, <code>system</code>, <code>jemalloc</code>, or <code>mimalloc</code>. Unset leaves the PyArrow default</td>
+</tr>
 </tbody>
 </table>
 <h2 id="cache">Cache<a class="headerlink" href="#cache" title="Permanent link">&para;</a></h2>
@@ -2415,6 +2579,16 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td><code>STRATA_FETCH_TIMEOUT_SECONDS</code></td>
 <td><code>60.0</code></td>
 <td>Per-fetch timeout</td>
+</tr>
+<tr>
+<td><code>STRATA_FAST_CONCAT</code></td>
+<td><code>rust</code> when the extension is built, else <code>pyarrow</code></td>
+<td>Arrow IPC concat implementation. <code>pyarrow</code> parses (slower, handles more edge cases)</td>
+</tr>
+<tr>
+<td><code>STRATA_MMAP_MIN_BYTES</code></td>
+<td><code>4194304</code> (4 MiB)</td>
+<td>Cache reads at or above this size go through the Rust mmap path; <code>0</code> forces it always</td>
 </tr>
 </tbody>
 </table>
@@ -2490,6 +2664,88 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td><code>10</code></td>
 <td>Max columns for interactive classification</td>
 </tr>
+<tr>
+<td><code>STRATA_INTERACTIVE_QUEUE_TIMEOUT</code></td>
+<td><code>10.0</code></td>
+<td>Queue wait for an interactive slot (seconds); exceeding it returns 429 with <code>Retry-After</code></td>
+</tr>
+<tr>
+<td><code>STRATA_BULK_QUEUE_TIMEOUT</code></td>
+<td><code>30.0</code></td>
+<td>Queue wait for a bulk slot (seconds); exceeding it returns 429 with <code>Retry-After</code></td>
+</tr>
+<tr>
+<td><code>STRATA_PER_CLIENT_INTERACTIVE</code></td>
+<td><code>2</code></td>
+<td>Per-client interactive slots; <code>0</code> disables per-client caps</td>
+</tr>
+<tr>
+<td><code>STRATA_PER_CLIENT_BULK</code></td>
+<td><code>1</code></td>
+<td>Per-client bulk slots; <code>0</code> disables per-client caps</td>
+</tr>
+</tbody>
+</table>
+<h3 id="adaptive-concurrency">Adaptive concurrency<a class="headerlink" href="#adaptive-concurrency" title="Permanent link">&para;</a></h3>
+<p>Off by default. When enabled, a background loop is meant to resize the QoS
+slot counts from observed latency.</p>
+<div class="admonition warning">
+<p class="admonition-title">Not wired up</p>
+<p>The controller starts and reports, but nothing feeds it latency samples
+(<a href="https://github.com/bearing-research/strata/issues/549">#549</a>), so the
+slot counts do not move. Enabling this changes no admission behavior
+today. The knobs are listed because they exist and validate, not because
+they do anything.</p>
+</div>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STRATA_ADAPTIVE_ENABLED</code></td>
+<td><code>false</code></td>
+<td>Enable the adaptive concurrency controller</td>
+</tr>
+<tr>
+<td><code>STRATA_ADAPTIVE_INTERVAL_SECONDS</code></td>
+<td><code>5.0</code></td>
+<td>How often the controller evaluates</td>
+</tr>
+<tr>
+<td><code>STRATA_ADAPTIVE_TARGET_P95_MS</code></td>
+<td><code>500.0</code></td>
+<td>Latency target the controller aims to hold</td>
+</tr>
+<tr>
+<td><code>STRATA_ADAPTIVE_MIN_INTERACTIVE</code></td>
+<td><code>4</code></td>
+<td>Floor for interactive slots</td>
+</tr>
+<tr>
+<td><code>STRATA_ADAPTIVE_MAX_INTERACTIVE</code></td>
+<td><code>64</code></td>
+<td>Ceiling for interactive slots</td>
+</tr>
+<tr>
+<td><code>STRATA_ADAPTIVE_MIN_BULK</code></td>
+<td><code>2</code></td>
+<td>Floor for bulk slots</td>
+</tr>
+<tr>
+<td><code>STRATA_ADAPTIVE_MAX_BULK</code></td>
+<td><code>32</code></td>
+<td>Ceiling for bulk slots</td>
+</tr>
+<tr>
+<td><code>STRATA_ADAPTIVE_HYSTERESIS</code></td>
+<td><code>3</code></td>
+<td>Consecutive same-direction readings before adjusting</td>
+</tr>
 </tbody>
 </table>
 <h2 id="metadata">Metadata<a class="headerlink" href="#metadata" title="Permanent link">&para;</a></h2>
@@ -2506,6 +2762,33 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td><code>STRATA_METADATA_DB</code></td>
 <td><code>None</code></td>
 <td>SQLite path for metadata persistence</td>
+</tr>
+</tbody>
+</table>
+<h2 id="catalog">Catalog<a class="headerlink" href="#catalog" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STRATA_CATALOG_NAME</code></td>
+<td><code>default</code></td>
+<td>Iceberg catalog name</td>
+</tr>
+<tr>
+<td><code>STRATA_CATALOG_PROPERTIES</code></td>
+<td><code>{}</code></td>
+<td>PyIceberg catalog properties (JSON object via env; <code>[tool.strata.catalog_properties]</code> in pyproject)</td>
+</tr>
+<tr>
+<td><code>STRATA_CATALOG_URI</code></td>
+<td><code>None</code></td>
+<td>Catalog database URI. Merged into <code>catalog_properties.uri</code>, so it does not replace sibling keys set in pyproject</td>
 </tr>
 </tbody>
 </table>
@@ -2543,6 +2826,85 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <td><code>STRATA_S3_ANONYMOUS</code></td>
 <td><code>false</code></td>
 <td>Use anonymous access</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gcs-storage">GCS Storage<a class="headerlink" href="#gcs-storage" title="Permanent link">&para;</a></h2>
+<p>Credentials for the GCS blob backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=gcs</code>).
+Unset credentials fall back to Application Default Credentials.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STRATA_GCS_PROJECT_ID</code></td>
+<td><code>None</code></td>
+<td>Despite the name, this is passed to PyArrow as the <strong>default bucket location</strong> (<code>US</code>, <code>europe-west1</code>), not a project id (<a href="https://github.com/bearing-research/strata/issues/604">#604</a>)</td>
+</tr>
+<tr>
+<td><code>STRATA_GCS_CREDENTIALS_JSON</code></td>
+<td><code>None</code></td>
+<td><strong>Path</strong> to a service-account key file (it is assigned to <code>GOOGLE_APPLICATION_CREDENTIALS</code>, which the Google client resolves as a path). Inline JSON does not work (<a href="https://github.com/bearing-research/strata/issues/605">#605</a>)</td>
+</tr>
+<tr>
+<td><code>STRATA_GCS_ANONYMOUS</code></td>
+<td><code>false</code></td>
+<td>Use anonymous access (public buckets, emulators)</td>
+</tr>
+<tr>
+<td><code>STRATA_GCS_ENDPOINT_OVERRIDE</code></td>
+<td><code>None</code></td>
+<td>Custom endpoint (fake-gcs-server and similar)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="azure-storage">Azure Storage<a class="headerlink" href="#azure-storage" title="Permanent link">&para;</a></h2>
+<p>Credentials for the Azure blob backend (<code>STRATA_ARTIFACT_BLOB_BACKEND=azure</code>).
+Supply exactly one of connection string, account key, SAS token, or default
+credential.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STRATA_AZURE_ACCOUNT_NAME</code></td>
+<td><code>None</code></td>
+<td>Storage account name</td>
+</tr>
+<tr>
+<td><code>STRATA_AZURE_ACCOUNT_KEY</code></td>
+<td><code>None</code></td>
+<td>Storage account key</td>
+</tr>
+<tr>
+<td><code>STRATA_AZURE_CONNECTION_STRING</code></td>
+<td><code>None</code></td>
+<td>Full connection string</td>
+</tr>
+<tr>
+<td><code>STRATA_AZURE_SAS_TOKEN</code></td>
+<td><code>None</code></td>
+<td>SAS token</td>
+</tr>
+<tr>
+<td><code>STRATA_AZURE_USE_DEFAULT_CREDENTIAL</code></td>
+<td><code>false</code></td>
+<td>Use <code>DefaultAzureCredential</code> (managed identity)</td>
+</tr>
+<tr>
+<td><code>STRATA_AZURE_ENDPOINT_URL</code></td>
+<td><code>None</code></td>
+<td>Custom endpoint (Azurite emulator)</td>
 </tr>
 </tbody>
 </table>
@@ -2691,6 +3053,11 @@ affects callers writing build rows directly.</p>
 <td>Shared secret for proxy verification</td>
 </tr>
 <tr>
+<td><code>STRATA_PROXY_TOKEN_HEADER</code></td>
+<td><code>X-Strata-Proxy-Token</code></td>
+<td>Header carrying the proxy token</td>
+</tr>
+<tr>
 <td><code>STRATA_PRINCIPAL_HEADER</code></td>
 <td><code>X-Strata-Principal</code></td>
 <td>Header for user identity</td>
@@ -2712,11 +3079,53 @@ affects callers writing build rows directly.</p>
 </tr>
 </tbody>
 </table>
+<h3 id="access-control-rules">Access control rules<a class="headerlink" href="#access-control-rules" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STRATA_ACL_CONFIG</code></td>
+<td><em>(none)</em></td>
+<td>Deny/allow rules, as a JSON object. Also settable as <code>[tool.strata.acl]</code></td>
+</tr>
+</tbody>
+</table>
+<p>Evaluation is deny-first: deny rules, then allow rules, then <code>default</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">[tool.strata.acl]</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deny&quot;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">deny</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">principal</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;*&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">tables</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:finance.*&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">]</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">allow</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">principal</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;bi-dashboard&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">tables</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:analytics.*&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">tenant</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;data-platform&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">tables</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:analytics.*&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="p">]</span>
+</code></pre></div>
+<p>The same shape as JSON in the env var:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_ACL_CONFIG</span><span class="o">=</span><span class="s1">&#39;{&quot;default&quot;:&quot;deny&quot;,&quot;allow&quot;:[{&quot;principal&quot;:&quot;bi&quot;,&quot;tables&quot;:[&quot;file:analytics.*&quot;]}]}&#39;</span>
+</code></pre></div>
+<p><code>principal</code> and each <code>tables</code> entry are glob patterns; <code>tenant</code> is an exact
+match. Every rule must list at least one table pattern — a rule with none can
+never match, so it is rejected at startup rather than sitting inert. Unknown
+keys are rejected for the same reason: a mistyped <code>deny</code> would otherwise leave
+an ACL that boots clean and enforces nothing.</p>
+<p>Rules are enforced only when the caller is authenticated. Service mode rejects
+configured rules under any other auth mode, so they cannot sit inert. <strong>Personal
+mode does not</strong>: <code>auth_mode</code> is always <code>none</code> there, so rules are accepted at
+startup and never evaluated. Do not rely on ACL for a personal deployment.</p>
 <h3 id="api-key-authentication">API key authentication<a class="headerlink" href="#api-key-authentication" title="Permanent link">&para;</a></h3>
 <p><code>STRATA_AUTH_MODE=api_key</code> is the mode where Strata authenticates callers
 itself, rather than trusting a proxy to have done it. Clients present a key as
 a bearer token:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Authorization: Bearer strata_&lt;key_id&gt;_&lt;secret&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>Authorization: Bearer strata_&lt;key_id&gt;_&lt;secret&gt;
 </code></pre></div>
 <p>A key resolves to the same principal a proxy header would have produced, so ACL
 rules, tenant scoping, and scope checks behave identically across both modes.</p>
@@ -2727,13 +3136,13 @@ personal mode rejects the mode outright, since authenticating to your own
 loopback-bound single-user server buys nothing.</p>
 <p>Mint the first key from the CLI — no running server needed, which is what
 makes bootstrapping possible:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>apikey<span class="w"> </span>create<span class="w"> </span>svc-etl<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--tenant<span class="w"> </span>acme<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>--scope<span class="w"> </span>artifacts:write<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">&quot;ETL pipeline&quot;</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>strata<span class="w"> </span>apikey<span class="w"> </span>list
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>strata<span class="w"> </span>apikey<span class="w"> </span>revoke<span class="w"> </span>&lt;key_id&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata<span class="w"> </span>apikey<span class="w"> </span>create<span class="w"> </span>svc-etl<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>--tenant<span class="w"> </span>acme<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>--scope<span class="w"> </span>artifacts:write<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">  </span>--description<span class="w"> </span><span class="s2">&quot;ETL pipeline&quot;</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>strata<span class="w"> </span>apikey<span class="w"> </span>list
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>strata<span class="w"> </span>apikey<span class="w"> </span>revoke<span class="w"> </span>&lt;key_id&gt;
 </code></pre></div>
 <p>The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
 shown again — by you or by us — and a database disclosure yields no usable
@@ -2747,7 +3156,7 @@ read plan, so only the node that planned it can serve it — a request for it
 that lands elsewhere used to return a bare <code>404</code>, indistinguishable from an
 expired stream.</p>
 <p>Set <code>STRATA_NODE_ADVERTISED_URL</code> to the address that reaches <em>this</em> node:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_NODE_ADVERTISED_URL</span><span class="o">=</span><span class="s1">&#39;https://strata-3.internal:8765&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_NODE_ADVERTISED_URL</span><span class="o">=</span><span class="s1">&#39;https://strata-3.internal:8765&#39;</span>
 </code></pre></div>
 <p>Each node then records which streams it is serving, in the artifact store's
 database, and a node asked for a sibling's stream answers <code>307</code> pointing at the
@@ -2792,6 +3201,11 @@ cache hit or joins the in-flight build.</p>
 artifact build pipeline). Transforms are also configured via the
 <code>[tool.strata.transforms]</code> block in <code>pyproject.toml</code>; <code>STRATA_TRANSFORMS_ENABLED</code>
 toggles <code>enabled</code> there.</p>
+<p>The v2-pull signed-URL routes (build manifest, signed download / upload, and
+<code>finalize</code>) have no on/off switch. They are served whenever the deployment can
+issue and honor them at all — personal mode, or service mode with transforms
+enabled — so <code>STRATA_TRANSFORM_SIGNING_SECRET</code> below matters in every such
+deployment, not only in one that opted in to something.</p>
 <table>
 <thead>
 <tr>
@@ -2807,9 +3221,9 @@ toggles <code>enabled</code> there.</p>
 <td><code>embedded</code> (common transforms like <code>duckdb_sql@v1</code> run in-process) or <code>registry</code> (only transforms configured in <code>transforms_config</code>, via external executors).</td>
 </tr>
 <tr>
-<td><code>STRATA_PULL_MODEL_ENABLED</code></td>
-<td><code>false</code></td>
-<td>Enable the v2-pull executor protocol (executors fetch inputs / upload outputs via signed URLs).</td>
+<td><code>STRATA_TRANSFORMS_CONFIG</code></td>
+<td><code>{}</code></td>
+<td>The whole transforms block as a JSON object (<code>enabled</code>, <code>registry</code>, …). Normally written as <code>[tool.strata.transforms]</code> instead; <code>STRATA_TRANSFORMS_ENABLED</code> merges into it rather than replacing it.</td>
 </tr>
 <tr>
 <td><code>STRATA_SIGNED_URL_EXPIRY_SECONDS</code></td>
@@ -2933,6 +3347,40 @@ toggles <code>enabled</code> there.</p>
 <td><code>{}</code></td>
 <td>Auth headers the ambient client attaches when pointed at a remote store (e.g. the trusted-proxy identity/token). JSON object; set via env so secrets stay out of committed config.</td>
 </tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES</code></td>
+<td><code>2147483648</code> (2 GiB)</td>
+<td>Per-file cap when packing a notebook bundle for a remote worker. Values that don't parse, or are <code>&lt;= 0</code>, fall back to the default.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="tui">TUI<a class="headerlink" href="#tui" title="Permanent link">&para;</a></h2>
+<p>Defaults for the <code>strata tui</code> client; each is also a command-line flag, and the
+flag wins.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>STRATA_TUI_SERVER</code></td>
+<td><code>http://localhost:8765</code></td>
+<td>Server the TUI connects to</td>
+</tr>
+<tr>
+<td><code>STRATA_TUI_USER</code></td>
+<td><code>None</code></td>
+<td>Caller identity to send, for a personal deployment behind a proxy</td>
+</tr>
+<tr>
+<td><code>STRATA_TUI_USER_HEADER_NAME</code></td>
+<td><code>None</code></td>
+<td>Header carrying that identity (matches <code>STRATA_PERSONAL_MODE_USER_HEADER</code> on the server)</td>
+</tr>
 </tbody>
 </table>
 <h2 id="worker">Worker<a class="headerlink" href="#worker" title="Permanent link">&para;</a></h2>
@@ -2993,6 +3441,21 @@ toggles <code>enabled</code> there.</p>
 <td><code>50.0</code></td>
 <td>Scan endpoint rate limit</td>
 </tr>
+<tr>
+<td><code>STRATA_RATE_LIMIT_WARM_RPS</code></td>
+<td><code>10.0</code></td>
+<td>Cache-warm endpoint rate limit</td>
+</tr>
+<tr>
+<td><code>STRATA_RATE_LIMIT_GLOBAL_BURST</code></td>
+<td><code>100.0</code></td>
+<td>Global token-bucket burst</td>
+</tr>
+<tr>
+<td><code>STRATA_RATE_LIMIT_CLIENT_BURST</code></td>
+<td><code>20.0</code></td>
+<td>Per-client token-bucket burst</td>
+</tr>
 </tbody>
 </table>
 <h2 id="observability">Observability<a class="headerlink" href="#observability" title="Permanent link">&para;</a></h2>
@@ -3019,6 +3482,11 @@ toggles <code>enabled</code> there.</p>
 <td><code>STRATA_TRACING_ENABLED</code></td>
 <td><code>false</code></td>
 <td>Enable OpenTelemetry</td>
+</tr>
+<tr>
+<td><code>STRATA_METRICS_ENABLED</code></td>
+<td><code>true</code></td>
+<td>Set <code>false</code> to stop collecting request/cache metrics</td>
 </tr>
 <tr>
 <td><code>OTEL_EXPORTER_OTLP_ENDPOINT</code></td>
@@ -3102,14 +3570,14 @@ toggles <code>enabled</code> there.</p>
 <p>Provider-specific keys auto-configure <code>base_url</code> and <code>model</code> defaults.
 <code>STRATA_AI_*</code> variables override provider defaults. Notebook-level <code>[ai]</code>
 config in <code>notebook.toml</code> overrides both.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[ai]</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434/v1&quot;</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;llama3&quot;</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">max_context_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">approval_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">120.0</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">[ai]</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">api_key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">              </span><span class="c1"># prefer the Runtime panel; writing here commits the key</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">base_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://localhost:11434/v1&quot;</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">model</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;llama3&quot;</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">max_context_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">100000</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">max_output_tokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4096</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">60.0</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">approval_timeout_seconds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">120.0</span>
 </code></pre></div>
 <p>All fields are optional, set only the ones you want to override.</p>
 <h2 id="timeouts">Timeouts<a class="headerlink" href="#timeouts" title="Permanent link">&para;</a></h2>
