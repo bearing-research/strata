@@ -25,6 +25,11 @@ class WorkerState(enum.StrEnum):
     BUSY = "busy"
     """Running a job."""
 
+    STOPPING = "stopping"
+    """Being torn down. Claimed synchronously before the pool awaits the
+    backend, so the dispatcher cannot hand a job to a machine that is on its
+    way out. Not warm, and not capacity."""
+
 
 class JobState(enum.StrEnum):
     """Lifecycle of a unit of work."""
@@ -76,6 +81,15 @@ class MachineType:
 
     boot_timeout_seconds: float = 120.0
     job_timeout_seconds: float = 300.0
+
+    cool_down_seconds: float = 300.0
+    """Idle time before a machine is stopped.
+
+    Lower it for anything expensive. Five idle minutes on a CPU worker is
+    pennies; on an H100 at $10/hour it is real money, and a machine that
+    outlives a forgotten notebook by a weekend is the costliest bug this
+    system can produce.
+    """
     env: dict[str, str] = field(default_factory=dict)
 
     cpus: float | None = None

@@ -5,17 +5,19 @@ machine type (preferring one that already served the same session), start a
 machine when there is none, forward the payload over HTTP, record the result,
 and meter the execution.
 
-What it deliberately does not do yet: cool down idle workers, keep a warm
-floor, reap stuck jobs, or retry preemptions. Those are the scaler and the
-reaper, and they are timer loops — this repo has just spent a release fixing
-control loops that shipped before anyone watched them run, so they land as
-their own change with their own tests rather than as scaffolding here.
+Idle machines are stopped by the scaler (`start_scaler`), which is the only
+thing in the pool that ever ends a machine that finished its work. A
+deployment that forgets to call it bills for every machine it ever started.
 
-Two consequences of having no timers yet, both intentional and tested:
+What it deliberately still does not do: keep a warm floor, or retry
+preemptions. A floor per tenant means paying for every tenant that ever
+existed, and per machine type it means choosing whose latency to subsidise;
+neither has a caller. Pre-warm belongs with the proxy, which is the thing
+that knows a user just opened a notebook.
 
-- A worker stays warm forever once booted. Nothing bills it down.
-- If the only booting worker fails to come up, its queued jobs stay queued
-  until the next submit for that machine type triggers another start.
+One consequence of having no other timer, intentional and tested: if the
+only booting worker fails to come up, its queued jobs stay queued until the
+next submit for that machine type triggers another start.
 
 A machine is retired whenever the pool cannot vouch for what is running on
 it: unreachable, timed out, or holding an orphaned job across a restart.
@@ -214,6 +216,9 @@ class Pool:
         total = self.store.count_workers(
             machine_type,
             tenant_id,
+            # STOPPING is deliberately absent: a machine being torn down is
+            # not capacity, and counting it would keep a tenant at its cap
+            # from starting the replacement.
             [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY],
         )
         needed = min(queued - starting - warm, spec.max_workers - total)
@@ -396,7 +401,16 @@ class Pool:
         The row goes away rather than becoming a tombstone: nothing in this
         slice would ever bring it back, and jobs keep `worker_id` as plain
         history.
+
+        The state flips to STOPPING first, synchronously. Everything below
+        awaits, and in that window the dispatcher could otherwise find this
+        machine warm and hand it a job we are about to kill.
         """
+        if worker.state is not WorkerState.STOPPING:
+            worker.state = WorkerState.STOPPING
+            worker.current_job_id = None
+            self.store.save_worker(worker)
+
         if worker.backend_id is not None:
             try:
                 await self.backend.stop(worker.backend_id)
@@ -460,6 +474,71 @@ class Pool:
                 extra={"endpoint": endpoint},
             )
             return False
+
+    # --- scaling down ---
+
+    async def reap_idle_workers(self) -> int:
+        """One scaler pass. Returns how many machines were stopped.
+
+        Public and synchronous-to-call so tests drive it directly with an
+        injected clock, rather than proving a cost control works by sleeping
+        and hoping.
+        """
+        now = self._wall()
+        stopped = 0
+        for name, spec in self.machine_types.items():
+            for worker in self.store.list_workers(name, [WorkerState.WARM]):
+                # A machine that never ran a job ages from when it booted, so
+                # one started for a job that then failed still gets reaped.
+                last_active = worker.last_active_at or worker.created_at
+
+                if last_active > now:
+                    # The wall clock moved backwards. Left alone this machine
+                    # is unreapable until the clock catches up, which is
+                    # unbounded idle billing; clamping makes it age from now.
+                    logger.warning(
+                        "machine was last active in the future; clamping to now",
+                        extra={"worker_id": worker.id, "skew_seconds": round(last_active - now, 1)},
+                    )
+                    worker.last_active_at = now
+                    self.store.save_worker(worker)
+                    continue
+
+                idle_for = now - last_active
+                if idle_for < spec.cool_down_seconds:
+                    continue
+
+                logger.info(
+                    "stopping an idle machine",
+                    extra={
+                        "worker_id": worker.id,
+                        "machine_type": name,
+                        "tenant_id": worker.tenant_id,
+                        "idle_seconds": round(idle_for, 1),
+                    },
+                )
+                await self._stop_worker(worker)
+                stopped += 1
+        return stopped
+
+    def start_scaler(self, interval_seconds: float = 10.0) -> None:
+        """Run `reap_idle_workers` on a timer until the pool closes.
+
+        Nothing else stops a machine that finished its work, so a pool
+        without this call bills for every machine it ever started, forever.
+        """
+        self._spawn(self._scaler_loop(interval_seconds))
+
+    async def _scaler_loop(self, interval_seconds: float) -> None:
+        while True:
+            await asyncio.sleep(interval_seconds)
+            try:
+                await self.reap_idle_workers()
+            except Exception:
+                # A pass that raises must not take the loop down with it:
+                # the loop dying is indistinguishable from having no scaler,
+                # and that failure is measured in dollars per hour.
+                logger.exception("scaler pass failed")
 
     # --- task bookkeeping ---
 
