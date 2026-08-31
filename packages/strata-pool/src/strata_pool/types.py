@@ -8,6 +8,7 @@ is checking.
 """
 
 import enum
+import secrets
 import uuid
 from dataclasses import dataclass, field
 
@@ -48,6 +49,15 @@ def new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+def new_auth_token() -> str:
+    """A worker's credential. One per machine, minted before it boots.
+
+    `secrets`, not `uuid`: this gates arbitrary code execution on the machine,
+    so it has to come from a CSPRNG.
+    """
+    return secrets.token_urlsafe(32)
+
+
 @dataclass(frozen=True)
 class MachineType:
     """A named capability class the pool can provision.
@@ -84,6 +94,14 @@ class Worker:
 
     current_job_id: str | None = None
     last_active_at: float | None = None
+
+    auth_token: str | None = field(default=None, repr=False)
+    """Bearer credential the pool presents to this machine.
+
+    repr=False so it cannot ride along into a log line: every logger call
+    that carries a worker would otherwise print a working credential for a
+    machine that runs arbitrary code.
+    """
 
 
 @dataclass

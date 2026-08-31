@@ -43,12 +43,21 @@ from strata_pool.types import (
     UsageEvent,
     Worker,
     WorkerState,
+    new_auth_token,
     new_id,
 )
 
 logger = logging.getLogger(__name__)
 
 _HEALTH_POLL_SECONDS = 0.5
+
+WORKER_TOKEN_ENV = "STRATA_WORKER_TOKEN"
+"""Environment variable carrying the worker's own credential.
+
+The worker contract, such as it is: reject any request to /execute that does
+not present this value as a bearer token. /health stays open — it is polled
+before the machine is trusted with anything, and it reveals nothing.
+"""
 
 
 class Pool:
@@ -212,17 +221,23 @@ class Pool:
         the provider created one — reconciling that needs a backend that can
         list its own machines, which arrives with the first real backend.
         """
+        token = new_auth_token()
         worker = Worker(
             id=new_id("worker"),
             machine_type=spec.name,
             backend=self.backend.name,
             state=WorkerState.STARTING,
             created_at=self._wall(),
+            auth_token=token,
         )
         self.store.save_worker(worker)
 
+        # The token has to reach the machine before it can accept anything, so
+        # it goes in the environment the backend boots it with. Minted per
+        # worker: one machine's credential must not open another's.
+        env = {**spec.env, WORKER_TOKEN_ENV: token}
         try:
-            provisioned = await self.backend.start(spec.name, spec.image, spec.env)
+            provisioned = await self.backend.start(spec.name, spec.image, env)
         except Exception:
             logger.exception(
                 "backend failed to start a worker",
@@ -296,6 +311,7 @@ class Pool:
                 response = await self._client.post(
                     f"{worker.endpoint}/execute",
                     content=job.payload,
+                    headers={"Authorization": f"Bearer {worker.auth_token}"},
                     timeout=timeout,
                 )
         except (httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
