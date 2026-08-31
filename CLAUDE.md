@@ -141,9 +141,11 @@ via `STRATA_ARTIFACT_BLOB_BACKEND` plus backend-specific env vars (see
 Two executor protocols:
 - **v1 push**: Strata POSTs multipart (`metadata` + `inputN`) to executor;
   executor returns Arrow IPC.
-- **v2 pull** (`pull_model_enabled=True`): Strata sends a `BuildManifest` of
-  signed URLs; executor fetches inputs, uploads result, POSTs to `finalize_url`.
-  Avoids bandwidth bottleneck at Strata. See `transforms/signed_urls.py`.
+- **v2 pull**: Strata sends a `BuildManifest` of signed URLs; executor fetches
+  inputs, uploads result, POSTs to `finalize_url`. Avoids bandwidth bottleneck
+  at Strata. Not gated by a flag — the routes are live wherever signed URLs can
+  be issued (`build_transport_available` in `api/dependencies.py`). See
+  `transforms/signed_urls.py`.
 
 ### Where to look
 
