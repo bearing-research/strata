@@ -20,6 +20,7 @@ _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS workers (
     id TEXT PRIMARY KEY,
     machine_type TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
     backend TEXT NOT NULL,
     backend_id TEXT,
     state TEXT NOT NULL CHECK (state IN ('starting','warm','busy')),
@@ -39,8 +40,10 @@ CREATE TABLE IF NOT EXISTS workers (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workers_backend_id
     ON workers (backend, backend_id) WHERE backend_id IS NOT NULL;
 
+-- Placement always filters by tenant as well as type: a machine belongs to
+-- one tenant for its life.
 CREATE INDEX IF NOT EXISTS idx_workers_type_state
-    ON workers (machine_type, state);
+    ON workers (machine_type, tenant_id, state);
 
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
@@ -94,6 +97,7 @@ def _to_worker(row: sqlite3.Row) -> Worker:
     return Worker(
         id=row["id"],
         machine_type=row["machine_type"],
+        tenant_id=row["tenant_id"],
         backend=row["backend"],
         state=WorkerState(row["state"]),
         created_at=row["created_at"],
@@ -153,10 +157,10 @@ class PoolStore:
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO workers (id, machine_type, backend, backend_id, state,
-                                     endpoint, region, session_id, current_job_id,
+                INSERT INTO workers (id, machine_type, tenant_id, backend, backend_id,
+                                     state, endpoint, region, session_id, current_job_id,
                                      created_at, last_active_at, auth_token)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     backend_id = excluded.backend_id,
                     state = excluded.state,
@@ -170,6 +174,7 @@ class PoolStore:
                 (
                     worker.id,
                     worker.machine_type,
+                    worker.tenant_id,
                     worker.backend,
                     worker.backend_id,
                     worker.state.value,
@@ -219,16 +224,22 @@ class PoolStore:
     def find_warm_worker(
         self,
         machine_type: str,
+        tenant_id: str,
         session_id: str | None = None,
     ) -> Worker | None:
         """The warm worker to hand the next job to.
 
+        Tenant is not optional. A machine that ran one tenant's code is never
+        offered to another, so there is no call site that legitimately wants
+        "any warm worker of this type".
+
         With `session_id`, only a worker that already served that session
-        matches — the caller falls back to any warm worker itself, so that an
-        affinity miss is a visible decision rather than a silent one.
+        matches — the caller falls back to the tenant's other warm workers
+        itself, so an affinity miss is a visible decision rather than a silent
+        one.
         """
-        sql = "SELECT * FROM workers WHERE machine_type = ? AND state = 'warm'"
-        params: list[object] = [machine_type]
+        sql = "SELECT * FROM workers WHERE machine_type = ? AND tenant_id = ? AND state = 'warm'"
+        params: list[object] = [machine_type, tenant_id]
         if session_id is not None:
             sql += " AND session_id = ?"
             params.append(session_id)
@@ -239,15 +250,22 @@ class PoolStore:
             row = self._conn.execute(sql, params).fetchone()
         return _to_worker(row) if row else None
 
-    def count_workers(self, machine_type: str, states: Iterable[WorkerState]) -> int:
+    def count_workers(
+        self,
+        machine_type: str,
+        tenant_id: str,
+        states: Iterable[WorkerState],
+    ) -> int:
+        """Machines of this type belonging to this tenant. Capacity is
+        counted per tenant because `max_workers` is a per-tenant cap."""
         state_values = [s.value for s in states]
         if not state_values:
             return 0
         with self._lock:
             row = self._conn.execute(
-                "SELECT COUNT(*) FROM workers WHERE machine_type = ? "
+                "SELECT COUNT(*) FROM workers WHERE machine_type = ? AND tenant_id = ? "
                 f"AND state IN ({','.join('?' * len(state_values))})",
-                [machine_type, *state_values],
+                [machine_type, tenant_id, *state_values],
             ).fetchone()
         return row[0]
 
@@ -305,23 +323,42 @@ class PoolStore:
             rows = self._conn.execute(sql, params).fetchall()
         return [_to_job(row) for row in rows]
 
-    def next_queued_job(self, machine_type: str) -> Job | None:
-        """Highest priority first, FIFO within a priority."""
+    def next_queued_job(self, machine_type: str, tenant_id: str) -> Job | None:
+        """Highest priority first, FIFO within a priority, one tenant only.
+
+        Scoped by tenant because a freed machine can only serve the tenant it
+        belongs to. Draining globally would stop at the first job the machine
+        is not allowed to run and starve everything behind it.
+        """
         with self._lock:
             row = self._conn.execute(
-                "SELECT * FROM jobs WHERE machine_type = ? AND state = 'queued' "
-                "ORDER BY priority DESC, submitted_at ASC LIMIT 1",
-                (machine_type,),
+                "SELECT * FROM jobs WHERE machine_type = ? AND tenant_id = ? "
+                "AND state = 'queued' ORDER BY priority DESC, submitted_at ASC LIMIT 1",
+                (machine_type, tenant_id),
             ).fetchone()
         return _to_job(row) if row else None
 
-    def count_queued(self, machine_type: str) -> int:
+    def count_queued(self, machine_type: str, tenant_id: str) -> int:
         with self._lock:
             row = self._conn.execute(
-                "SELECT COUNT(*) FROM jobs WHERE machine_type = ? AND state = 'queued'",
-                (machine_type,),
+                "SELECT COUNT(*) FROM jobs WHERE machine_type = ? AND tenant_id = ? "
+                "AND state = 'queued'",
+                (machine_type, tenant_id),
             ).fetchone()
         return row[0]
+
+    def queued_tenants(self, machine_type: str) -> list[str]:
+        """Tenants with work waiting for this machine type.
+
+        Recovery needs it: after a restart there is no submit to drive
+        placement, so the pool has to ask who is waiting.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT tenant_id FROM jobs WHERE machine_type = ? AND state = 'queued'",
+                (machine_type,),
+            ).fetchall()
+        return [row[0] for row in rows]
 
     # --- usage ---
 

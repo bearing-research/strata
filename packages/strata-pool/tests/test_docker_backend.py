@@ -7,7 +7,7 @@ one. These stay fast and always run.
 
 import httpx
 import pytest
-from strata_pool import DockerBackend
+from strata_pool import DockerBackend, MachineType
 from strata_pool.backends import DockerError
 
 
@@ -49,6 +49,12 @@ class FakeDaemon:
         raise AssertionError(f"never called {path}")
 
 
+def _spec(**kwargs) -> MachineType:
+    return MachineType(
+        name=kwargs.pop("name", "cpu-4x"), image=kwargs.pop("image", "worker:latest"), **kwargs
+    )
+
+
 def _backend(daemon: FakeDaemon, **kwargs) -> DockerBackend:
     return DockerBackend(
         api=httpx.AsyncClient(transport=httpx.MockTransport(daemon.handle), base_url="http://d"),
@@ -59,7 +65,7 @@ def _backend(daemon: FakeDaemon, **kwargs) -> DockerBackend:
 
 async def test_start_creates_starts_and_reports_the_published_port():
     daemon = FakeDaemon()
-    worker = await _backend(daemon).start("cpu-4x", "worker:latest", {"TOKEN": "abc"})
+    worker = await _backend(daemon).start(_spec(), {"TOKEN": "abc"})
 
     assert worker.backend_id == "c0ffee"
     assert worker.endpoint == "http://127.0.0.1:49154"
@@ -73,7 +79,7 @@ async def test_start_creates_starts_and_reports_the_published_port():
 async def test_the_worker_port_is_published_on_loopback_only():
     """A worker on 0.0.0.0 is reachable by anything sharing the host."""
     daemon = FakeDaemon()
-    await _backend(daemon).start("cpu-4x", "worker:latest")
+    await _backend(daemon).start(_spec())
 
     host_config = daemon.body("/containers/create")["HostConfig"]
     assert host_config["PortBindings"]["8080/tcp"] == [{"HostIp": "127.0.0.1", "HostPort": ""}]
@@ -81,7 +87,7 @@ async def test_the_worker_port_is_published_on_loopback_only():
 
 async def test_environment_and_labels_reach_the_container():
     daemon = FakeDaemon()
-    await _backend(daemon).start("gpu-a100", "worker:latest", {"A": "1", "B": "2"})
+    await _backend(daemon).start(_spec(name="gpu-a100"), {"A": "1", "B": "2"})
 
     created = daemon.body("/containers/create")
     assert created["Env"] == ["A=1", "B=2"]
@@ -97,7 +103,7 @@ async def test_a_custom_worker_port_is_the_one_requested_and_read_back():
             )
         }
     )
-    worker = await _backend(daemon, worker_port=9000).start("cpu-4x", "worker:latest")
+    worker = await _backend(daemon, worker_port=9000).start(_spec())
 
     assert daemon.body("/containers/create")["ExposedPorts"] == {"9000/tcp": {}}
     assert worker.endpoint == "http://127.0.0.1:33001"
@@ -108,7 +114,7 @@ async def test_an_image_that_publishes_nothing_says_so():
         **{"/containers/c0ffee/json": httpx.Response(200, json={"NetworkSettings": {"Ports": {}}})}
     )
     with pytest.raises(DockerError, match="published no host port"):
-        await _backend(daemon).start("cpu-4x", "worker:latest")
+        await _backend(daemon).start(_spec())
 
 
 async def test_a_missing_image_surfaces_the_daemons_own_message():
@@ -116,7 +122,7 @@ async def test_a_missing_image_surfaces_the_daemons_own_message():
         **{"/containers/create": httpx.Response(404, json={"message": "No such image: nope"})}
     )
     with pytest.raises(DockerError, match="No such image: nope"):
-        await _backend(daemon).start("cpu-4x", "nope")
+        await _backend(daemon).start(_spec(image="nope"))
 
 
 async def test_a_container_that_will_not_start_is_removed_rather_than_left_behind():
@@ -124,7 +130,7 @@ async def test_a_container_that_will_not_start_is_removed_rather_than_left_behin
         **{"/containers/c0ffee/start": httpx.Response(500, json={"message": "no such device"})}
     )
     with pytest.raises(DockerError, match="no such device"):
-        await _backend(daemon).start("cpu-4x", "worker:latest")
+        await _backend(daemon).start(_spec())
 
     assert "/containers/c0ffee/stop" in [r.url.path for r in daemon.requests]
     assert ("DELETE", "/containers/c0ffee") in [(r.method, r.url.path) for r in daemon.requests]
@@ -193,3 +199,25 @@ async def test_health_is_false_when_the_worker_answers_badly():
         probe=httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(503))),
     )
     assert await backend.health("http://127.0.0.1:49154") is False
+
+
+async def test_resource_limits_reach_the_container():
+    """Unset, a container may consume the whole host — one tenant's job able
+    to starve every other container on the box."""
+    daemon = FakeDaemon()
+    await _backend(daemon).start(_spec(cpus=2.5, memory_mb=4096))
+
+    host_config = daemon.body("/containers/create")["HostConfig"]
+    assert host_config["NanoCpus"] == 2_500_000_000
+    assert host_config["Memory"] == 4096 * 1024 * 1024
+
+
+async def test_limits_are_omitted_rather_than_sent_as_zero():
+    """Docker reads 0 as unlimited, but sending a field we were not asked to
+    set would silently override a daemon-level default."""
+    daemon = FakeDaemon()
+    await _backend(daemon).start(_spec())
+
+    host_config = daemon.body("/containers/create")["HostConfig"]
+    assert "NanoCpus" not in host_config
+    assert "Memory" not in host_config

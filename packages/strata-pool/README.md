@@ -23,6 +23,27 @@ job = await pool.submit(tenant_id="acme", machine_type="cpu-4x", payload=bundle)
 done = await pool.wait(job.id)
 ```
 
+## Isolation
+
+A machine belongs to **one tenant for its life** and is destroyed rather than
+handed to another. Even scrubbed of files, a process that ran one tenant's
+code is not a boundary the next tenant should have to trust, and GPU memory is
+not reliably zeroed between processes at all. `max_workers` is therefore a
+per-tenant cap.
+
+`MachineType.cpus` and `memory_mb` bound what a container may consume; unset,
+it may take the whole host. Both are enforced by the daemon, asserted against
+a real one in `test_docker_live.py`.
+
+What that buys is process-level isolation, which is **not** a boundary for
+untrusted code — a shared kernel is one CVE away from a cross-tenant escape.
+A deployment running untrusted work wants a VM-backed runtime (Kata, gVisor)
+or a backend whose machines are already microVMs. The `Backend` protocol is
+where that choice lives.
+
+Still missing: a global cap across tenants, and any restriction on the
+container's own network access.
+
 ## What it is not
 
 **It is not a cache.** The pool has no idea Strata deduplicates work.

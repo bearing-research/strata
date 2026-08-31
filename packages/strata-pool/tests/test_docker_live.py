@@ -120,7 +120,16 @@ async def docker_pool(tmp_path):
         pool = Pool(
             store,
             backend,
-            [MachineType(name="cpu", image=IMAGE, max_workers=2, boot_timeout_seconds=90)],
+            [
+                MachineType(
+                    name="cpu",
+                    image=IMAGE,
+                    max_workers=2,
+                    boot_timeout_seconds=90,
+                    cpus=1.0,
+                    memory_mb=512,
+                )
+            ],
         )
 
         try:
@@ -135,6 +144,21 @@ async def docker_pool(tmp_path):
                 await backend.stop(container["Id"])
             await backend.aclose()
             store.close()
+
+
+@requires_docker
+async def test_the_daemon_applies_the_resource_limits_we_asked_for(docker_pool):
+    """The limits are only real if the daemon accepted them; a field name we
+    got wrong would be ignored silently."""
+    job = await docker_pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
+    await docker_pool.wait(job.id, timeout=120)
+
+    worker = docker_pool.store.list_workers()[0]
+    async with _daemon_client() as daemon:
+        inspected = (await daemon.get(f"/containers/{worker.backend_id}/json")).json()
+
+    assert inspected["HostConfig"]["NanoCpus"] == 1_000_000_000
+    assert inspected["HostConfig"]["Memory"] == 512 * 1024 * 1024
 
 
 @requires_docker

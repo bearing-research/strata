@@ -19,6 +19,7 @@ import logging
 import httpx
 
 from strata_pool.backend import ProvisionedWorker
+from strata_pool.types import MachineType
 
 logger = logging.getLogger(__name__)
 
@@ -71,31 +72,38 @@ class DockerBackend:
 
     async def start(
         self,
-        machine_type: str,
-        image: str,
+        spec: MachineType,
         env: dict[str, str] | None = None,
     ) -> ProvisionedWorker:
         port_key = f"{self.worker_port}/tcp"
+        host_config: dict[str, object] = {
+            # Empty HostPort means "pick a free one". Binding to loopback
+            # keeps a worker off the network: the pool is the only thing that
+            # should be able to reach it.
+            "PortBindings": {port_key: [{"HostIp": "127.0.0.1", "HostPort": ""}]},
+        }
+        # Unset means the container may consume the whole host, which is one
+        # tenant's job able to starve every other container on the box.
+        if spec.cpus is not None:
+            host_config["NanoCpus"] = int(spec.cpus * 1_000_000_000)
+        if spec.memory_mb is not None:
+            host_config["Memory"] = spec.memory_mb * 1024 * 1024
+
         create = await self._api.post(
             "/containers/create",
             json={
-                "Image": image,
+                "Image": spec.image,
                 "Env": [f"{key}={value}" for key, value in (env or {}).items()],
                 "Cmd": self.command,
                 "ExposedPorts": {port_key: {}},
-                "HostConfig": {
-                    # Empty HostPort means "pick a free one". Binding to
-                    # loopback keeps a worker off the network: the pool is the
-                    # only thing that should be able to reach it.
-                    "PortBindings": {port_key: [{"HostIp": "127.0.0.1", "HostPort": ""}]},
-                },
+                "HostConfig": host_config,
                 # A machine the pool forgot about can still be found by hand,
                 # and gives a later reconcile pass something to match on.
-                "Labels": {"strata.pool.machine-type": machine_type},
+                "Labels": {"strata.pool.machine-type": spec.name},
             },
         )
         if create.status_code >= 400:
-            raise DockerError(f"could not create a {image} container: {_message(create)}")
+            raise DockerError(f"could not create a {spec.image} container: {_message(create)}")
         container_id = create.json()["Id"]
 
         started = await self._api.post(f"/containers/{container_id}/start")
@@ -110,7 +118,7 @@ class DockerBackend:
             backend_id=container_id,
             endpoint=f"http://127.0.0.1:{port}",
             region="local",
-            metadata={"machine_type": machine_type},
+            metadata={"machine_type": spec.name},
         )
 
     async def stop(self, backend_id: str) -> None:

@@ -70,9 +70,19 @@ class MachineType:
     name: str
     image: str
     max_workers: int = 10
+    """Cap on machines of this type *per tenant*, since a machine belongs to
+    one tenant for its life. There is no global cap yet; a hosted deployment
+    will want one."""
+
     boot_timeout_seconds: float = 120.0
     job_timeout_seconds: float = 300.0
     env: dict[str, str] = field(default_factory=dict)
+
+    cpus: float | None = None
+    """CPU allowance. None means whatever the backend defaults to, which for
+    a container is the whole host."""
+
+    memory_mb: int | None = None
 
 
 @dataclass
@@ -81,6 +91,15 @@ class Worker:
 
     id: str
     machine_type: str
+    tenant_id: str
+    """Who this machine belongs to, for its whole life.
+
+    A machine is never handed across tenants. Even scrubbed of files, a
+    process that ran one tenant's code is not a boundary the next tenant
+    should have to trust — and for a GPU, memory is not reliably zeroed
+    between processes at all.
+    """
+
     backend: str
     state: WorkerState
     created_at: float

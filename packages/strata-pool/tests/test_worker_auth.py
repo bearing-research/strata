@@ -20,9 +20,9 @@ class RecordingBackend(FakeBackend):
         super().__init__(**kwargs)
         self.envs: list[dict[str, str]] = []
 
-    async def start(self, machine_type, image, env=None):
+    async def start(self, spec, env=None):
         self.envs.append(dict(env or {}))
-        return await super().start(machine_type, image, env)
+        return await super().start(spec, env)
 
 
 async def test_the_machine_is_booted_with_a_credential(make_pool):
