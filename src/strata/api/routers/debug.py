@@ -1,5 +1,5 @@
 """Debug / diagnostics routes: latency, GC, pools, connections, memory, rate
-limits, circuit breakers, and low-level cache inspection.
+limits, and low-level cache inspection.
 
 Moved verbatim from ``server.py`` (P3, router split). All read-only operator
 diagnostics. ``inspect_cache_v1`` reaches server state through a lazy
@@ -169,25 +169,6 @@ async def get_rate_limits_debug_v1():
     if rate_limiter is None:
         return {"error": "Rate limiter not initialized", "enabled": False}
     return rate_limiter.get_stats()
-
-
-@router.get("/v1/debug/circuit-breakers")
-async def get_circuit_breakers_v1():
-    """Get circuit breaker status for all dependencies.
-
-    Returns status for each registered circuit breaker:
-    - state: Current state (closed, open, half_open)
-    - failure_count: Current consecutive failures
-    - success_count: Current consecutive successes (in half_open)
-    - total_calls: Lifetime call count
-    - total_failures: Lifetime failure count
-    - total_successes: Lifetime success count
-    - total_rejections: Requests rejected when open
-    """
-    from strata.circuit_breaker import get_circuit_breaker_registry
-
-    registry = get_circuit_breaker_registry()
-    return {"breakers": registry.get_all_stats()}
 
 
 @router.get("/v1/debug/cache/inspect", dependencies=[require_scope("admin:cache")])

@@ -24,9 +24,9 @@ DASHBOARD = REPO_ROOT / "observability/grafana/provisioning/dashboards/strata.js
 DATASOURCES = REPO_ROOT / "observability/grafana/provisioning/datasources/datasources.yml"
 
 # Metric families emitted only under specific conditions — multi-tenant traffic,
-# a registered circuit breaker, per-table activity — so they are absent from an
-# idle server's scrape. Allowlisted by prefix rather than required to be live.
-CONDITIONAL_PREFIXES = ("strata_tenant_", "strata_circuit_breaker_", "strata_table_")
+# per-table activity — so they are absent from an idle server's scrape.
+# Allowlisted by prefix rather than required to be live.
+CONDITIONAL_PREFIXES = ("strata_tenant_", "strata_table_")
 
 _METRIC_RE = re.compile(r"strata_[a-z0-9_]+")
 

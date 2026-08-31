@@ -766,64 +766,6 @@ async def metrics_prometheus():
         ]
     )
 
-    # Add circuit breaker metrics
-    from strata.circuit_breaker import get_circuit_breaker_registry
-
-    cb_registry = get_circuit_breaker_registry()
-    cb_all_stats = cb_registry.get_all_stats()
-    if cb_all_stats:
-        lines.extend(
-            [
-                "",
-                # Circuit breaker state: 0=closed, 1=open, 2=half_open
-                "# HELP strata_circuit_breaker_state Circuit breaker state",
-                "# TYPE strata_circuit_breaker_state gauge",
-            ]
-        )
-        state_map = {"closed": 0, "open": 1, "half_open": 2}
-        for cb_name, cb_stats in cb_all_stats.items():
-            cb_state_val = state_map.get(cb_stats.get("state", "closed"), 0)
-            lines.append(f'strata_circuit_breaker_state{{name="{cb_name}"}} {cb_state_val}')
-
-        lines.extend(
-            [
-                "",
-                "# HELP strata_circuit_breaker_calls_total Total calls by circuit breaker",
-                "# TYPE strata_circuit_breaker_calls_total counter",
-            ]
-        )
-        for cb_name, cb_stats in cb_all_stats.items():
-            lines.append(
-                f'strata_circuit_breaker_calls_total{{name="{cb_name}"}} '
-                f"{cb_stats.get('total_calls', 0)}"
-            )
-
-        lines.extend(
-            [
-                "",
-                "# HELP strata_circuit_breaker_failures_total Total failures by circuit breaker",
-                "# TYPE strata_circuit_breaker_failures_total counter",
-            ]
-        )
-        for cb_name, cb_stats in cb_all_stats.items():
-            lines.append(
-                f'strata_circuit_breaker_failures_total{{name="{cb_name}"}} '
-                f"{cb_stats.get('total_failures', 0)}"
-            )
-
-        lines.extend(
-            [
-                "",
-                "# HELP strata_circuit_breaker_rejections_total Rejected calls by circuit breaker",
-                "# TYPE strata_circuit_breaker_rejections_total counter",
-            ]
-        )
-        for cb_name, cb_stats in cb_all_stats.items():
-            lines.append(
-                f'strata_circuit_breaker_rejections_total{{name="{cb_name}"}} '
-                f"{cb_stats.get('total_rejections', 0)}"
-            )
-
     # Add per-table metrics (top 20 most accessed tables)
     table_metrics = state.metrics.get_top_tables(20)
     if table_metrics:

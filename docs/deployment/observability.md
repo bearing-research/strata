@@ -123,8 +123,7 @@ The dashboard covers the serving layer end to end:
   eviction rate & pressure
 - **Admission & QoS**: interactive vs bulk slot usage, queue-wait
   times, rejections
-- **Resilience**: rate limiter (allowed vs rejected, active clients),
-  circuit-breaker state and failures
+- **Resilience**: rate limiter (allowed vs rejected, active clients)
 - **Multi-tenant**: per-tenant scan rate and cache hit rate
 - **Server**: status / draining, stream aborts, client disconnects
 

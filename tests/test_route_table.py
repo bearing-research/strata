@@ -80,7 +80,6 @@ EXPECTED_ROUTES = [
     ("/v1/config/timeouts", "GET", 0),
     # 1 dependency: require_scope("admin:cache") — same cross-tenant exposure.
     ("/v1/debug/cache/inspect", "GET", 1),
-    ("/v1/debug/circuit-breakers", "GET", 0),
     ("/v1/debug/connections", "GET", 0),
     ("/v1/debug/gc/pauses", "GET", 0),
     ("/v1/debug/latency", "GET", 0),
