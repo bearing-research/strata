@@ -98,6 +98,13 @@ def _reset_process_globals():
     # without lifespan inherits — surfacing as a spurious 429 once the bucket is
     # drained. Reset so every test starts with rate limiting disabled (None).
     reset_rate_limiter()
+    # The build runner is a process global too, and the one whose leftovers are
+    # not merely stale but *loop-bound*: its heartbeat task belongs to the loop
+    # that started it. A test that leaves one registered hands the next
+    # lifespan on this worker a runner it cannot await, which surfaced as an
+    # intermittent "got Future ... attached to a different loop" teardown error
+    # on whichever test happened to follow.
+    _reset_transform_singletons()
 
 
 # =============================================================================

@@ -979,13 +979,18 @@ async def lifespan(app: FastAPI):
 
     reset_build_qos()
 
-    # Stop build runner (cancel pending builds)
-    from strata.transforms.runner import get_build_runner, reset_build_runner
+    # Stop the build runner *this* lifespan started (cancelling pending builds).
+    # Reading the global here instead adopted whatever runner happened to be
+    # registered: a lifespan that started none — service mode without
+    # ``[tool.strata.transforms] enabled`` — would await ``stop()`` on one an
+    # earlier lifespan left behind, whose heartbeat task belongs to an event
+    # loop that is gone ("got Future ... attached to a different loop"). The
+    # registry is cleared either way, so nothing downstream inherits it.
+    from strata.transforms.runner import reset_build_runner
 
-    build_runner = get_build_runner()
-    if build_runner:
+    if build_runner is not None:
         await build_runner.stop()
-        reset_build_runner()
+    reset_build_runner()
 
     # Stop adaptive controller (cancel background loop)
     if _state._adaptive_controller:
