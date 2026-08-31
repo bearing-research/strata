@@ -2687,16 +2687,26 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 </tbody>
 </table>
 <h3 id="adaptive-concurrency">Adaptive concurrency<a class="headerlink" href="#adaptive-concurrency" title="Permanent link">&para;</a></h3>
-<p>Off by default. When enabled, a background loop is meant to resize the QoS
-slot counts from observed latency.</p>
-<div class="admonition warning">
-<p class="admonition-title">Not wired up</p>
-<p>The controller starts and reports, but nothing feeds it latency samples
-(<a href="https://github.com/bearing-research/strata/issues/549">#549</a>), so the
-slot counts do not move. Enabling this changes no admission behavior
-today. The knobs are listed because they exist and validate, not because
-they do anything.</p>
-</div>
+<p>Off by default. When enabled, a background loop resizes the QoS slot counts
+from what stream admission observes: queue wait when a scan acquires its tier
+slot, and slot-held duration when it releases. Latency over the target walks
+the tier down; latency well under it <em>plus</em> real queue pressure walks it up.
+Hysteresis (<code>STRATA_ADAPTIVE_HYSTERESIS</code> consecutive readings in the same
+direction) keeps it from flapping, and samples older than 60 seconds stop
+counting so an idle tier is not steered by a burst that is over.</p>
+<p><code>STRATA_ADAPTIVE_TARGET_P95_MS</code> is compared against how long a scan holds its
+slot, which for a bulk scan is the whole build. Set it from observed scan
+duration on your deployment, not from a dashboard SLO, or the loop will read
+normal work as overload and walk the tier down to its floor.</p>
+<p>Two constraints are enforced at startup rather than papered over at runtime:</p>
+<ul>
+<li><code>STRATA_INTERACTIVE_SLOTS</code> and <code>STRATA_BULK_SLOTS</code> must fall inside their
+  adaptive <code>[min, max]</code> range. The controller starts from those counts, so a
+  value outside the range means the first adjustment jumps to a bound.</li>
+<li>Adaptive control cannot be combined with <code>STRATA_MULTI_TENANT_ENABLED</code>. It
+  steers the default tenant's limiters, which under multi-tenancy is a tier no
+  request acquires.</li>
+</ul>
 <table>
 <thead>
 <tr>
@@ -2709,7 +2719,7 @@ they do anything.</p>
 <tr>
 <td><code>STRATA_ADAPTIVE_ENABLED</code></td>
 <td><code>false</code></td>
-<td>Enable the adaptive concurrency controller</td>
+<td>Enable the adaptive concurrency controller (single-tenant only)</td>
 </tr>
 <tr>
 <td><code>STRATA_ADAPTIVE_INTERVAL_SECONDS</code></td>
