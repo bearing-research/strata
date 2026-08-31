@@ -42,3 +42,6 @@ include = ["src/strata_pool", "README.md"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "docker: needs a reachable Docker daemon (skipped automatically without one)",
+]

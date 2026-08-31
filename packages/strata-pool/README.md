@@ -10,11 +10,11 @@ Fly, EC2) provide start / stop / health; the pool does not know which it is
 talking to.
 
 ```python
-from strata_pool import MachineType, Pool, PoolStore
+from strata_pool import DockerBackend, MachineType, Pool, PoolStore
 
 pool = Pool(
     store=PoolStore("pool.sqlite"),
-    backend=backend,
+    backend=DockerBackend(),
     machine_types=[MachineType(name="cpu-4x", image="strata-worker:latest")],
 )
 await pool.recover()          # reconcile after a restart
@@ -45,14 +45,32 @@ behaviours that follow from having no timers.
 |---|---|
 | `types.py` | `Worker`, `Job`, `MachineType`, `UsageEvent` and their states |
 | `backend.py` | The `Backend` protocol — start / stop / health |
+| `backends/docker.py` | Containers on the local Docker daemon |
 | `store.py` | SQLite persistence; the pool process keeps no authoritative state |
 | `pool.py` | Submission, dispatch, boot, execution, metering, restart recovery |
+
+## The Docker backend
+
+Talks to the Docker Engine API over its UNIX socket with httpx, so the pool
+needs no Docker SDK and every request shape is testable without a daemon. It
+starts the image, publishes the worker port on loopback only, and reports the
+host port Docker picked. It does not care what runs inside the container.
+
+It does not pull. An image that is not on the host fails with the daemon's own
+"No such image" message.
 
 ## Tests
 
 ```bash
-uv run pytest packages/strata-pool/tests -v
+pytest packages/strata-pool/tests -v
 ```
+
+The tests in `test_docker_live.py` run the whole path against real containers
+and skip when no daemon is reachable. Set `STRATA_POOL_DOCKER_SOCKET` if yours
+is not at `/var/run/docker.sock` (Docker Desktop on macOS puts it in
+`~/.docker/run/docker.sock`), and `STRATA_POOL_REQUIRE_DOCKER=1` to make a
+missing daemon an error instead of a skip — CI sets that, so a runner whose
+socket moved fails loudly rather than reporting coverage it never ran.
 
 CI additionally installs the package into a venv with only its own
 dependencies, to keep it from quietly growing a dependency on the server.
