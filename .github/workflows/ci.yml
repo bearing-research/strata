@@ -119,6 +119,12 @@ jobs:
 
       - name: Run pool tests
         working-directory: packages/strata-pool
+        # STRATA_POOL_REQUIRE_DOCKER turns "no daemon here" from a silent skip
+        # of every live test into a hard failure. The runner has Docker; if the
+        # socket ever moves, this job must say so rather than report green
+        # coverage it did not run.
+        env:
+          STRATA_POOL_REQUIRE_DOCKER: "1"
         run: ../../.venv-pool/bin/python -m pytest tests/ -v
 
   # Type-check the shipped code (src + strata-client) with ty. Enforces the
