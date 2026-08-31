@@ -11,6 +11,7 @@ resolution-markers = [
 members = [
     "strata-client",
     "strata-notebook",
+    "strata-pool",
 ]
 
 [[package]]
@@ -3948,6 +3949,7 @@ dev = [
     { name = "s3fs" },
     { name = "sqlglot" },
     { name = "strata-client" },
+    { name = "strata-pool" },
     { name = "testcontainers", extra = ["minio"] },
     { name = "textual" },
     { name = "textual-image" },
@@ -4029,6 +4031,7 @@ dev = [
     { name = "s3fs", specifier = ">=2026.3.0" },
     { name = "sqlglot", specifier = ">=25.0.0" },
     { name = "strata-client", editable = "packages/strata-client" },
+    { name = "strata-pool", editable = "packages/strata-pool" },
     { name = "testcontainers", extras = ["minio"], specifier = ">=4.0.0" },
     { name = "textual", specifier = ">=0.80.0" },
     { name = "textual-image", specifier = ">=0.13" },
@@ -4039,6 +4042,17 @@ docs = [
     { name = "mkdocs", specifier = ">=1.6.0" },
     { name = "mkdocs-material", specifier = ">=9.5.0" },
 ]
+
+[[package]]
+name = "strata-pool"
+version = "0.1.0"
+source = { editable = "packages/strata-pool" }
+dependencies = [
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "httpx", specifier = ">=0.28.0" }]
 
 [[package]]
 name = "strictyaml"
