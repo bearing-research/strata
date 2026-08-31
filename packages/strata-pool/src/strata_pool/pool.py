@@ -16,6 +16,13 @@ Two consequences of having no timers yet, both intentional and tested:
 - A worker stays warm forever once booted. Nothing bills it down.
 - If the only booting worker fails to come up, its queued jobs stay queued
   until the next submit for that machine type triggers another start.
+
+A machine is retired whenever the pool cannot vouch for what is running on
+it: unreachable, timed out, or holding an orphaned job across a restart.
+Nothing here can cancel remote work, so reuse would mean two jobs on
+hardware sized for one. That trades a cold start for a correctness
+guarantee, which is the right trade until the worker protocol grows a
+cancel.
 """
 
 import asyncio
@@ -100,7 +107,13 @@ class Pool:
         session_id: str | None = None,
         timeout_seconds: float | None = None,
     ) -> Job:
-        """Queue a job and try to place it. Returns as soon as it is durable.
+        """Queue a job and place it, without waiting for it to run.
+
+        Returns once the job is durable and any machines it needs have been
+        requested — so it does wait on `backend.start()`, which a cloud API
+        makes slow. Moving provisioning off the caller's path needs the counts
+        it reads to stay consistent, and belongs with the first backend where
+        that latency is real rather than as untested indirection now.
 
         The caller decides whether the work is needed at all. The pool has no
         idea Strata has a cache; submitting a job whose result already exists
@@ -221,7 +234,19 @@ class Pool:
         worker.backend_id = provisioned.backend_id
         worker.endpoint = provisioned.endpoint
         worker.region = provisioned.region
-        self.store.save_worker(worker)
+        try:
+            self.store.save_worker(worker)
+        except Exception:
+            # The machine exists but we could not write down its ID, so nothing
+            # would ever be able to stop it. Stop it now, while the ID is still
+            # in hand, rather than leak a billing resource.
+            logger.exception(
+                "could not record a machine that was just started; stopping it",
+                extra={"worker_id": worker.id, "backend_id": provisioned.backend_id},
+            )
+            await self.backend.stop(provisioned.backend_id)
+            self.store.delete_worker(worker.id)
+            return
         self._spawn(self._await_boot(worker, spec, provisioned.endpoint))
 
     async def _await_boot(self, worker: Worker, spec: MachineType, endpoint: str) -> None:
@@ -262,22 +287,45 @@ class Pool:
         self.store.save_job(job)
         started_at_mono = self._monotonic()
 
-        worker_died = False
+        keep_worker = False
         try:
-            response = await self._client.post(
-                f"{worker.endpoint}/execute",
-                content=job.payload,
-                timeout=timeout,
-            )
-        except httpx.TimeoutException:
+            # asyncio.timeout is the wall-clock bound; httpx's own timeout is
+            # per phase (its read timeout is the gap between bytes, so a worker
+            # dribbling output could outlive the budget the error text claims).
+            async with asyncio.timeout(timeout):
+                response = await self._client.post(
+                    f"{worker.endpoint}/execute",
+                    content=job.payload,
+                    timeout=timeout,
+                )
+        except (httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
+            # These are timeouts that never reached the worker. A machine that
+            # black-holes packets looks exactly like this, and calling it a slow
+            # job would hand the next one to a corpse.
+            job.state = JobState.FAILED
+            job.error = f"worker unreachable: {exc}"
+        except (httpx.TimeoutException, TimeoutError):
+            # The work is still running on the machine and there is no way to
+            # tell it to stop, so the machine is not reusable: handing it the
+            # next job would put two jobs on hardware sized for one.
             job.state = JobState.TIMED_OUT
             job.error = f"job exceeded its {timeout}s timeout"
         except httpx.TransportError as exc:
-            # The connection failed, not the work: the machine is gone.
             job.state = JobState.FAILED
             job.error = f"worker unreachable: {exc}"
-            worker_died = True
+        except Exception as exc:
+            # Anything else (a corrupt response body, a malformed endpoint) is
+            # a machine behaving in a way we cannot reason about. Losing the
+            # job is recoverable; leaving the worker BUSY forever is not — it
+            # would bill indefinitely and hold a slot against max_workers.
+            logger.exception(
+                "unexpected failure while running a job",
+                extra={"job_id": job.id, "worker_id": worker.id},
+            )
+            job.state = JobState.FAILED
+            job.error = f"pool failed to run the job: {exc!r}"
         else:
+            keep_worker = True
             if response.status_code >= 400:
                 job.state = JobState.FAILED
                 job.error = f"worker returned {response.status_code}: {response.text[:500]}"
@@ -287,32 +335,36 @@ class Pool:
 
         duration_ms = (self._monotonic() - started_at_mono) * 1000
         job.completed_at = self._wall()
-        self.store.save_job(job)
-        self.store.record_usage(
-            UsageEvent(
-                id=new_id("usage"),
-                tenant_id=job.tenant_id,
-                job_id=job.id,
-                machine_type=job.machine_type,
-                duration_ms=duration_ms,
-                started_at=job.started_at,
-                completed_at=job.completed_at,
-                terminal_state=job.state,
-                worker_id=worker.id,
+
+        try:
+            self.store.save_job(job)
+            self.store.record_usage(
+                UsageEvent(
+                    id=new_id("usage"),
+                    tenant_id=job.tenant_id,
+                    job_id=job.id,
+                    machine_type=job.machine_type,
+                    duration_ms=duration_ms,
+                    started_at=job.started_at,
+                    completed_at=job.completed_at,
+                    terminal_state=job.state,
+                    worker_id=worker.id,
+                )
             )
-        )
-
-        if worker_died:
-            await self._stop_worker(worker)
-            # The queue may still hold work this worker was going to take.
-            await self._ensure_capacity(job.machine_type)
-            return
-
-        worker.state = WorkerState.WARM
-        worker.current_job_id = None
-        worker.last_active_at = self._wall()
-        self.store.save_worker(worker)
-        await self._drain(job.machine_type)
+        finally:
+            # Releasing the worker happens even if persistence just failed.
+            # A store that rejects a write is a problem; a worker stuck BUSY
+            # with nothing left to release it is a permanent one.
+            if keep_worker:
+                worker.state = WorkerState.WARM
+                worker.current_job_id = None
+                worker.last_active_at = self._wall()
+                self.store.save_worker(worker)
+                await self._drain(job.machine_type)
+            else:
+                await self._stop_worker(worker)
+                # The queue may still hold work this worker was going to take.
+                await self._ensure_capacity(job.machine_type)
 
     async def _stop_worker(self, worker: Worker) -> None:
         """Deallocate a machine and forget it.
@@ -351,8 +403,17 @@ class Pool:
                 await self._stop_worker(worker)
                 continue
             if worker.state is WorkerState.BUSY:
+                # Our process died, not the machine's: it may still be running
+                # the job we are about to fail, and nothing can tell it to stop.
+                # Reusing it would put the next job alongside an orphan.
+                await self._stop_worker(worker)
+                continue
+            if worker.state is WorkerState.STARTING:
+                # Answering a health check is exactly the promotion criterion,
+                # and no _await_boot task survived the restart to apply it.
+                # Left alone this machine bills forever and takes a slot
+                # against max_workers without ever accepting work.
                 worker.state = WorkerState.WARM
-                worker.current_job_id = None
                 self.store.save_worker(worker)
 
         for job in self.store.list_jobs([JobState.DISPATCHED, JobState.RUNNING]):
@@ -380,4 +441,18 @@ class Pool:
     def _spawn(self, coro: Coroutine[Any, Any, None]) -> None:
         task = asyncio.create_task(coro)
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._task_finished)
+
+    def _task_finished(self, task: asyncio.Task) -> None:
+        """Drop the reference, and say so when a background task died.
+
+        Without this the only trace of a crashed dispatch is asyncio's
+        "Task exception was never retrieved" at collection time, on the root
+        logger, with no job or worker to correlate it to.
+        """
+        self._tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error("pool background task failed", exc_info=error)
