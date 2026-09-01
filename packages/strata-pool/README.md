@@ -18,6 +18,7 @@ pool = Pool(
     machine_types=[MachineType(name="cpu-4x", image="strata-worker:latest")],
 )
 await pool.recover()          # reconcile after a restart
+pool.start_scaler()           # stop paying for machines that finished
 
 job = await pool.submit(tenant_id="acme", machine_type="cpu-4x", payload=bundle)
 done = await pool.wait(job.id)
@@ -55,10 +56,14 @@ that order wrong bills customers for cache hits.
 terminal job, including failures, with a monotonic duration. What is billable,
 and at what price, is decided above it.
 
-**It does not scale down yet.** A worker stays warm once booted. Cool-down, a
-warm floor, and reaping stuck jobs are the scaler and the reaper, and they
-land as their own change. See the module docstring in `pool.py` for the two
-behaviours that follow from having no timers.
+**It does not keep machines warm on purpose.** `start_scaler()` stops
+machines idle past their type's `cool_down_seconds`, and nothing else in the
+pool ever ends a machine that finished its work — a deployment that forgets
+that call bills for every machine it ever started. A warm floor is
+deliberately absent: per tenant it means paying for everyone who ever showed
+up, per machine type it means choosing whose latency to subsidise, and
+pre-warming belongs with the layer that knows a user just opened a
+notebook.
 
 ## Layout
 

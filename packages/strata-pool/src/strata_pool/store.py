@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS workers (
     tenant_id TEXT NOT NULL,
     backend TEXT NOT NULL,
     backend_id TEXT,
-    state TEXT NOT NULL CHECK (state IN ('starting','warm','busy')),
+    state TEXT NOT NULL CHECK (state IN ('starting','warm','busy','stopping')),
     endpoint TEXT,
     region TEXT,
     session_id TEXT,

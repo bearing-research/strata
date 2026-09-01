@@ -11,6 +11,7 @@ Skipped when there is no daemon, which is the common local case.
 import asyncio
 import os
 import time
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -216,3 +217,26 @@ async def test_a_container_that_dies_mid_flight_fails_the_job_and_leaves_no_work
     assert done.state is JobState.FAILED
     assert "unreachable" in done.error
     assert await _eventually_gone(docker_pool.store, worker.id)
+
+
+@requires_docker
+async def test_the_scaler_removes_an_idle_container_from_the_daemon(docker_pool):
+    """The row disappearing is not the point; the container disappearing is.
+
+    A stop path that updated the database and left the machine running would
+    keep billing while the pool believed it had scaled down.
+    """
+    job = await docker_pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
+    await docker_pool.wait(job.id, timeout=120)
+
+    worker = docker_pool.store.list_workers()[0]
+    docker_pool.machine_types["cpu"] = replace(
+        docker_pool.machine_types["cpu"], cool_down_seconds=0.0
+    )
+
+    assert await docker_pool.reap_idle_workers() == 1
+
+    async with _daemon_client() as daemon:
+        inspected = await daemon.get(f"/containers/{worker.backend_id}/json")
+    assert inspected.status_code == 404, "the daemon should no longer know this container"
+    assert docker_pool.store.list_workers() == []
