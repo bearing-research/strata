@@ -118,6 +118,45 @@ identity**: it authenticates as itself and asserts whose work this is. The
 pool does not authenticate end users and must never be reachable from
 anywhere but the proxy.
 
+## The RunPod backend (unverified)
+
+Rents real hardware. `MachineType.gpu_type` is the provider's own string —
+`"NVIDIA H100 80GB PCIe"` — deliberately not a normalised label, because one
+that maps cleanly across providers does not exist and inventing it would put a
+lossy translation between a user and the hardware they asked for.
+
+```python
+RunPodBackend(os.environ["RUNPOD_API_KEY"])
+MachineType(
+    name="h100-80gb",
+    image="strata-worker:latest",
+    gpu_type="NVIDIA H100 80GB PCIe",
+    boot_timeout_seconds=600,   # pulling an image onto a fresh pod is minutes
+    cool_down_seconds=60,       # an idle H100 is the expensive mistake
+)
+```
+
+**The request shapes have not been run against a live account.** They come
+from RunPod's documented API, and RunPod has moved its API surface before.
+Every field lives in `_create_body` and is asserted by a test, so a wrong one
+is a one-line fix; `provider_options` overrides anything in the body, so a
+deployment can correct a field without waiting for a release; and `base_url`
+can be repointed. To actually verify:
+
+```bash
+export RUNPOD_API_KEY=...
+STRATA_POOL_RUNPOD_LIVE=1 pytest packages/strata-pool/tests/test_runpod_live.py -v -s
+```
+
+That **starts a billed pod**, which is why it is opt-in and never runs in CI.
+It terminates what it starts, but a crashed interpreter can still leave a pod
+running — check the console. Pods are named `strata-{machine_type}-{id}` so an
+orphan is findable.
+
+A pod's port is published on the public internet through RunPod's proxy. The
+per-machine credential is what stands between that URL and anyone who finds
+it.
+
 ## The worker contract
 
 The pool is image-agnostic, but an image has to hold up four things:

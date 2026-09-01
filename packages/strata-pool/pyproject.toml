@@ -53,4 +53,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "docker: needs a reachable Docker daemon (skipped automatically without one)",
+    "runpod: starts a billed RunPod pod; opt-in only, never in CI",
 ]
