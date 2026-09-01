@@ -446,6 +446,13 @@ class Pool:
                 # Reusing it would put the next job alongside an orphan.
                 await self._stop_worker(worker)
                 continue
+            if worker.state is WorkerState.STOPPING:
+                # A previous process claimed this machine and died before the
+                # backend call landed. Nothing else would ever finish the job:
+                # the scaler only looks at warm machines and the dispatcher
+                # cannot see this one, so it would bill forever, invisible.
+                await self._stop_worker(worker)
+                continue
             if worker.state is WorkerState.STARTING:
                 # Answering a health check is exactly the promotion criterion,
                 # and no _await_boot task survived the restart to apply it.
@@ -487,7 +494,15 @@ class Pool:
         now = self._wall()
         stopped = 0
         for name, spec in self.machine_types.items():
-            for worker in self.store.list_workers(name, [WorkerState.WARM]):
+            for candidate in self.store.list_workers(name, [WorkerState.WARM]):
+                # Stopping a machine awaits the backend, and the list was read
+                # before that. Re-read: a machine further down it may have
+                # taken a job in the meantime, and stopping a busy machine
+                # kills the job running on it.
+                worker = self.store.get_worker(candidate.id)
+                if worker is None or worker.state is not WorkerState.WARM:
+                    continue
+
                 # A machine that never ran a job ages from when it booted, so
                 # one started for a job that then failed still gets reaped.
                 last_active = worker.last_active_at or worker.created_at
