@@ -42,8 +42,14 @@ A deployment running untrusted work wants a VM-backed runtime (Kata, gVisor)
 or a backend whose machines are already microVMs. The `Backend` protocol is
 where that choice lives.
 
-Still missing: a global cap across tenants, and any restriction on the
-container's own network access.
+`Pool(max_workers_total=...)` caps the whole fleet across every tenant.
+`MachineType.max_workers` caps one tenant, so without it the fleet is that
+number times however many tenants show up. Unset means no ceiling, which is
+right for a single-tenant pool and wrong for a hosted one. Hitting the
+ceiling logs a warning: a capped fleet looks exactly like a slow queue from
+the outside.
+
+Still missing: any restriction on the container's own network access.
 
 ## What it is not
 

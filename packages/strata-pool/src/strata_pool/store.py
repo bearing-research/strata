@@ -338,6 +338,23 @@ class PoolStore:
             ).fetchone()
         return _to_job(row) if row else None
 
+    def count_all_workers(self, states: Iterable[WorkerState]) -> int:
+        """Machines in these states across every tenant and machine type.
+
+        The per-tenant count is what capacity planning uses; this is what a
+        global cap needs, and the two must not be confused.
+        """
+        state_values = [s.value for s in states]
+        if not state_values:
+            return 0
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM workers "
+                f"WHERE state IN ({','.join('?' * len(state_values))})",
+                state_values,
+            ).fetchone()
+        return row[0]
+
     def count_queued(self, machine_type: str, tenant_id: str) -> int:
         with self._lock:
             row = self._conn.execute(
