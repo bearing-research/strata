@@ -94,9 +94,25 @@ class MachineType:
 
     cpus: float | None = None
     """CPU allowance. None means whatever the backend defaults to, which for
-    a container is the whole host."""
+    a container is the whole host. Ignored by providers that size a machine
+    by its GPU rather than by cores."""
 
     memory_mb: int | None = None
+
+    gpu_type: str | None = None
+    """The provider's own name for the accelerator, e.g. "NVIDIA H100 80GB
+    PCIe". Deliberately the provider's string and not a normalised one: a
+    label that maps cleanly across RunPod, Fly, and EC2 does not exist, and
+    inventing one would put a lossy translation between the user and the
+    hardware they asked for."""
+
+    gpu_count: int = 1
+    disk_gb: int | None = None
+
+    provider_options: dict[str, object] = field(default_factory=dict)
+    """Merged into the backend's create request. The escape hatch for the
+    settings that are real but not shared — RunPod's cloudType, a region, a
+    network volume. A backend ignores what it does not understand."""
 
 
 @dataclass
