@@ -75,6 +75,43 @@ notebook.
 | `store.py` | SQLite persistence; the pool process keeps no authoritative state |
 | `pool.py` | Submission, dispatch, boot, execution, metering, restart recovery |
 
+## Running it as a service
+
+```bash
+pip install 'strata-pool[server]'
+```
+
+```python
+from strata_pool.api import create_app
+
+app = create_app(pool, api_token=os.environ["STRATA_POOL_TOKEN"])
+# uvicorn strata_pool_service:app
+```
+
+The app's lifespan calls `recover()` and `start_scaler()` itself, so a
+deployment cannot forget the call that stops it paying for idle machines.
+
+| Route | |
+|---|---|
+| `POST /v1/jobs` | Queue a job; body is the payload, verbatim. 202 with an id |
+| `POST /v1/jobs/sync` | Queue and block. 200 with the result bytes, or 202 and an id if `wait_seconds` runs out |
+| `GET /v1/jobs/{id}` | Status, without the payload or result |
+| `GET /v1/jobs/{id}/result` | The raw result bytes; 409 while the job is not finished |
+| `GET /v1/machine-types` | What a caller may ask for — the catalogue an annotation resolves against |
+| `GET /v1/workers` | The fleet, without machine credentials |
+| `GET /v1/usage` | The billing feed, filterable by tenant |
+| `GET /health` | Outside the token check, for load balancers |
+
+A job that fails **on the worker** comes back as 502, and one that times out
+as 504 — the caller has to be able to tell "your code raised" from "we could
+not run it".
+
+Every route but `/health` requires `Authorization: Bearer <api_token>`, and
+job routes require `X-Strata-Tenant`. **The caller is trusted for tenant
+identity**: it authenticates as itself and asserts whose work this is. The
+pool does not authenticate end users and must never be reachable from
+anywhere but the proxy.
+
 ## The worker contract
 
 The pool is image-agnostic, but an image has to hold up four things:

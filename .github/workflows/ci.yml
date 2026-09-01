@@ -106,13 +106,26 @@ jobs:
         run: |
           uv venv --python 3.12 .venv-pool
           # strata-pool pulls httpx; persistence is stdlib sqlite3.
-          uv pip install --python .venv-pool ./packages/strata-pool pytest pytest-asyncio
+          uv pip install --python .venv-pool ./packages/strata-pool
 
-      - name: Assert the server stack is absent
+      - name: Assert the base install carries no server of any kind
         run: |
           .venv-pool/bin/python - <<'PY'
           import importlib.util
           for mod in ("strata", "pyiceberg", "fastapi", "uvicorn", "duckdb", "pyarrow"):
+              assert importlib.util.find_spec(mod) is None, f"{mod} unexpectedly installed"
+          print("base install is httpx and stdlib — importing the pool drags in no framework")
+          PY
+
+      - name: Add the server extra and the test runner
+        run: |
+          uv pip install --python .venv-pool './packages/strata-pool[server]' pytest pytest-asyncio
+
+      - name: Assert the Strata server stack is still absent
+        run: |
+          .venv-pool/bin/python - <<'PY'
+          import importlib.util
+          for mod in ("strata", "pyiceberg", "duckdb", "pyarrow"):
               assert importlib.util.find_spec(mod) is None, f"{mod} unexpectedly installed"
           print("server stack absent — the pool stands alone")
           PY
@@ -123,8 +136,12 @@ jobs:
         # of every live test into a hard failure. The runner has Docker; if the
         # socket ever moves, this job must say so rather than report green
         # coverage it did not run.
+        # Each REQUIRE turns "this dependency is missing here" from a silent
+        # skip of a whole file into a hard failure. A suite that skips itself
+        # and reports green is coverage that examined nothing.
         env:
           STRATA_POOL_REQUIRE_DOCKER: "1"
+          STRATA_POOL_REQUIRE_SERVER: "1"
         run: ../../.venv-pool/bin/python -m pytest tests/ -v
 
   # Type-check the shipped code (src + strata-client) with ty. Enforces the
