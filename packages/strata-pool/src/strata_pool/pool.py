@@ -75,6 +75,7 @@ class Pool:
         wall: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
         health_poll_seconds: float = _HEALTH_POLL_SECONDS,
+        max_workers_total: int | None = None,
     ):
         """
         Args:
@@ -82,6 +83,12 @@ class Pool:
                 billing period.
             monotonic: Monotonic source, for durations. Separate from `wall`
                 so a clock step cannot change what a customer is charged.
+            max_workers_total: Machines this pool may run at once, across
+                every tenant and machine type. `MachineType.max_workers` caps
+                one tenant; without this, the fleet is that cap times however
+                many tenants show up. None means no ceiling, which is the
+                right default for a single-tenant pool and the wrong one for
+                a hosted deployment.
         """
         self.store = store
         self.backend = backend
@@ -91,6 +98,7 @@ class Pool:
         self._wall = wall
         self._monotonic = monotonic
         self._health_poll_seconds = health_poll_seconds
+        self.max_workers_total = max_workers_total
         self._tasks: set[asyncio.Task] = set()
 
     async def aclose(self) -> None:
@@ -222,6 +230,28 @@ class Pool:
             [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY],
         )
         needed = min(queued - starting - warm, spec.max_workers - total)
+
+        if self.max_workers_total is not None:
+            fleet = self.store.count_all_workers(
+                [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY]
+            )
+            headroom = self.max_workers_total - fleet
+            if needed > headroom:
+                # Saying so matters: a fleet at its ceiling looks exactly like
+                # a queue that is simply slow, and a silent stall is the kind
+                # of thing that gets debugged at 3am.
+                logger.warning(
+                    "fleet is at its global cap; jobs will wait",
+                    extra={
+                        "machine_type": machine_type,
+                        "tenant_id": tenant_id,
+                        "fleet": fleet,
+                        "max_workers_total": self.max_workers_total,
+                        "waiting": queued,
+                    },
+                )
+                needed = headroom
+
         for _ in range(max(needed, 0)):
             await self._start_worker(spec, tenant_id)
 
