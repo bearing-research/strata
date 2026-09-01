@@ -22,6 +22,15 @@ dependencies = [
     "httpx>=0.28.0",
 ]
 
+# Running the pool as a service, rather than embedding it as a library.
+# Kept out of the base install so importing the pool never drags in a web
+# framework — the proxy that composes it may well have its own.
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/bearing-research/strata"
 Repository = "https://github.com/bearing-research/strata"
