@@ -231,12 +231,12 @@ class Pool:
         )
         needed = min(queued - starting - warm, spec.max_workers - total)
 
-        if self.max_workers_total is not None:
-            fleet = self.store.count_all_workers(
-                [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY]
-            )
-            headroom = self.max_workers_total - fleet
-            if needed > headroom:
+        for _ in range(max(needed, 0)):
+            # Re-read the fleet on every iteration: starting a machine awaits
+            # the backend, and another tenant's _ensure_capacity can start its
+            # own machines in that window. Deciding headroom once, up front,
+            # lets two callers each spend the same last slot.
+            if not self._has_fleet_headroom():
                 # Saying so matters: a fleet at its ceiling looks exactly like
                 # a queue that is simply slow, and a silent stall is the kind
                 # of thing that gets debugged at 3am.
@@ -245,15 +245,33 @@ class Pool:
                     extra={
                         "machine_type": machine_type,
                         "tenant_id": tenant_id,
-                        "fleet": fleet,
                         "max_workers_total": self.max_workers_total,
                         "waiting": queued,
                     },
                 )
-                needed = headroom
-
-        for _ in range(max(needed, 0)):
+                return
             await self._start_worker(spec, tenant_id)
+
+    def _has_fleet_headroom(self) -> bool:
+        if self.max_workers_total is None:
+            return True
+        fleet = self.store.count_all_workers(
+            [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY]
+        )
+        return fleet < self.max_workers_total
+
+    async def _offer_freed_capacity(self) -> None:
+        """Hand headroom back to whoever is waiting for it.
+
+        A tenant the fleet cap deferred has no other way back: its jobs sit
+        queued, and `_ensure_capacity` otherwise only runs when *that* tenant
+        submits again. Freeing a machine is by definition freeing it for
+        somebody else, so the release needs a path back to the work waiting
+        on it — the same shape as every other bug in this package.
+        """
+        for machine_type in self.machine_types:
+            for tenant_id in self.store.queued_tenants(machine_type):
+                await self._ensure_capacity(machine_type, tenant_id)
 
     async def _start_worker(self, spec: MachineType, tenant_id: str) -> None:
         """Provision a machine and poll it to warm in the background.
@@ -422,8 +440,10 @@ class Pool:
                 await self._drain(job.machine_type, job.tenant_id)
             else:
                 await self._stop_worker(worker)
-                # The queue may still hold work this worker was going to take.
-                await self._ensure_capacity(job.machine_type, job.tenant_id)
+                # The queue may still hold work this machine was going to
+                # take — and the slot it just freed belongs to whoever is
+                # waiting, not only to this job's tenant.
+                await self._offer_freed_capacity()
 
     async def _stop_worker(self, worker: Worker) -> None:
         """Deallocate a machine and forget it.
@@ -564,6 +584,9 @@ class Pool:
                 )
                 await self._stop_worker(worker)
                 stopped += 1
+
+        if stopped:
+            await self._offer_freed_capacity()
         return stopped
 
     def start_scaler(self, interval_seconds: float = 10.0) -> None:
