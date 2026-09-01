@@ -245,3 +245,61 @@ async def test_the_scaler_actually_runs_on_its_own(make_pool):
 
     assert backend.stopped == ["machine-1"]
     assert pool.store.list_workers() == []
+
+
+async def test_a_machine_that_takes_a_job_mid_pass_is_not_stopped_under_it(make_pool):
+    """The list of idle machines is read once, and stopping each one awaits.
+
+    A machine further down that list can take a job while an earlier stop is
+    in flight, and stopping it then kills the job running on it.
+    """
+    clock = Clock()
+    backend = SlowStopBackend()
+    pool = make_pool(backend=backend, machine_types=[_spec(max_workers=2)], wall=clock)
+
+    # Two idle machines for the same tenant, both past their cool-down.
+    first = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"one")
+    await pool.wait(first.id)
+    await pool._start_worker(pool.machine_types["cpu"], "acme")
+    await asyncio.sleep(0)
+    assert len(pool.store.list_workers()) == 2
+    clock.advance(301)
+
+    reaping = asyncio.create_task(pool.reap_idle_workers())
+    await asyncio.wait_for(backend.stop_entered.wait(), timeout=2)
+
+    # While the first stop is in flight, work arrives for the other machine.
+    arriving = await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"two")
+    claimed = pool.store.get_job(arriving.id).worker_id
+    assert claimed is not None, "the second machine was still warm and took the job"
+
+    backend.release.set()
+    await reaping
+
+    assert (await pool.wait(arriving.id)).state is JobState.COMPLETED
+    assert pool.store.get_worker(claimed) is not None, "the working machine survived the pass"
+    assert len(backend.stopped) == 1
+
+
+async def test_a_machine_left_mid_teardown_by_a_crash_is_finished_off(make_pool):
+    """A claimed machine whose stop never landed is invisible to everything:
+    the scaler only looks at warm machines and the dispatcher cannot see it.
+    Left alone it bills forever with nothing watching it."""
+    clock = Clock()
+    first = make_pool(machine_types=[_spec()], wall=clock, db_name="shared.sqlite")
+    job = await first.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
+    ran = await first.wait(job.id)
+
+    abandoned = first.store.get_worker(ran.worker_id)
+    abandoned.state = WorkerState.STOPPING
+    first.store.save_worker(abandoned)
+    await first.aclose()
+
+    backend = FakeBackend(id_prefix="after-restart")
+    restarted = make_pool(
+        backend=backend, machine_types=[_spec()], wall=clock, db_name="shared.sqlite"
+    )
+    await restarted.recover()
+
+    assert restarted.store.get_worker(abandoned.id) is None
+    assert backend.stopped == ["machine-1"], "the machine the last process claimed is gone"
