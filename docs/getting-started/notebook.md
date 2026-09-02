@@ -6,6 +6,11 @@ quickstart walks through a real three-cell pipeline, then surfaces
 the distinctive features (prompt cells, AI assistant, cascade,
 cache hits) on top of it.
 
+This is the **web UI** quickstart - you drive the notebook in a
+browser. The same notebook can also be driven by a
+[coding agent](../notebook/agent.md) or watched live from a
+[terminal](../notebook/tui.md).
+
 ## 1. Start the server
 
 === "uv (recommended)"
@@ -57,10 +62,13 @@ Open [http://localhost:8765](http://localhost:8765).
 
 ## 2. Create a notebook
 
-Click **New Notebook** on the landing page. Pick a name and a
-parent directory under the notebook storage root. Strata creates a
-directory containing `notebook.toml`, a per-notebook `pyproject.toml`,
-a `cells/` folder, and an empty first cell ready to type into.
+Click **New Notebook** on the landing page. Pick a name, a parent
+directory under the notebook storage root, and a Python version.
+Strata creates a directory containing `notebook.toml`, a per-notebook
+`pyproject.toml`, and a `cells/` folder.
+
+The notebook opens empty - click **+ Add cell** and pick a kind to
+write the first one.
 
 By default the storage root is `~/.strata/notebooks` - **not** the
 directory you launched from - so new notebooks land there regardless of
@@ -82,23 +90,31 @@ Both diff cleanly in git, no JSON blobs in commits.
 
 ### Cell types
 
-Every cell is one of these kinds. The default is Python; the others
-are selected via the "+ Add cell" menu or by typing the kind name
-in the cell language picker.
+The **+ Add cell** menu offers six kinds. Python is the default; you
+can also change a cell's kind later with the language picker in its
+header.
 
 | Kind | What it's for |
 | --- | --- |
 | **Python** | Regular Python code. Most cells. |
-| **Prompt** | LLM call as a DAG node. The body is a template with `{{ variable }}` substitution from upstream cells; the response is cached as an artifact like any other cell output. |
 | **SQL** | A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream. |
+| **R** | R code - stats and tidyverse. See [Cell Types](../notebook/cells.md). |
+| **Prompt** | LLM call as a DAG node. The body is a template with `{{ variable }}` substitution from upstream cells; the response is cached as an artifact like any other cell output. |
 | **Widget** | A declarative control panel - one control per line (`alpha = slider(0, 1)`, plus number/dropdown/checkbox/text). Each control is an input downstream cells consume; with **⚡ Live** on, dragging one recomputes the cells that depend on it. |
 | **Markdown** | Prose between cells. Rendered as HTML; not part of the DAG. |
-| **Loop** | A Python cell that re-runs with a `carry` variable threaded across iterations. Annotate with `# @loop max_iter=N carry=state`. |
-| **Variant** | Multiple cells share one DAG slot (`# @variant group name`); only the active variant is in the DAG at any time. For A/B-ing different implementations of the same step. |
 
-Library, mount, and worker shapes are annotation-driven on top of
-Python cells. See [Cell Types](../notebook/cells.md) for the full
-surface.
+Two more shapes are **annotations on a Python cell** rather than menu
+entries - you add a Python cell and put the annotation on its first
+line:
+
+| Shape | Annotation |
+| --- | --- |
+| **Loop** | `# @loop max_iter=N carry=state` - re-runs the cell with `carry` threaded across iterations, one artifact per step. |
+| **Variant** | `# @variant group name` - several cells share one DAG slot, for A/B-ing implementations of the same step. |
+
+Library, mount, and worker shapes are annotation-driven too. See
+[Cell Types](../notebook/cells.md) for the full surface and
+[Cell Annotations](../notebook/annotations.md) for every annotation.
 
 ## 3. Walk through a pipeline
 
@@ -205,15 +221,18 @@ with [`# @nocache`](../notebook/annotations.md#nocache).
 ## 5. Edit upstream, watch the cascade
 
 Edit the loader, say, change `time.sleep(2)` to `time.sleep(1)`.
-Strata re-analyzes the source, computes a new provenance hash, and
-marks the loader **stale**. The summary and plot cells flip stale
-too: they referenced `df`, which is no longer the cached value.
+Strata re-analyzes the source and computes a new provenance hash, so
+the loader's cached result no longer matches its source and the cell
+returns to **idle**. The summary and plot cells flip **stale**: they
+referenced `df`, which is no longer the cached value. (Hover
+**Why stale?** on either to see the reason - here, `upstream`.)
 
-Now press ++shift+enter++ on the plot cell. A confirmation banner
-appears at the top of the notebook: "2 upstream cells need to
-re-run, proceed?" Accept it. Strata runs loader → summary → plot
-in topological order, with a live progress strip showing which cell
-is executing.
+Now press ++shift+enter++ on the plot cell. Strata walks back through
+the stale upstream cells and runs loader → summary → plot in
+topological order, with a live progress strip showing which cell is
+executing. There is no confirmation step: cascades run automatically,
+so running a cell always gives you a result computed from current
+inputs.
 
 Revert the edit (`time.sleep(1)` back to `time.sleep(2)`) and
 re-run: every cell becomes a cache hit on the way through, no work
@@ -321,6 +340,7 @@ grouped by feature.
 ## What's next
 
 - [Driving a notebook with a coding agent](../notebook/agent.md): let a coding agent (Claude Code) use the notebook as a persistent, **cached scratchpad** instead of throwaway scripts; installs as a one-command plugin
+- [Terminal viewer (TUI)](../notebook/tui.md) to watch this notebook live from a terminal with `strata watch ./my-notebook`
 - [Concepts](../notebook/concepts.md) for how the DAG, caching, and cascade work
 - [Cell Types](../notebook/cells.md) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
 - [Cell Annotations](../notebook/annotations.md) for `@worker`, `@mount`, `@loop`, and friends

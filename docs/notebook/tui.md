@@ -10,6 +10,10 @@ It does not edit or run cells. Its purpose is **watching**: open a notebook in
 the web UI (or let an AI agent drive it), and follow along in a terminal - a
 second pane, an SSH session, or a tmux window beside your editor.
 
+This is the **terminal** quickstart. Something else has to be driving the
+notebook - either you in the [web UI](../getting-started/notebook.md), or a
+[coding agent](agent.md).
+
 ## Install
 
 The viewer ships behind the `tui` extra (it pulls in `textual` and `grandalf`,
