@@ -90,9 +90,10 @@ Both diff cleanly in git, no JSON blobs in commits.
 
 ### Cell types
 
-The **+ Add cell** menu offers six kinds. Python is the default; you
-can also change a cell's kind later with the language picker in its
-header.
+The **+ Add cell** menu offers six kinds, and Python is the default.
+A cell's kind is fixed when you create it - the kind shown in the cell
+header is a label, not a picker - so to change one, delete the cell and
+re-add it with the kind you want.
 
 | Kind | What it's for |
 | --- | --- |
@@ -334,7 +335,7 @@ grouped by feature.
 | Delete cell | **×** button in gutter |
 | Duplicate cell | **⎘** button in gutter |
 | Move cell | **▲** / **▼** buttons in gutter |
-| Change cell kind | Language picker in cell header |
+| Change cell kind | Not editable - delete and re-add with the new kind |
 | Keyboard help | Press ++question++ |
 
 ## What's next
