@@ -58,7 +58,10 @@ class RunPodBackend:
                 through its proxy; the pod itself is not directly addressable.
         """
         self.worker_port = worker_port
-        self._owns_clients = api is None and probe is None
+        # Tracked per client: injecting one for retries or a proxy must not
+        # leave the other's connection pool unreleased.
+        self._owns_api = api is None
+        self._owns_probe = probe is None
         # Sent per request rather than baked into the client, so that handing
         # in a client — for retries, a proxy, or a test — cannot silently drop
         # authentication and leave every call failing for a reason nobody
@@ -68,8 +71,9 @@ class RunPodBackend:
         self._probe = probe or httpx.AsyncClient()
 
     async def aclose(self) -> None:
-        if self._owns_clients:
+        if self._owns_api:
             await self._api.aclose()
+        if self._owns_probe:
             await self._probe.aclose()
 
     async def start(
@@ -85,16 +89,36 @@ class RunPodBackend:
         if created.status_code >= 400:
             raise RunPodError(f"could not create a {spec.name} pod: {_message(created)}")
 
-        pod_id = created.json().get("id")
+        # Everything below runs with a pod already created and already
+        # billing. A parse that raises here is caught upstream as a failed
+        # start, which deletes the row holding the backend_id — so nothing
+        # could ever terminate the pod. Read the body once, and assume
+        # nothing about its shape.
+        try:
+            payload = created.json()
+        except ValueError as exc:
+            raise RunPodError(
+                f"RunPod returned a non-JSON body for a created pod: {created.text[:200]}"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise RunPodError(f"RunPod returned an unexpected body shape: {created.text[:200]}")
+
+        pod_id = payload.get("id")
         if not pod_id:
             # Better to fail loudly than to hand back an endpoint built from
             # None and let it surface later as an unreachable worker.
             raise RunPodError(f"RunPod created a pod without an id: {created.text[:200]}")
 
+        # `machine` is null until the pod is placed on a host, which is the
+        # normal shape immediately after create — `.get("machine", {})` would
+        # return None for it, not the default.
+        machine = payload.get("machine") or {}
+        region = machine.get("dataCenterId") if isinstance(machine, dict) else None
+
         return ProvisionedWorker(
             backend_id=pod_id,
             endpoint=proxy_url(pod_id, self.worker_port),
-            region=created.json().get("machine", {}).get("dataCenterId"),
+            region=region,
             metadata={"machine_type": spec.name},
         )
 
@@ -156,13 +180,36 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, worker_port: int
     # Last, so a deployment can correct anything above it without waiting for
     # a release — including a field this function got wrong.
     body.update(spec.provider_options)
+
+    # Except the credential. An override that replaces `env` wholesale would
+    # leave a pod with no token behind a public proxy URL, which is the one
+    # failure this backend cannot tolerate — adding a single HF_TOKEN is a
+    # plausible way to get there by accident.
+    declared = body.get("env")
+    if isinstance(declared, dict):
+        body["env"] = {**declared, **(env or {})}
+    elif env:
+        raise ValueError(
+            "provider_options replaced `env` with a non-mapping, so the worker "
+            "credential cannot be merged into it. A pod without its credential is "
+            "an open execute endpoint on a public URL."
+        )
     return body
 
 
 def _message(response: httpx.Response) -> str:
+    """Format a refusal. Must never raise.
+
+    This runs on the failure path, so an exception here replaces RunPod's
+    actual complaint — "HTTP 401" — with an AttributeError traceback, and
+    in stop() that gets swallowed as "may still be billing" while the
+    operator never learns their API key is wrong.
+    """
     try:
         payload = response.json()
     except ValueError:
+        return f"HTTP {response.status_code}: {response.text[:200]}"
+    if not isinstance(payload, dict):
         return f"HTTP {response.status_code}: {response.text[:200]}"
     detail = payload.get("error") or payload.get("message") or response.text[:200]
     return f"HTTP {response.status_code}: {detail}"

@@ -77,10 +77,18 @@ async def runpod():
     try:
         yield backend
     finally:
-        for pod_id in started:
-            await backend.stop(pod_id)
-            print(f"terminated RunPod pod {pod_id}")
-        await backend.aclose()
+        try:
+            # One pod refusing to terminate must not strand the rest. The
+            # docstring promises this cleans up; a bare loop breaks that
+            # promise on the first RunPodError and leaves GPUs running.
+            for pod_id in started:
+                try:
+                    await backend.stop(pod_id)
+                    print(f"terminated RunPod pod {pod_id}")
+                except Exception as exc:
+                    print(f"FAILED to terminate RunPod pod {pod_id}: {exc!r} — CHECK THE CONSOLE")
+        finally:
+            await backend.aclose()
 
 
 async def test_a_pod_starts_becomes_healthy_and_terminates(runpod):

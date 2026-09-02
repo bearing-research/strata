@@ -218,3 +218,98 @@ class TestHealth:
         )
         assert await backend.health("https://pod123-8080.proxy.runpod.net") is True
         assert seen == ["https://pod123-8080.proxy.runpod.net/health"]
+
+
+class TestResponseShapes:
+    """Everything here runs with a pod already created and already billing.
+
+    A parse that raises is caught upstream as a failed start, which deletes
+    the row holding the backend_id — so nothing could ever terminate the pod.
+    These are the shapes that must not do that.
+    """
+
+    async def test_a_pod_not_yet_placed_on_a_host_has_a_null_machine(self):
+        """The normal shape immediately after create. `.get("machine", {})`
+        returns None for it, not the default."""
+        fake = FakeRunPod(
+            **{"POST /pods": httpx.Response(201, json={"id": "pod123", "machine": None})}
+        )
+        worker = await _backend(fake).start(_spec())
+
+        assert worker.backend_id == "pod123"
+        assert worker.region is None
+
+    async def test_a_machine_field_that_is_not_an_object_is_survivable(self):
+        fake = FakeRunPod(
+            **{"POST /pods": httpx.Response(201, json={"id": "pod123", "machine": "us-ks-2"})}
+        )
+        assert (await _backend(fake).start(_spec())).region is None
+
+    async def test_a_non_json_success_body_is_an_error_not_a_crash(self):
+        fake = FakeRunPod(**{"POST /pods": httpx.Response(201, text="<html>gateway</html>")})
+        with pytest.raises(RunPodError, match="non-JSON"):
+            await _backend(fake).start(_spec())
+
+    async def test_a_json_array_success_body_is_an_error_not_a_crash(self):
+        fake = FakeRunPod(**{"POST /pods": httpx.Response(201, json=[{"id": "pod123"}])})
+        with pytest.raises(RunPodError, match="unexpected body shape"):
+            await _backend(fake).start(_spec())
+
+    async def test_a_bare_string_error_body_still_reports_the_status(self):
+        """A formatter that raises replaces RunPod's actual complaint with a
+        traceback, and in stop() that is swallowed as "may still be billing"
+        while the operator never learns the key is wrong."""
+        fake = FakeRunPod(**{"POST /pods": httpx.Response(401, json="Unauthorized")})
+        with pytest.raises(RunPodError, match="401"):
+            await _backend(fake).start(_spec())
+
+    async def test_a_bare_string_error_body_on_stop_still_reports_the_status(self):
+        fake = FakeRunPod(**{"DELETE /pods/pod123": httpx.Response(403, json="Forbidden")})
+        with pytest.raises(RunPodError, match="403"):
+            await _backend(fake).stop("pod123")
+
+
+class TestCredentialCannotBeDropped:
+    async def test_adding_an_env_var_does_not_delete_the_worker_credential(self):
+        """A pod without its token is an open execute endpoint on a public URL,
+        and adding one HF_TOKEN is a plausible way to get there by accident."""
+        fake = FakeRunPod()
+        await _backend(fake).start(
+            _spec(provider_options={"env": {"HF_TOKEN": "hf_abc"}}),
+            {"STRATA_WORKER_TOKEN": "secret-token"},
+        )
+
+        env = fake.body()["env"]
+        assert env["HF_TOKEN"] == "hf_abc"
+        assert env["STRATA_WORKER_TOKEN"] == "secret-token"
+
+    async def test_an_override_cannot_substitute_its_own_credential(self):
+        fake = FakeRunPod()
+        await _backend(fake).start(
+            _spec(provider_options={"env": {"STRATA_WORKER_TOKEN": "attacker"}}),
+            {"STRATA_WORKER_TOKEN": "ours"},
+        )
+
+        assert fake.body()["env"]["STRATA_WORKER_TOKEN"] == "ours"
+
+    async def test_an_env_override_we_cannot_merge_into_is_refused(self):
+        fake = FakeRunPod()
+        with pytest.raises(ValueError, match="open execute endpoint"):
+            await _backend(fake).start(
+                _spec(provider_options={"env": [{"key": "A", "value": "1"}]}),
+                {"STRATA_WORKER_TOKEN": "ours"},
+            )
+
+
+class TestClientOwnership:
+    async def test_injecting_one_client_does_not_leak_the_other(self):
+        """The documented reason to inject `api` is retries on the control
+        plane; the probe is then built here and nobody else can close it."""
+        backend = RunPodBackend(
+            api_key="secret",
+            api=httpx.AsyncClient(transport=httpx.MockTransport(FakeRunPod().handle)),
+        )
+        probe = backend._probe
+        await backend.aclose()
+
+        assert probe.is_closed
