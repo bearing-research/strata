@@ -106,6 +106,31 @@ const renderedCells = computed(() => {
     return true
   })
 })
+// The kinds offered on an empty notebook. A subset of AddCellMenu's six on
+// purpose: the point is to get someone to their first cell, not to make them
+// choose. The full list stays one click away in "+ Add cell".
+const emptyStateKinds = [
+  { language: 'python', label: 'Python', description: 'Code cell — the default' },
+  { language: 'sql', label: 'SQL', description: 'Query a connected database' },
+  { language: 'prompt', label: 'Prompt', description: 'LLM-powered template' },
+  { language: 'markdown', label: 'Markdown', description: 'Documentation / prose' },
+]
+
+// These buttons stay on screen for the whole `addCell` round-trip (the empty
+// state only unmounts once the cell lands), so without a latch a double-click
+// POSTs twice and creates two cells. AddCellMenu avoids this by accident — its
+// dropdown closes on the first click.
+const addingFirstCell = ref(false)
+async function addFirstCell(language: string) {
+  if (addingFirstCell.value) return
+  addingFirstCell.value = true
+  try {
+    await addCell(undefined, language)
+  } finally {
+    addingFirstCell.value = false
+  }
+}
+
 const nameDraft = ref('')
 const loading = ref(true)
 const renamingNotebook = ref(false)
@@ -687,6 +712,40 @@ function goHome() {
             @move-up="(id) => moveCell(id, 'up')"
             @move-down="(id) => moveCell(id, 'down')"
           />
+          <!-- First run: a new notebook has no cells, and a bare canvas with
+               one small button gives a first-time user nothing to aim at. -->
+          <div v-if="orderedCells.length === 0" class="cells-empty">
+            <p class="cells-empty-title">This notebook is empty.</p>
+            <p class="cells-empty-hint">
+              Add a cell to start. Every cell you run is cached by its source, its inputs, and the
+              environment, so re-running unchanged work costs nothing.
+            </p>
+            <div class="cells-empty-kinds">
+              <button
+                v-for="kind in emptyStateKinds"
+                :key="kind.language"
+                type="button"
+                class="btn btn-secondary"
+                :disabled="!connected || addingFirstCell"
+                :title="kind.description"
+                @click="addFirstCell(kind.language)"
+              >
+                {{ kind.label }}
+              </button>
+            </div>
+            <p class="cells-empty-hint">
+              Or browse the
+              <a
+                href="https://bearing-research.github.io/strata/latest/notebook/examples/"
+                target="_blank"
+                rel="noopener"
+              >
+                example notebooks
+              </a>
+              to see what a finished one looks like.
+            </p>
+          </div>
+
           <div class="add-cell-row">
             <AddCellMenu
               variant="inline"
@@ -789,6 +848,35 @@ function goHome() {
 </template>
 
 <style scoped>
+.cells-empty {
+  padding: 32px 24px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.cells-empty-title {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cells-empty-hint {
+  margin: 0 auto;
+  max-width: 46em;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.cells-empty-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin: 16px 0;
+}
+
 .add-cell-row {
   display: flex;
   gap: 8px;
