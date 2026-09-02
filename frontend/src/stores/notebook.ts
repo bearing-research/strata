@@ -2595,7 +2595,16 @@ function cleanupWebSocket() {
 const variantDisplaySelection = ref<Record<string, string>>({})
 
 function variantDisplayCellId(group: VariantGroup): string {
-  return variantDisplaySelection.value[group.group] || group.activeCellId
+  // Fall back whenever the remembered cell is no longer a member, not just
+  // when nothing was ever picked. Deleting the displayed variant used to
+  // leave a dead id here, and since the sweep filter in NotebookPage keeps
+  // only the cell matching it, *every* member of the group disappeared from
+  // the editor — including the ones still on disk.
+  const remembered = variantDisplaySelection.value[group.group]
+  if (remembered && group.members.some((m) => m.cellId === remembered)) {
+    return remembered
+  }
+  return group.activeCellId
 }
 
 function selectVariantDisplay(group: string, cellId: string): void {
