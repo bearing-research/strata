@@ -28,7 +28,7 @@ best model: always_one
 ```
 
 Same numbers as `compare`, produced by fanning the scoring out first. See
-[Variant Cells → Fan-out](https://bearing-research.github.io/strata/notebook/annotations/#fan-out--run-a-downstream-cell-once-per-variant).
+[Variant Cells → Fan-out](https://bearing-research.github.io/strata/latest/notebook/annotations/#fan-out-run-a-downstream-cell-once-per-variant).
 
 ## Run it
 
@@ -46,4 +46,4 @@ Flip `mode = "sweep"` to `mode = "switch"` (or drop the line) in
 `notebook.toml` and only the active variant runs; `compare` would then see a
 single `preds` value instead of the dict. Sweep is for *comparing* variants on
 a shared downstream; switch is for *picking* one. See
-[Variant Cells → Sweep mode](https://bearing-research.github.io/strata/notebook/annotations/#sweep-mode--compare-all-variants-at-once).
+[Variant Cells → Sweep mode](https://bearing-research.github.io/strata/latest/notebook/annotations/#sweep-mode-compare-all-variants-at-once).

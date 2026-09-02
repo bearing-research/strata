@@ -28,4 +28,4 @@ one-call add-and-run primitive).
 Once installed the skill is auto-discovered in any project; a human can watch the
 agent's scratchpad live with `strata watch ./scratch`.
 
-See [Driving a notebook with a coding agent](https://bearing-research.github.io/strata/notebook/agent/).
+See [Driving a notebook with a coding agent](https://bearing-research.github.io/strata/latest/notebook/agent/).

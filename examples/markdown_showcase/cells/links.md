@@ -5,7 +5,7 @@ Standard markdown link: [Strata homepage](https://bearing-research.github.io/str
 Link with a query string:
 [search](https://example.com/search?q=strata&page=2).
 
-Link to a fragment: [strata install](https://bearing-research.github.io/strata/getting-started/installation/#prerequisites).
+Link to a fragment: [strata install](https://bearing-research.github.io/strata/latest/getting-started/installation/#prerequisites).
 
 ## Autolinks (CommonMark)
 
