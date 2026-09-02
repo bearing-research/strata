@@ -116,6 +116,21 @@ const emptyStateKinds = [
   { language: 'markdown', label: 'Markdown', description: 'Documentation / prose' },
 ]
 
+// These buttons stay on screen for the whole `addCell` round-trip (the empty
+// state only unmounts once the cell lands), so without a latch a double-click
+// POSTs twice and creates two cells. AddCellMenu avoids this by accident — its
+// dropdown closes on the first click.
+const addingFirstCell = ref(false)
+async function addFirstCell(language: string) {
+  if (addingFirstCell.value) return
+  addingFirstCell.value = true
+  try {
+    await addCell(undefined, language)
+  } finally {
+    addingFirstCell.value = false
+  }
+}
+
 const nameDraft = ref('')
 const loading = ref(true)
 const renamingNotebook = ref(false)
@@ -709,10 +724,11 @@ function goHome() {
               <button
                 v-for="kind in emptyStateKinds"
                 :key="kind.language"
+                type="button"
                 class="btn btn-secondary"
-                :disabled="!connected"
+                :disabled="!connected || addingFirstCell"
                 :title="kind.description"
-                @click="addCell(undefined, kind.language)"
+                @click="addFirstCell(kind.language)"
               >
                 {{ kind.label }}
               </button>
