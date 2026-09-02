@@ -4,6 +4,10 @@
 a coding agent (Claude Code) needs to drive a **live** Strata notebook, and
 attaches a terminal viewer so you watch it happen in real time.
 
+This is the **coding agent** quickstart. The same notebook can also be driven
+by hand in the [web UI](../getting-started/notebook.md) or watched from a
+[terminal](tui.md).
+
 It exists because the pieces were already there (the [MCP server](mcp.md), the
 [`strata` CLI](cli.md) ops, the [terminal viewer](tui.md)), but wiring them
 together by hand is a fiddly, ordered dance: enable the MCP endpoint *before*
@@ -13,11 +17,21 @@ of it in one step.
 
 ## Prerequisites
 
-The `[mcp]` (agent endpoint) and `[tui]` (terminal viewer) extras:
+The `[mcp]` (agent endpoint) and `[tui]` (terminal viewer) extras, plus
+[Claude Code](https://claude.com/claude-code) (or another MCP-capable
+coding agent) on your `PATH`:
 
-```bash
-uv sync --extra mcp --extra tui     # or: uv sync --all-extras
-```
+=== "From PyPI"
+
+    ```bash
+    uv tool install "strata-notebook[mcp,tui]"
+    ```
+
+=== "From source"
+
+    ```bash
+    uv sync --extra mcp --extra tui     # or: uv sync --all-extras
+    ```
 
 ## Use it
 

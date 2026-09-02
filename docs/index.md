@@ -35,6 +35,18 @@ producing artifacts that flow through an auto-built DAG.
 - **auto-install:** missing import in a cell? one click adds the package via uv and re-runs
 - **headless:** `strata run ./my-notebook` for CI and scheduled execution - same DAG, same cache
 
+### Three ways to drive it
+
+The same notebook - the same cells, the same cache, the same artifacts -
+has three front doors. Pick the one that matches how you work; they all
+operate on the same notebook directory and can be used at the same time.
+
+| Surface | For | Start here |
+| --- | --- | --- |
+| **Web UI** | Writing and running cells yourself, with rendered tables, plots, and the DAG view. | [Quickstart - Web UI](getting-started/notebook.md) |
+| **Coding agent** | Letting Claude Code build the notebook through MCP tools, using it as a cached scratchpad instead of throwaway scripts. | [Quickstart - Coding agent](notebook/agent.md) |
+| **Terminal (TUI)** | Watching a notebook live from a terminal - a second pane, an SSH session, or beside your editor. Read-only. | [Quickstart - Terminal](notebook/tui.md) |
+
 [:octicons-arrow-right-24: Notebook Quickstart](getting-started/notebook.md){ .md-button .md-button--primary }
 
 ---

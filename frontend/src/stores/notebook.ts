@@ -155,6 +155,11 @@ async function addCell(afterId?: CellId, language?: string) {
   const strata = useStrata()
   try {
     const data = await strata.addCell(sid, afterId, language)
+    // The POST broadcasts `notebook_state` to every watcher — including this
+    // one — before it returns. When that frame wins the race it has already
+    // inserted the new cell, so splicing it again renders the same cell twice
+    // (until a reload). The optimistic insert has to be idempotent.
+    if (notebook.cells.some((c) => c.id === data.id)) return
     const newCell: Cell = {
       id: data.id,
       source: data.source || '',

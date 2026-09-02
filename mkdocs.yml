@@ -63,7 +63,10 @@ nav:
   - Home: index.md
   - Changelog: changelog.md
   - Notebook:
-    - Quickstart: getting-started/notebook.md
+    - Start here:
+      - Quickstart - Web UI: getting-started/notebook.md
+      - Quickstart - Coding agent: notebook/agent.md
+      - Quickstart - Terminal (TUI): notebook/tui.md
     - Concepts: notebook/concepts.md
     - vs Jupyter, Marimo, Pluto: notebook/comparison.md
     - Examples: notebook/examples.md
@@ -79,10 +82,8 @@ nav:
     - Headless Runner: notebook/cli.md
     - Authoring Programmatically: notebook/agent-authoring.md
     - MCP Server: notebook/mcp.md
-    - Drive with a Coding Agent: notebook/agent.md
     - Import from Jupyter: notebook/import.md
     - Export: notebook/export.md
-    - Terminal Viewer (TUI): notebook/tui.md
     - Keyboard Shortcuts: notebook/keyboard.md
   - Core:
     - Quickstart: getting-started/core.md
