@@ -39,6 +39,7 @@ from strata_pool.backend import Backend
 from strata_pool.store import PoolStore
 from strata_pool.types import (
     TERMINAL_JOB_STATES,
+    WORKER_TOKEN_ENV,
     Job,
     JobState,
     MachineType,
@@ -53,13 +54,7 @@ logger = logging.getLogger(__name__)
 
 _HEALTH_POLL_SECONDS = 0.5
 
-WORKER_TOKEN_ENV = "STRATA_WORKER_TOKEN"
-"""Environment variable carrying the worker's own credential.
-
-The worker contract, such as it is: reject any request to /execute that does
-not present this value as a bearer token. /health stays open — it is polled
-before the machine is trusted with anything, and it reveals nothing.
-"""
+__all__ = ["Pool", "WORKER_TOKEN_ENV"]
 
 
 class Pool:

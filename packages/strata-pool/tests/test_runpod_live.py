@@ -77,6 +77,7 @@ async def runpod():
     try:
         yield backend
     finally:
+        stranded: list[str] = []
         try:
             # One pod refusing to terminate must not strand the rest. The
             # docstring promises this cleans up; a bare loop breaks that
@@ -86,9 +87,15 @@ async def runpod():
                     await backend.stop(pod_id)
                     print(f"terminated RunPod pod {pod_id}")
                 except Exception as exc:
-                    print(f"FAILED to terminate RunPod pod {pod_id}: {exc!r} — CHECK THE CONSOLE")
+                    stranded.append(f"{pod_id}: {exc!r}")
         finally:
             await backend.aclose()
+
+        # Not a print. Teardown output is swallowed under default capture when
+        # the test passes, so a green run would be hiding a billing GPU — and
+        # a run that leaves one is not a passing run.
+        if stranded:
+            pytest.fail("RunPod pods left running, terminate them by hand: " + "; ".join(stranded))
 
 
 async def test_a_pod_starts_becomes_healthy_and_terminates(runpod):

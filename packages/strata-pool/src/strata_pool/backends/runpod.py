@@ -23,7 +23,7 @@ import uuid
 import httpx
 
 from strata_pool.backend import ProvisionedWorker
-from strata_pool.types import MachineType
+from strata_pool.types import WORKER_TOKEN_ENV, MachineType
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +81,17 @@ class RunPodBackend:
         spec: MachineType,
         env: dict[str, str] | None = None,
     ) -> ProvisionedWorker:
-        created = await self._api.post(
-            "/pods",
-            json=_create_body(spec, env, self.worker_port),
-            headers=self._auth,
-        )
+        body = _create_body(spec, env, self.worker_port)
+        created = await self._api.post("/pods", json=body, headers=self._auth)
         if created.status_code >= 400:
             raise RunPodError(f"could not create a {spec.name} pod: {_message(created)}")
+
+        # Past this line a pod exists and is billing. Every failure below is
+        # an orphan: the pool catches it as a failed start and deletes the row
+        # that would have held the id, so nothing can terminate it. Converting
+        # the exception type does not change that — naming the pod does. The
+        # generated name is the only handle left.
+        name = body["name"]
 
         # Everything below runs with a pod already created and already
         # billing. A parse that raises here is caught upstream as a failed
@@ -97,17 +101,17 @@ class RunPodBackend:
         try:
             payload = created.json()
         except ValueError as exc:
-            raise RunPodError(
-                f"RunPod returned a non-JSON body for a created pod: {created.text[:200]}"
+            raise _orphaned(
+                name, f"RunPod returned a non-JSON body for a created pod: {created.text[:200]}"
             ) from exc
         if not isinstance(payload, dict):
-            raise RunPodError(f"RunPod returned an unexpected body shape: {created.text[:200]}")
+            raise _orphaned(name, f"RunPod returned an unexpected body shape: {created.text[:200]}")
 
         pod_id = payload.get("id")
         if not pod_id:
             # Better to fail loudly than to hand back an endpoint built from
             # None and let it surface later as an unreachable worker.
-            raise RunPodError(f"RunPod created a pod without an id: {created.text[:200]}")
+            raise _orphaned(name, f"RunPod created a pod without an id: {created.text[:200]}")
 
         # `machine` is null until the pod is placed on a host, which is the
         # normal shape immediately after create — `.get("machine", {})` would
@@ -180,21 +184,56 @@ def _create_body(spec: MachineType, env: dict[str, str] | None, worker_port: int
     # Last, so a deployment can correct anything above it without waiting for
     # a release — including a field this function got wrong.
     body.update(spec.provider_options)
+    _restore_credential(body, env)
+    return body
 
-    # Except the credential. An override that replaces `env` wholesale would
-    # leave a pod with no token behind a public proxy URL, which is the one
-    # failure this backend cannot tolerate — adding a single HF_TOKEN is a
-    # plausible way to get there by accident.
+
+def _restore_credential(body: dict, env: dict[str, str] | None) -> None:
+    """Put the worker credential back after an override, and nothing else.
+
+    `provider_options` overrides everything on purpose: these request shapes
+    were written from documentation and never run live, and `env` is the field
+    most likely to be wrong — RunPod's GraphQL surface takes a list of
+    ``{key, value}``. Refusing that form would close the escape hatch on
+    exactly the field it exists for.
+
+    So the override stands, in either encoding, and only the credential is
+    restored. A pod without it is an open execute endpoint on a public URL.
+    """
+    token = (env or {}).get(WORKER_TOKEN_ENV)
+    if token is None:
+        return
+
     declared = body.get("env")
     if isinstance(declared, dict):
-        body["env"] = {**declared, **(env or {})}
-    elif env:
-        raise ValueError(
-            "provider_options replaced `env` with a non-mapping, so the worker "
-            "credential cannot be merged into it. A pod without its credential is "
-            "an open execute endpoint on a public URL."
-        )
-    return body
+        declared[WORKER_TOKEN_ENV] = token
+        return
+    if isinstance(declared, list):
+        body["env"] = [
+            entry
+            for entry in declared
+            if not (isinstance(entry, dict) and entry.get("key") == WORKER_TOKEN_ENV)
+        ] + [{"key": WORKER_TOKEN_ENV, "value": token}]
+        return
+
+    raise RunPodError(
+        f"provider_options set `env` to a {type(declared).__name__}, which the worker "
+        f"credential cannot be added to. A pod without it is an open execute endpoint "
+        f"on a public URL."
+    )
+
+
+def _orphaned(name: str, detail: str) -> RunPodError:
+    """An error raised with a pod already created and already billing.
+
+    The pool will delete the row that would have held the id, so the name is
+    the only way anyone finds this again. Log it as well as raising it.
+    """
+    logger.error(
+        "a created pod could not be identified and may still be billing",
+        extra={"pod_name": name},
+    )
+    return RunPodError(f"{detail} The pod is named {name!r} and may still be running.")
 
 
 def _message(response: httpx.Response) -> str:
