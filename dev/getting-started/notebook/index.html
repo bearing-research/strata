@@ -16,7 +16,7 @@
         <link rel="prev" href="../../changelog/">
       
       
-        <link rel="next" href="../../notebook/concepts/">
+        <link rel="next" href="../../notebook/agent/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Quickstart - Strata</title>
+        <title>Quickstart - Web UI - Strata</title>
       
     
     
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Quickstart
+              Quickstart - Web UI
             
           </span>
         </div>
@@ -270,6 +270,15 @@
   
     
     
+      
+  
+  
+  
+    
+  
+  
+    
+    
       <li class="md-tabs__item md-tabs__item--active">
         <a href="./" class="md-tabs__link">
           
@@ -279,6 +288,9 @@
 
         </a>
       </li>
+    
+  
+
     
   
 
@@ -507,6 +519,63 @@
   
   
   
+    
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
     <li class="md-nav__item md-nav__item--active">
       
       <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
@@ -522,7 +591,7 @@
   <span class="md-ellipsis">
     
   
-    Quickstart
+    Quickstart - Web UI
   
 
     
@@ -540,7 +609,7 @@
   <span class="md-ellipsis">
     
   
-    Quickstart
+    Quickstart - Web UI
   
 
     
@@ -745,6 +814,70 @@
     </ul>
   
 </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebook/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart - Coding agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebook/tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart - Terminal (TUI)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
       
     </li>
   
@@ -1178,34 +1311,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../notebook/agent/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Drive with a Coding Agent
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../notebook/import/" class="md-nav__link">
         
   
@@ -1242,34 +1347,6 @@
     
   
     Export
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../notebook/tui/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Terminal Viewer (TUI)
   
 
     
@@ -2206,6 +2283,10 @@ caching, automatic dependency tracking, and cascade execution. This
 quickstart walks through a real three-cell pipeline, then surfaces
 the distinctive features (prompt cells, AI assistant, cascade,
 cache hits) on top of it.</p>
+<p>This is the <strong>web UI</strong> quickstart - you drive the notebook in a
+browser. The same notebook can also be driven by a
+<a href="../../notebook/agent/">coding agent</a> or watched live from a
+<a href="../../notebook/tui/">terminal</a>.</p>
 <h2 id="1-start-the-server">1. Start the server<a class="headerlink" href="#1-start-the-server" title="Permanent link">&para;</a></h2>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">uv (recommended)</label><label for="__tabbed_1_2">Docker</label><label for="__tabbed_1_3">From source (one-time setup)</label></div>
 <div class="tabbed-content">
@@ -2244,10 +2325,12 @@ not part of the recurring start command.</p>
 </div>
 <p>Open <a href="http://localhost:8765">http://localhost:8765</a>.</p>
 <h2 id="2-create-a-notebook">2. Create a notebook<a class="headerlink" href="#2-create-a-notebook" title="Permanent link">&para;</a></h2>
-<p>Click <strong>New Notebook</strong> on the landing page. Pick a name and a
-parent directory under the notebook storage root. Strata creates a
-directory containing <code>notebook.toml</code>, a per-notebook <code>pyproject.toml</code>,
-a <code>cells/</code> folder, and an empty first cell ready to type into.</p>
+<p>Click <strong>New Notebook</strong> on the landing page. Pick a name, a parent
+directory under the notebook storage root, and a Python version.
+Strata creates a directory containing <code>notebook.toml</code>, a per-notebook
+<code>pyproject.toml</code>, and a <code>cells/</code> folder.</p>
+<p>The notebook opens empty - click <strong>+ Add cell</strong> and pick a kind to
+write the first one.</p>
 <p>By default the storage root is <code>~/.strata/notebooks</code> - <strong>not</strong> the
 directory you launched from - so new notebooks land there regardless of
 your shell's working directory. To put them somewhere else (the current
@@ -2262,9 +2345,9 @@ installing pandas in one notebook doesn't touch another. Everything
 autosaves: source goes to <code>cells/*.py</code>, runtime state to <code>.strata/</code>.
 Both diff cleanly in git, no JSON blobs in commits.</p>
 <h3 id="cell-types">Cell types<a class="headerlink" href="#cell-types" title="Permanent link">&para;</a></h3>
-<p>Every cell is one of these kinds. The default is Python; the others
-are selected via the "+ Add cell" menu or by typing the kind name
-in the cell language picker.</p>
+<p>The <strong>+ Add cell</strong> menu offers six kinds. Python is the default; you
+can also change a cell's kind later with the language picker in its
+header.</p>
 <table>
 <thead>
 <tr>
@@ -2278,12 +2361,16 @@ in the cell language picker.</p>
 <td>Regular Python code. Most cells.</td>
 </tr>
 <tr>
-<td><strong>Prompt</strong></td>
-<td>LLM call as a DAG node. The body is a template with <code>{{ variable }}</code> substitution from upstream cells; the response is cached as an artifact like any other cell output.</td>
-</tr>
-<tr>
 <td><strong>SQL</strong></td>
 <td>A SQL query against a declared connection. Connection name is an annotation; the result is a pyarrow Table available downstream.</td>
+</tr>
+<tr>
+<td><strong>R</strong></td>
+<td>R code - stats and tidyverse. See <a href="../../notebook/cells/">Cell Types</a>.</td>
+</tr>
+<tr>
+<td><strong>Prompt</strong></td>
+<td>LLM call as a DAG node. The body is a template with <code>{{ variable }}</code> substitution from upstream cells; the response is cached as an artifact like any other cell output.</td>
 </tr>
 <tr>
 <td><strong>Widget</strong></td>
@@ -2293,19 +2380,32 @@ in the cell language picker.</p>
 <td><strong>Markdown</strong></td>
 <td>Prose between cells. Rendered as HTML; not part of the DAG.</td>
 </tr>
+</tbody>
+</table>
+<p>Two more shapes are <strong>annotations on a Python cell</strong> rather than menu
+entries - you add a Python cell and put the annotation on its first
+line:</p>
+<table>
+<thead>
+<tr>
+<th>Shape</th>
+<th>Annotation</th>
+</tr>
+</thead>
+<tbody>
 <tr>
 <td><strong>Loop</strong></td>
-<td>A Python cell that re-runs with a <code>carry</code> variable threaded across iterations. Annotate with <code># @loop max_iter=N carry=state</code>.</td>
+<td><code># @loop max_iter=N carry=state</code> - re-runs the cell with <code>carry</code> threaded across iterations, one artifact per step.</td>
 </tr>
 <tr>
 <td><strong>Variant</strong></td>
-<td>Multiple cells share one DAG slot (<code># @variant group name</code>); only the active variant is in the DAG at any time. For A/B-ing different implementations of the same step.</td>
+<td><code># @variant group name</code> - several cells share one DAG slot, for A/B-ing implementations of the same step.</td>
 </tr>
 </tbody>
 </table>
-<p>Library, mount, and worker shapes are annotation-driven on top of
-Python cells. See <a href="../../notebook/cells/">Cell Types</a> for the full
-surface.</p>
+<p>Library, mount, and worker shapes are annotation-driven too. See
+<a href="../../notebook/cells/">Cell Types</a> for the full surface and
+<a href="../../notebook/annotations/">Cell Annotations</a> for every annotation.</p>
 <h2 id="3-walk-through-a-pipeline">3. Walk through a pipeline<a class="headerlink" href="#3-walk-through-a-pipeline" title="Permanent link">&para;</a></h2>
 <p>Three cells, one real DAG. We'll load the iris dataset, summarize
 by species, and plot a scatter.</p>
@@ -2389,14 +2489,17 @@ run (a side effect, a live API call, a fresh random draw) opts out
 with <a href="../../notebook/annotations/#nocache"><code># @nocache</code></a>.</p>
 <h2 id="5-edit-upstream-watch-the-cascade">5. Edit upstream, watch the cascade<a class="headerlink" href="#5-edit-upstream-watch-the-cascade" title="Permanent link">&para;</a></h2>
 <p>Edit the loader, say, change <code>time.sleep(2)</code> to <code>time.sleep(1)</code>.
-Strata re-analyzes the source, computes a new provenance hash, and
-marks the loader <strong>stale</strong>. The summary and plot cells flip stale
-too: they referenced <code>df</code>, which is no longer the cached value.</p>
-<p>Now press <span class="keys"><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-enter">Enter</kbd></span> on the plot cell. A confirmation banner
-appears at the top of the notebook: "2 upstream cells need to
-re-run, proceed?" Accept it. Strata runs loader → summary → plot
-in topological order, with a live progress strip showing which cell
-is executing.</p>
+Strata re-analyzes the source and computes a new provenance hash, so
+the loader's cached result no longer matches its source and the cell
+returns to <strong>idle</strong>. The summary and plot cells flip <strong>stale</strong>: they
+referenced <code>df</code>, which is no longer the cached value. (Hover
+<strong>Why stale?</strong> on either to see the reason - here, <code>upstream</code>.)</p>
+<p>Now press <span class="keys"><kbd class="key-shift">Shift</kbd><span>+</span><kbd class="key-enter">Enter</kbd></span> on the plot cell. Strata walks back through
+the stale upstream cells and runs loader → summary → plot in
+topological order, with a live progress strip showing which cell is
+executing. There is no confirmation step: cascades run automatically,
+so running a cell always gives you a result computed from current
+inputs.</p>
 <p>Revert the edit (<code>time.sleep(1)</code> back to <code>time.sleep(2)</code>) and
 re-run: every cell becomes a cache hit on the way through, no work
 happens, the cascade short-circuits to milliseconds.</p>
@@ -2539,6 +2642,7 @@ grouped by feature.</p>
 <h2 id="whats-next">What's next<a class="headerlink" href="#whats-next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../../notebook/agent/">Driving a notebook with a coding agent</a>: let a coding agent (Claude Code) use the notebook as a persistent, <strong>cached scratchpad</strong> instead of throwaway scripts; installs as a one-command plugin</li>
+<li><a href="../../notebook/tui/">Terminal viewer (TUI)</a> to watch this notebook live from a terminal with <code>strata watch ./my-notebook</code></li>
 <li><a href="../../notebook/concepts/">Concepts</a> for how the DAG, caching, and cascade work</li>
 <li><a href="../../notebook/cells/">Cell Types</a> for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)</li>
 <li><a href="../../notebook/annotations/">Cell Annotations</a> for <code>@worker</code>, <code>@mount</code>, <code>@loop</code>, and friends</li>

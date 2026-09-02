@@ -268,6 +268,13 @@
   
     
     
+      
+  
+  
+  
+  
+    
+    
       <li class="md-tabs__item">
         <a href="getting-started/notebook/" class="md-tabs__link">
           
@@ -277,6 +284,9 @@
 
         </a>
       </li>
+    
+  
+
     
   
 
@@ -461,6 +471,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Strata Notebook">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-ways-to-drive-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three ways to drive it
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -591,6 +618,60 @@
   
   
   
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start here
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Start here
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
       <a href="getting-started/notebook/" class="md-nav__link">
         
@@ -599,7 +680,7 @@
   <span class="md-ellipsis">
     
   
-    Quickstart
+    Quickstart - Web UI
   
 
     
@@ -608,6 +689,70 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="notebook/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart - Coding agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="notebook/tui/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart - Terminal (TUI)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -1040,34 +1185,6 @@
   
   
     <li class="md-nav__item">
-      <a href="notebook/agent/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Drive with a Coding Agent
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="notebook/import/" class="md-nav__link">
         
   
@@ -1104,34 +1221,6 @@
     
   
     Export
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="notebook/tui/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Terminal Viewer (TUI)
   
 
     
@@ -1874,6 +1963,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Strata Notebook">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#three-ways-to-drive-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Three ways to drive it
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1960,6 +2066,36 @@ producing artifacts that flow through an auto-built DAG.</p>
 <li><strong>auto-install:</strong> missing import in a cell? one click adds the package via uv and re-runs</li>
 <li><strong>headless:</strong> <code>strata run ./my-notebook</code> for CI and scheduled execution - same DAG, same cache</li>
 </ul>
+<h3 id="three-ways-to-drive-it">Three ways to drive it<a class="headerlink" href="#three-ways-to-drive-it" title="Permanent link">&para;</a></h3>
+<p>The same notebook - the same cells, the same cache, the same artifacts -
+has three front doors. Pick the one that matches how you work; they all
+operate on the same notebook directory and can be used at the same time.</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>For</th>
+<th>Start here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web UI</strong></td>
+<td>Writing and running cells yourself, with rendered tables, plots, and the DAG view.</td>
+<td><a href="getting-started/notebook/">Quickstart - Web UI</a></td>
+</tr>
+<tr>
+<td><strong>Coding agent</strong></td>
+<td>Letting Claude Code build the notebook through MCP tools, using it as a cached scratchpad instead of throwaway scripts.</td>
+<td><a href="notebook/agent/">Quickstart - Coding agent</a></td>
+</tr>
+<tr>
+<td><strong>Terminal (TUI)</strong></td>
+<td>Watching a notebook live from a terminal - a second pane, an SSH session, or beside your editor. Read-only.</td>
+<td><a href="notebook/tui/">Quickstart - Terminal</a></td>
+</tr>
+</tbody>
+</table>
 <p><a class="md-button md-button--primary" href="getting-started/notebook/"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Notebook Quickstart</a></p>
 <hr />
 <h2 id="use-strata-as-a-library">Use Strata as a library<a class="headerlink" href="#use-strata-as-a-library" title="Permanent link">&para;</a></h2>
