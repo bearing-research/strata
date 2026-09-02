@@ -250,6 +250,14 @@ class TestResponseShapes:
         with pytest.raises(RunPodError, match="non-JSON"):
             await _backend(fake).start(_spec())
 
+    async def test_an_unidentifiable_pod_is_named_in_the_error(self):
+        """The pool deletes the row that would have held the id, so the
+        generated name is the only handle anyone has left for a pod that is
+        already billing."""
+        fake = FakeRunPod(**{"POST /pods": httpx.Response(201, json={})})
+        with pytest.raises(RunPodError, match=r"strata-h100-80gb-[0-9a-f]{8}"):
+            await _backend(fake).start(_spec())
+
     async def test_a_json_array_success_body_is_an_error_not_a_crash(self):
         fake = FakeRunPod(**{"POST /pods": httpx.Response(201, json=[{"id": "pod123"}])})
         with pytest.raises(RunPodError, match="unexpected body shape"):
@@ -292,11 +300,50 @@ class TestCredentialCannotBeDropped:
 
         assert fake.body()["env"]["STRATA_WORKER_TOKEN"] == "ours"
 
-    async def test_an_env_override_we_cannot_merge_into_is_refused(self):
+    async def test_the_list_encoding_is_supported_not_refused(self):
+        """RunPod's GraphQL surface takes env as a list of {key, value}. That
+        is the field most likely to be wrong here, so refusing the correction
+        would close the escape hatch on exactly the case it exists for."""
         fake = FakeRunPod()
-        with pytest.raises(ValueError, match="open execute endpoint"):
+        await _backend(fake).start(
+            _spec(provider_options={"env": [{"key": "HF_TOKEN", "value": "hf_abc"}]}),
+            {"STRATA_WORKER_TOKEN": "ours"},
+        )
+
+        env = fake.body()["env"]
+        assert {"key": "HF_TOKEN", "value": "hf_abc"} in env
+        assert {"key": "STRATA_WORKER_TOKEN", "value": "ours"} in env
+
+    async def test_a_list_encoding_cannot_smuggle_its_own_credential(self):
+        fake = FakeRunPod()
+        await _backend(fake).start(
+            _spec(provider_options={"env": [{"key": "STRATA_WORKER_TOKEN", "value": "attacker"}]}),
+            {"STRATA_WORKER_TOKEN": "ours"},
+        )
+
+        tokens = [
+            entry["value"] for entry in fake.body()["env"] if entry["key"] == "STRATA_WORKER_TOKEN"
+        ]
+        assert tokens == ["ours"]
+
+    async def test_an_override_can_still_correct_other_env_values(self):
+        """`provider_options` overrides everything except the credential —
+        including values the caller set."""
+        fake = FakeRunPod()
+        await _backend(fake).start(
+            _spec(provider_options={"env": {"HF_HOME": "/corrected"}}),
+            {"STRATA_WORKER_TOKEN": "ours", "HF_HOME": "/wrong"},
+        )
+
+        env = fake.body()["env"]
+        assert env["HF_HOME"] == "/corrected"
+        assert env["STRATA_WORKER_TOKEN"] == "ours"
+
+    async def test_an_env_shape_with_nowhere_to_put_a_credential_is_refused(self):
+        fake = FakeRunPod()
+        with pytest.raises(RunPodError, match="open execute endpoint"):
             await _backend(fake).start(
-                _spec(provider_options={"env": [{"key": "A", "value": "1"}]}),
+                _spec(provider_options={"env": "A=1"}),
                 {"STRATA_WORKER_TOKEN": "ours"},
             )
 
@@ -305,11 +352,14 @@ class TestClientOwnership:
     async def test_injecting_one_client_does_not_leak_the_other(self):
         """The documented reason to inject `api` is retries on the control
         plane; the probe is then built here and nobody else can close it."""
-        backend = RunPodBackend(
-            api_key="secret",
-            api=httpx.AsyncClient(transport=httpx.MockTransport(FakeRunPod().handle)),
-        )
+        injected = httpx.AsyncClient(transport=httpx.MockTransport(FakeRunPod().handle))
+        backend = RunPodBackend(api_key="secret", api=injected)
         probe = backend._probe
+
         await backend.aclose()
 
-        assert probe.is_closed
+        assert probe.is_closed, "the client we built is ours to close"
+        assert not injected.is_closed, (
+            "closing a caller's shared client breaks every other user of it"
+        )
+        await injected.aclose()

@@ -49,6 +49,19 @@ TERMINAL_JOB_STATES = frozenset(
 )
 
 
+WORKER_TOKEN_ENV = "STRATA_WORKER_TOKEN"
+"""Environment variable carrying a worker's own credential.
+
+The worker contract: reject any request to /execute that does not present
+this value as a bearer token. /health stays open — it is polled before the
+machine is trusted with anything, and it reveals nothing.
+
+Lives here rather than in the pool because backends need it too: a backend
+that lets an operator override the environment has to be able to put the
+credential back.
+"""
+
+
 def new_id(prefix: str) -> str:
     """Pool-assigned identifier. Callers never invent these."""
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
