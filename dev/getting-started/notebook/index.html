@@ -2345,9 +2345,10 @@ installing pandas in one notebook doesn't touch another. Everything
 autosaves: source goes to <code>cells/*.py</code>, runtime state to <code>.strata/</code>.
 Both diff cleanly in git, no JSON blobs in commits.</p>
 <h3 id="cell-types">Cell types<a class="headerlink" href="#cell-types" title="Permanent link">&para;</a></h3>
-<p>The <strong>+ Add cell</strong> menu offers six kinds. Python is the default; you
-can also change a cell's kind later with the language picker in its
-header.</p>
+<p>The <strong>+ Add cell</strong> menu offers six kinds, and Python is the default.
+A cell's kind is fixed when you create it - the kind shown in the cell
+header is a label, not a picker - so to change one, delete the cell and
+re-add it with the kind you want.</p>
 <table>
 <thead>
 <tr>
@@ -2631,7 +2632,7 @@ grouped by feature.</p>
 </tr>
 <tr>
 <td>Change cell kind</td>
-<td>Language picker in cell header</td>
+<td>Not editable - delete and re-add with the new kind</td>
 </tr>
 <tr>
 <td>Keyboard help</td>
