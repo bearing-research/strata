@@ -55,7 +55,7 @@ Does the agent reach for it instead of a scratch script? There's an eval
 that measures exactly that (`evals/agent_notebook/`): in the un-primed sessions
 tested so far it reaches for the notebook every time, and building the eval
 caught real bugs. Small sample, and honest about it. See
-[Driving a notebook with a coding agent](https://bearing-research.github.io/strata/notebook/agent/).
+[Driving a notebook with a coding agent](https://bearing-research.github.io/strata/latest/notebook/agent/).
 
 ## Highlights
 
@@ -94,7 +94,7 @@ caught real bugs. Small sample, and honest about it. See
 
 Both paths below run in **personal mode**: single-user, writes enabled, no
 proxy auth. For multi-tenant or hosted deployments, see
-[Deployment Modes](https://bearing-research.github.io/strata/deployment/modes/).
+[Deployment Modes](https://bearing-research.github.io/strata/latest/deployment/modes/).
 
 ```bash
 # Docker. docker-compose.yml sets personal mode for you.
@@ -112,10 +112,10 @@ strata-notebook
 
 For the full inventory of installed commands (`strata-notebook`, `strata`,
 `strata-worker`, `python -m strata`), see the
-[Commands reference](https://bearing-research.github.io/strata/getting-started/installation/#commands-reference).
+[Commands reference](https://bearing-research.github.io/strata/latest/getting-started/installation/#commands-reference).
 
 Source builds - `git clone + uv sync` - work too and are documented in
-[Installation](https://bearing-research.github.io/strata/getting-started/installation/);
+[Installation](https://bearing-research.github.io/strata/latest/getting-started/installation/);
 needed only if you're modifying Strata itself.
 
 ### Requirements
@@ -237,24 +237,24 @@ it on first read and caches the bytes locally for the session.
 
 | Example                                             | What it shows                                                                       |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [pandas_basics](https://bearing-research.github.io/strata/examples/pandas_basics/)             | Linear DataFrame chain, caching, staleness propagation, per-cell unit tests          |
-| [iris_classification](https://bearing-research.github.io/strata/examples/iris_classification/) | End-to-end ML, DAG branching, mixed output types                                    |
-| [titanic_ml](https://bearing-research.github.io/strata/examples/titanic_ml/)                   | Feature engineering + model comparison                                              |
-| [s3_mount](https://bearing-research.github.io/strata/examples/s3_mount/)                       | Reading a public S3 bucket via a mount                                              |
-| [arxiv_classifier](https://bearing-research.github.io/strata/examples/arxiv_classifier/)       | Distributed execution via `@worker` + Modal GPU + Fly cluster                       |
-| [markdown_showcase](https://bearing-research.github.io/strata/examples/markdown_showcase/)     | Markdown cells, dynamic `Markdown(...)` outputs, security cases                     |
-| [library_cells](https://bearing-research.github.io/strata/examples/library_cells/)             | Cross-cell library code: pure module cells, mixed runtime+library cells, the limits |
-| [news_alpha_trader](https://bearing-research.github.io/strata/examples/news_alpha_trader/)     | Multi-stage trading pipeline with prompt cells and structured LLM outputs           |
-| [review_triage](https://bearing-research.github.io/strata/examples/review_triage/)             | Prompt cell with `# @output_schema` - structured, schema-validated LLM output       |
-| [r_mtcars_analysis](https://bearing-research.github.io/strata/examples/r_mtcars_analysis/)     | Pure-R notebook - `mtcars` regression with inline ggplot2 / base-graphics plots     |
-| [r_lm_vs_sklearn](https://bearing-research.github.io/strata/examples/r_lm_vs_sklearn/)         | Cross-language R + Python - R `lm()` vs scikit-learn over shared Arrow data          |
-| [sql_orders_report](https://bearing-research.github.io/strata/examples/sql_orders_report/)     | SQL cells over a local SQLite warehouse, mixing SQL / Python / markdown              |
-| [widget_playground](https://bearing-research.github.io/strata/examples/widget_playground/)     | Widget cell (control panel) driving a downstream cell, with `# @live` reactivity     |
-| [model_variants](https://bearing-research.github.io/strata/examples/model_variants/)           | Variant groups - alternative training cells sharing one DAG slot (switch mode)       |
-| [model_variants_sweep](https://bearing-research.github.io/strata/examples/model_variants_sweep/) | Variant sweep mode - run every variant and compare them in one downstream cell     |
-| [loop_hill_climb](https://bearing-research.github.io/strata/examples/loop_hill_climb/)         | `# @loop` / `# @loop_until` iteration with carry and per-iteration artifacts         |
-| [data_viewer](https://bearing-research.github.io/strata/examples/data_viewer/)                 | Interactive data viewer - page / sort / filter / search the full cached artifact     |
-| [agent_demo](https://bearing-research.github.io/strata/examples/agent_demo/)                   | A coding agent builds the notebook live; only the eval re-runs when the model caches |
+| [pandas_basics](https://bearing-research.github.io/strata/latest/examples/pandas_basics/)             | Linear DataFrame chain, caching, staleness propagation, per-cell unit tests          |
+| [iris_classification](https://bearing-research.github.io/strata/latest/examples/iris_classification/) | End-to-end ML, DAG branching, mixed output types                                    |
+| [titanic_ml](https://bearing-research.github.io/strata/latest/examples/titanic_ml/)                   | Feature engineering + model comparison                                              |
+| [s3_mount](https://bearing-research.github.io/strata/latest/examples/s3_mount/)                       | Reading a public S3 bucket via a mount                                              |
+| [arxiv_classifier](https://bearing-research.github.io/strata/latest/examples/arxiv_classifier/)       | Distributed execution via `@worker` + Modal GPU + Fly cluster                       |
+| [markdown_showcase](https://bearing-research.github.io/strata/latest/examples/markdown_showcase/)     | Markdown cells, dynamic `Markdown(...)` outputs, security cases                     |
+| [library_cells](https://bearing-research.github.io/strata/latest/examples/library_cells/)             | Cross-cell library code: pure module cells, mixed runtime+library cells, the limits |
+| [news_alpha_trader](https://bearing-research.github.io/strata/latest/examples/news_alpha_trader/)     | Multi-stage trading pipeline with prompt cells and structured LLM outputs           |
+| [review_triage](https://bearing-research.github.io/strata/latest/examples/review_triage/)             | Prompt cell with `# @output_schema` - structured, schema-validated LLM output       |
+| [r_mtcars_analysis](https://bearing-research.github.io/strata/latest/examples/r_mtcars_analysis/)     | Pure-R notebook - `mtcars` regression with inline ggplot2 / base-graphics plots     |
+| [r_lm_vs_sklearn](https://bearing-research.github.io/strata/latest/examples/r_lm_vs_sklearn/)         | Cross-language R + Python - R `lm()` vs scikit-learn over shared Arrow data          |
+| [sql_orders_report](https://bearing-research.github.io/strata/latest/examples/sql_orders_report/)     | SQL cells over a local SQLite warehouse, mixing SQL / Python / markdown              |
+| [widget_playground](https://bearing-research.github.io/strata/latest/examples/widget_playground/)     | Widget cell (control panel) driving a downstream cell, with `# @live` reactivity     |
+| [model_variants](https://bearing-research.github.io/strata/latest/examples/model_variants/)           | Variant groups - alternative training cells sharing one DAG slot (switch mode)       |
+| [model_variants_sweep](https://bearing-research.github.io/strata/latest/examples/model_variants_sweep/) | Variant sweep mode - run every variant and compare them in one downstream cell     |
+| [loop_hill_climb](https://bearing-research.github.io/strata/latest/examples/loop_hill_climb/)         | `# @loop` / `# @loop_until` iteration with carry and per-iteration artifacts         |
+| [data_viewer](https://bearing-research.github.io/strata/latest/examples/data_viewer/)                 | Interactive data viewer - page / sort / filter / search the full cached artifact     |
+| [agent_demo](https://bearing-research.github.io/strata/latest/examples/agent_demo/)                   | A coding agent builds the notebook live; only the eval re-runs when the model caches |
 
 ## Known rough edges
 
@@ -312,7 +312,7 @@ row-group caching, pluggable blob storage (local/S3/GCS/Azure),
 multi-tenancy, trusted-proxy auth, and an executor protocol for
 external compute.
 
-**[Library docs →](https://bearing-research.github.io/strata/getting-started/core/)**
+**[Library docs →](https://bearing-research.github.io/strata/latest/getting-started/core/)**
 
 ---
 

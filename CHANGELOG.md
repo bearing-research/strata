@@ -355,7 +355,7 @@ cell.featurize(cell.trips)…` - `cell.X` is any def or input after the cell
   warnings in both human and JSON output. Strata also warns when two of a cell's
   outputs **share a mutable object** (the optimizer-over-a-model footgun: stored
   as separate artifacts they decouple downstream). New
-  [Stateful objects & value semantics](https://bearing-research.github.io/strata/notebook/concepts/)
+  [Stateful objects & value semantics](https://bearing-research.github.io/strata/latest/notebook/concepts/)
   docs cover the one-cell training pattern.
 
 - **Variant sweep mode.** A variant group can now run in **sweep mode**

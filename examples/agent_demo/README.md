@@ -1,7 +1,7 @@
 # Agent Demo — a coding agent builds this notebook
 
 This is the notebook from the
-[`strata agent`](https://bearing-research.github.io/strata/notebook/agent/)
+[`strata agent`](https://bearing-research.github.io/strata/latest/notebook/agent/)
 demo: a coding agent (Claude Code) builds it live while you watch in the
 terminal UI. It's a plain, runnable notebook — the agent-driven part is just how
 it gets written.
