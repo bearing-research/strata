@@ -1816,6 +1816,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#the-team-cache-sharing-results-nobody-named" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The team cache: sharing results nobody named
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2164,6 +2175,17 @@
     <span class="md-ellipsis">
       
         Connecting a notebook to the shared store
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-team-cache-sharing-results-nobody-named" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The team cache: sharing results nobody named
       
     </span>
   </a>
@@ -2524,6 +2546,46 @@ provenance stay local; only what a cell explicitly publishes
 <p>In a fully proxy-fronted setup the notebook's requests instead flow through the
 same auth proxy, which injects identity, and <code>notebook_remote_store_headers</code>
 can be omitted.</p>
+<h3 id="the-team-cache-sharing-results-nobody-named">The team cache: sharing results nobody named<a class="headerlink" href="#the-team-cache-sharing-results-nobody-named" title="Permanent link">&para;</a></h3>
+<p>Everything above is <strong>explicit publish</strong> - a researcher decides a dataset is
+worth sharing and names it. That leaves out the expensive middle of a pipeline,
+because nobody names their intermediate results, and that is exactly where the
+recomputation is.</p>
+<p><code>STRATA_NOTEBOOK_TEAM_CACHE_ENABLED=true</code> closes that gap. On a <strong>local cache
+miss</strong> the notebook asks the shared store whether anyone has already run this
+exact computation, and on a hit it fetches the result instead of running the
+cell. After a cell does run, its outputs are offered back to the store so the
+next teammate hits.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># On each researcher&#39;s notebook server, alongside the two settings above:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">STRATA_NOTEBOOK_TEAM_CACHE_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+</code></pre></div>
+<p>It works because a cell's provenance key -
+<code>sha256(sorted_input_hashes + source_hash + env_hash)</code> - contains no notebook id
+and no cell id. Two people running the same source over the same inputs in the
+same environment already arrive at the same hash; the store just had no way to
+be asked.</p>
+<p>What to know before switching it on:</p>
+<ul>
+<li><strong>It is a separate opt-in from the URL, deliberately.</strong> Wanting a shared store
+  to publish <em>to</em> is not the same as wanting one to silently source results
+  <em>from</em>. Enabling it without <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> is rejected at
+  startup rather than left silently inert.</li>
+<li><strong>Publishing needs <code>artifacts:write</code>.</strong> Members without the scope still get
+  team cache <em>hits</em>; they just do not contribute. That is a supported
+  configuration, and the notebook logs a warning when a publish is refused so
+  it does not look like the cache is simply empty.</li>
+<li><strong>It never fails a cell.</strong> A store that is unreachable, refusing, or missing
+  one of a cell's outputs ends in "run it locally".</li>
+<li><strong>Point it at an authenticated store.</strong> Without auth there is no tenant, so
+  every team shares one flat namespace, and no principal, so every result
+  arrives authored by nobody. The server warns at startup if the team cache is
+  on with no <code>notebook_remote_store_headers</code>.</li>
+<li><strong>The environment key does not include the platform.</strong> <code>uv.lock</code> resolves to
+  different wheels on macOS-arm64 and Linux-x86_64, and today the env hash
+  covers the lockfile only. In practice a shared cache handing the whole team
+  one number is the more reproducible outcome, but if your work depends on
+  hardware-identical results, leave the team cache off for now.</li>
+</ul>
 <h2 id="migrating-from-personal-mode">Migrating from personal mode<a class="headerlink" href="#migrating-from-personal-mode" title="Permanent link">&para;</a></h2>
 <p>If you've been running personal mode and want to grow into service:</p>
 <ol>
@@ -2542,9 +2604,9 @@ can be omitted.</p>
 </li>
 <li>
 <p><strong>Flip the mode</strong> in env or <code>pyproject.toml</code>:
-   <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;your-shared-secret&gt;
+   <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;your-shared-secret&gt;
 </code></pre></div>
    Boot will fail with a clear error if anything's missing, that's
    the fail-closed property at work.</p>
