@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import os
+import platform
 import sys
 import traceback
 from contextlib import contextmanager
@@ -376,6 +377,30 @@ def _eval_loop_until(expr: str, namespace: dict[str, Any]) -> dict[str, Any]:
 _MISSING = object()
 
 
+def build_env_identity() -> str:
+    """Which interpreter, on which machine, produced these bytes.
+
+    Recorded on every artifact so a *shared* cache can say where a result came
+    from. It is not part of the provenance hash and deliberately so: teams run
+    Macs locally and Linux in CI, and folding the platform into the key would
+    drop cross-machine hit rate to roughly zero — deleting the feature in order
+    to protect it. What is not acceptable is sharing across platforms while
+    recording nothing, which is what happened before this.
+
+    Computed here rather than in ``strata`` because this is the process that
+    actually ran the cell: the notebook venv locally, or a remote worker's
+    interpreter on someone else's hardware. Anything the server computed about
+    itself would be a guess about a machine it is not on.
+
+    Not normalised. macOS reports ``arm64`` where Linux reports ``aarch64``;
+    calling those the same is a portability claim nothing here can back.
+    """
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    return (
+        f"{platform.python_implementation().lower()}-{version}-{sys.platform}-{platform.machine()}"
+    )
+
+
 def _send_frame(stream: Any, frame_type: str, payload: dict) -> None:
     """Write one length-line JSON frame to the parent and flush."""
     line = orjson.dumps({"type": frame_type, "payload": payload}) + b"\n"
@@ -575,6 +600,7 @@ def _run_one_batched_cell(
                     "source_hash": source_hash,
                     "env_hash": env_hash,
                     "mutation_warnings": mutation_warnings,
+                    "build_env": build_env_identity(),
                 },
             )
             ack = _recv_response(resp_in)
@@ -834,6 +860,7 @@ def main():
             "stdout": stdout_text,
             "stderr": stderr_text,
             "mutation_warnings": mutation_warnings,
+            "build_env": build_env_identity(),
         }
         if loop_state is not None:
             result["loop"] = loop_state

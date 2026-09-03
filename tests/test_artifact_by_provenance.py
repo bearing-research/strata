@@ -457,3 +457,52 @@ def test_the_client_returns_none_for_a_miss(personal_server):
         assert found is not None
         assert found["artifact_id"] == _ref(uri)[0]
         assert found["provenance_hash"] == provenance
+
+
+def test_the_build_environment_travels_with_the_result(personal_server):
+    """A shared cache that spans platforms has to say which one it spanned from.
+
+    The provenance key covers the lockfile, not the platform — deliberately,
+    since hashing the platform would drop cross-machine hit rate to nothing —
+    so the store records where a result was produced and hands it back on the
+    lookup. Sharing across platforms *and* recording nothing is the combination
+    that is not defensible.
+    """
+    base_url = personal_server["base_url"]
+    provenance = "b" * 64
+    response = httpx.put(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}",
+        files={
+            "metadata": (
+                "metadata.json",
+                json.dumps(
+                    {
+                        "content_type": "arrow/ipc",
+                        "build_env": "cpython-3.12-linux-x86_64",
+                    }
+                ),
+                "application/json",
+            ),
+            "data": ("data.bin", b"bytes", "application/octet-stream"),
+        },
+        timeout=30.0,
+    )
+    assert response.status_code == 200, response.text
+
+    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}").json()
+    assert found["build_env"] == "cpython-3.12-linux-x86_64"
+    # Distinct fields, not one read twice — this is the bug the notebook-side
+    # test caught first, where a shared param reader ignored its key argument.
+    assert found["content_type"] == "arrow/ipc"
+
+
+def test_an_artifact_stored_without_a_platform_reports_an_empty_one(personal_server):
+    """Every artifact written before this existed has none, and core transforms
+    never record one. Empty is the honest answer; a plausible default would be
+    a claim about a machine nobody observed."""
+    base_url = personal_server["base_url"]
+    provenance = "7" * 64
+    _publish_by_provenance(base_url, provenance, b"x")
+
+    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}").json()
+    assert found["build_env"] == ""

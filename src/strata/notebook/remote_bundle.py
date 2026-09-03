@@ -68,6 +68,11 @@ def pack_notebook_output_bundle(
         "mutation_warnings": result_manifest.get("mutation_warnings", []),
         "error": result_manifest.get("error"),
         "traceback": result_manifest.get("traceback"),
+        # The worker's interpreter and hardware, not ours. A remote cell is
+        # exactly the case where the two differ, so carrying this across the
+        # bundle is the difference between recording where a result came from
+        # and recording where we happened to be standing.
+        "build_env": result_manifest.get("build_env", ""),
     }
 
     variables = result_manifest.get("variables", {})
@@ -152,6 +157,7 @@ def unpack_notebook_output_bundle(
             "mutation_warnings": manifest_data.get("mutation_warnings", []),
             "error": manifest_data.get("error"),
             "traceback": manifest_data.get("traceback"),
+            "build_env": manifest_data.get("build_env", ""),
         }
 
         variables = manifest_data.get("variables", {})

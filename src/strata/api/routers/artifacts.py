@@ -407,6 +407,9 @@ async def put_artifact_by_provenance(
     variable_name = metadata.get("variable_name")
     if variable_name:
         params["variable_name"] = str(variable_name)
+    build_env = metadata.get("build_env")
+    if build_env:
+        params["build_env"] = str(build_env)
 
     artifact_id = str(metadata.get("artifact_id") or uuid.uuid4())
     version = store.create_artifact(
@@ -506,7 +509,8 @@ async def find_artifact_by_provenance(
         artifact_id=artifact.id,
         version=artifact.version,
         provenance_hash=artifact.provenance_hash,
-        content_type=_content_type_of(artifact),
+        content_type=_spec_param(artifact, "content_type"),
+        build_env=_spec_param(artifact, "build_env"),
         state=artifact.state,
         arrow_schema=artifact.schema_json,
         row_count=artifact.row_count,
@@ -516,13 +520,15 @@ async def find_artifact_by_provenance(
     )
 
 
-def _content_type_of(artifact) -> str:
-    """How the blob was serialized, per the stored transform spec.
+def _spec_param(artifact, key: str) -> str:
+    """One value out of the stored transform spec's params.
 
-    The notebook records it in ``transform_spec.params.content_type``; core
-    transforms do not record one at all. Returns "" rather than guessing —
-    a caller that has to deserialize should see "unstated" and decide, not
-    receive a plausible-looking default that is wrong for pickled values.
+    Carries ``content_type`` (how the blob was serialized) and ``build_env``
+    (which interpreter on which machine produced it). Both come back "" rather
+    than a guess when unrecorded: core transforms record neither, and every
+    artifact written before those fields existed has neither. A caller that has
+    to deserialize should see "unstated" and decide, not receive a
+    plausible-looking default that is wrong for pickled values.
     """
     if not artifact.transform_spec:
         return ""
@@ -535,7 +541,7 @@ def _content_type_of(artifact) -> str:
     params = spec.get("params")
     if not isinstance(params, dict):
         return ""
-    return str(params.get("content_type") or "")
+    return str(params.get(key) or "")
 
 
 @router.get("/v1/artifacts/stats")

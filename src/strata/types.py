@@ -865,6 +865,13 @@ class ArtifactProvenanceMatchResponse(BaseModel):
             ready rows — but carried explicitly so that staying true remains
             the store's decision rather than this route's assumption.
         principal: Who computed it, when the store recorded one.
+        build_env: Interpreter and platform that produced the bytes, e.g.
+            ``cpython-3.14-linux-x86_64``. Deliberately not part of the
+            provenance key — teams run Macs locally and Linux in CI, and
+            hashing the platform would drop cross-machine hit rate to nothing.
+            Recorded so a hit can say where it came from instead of sharing
+            across platforms silently. Empty for artifacts written before this
+            was captured, and for producers that do not report one.
     """
 
     artifact_id: str
@@ -877,6 +884,7 @@ class ArtifactProvenanceMatchResponse(BaseModel):
     byte_size: int | None = None
     created_at: float = 0.0
     principal: str | None = None
+    build_env: str = ""
 
 
 class InputChangeInfo(BaseModel):

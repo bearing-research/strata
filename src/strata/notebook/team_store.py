@@ -62,6 +62,7 @@ class TeamArtifact:
     content_type: str
     principal: str | None
     blob: bytes
+    build_env: str = ""
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,11 @@ class TeamPull:
     variables: tuple[str, ...]
     principal: str | None
     byte_size: int
+    # Where the result was computed, e.g. ``cpython-3.14-linux-x86_64``. The
+    # provenance key covers the lockfile, not the platform, so a hit can cross
+    # machines — recording which one it crossed from is what keeps that
+    # honest rather than silent. Empty when the producer reported none.
+    build_env: str = ""
 
 
 class TeamStore:
@@ -141,6 +147,7 @@ class TeamStore:
             content_type=str(match.get("content_type") or ""),
             principal=match.get("principal"),
             blob=blob,
+            build_env=str(match.get("build_env") or ""),
         )
 
     async def publish(
@@ -150,6 +157,7 @@ class TeamStore:
         *,
         content_type: str,
         variable_name: str | None = None,
+        build_env: str = "",
     ) -> bool:
         """Offer a result to the team, keyed by provenance. Never raises.
 
@@ -161,6 +169,8 @@ class TeamStore:
         metadata: dict[str, str] = {"content_type": content_type}
         if variable_name:
             metadata["variable_name"] = variable_name
+        if build_env:
+            metadata["build_env"] = build_env
         files = {
             "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
             "data": ("data.bin", blob, "application/octet-stream"),
@@ -321,20 +331,32 @@ async def pull_cell_outputs(
             source_hash=source_hash,
             env_hash=env_hash,
             variant=variant,
+            # Preserved, not restamped. The bytes were produced on the
+            # publisher's machine, so the local copy has to keep saying so —
+            # overwriting it with this machine's identity would turn a record
+            # of where the result came from into a claim we ran it ourselves.
+            build_env=artifact.build_env,
         )
         total_bytes += len(artifact.blob)
 
     # Every variable of one cell run was computed together, so they share an
     # author; reporting the first is reporting all of them.
     principal = pulled[0][1].principal
+    build_env = pulled[0][1].build_env
     logger.info(
-        "Team store supplied cell %s (%s, %d bytes, computed by %s); skipped running it",
+        "Team store supplied cell %s (%s, %d bytes, computed by %s on %s); skipped running it",
         cell_id,
         ", ".join(ordered),
         total_bytes,
         principal or "an unrecorded author",
+        build_env or "an unrecorded platform",
     )
-    return TeamPull(variables=tuple(ordered), principal=principal, byte_size=total_bytes)
+    return TeamPull(
+        variables=tuple(ordered),
+        principal=principal,
+        byte_size=total_bytes,
+        build_env=build_env,
+    )
 
 
 async def publish_cell_outputs(
@@ -375,8 +397,9 @@ async def publish_cell_outputs(
         if await store.publish(
             stored.provenance_hash,
             blob,
-            content_type=_content_type_of(stored),
+            content_type=_spec_param(stored, "content_type"),
             variable_name=var,
+            build_env=_spec_param(stored, "build_env"),
         ):
             published += 1
 
@@ -389,11 +412,13 @@ async def publish_cell_outputs(
     return published
 
 
-def _content_type_of(artifact) -> str:
-    """How the blob was serialized, per the stored transform spec.
+def _spec_param(artifact, key: str) -> str:
+    """One value out of the stored transform spec's params.
 
-    Empty rather than a guess: the puller needs this to decode, and a plausible
-    default that is wrong for a pickle is worse than an absent one.
+    Carries ``content_type`` (how the blob was serialized) and ``build_env``
+    (which interpreter on which machine produced it). Empty rather than a
+    guess: the puller needs the first to decode at all, and a plausible default
+    that is wrong for a pickle is worse than an absent one.
     """
     if not artifact.transform_spec:
         return ""
@@ -406,4 +431,4 @@ def _content_type_of(artifact) -> str:
     params = spec.get("params")
     if not isinstance(params, dict):
         return ""
-    return str(params.get("content_type") or "")
+    return str(params.get(key) or "")

@@ -102,3 +102,54 @@ def test_read_member_rejects_oversized_member(tmp_path, monkeypatch):
     with tarfile.open(bundle_path, "r") as tar:
         with pytest.raises(ValueError, match="exceeds .*-byte cap"):
             _read_member(tar, "big.bin")
+
+
+def test_the_workers_build_environment_survives_the_bundle(tmp_path):
+    """A remote cell is exactly the case where the producing machine is not
+    ours, so the bundle has to carry the worker's identity across rather than
+    letting the receiving side substitute its own. Dropping it here would make
+    every remotely-computed artifact silently claim no platform at all.
+    """
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "x.json").write_text('{"value": 1}', encoding="utf-8")
+    worker_env = "cpython-3.12-linux-x86_64"
+    result = {
+        "success": True,
+        "variables": {"x": {"content_type": "json/object", "file": "x.json"}},
+        "stdout": "",
+        "stderr": "",
+        "mutation_warnings": [],
+        "build_env": worker_env,
+    }
+
+    bundle_path = tmp_path / "bundle.tar"
+    pack_notebook_output_bundle(bundle_path, result, output_dir)
+
+    unpacked_dir = tmp_path / "unpacked"
+    unpacked_dir.mkdir()
+    unpacked = unpack_notebook_output_bundle(bundle_path, unpacked_dir)
+
+    assert unpacked["build_env"] == worker_env
+
+
+def test_a_bundle_from_a_worker_that_reports_no_platform_is_still_valid(tmp_path):
+    """Older workers predate this field. They must keep working, reporting an
+    empty platform rather than failing to unpack."""
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "x.json").write_text('{"value": 1}', encoding="utf-8")
+    result = {
+        "success": True,
+        "variables": {"x": {"content_type": "json/object", "file": "x.json"}},
+        "stdout": "",
+        "stderr": "",
+        "mutation_warnings": [],
+    }
+
+    bundle_path = tmp_path / "bundle.tar"
+    pack_notebook_output_bundle(bundle_path, result, output_dir)
+
+    unpacked_dir = tmp_path / "unpacked"
+    unpacked_dir.mkdir()
+    assert unpack_notebook_output_bundle(bundle_path, unpacked_dir)["build_env"] == ""

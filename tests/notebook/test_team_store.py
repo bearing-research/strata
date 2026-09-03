@@ -477,3 +477,105 @@ async def test_a_cell_with_no_downstream_consumers_is_not_pulled(local_manager):
         consumed_vars=set(),
     )
     assert pull is None
+
+
+async def test_a_pulled_result_says_where_it_was_computed(tmp_path, team_store_server, monkeypatch):
+    """The honesty half of the team cache.
+
+    The provenance key covers the lockfile, not the platform: `uv.lock`
+    resolves to different wheels on macOS-arm64 and Linux-x86_64, so a hit can
+    legitimately cross machines. That is deliberate — hashing the platform
+    would drop cross-machine hit rate to roughly zero and delete the feature in
+    order to protect it — but sharing across platforms while recording *nothing*
+    is not defensible. So the producer records what ran it, and the pull says
+    so.
+    """
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.harness import build_env_identity
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    source = "value = sum(range(3000))"
+
+    def build(name: str):
+        notebook_dir = create_notebook(tmp_path / name, name)
+        add_cell_to_notebook(notebook_dir, "up", None)
+        write_cell(notebook_dir, "up", source)
+        add_cell_to_notebook(notebook_dir, "down", "up")
+        write_cell(notebook_dir, "down", "doubled = value * 2")
+        return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+
+    monkeypatch.setattr(
+        CellExecutor,
+        "_lake_config",
+        lambda self: StrataConfig(
+            cache_dir=tmp_path / "cache",
+            notebook_remote_store_url=team_store_server["base_url"],
+            notebook_team_cache_enabled=True,
+        ),
+    )
+
+    alice = build("alice")
+    assert (await CellExecutor(alice).execute_cell("up", source)).success
+
+    bob = build("bob")
+    hit = await CellExecutor(bob).execute_cell("up", source)
+
+    assert hit.cache_hit is True
+    # The venv here shims to the dev interpreter, so the harness reports this
+    # process's identity — which is what makes the expected value knowable.
+    assert hit.team_cache_build_env == build_env_identity()
+    assert hit.team_cache_build_env != ""
+
+
+async def test_a_pulled_result_keeps_the_publishers_platform(team_store_server, local_manager):
+    """Preserved, not restamped.
+
+    Rewriting it with the puller's own identity would convert a record of
+    where the result came from into a claim that this machine produced it —
+    and the next person to pull from *this* store would inherit the lie.
+    """
+    import json as json_module
+
+    foreign = "cpython-3.11-linux-s390x"
+    artifact_id = "nb_someone_else_cell_zz_var_model"
+    provenance = derive_subkey(CELL_PROVENANCE, "model")
+    shared = ArtifactStore(team_store_server["artifact_dir"])
+    version = shared.create_artifact(
+        artifact_id=artifact_id,
+        provenance_hash=provenance,
+        transform_spec=TransformSpec(
+            executor="notebook/cell@v1",
+            params={"content_type": "json/object", "build_env": foreign},
+            inputs=[],
+        ),
+        principal="alice",
+    )
+    shared.blob_store.write_blob(artifact_id, version, b'{"ok": 1}')
+    shared.finalize_artifact(
+        artifact_id=artifact_id, version=version, schema_json="", row_count=0, byte_size=9
+    )
+
+    store = TeamStore(team_store_server["base_url"])
+    try:
+        pull = await pull_cell_outputs(
+            store,
+            local_manager,
+            cell_id=CELL_ID,
+            provenance_hash=CELL_PROVENANCE,
+            consumed_vars={"model"},
+        )
+    finally:
+        await store.aclose()
+
+    assert pull is not None
+    assert pull.build_env == foreign
+
+    stored = local_manager.artifact_store.get_latest_version(
+        local_manager.cell_artifact_id(CELL_ID, "model")
+    )
+    assert stored is not None
+    params = json_module.loads(stored.transform_spec)["params"]
+    assert params["build_env"] == foreign

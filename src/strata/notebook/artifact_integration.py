@@ -188,6 +188,7 @@ class NotebookArtifactManager:
         env_hash: str = "",
         iteration: int | None = None,
         variant: str | None = None,
+        build_env: str = "",
     ) -> ArtifactVersion:
         """Store a cell output as an artifact.
 
@@ -208,6 +209,13 @@ class NotebookArtifactManager:
             variant: Optional sweep-v2 fan-out variant name. When set, the
                 artifact id is suffixed with ``@variant={name}`` so each
                 ``# @per_variant`` instance is stored as its own artifact.
+            build_env: Interpreter + platform that produced the bytes, as
+                reported by the process that ran the cell (see
+                ``harness.build_env_identity``). Recorded, never hashed: it
+                exists so a shared cache can say *where* a result came from,
+                and folding it into the provenance key would drop cross-machine
+                hit rate to nothing. Empty when the producer did not report one
+                — every artifact written before this existed.
 
         Returns:
             The created ArtifactVersion
@@ -228,6 +236,8 @@ class NotebookArtifactManager:
             params["source_hash"] = source_hash
         if env_hash:
             params["env_hash"] = env_hash
+        if build_env:
+            params["build_env"] = build_env
 
         transform_spec = TransformSpec(
             executor="notebook/cell@v1",
