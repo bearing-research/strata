@@ -1967,35 +1967,61 @@ class NotebookSession:
             duration_ms=int((_time.perf_counter() - started) * 1000),
         )
 
-    def environment_matches_lockfile(self) -> bool:
-        """Does the venv actually hold what the lockfile declares?
+    def environment_attestation_error(self) -> str | None:
+        """Why this environment cannot be published from, or ``None`` if it can.
 
-        Provenance is computed from ``uv.lock`` on disk, but nothing forces the
-        installed environment to agree with it. A failed ``uv sync`` keeps the
-        previous venv and leaves the sync state ``ready`` — deliberately, so a
-        transient network failure does not lock someone out of their own
-        notebook — and from then on every artifact is stamped with an
-        environment it was not built in.
+        Provenance is computed from the lockfiles on disk, but nothing forces
+        the installed environment to agree with them. A failed ``uv sync``
+        keeps the previous venv and leaves the sync state ``ready`` —
+        deliberately, so a transient network failure does not lock someone out
+        of their own notebook — and from then on every artifact is stamped with
+        an environment it was not built in.
 
         Locally that is a footgun the owner absorbs. Published to a shared
         store it is someone else's problem, and a permanent one: the team cache
         keeps the first writer's result, so a stale-environment artifact
         becomes the answer everyone gets.
 
-        Compares what a sync actually realized against what is declared now.
-        It does not re-inspect the venv's contents — a hand-installed package
-        would slip past — because that costs a subprocess on a path that runs
-        after every cell. The failure this closes is the one that happens by
+        Returns a reason rather than a bool because the remedies differ — "no
+        sync was ever recorded" and "the sync failed and the lockfile moved on"
+        are different situations, and a caller logging one message for both
+        sends people looking in the wrong place.
+
+        It does not re-inspect the venv's contents, so a hand-installed package
+        still slips past. That would cost a subprocess on a path that runs after
+        every cell, and the failure being closed here is the one that happens by
         accident rather than the one that takes effort.
         """
-        if self.environment_interpreter_source != "venv":
-            # No notebook venv at all: cells run against whatever ``python``
-            # resolves to, which the lockfile says nothing about.
-            return False
+        # Only a *known* system-python fallback disqualifies. ``unknown`` means
+        # nobody has probed the interpreter yet, which is the normal state for
+        # a directly constructed session — the CLI, the MCP ops layer, an agent
+        # scratchpad — and treating it as a failure switched publishing off for
+        # that entire surface with no way to tell why.
+        if self.environment_interpreter_source == "path":
+            return (
+                "the notebook has no venv and is running system python, "
+                "which uv.lock does not describe"
+            )
+
         realized = self._read_persisted_environment_metadata().synced_lockfile_hash
         if not realized:
-            return False
-        return realized == compute_lockfile_hash(self.path)
+            return "no successful environment sync has been recorded for this notebook"
+        if realized != compute_lockfile_hash(self.path):
+            return "the installed environment does not match uv.lock"
+
+        # The Python attestation covers `compute_lockfile_hash`, which folds
+        # renv.lock in as well — so on an R notebook it can be satisfied by a
+        # `uv sync` that ran before a `renv::restore()` that failed. R records
+        # its own last-good hash, so check that half against its own lockfile.
+        renv_lock = self.path / "renv.lock"
+        if renv_lock.exists():
+            from strata.notebook.dependencies import _renv_lockfile_hash
+
+            state = load_runtime_state(self.path)
+            if state.r.lock_hash != _renv_lockfile_hash(self.path):
+                return "the installed R library does not match renv.lock"
+
+        return None
 
     def _apply_uv_sync_result(self, ok: bool, *, duration_ms: int) -> None:
         """Update runtime state after a uv sync attempt."""
@@ -2308,11 +2334,13 @@ class NotebookSession:
         self.environment_sync_state = "ready"
         self.environment_sync_error = None
         self.environment_sync_notice = None
-        # ``uv add`` / ``uv remove`` installed into the venv on the way here, so
-        # this path realized the lockfile as surely as an explicit sync did.
-        # Without recording it, every dependency change would silently disable
-        # publishing until the next full sync.
-        persist_environment_synced_lockfile_hash(self.path, compute_lockfile_hash(self.path))
+        # Deliberately does NOT attest the environment. This runs on the
+        # session-reuse path too — every reopen of an already-open notebook —
+        # where nothing was installed. Attesting here meant a failed sync could
+        # be laundered by reloading the browser tab: the new lockfile would be
+        # recorded as realized without anything having been installed, and the
+        # next cell would publish a stale-environment result to the team.
+        # The caller that knows an install happened attests instead.
         self.environment_last_synced_at = persisted.last_synced_at or int(_time.time() * 1000)
         self.environment_last_sync_duration_ms = int((_time.perf_counter() - started) * 1000)
 
@@ -2428,6 +2456,16 @@ class NotebookSession:
         # 1. Dependency mutation already synced .venv. Reuse that interpreter
         #    instead of immediately running a second uv sync.
         await asyncio.to_thread(self.refresh_environment_runtime)
+        # ``uv add`` / ``uv remove`` installed into the venv on the way here, so
+        # this path realized the lockfile as surely as an explicit sync did —
+        # and unlike ``refresh_environment_runtime`` itself, reaching here means
+        # an install actually happened. Without it, every dependency change
+        # would disable publishing until the next full sync.
+        await asyncio.to_thread(
+            persist_environment_synced_lockfile_hash,
+            self.path,
+            compute_lockfile_hash(self.path),
+        )
         await self._invalidate_warm_pool_for_environment_change()
 
         # 2. Recompute lockfile hash (triggers cache invalidation on next exec)

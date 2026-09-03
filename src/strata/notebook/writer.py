@@ -838,6 +838,12 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
 
     declared_package_count = len(list_dependencies(notebook_dir))
     state = load_runtime_state(notebook_dir)
+    # Everything below describes what is *declared* on disk and is rewritten
+    # unconditionally. The attestation is the one field that describes what was
+    # *installed*, so it has to survive a refresh it knows nothing about —
+    # rebuilding the record without it silently revoked the attestation on
+    # every sync, dependency change, and environment job.
+    realized = state.environment.synced_lockfile_hash
     state.environment = EnvironmentRuntime(
         requested_python_version=requested_python_version,
         runtime_python_version=runtime_python_version,
@@ -848,6 +854,7 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
         resolved_package_count=resolved_package_count,
         has_lockfile=lock_path.exists(),
         last_synced_at=int(time.time() * 1000),
+        synced_lockfile_hash=realized,
     )
     save_runtime_state(notebook_dir, state)
 
