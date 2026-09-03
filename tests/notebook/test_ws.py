@@ -635,6 +635,10 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         source_hash="",
         env_hash="",
         variant=None,
+        # Mirrors the real signature. A stub that pins an outdated one turns
+        # any added keyword into "the cell errored", which is what this
+        # assertion reads as — several layers away from the actual cause.
+        build_env="",
     ):
         return True
 
