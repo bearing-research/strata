@@ -626,10 +626,24 @@ def create_notebook(
 
     if initialize_environment:
         # Run uv sync to create venv + uv.lock (best-effort)
-        _uv_sync(notebook_dir, python_version=requested_python_version)
+        synced = _uv_sync(notebook_dir, python_version=requested_python_version)
 
         # Populate environment section with lockfile hash + python version
         _update_environment_metadata(notebook_dir)
+
+        # And separately, what the sync actually realized. The snapshot above
+        # records the lockfile on disk whether or not it was installed; this
+        # records it only when it was. A best-effort sync that fell over must
+        # not leave the notebook claiming an environment it does not have.
+        if synced:
+            from strata.notebook.env import compute_lockfile_hash
+            from strata.notebook.runtime_state import (
+                persist_environment_synced_lockfile_hash,
+            )
+
+            persist_environment_synced_lockfile_hash(
+                notebook_dir, compute_lockfile_hash(notebook_dir)
+            )
 
     return notebook_dir
 

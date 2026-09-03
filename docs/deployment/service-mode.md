@@ -350,6 +350,15 @@ What to know before switching it on:
   it does not look like the cache is simply empty.
 - **It never fails a cell.** A store that is unreachable, refusing, or missing
   one of a cell's outputs ends in "run it locally".
+- **A notebook whose environment does not match its lockfile will not publish.**
+  A failed `uv sync` keeps the previous venv and stays usable on purpose, so a
+  transient network failure does not lock you out of your own notebook - but
+  provenance is computed from `uv.lock`, which has moved on, so anything
+  produced afterwards would be stamped with an environment it was not built in.
+  Locally that is your own problem; published it is permanent and everyone's,
+  because the store keeps the first writer's result. The cell still runs and
+  its result is still cached locally; only the publish is refused, with a
+  warning naming the cell. Re-run the environment sync to resume publishing.
 - **Point it at an authenticated store.** Without auth there is no tenant, so
   every team shares one flat namespace, and no principal, so every result
   arrives authored by nobody. The server warns at startup if the team cache is

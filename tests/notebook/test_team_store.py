@@ -347,7 +347,13 @@ async def test_a_result_alice_never_published_by_hand_reaches_bob(
         write_cell(notebook_dir, "up", upstream_source)
         add_cell_to_notebook(notebook_dir, "down", "up")
         write_cell(notebook_dir, "down", "doubled = value * 2")
-        return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        # Opening a notebook syncs its environment. Publishing requires that
+        # attestation — an unsynced session cannot say the venv matches
+        # uv.lock — so a test that constructs a session directly has to do
+        # what opening one does.
+        session.ensure_venv_synced()
+        return session
 
     team_config = StrataConfig(
         cache_dir=tmp_path / "shared-config-cache",
@@ -505,7 +511,13 @@ async def test_a_pulled_result_says_where_it_was_computed(tmp_path, team_store_s
         write_cell(notebook_dir, "up", source)
         add_cell_to_notebook(notebook_dir, "down", "up")
         write_cell(notebook_dir, "down", "doubled = value * 2")
-        return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        # Opening a notebook syncs its environment. Publishing requires that
+        # attestation — an unsynced session cannot say the venv matches
+        # uv.lock — so a test that constructs a session directly has to do
+        # what opening one does.
+        session.ensure_venv_synced()
+        return session
 
     monkeypatch.setattr(
         CellExecutor,
@@ -606,7 +618,13 @@ async def test_a_team_hit_is_priced_by_the_run_it_replaced(
         write_cell(notebook_dir, "up", source)
         add_cell_to_notebook(notebook_dir, "down", "up")
         write_cell(notebook_dir, "down", "doubled = value * 2")
-        return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        # Opening a notebook syncs its environment. Publishing requires that
+        # attestation — an unsynced session cannot say the venv matches
+        # uv.lock — so a test that constructs a session directly has to do
+        # what opening one does.
+        session.ensure_venv_synced()
+        return session
 
     monkeypatch.setattr(
         CellExecutor,
@@ -643,3 +661,117 @@ async def test_a_team_hit_is_priced_by_the_run_it_replaced(
     summary = bob.get_profiling_summary()
     assert summary["team_cache_savings_ms"] == int(alice_run.duration_ms)
     assert summary["team_cache_hits"] == 1
+
+
+async def test_a_failed_environment_sync_does_not_publish(tmp_path, team_store_server, monkeypatch):
+    """The poisoning vector this gate exists for.
+
+    A failed ``uv sync`` keeps the previous venv and leaves the sync state
+    ``ready`` — deliberately, so a transient network failure does not lock
+    someone out of their own notebook. But provenance is computed from
+    ``uv.lock`` on disk, which has moved on. Every artifact produced from then
+    on is stamped with an environment it was not built in.
+
+    Locally that is the owner's problem. Published to a shared store it is
+    permanent and everyone's: first-writer-wins means the stale-environment
+    result becomes the answer the whole team gets.
+
+    The cell must still run, and its result must still be stored locally.
+    Only the publish is refused.
+    """
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    source = "value = sum(range(1000))"
+    notebook_dir = create_notebook(tmp_path / "broken", "broken")
+    add_cell_to_notebook(notebook_dir, "up", None)
+    write_cell(notebook_dir, "up", source)
+    add_cell_to_notebook(notebook_dir, "down", "up")
+    write_cell(notebook_dir, "down", "doubled = value * 2")
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.ensure_venv_synced()
+    assert session.environment_matches_lockfile()
+
+    # The lockfile moves on and the re-sync fails: the venv still holds the old
+    # environment while provenance now describes the new one.
+    (notebook_dir / "uv.lock").write_text('version = 1\n[[package]]\nname = "new"\n')
+    monkeypatch.setattr("strata.notebook.session._uv_sync", lambda *a, **k: False)
+    session.ensure_venv_synced()
+
+    assert session.environment_sync_state == "ready", (
+        "a failed sync deliberately stays usable — that is why the publish "
+        "needs its own gate rather than relying on the sync state"
+    )
+    assert not session.environment_matches_lockfile()
+
+    monkeypatch.setattr(
+        CellExecutor,
+        "_lake_config",
+        lambda self: StrataConfig(
+            cache_dir=tmp_path / "cache",
+            notebook_remote_store_url=team_store_server["base_url"],
+            notebook_team_cache_enabled=True,
+        ),
+    )
+    result = await CellExecutor(session).execute_cell("up", source)
+
+    # The cell ran and its result is local.
+    assert result.success, result.error
+    manager = session.get_artifact_manager()
+    stored = manager.artifact_store.get_latest_version(manager.cell_artifact_id("up", "value"))
+    assert stored is not None
+
+    # But nothing reached the team.
+    shared = ArtifactStore(team_store_server["artifact_dir"])
+    assert shared.find_by_provenance(stored.provenance_hash) is None, (
+        "an artifact built in a stale environment was published to the team"
+    )
+
+
+async def test_publishing_resumes_once_the_environment_is_synced(
+    tmp_path, team_store_server, monkeypatch
+):
+    """The gate must be a gate, not a latch — a fixed environment publishes."""
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    source = "value = sum(range(1200))"
+    notebook_dir = create_notebook(tmp_path / "recovered", "recovered")
+    add_cell_to_notebook(notebook_dir, "up", None)
+    write_cell(notebook_dir, "up", source)
+    add_cell_to_notebook(notebook_dir, "down", "up")
+    write_cell(notebook_dir, "down", "doubled = value * 2")
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+
+    (notebook_dir / "uv.lock").write_text('version = 1\n[[package]]\nname = "new"\n')
+    monkeypatch.setattr("strata.notebook.session._uv_sync", lambda *a, **k: False)
+    session.ensure_venv_synced()
+    assert not session.environment_matches_lockfile()
+
+    monkeypatch.setattr("strata.notebook.session._uv_sync", lambda *a, **k: True)
+    session.ensure_venv_synced()
+    assert session.environment_matches_lockfile()
+
+    monkeypatch.setattr(
+        CellExecutor,
+        "_lake_config",
+        lambda self: StrataConfig(
+            cache_dir=tmp_path / "cache",
+            notebook_remote_store_url=team_store_server["base_url"],
+            notebook_team_cache_enabled=True,
+        ),
+    )
+    result = await CellExecutor(session).execute_cell("up", source)
+    assert result.success, result.error
+
+    manager = session.get_artifact_manager()
+    stored = manager.artifact_store.get_latest_version(manager.cell_artifact_id("up", "value"))
+    assert stored is not None
+    shared = ArtifactStore(team_store_server["artifact_dir"])
+    assert shared.find_by_provenance(stored.provenance_hash) is not None

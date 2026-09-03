@@ -85,6 +85,12 @@ class EnvironmentRuntime:
     resolved_package_count: int = 0
     has_lockfile: bool = False
     last_synced_at: int = 0
+    # The lockfile hash a ``uv sync`` actually *realized*, as opposed to
+    # ``lockfile_hash``, which is whatever was on disk when metadata was last
+    # written. The two differ exactly when a sync failed and the previous venv
+    # was kept — the case where a cell then runs in one environment while its
+    # provenance claims another. Empty until a successful sync records one.
+    synced_lockfile_hash: str = ""
 
 
 @dataclass
@@ -205,6 +211,21 @@ def persist_cell_provenance(
     entry.last_provenance_hash = last_provenance_hash or None
     entry.last_source_hash = last_source_hash or None
     entry.last_env_hash = last_env_hash or None
+    save_runtime_state(notebook_dir, state)
+
+
+def persist_environment_synced_lockfile_hash(notebook_dir: Path, lockfile_hash: str) -> None:
+    """Record the lockfile a ``uv sync`` actually realized.
+
+    Written only on success, and separately from the rest of the environment
+    snapshot, because the rest is written unconditionally: the snapshot
+    records what is *declared* on disk, while this records what was
+    *installed*. Keeping them apart is the whole point — when they disagree,
+    the venv does not match the lockfile that provenance is being computed
+    from.
+    """
+    state = load_runtime_state(notebook_dir)
+    state.environment.synced_lockfile_hash = lockfile_hash
     save_runtime_state(notebook_dir, state)
 
 
