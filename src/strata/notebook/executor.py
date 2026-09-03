@@ -359,6 +359,12 @@ class CellExecutionResult:
     # team hit is otherwise indistinguishable from a local one, and a result
     # that appears with no author reads as a bug rather than as a saving.
     team_cache_principal: str | None = None
+    # And on what — e.g. ``cpython-3.14-linux-x86_64``. The provenance key
+    # covers the lockfile, not the platform, so a team hit can legitimately
+    # cross machines; saying which one it crossed from is what keeps that a
+    # disclosed property rather than a silent one. Empty unless this was a team
+    # hit whose publisher recorded a platform.
+    team_cache_build_env: str = ""
 
     def __post_init__(self) -> None:
         # Legacy shim: accept either `display_outputs` or `display_output`
@@ -1293,6 +1299,7 @@ class CellExecutor:
                     ),
                     execution_method="cached",
                     team_cache_principal=team_pull.principal if team_pull else None,
+                    team_cache_build_env=team_pull.build_env if team_pull else "",
                 ).apply_remote_metadata(**remote_metadata)
                 self.session.record_successful_execution_provenance(
                     cell_id,
@@ -1395,6 +1402,11 @@ class CellExecutor:
                         source_hash=source_hash,
                         env_hash=env_hash,
                         variant=fanout_variant,
+                        # Reported by whatever actually ran the cell — the
+                        # notebook venv, or a remote worker's interpreter on
+                        # someone else's hardware. Never computed here: this
+                        # process may not be on that machine.
+                        build_env=str(result.get("build_env") or ""),
                     )
                     if not stored_ok:
                         logger.error(
@@ -1785,6 +1797,7 @@ class CellExecutor:
                     ),
                     execution_method="cached",
                     team_cache_principal=team_pull.principal if team_pull else None,
+                    team_cache_build_env=team_pull.build_env if team_pull else "",
                 )
                 self.session.record_successful_execution_provenance(
                     cell_id,
@@ -3480,6 +3493,7 @@ class CellExecutor:
         source_hash: str = "",
         env_hash: str = "",
         variant: str | None = None,
+        build_env: str = "",
     ) -> bool:
         """Persist consumed output variables as artifacts.
 
@@ -3587,6 +3601,7 @@ class CellExecutor:
                     source_hash=source_hash,
                     env_hash=env_hash,
                     variant=variant,
+                    build_env=build_env,
                 )
                 uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
                 cell.artifact_uris[var_name] = uri

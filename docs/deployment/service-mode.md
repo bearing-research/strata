@@ -347,11 +347,18 @@ What to know before switching it on:
   every team shares one flat namespace, and no principal, so every result
   arrives authored by nobody. The server warns at startup if the team cache is
   on with no `notebook_remote_store_headers`.
-- **The environment key does not include the platform.** `uv.lock` resolves to
-  different wheels on macOS-arm64 and Linux-x86_64, and today the env hash
-  covers the lockfile only. In practice a shared cache handing the whole team
-  one number is the more reproducible outcome, but if your work depends on
-  hardware-identical results, leave the team cache off for now.
+- **The environment key does not include the platform, but the artifact
+  records it.** `uv.lock` resolves to different wheels on macOS-arm64 and
+  Linux-x86_64, and the env hash covers the lockfile only — deliberately, since
+  hashing the platform would drop cross-machine hit rate to roughly zero and
+  delete the feature in order to protect it. So a hit can legitimately cross
+  machines, and every artifact carries the interpreter and hardware that
+  produced it (`cpython-3.14-linux-x86_64`), reported by the process that
+  actually ran the cell — the notebook venv locally, or the worker's
+  interpreter for a remote cell. A team hit says which platform it came from
+  rather than crossing one silently. In practice a shared cache handing the
+  whole team one number is the more reproducible outcome, but if your work
+  depends on hardware-identical results, leave the team cache off for now.
 
 ## Migrating from personal mode
 
