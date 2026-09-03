@@ -307,6 +307,52 @@ In a fully proxy-fronted setup the notebook's requests instead flow through the
 same auth proxy, which injects identity, and `notebook_remote_store_headers`
 can be omitted.
 
+### The team cache: sharing results nobody named
+
+Everything above is **explicit publish** - a researcher decides a dataset is
+worth sharing and names it. That leaves out the expensive middle of a pipeline,
+because nobody names their intermediate results, and that is exactly where the
+recomputation is.
+
+`STRATA_NOTEBOOK_TEAM_CACHE_ENABLED=true` closes that gap. On a **local cache
+miss** the notebook asks the shared store whether anyone has already run this
+exact computation, and on a hit it fetches the result instead of running the
+cell. After a cell does run, its outputs are offered back to the store so the
+next teammate hits.
+
+```bash
+# On each researcher's notebook server, alongside the two settings above:
+STRATA_NOTEBOOK_TEAM_CACHE_ENABLED=true
+```
+
+It works because a cell's provenance key -
+`sha256(sorted_input_hashes + source_hash + env_hash)` - contains no notebook id
+and no cell id. Two people running the same source over the same inputs in the
+same environment already arrive at the same hash; the store just had no way to
+be asked.
+
+What to know before switching it on:
+
+- **It is a separate opt-in from the URL, deliberately.** Wanting a shared store
+  to publish *to* is not the same as wanting one to silently source results
+  *from*. Enabling it without `STRATA_NOTEBOOK_REMOTE_STORE_URL` is rejected at
+  startup rather than left silently inert.
+- **Publishing needs `artifacts:write`.** Members without the scope still get
+  team cache *hits*; they just do not contribute. That is a supported
+  configuration, and the notebook logs a warning when a publish is refused so
+  it does not look like the cache is simply empty.
+- **It never fails a cell.** A store that is unreachable, refusing, or missing
+  one of a cell's outputs ends in "run it locally".
+- **Point it at an authenticated store.** Without auth there is no tenant, so
+  every team shares one flat namespace, and no principal, so every result
+  arrives authored by nobody. The server warns at startup if the team cache is
+  on with no `notebook_remote_store_headers`.
+- **The environment key does not include the platform.** `uv.lock` resolves to
+  different wheels on macOS-arm64 and Linux-x86_64, and today the env hash
+  covers the lockfile only. In practice a shared cache handing the whole team
+  one number is the more reproducible outcome, but if your work depends on
+  hardware-identical results, leave the team cache off for now.
+
 ## Migrating from personal mode
 
 If you've been running personal mode and want to grow into service:

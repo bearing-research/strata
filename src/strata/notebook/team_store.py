@@ -28,6 +28,7 @@ cache does not work.
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 
 import httpx
@@ -45,6 +46,10 @@ logger = get_logger(__name__)
 # result the user actually wants and its size is not ours to predict.
 LOOKUP_TIMEOUT_SECONDS = 10.0
 DOWNLOAD_TIMEOUT_SECONDS = 300.0
+# A publish runs after the cell has already finished, so the user is waiting on
+# nothing — but they are waiting to see their output, so it cannot be
+# open-ended either.
+PUBLISH_TIMEOUT_SECONDS = 300.0
 
 
 @dataclass(frozen=True)
@@ -137,6 +142,55 @@ class TeamStore:
             principal=match.get("principal"),
             blob=blob,
         )
+
+    async def publish(
+        self,
+        provenance_hash: str,
+        blob: bytes,
+        *,
+        content_type: str,
+        variable_name: str | None = None,
+    ) -> bool:
+        """Offer a result to the team, keyed by provenance. Never raises.
+
+        Returns whether it landed, which is used for logging and nothing else:
+        a push that fails costs the *next* person a recomputation, and costs
+        this one nothing. It must not turn a cell that ran fine into a cell
+        that errored.
+        """
+        metadata: dict[str, str] = {"content_type": content_type}
+        if variable_name:
+            metadata["variable_name"] = variable_name
+        files = {
+            "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
+            "data": ("data.bin", blob, "application/octet-stream"),
+        }
+        try:
+            response = await self._client.put(
+                f"{self._base_url}/v1/artifacts/by-provenance/{provenance_hash}",
+                files=files,
+                headers=self._headers,
+                timeout=PUBLISH_TIMEOUT_SECONDS,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "Team store unreachable publishing %s (%s); the result stays local",
+                provenance_hash[:12],
+                exc,
+            )
+            return False
+
+        if response.status_code >= 400:
+            # 403 here is the common and important one: a read-only member.
+            # That is a legitimate configuration, not a fault, but it should be
+            # visible — otherwise a team wonders why nothing is ever shared.
+            logger.warning(
+                "Team store refused to publish %s with HTTP %d; the result stays local",
+                provenance_hash[:12],
+                response.status_code,
+            )
+            return False
+        return True
 
     async def _lookup(self, provenance_hash: str) -> dict | None:
         try:
@@ -281,3 +335,75 @@ async def pull_cell_outputs(
         principal or "an unrecorded author",
     )
     return TeamPull(variables=tuple(ordered), principal=principal, byte_size=total_bytes)
+
+
+async def publish_cell_outputs(
+    store: TeamStore,
+    artifact_mgr: NotebookArtifactManager,
+    *,
+    cell_id: str,
+    consumed_vars: set[str],
+    variant: str | None = None,
+) -> int:
+    """Offer this cell's freshly computed outputs to the team.
+
+    Reads back what was just written to the *local* store rather than the
+    harness's temp files: those artifacts are the ones the pull will have to
+    reproduce byte for byte, so publishing anything else would let the two
+    halves disagree without either being obviously wrong. It also means the
+    per-variable provenance key comes from the stored artifact rather than
+    being recomputed here, so the two sides cannot drift.
+
+    Unlike the pull this is not all-or-nothing. A pull that is short one
+    variable is a hit that will fail validation, so it must abort; a publish
+    that is short one variable just means the next person pulls nothing and
+    recomputes — the same outcome as not publishing at all, and no worse for
+    having published the others.
+
+    Returns how many variables landed. Never raises: the cell has already
+    succeeded, and a shared-cache problem must not retroactively fail it.
+    """
+    published = 0
+    for var in sorted(consumed_vars):
+        artifact_id = artifact_mgr.cell_artifact_id(cell_id, var, variant=variant)
+        stored = artifact_mgr.artifact_store.get_latest_version(artifact_id)
+        if stored is None or stored.state not in ("ready", "superseded"):
+            continue
+        blob = artifact_mgr.artifact_store.blob_store.read_blob(artifact_id, stored.version)
+        if blob is None:
+            continue
+        if await store.publish(
+            stored.provenance_hash,
+            blob,
+            content_type=_content_type_of(stored),
+            variable_name=var,
+        ):
+            published += 1
+
+    if published:
+        logger.info(
+            "Published %d of cell %s's outputs to the team store",
+            published,
+            cell_id,
+        )
+    return published
+
+
+def _content_type_of(artifact) -> str:
+    """How the blob was serialized, per the stored transform spec.
+
+    Empty rather than a guess: the puller needs this to decode, and a plausible
+    default that is wrong for a pickle is worse than an absent one.
+    """
+    if not artifact.transform_spec:
+        return ""
+    try:
+        spec = json.loads(artifact.transform_spec)
+    except ValueError:
+        return ""
+    if not isinstance(spec, dict):
+        return ""
+    params = spec.get("params")
+    if not isinstance(params, dict):
+        return ""
+    return str(params.get("content_type") or "")
