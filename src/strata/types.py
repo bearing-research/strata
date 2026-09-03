@@ -876,6 +876,15 @@ class ArtifactProvenanceMatchResponse(BaseModel):
             The only way a shared cache can say what a hit *saved*: whoever
             hits it never ran the cell, so their own history holds no
             comparable duration. Zero when unrecorded.
+        env_hash: The environment the result was computed in, as a digest over
+            the lockfiles and the declared runtime env. Together with
+            ``build_env`` this is the artifact's environment identity: *which
+            package set*, and *on what*. It has always participated in the
+            provenance key and has never been readable, which is fine while a
+            cache is one person's and useless the moment it is a team's — "you
+            got a hit and I did not" is answered by comparing these two values
+            and by nothing else. Empty for artifacts that record no
+            environment.
     """
 
     artifact_id: str
@@ -890,6 +899,7 @@ class ArtifactProvenanceMatchResponse(BaseModel):
     principal: str | None = None
     build_env: str = ""
     build_duration_ms: int = 0
+    env_hash: str = ""
 
 
 class InputChangeInfo(BaseModel):
@@ -1050,6 +1060,9 @@ class LineageNode(BaseModel):
         build_env: The interpreter and hardware that produced it, e.g.
             ``cpython-3.14-linux-x86_64``.
         build_duration_ms: How long the producing run took.
+        env_hash: Digest of the environment it was computed in. With
+            ``build_env``, the step's environment identity — which package set,
+            on what.
 
     The last three used to be worth nothing here: before results could be
     shared, "who" was always you and "which environment" was always this
@@ -1068,6 +1081,7 @@ class LineageNode(BaseModel):
     principal: str | None = None
     build_env: str = ""
     build_duration_ms: int = 0
+    env_hash: str = ""
 
 
 class LineageEdge(BaseModel):

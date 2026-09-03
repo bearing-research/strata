@@ -23,6 +23,12 @@ export interface LineageTreeNode {
   principal: string | null
   buildEnv: string
   buildDurationMs: number
+  /**
+   * Which package set, where ``buildEnv`` is which platform. Together they are
+   * the step's environment identity, and comparing them is the only way to
+   * answer "you got a cache hit and I did not".
+   */
+  envHash: string
 }
 
 function tableLabel(uri: string): string {
@@ -63,6 +69,7 @@ export function lineageToTree(graph: LineageGraph, rootUri: string): LineageTree
       principal: n?.principal ?? null,
       buildEnv: n?.build_env ?? '',
       buildDurationMs: n?.build_duration_ms ?? 0,
+      envHash: n?.env_hash ?? '',
     }
   }
   return build(rootUri)

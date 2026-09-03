@@ -506,3 +506,37 @@ def test_an_artifact_stored_without_a_platform_reports_an_empty_one(personal_ser
 
     found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}").json()
     assert found["build_env"] == ""
+
+
+def test_the_environment_identity_round_trips(personal_server):
+    """Both halves of it: which package set (env_hash) and on what (build_env).
+
+    Recorded on every notebook artifact since long before the team store, and
+    readable through nothing until now — the roadmap's "incidental lockfile
+    hash". A shared cache makes it the first thing anyone needs to see.
+    """
+    base_url = personal_server["base_url"]
+    provenance = "5" * 64
+    response = httpx.put(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}",
+        files={
+            "metadata": (
+                "metadata.json",
+                json.dumps(
+                    {
+                        "content_type": "arrow/ipc",
+                        "build_env": "cpython-3.13-linux-aarch64",
+                        "env_hash": "e" * 64,
+                    }
+                ),
+                "application/json",
+            ),
+            "data": ("data.bin", b"bytes", "application/octet-stream"),
+        },
+        timeout=30.0,
+    )
+    assert response.status_code == 200, response.text
+
+    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}").json()
+    assert found["env_hash"] == "e" * 64
+    assert found["build_env"] == "cpython-3.13-linux-aarch64"

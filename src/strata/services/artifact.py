@@ -58,8 +58,8 @@ def _transform_ref(transform_spec: str | None) -> str | None:
         return None
 
 
-def _build_metadata(transform_spec: str | None) -> tuple[str, int]:
-    """``(build_env, build_duration_ms)`` from a stored transform_spec.
+def _build_metadata(transform_spec: str | None) -> tuple[str, int, str]:
+    """``(build_env, build_duration_ms, env_hash)`` from a stored transform_spec.
 
     Recorded by the process that ran the cell, so both are absent for tables,
     for core transforms, and for anything stored before those fields existed.
@@ -67,18 +67,22 @@ def _build_metadata(transform_spec: str | None) -> tuple[str, int]:
     reading ``_transform_ref`` takes of the same field.
     """
     if not transform_spec:
-        return "", 0
+        return "", 0, ""
     try:
         params = json.loads(transform_spec).get("params", {})
     except (json.JSONDecodeError, ValueError):
-        return "", 0
+        return "", 0, ""
     if not isinstance(params, dict):
-        return "", 0
+        return "", 0, ""
     try:
         duration = int(params.get("build_duration_ms") or 0)
     except (TypeError, ValueError):
         duration = 0
-    return str(params.get("build_env") or ""), duration
+    return (
+        str(params.get("build_env") or ""),
+        duration,
+        str(params.get("env_hash") or ""),
+    )
 
 
 def _load_input_versions(input_versions: str | None) -> dict[str, str]:
@@ -118,7 +122,7 @@ class ArtifactService:
         queue: list[tuple[str, str, int, int]] = []  # (uri, artifact_id, version, depth)
 
         # Add root node
-        root_env, root_duration = _build_metadata(artifact.transform_spec)
+        root_env, root_duration, root_env_hash = _build_metadata(artifact.transform_spec)
         nodes[artifact_uri] = LineageNode(
             uri=artifact_uri,
             artifact_id=artifact_id,
@@ -129,6 +133,7 @@ class ArtifactService:
             principal=artifact.principal,
             build_env=root_env,
             build_duration_ms=root_duration,
+            env_hash=root_env_hash,
         )
         visited.add(artifact_uri)
 
@@ -188,7 +193,9 @@ class ArtifactService:
                 )
                 continue
 
-            input_env, input_duration = _build_metadata(input_artifact.transform_spec)
+            input_env, input_duration, input_env_hash = _build_metadata(
+                input_artifact.transform_spec
+            )
             nodes[node_uri] = LineageNode(
                 uri=node_uri,
                 artifact_id=art_id,
@@ -199,6 +206,7 @@ class ArtifactService:
                 principal=input_artifact.principal,
                 build_env=input_env,
                 build_duration_ms=input_duration,
+                env_hash=input_env_hash,
             )
 
             # Add this artifact's inputs to queue
