@@ -693,7 +693,7 @@ async def test_a_failed_environment_sync_does_not_publish(tmp_path, team_store_s
     write_cell(notebook_dir, "down", "doubled = value * 2")
     session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
     session.ensure_venv_synced()
-    assert session.environment_matches_lockfile()
+    assert session.environment_attestation_error() is None
 
     # The lockfile moves on and the re-sync fails: the venv still holds the old
     # environment while provenance now describes the new one.
@@ -705,7 +705,7 @@ async def test_a_failed_environment_sync_does_not_publish(tmp_path, team_store_s
         "a failed sync deliberately stays usable — that is why the publish "
         "needs its own gate rather than relying on the sync state"
     )
-    assert not session.environment_matches_lockfile()
+    assert session.environment_attestation_error() is not None
 
     monkeypatch.setattr(
         CellExecutor,
@@ -752,11 +752,11 @@ async def test_publishing_resumes_once_the_environment_is_synced(
     (notebook_dir / "uv.lock").write_text('version = 1\n[[package]]\nname = "new"\n')
     monkeypatch.setattr("strata.notebook.session._uv_sync", lambda *a, **k: False)
     session.ensure_venv_synced()
-    assert not session.environment_matches_lockfile()
+    assert session.environment_attestation_error() is not None
 
     monkeypatch.setattr("strata.notebook.session._uv_sync", lambda *a, **k: True)
     session.ensure_venv_synced()
-    assert session.environment_matches_lockfile()
+    assert session.environment_attestation_error() is None
 
     monkeypatch.setattr(
         CellExecutor,
@@ -775,3 +775,98 @@ async def test_publishing_resumes_once_the_environment_is_synced(
     assert stored is not None
     shared = ArtifactStore(team_store_server["artifact_dir"])
     assert shared.find_by_provenance(stored.provenance_hash) is not None
+
+
+def _synced_notebook(tmp_path, name: str):
+    """A notebook in the state opening one leaves it: synced and attested."""
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook_dir = create_notebook(tmp_path / name, name)
+    add_cell_to_notebook(notebook_dir, "up", None)
+    write_cell(notebook_dir, "up", "value = 1")
+    add_cell_to_notebook(notebook_dir, "down", "up")
+    write_cell(notebook_dir, "down", "doubled = value * 2")
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.ensure_venv_synced()
+    assert session.environment_attestation_error() is None
+    return session
+
+
+def test_an_environment_metadata_refresh_keeps_the_attestation(tmp_path):
+    """The metadata snapshot is rebuilt wholesale on every sync, dependency
+    change, and environment job. It describes what is *declared*; the
+    attestation describes what was *installed*. Rebuilding the record without
+    carrying the attestation forward revoked it every time — so clicking "Sync
+    environment" once turned publishing off permanently, on a healthy
+    environment, with only a per-cell warning to show for it.
+    """
+    from strata.notebook.writer import update_environment_metadata
+
+    session = _synced_notebook(tmp_path, "refreshed")
+    update_environment_metadata(session.path)
+
+    assert session.environment_attestation_error() is None
+
+
+def test_reopening_a_session_does_not_launder_a_failed_sync(tmp_path, monkeypatch):
+    """``refresh_environment_runtime`` runs on the session-reuse path — every
+    reopen of an already-open notebook — where nothing is installed.
+
+    Attesting there meant a failed sync could be laundered by reloading the
+    browser tab: the new lockfile would be recorded as realized with nothing
+    installed, and the next cell would publish a stale-environment result.
+    """
+    session = _synced_notebook(tmp_path, "reopened")
+
+    (session.path / "uv.lock").write_text('version = 1\n[[package]]\nname = "new"\n')
+    monkeypatch.setattr("strata.notebook.session._uv_sync", lambda *a, **k: False)
+    session.ensure_venv_synced()
+    assert session.environment_attestation_error() is not None
+
+    # The reopen path. Nothing was installed, so nothing may be attested.
+    session.refresh_environment_runtime()
+
+    assert session.environment_attestation_error() is not None, (
+        "reopening the notebook laundered a failed sync into an attestation"
+    )
+
+
+def test_a_directly_constructed_session_can_still_publish(tmp_path):
+    """The CLI, the MCP ops layer, and the agent scratchpad all build sessions
+    directly and never call a sync, leaving ``interpreter_source`` at
+    ``unknown``. Treating that as a failure switched publishing off for that
+    entire surface — with nothing to diagnose it but a warning about uv.lock.
+
+    ``unknown`` means unprobed, not broken. Only a *known* system-python
+    fallback disqualifies.
+    """
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook_dir = create_notebook(tmp_path / "cli", "cli")
+    add_cell_to_notebook(notebook_dir, "up", None)
+    write_cell(notebook_dir, "up", "value = 1")
+
+    fresh = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    assert fresh.environment_interpreter_source == "unknown"
+    assert fresh.environment_attestation_error() is None
+
+
+def test_a_stale_r_library_does_not_publish(tmp_path):
+    """The Python attestation covers ``compute_lockfile_hash``, which folds
+    ``renv.lock`` in too — so on an R notebook it can be satisfied by a
+    ``uv sync`` that ran before a ``renv::restore()`` that failed, leaving the
+    R library stale while the gate says everything is fine.
+    """
+    session = _synced_notebook(tmp_path, "rnotebook")
+
+    # An R lockfile appears and was never restored. The Python side re-syncs
+    # happily — its own install genuinely succeeded.
+    (session.path / "renv.lock").write_text('{"Packages": {"jsonlite": {"Version": "1.8.0"}}}')
+    session.ensure_venv_synced()
+
+    error = session.environment_attestation_error()
+    assert error is not None and "R library" in error

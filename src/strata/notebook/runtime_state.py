@@ -225,6 +225,12 @@ def persist_environment_synced_lockfile_hash(notebook_dir: Path, lockfile_hash: 
     from.
     """
     state = load_runtime_state(notebook_dir)
+    if state.environment.synced_lockfile_hash == lockfile_hash:
+        # Reopening an unchanged notebook is the common case, and this file
+        # holds every cell's display outputs and timings. Rewriting it to store
+        # a value it already has costs a full serialize and widens the window
+        # in which a concurrent execution's write is clobbered.
+        return
     state.environment.synced_lockfile_hash = lockfile_hash
     save_runtime_state(notebook_dir, state)
 

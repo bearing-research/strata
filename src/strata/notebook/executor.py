@@ -2904,12 +2904,14 @@ class CellExecutor:
         # the *publish* rather than the run keeps a broken sync the owner's
         # problem instead of the team's, which is the only part that has to be
         # someone else's decision.
-        if not self.session.environment_matches_lockfile():
+        attestation_error = self.session.environment_attestation_error()
+        if attestation_error is not None:
             logger.warning(
-                "Not publishing cell %s to the team store: the notebook environment "
-                "does not match uv.lock, so its provenance would describe an "
-                "environment the result was not built in. Re-run the environment sync.",
+                "Not publishing cell %s to the team store: %s, so its provenance "
+                "would describe an environment the result was not built in. "
+                "Re-run the environment sync.",
                 cell_id,
+                attestation_error,
             )
             return
 
