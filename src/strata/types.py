@@ -872,6 +872,10 @@ class ArtifactProvenanceMatchResponse(BaseModel):
             Recorded so a hit can say where it came from instead of sharing
             across platforms silently. Empty for artifacts written before this
             was captured, and for producers that do not report one.
+        build_duration_ms: How long the run that produced these bytes took.
+            The only way a shared cache can say what a hit *saved*: whoever
+            hits it never ran the cell, so their own history holds no
+            comparable duration. Zero when unrecorded.
     """
 
     artifact_id: str
@@ -885,6 +889,7 @@ class ArtifactProvenanceMatchResponse(BaseModel):
     created_at: float = 0.0
     principal: str | None = None
     build_env: str = ""
+    build_duration_ms: int = 0
 
 
 class InputChangeInfo(BaseModel):

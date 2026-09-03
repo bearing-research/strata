@@ -410,6 +410,9 @@ async def put_artifact_by_provenance(
     build_env = metadata.get("build_env")
     if build_env:
         params["build_env"] = str(build_env)
+    build_duration_ms = metadata.get("build_duration_ms")
+    if build_duration_ms:
+        params["build_duration_ms"] = str(build_duration_ms)
 
     artifact_id = str(metadata.get("artifact_id") or uuid.uuid4())
     version = store.create_artifact(
@@ -511,6 +514,7 @@ async def find_artifact_by_provenance(
         provenance_hash=artifact.provenance_hash,
         content_type=_spec_param(artifact, "content_type"),
         build_env=_spec_param(artifact, "build_env"),
+        build_duration_ms=_spec_int(artifact, "build_duration_ms"),
         state=artifact.state,
         arrow_schema=artifact.schema_json,
         row_count=artifact.row_count,
@@ -542,6 +546,21 @@ def _spec_param(artifact, key: str) -> str:
     if not isinstance(params, dict):
         return ""
     return str(params.get(key) or "")
+
+
+def _spec_int(artifact, key: str) -> int:
+    """The same, for a param that is a whole number of milliseconds.
+
+    Params are stored as strings, and a stored value that will not parse means
+    a producer wrote something unexpected. Zero, matching "unrecorded", is the
+    honest reading — the alternative is a 500 on a read path over metadata
+    nothing depends on.
+    """
+    raw = _spec_param(artifact, key)
+    try:
+        return int(raw)
+    except ValueError:
+        return 0
 
 
 @router.get("/v1/artifacts/stats")

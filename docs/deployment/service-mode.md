@@ -331,6 +331,13 @@ and no cell id. Two people running the same source over the same inputs in the
 same environment already arrive at the same hash; the store just had no way to
 be asked.
 
+The notebook's profiling panel splits the savings once a team hit happens:
+"Cache savings ~12m" alongside "From your team ~8m (4 hits, alice, bob)". The
+team figure is priced by what the *publisher's* run actually cost, carried on
+the artifact - whoever gets the hit never ran the cell, so their own history
+holds no comparable number and a locally-derived estimate would credit zero for
+exactly the case the shared store exists to create.
+
 What to know before switching it on:
 
 - **It is a separate opt-in from the URL, deliberately.** Wanting a shared store

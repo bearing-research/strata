@@ -130,6 +130,14 @@ class ExecutionSample:
 
     duration_ms: float
     cache_hit: bool
+    # Set only when the hit came from the shared team store: who computed it,
+    # and what their run cost. A team hit is the case the ordinary estimator
+    # cannot price — it credits the last local uncached run, and someone served
+    # a teammate's result never made one — so the saving has to be carried on
+    # the sample rather than inferred from the history around it.
+    from_team: bool = False
+    team_principal: str | None = None
+    team_saved_ms: int = 0
 
 
 @dataclass
@@ -1789,6 +1797,9 @@ class NotebookSession:
                 ExecutionSample(
                     duration_ms=float(sample["duration_ms"]),
                     cache_hit=bool(sample["cache_hit"]),
+                    from_team=bool(sample.get("from_team")),
+                    team_principal=sample.get("team_principal"),
+                    team_saved_ms=int(sample.get("team_saved_ms") or 0),
                 )
                 for sample in entry.execution_samples
             ]
@@ -1796,18 +1807,42 @@ class NotebookSession:
                 history[cell_id] = samples
         return history
 
-    def record_execution(self, cell_id: str, duration_ms: float, cache_hit: bool) -> None:
+    def record_execution(
+        self,
+        cell_id: str,
+        duration_ms: float,
+        cache_hit: bool,
+        *,
+        from_team: bool = False,
+        team_principal: str | None = None,
+        team_saved_ms: int = 0,
+    ) -> None:
         """Record a cell execution for profiling (v1.1).
 
         Args:
             cell_id: ID of the executed cell
             duration_ms: Execution duration in milliseconds
             cache_hit: Whether this was a cache hit
+            from_team: Whether the result came from the shared team store.
+                Passed explicitly rather than inferred from the two fields
+                below, neither of which is reliable: an unauthenticated store
+                publishes anonymously, and a publisher may record no duration.
+            team_principal: Who computed it, when the store recorded an author.
+            team_saved_ms: What their run cost, and therefore what this hit
+                saved. Carried rather than inferred: the estimator prices a
+                local hit against the last local run of the same cell, and
+                someone served a teammate's result never made one.
         """
         if cell_id not in self.execution_history:
             self.execution_history[cell_id] = []
         self.execution_history[cell_id].append(
-            ExecutionSample(duration_ms=duration_ms, cache_hit=cache_hit)
+            ExecutionSample(
+                duration_ms=duration_ms,
+                cache_hit=cache_hit,
+                from_team=from_team,
+                team_principal=team_principal,
+                team_saved_ms=team_saved_ms,
+            )
         )
         # Mirror to disk so the profiling summary survives a restart. Trimmed
         # there to the same cap the file keeps, so the in-memory list and the
@@ -1818,6 +1853,9 @@ class NotebookSession:
             cell_id,
             duration_ms=duration_ms,
             cache_hit=cache_hit,
+            from_team=from_team,
+            team_principal=team_principal,
+            team_saved_ms=team_saved_ms,
         )
 
     def get_estimated_duration(self, cell_id: str) -> int:
@@ -1870,15 +1908,29 @@ class NotebookSession:
                 }
             )
 
-        # Estimate cache savings: sum of historical durations for cached cells
+        # Estimate cache savings. A local hit is priced against the last
+        # uncached run of the same cell — the best evidence available for what
+        # running it again would have cost. A *team* hit has no such evidence:
+        # whoever got it never ran the cell, so its price rides along on the
+        # sample, taken from what the publisher's run actually cost.
         cache_savings_ms = 0
+        team_cache_savings_ms = 0
+        team_cache_hits = 0
+        team_contributors: set[str] = set()
         for cell in self.notebook_state.cells:
             history = self.execution_history.get(cell.id, [])
             last_non_cached_duration: int | None = None
             for sample in history:
                 if sample.cache_hit:
-                    if last_non_cached_duration is not None:
+                    if sample.team_saved_ms:
+                        cache_savings_ms += sample.team_saved_ms
+                        team_cache_savings_ms += sample.team_saved_ms
+                    elif last_non_cached_duration is not None:
                         cache_savings_ms += last_non_cached_duration
+                    if sample.from_team:
+                        team_cache_hits += 1
+                        if sample.team_principal:
+                            team_contributors.add(sample.team_principal)
                 else:
                     last_non_cached_duration = int(sample.duration_ms)
 
@@ -1887,6 +1939,12 @@ class NotebookSession:
             "cache_hits": cache_hits,
             "cache_misses": cache_misses,
             "cache_savings_ms": cache_savings_ms,
+            # The subset of the above that came from someone else's machine —
+            # the number that answers "is the shared store earning its keep?",
+            # which the total alone cannot.
+            "team_cache_savings_ms": team_cache_savings_ms,
+            "team_cache_hits": team_cache_hits,
+            "team_contributors": sorted(team_contributors),
             "total_artifact_bytes": total_artifact_bytes,
             "cell_profiles": cell_profiles,
         }

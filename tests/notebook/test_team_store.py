@@ -579,3 +579,67 @@ async def test_a_pulled_result_keeps_the_publishers_platform(team_store_server, 
     assert stored is not None
     params = json_module.loads(stored.transform_spec)["params"]
     assert params["build_env"] == foreign
+
+
+async def test_a_team_hit_is_priced_by_the_run_it_replaced(
+    tmp_path, team_store_server, monkeypatch
+):
+    """The number that makes the shared store legible, end to end.
+
+    Alice runs the cell; what it cost her travels with the bytes. Bob, who has
+    never run it, is told what he skipped. Without the publisher's duration
+    riding along there is nothing to report: his own history has no comparable
+    run, so the savings estimate would credit zero for exactly the case the
+    shared store exists to create.
+    """
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    source = "value = sum(range(4000))"
+
+    def build(name: str):
+        notebook_dir = create_notebook(tmp_path / name, name)
+        add_cell_to_notebook(notebook_dir, "up", None)
+        write_cell(notebook_dir, "up", source)
+        add_cell_to_notebook(notebook_dir, "down", "up")
+        write_cell(notebook_dir, "down", "doubled = value * 2")
+        return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+
+    monkeypatch.setattr(
+        CellExecutor,
+        "_lake_config",
+        lambda self: StrataConfig(
+            cache_dir=tmp_path / "cache",
+            notebook_remote_store_url=team_store_server["base_url"],
+            notebook_team_cache_enabled=True,
+        ),
+    )
+
+    alice = build("alice")
+    alice_run = await CellExecutor(alice).execute_cell("up", source)
+    assert alice_run.success, alice_run.error
+
+    bob = build("bob")
+    hit = await CellExecutor(bob).execute_cell("up", source)
+
+    assert hit.cache_hit is True
+    assert hit.team_cache_saved_ms > 0, "a team hit that reports no saving is not legible"
+    # It is *her* run being reported, not his instant one. No timing threshold
+    # here — only that the number came from the run that actually happened.
+    assert hit.team_cache_saved_ms == int(alice_run.duration_ms)
+
+    # And it reaches the profiling summary as team savings, not just total.
+    bob.record_execution(
+        "up",
+        hit.duration_ms,
+        hit.cache_hit,
+        from_team=hit.from_team_cache,
+        team_principal=hit.team_cache_principal,
+        team_saved_ms=hit.team_cache_saved_ms,
+    )
+    summary = bob.get_profiling_summary()
+    assert summary["team_cache_savings_ms"] == int(alice_run.duration_ms)
+    assert summary["team_cache_hits"] == 1

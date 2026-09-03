@@ -300,6 +300,12 @@ class ProfilingSummaryPayload(WsPayload):
     cache_hits: int
     cache_misses: int
     cache_savings_ms: int
+    # The subset of the savings that came from someone else's machine, plus who
+    # contributed. The total alone cannot answer "is the shared store earning
+    # its keep?", which is the question a team is actually asking.
+    team_cache_savings_ms: int = 0
+    team_cache_hits: int = 0
+    team_contributors: list[str] = Field(default_factory=list)
     total_artifact_bytes: int
     cell_profiles: list[CellProfileModel] = Field(default_factory=list)
 

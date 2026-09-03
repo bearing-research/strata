@@ -45,6 +45,26 @@ function refresh() {
             <span class="stat-detail">({{ profilingSummary.cacheHits }} hits)</span>
           </span>
         </div>
+        <!--
+          Only shown once a team hit has actually happened. A permanent "0 from
+          your team" row on a solo notebook advertises a feature the reader has
+          not turned on, which is noise rather than information.
+        -->
+        <div v-if="profilingSummary.teamCacheHits > 0" class="stat-row">
+          <span class="stat-label">From your team</span>
+          <span class="stat-value cache-savings">
+            ~{{ formatMs(profilingSummary.teamCacheSavingsMs) }}
+            <span class="stat-detail">
+              ({{ profilingSummary.teamCacheHits }}
+              {{ profilingSummary.teamCacheHits === 1 ? 'hit' : 'hits'
+              }}{{
+                profilingSummary.teamContributors.length
+                  ? ', ' + profilingSummary.teamContributors.join(', ')
+                  : ''
+              }})
+            </span>
+          </span>
+        </div>
         <div v-if="profilingSummary.totalArtifactBytes > 0" class="stat-row">
           <span class="stat-label">Artifact storage</span>
           <span class="stat-value">{{ formatBytes(profilingSummary.totalArtifactBytes) }}</span>

@@ -734,6 +734,11 @@ export interface ProfilingSummary {
   cacheHits: number
   cacheMisses: number
   cacheSavingsMs: number
+  /** The subset of cacheSavingsMs that came from a teammate's machine. */
+  teamCacheSavingsMs: number
+  teamCacheHits: number
+  /** Who published the results this notebook was served. */
+  teamContributors: string[]
   totalArtifactBytes: number
   cellProfiles: CellProfile[]
 }
