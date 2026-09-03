@@ -39,6 +39,7 @@ from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.logging import get_logger
 from strata.services.artifact import artifact_service
 from strata.types import (
+    PROVENANCE_MISS_HEADER,
     ArtifactDependentsResponse,
     ArtifactInfoResponse,
     ArtifactLineageResponse,
@@ -387,7 +388,7 @@ async def find_artifact_by_provenance(
         raise HTTPException(
             status_code=404,
             detail="No artifact has been computed for that provenance hash",
-            headers={"X-Strata-Provenance-Miss": "1"},
+            headers={PROVENANCE_MISS_HEADER: "1"},
         )
     artifact = _ensure_artifact_access(artifact, tenant_filter)
     _authorize_artifact_read(artifact)

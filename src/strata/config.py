@@ -398,6 +398,18 @@ class StrataConfig(BaseSettings):
     # ambient client targets the local server as before.
     notebook_remote_store_url: str | None = None
     notebook_remote_store_headers: dict[str, str] = Field(default_factory=dict)
+    # Consult the remote store on a LOCAL cache miss, so a colleague's
+    # expensive cell becomes your instant result. Distinct from the knob above,
+    # which only redirects a cell's ambient client: that is explicit publish
+    # (someone names a dataset and pushes it), and nobody names their
+    # intermediate results — which is exactly where the recomputation is.
+    #
+    # Opt-in, and separate from the URL, because it is a real behaviour change
+    # and not only a performance one: it puts bytes another machine produced
+    # into your local store, and adds a network round-trip to the miss path of
+    # every cell. Wanting a shared store to publish to is not the same as
+    # wanting one to silently source results from.
+    notebook_team_cache_enabled: bool = False
 
     # AI/LLM assistant settings (OpenAI-compatible API)
     ai_base_url: str | None = None
@@ -655,6 +667,28 @@ class StrataConfig(BaseSettings):
                 "adaptive_enabled cannot be combined with multi_tenant_enabled: the controller "
                 "steers one tenant's limiters (the default tenant's), which in a multi-tenant "
                 "deployment is a tier no request acquires"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_team_cache(self) -> StrataConfig:
+        """The team cache needs a store to be a cache *of*.
+
+        Not a deployment-mode check: the notebook that reads a team store is
+        normally a personal-mode process on someone's laptop, pointed at a
+        service-mode store elsewhere. It is the pairing that has to hold, in
+        any mode.
+
+        Enabled without a URL is silently inert — every lookup would have
+        nowhere to go, so every cell would recompute and the operator would
+        conclude the shared cache does not work rather than that it was never
+        switched on. That is a worse outcome than refusing to start.
+        """
+        if self.notebook_team_cache_enabled and not self.notebook_remote_store_url:
+            raise ValueError(
+                "notebook_team_cache_enabled=True without notebook_remote_store_url "
+                "(there is no store to look results up in, so every lookup would "
+                "miss and every cell would recompute; set notebook_remote_store_url)"
             )
         return self
 

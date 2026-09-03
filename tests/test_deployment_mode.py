@@ -445,6 +445,44 @@ class TestModeCoherence:
         assert config.service_writes_enabled is True
 
 
+class TestTeamCacheCoherence:
+    """The team cache needs a store to be a cache *of*.
+
+    Not a deployment-mode rule: the notebook reading a team store is normally
+    a personal-mode process on a laptop, pointed at a service-mode store
+    elsewhere. It is the pairing that has to hold, in either mode.
+    """
+
+    def test_team_cache_without_a_store_is_rejected(self, tmp_path):
+        """Silently inert is the worse outcome: every lookup would have
+        nowhere to go, so every cell would recompute and the operator would
+        conclude the shared cache does not work rather than that it was never
+        switched on."""
+        with pytest.raises(ValueError) as exc_info:
+            StrataConfig(
+                cache_dir=tmp_path / "cache",
+                notebook_team_cache_enabled=True,
+            )
+        assert "notebook_remote_store_url" in str(exc_info.value)
+
+    def test_team_cache_with_a_store_is_allowed(self, tmp_path):
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            notebook_remote_store_url="https://store.example",
+            notebook_team_cache_enabled=True,
+        )
+        assert config.notebook_team_cache_enabled is True
+
+    def test_a_remote_store_alone_does_not_turn_the_cache_on(self, tmp_path):
+        """Wanting a shared store to publish to is not the same as wanting one
+        to silently source results from: the pull is a separate opt-in."""
+        config = StrataConfig(
+            cache_dir=tmp_path / "cache",
+            notebook_remote_store_url="https://store.example",
+        )
+        assert config.notebook_team_cache_enabled is False
+
+
 class TestUnsetSigningSecretIsSurfaced:
     """Service mode warns when pull-model URLs get a throwaway signing secret.
 

@@ -827,6 +827,15 @@ class ArtifactInfoResponse(BaseModel):
     created_at: float
 
 
+#: Marks a by-provenance 404 as a genuine "nobody has computed this", as
+#: opposed to the other 404s the same request can produce — a server that
+#: predates the route, or a gateway with no artifact store, both of which would
+#: otherwise read as a cache miss and recompute forever while looking healthy.
+#: ``strata_client`` keeps its own copy: it is a wire constant, and the two
+#: packages are deliberately independent.
+PROVENANCE_MISS_HEADER = "X-Strata-Provenance-Miss"
+
+
 class ArtifactProvenanceMatchResponse(BaseModel):
     """An artifact that already exists for a provenance hash.
 
