@@ -825,6 +825,46 @@ class StrataClient:
         response.raise_for_status()
         return response.json()
 
+    def put_by_provenance(
+        self,
+        provenance_hash: str,
+        blob: bytes,
+        *,
+        content_type: str,
+        variable_name: str | None = None,
+    ) -> dict:
+        """Store a result under a provenance key you computed yourself.
+
+        For callers whose provenance formula the server cannot reproduce — a
+        notebook cell hashes its own source and environment, which the store
+        never sees. The blob is opaque bytes, so any content type round-trips.
+
+        First writer wins: publishing a hash the store already holds returns
+        the incumbent with ``hit=True`` rather than replacing it.
+
+        Args:
+            provenance_hash: The sha256 key to store under.
+            blob: The serialized value, exactly as it should come back.
+            content_type: How to decode it — the reader has no other source
+                for this.
+            variable_name: Optional label, recorded for readability.
+
+        Returns:
+            Dict with artifact_uri, hit, byte_size.
+        """
+        metadata: dict[str, str] = {"content_type": content_type}
+        if variable_name:
+            metadata["variable_name"] = variable_name
+        response = self._client.put(
+            f"/v1/artifacts/by-provenance/{provenance_hash}",
+            files={
+                "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
+                "data": ("data.bin", blob, "application/octet-stream"),
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+
     def get_artifact_by_name(self, name: str) -> Artifact:
         """Get an artifact by its name.
 

@@ -111,7 +111,12 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
-from strata.notebook.team_store import TeamPull, TeamStore, pull_cell_outputs
+from strata.notebook.team_store import (
+    TeamPull,
+    TeamStore,
+    publish_cell_outputs,
+    pull_cell_outputs,
+)
 from strata.notebook.workers import (
     get_worker_execution_error,
     is_embedded_executor_worker,
@@ -1410,6 +1415,12 @@ class CellExecutor:
                             execution_method=exec_result.execution_method,
                         ).apply_remote_metadata(**remote_metadata)
 
+                    if stored_ok:
+                        # Only once the artifacts are on disk: what gets
+                        # published is read back from them, so a pull
+                        # reproduces exactly what a local run stored.
+                        await self._push_to_team_store(cell_id=cell_id, variant=fanout_variant)
+
                     if exec_result.success:
                         exec_result.display_outputs = self._store_display_outputs(
                             cell_id,
@@ -1853,6 +1864,9 @@ class CellExecutor:
                             ),
                             execution_method=exec_result.execution_method,
                         )
+
+                    if stored_ok:
+                        await self._push_to_team_store(cell_id=cell_id)
 
                     if exec_result.success:
                         exec_result.display_outputs = self._store_display_outputs(
@@ -2815,6 +2829,47 @@ class CellExecutor:
                 consumed_vars=consumed_vars,
                 source_hash=source_hash,
                 env_hash=env_hash,
+                variant=variant,
+            )
+        finally:
+            await store.aclose()
+
+    async def _push_to_team_store(
+        self,
+        *,
+        cell_id: str,
+        variant: str | None = None,
+    ) -> None:
+        """Offer this cell's fresh outputs to the team, so nobody runs it again.
+
+        Runs only after the cell succeeded *and* its artifacts were stored, so
+        the outputs it reads back are the same ones a pull will have to
+        reproduce. Failures are swallowed by design: the cell is already done,
+        and a shared-cache problem must not retroactively fail it.
+
+        Gated on the same switch as the pull. Someone who is willing to consume
+        the team cache is willing to contribute to it — a store where everyone
+        reads and nobody writes stays empty forever.
+        """
+        config = self._lake_config()
+        if not getattr(config, "notebook_team_cache_enabled", False):
+            return
+        base_url = getattr(config, "notebook_remote_store_url", None)
+        if not base_url:
+            return
+        if self.session.dag is None:
+            return
+        consumed_vars = self.session.dag.consumed_variables.get(cell_id, set())
+        if not consumed_vars:
+            return
+
+        store = TeamStore(str(base_url), self._ambient_strata_headers())
+        try:
+            await publish_cell_outputs(
+                store,
+                self.session.get_artifact_manager(),
+                cell_id=cell_id,
+                consumed_vars=consumed_vars,
                 variant=variant,
             )
         finally:

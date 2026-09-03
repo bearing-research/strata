@@ -321,6 +321,110 @@ async def test_a_teammates_result_is_served_instead_of_running_the_cell(
     assert bob_store.load_artifact_data(bob_artifact_id, bob_artifact.version) == alice_blob
 
 
+async def test_a_result_alice_never_published_by_hand_reaches_bob(
+    tmp_path, team_store_server, monkeypatch
+):
+    """The whole loop, with nothing seeded.
+
+    Alice runs a cell; the push happens because she has the team cache on, not
+    because the test placed anything anywhere. Bob then runs the same cell on a
+    cold notebook and is served her result. This is the claim the roadmap's
+    Phase 1 asks about — a colleague's expensive preprocessing is your instant
+    result — with no step performed by the test that a real user would not get
+    for free.
+    """
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    upstream_source = "value = sum(range(5000))"
+
+    def build(name: str):
+        notebook_dir = create_notebook(tmp_path / name, name)
+        add_cell_to_notebook(notebook_dir, "up", None)
+        write_cell(notebook_dir, "up", upstream_source)
+        add_cell_to_notebook(notebook_dir, "down", "up")
+        write_cell(notebook_dir, "down", "doubled = value * 2")
+        return NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+
+    team_config = StrataConfig(
+        cache_dir=tmp_path / "shared-config-cache",
+        notebook_remote_store_url=team_store_server["base_url"],
+        notebook_team_cache_enabled=True,
+    )
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: team_config)
+
+    alice = build("alice")
+    alice_result = await CellExecutor(alice).execute_cell("up", upstream_source)
+    assert alice_result.success, alice_result.error
+    assert alice_result.cache_hit is False
+    # Nobody had computed it, so she had nothing to be served.
+    assert alice_result.team_cache_principal is None
+
+    bob = build("bob")
+    bob_result = await CellExecutor(bob).execute_cell("up", upstream_source)
+
+    assert bob_result.success, bob_result.error
+    assert bob_result.cache_hit is True, (
+        "Bob recomputed a cell Alice had already published to the shared store"
+    )
+
+    bob_store = bob.get_artifact_manager()
+    bob_artifact_id = bob_store.cell_artifact_id("up", "value")
+    bob_artifact = bob_store.artifact_store.get_latest_version(bob_artifact_id)
+    assert bob_artifact is not None
+
+    alice_store = alice.get_artifact_manager()
+    alice_artifact_id = alice_store.cell_artifact_id("up", "value")
+    alice_artifact = alice_store.artifact_store.get_latest_version(alice_artifact_id)
+    assert alice_artifact is not None
+    assert bob_artifact.provenance_hash == alice_artifact.provenance_hash
+    assert bob_store.load_artifact_data(
+        bob_artifact_id, bob_artifact.version
+    ) == alice_store.load_artifact_data(alice_artifact_id, alice_artifact.version)
+
+
+async def test_a_store_that_refuses_a_publish_does_not_fail_the_cell(tmp_path, monkeypatch):
+    """The cell already succeeded. A read-only member, an expired token, or a
+    store that is simply down must cost the *next* person a recomputation and
+    this one nothing at all."""
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    source = "value = 7"
+    notebook_dir = create_notebook(tmp_path / "solo", "solo")
+    add_cell_to_notebook(notebook_dir, "up", None)
+    write_cell(notebook_dir, "up", source)
+    add_cell_to_notebook(notebook_dir, "down", "up")
+    write_cell(notebook_dir, "down", "doubled = value * 2")
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+
+    monkeypatch.setattr(
+        CellExecutor,
+        "_lake_config",
+        lambda self: StrataConfig(
+            cache_dir=tmp_path / "cache",
+            # Nothing listens here, so the publish attempt is a real failure
+            # rather than a mocked one.
+            notebook_remote_store_url="http://127.0.0.1:1",
+            notebook_team_cache_enabled=True,
+        ),
+    )
+
+    result = await CellExecutor(session).execute_cell("up", source)
+
+    assert result.success, result.error
+    stored = session.get_artifact_manager().artifact_store.get_latest_version(
+        session.get_artifact_manager().cell_artifact_id("up", "value")
+    )
+    assert stored is not None, "the local artifact must survive a failed publish"
+
+
 async def test_the_pull_is_off_unless_it_is_switched_on(tmp_path, monkeypatch):
     """A configured remote store is for publishing. Sourcing results from one
     is the separate opt-in, and with it off nothing reaches the network."""

@@ -211,6 +211,153 @@ def test_another_teams_identical_computation_is_invisible(team_server):
     assert hit.json()["principal"] == "carol"
 
 
+def _publish_by_provenance(
+    base_url: str,
+    provenance: str,
+    blob: bytes,
+    *,
+    content_type: str = "pickle/object",
+    headers: dict | None = None,
+) -> httpx.Response:
+    return httpx.put(
+        f"{base_url}/v1/artifacts/by-provenance/{provenance}",
+        files={
+            "metadata": (
+                "metadata.json",
+                json.dumps({"content_type": content_type, "variable_name": "model"}),
+                "application/json",
+            ),
+            "data": ("data.bin", blob, "application/octet-stream"),
+        },
+        headers=headers or {},
+        timeout=30.0,
+    )
+
+
+def test_a_caller_computed_key_round_trips_with_opaque_bytes(personal_server):
+    """The write half. Bytes that are not Arrow — a pickle here — must survive,
+    because a cell variable is Arrow, JSON, or a pickle and only the notebook's
+    serializer knows which."""
+    base_url = personal_server["base_url"]
+    provenance = "c" * 64
+    blob = b"\x80\x05\x95not-arrow-at-all"
+
+    stored = _publish_by_provenance(base_url, provenance, blob)
+    assert stored.status_code == 200, stored.text
+    assert stored.json()["hit"] is False
+
+    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}")
+    assert found.status_code == 200
+    assert found.json()["content_type"] == "pickle/object"
+
+    artifact_id, version = found.json()["artifact_id"], found.json()["version"]
+    data = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}/data")
+    assert data.status_code == 200
+    assert data.content == blob
+
+
+def test_the_first_writer_of_a_key_wins(personal_server):
+    """A shared cache key must not be reassignable by whoever writes last.
+
+    This is most of what makes accepting a caller-computed key tolerable: it
+    turns "poison the team's cache" into "race to be first", and a team that
+    shares a cache already runs each other's code.
+
+    The *outcome* is also guaranteed one layer down — ``finalize_artifact``
+    collapses a duplicate provenance whatever the route does. What the route's
+    own check adds is that the loser never reaches the disk at all: no blob
+    written, no failed row left behind. The version count is what asserts that
+    part, so it is not merely re-testing the store.
+    """
+    base_url = personal_server["base_url"]
+    provenance = "d" * 64
+
+    first = _publish_by_provenance(base_url, provenance, b"the original")
+    assert first.json()["hit"] is False
+
+    second = _publish_by_provenance(base_url, provenance, b"a replacement")
+    assert second.status_code == 200
+    assert second.json()["hit"] is True
+    assert second.json()["artifact_uri"] == first.json()["artifact_uri"]
+
+    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}").json()
+    data = httpx.get(f"{base_url}/v1/artifacts/{found['artifact_id']}/v/{found['version']}/data")
+    assert data.content == b"the original"
+
+    stored = ArtifactStore(personal_server["artifact_dir"])
+    versions = [
+        artifact
+        for artifact in stored.list_artifacts(limit=100)
+        if artifact.provenance_hash == provenance
+    ]
+    assert len(versions) == 1, "the rejected publish left a row behind"
+
+
+def test_publishing_needs_the_write_scope(team_server):
+    """Reading the team cache and contributing to it are different rights."""
+    base_url = team_server["base_url"]
+    provenance = "e" * 64
+
+    denied = _publish_by_provenance(base_url, provenance, b"x", headers=_headers("team-a", "bob"))
+    assert denied.status_code == 403
+
+    allowed = _publish_by_provenance(
+        base_url,
+        provenance,
+        b"x",
+        headers=_headers("team-a", "alice", scopes="artifacts:write"),
+    )
+    assert allowed.status_code == 200, allowed.text
+
+
+def test_a_published_key_is_only_visible_to_its_own_team(team_server):
+    """The same guarantee as the read side, on the path that creates the data."""
+    base_url = team_server["base_url"]
+    provenance = "f" * 64
+
+    _publish_by_provenance(
+        base_url,
+        provenance,
+        b"team-a only",
+        headers=_headers("team-a", "alice", scopes="artifacts:write"),
+    )
+
+    carol = _headers("team-b", "carol")
+    assert (
+        httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}", headers=carol).status_code
+        == 404
+    )
+
+
+def test_a_publish_without_a_content_type_is_refused(personal_server):
+    """The reader has no other source for it, so an artifact stored without one
+    is one nobody can decode — better refused at the door than discovered on a
+    pull months later."""
+    response = httpx.put(
+        f"{personal_server['base_url']}/v1/artifacts/by-provenance/{'a' * 64}",
+        files={
+            "metadata": ("metadata.json", json.dumps({"variable_name": "x"}), "application/json"),
+            "data": ("data.bin", b"bytes", "application/octet-stream"),
+        },
+        timeout=30.0,
+    )
+    assert response.status_code == 400
+    assert "content_type" in response.text
+
+
+def test_the_client_publishes_and_finds_its_own_key(personal_server):
+    with StrataClient(base_url=personal_server["base_url"]) as client:
+        provenance = "9" * 64
+        stored = client.put_by_provenance(
+            provenance, b"opaque", content_type="json/object", variable_name="v"
+        )
+        assert stored["hit"] is False
+
+        found = client.find_by_provenance(provenance)
+        assert found is not None
+        assert found["content_type"] == "json/object"
+
+
 def test_an_admin_hits_on_what_it_just_published(team_server):
     """``admin:*`` widens reads by id; it must not *narrow* this one.
 

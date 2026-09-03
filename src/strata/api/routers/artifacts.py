@@ -329,6 +329,115 @@ async def get_artifact_info(
     )
 
 
+@router.put(
+    "/v1/artifacts/by-provenance/{provenance_hash}",
+    response_model=PutArtifactResponse,
+)
+async def put_artifact_by_provenance(
+    request: Request,
+    store: WriteStore,
+    principal: CurrentPrincipal,
+    provenance_hash: str = FastPath(pattern="^[0-9a-f]{64}$"),
+):
+    """Store a result under a provenance key the caller computed.
+
+    The write half of the team cache, and the one place the two materialize
+    pipelines have to meet above the artifact store. ``PUT /v1/artifacts``
+    derives the provenance hash itself from inputs + transform; a notebook cell
+    derives its own from ``sorted_input_hashes + source_hash + env_hash``, over
+    material — the cell's source, the environment lockfile — that the server
+    never sees. There is therefore no way for the store to *check* this key,
+    and no way for a notebook to publish under it without a route that accepts
+    one.
+
+    So this is a deliberate trust delegation, and it is bounded three ways: the
+    caller must be authenticated with ``artifacts:write``, the row is stamped
+    with their tenant so the reach is exactly their own team, and **an existing
+    hash is never overwritten** — a second write of the same key returns the
+    first one. That last part matters most: it turns "poison the shared cache"
+    into "race to be first", and a team already runs each other's code by
+    sharing a cache at all.
+
+    The body is opaque bytes, not Arrow. A cell variable can be Arrow, JSON, or
+    a pickle, and only the notebook's serializer knows which — parsing here
+    would reject two of the three. ``content_type`` travels in the metadata so
+    the puller can decode without a second round trip.
+    """
+    import json as json_module
+
+    from strata.artifact_store import TransformSpec as ArtifactTransformSpec
+
+    form = await request.form()
+    metadata_file = form.get("metadata")
+    data_file = form.get("data")
+    if metadata_file is None or isinstance(metadata_file, str):
+        raise HTTPException(status_code=400, detail="Missing 'metadata' file field")
+    if data_file is None or isinstance(data_file, str):
+        raise HTTPException(status_code=400, detail="Missing 'data' file field")
+
+    try:
+        metadata = json_module.loads(await metadata_file.read())
+    except json_module.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
+    if not isinstance(metadata, dict):
+        raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
+
+    content_type = metadata.get("content_type")
+    if not content_type:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing 'content_type' — a reader cannot decode the blob without it",
+        )
+
+    blob = await data_file.read()
+    tenant_id = principal.tenant if principal else None
+
+    # First writer wins. Returning the incumbent rather than superseding it is
+    # what keeps a shared cache key from being reassignable by anyone who can
+    # write to the tenant.
+    existing = store.find_by_provenance(provenance_hash, tenant=tenant_id)
+    if existing is not None and existing.state == "ready":
+        return PutArtifactResponse(
+            artifact_uri=f"strata://artifact/{existing.id}@v={existing.version}",
+            hit=True,
+            byte_size=existing.byte_size or 0,
+        )
+
+    params: dict[str, str] = {"content_type": str(content_type)}
+    variable_name = metadata.get("variable_name")
+    if variable_name:
+        params["variable_name"] = str(variable_name)
+
+    artifact_id = str(metadata.get("artifact_id") or uuid.uuid4())
+    version = store.create_artifact(
+        artifact_id=artifact_id,
+        provenance_hash=provenance_hash,
+        transform_spec=ArtifactTransformSpec(
+            executor="notebook/cell@v1",
+            params=params,
+            inputs=[],
+        ),
+        tenant=tenant_id,
+        principal=principal.id if principal else None,
+    )
+    store.write_blob(artifact_id, version, blob)
+    finalized = store.finalize_artifact(
+        artifact_id=artifact_id,
+        version=version,
+        schema_json=str(metadata.get("schema_json") or ""),
+        row_count=int(metadata.get("row_count") or 0),
+        byte_size=len(blob),
+    )
+    if finalized is None:
+        raise HTTPException(status_code=500, detail="Failed to finalize artifact")
+
+    return PutArtifactResponse(
+        artifact_uri=f"strata://artifact/{finalized.id}@v={finalized.version}",
+        hit=finalized.id != artifact_id or finalized.version != version,
+        byte_size=finalized.byte_size or len(blob),
+    )
+
+
 @router.get(
     "/v1/artifacts/by-provenance/{provenance_hash}",
     response_model=ArtifactProvenanceMatchResponse,

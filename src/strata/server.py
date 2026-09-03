@@ -758,6 +758,24 @@ async def lifespan(app: FastAPI):
             ),
         )
 
+    # A team cache pointed at a store that authenticates nobody. The pull works
+    # and looks fine, which is the problem: without auth there is no tenant, so
+    # every team shares one flat namespace, and no principal, so every result
+    # arrives authored by nobody. Neither shows up until a second team joins.
+    # Not a hard error — a single-team store on a private network is a real
+    # thing, and the local test setups depend on it — but never silent.
+    if config.notebook_team_cache_enabled and not config.notebook_remote_store_headers:
+        logger.warning(
+            "team_cache_store_unauthenticated",
+            detail=(
+                "notebook_team_cache_enabled is set but notebook_remote_store_headers "
+                "is empty, so this notebook reaches the shared store with no identity. "
+                "Results will be shared and published into the tenantless namespace "
+                "with no attribution, and no isolation from any other team using the "
+                "same store. Set the trusted-proxy headers the store expects."
+            ),
+        )
+
     # Configure structured logging first
     configure_logging()
 

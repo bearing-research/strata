@@ -45,6 +45,7 @@ EXPECTED_ROUTES = [
     ("/v1/artifacts", "PUT", 0),
     ("/v1/artifacts/builds/{build_id}", "GET", 0),
     ("/v1/artifacts/by-provenance/{provenance_hash}", "GET", 0),
+    ("/v1/artifacts/by-provenance/{provenance_hash}", "PUT", 0),
     ("/v1/artifacts/download", "GET", 0),
     ("/v1/artifacts/explain-materialize", "POST", 0),
     ("/v1/artifacts/finalize", "POST", 0),
