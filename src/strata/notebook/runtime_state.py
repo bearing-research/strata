@@ -24,6 +24,12 @@ from typing import Any
 SCHEMA_VERSION = 1
 _RUNTIME_FILENAME = "runtime.json"
 
+# Most recent execution timings kept per cell. The profiling summary walks the
+# sequence in order (a cache hit credits the last uncached duration before it),
+# so it needs samples rather than a scalar — but this file is rewritten on
+# every execution, so the list has to stay short.
+MAX_EXECUTION_SAMPLES = 50
+
 
 @dataclass
 class CellRuntime:
@@ -39,6 +45,10 @@ class CellRuntime:
     # committed source declares the controls + defaults; the user-set value is
     # runtime state (a slider drag must not churn ``notebook.toml``).
     widget_values: dict[str, Any] = field(default_factory=dict)
+    # Recent ``{duration_ms, cache_hit}`` timings, oldest first, capped at
+    # ``MAX_EXECUTION_SAMPLES``. Feeds the profiling summary's cache-savings
+    # figure, which otherwise restarted from zero every time the server did.
+    execution_samples: list[dict[str, Any]] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         """Whether this entry carries no useful state.
@@ -53,6 +63,7 @@ class CellRuntime:
             or self.display
             or self.test_result
             or self.widget_values
+            or self.execution_samples
         )
 
 
@@ -194,6 +205,33 @@ def persist_cell_provenance(
     entry.last_provenance_hash = last_provenance_hash or None
     entry.last_source_hash = last_source_hash or None
     entry.last_env_hash = last_env_hash or None
+    save_runtime_state(notebook_dir, state)
+
+
+def persist_cell_execution_sample(
+    notebook_dir: Path,
+    cell_id: str,
+    *,
+    duration_ms: float,
+    cache_hit: bool,
+) -> None:
+    """Append one execution timing to a cell's persisted history.
+
+    The profiling summary's cache-savings figure is derived from these, and
+    they used to live only on the ``Session`` — so restarting the server reset
+    "you skipped N minutes of recomputation" to zero while the cells were
+    still happily serving from cache.
+
+    Trimmed to the newest ``MAX_EXECUTION_SAMPLES``: this file is rewritten on
+    every execution, so an unbounded list would make each run cost more than
+    the last.
+    """
+    state = load_runtime_state(notebook_dir)
+    entry = state.get_or_create_cell(cell_id)
+    entry.execution_samples = [
+        *entry.execution_samples,
+        {"duration_ms": float(duration_ms), "cache_hit": bool(cache_hit)},
+    ][-MAX_EXECUTION_SAMPLES:]
     save_runtime_state(notebook_dir, state)
 
 
