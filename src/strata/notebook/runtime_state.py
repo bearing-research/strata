@@ -214,6 +214,9 @@ def persist_cell_execution_sample(
     *,
     duration_ms: float,
     cache_hit: bool,
+    from_team: bool = False,
+    team_principal: str | None = None,
+    team_saved_ms: int = 0,
 ) -> None:
     """Append one execution timing to a cell's persisted history.
 
@@ -225,13 +228,26 @@ def persist_cell_execution_sample(
     Trimmed to the newest ``MAX_EXECUTION_SAMPLES``: this file is rewritten on
     every execution, so an unbounded list would make each run cost more than
     the last.
+
+    ``team_principal`` / ``team_saved_ms`` are set only when the result came
+    from the shared store. They have to be stored rather than derived: the
+    estimator prices a local hit against the last local run of the same cell,
+    and someone served a teammate's result never made one — so without the
+    publisher's cost riding along, the shared cache would report saving nothing
+    in exactly the case it saved the most.
     """
     state = load_runtime_state(notebook_dir)
     entry = state.get_or_create_cell(cell_id)
-    entry.execution_samples = [
-        *entry.execution_samples,
-        {"duration_ms": float(duration_ms), "cache_hit": bool(cache_hit)},
-    ][-MAX_EXECUTION_SAMPLES:]
+    sample: dict[str, Any] = {"duration_ms": float(duration_ms), "cache_hit": bool(cache_hit)}
+    # Written only for a team hit, so an ordinary notebook's runtime file does
+    # not grow two dead keys on every execution.
+    if from_team:
+        sample["from_team"] = True
+    if team_principal:
+        sample["team_principal"] = team_principal
+    if team_saved_ms:
+        sample["team_saved_ms"] = int(team_saved_ms)
+    entry.execution_samples = [*entry.execution_samples, sample][-MAX_EXECUTION_SAMPLES:]
     save_runtime_state(notebook_dir, state)
 
 

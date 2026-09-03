@@ -63,6 +63,7 @@ class TeamArtifact:
     principal: str | None
     blob: bytes
     build_env: str = ""
+    build_duration_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,10 @@ class TeamPull:
     # machines — recording which one it crossed from is what keeps that
     # honest rather than silent. Empty when the producer reported none.
     build_env: str = ""
+    # What the publisher's run cost, and therefore what this hit saved. The
+    # puller has no history for a cell they never ran, so without this the
+    # savings estimate credits zero for exactly the case worth counting.
+    saved_ms: int = 0
 
 
 class TeamStore:
@@ -148,6 +153,7 @@ class TeamStore:
             principal=match.get("principal"),
             blob=blob,
             build_env=str(match.get("build_env") or ""),
+            build_duration_ms=int(match.get("build_duration_ms") or 0),
         )
 
     async def publish(
@@ -158,6 +164,7 @@ class TeamStore:
         content_type: str,
         variable_name: str | None = None,
         build_env: str = "",
+        build_duration_ms: int = 0,
     ) -> bool:
         """Offer a result to the team, keyed by provenance. Never raises.
 
@@ -171,6 +178,8 @@ class TeamStore:
             metadata["variable_name"] = variable_name
         if build_env:
             metadata["build_env"] = build_env
+        if build_duration_ms > 0:
+            metadata["build_duration_ms"] = str(build_duration_ms)
         files = {
             "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
             "data": ("data.bin", blob, "application/octet-stream"),
@@ -336,6 +345,7 @@ async def pull_cell_outputs(
             # overwriting it with this machine's identity would turn a record
             # of where the result came from into a claim we ran it ourselves.
             build_env=artifact.build_env,
+            build_duration_ms=artifact.build_duration_ms,
         )
         total_bytes += len(artifact.blob)
 
@@ -343,6 +353,10 @@ async def pull_cell_outputs(
     # author; reporting the first is reporting all of them.
     principal = pulled[0][1].principal
     build_env = pulled[0][1].build_env
+    # One cell run produced every variable together, so its cost is the cost of
+    # the run — not the sum over variables, which would multiply it by the
+    # number of things the cell happened to define.
+    saved_ms = max(artifact.build_duration_ms for _, artifact in pulled)
     logger.info(
         "Team store supplied cell %s (%s, %d bytes, computed by %s on %s); skipped running it",
         cell_id,
@@ -356,6 +370,7 @@ async def pull_cell_outputs(
         principal=principal,
         byte_size=total_bytes,
         build_env=build_env,
+        saved_ms=saved_ms,
     )
 
 
@@ -400,6 +415,7 @@ async def publish_cell_outputs(
             content_type=_spec_param(stored, "content_type"),
             variable_name=var,
             build_env=_spec_param(stored, "build_env"),
+            build_duration_ms=_spec_int(stored, "build_duration_ms"),
         ):
             published += 1
 
@@ -432,3 +448,11 @@ def _spec_param(artifact, key: str) -> str:
     if not isinstance(params, dict):
         return ""
     return str(params.get(key) or "")
+
+
+def _spec_int(artifact, key: str) -> int:
+    """The same, for a param that is a whole number of milliseconds."""
+    try:
+        return int(_spec_param(artifact, key))
+    except ValueError:
+        return 0

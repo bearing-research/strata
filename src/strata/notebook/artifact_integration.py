@@ -189,6 +189,7 @@ class NotebookArtifactManager:
         iteration: int | None = None,
         variant: str | None = None,
         build_env: str = "",
+        build_duration_ms: float = 0.0,
     ) -> ArtifactVersion:
         """Store a cell output as an artifact.
 
@@ -216,6 +217,12 @@ class NotebookArtifactManager:
                 and folding it into the provenance key would drop cross-machine
                 hit rate to nothing. Empty when the producer did not report one
                 — every artifact written before this existed.
+            build_duration_ms: How long the run that produced these bytes
+                took. Recorded because it is the only way a *shared* cache can
+                say what a hit saved: the person hitting it never ran the cell,
+                so their own history holds no comparable duration and the
+                savings estimate would credit zero for exactly the case worth
+                counting. Zero when unrecorded.
 
         Returns:
             The created ArtifactVersion
@@ -238,6 +245,8 @@ class NotebookArtifactManager:
             params["env_hash"] = env_hash
         if build_env:
             params["build_env"] = build_env
+        if build_duration_ms > 0:
+            params["build_duration_ms"] = str(int(build_duration_ms))
 
         transform_spec = TransformSpec(
             executor="notebook/cell@v1",

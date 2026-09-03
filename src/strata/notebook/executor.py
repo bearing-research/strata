@@ -354,6 +354,12 @@ class CellExecutionResult:
     remote_build_id: str | None = None
     remote_build_state: str | None = None
     remote_error_code: str | None = None
+    # Whether the result came from the shared team store rather than this
+    # machine's own cache. Explicit, because none of the three fields below is
+    # a reliable stand-in: an unauthenticated store publishes anonymously, and
+    # a publisher may record no duration. Inferring it from those produced a
+    # summary that showed team savings alongside zero team hits.
+    from_team_cache: bool = False
     # Who computed the result, when it came from the shared team store rather
     # than this machine's own cache. ``None`` for a local hit or a real run. A
     # team hit is otherwise indistinguishable from a local one, and a result
@@ -365,6 +371,11 @@ class CellExecutionResult:
     # disclosed property rather than a silent one. Empty unless this was a team
     # hit whose publisher recorded a platform.
     team_cache_build_env: str = ""
+    # What the publisher's run cost, and therefore what this hit saved. Carried
+    # rather than inferred: the savings estimate prices a local hit against the
+    # last local run of the same cell, and someone served a teammate's result
+    # never made one.
+    team_cache_saved_ms: int = 0
 
     def __post_init__(self) -> None:
         # Legacy shim: accept either `display_outputs` or `display_output`
@@ -1300,6 +1311,8 @@ class CellExecutor:
                     execution_method="cached",
                     team_cache_principal=team_pull.principal if team_pull else None,
                     team_cache_build_env=team_pull.build_env if team_pull else "",
+                    team_cache_saved_ms=team_pull.saved_ms if team_pull else 0,
+                    from_team_cache=team_pull is not None,
                 ).apply_remote_metadata(**remote_metadata)
                 self.session.record_successful_execution_provenance(
                     cell_id,
@@ -1407,6 +1420,10 @@ class CellExecutor:
                         # someone else's hardware. Never computed here: this
                         # process may not be on that machine.
                         build_env=str(result.get("build_env") or ""),
+                        # What a teammate will be told they saved. Their own
+                        # history has no comparable number — they never ran
+                        # this cell — so it has to travel with the bytes.
+                        build_duration_ms=exec_result.duration_ms,
                     )
                     if not stored_ok:
                         logger.error(
@@ -1798,6 +1815,8 @@ class CellExecutor:
                     execution_method="cached",
                     team_cache_principal=team_pull.principal if team_pull else None,
                     team_cache_build_env=team_pull.build_env if team_pull else "",
+                    team_cache_saved_ms=team_pull.saved_ms if team_pull else 0,
+                    from_team_cache=team_pull is not None,
                 )
                 self.session.record_successful_execution_provenance(
                     cell_id,
@@ -3494,6 +3513,7 @@ class CellExecutor:
         env_hash: str = "",
         variant: str | None = None,
         build_env: str = "",
+        build_duration_ms: float = 0.0,
     ) -> bool:
         """Persist consumed output variables as artifacts.
 
@@ -3602,6 +3622,7 @@ class CellExecutor:
                     env_hash=env_hash,
                     variant=variant,
                     build_env=build_env,
+                    build_duration_ms=build_duration_ms,
                 )
                 uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
                 cell.artifact_uris[var_name] = uri

@@ -2143,7 +2143,14 @@ async def execute_cell_and_broadcast(
 
         # Record execution for profiling before broadcasting so the
         # output payload reflects the just-recorded metadata.
-        session.record_execution(cell_id, result.duration_ms, result.cache_hit)
+        session.record_execution(
+            cell_id,
+            result.duration_ms,
+            result.cache_hit,
+            from_team=result.from_team_cache,
+            team_principal=result.team_cache_principal,
+            team_saved_ms=result.team_cache_saved_ms,
+        )
         session.apply_execution_result_metadata(cell_id, result)
 
         await _broadcast_execution_result(notebook_id, seq, cell_id, result)
@@ -2287,7 +2294,14 @@ async def _execute_cascade(
                 seq = execution_state.next_sequence()
 
                 # v1.1: Record execution for profiling
-                session.record_execution(cell_id, result.duration_ms, result.cache_hit)
+                session.record_execution(
+                    cell_id,
+                    result.duration_ms,
+                    result.cache_hit,
+                    from_team=result.from_team_cache,
+                    team_principal=result.team_cache_principal,
+                    team_saved_ms=result.team_cache_saved_ms,
+                )
                 session.apply_execution_result_metadata(cell_id, result)
 
                 # Broadcast stdout/stderr console + output/error in the
@@ -2706,7 +2720,14 @@ async def _run_partition_single_cell(
         # same counter; the result must not look older.
         seq = execution_state.next_sequence()
 
-        session.record_execution(cell_id, result.duration_ms, result.cache_hit)
+        session.record_execution(
+            cell_id,
+            result.duration_ms,
+            result.cache_hit,
+            from_team=result.from_team_cache,
+            team_principal=result.team_cache_principal,
+            team_saved_ms=result.team_cache_saved_ms,
+        )
         session.apply_execution_result_metadata(cell_id, result)
         await _broadcast_execution_result(notebook_id, seq, cell_id, result)
 

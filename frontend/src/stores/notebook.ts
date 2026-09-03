@@ -2354,6 +2354,9 @@ function initializeWebSocket() {
         cacheHits: p.cache_hits || 0,
         cacheMisses: p.cache_misses || 0,
         cacheSavingsMs: p.cache_savings_ms || 0,
+        teamCacheSavingsMs: p.team_cache_savings_ms || 0,
+        teamCacheHits: p.team_cache_hits || 0,
+        teamContributors: p.team_contributors || [],
         totalArtifactBytes: p.total_artifact_bytes || 0,
         cellProfiles: (p.cell_profiles || []).map((cp: any) => ({
           cellId: cp.cell_id,

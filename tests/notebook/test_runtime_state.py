@@ -416,3 +416,144 @@ def test_execution_samples_survive_a_new_session(tmp_path: Path):
     assert after["total_execution_ms"] == 2005
     # The duration estimate is read off the same history.
     assert restarted.get_estimated_duration("c1") == 2000
+
+
+def test_a_team_hit_is_priced_by_the_publishers_run(tmp_path: Path):
+    """The case the ordinary estimator cannot price.
+
+    Local savings are estimated against the last uncached run of the same cell
+    — the best available evidence for what running it again would cost. Someone
+    served a teammate's result never made such a run, so with nothing carried
+    on the sample the shared cache would report saving **zero** in exactly the
+    case it saved the most.
+    """
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook_dir = create_notebook(tmp_path, "Team", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    # A cold notebook: no local run of this cell has ever happened.
+    session.record_execution(
+        "c1",
+        duration_ms=12.0,
+        cache_hit=True,
+        from_team=True,
+        team_principal="alice",
+        team_saved_ms=38000,
+    )
+
+    summary = session.get_profiling_summary()
+    assert summary["cache_savings_ms"] == 38000
+    assert summary["team_cache_savings_ms"] == 38000
+    assert summary["team_cache_hits"] == 1
+    assert summary["team_contributors"] == ["alice"]
+
+
+def test_local_and_team_savings_are_reported_separately(tmp_path: Path):
+    """The total alone cannot answer "is the shared store earning its keep?"."""
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook_dir = create_notebook(tmp_path, "Mixed", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+    add_cell_to_notebook(notebook_dir, "c2", "c1")
+    write_cell(notebook_dir, "c2", "y = 2")
+
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    # c1: ran locally, then hit locally — priced against its own last run.
+    session.record_execution("c1", duration_ms=2000.0, cache_hit=False)
+    session.record_execution("c1", duration_ms=5.0, cache_hit=True)
+    # c2: never ran here; served from the team store.
+    session.record_execution(
+        "c2",
+        duration_ms=9.0,
+        cache_hit=True,
+        from_team=True,
+        team_principal="bob",
+        team_saved_ms=7000,
+    )
+
+    summary = session.get_profiling_summary()
+    assert summary["cache_savings_ms"] == 9000, "the total is both kinds together"
+    assert summary["team_cache_savings_ms"] == 7000
+    assert summary["team_cache_hits"] == 1
+    assert summary["team_contributors"] == ["bob"]
+
+
+def test_team_attribution_survives_a_restart(tmp_path: Path):
+    """Same reason the durations had to: a number that resets on restart is not
+    a number anyone trusts."""
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook_dir = create_notebook(tmp_path, "Restart", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+
+    first = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    first.record_execution(
+        "c1",
+        duration_ms=4.0,
+        cache_hit=True,
+        from_team=True,
+        team_principal="carol",
+        team_saved_ms=15000,
+    )
+
+    restarted = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    summary = restarted.get_profiling_summary()
+    assert summary["team_cache_savings_ms"] == 15000
+    assert summary["team_contributors"] == ["carol"]
+
+
+def test_a_solo_notebook_records_no_team_keys(tmp_path: Path):
+    """The runtime file is rewritten on every execution, so two dead keys per
+    sample is a cost every solo notebook would pay forever."""
+    import json as json_module
+
+    from strata.notebook.runtime_state import persist_cell_execution_sample
+
+    persist_cell_execution_sample(tmp_path, "c1", duration_ms=10.0, cache_hit=False)
+
+    written = json_module.loads((tmp_path / ".strata" / "runtime.json").read_text())
+    sample = written["cells"]["c1"]["execution_samples"][0]
+    assert set(sample) == {"duration_ms", "cache_hit"}
+
+
+def test_a_team_hit_from_an_anonymous_publisher_still_counts(tmp_path: Path):
+    """An unauthenticated store publishes with no principal.
+
+    That is a flagged-but-supported deployment, and it must not make the hit
+    invisible. Counting team hits by "did we learn an author" produced a
+    summary reporting team *savings* alongside zero team *hits* — the reason
+    the flag is passed explicitly rather than inferred.
+    """
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook_dir = create_notebook(tmp_path, "Anon", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+
+    session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    session.record_execution(
+        "c1",
+        duration_ms=6.0,
+        cache_hit=True,
+        from_team=True,
+        team_principal=None,
+        team_saved_ms=9000,
+    )
+
+    summary = session.get_profiling_summary()
+    assert summary["team_cache_hits"] == 1
+    assert summary["team_cache_savings_ms"] == 9000
+    assert summary["team_contributors"] == []
