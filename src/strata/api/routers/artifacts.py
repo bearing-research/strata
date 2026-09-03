@@ -15,6 +15,7 @@ materialize/streams routes are separate slices and stay put.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import tempfile
@@ -24,6 +25,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.ipc as ipc
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import Path as FastPath
 from fastapi.responses import StreamingResponse
 
 from strata.api.dependencies import (
@@ -40,6 +42,7 @@ from strata.types import (
     ArtifactDependentsResponse,
     ArtifactInfoResponse,
     ArtifactLineageResponse,
+    ArtifactProvenanceMatchResponse,
     PutArtifactResponse,
     UploadFinalizeRequest,
     UploadFinalizeResponse,
@@ -243,6 +246,12 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
         transform_spec=artifact_transform,
         input_versions=input_versions,
         tenant=tenant_id,
+        # A shared store hands you results you did not compute, so who did is
+        # part of the result. The column and the store parameter have both
+        # existed since the tenancy migration; this write site never passed it,
+        # which left every published artifact anonymous — including under
+        # `service_writes_enabled`, whose whole premise is attributed publish.
+        principal=principal.id if principal else None,
     )
 
     # Write blob
@@ -317,6 +326,83 @@ async def get_artifact_info(
         byte_size=artifact.byte_size,
         created_at=artifact.created_at or 0,
     )
+
+
+@router.get(
+    "/v1/artifacts/by-provenance/{provenance_hash}",
+    response_model=ArtifactProvenanceMatchResponse,
+)
+async def find_artifact_by_provenance(
+    store: ReadStore,
+    tenant_filter: CurrentTenant,
+    provenance_hash: str = FastPath(pattern="^[0-9a-f]{64}$"),
+):
+    """Has anyone already computed this?
+
+    The primitive a *shared* store exists to answer. Every other artifact read
+    starts from an id someone already holds; this one starts from a provenance
+    hash, which is the only identifier two people arrive at independently —
+    notebook artifact ids embed the notebook, so a colleague's copy of the same
+    computation is never at an id you could have guessed.
+
+    Answering it over HTTP is what turns the local dedup that already happens
+    into a team cache hit: look up by hash, and on a match fetch the bytes from
+    the sibling ``/data`` route.
+
+    404 is the ordinary answer, not an error — it means "nobody has, go
+    compute it". Callers should treat it as a miss and not log it as a failure.
+
+    The hash is constrained to a sha256 digest at the route, because every
+    hash the store issues is one (including the ``derive_subkey`` per-variable
+    hashes) and a lookup key that reaches the database should not be free-form.
+
+    Scoping: ``find_by_provenance`` filters to the caller's tenant in SQL, so
+    a team only ever hits its own results — and the ACL re-check below applies
+    the same table-level deny rules the by-id reads apply, so a shared cache
+    cannot become a way around a table someone is denied.
+    """
+    from strata.server import _authorize_artifact_read, _ensure_artifact_access
+
+    artifact = _ensure_artifact_access(
+        store.find_by_provenance(provenance_hash, tenant=tenant_filter),
+        tenant_filter,
+    )
+    _authorize_artifact_read(artifact)
+
+    return ArtifactProvenanceMatchResponse(
+        artifact_id=artifact.id,
+        version=artifact.version,
+        provenance_hash=artifact.provenance_hash,
+        content_type=_content_type_of(artifact),
+        state=artifact.state,
+        arrow_schema=artifact.schema_json,
+        row_count=artifact.row_count,
+        byte_size=artifact.byte_size,
+        created_at=artifact.created_at or 0.0,
+        principal=artifact.principal,
+    )
+
+
+def _content_type_of(artifact) -> str:
+    """How the blob was serialized, per the stored transform spec.
+
+    The notebook records it in ``transform_spec.params.content_type``; core
+    transforms do not record one at all. Returns "" rather than guessing —
+    a caller that has to deserialize should see "unstated" and decide, not
+    receive a plausible-looking default that is wrong for pickled values.
+    """
+    if not artifact.transform_spec:
+        return ""
+    try:
+        spec = json.loads(artifact.transform_spec)
+    except ValueError:
+        return ""
+    if not isinstance(spec, dict):
+        return ""
+    params = spec.get("params")
+    if not isinstance(params, dict):
+        return ""
+    return str(params.get("content_type") or "")
 
 
 @router.get("/v1/artifacts/stats")
