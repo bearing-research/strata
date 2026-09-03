@@ -775,6 +775,33 @@ class StrataClient:
         response.raise_for_status()
         return Artifact(_client=self, artifact_id=artifact_id, version=version)
 
+    def find_by_provenance(self, provenance_hash: str) -> dict | None:
+        """Ask a shared store whether this computation already has a result.
+
+        Returns the match's metadata, or ``None`` when nobody has computed it.
+        A miss is the ordinary case, so it is a return value rather than an
+        exception — callers use this on the hot path of "should I run this?"
+        and would otherwise wrap every call in try/except.
+
+        Only a 404 becomes ``None``. A 403, a timeout, or a 500 still raises:
+        those mean the store could not answer, which is different from
+        answering "no", and silently treating them the same would turn an
+        expired token into a recomputation nobody can explain.
+
+        Args:
+            provenance_hash: The sha256 provenance hash to look up.
+
+        Returns:
+            Dict with artifact_id, version, provenance_hash, content_type,
+            state, arrow_schema, row_count, byte_size, created_at, principal —
+            or None if the store holds no result for that hash.
+        """
+        response = self._client.get(f"/v1/artifacts/by-provenance/{provenance_hash}")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
+
     def get_artifact_by_name(self, name: str) -> Artifact:
         """Get an artifact by its name.
 

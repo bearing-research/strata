@@ -827,6 +827,49 @@ class ArtifactInfoResponse(BaseModel):
     created_at: float
 
 
+class ArtifactProvenanceMatchResponse(BaseModel):
+    """An artifact that already exists for a provenance hash.
+
+    The lookup a shared store answers for a *team* cache hit: "someone has
+    already computed exactly this — here is what they got." Deliberately
+    richer than ``ArtifactInfoResponse``, because the caller starts from a
+    hash and nothing else:
+
+    * ``content_type`` so the caller can deserialize the blob it is about to
+      fetch without a second metadata round-trip.
+    * ``principal`` so a hit can be *attributed* on screen. A result that
+      silently appears is indistinguishable from a bug; "computed by alice"
+      is the whole difference between a cache and a team cache.
+
+    Attributes:
+        artifact_id: Storage id of the match. Notebook artifact ids are
+            notebook-scoped, so this is usually *not* an id the caller
+            would have constructed — the provenance hash is the join key,
+            not the id.
+        version: Version number of the match.
+        provenance_hash: Echoed back, so a caller batching lookups can
+            correlate responses without tracking request order.
+        content_type: ``arrow/ipc`` / ``json/object`` / ``pickle/object`` …,
+            read from the stored transform spec. Empty when the spec does
+            not record one.
+        state: Always ``ready`` today — ``find_by_provenance`` only matches
+            ready rows — but carried explicitly so that staying true remains
+            the store's decision rather than this route's assumption.
+        principal: Who computed it, when the store recorded one.
+    """
+
+    artifact_id: str
+    version: int
+    provenance_hash: str
+    content_type: str = ""
+    state: str = "ready"
+    arrow_schema: str | None = None
+    row_count: int | None = None
+    byte_size: int | None = None
+    created_at: float = 0.0
+    principal: str | None = None
+
+
 class InputChangeInfo(BaseModel):
     """Information about a changed input dependency.
 
