@@ -1046,6 +1046,17 @@ class LineageNode(BaseModel):
         type: "artifact" or "table"
         transform_ref: Transform executor reference (if artifact)
         created_at: When artifact was created (if artifact)
+        principal: Who computed it, when the store recorded an author.
+        build_env: The interpreter and hardware that produced it, e.g.
+            ``cpython-3.14-linux-x86_64``.
+        build_duration_ms: How long the producing run took.
+
+    The last three used to be worth nothing here: before results could be
+    shared, "who" was always you and "which environment" was always this
+    machine. Once a lineage graph can contain a step someone else ran on
+    another machine, they are the questions the graph is being opened to
+    answer. Empty for tables, for core transforms, and for anything stored
+    before those fields existed.
     """
 
     uri: str
@@ -1054,6 +1065,9 @@ class LineageNode(BaseModel):
     type: str  # "artifact" | "table"
     transform_ref: str | None = None
     created_at: float | None = None
+    principal: str | None = None
+    build_env: str = ""
+    build_duration_ms: int = 0
 
 
 class LineageEdge(BaseModel):
