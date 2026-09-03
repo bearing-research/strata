@@ -7,14 +7,24 @@ credential from the pool is doing real work here, not defence in depth — an
 unauthenticated `/execute` on a public URL is a remote code execution endpoint
 anyone can find.
 
-**The request shapes below are written from RunPod's documented API and have
-not been run against a live account.** They are deliberately confined to
-`_create_body` and the three call sites in `start`/`stop`, and every one is
-asserted by a test, so correcting them is a small, visible edit rather than an
-excavation. Anything here may be wrong until someone with an account runs
-`STRATA_POOL_RUNPOD_LIVE=1 pytest tests/test_runpod_live.py`; that test starts
-a real pod and **costs real money**, which is why it is opt-in and never runs
+**Verified against a live account** on 2026-09-02 by
+`STRATA_POOL_RUNPOD_LIVE=1 pytest tests/test_runpod_live.py`: the base URL,
+`POST /pods` with `imageName` / `ports` / `env` / `containerDiskInGb` / `name`,
+the `id` in the create response, the proxy endpoint, health through that proxy,
+and `DELETE /pods/{id}` including a second delete of the same pod. A CPU pod
+booted, answered, and terminated with nothing left running.
+
+**Two things that run remains silent on**, because a CPU pod does not exercise
+them: `gpuTypeIds` + `gpuCount`, and reading a region from `machine`. Every pod
+in the account listing carried `machine: {}` with no `dataCenterId`, so
+`region` is probably always `None` today — harmless, since it is metadata, but
+do not trust it. Point `STRATA_POOL_RUNPOD_GPU` at a GPU type to close the
+first gap; it costs real money, which is why the test is opt-in and never runs
 in CI.
+
+The request shapes stay confined to `_create_body` and the three call sites in
+`start`/`stop`, and every one is asserted by a test, so a correction is still a
+small, visible edit rather than an excavation.
 """
 
 import logging

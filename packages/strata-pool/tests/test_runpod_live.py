@@ -7,10 +7,14 @@ interpreter can still leave a pod running, so check the console afterwards.
     export RUNPOD_API_KEY=...
     STRATA_POOL_RUNPOD_LIVE=1 pytest tests/test_runpod_live.py -v -s
 
-Until someone runs this, everything in `test_runpod_backend.py` proves only
-that we send what we intended to send — not that RunPod wants it. This test
-is the one that closes that gap, and it prints the pod id so a failure can be
-chased in the console.
+Everything in `test_runpod_backend.py` proves only that we send what we
+intended to send — not that RunPod wants it. This test is the one that closes
+that gap, and it prints the pod id so a failure can be chased in the console.
+
+Last run 2026-09-02: passed in 25s. A CPU pod booted, answered health through
+the proxy, and terminated with nothing left in the account — covering the base
+URL, the create body, the `id` in the response, the proxy endpoint, and a
+repeated delete. It does **not** cover the accelerator fields.
 
 It uses a CPU pod by default because it is the cheapest thing that exercises
 the same path. Point `STRATA_POOL_RUNPOD_GPU` at a GPU type to prove the
