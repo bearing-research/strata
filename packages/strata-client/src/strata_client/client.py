@@ -79,6 +79,28 @@ def _parse_artifact_uri(uri: str) -> tuple[str, int]:
     return match.group(1), int(match.group(2))
 
 
+#: Set by the by-provenance route on a genuine "nobody has computed this".
+PROVENANCE_MISS_HEADER = "X-Strata-Provenance-Miss"
+
+
+def _provenance_miss(response: httpx.Response) -> bool:
+    """Is this 404 the store saying "no result", or the store not answering?
+
+    A provenance lookup gets 404 for at least three unrelated reasons: the
+    hash is genuinely unknown; the server predates the route and 404s the
+    path; a service-mode gateway has no artifact store configured and 404s
+    with "Artifact store not available in this deployment". Only the first is
+    a cache miss. Reading the other two as misses recomputes forever while
+    every response still looks like a normal, healthy "no".
+
+    So the route marks the real miss with a header. Matching on that rather
+    than on the status keeps the distinction out of response prose, and makes
+    an older server — which cannot set it — raise rather than quietly answer
+    "no" to every question it is asked.
+    """
+    return response.status_code == 404 and PROVENANCE_MISS_HEADER in response.headers
+
+
 def _table_to_ipc(table: pa.Table) -> bytes:
     """Serialize an Arrow Table to IPC stream bytes."""
     sink = pa.BufferOutputStream()
@@ -783,10 +805,11 @@ class StrataClient:
         exception — callers use this on the hot path of "should I run this?"
         and would otherwise wrap every call in try/except.
 
-        Only a 404 becomes ``None``. A 403, a timeout, or a 500 still raises:
-        those mean the store could not answer, which is different from
-        answering "no", and silently treating them the same would turn an
-        expired token into a recomputation nobody can explain.
+        Everything else raises. A 403, a timeout, or a 500 means the store
+        could not answer, which is different from answering "no": treating
+        them the same turns an expired token into a recomputation nobody can
+        explain. See :func:`_provenance_miss` for why the status alone is not
+        enough to tell those apart.
 
         Args:
             provenance_hash: The sha256 provenance hash to look up.
@@ -797,7 +820,7 @@ class StrataClient:
             or None if the store holds no result for that hash.
         """
         response = self._client.get(f"/v1/artifacts/by-provenance/{provenance_hash}")
-        if response.status_code == 404:
+        if _provenance_miss(response):
             return None
         response.raise_for_status()
         return response.json()
@@ -1448,6 +1471,23 @@ class AsyncStrataClient:
             else:
                 # Unknown state, assume ready and try to fetch
                 return await self._fetch_artifact_data(artifact_id, version)
+
+    async def find_by_provenance(self, provenance_hash: str) -> dict | None:
+        """Ask a shared store whether this computation already has a result.
+
+        The async twin of :meth:`StrataClient.find_by_provenance`, and the one
+        the notebook executor uses: the lookup sits on the path of every cell
+        run, inside an already-async materialize, so the sync client would
+        block the event loop on a network round-trip per cell.
+
+        Returns the match's metadata, or ``None`` for a genuine miss.
+        Everything else raises — see :func:`_provenance_miss`.
+        """
+        response = await self._client.get(f"/v1/artifacts/by-provenance/{provenance_hash}")
+        if _provenance_miss(response):
+            return None
+        response.raise_for_status()
+        return response.json()
 
     async def _fetch_artifact_data(self, artifact_id: str, version: int) -> pa.Table:
         """Fetch artifact data by ID and version."""

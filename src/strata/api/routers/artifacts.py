@@ -335,6 +335,7 @@ async def get_artifact_info(
 async def find_artifact_by_provenance(
     store: ReadStore,
     tenant_filter: CurrentTenant,
+    principal: CurrentPrincipal,
     provenance_hash: str = FastPath(pattern="^[0-9a-f]{64}$"),
 ):
     """Has anyone already computed this?
@@ -350,23 +351,45 @@ async def find_artifact_by_provenance(
     the sibling ``/data`` route.
 
     404 is the ordinary answer, not an error — it means "nobody has, go
-    compute it". Callers should treat it as a miss and not log it as a failure.
+    compute it". A caller cannot tell that apart from the *other* 404s it might
+    get (an old server that lacks this route; a gateway with no artifact store
+    configured), and treating those as a miss means recomputing forever while
+    everything looks healthy. So a genuine miss carries
+    ``X-Strata-Provenance-Miss``, and clients key off the header rather than
+    the status alone.
 
     The hash is constrained to a sha256 digest at the route, because every
     hash the store issues is one (including the ``derive_subkey`` per-variable
     hashes) and a lookup key that reaches the database should not be free-form.
 
-    Scoping: ``find_by_provenance`` filters to the caller's tenant in SQL, so
-    a team only ever hits its own results — and the ACL re-check below applies
-    the same table-level deny rules the by-id reads apply, so a shared cache
-    cannot become a way around a table someone is denied.
+    Scoping: the lookup is filtered to the caller's own tenant in SQL, so a
+    team only ever hits its own results, and the ACL re-check below applies the
+    same table-level deny rules the by-id reads apply — a shared cache does not
+    become a way around a table someone is denied.
     """
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
-    artifact = _ensure_artifact_access(
-        store.find_by_provenance(provenance_hash, tenant=tenant_filter),
-        tenant_filter,
-    )
+    # Two different Nones meet here. `CurrentTenant` yields None for "do not
+    # filter" (an `admin:*` caller, or auth switched off), while
+    # `find_by_provenance(tenant=None)` means the *tenantless* namespace
+    # specifically — never "any tenant", by design, so a tenantless build
+    # cannot dedup against another tenant's artifact. Passing one straight into
+    # the other made an admin miss on results they had just published.
+    #
+    # The lookup therefore scopes to the principal's own tenant, exactly as the
+    # publish path does. Admin does not widen it: "has anyone computed this?"
+    # is a question about one team's cache, and a match drawn from whichever
+    # tenant happened to write last is not an answer to it. Reading another
+    # tenant's artifact stays available by id, where admin does widen.
+    lookup_tenant = principal.tenant if principal else None
+    artifact = store.find_by_provenance(provenance_hash, tenant=lookup_tenant)
+    if artifact is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No artifact has been computed for that provenance hash",
+            headers={"X-Strata-Provenance-Miss": "1"},
+        )
+    artifact = _ensure_artifact_access(artifact, tenant_filter)
     _authorize_artifact_read(artifact)
 
     return ArtifactProvenanceMatchResponse(
