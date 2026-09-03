@@ -2895,6 +2895,24 @@ class CellExecutor:
         if not consumed_vars:
             return
 
+        # Publishing from an environment that does not match the lockfile
+        # poisons the team: provenance is computed from ``uv.lock``, so the
+        # artifact would be stamped with an environment it was not built in,
+        # and first-writer-wins makes it the answer everyone gets from then on.
+        #
+        # The cell still ran, and its result is still stored locally. Refusing
+        # the *publish* rather than the run keeps a broken sync the owner's
+        # problem instead of the team's, which is the only part that has to be
+        # someone else's decision.
+        if not self.session.environment_matches_lockfile():
+            logger.warning(
+                "Not publishing cell %s to the team store: the notebook environment "
+                "does not match uv.lock, so its provenance would describe an "
+                "environment the result was not built in. Re-run the environment sync.",
+                cell_id,
+            )
+            return
+
         store = TeamStore(str(base_url), self._ambient_strata_headers())
         try:
             await publish_cell_outputs(

@@ -67,6 +67,7 @@ from strata.notebook.runtime_state import (
     RRuntime,
     load_runtime_state,
     persist_cell_execution_sample,
+    persist_environment_synced_lockfile_hash,
     save_runtime_state,
 )
 from strata.notebook.timing import NotebookTimingRecorder
@@ -1966,6 +1967,36 @@ class NotebookSession:
             duration_ms=int((_time.perf_counter() - started) * 1000),
         )
 
+    def environment_matches_lockfile(self) -> bool:
+        """Does the venv actually hold what the lockfile declares?
+
+        Provenance is computed from ``uv.lock`` on disk, but nothing forces the
+        installed environment to agree with it. A failed ``uv sync`` keeps the
+        previous venv and leaves the sync state ``ready`` — deliberately, so a
+        transient network failure does not lock someone out of their own
+        notebook — and from then on every artifact is stamped with an
+        environment it was not built in.
+
+        Locally that is a footgun the owner absorbs. Published to a shared
+        store it is someone else's problem, and a permanent one: the team cache
+        keeps the first writer's result, so a stale-environment artifact
+        becomes the answer everyone gets.
+
+        Compares what a sync actually realized against what is declared now.
+        It does not re-inspect the venv's contents — a hand-installed package
+        would slip past — because that costs a subprocess on a path that runs
+        after every cell. The failure this closes is the one that happens by
+        accident rather than the one that takes effort.
+        """
+        if self.environment_interpreter_source != "venv":
+            # No notebook venv at all: cells run against whatever ``python``
+            # resolves to, which the lockfile says nothing about.
+            return False
+        realized = self._read_persisted_environment_metadata().synced_lockfile_hash
+        if not realized:
+            return False
+        return realized == compute_lockfile_hash(self.path)
+
     def _apply_uv_sync_result(self, ok: bool, *, duration_ms: int) -> None:
         """Update runtime state after a uv sync attempt."""
         self.environment_last_synced_at = int(_time.time() * 1000)
@@ -1979,6 +2010,14 @@ class NotebookSession:
             self.environment_sync_state = "ready"
             self.environment_sync_error = None
             if ok:
+                # Record what was actually installed, not what is declared.
+                # Provenance is computed from the lockfile on disk; when a sync
+                # fails the venv keeps its old contents while that lockfile
+                # moves on, and every artifact produced afterwards is stamped
+                # with an environment it was not built in.
+                persist_environment_synced_lockfile_hash(
+                    self.path, compute_lockfile_hash(self.path)
+                )
                 self.environment_sync_notice = None
             else:
                 self.environment_sync_notice = (
@@ -2269,6 +2308,11 @@ class NotebookSession:
         self.environment_sync_state = "ready"
         self.environment_sync_error = None
         self.environment_sync_notice = None
+        # ``uv add`` / ``uv remove`` installed into the venv on the way here, so
+        # this path realized the lockfile as surely as an explicit sync did.
+        # Without recording it, every dependency change would silently disable
+        # publishing until the next full sync.
+        persist_environment_synced_lockfile_hash(self.path, compute_lockfile_hash(self.path))
         self.environment_last_synced_at = persisted.last_synced_at or int(_time.time() * 1000)
         self.environment_last_sync_duration_ms = int((_time.perf_counter() - started) * 1000)
 
