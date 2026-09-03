@@ -2276,9 +2276,14 @@ function initializeWebSocket() {
       const cellId = p.cell_id as CellId
       const planId = p.plan_id as string
 
-      // Always auto-accept cascades. If the backend says upstream cells
-      // need to run first, just do it. A confirmation dialog can be added
-      // later for expensive re-runs; for now, eliminate friction.
+      // Always auto-accept cascades. This is the decision, not a stopgap:
+      // running a cell means running it against current inputs, and a
+      // confirmation step would interrupt every cascade to catch the rare
+      // expensive one. Gating it on an estimated duration was considered
+      // and rejected (#631) — cost is only one of the reasons someone
+      // might not want a rerun, and the common ones (a cosmetic edit
+      // upstream, iterating on a downstream cell) have nothing to do with
+      // how long it takes.
       if (planId) {
         executeCascadeWebSocket(cellId, planId)
       }
