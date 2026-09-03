@@ -1971,7 +1971,7 @@ per-variant <code>accuracy</code> back to a dict and picks the winner:</p>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>best model: always_one
 </code></pre></div>
 <p>Same numbers as <code>compare</code>, produced by fanning the scoring out first. See
-<a href="https://bearing-research.github.io/strata/notebook/annotations/#fan-out--run-a-downstream-cell-once-per-variant">Variant Cells → Fan-out</a>.</p>
+<a href="https://bearing-research.github.io/strata/latest/notebook/annotations/#fan-out-run-a-downstream-cell-once-per-variant">Variant Cells → Fan-out</a>.</p>
 <h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>run<span class="w"> </span>examples/model_variants_sweep
 </code></pre></div>
@@ -1983,7 +1983,7 @@ of them still run), and the group has a run-all button + a readiness rollup.</p>
 <code>notebook.toml</code> and only the active variant runs; <code>compare</code> would then see a
 single <code>preds</code> value instead of the dict. Sweep is for <em>comparing</em> variants on
 a shared downstream; switch is for <em>picking</em> one. See
-<a href="https://bearing-research.github.io/strata/notebook/annotations/#sweep-mode--compare-all-variants-at-once">Variant Cells → Sweep mode</a>.</p>
+<a href="https://bearing-research.github.io/strata/latest/notebook/annotations/#sweep-mode-compare-all-variants-at-once">Variant Cells → Sweep mode</a>.</p>
 <h2 id="data">data<a class="headerlink" href="#data" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">y_true</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span>
