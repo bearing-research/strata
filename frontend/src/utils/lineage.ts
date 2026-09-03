@@ -11,6 +11,18 @@ export interface LineageTreeNode {
   type: string // 'artifact' | 'table'
   version: number | null
   children: LineageTreeNode[]
+  /**
+   * Who computed this step, on what, and how long it took.
+   *
+   * Worth nothing until results could be shared — "who" was always you and
+   * "which environment" was always this machine. Once a lineage graph can
+   * contain a step a teammate ran elsewhere, these are the questions the graph
+   * is being opened to answer. Absent for tables and for anything stored
+   * before the fields existed.
+   */
+  principal: string | null
+  buildEnv: string
+  buildDurationMs: number
 }
 
 function tableLabel(uri: string): string {
@@ -42,7 +54,16 @@ export function lineageToTree(graph: LineageGraph, rootUri: string): LineageTree
     const type = n?.type ?? 'artifact'
     const label = type === 'table' ? tableLabel(uri) : (n?.transform_ref ?? 'artifact')
     const children = (inputsOf.get(uri) ?? []).filter((u) => !seen.has(u)).map((u) => build(u))
-    return { uri, label, type, version: n?.version ?? null, children }
+    return {
+      uri,
+      label,
+      type,
+      version: n?.version ?? null,
+      children,
+      principal: n?.principal ?? null,
+      buildEnv: n?.build_env ?? '',
+      buildDurationMs: n?.build_duration_ms ?? 0,
+    }
   }
   return build(rootUri)
 }

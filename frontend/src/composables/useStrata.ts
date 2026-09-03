@@ -141,6 +141,12 @@ export interface LineageNode {
   version?: number | null
   type: string // 'artifact' | 'table'
   transform_ref?: string | null
+  /** Who computed this step, when the store recorded an author. */
+  principal?: string | null
+  /** Interpreter + hardware that produced it, e.g. cpython-3.14-linux-x86_64. */
+  build_env?: string
+  /** How long the producing run took. */
+  build_duration_ms?: number
 }
 export interface LineageEdge {
   from_uri: string

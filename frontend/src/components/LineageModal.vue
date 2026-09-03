@@ -3,6 +3,12 @@ import { useNotebook } from '../stores/notebook'
 
 const { lineageOpen, lineageTitle, lineageRows, lineageLoading, lineageError, closeLineage } =
   useNotebook()
+
+function formatMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.round(ms / 60_000)}m`
+}
 </script>
 
 <template>
@@ -27,6 +33,17 @@ const { lineageOpen, lineageTitle, lineageRows, lineageLoading, lineageError, cl
             <span class="ltype" :class="row.type">{{ row.type === 'table' ? '⛁' : '⬡' }}</span>
             <span class="llabel">{{ row.label }}</span>
             <span v-if="row.version != null" class="lver">v{{ row.version }}</span>
+            <!--
+              Who and where, shown only when recorded. A solo notebook records
+              neither and would otherwise gain a column of dashes; the moment a
+              step comes from a teammate's machine, this is the question the
+              lineage view was opened to answer.
+            -->
+            <span v-if="row.principal" class="lmeta lwho">{{ row.principal }}</span>
+            <span v-if="row.buildEnv" class="lmeta lenv">{{ row.buildEnv }}</span>
+            <span v-if="row.buildDurationMs > 0" class="lmeta lcost">{{
+              formatMs(row.buildDurationMs)
+            }}</span>
           </div>
         </div>
       </div>
@@ -35,6 +52,21 @@ const { lineageOpen, lineageTitle, lineageRows, lineageLoading, lineageError, cl
 </template>
 
 <style scoped>
+.lmeta {
+  margin-left: 8px;
+  font-size: 11px;
+  opacity: 0.72;
+  white-space: nowrap;
+}
+.lwho {
+  font-weight: 500;
+}
+.lenv {
+  font-family: var(--font-mono, monospace);
+}
+.lcost {
+  opacity: 0.55;
+}
 .lineage-overlay {
   position: fixed;
   inset: 0;

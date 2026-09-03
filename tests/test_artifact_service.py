@@ -12,16 +12,37 @@ from types import SimpleNamespace
 from strata.services.artifact import artifact_service
 
 
-def _art(art_id, version, *, inputs=None, state="ready", tenant=None, created_at=100.0):
+def _art(
+    art_id,
+    version,
+    *,
+    inputs=None,
+    state="ready",
+    tenant=None,
+    created_at=100.0,
+    principal=None,
+    transform_spec=None,
+):
     return SimpleNamespace(
         id=art_id,
         version=version,
         state=state,
         tenant=tenant,
-        transform_spec=None,
+        transform_spec=transform_spec,
         input_versions=json.dumps(inputs) if inputs else None,
         created_at=created_at,
+        principal=principal,
     )
+
+
+def _notebook_spec(*, build_env="", build_duration_ms=None):
+    """A stored transform spec as the notebook writes one."""
+    params = {"content_type": "json/object"}
+    if build_env:
+        params["build_env"] = build_env
+    if build_duration_ms is not None:
+        params["build_duration_ms"] = str(build_duration_ms)
+    return json.dumps({"executor": "notebook/cell@v1", "params": params, "inputs": []})
 
 
 class _FakeStore:
@@ -139,3 +160,92 @@ def test_dependents_caps_list_at_limit_but_total_counts_all():
 
     assert resp.total_count == 5  # full count, not the page size
     assert len(resp.dependents) == 2
+
+
+def test_lineage_reports_who_computed_each_step_and_where():
+    """Lineage's reason to exist changed when results became shareable.
+
+    Before a shared store, "who produced this" was always you and "in which
+    environment" was always this machine, so neither was worth a column. Once a
+    graph can contain a step a teammate ran on another machine, they are the
+    questions it is being opened to answer.
+    """
+    upstream = _art(
+        "raw",
+        1,
+        principal="alice@lab",
+        transform_spec=_notebook_spec(
+            build_env="cpython-3.14-linux-x86_64", build_duration_ms=38000
+        ),
+    )
+    root = _art(
+        "model",
+        1,
+        inputs={"strata://artifact/raw@v=1": "raw@v=1"},
+        principal="bob@lab",
+        transform_spec=_notebook_spec(build_env="cpython-3.14-darwin-arm64", build_duration_ms=250),
+    )
+
+    graph = artifact_service.build_lineage(
+        _FakeStore(upstream, root),
+        artifact=root,
+        artifact_id="model",
+        version=1,
+        tenant_filter=None,
+        max_depth=5,
+    )
+    by_uri = {n.uri: n for n in graph.nodes}
+
+    me = by_uri["strata://artifact/model@v=1"]
+    assert (me.principal, me.build_env, me.build_duration_ms) == (
+        "bob@lab",
+        "cpython-3.14-darwin-arm64",
+        250,
+    )
+
+    # The interesting row: an upstream someone else ran, on a different platform.
+    theirs = by_uri["strata://artifact/raw@v=1"]
+    assert (theirs.principal, theirs.build_env, theirs.build_duration_ms) == (
+        "alice@lab",
+        "cpython-3.14-linux-x86_64",
+        38000,
+    )
+
+
+def test_lineage_reports_nothing_rather_than_guessing():
+    """Tables, core transforms, and anything stored before these fields existed
+    record none of it. Empty is the honest answer — a plausible default would be
+    a claim about a machine nobody observed."""
+    root = _art("plain", 1, inputs={"file:///wh#ns.tbl@snapshot=7": "snapshot=7"})
+
+    graph = artifact_service.build_lineage(
+        _FakeStore(root),
+        artifact=root,
+        artifact_id="plain",
+        version=1,
+        tenant_filter=None,
+        max_depth=5,
+    )
+    for node in graph.nodes:
+        assert node.principal is None
+        assert node.build_env == ""
+        assert node.build_duration_ms == 0
+
+
+def test_lineage_survives_a_transform_spec_it_cannot_parse():
+    """``transform_spec`` is client-opaque. A malformed one means "not
+    recorded", the same reading ``_transform_ref`` already takes — not a 500 on
+    a read path over metadata nothing depends on."""
+    root = _art("odd", 1, transform_spec="{not json at all")
+
+    graph = artifact_service.build_lineage(
+        _FakeStore(root),
+        artifact=root,
+        artifact_id="odd",
+        version=1,
+        tenant_filter=None,
+        max_depth=5,
+    )
+    node = graph.nodes[0]
+    assert node.build_env == ""
+    assert node.build_duration_ms == 0

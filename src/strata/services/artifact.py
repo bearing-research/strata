@@ -58,6 +58,29 @@ def _transform_ref(transform_spec: str | None) -> str | None:
         return None
 
 
+def _build_metadata(transform_spec: str | None) -> tuple[str, int]:
+    """``(build_env, build_duration_ms)`` from a stored transform_spec.
+
+    Recorded by the process that ran the cell, so both are absent for tables,
+    for core transforms, and for anything stored before those fields existed.
+    An unparseable spec means "not recorded" rather than an error — the same
+    reading ``_transform_ref`` takes of the same field.
+    """
+    if not transform_spec:
+        return "", 0
+    try:
+        params = json.loads(transform_spec).get("params", {})
+    except (json.JSONDecodeError, ValueError):
+        return "", 0
+    if not isinstance(params, dict):
+        return "", 0
+    try:
+        duration = int(params.get("build_duration_ms") or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    return str(params.get("build_env") or ""), duration
+
+
 def _load_input_versions(input_versions: str | None) -> dict[str, str]:
     """Parse the stored ``input_uri -> version`` map, or ``{}`` if absent/malformed."""
     if not input_versions:
@@ -95,6 +118,7 @@ class ArtifactService:
         queue: list[tuple[str, str, int, int]] = []  # (uri, artifact_id, version, depth)
 
         # Add root node
+        root_env, root_duration = _build_metadata(artifact.transform_spec)
         nodes[artifact_uri] = LineageNode(
             uri=artifact_uri,
             artifact_id=artifact_id,
@@ -102,6 +126,9 @@ class ArtifactService:
             type="artifact",
             transform_ref=_transform_ref(artifact.transform_spec),
             created_at=artifact.created_at,
+            principal=artifact.principal,
+            build_env=root_env,
+            build_duration_ms=root_duration,
         )
         visited.add(artifact_uri)
 
@@ -161,6 +188,7 @@ class ArtifactService:
                 )
                 continue
 
+            input_env, input_duration = _build_metadata(input_artifact.transform_spec)
             nodes[node_uri] = LineageNode(
                 uri=node_uri,
                 artifact_id=art_id,
@@ -168,6 +196,9 @@ class ArtifactService:
                 type="artifact",
                 transform_ref=_transform_ref(input_artifact.transform_spec),
                 created_at=input_artifact.created_at,
+                principal=input_artifact.principal,
+                build_env=input_env,
+                build_duration_ms=input_duration,
             )
 
             # Add this artifact's inputs to queue

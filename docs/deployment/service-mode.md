@@ -331,6 +331,13 @@ and no cell id. Two people running the same source over the same inputs in the
 same environment already arrive at the same hash; the store just had no way to
 be asked.
 
+Lineage answers the follow-up. Opening a result's lineage (from the cell's
+artifact strip, or the registry panel) shows each step with **who computed it,
+on what, and what it cost** - `alice@lab · cpython-3.14-linux-x86_64 · 38s`.
+Those columns are blank on a solo notebook and always were worth nothing there:
+"who" was you and "which environment" was this machine. They start meaning
+something the moment a step in your graph was run by someone else.
+
 The notebook's profiling panel splits the savings once a team hit happens:
 "Cache savings ~12m" alongside "From your team ~8m (4 hits, alice, bob)". The
 team figure is priced by what the *publisher's* run actually cost, carried on
