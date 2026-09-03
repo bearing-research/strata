@@ -62,9 +62,11 @@ from strata.notebook.python_versions import (
     read_venv_runtime_python_version,
 )
 from strata.notebook.runtime_state import (
+    MAX_EXECUTION_SAMPLES,
     EnvironmentRuntime,
     RRuntime,
     load_runtime_state,
+    persist_cell_execution_sample,
     save_runtime_state,
 )
 from strata.notebook.timing import NotebookTimingRecorder
@@ -239,7 +241,13 @@ class NotebookSession:
         self.last_accessed: float = _time.time()
 
         # v1.1: Execution history for profiling and duration estimates.
-        self.execution_history: dict[str, list[ExecutionSample]] = {}
+        # Seeded from ``.strata/runtime.json`` so the profiling summary's
+        # cache-savings figure survives a server restart — it is the
+        # notebook's own evidence that it skipped work, and it used to reset
+        # to zero while every cell was still serving from cache.
+        self.execution_history: dict[str, list[ExecutionSample]] = (
+            self._load_persisted_execution_history()
+        )
 
         # v1.1: Causality chains for stale cells
         self.causality_map: dict[str, CausalityChain] = {}
@@ -1769,6 +1777,25 @@ class NotebookSession:
             self._effective_worker_name(cell),
         )
 
+    def _load_persisted_execution_history(self) -> dict[str, list[ExecutionSample]]:
+        """Read per-cell execution timings back from ``.strata/runtime.json``.
+
+        Runs at session construction, before the notebook has been read, so a
+        missing or unreadable file simply means no history yet.
+        """
+        history: dict[str, list[ExecutionSample]] = {}
+        for cell_id, entry in load_runtime_state(self.path).cells.items():
+            samples = [
+                ExecutionSample(
+                    duration_ms=float(sample["duration_ms"]),
+                    cache_hit=bool(sample["cache_hit"]),
+                )
+                for sample in entry.execution_samples
+            ]
+            if samples:
+                history[cell_id] = samples
+        return history
+
     def record_execution(self, cell_id: str, duration_ms: float, cache_hit: bool) -> None:
         """Record a cell execution for profiling (v1.1).
 
@@ -1781,6 +1808,16 @@ class NotebookSession:
             self.execution_history[cell_id] = []
         self.execution_history[cell_id].append(
             ExecutionSample(duration_ms=duration_ms, cache_hit=cache_hit)
+        )
+        # Mirror to disk so the profiling summary survives a restart. Trimmed
+        # there to the same cap the file keeps, so the in-memory list and the
+        # persisted one do not drift apart across a reopen.
+        self.execution_history[cell_id] = self.execution_history[cell_id][-MAX_EXECUTION_SAMPLES:]
+        persist_cell_execution_sample(
+            self.path,
+            cell_id,
+            duration_ms=duration_ms,
+            cache_hit=cache_hit,
         )
 
     def get_estimated_duration(self, cell_id: str) -> int:

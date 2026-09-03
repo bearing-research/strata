@@ -352,3 +352,67 @@ def test_runtime_state_writes_do_not_bump_notebook_toml_updated_at(tmp_path: Pat
 
     assert before == after
     assert before_updated_at == after_updated_at
+
+
+def test_persist_cell_execution_sample_appends_in_order(tmp_path: Path):
+    from strata.notebook.runtime_state import persist_cell_execution_sample
+
+    persist_cell_execution_sample(tmp_path, "c1", duration_ms=1200.0, cache_hit=False)
+    persist_cell_execution_sample(tmp_path, "c1", duration_ms=8.0, cache_hit=True)
+
+    samples = load_runtime_state(tmp_path).cells["c1"].execution_samples
+    assert samples == [
+        {"duration_ms": 1200.0, "cache_hit": False},
+        {"duration_ms": 8.0, "cache_hit": True},
+    ]
+
+
+def test_persist_cell_execution_sample_keeps_only_the_newest(tmp_path: Path):
+    """The file is rewritten on every execution, so the list has to stay short."""
+    from strata.notebook.runtime_state import (
+        MAX_EXECUTION_SAMPLES,
+        persist_cell_execution_sample,
+    )
+
+    for i in range(MAX_EXECUTION_SAMPLES + 10):
+        persist_cell_execution_sample(tmp_path, "c1", duration_ms=float(i), cache_hit=False)
+
+    samples = load_runtime_state(tmp_path).cells["c1"].execution_samples
+    assert len(samples) == MAX_EXECUTION_SAMPLES
+    # The *newest* survive, not the oldest.
+    assert samples[0]["duration_ms"] == 10.0
+    assert samples[-1]["duration_ms"] == float(MAX_EXECUTION_SAMPLES + 9)
+
+
+def test_execution_samples_survive_a_new_session(tmp_path: Path):
+    """Profiling used to reset to zero whenever the server restarted.
+
+    A new ``NotebookSession`` over the same directory stands in for a restart:
+    it is a fresh object with a fresh ``execution_history``, so anything the
+    summary still reports has come back off disk.
+    """
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook_dir = create_notebook(tmp_path, "Profiling", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+
+    first = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    first.record_execution("c1", duration_ms=2000.0, cache_hit=False)
+    first.record_execution("c1", duration_ms=5.0, cache_hit=True)
+
+    before = first.get_profiling_summary()
+    assert before["cache_savings_ms"] == 2000
+    assert before["cache_hits"] == 1
+
+    restarted = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    after = restarted.get_profiling_summary()
+
+    assert after["cache_savings_ms"] == 2000
+    assert after["cache_hits"] == 1
+    assert after["cache_misses"] == 1
+    assert after["total_execution_ms"] == 2005
+    # The duration estimate is read off the same history.
+    assert restarted.get_estimated_duration("c1") == 2000
