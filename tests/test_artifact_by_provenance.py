@@ -211,6 +211,92 @@ def test_another_teams_identical_computation_is_invisible(team_server):
     assert hit.json()["principal"] == "carol"
 
 
+def test_an_admin_hits_on_what_it_just_published(team_server):
+    """``admin:*`` widens reads by id; it must not *narrow* this one.
+
+    ``CurrentTenant`` yields None for an admin meaning "do not filter", while
+    ``find_by_provenance(tenant=None)`` means the tenantless namespace
+    specifically. Passing one into the other made an admin miss on results it
+    had published seconds earlier and silently recompute them.
+    """
+    base_url = team_server["base_url"]
+    admin = _headers("team-a", "root", scopes="admin:*")
+    uri = _publish(base_url, pa.table({"id": [1, 2, 3]}), admin)
+    provenance = _provenance_of(team_server["artifact_dir"], uri)
+
+    # By id the admin can already read it — so a miss below is this route's
+    # scoping being wrong, not the artifact being unreachable.
+    artifact_id, version = _ref(uri)
+    assert (
+        httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}", headers=admin).status_code
+        == 200
+    )
+
+    found = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{provenance}", headers=admin)
+    assert found.status_code == 200, found.text
+    assert found.json()["artifact_id"] == artifact_id
+
+
+def test_a_miss_is_marked_so_it_cannot_be_confused_with_a_broken_store(personal_server):
+    """A 404 alone is ambiguous: an old server 404s the unknown path, and a
+    gateway with no artifact store 404s with its own message. Both would read
+    as "nobody computed it" and recompute forever, looking healthy throughout.
+    """
+    base_url = personal_server["base_url"]
+
+    miss = httpx.get(f"{base_url}/v1/artifacts/by-provenance/{ABSENT_HASH}")
+    assert miss.status_code == 404
+    assert miss.headers.get("X-Strata-Provenance-Miss") == "1"
+
+    # The stand-in for every other 404 the same client can receive: a path
+    # this server does not serve, exactly as an older deployment would answer.
+    unknown_route = httpx.get(f"{base_url}/v1/artifacts/by-provenance-typo/{ABSENT_HASH}")
+    assert unknown_route.status_code == 404
+    assert "X-Strata-Provenance-Miss" not in unknown_route.headers
+
+
+def test_the_client_raises_rather_than_reporting_a_miss_it_cannot_verify():
+    """An *unmarked* 404 must surface, not become None.
+
+    This is what an older store answers for a route it does not serve, and
+    what a service-mode gateway with no artifact store answers with its own
+    message. Reporting "no result" for a question that was never answered is
+    the failure mode that recomputes forever without ever looking wrong.
+    """
+    unmarked_404 = httpx.MockTransport(
+        lambda request: httpx.Response(404, json={"detail": "Not Found"})
+    )
+    with StrataClient.from_transport(unmarked_404) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            client.find_by_provenance(ABSENT_HASH)
+
+    marked_404 = httpx.MockTransport(
+        lambda request: httpx.Response(
+            404,
+            json={"detail": "No artifact has been computed for that provenance hash"},
+            headers={"X-Strata-Provenance-Miss": "1"},
+        )
+    )
+    with StrataClient.from_transport(marked_404) as client:
+        assert client.find_by_provenance(ABSENT_HASH) is None
+
+
+async def test_the_async_client_answers_the_same_way(personal_server):
+    """The executor's lookup sits inside an already-async cell run, so the
+    sync client would block the event loop once per cell."""
+    from strata_client.client import AsyncStrataClient
+
+    uri = _publish(personal_server["base_url"], pa.table({"id": [1]}))
+    provenance = _provenance_of(personal_server["artifact_dir"], uri)
+
+    async with AsyncStrataClient(base_url=personal_server["base_url"]) as client:
+        assert await client.find_by_provenance(ABSENT_HASH) is None
+
+        found = await client.find_by_provenance(provenance)
+        assert found is not None
+        assert found["artifact_id"] == _ref(uri)[0]
+
+
 def test_the_client_returns_none_for_a_miss(personal_server):
     """A miss is a value, not an exception — the caller is on the hot path of
     "should I run this?" and would otherwise wrap every call in try/except."""
