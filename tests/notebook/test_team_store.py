@@ -870,3 +870,23 @@ def test_a_stale_r_library_does_not_publish(tmp_path):
 
     error = session.environment_attestation_error()
     assert error is not None and "R library" in error
+
+
+def test_both_execution_paths_report_the_same_build_environment():
+    """A warm-pool cell and a cold-harness cell land in the same shared cache.
+
+    ``harness.py`` and ``pool_worker.py`` both run inside the notebook venv and
+    neither can ``import strata``, so each carries its own copy of the identity
+    function. The duplication is fine; a divergence is not — the values are
+    compared as strings by anyone reading the store, and the two paths are
+    interchangeable from the user's point of view.
+
+    The pool worker originally had no copy at all. Every test exercised the
+    cold path, so it went unnoticed until a live team store showed warm-pool
+    artifacts published with no platform recorded.
+    """
+    from strata.notebook.harness import build_env_identity as harness_identity
+    from strata.notebook.pool_worker import build_env_identity as pool_identity
+
+    assert pool_identity() == harness_identity()
+    assert harness_identity().count("-") >= 3, "expected impl-version-platform-machine"

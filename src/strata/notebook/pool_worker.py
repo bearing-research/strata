@@ -16,6 +16,7 @@ loaded via ``importlib.util``.
 import importlib.util
 import io
 import os
+import platform
 import sys
 import tomllib
 from contextlib import contextmanager
@@ -214,6 +215,25 @@ def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
     return client
 
 
+def build_env_identity() -> str:
+    """Which interpreter, on which machine, produced these bytes.
+
+    A duplicate of ``harness.build_env_identity``, and deliberately so: both
+    files run inside the notebook venv and cannot ``import strata``, and the
+    value has to describe *this* process rather than the server's. What must
+    not diverge is the format, since a warm-pool result and a cold-harness
+    result land in the same shared cache and are compared as strings.
+
+    Omitting it here was invisible in tests — they exercise the cold path —
+    and only showed up against a live team store, where every warm-pool
+    artifact published with no platform recorded at all.
+    """
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    return (
+        f"{platform.python_implementation().lower()}-{version}-{sys.platform}-{platform.machine()}"
+    )
+
+
 def _close_client(client: Any) -> None:
     """Close an injected ambient client, swallowing teardown errors."""
     if client is None:
@@ -338,6 +358,7 @@ def execute_harness(manifest: dict) -> dict:
             "stderr": stderr_buf.getvalue(),
             "error": None,
             "mutation_warnings": mutation_warnings,
+            "build_env": build_env_identity(),
         }
 
     except Exception as e:
