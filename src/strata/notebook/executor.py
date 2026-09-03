@@ -111,6 +111,7 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
+from strata.notebook.team_store import TeamPull, TeamStore, pull_cell_outputs
 from strata.notebook.workers import (
     get_worker_execution_error,
     is_embedded_executor_worker,
@@ -348,6 +349,11 @@ class CellExecutionResult:
     remote_build_id: str | None = None
     remote_build_state: str | None = None
     remote_error_code: str | None = None
+    # Who computed the result, when it came from the shared team store rather
+    # than this machine's own cache. ``None`` for a local hit or a real run. A
+    # team hit is otherwise indistinguishable from a local one, and a result
+    # that appears with no author reads as a bug rather than as a saving.
+    team_cache_principal: str | None = None
 
     def __post_init__(self) -> None:
         # Legacy shim: accept either `display_outputs` or `display_output`
@@ -1165,6 +1171,7 @@ class CellExecutor:
                 if (cell is not None and use_cache and not consumed_vars)
                 else None
             )
+            team_pull: TeamPull | None = None
             if use_cache:
                 if consumed_vars:
                     first_var = sorted(consumed_vars)[0]
@@ -1172,6 +1179,25 @@ class CellExecutor:
                     cached_artifact = artifact_mgr.find_cached(var_prov)
                 else:
                     cached_artifact = artifact_mgr.find_cached(provenance_hash)
+
+                # The team cache tier: only after the local store has missed,
+                # so an ordinary hit pays nothing for it. A successful pull has
+                # written each consumed variable under its canonical local id,
+                # so re-probing now finds them and the validation below runs
+                # against real local artifacts rather than a special case.
+                if cached_artifact is None and consumed_vars:
+                    team_pull = await self._pull_from_team_store(
+                        cell_id=cell_id,
+                        provenance_hash=provenance_hash,
+                        consumed_vars=consumed_vars,
+                        source_hash=source_hash,
+                        env_hash=env_hash,
+                        variant=fanout_variant,
+                    )
+                    if team_pull is not None:
+                        cached_artifact = artifact_mgr.find_cached(
+                            derive_subkey(provenance_hash, sorted(consumed_vars)[0])
+                        )
 
             # Validate cache hit: every consumed variable must have a
             # canonical artifact whose provenance matches.  The global
@@ -1261,6 +1287,7 @@ class CellExecutor:
                         )
                     ),
                     execution_method="cached",
+                    team_cache_principal=team_pull.principal if team_pull else None,
                 ).apply_remote_metadata(**remote_metadata)
                 self.session.record_successful_execution_provenance(
                     cell_id,
@@ -1670,6 +1697,7 @@ class CellExecutor:
                 if cell is not None
                 else []
             )
+            team_pull: TeamPull | None = None
             if use_cache:
                 if consumed_vars:
                     first_var = sorted(consumed_vars)[0]
@@ -1677,6 +1705,24 @@ class CellExecutor:
                     cached_artifact = artifact_mgr.find_cached(var_prov)
                 else:
                     cached_artifact = artifact_mgr.find_cached(provenance_hash)
+
+                # Same team-cache tier as the Python path. The store keys off
+                # provenance and on-disk blobs, both language-agnostic, so an R
+                # cell shares a teammate's result on exactly the same terms —
+                # and leaving it out would be the kind of drift between the two
+                # execution paths that has bitten before.
+                if cached_artifact is None and consumed_vars:
+                    team_pull = await self._pull_from_team_store(
+                        cell_id=cell_id,
+                        provenance_hash=provenance_hash,
+                        consumed_vars=consumed_vars,
+                        source_hash=source_hash,
+                        env_hash=env_hash,
+                    )
+                    if team_pull is not None:
+                        cached_artifact = artifact_mgr.find_cached(
+                            derive_subkey(provenance_hash, sorted(consumed_vars)[0])
+                        )
 
             notebook_id = self.session.notebook_state.id
             if use_cache and cached_artifact is not None and consumed_vars:
@@ -1727,6 +1773,7 @@ class CellExecutor:
                         )
                     ),
                     execution_method="cached",
+                    team_cache_principal=team_pull.principal if team_pull else None,
                 )
                 self.session.record_successful_execution_provenance(
                     cell_id,
@@ -2728,6 +2775,50 @@ class CellExecutor:
         if not getattr(config, "notebook_remote_store_url", None):
             return {}
         return dict(getattr(config, "notebook_remote_store_headers", {}) or {})
+
+    async def _pull_from_team_store(
+        self,
+        *,
+        cell_id: str,
+        provenance_hash: str,
+        consumed_vars: set[str],
+        source_hash: str,
+        env_hash: str,
+        variant: str | None = None,
+    ) -> TeamPull | None:
+        """Try to serve this cell from a colleague's result.
+
+        Runs only after the *local* store has missed, so the common path pays
+        nothing. Returns ``None`` whenever the feature is off, no store is
+        configured, or the store cannot supply every consumed variable — the
+        caller then runs the cell exactly as it would have.
+
+        The client is created and closed per pull rather than kept on the
+        executor. It only happens on a miss, immediately before spawning a
+        subprocess that costs orders of magnitude more, so the connection
+        setup is free in context and there is no lifetime to leak.
+        """
+        config = self._lake_config()
+        if not getattr(config, "notebook_team_cache_enabled", False):
+            return None
+        base_url = getattr(config, "notebook_remote_store_url", None)
+        if not base_url:
+            return None
+
+        store = TeamStore(str(base_url), self._ambient_strata_headers())
+        try:
+            return await pull_cell_outputs(
+                store,
+                self.session.get_artifact_manager(),
+                cell_id=cell_id,
+                provenance_hash=provenance_hash,
+                consumed_vars=consumed_vars,
+                source_hash=source_hash,
+                env_hash=env_hash,
+                variant=variant,
+            )
+        finally:
+            await store.aclose()
 
     def _manifest_tables(
         self,
