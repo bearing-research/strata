@@ -72,14 +72,24 @@ Claude Code finds the `.mcp.json` that step 1 wrote, connects to the
 ### 3. Ask for something
 
 ```text
-Load the iris dataset, train a classifier on it, and report the accuracy.
+Simulate 100,000 rolls of three dice and tell me how often the total beats 12.
 Build it in the notebook.
 ```
 
 The agent adds cells and runs them. Each one appears in the viewer in the first
 terminal as it happens — status flipping to running, then the output landing.
 That is the confirmation that it is driving the notebook rather than writing
-scripts: if nothing appears in the viewer, it is not using the notebook.
+scripts: if **nothing** appears in the viewer, it is not using the notebook. A
+cell that appears and goes red is fine — that is the notebook working and the
+code failing, which is a normal first draft.
+
+!!! tip "Asking for something that needs a library"
+
+    A freshly scaffolded notebook's environment has only what the cell runtime
+    needs (`pyarrow`, `orjson`, `cloudpickle`). Ask for pandas or scikit-learn
+    and the agent adds it first with the `add_dependency` tool, so expect an
+    environment sync before the first cell runs. The example above is deliberately
+    dependency-free so your first run is a clean one.
 
 ### 4. Take it from there
 

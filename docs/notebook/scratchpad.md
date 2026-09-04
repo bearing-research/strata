@@ -54,10 +54,13 @@ This is worth doing once, because the whole thing is invisible by design —
 nothing announces itself, and an agent that quietly kept using `python -c` looks
 identical from the outside.
 
-Ask an agent, in any project, for something that needs a computation:
+Ask an agent, in any project, for something it **cannot** answer with shell
+tools — the skill only triggers when it was about to run ad-hoc *Python*, so a
+question `find`/`awk` can answer proves nothing:
 
 ```text
-What's the median of the file sizes under src/, in KB?
+Fit a linear regression to the points (1,2), (2,4.1), (3,5.9), (4,8.2)
+and tell me the slope and intercept.
 ```
 
 Then look for the notebook:
@@ -71,10 +74,13 @@ If `./scratch` exists and has cells in it, the skill engaged. If it does not,
 the agent answered with `python -c` and the skill did not fire — check that
 `strata --help` works **in the agent's environment**, which is the usual cause.
 
-### 4. Nothing else
+### 4. Nothing else — for the agent
 
-There is no server to start and no session to open. The agent creates the
-scratch notebook itself the first time it needs one, with
+The agent needs no server and no session: it drives the notebook through the
+`strata` CLI against the directory. (Looking at it yourself is the one thing
+that does need a server — see [Looking at it](#looking-at-it) below.)
+
+It creates the scratch notebook the first time it needs one, with
 
 ```bash
 strata new scratch --parent . --no-env --project-mount
@@ -111,14 +117,32 @@ A better option that costs more gets ignored. Two things keep the cost equal:
 
 ## Looking at it
 
-You don't have to, and usually won't. When you want to:
+You don't have to, and usually won't. When you want to, the simplest way is:
 
 ```bash
-strata watch ./scratch        # live terminal viewer, read-only
+strata agent ./scratch        # starts a server scoped to it, then attaches the viewer
 ```
 
-or open the notebook in the [web UI](../getting-started/notebook.md). Everything
-in [Watching an agent work](agent.md#watching-an-agent-work) applies here too.
+!!! warning "`strata watch ./scratch` on its own usually won't work"
+
+    A server only opens notebooks inside its configured storage root, which
+    defaults to `~/.strata/notebooks` — and a scratchpad lives in your project.
+    Pointed at a default server, opening it is rejected with *"Invalid notebook
+    path: must be inside configured notebook storage"*, and the viewer sits at
+    `connecting…` rather than saying so.
+
+    `strata agent` avoids this because it starts a server scoped to the
+    notebook's parent directory. If you would rather use a server you already
+    run, start it with its root over your project:
+
+    ```bash
+    STRATA_NOTEBOOK_STORAGE_DIR=. strata-notebook &
+    strata watch ./scratch
+    ```
+
+Once something is attached, everything in
+[Watching an agent work](agent.md#watching-an-agent-work) applies here too —
+including opening it in the [web UI](../getting-started/notebook.md) instead.
 
 ## Related
 
