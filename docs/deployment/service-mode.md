@@ -340,9 +340,12 @@ answers the question a shared cache generates on day one: *"you got a hit and I
 didn't - why?"* The answer is almost always that the identities differ, and
 until they were readable there was no way to see it.
 
-Those columns are blank on a solo notebook and always were worth nothing there:
-"who" was you and "which environment" was this machine. They start meaning
-something the moment a step in your graph was run by someone else.
+Only the author column is blank on a solo notebook - personal mode has no
+authenticated identity to record. The platform and the environment identity are
+recorded on every run and always have been; what changes with a shared store is
+that they stop being the same value on every row. A graph where one step ran on
+someone else's machine, in a different environment, is the case these columns
+exist to make visible.
 
 The notebook's profiling panel splits the savings once a team hit happens:
 "Cache savings ~12m" alongside "From your team ~8m (4 hits, alice, bob)". The

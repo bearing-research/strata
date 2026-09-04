@@ -1064,12 +1064,18 @@ class LineageNode(BaseModel):
             ``build_env``, the step's environment identity — which package set,
             on what.
 
-    The last three used to be worth nothing here: before results could be
-    shared, "who" was always you and "which environment" was always this
-    machine. Once a lineage graph can contain a step someone else ran on
-    another machine, they are the questions the graph is being opened to
-    answer. Empty for tables, for core transforms, and for anything stored
-    before those fields existed.
+    These carried no information before results could be shared: every step in
+    a graph had the same author (you) and the same environment (this machine).
+    Once a graph can contain a step someone else ran elsewhere, they are the
+    questions it is being opened to answer.
+
+    They are absent under different conditions, which is worth keeping
+    straight. ``principal`` needs an authenticated caller, so it is empty on a
+    personal-mode notebook however the artifact was produced. ``build_env``,
+    ``build_duration_ms`` and ``env_hash`` are recorded by the process that ran
+    the cell, so they are populated on a solo notebook too and empty only for
+    tables, for core transforms, and for anything stored before the fields
+    existed.
     """
 
     uri: str

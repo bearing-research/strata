@@ -890,3 +890,65 @@ def test_both_execution_paths_report_the_same_build_environment():
 
     assert pool_identity() == harness_identity()
     assert harness_identity().count("-") >= 3, "expected impl-version-platform-machine"
+
+
+async def test_a_store_that_disagrees_about_the_environment_is_not_believed(
+    team_store_server, local_manager, monkeypatch
+):
+    """An honest pull cannot disagree — ``env_hash`` is part of the provenance
+    key, so a matching provenance implies a matching env_hash.
+
+    If one disagrees anyway, importing it pushes the wrongness somewhere it
+    cannot be read as a problem: ``causality._get_stored_hash`` prefers the
+    stored env_hash over the cell's own when explaining staleness, so the cell
+    would report "the environment changed" forever with nothing pointing at
+    why. Keep the local value and say so out loud instead.
+    """
+    import json as json_module
+
+    artifact_id = "nb_liar_cell_zz_var_model"
+    provenance = derive_subkey(CELL_PROVENANCE, "model")
+    shared = ArtifactStore(team_store_server["artifact_dir"])
+    version = shared.create_artifact(
+        artifact_id=artifact_id,
+        provenance_hash=provenance,
+        transform_spec=TransformSpec(
+            executor="notebook/cell@v1",
+            params={"content_type": "json/object", "env_hash": "9" * 64},
+            inputs=[],
+        ),
+        principal="alice",
+    )
+    shared.blob_store.write_blob(artifact_id, version, b'{"ok": 1}')
+    shared.finalize_artifact(
+        artifact_id=artifact_id, version=version, schema_json="", row_count=0, byte_size=9
+    )
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "strata.notebook.team_store.logger.warning",
+        lambda msg, *args: warnings.append(msg % args if args else msg),
+    )
+
+    store = TeamStore(team_store_server["base_url"])
+    try:
+        pull = await pull_cell_outputs(
+            store,
+            local_manager,
+            cell_id=CELL_ID,
+            provenance_hash=CELL_PROVENANCE,
+            consumed_vars={"model"},
+            env_hash="1" * 64,
+        )
+    finally:
+        await store.aclose()
+
+    assert pull is not None, "a disagreement must not turn a usable result into a miss"
+    assert any("cannot both be right" in w for w in warnings)
+
+    stored = local_manager.artifact_store.get_latest_version(
+        local_manager.cell_artifact_id(CELL_ID, "model")
+    )
+    assert stored is not None
+    params = json_module.loads(stored.transform_spec)["params"]
+    assert params["env_hash"] == "1" * 64, "the store's disputed value was imported"
