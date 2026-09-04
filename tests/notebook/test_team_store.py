@@ -952,3 +952,93 @@ async def test_a_store_that_disagrees_about_the_environment_is_not_believed(
     assert stored is not None
     params = json_module.loads(stored.transform_spec)["params"]
     assert params["env_hash"] == "1" * 64, "the store's disputed value was imported"
+
+
+async def test_a_pulled_result_keeps_its_author_in_the_local_store(
+    team_store_server, local_manager
+):
+    """The lineage view reads the *local* store.
+
+    ``TeamPull.principal`` was logged and surfaced at pull time but never
+    persisted, and ``store_cell_output`` never passed one — so every notebook
+    artifact had a null author and the lineage column stayed blank on exactly
+    the steps someone else produced. Which is the case the column exists for.
+    """
+    seed_team_result(
+        team_store_server["artifact_dir"], variable="model", blob=b"{}", principal="alice@lab"
+    )
+
+    store = TeamStore(team_store_server["base_url"])
+    try:
+        pull = await pull_cell_outputs(
+            store,
+            local_manager,
+            cell_id=CELL_ID,
+            provenance_hash=CELL_PROVENANCE,
+            consumed_vars={"model"},
+        )
+    finally:
+        await store.aclose()
+
+    assert pull is not None and pull.principal == "alice@lab"
+    stored = local_manager.artifact_store.get_latest_version(
+        local_manager.cell_artifact_id(CELL_ID, "model")
+    )
+    assert stored is not None
+    assert stored.principal == "alice@lab", "the author was surfaced but not persisted"
+
+
+async def test_a_disputed_env_hash_on_any_variable_is_caught(
+    team_store_server, local_manager, monkeypatch
+):
+    """Checking the alphabetically-first variable and stamping every variable
+    from it would launder a bad value on anything sorting later — silently,
+    since the warning never looks at it."""
+    import json as json_module
+
+    shared = ArtifactStore(team_store_server["artifact_dir"])
+    for variable, stored_env in (("alpha", "1" * 64), ("zeta", "9" * 64)):
+        artifact_id = f"nb_other_cell_zz_var_{variable}"
+        version = shared.create_artifact(
+            artifact_id=artifact_id,
+            provenance_hash=derive_subkey(CELL_PROVENANCE, variable),
+            transform_spec=TransformSpec(
+                executor="notebook/cell@v1",
+                params={"content_type": "json/object", "env_hash": stored_env},
+                inputs=[],
+            ),
+        )
+        shared.blob_store.write_blob(artifact_id, version, b"{}")
+        shared.finalize_artifact(
+            artifact_id=artifact_id, version=version, schema_json="", row_count=0, byte_size=2
+        )
+
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "strata.notebook.team_store.logger.warning",
+        lambda msg, *args: warnings.append(msg % args if args else msg),
+    )
+
+    store = TeamStore(team_store_server["base_url"])
+    try:
+        pull = await pull_cell_outputs(
+            store,
+            local_manager,
+            cell_id=CELL_ID,
+            provenance_hash=CELL_PROVENANCE,
+            consumed_vars={"alpha", "zeta"},
+            env_hash="1" * 64,  # agrees with alpha, not with zeta
+        )
+    finally:
+        await store.aclose()
+
+    assert pull is not None
+    assert any("cannot both be right" in w for w in warnings), (
+        "a bad env_hash on a later-sorting variable went unreported"
+    )
+    for variable in ("alpha", "zeta"):
+        stored = local_manager.artifact_store.get_latest_version(
+            local_manager.cell_artifact_id(CELL_ID, variable)
+        )
+        params = json_module.loads(stored.transform_spec)["params"]
+        assert params["env_hash"] == "1" * 64

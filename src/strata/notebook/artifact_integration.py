@@ -190,6 +190,7 @@ class NotebookArtifactManager:
         variant: str | None = None,
         build_env: str = "",
         build_duration_ms: float = 0.0,
+        principal: str | None = None,
     ) -> ArtifactVersion:
         """Store a cell output as an artifact.
 
@@ -223,6 +224,12 @@ class NotebookArtifactManager:
                 so their own history holds no comparable duration and the
                 savings estimate would credit zero for exactly the case worth
                 counting. Zero when unrecorded.
+            principal: Who computed these bytes, when that is known. A locally
+                run cell has no authenticated identity to record, so this is
+                normally ``None``; a result *pulled* from a shared store does,
+                and without persisting it the lineage view would show a blank
+                author for exactly the steps someone else produced — the case
+                the column exists for.
 
         Returns:
             The created ArtifactVersion
@@ -260,6 +267,7 @@ class NotebookArtifactManager:
             provenance_hash=provenance_hash,
             transform_spec=transform_spec,
             input_versions=input_versions,
+            principal=principal,
         )
 
         # Write blob

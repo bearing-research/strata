@@ -4382,6 +4382,13 @@ class CellExecutor:
         env_hash = prov.env_hash
         carry_var_provenance = derive_subkey(cell_provenance, loop.carry)
 
+        # A loop cell's artifacts were as environment-specific as any other's
+        # and recorded none of it, so lineage and the team cache saw blanks
+        # where a non-loop cell in the same notebook showed a platform. The
+        # cost is the whole loop, which is what a teammate skipping it saves.
+        loop_build_env = str((final_result or {}).get("build_env") or "")
+        loop_duration_ms = (time.time() - start_time) * 1000
+
         canonical_artifact = artifact_mgr.store_cell_output(
             cell_id=cell_id,
             variable_name=loop.carry,
@@ -4389,6 +4396,9 @@ class CellExecutor:
             content_type=carry_content_type,
             provenance_hash=carry_var_provenance,
             source_hash=source_hash,
+            env_hash=env_hash,
+            build_env=loop_build_env,
+            build_duration_ms=loop_duration_ms,
         )
         canonical_uri = f"strata://artifact/{canonical_artifact.id}@v={canonical_artifact.version}"
 
@@ -4414,6 +4424,9 @@ class CellExecutor:
                 content_type=extra_content_type,
                 provenance_hash=derive_subkey(cell_provenance, extra_var),
                 source_hash=source_hash,
+                env_hash=env_hash,
+                build_env=loop_build_env,
+                build_duration_ms=loop_duration_ms,
             )
             extra_outputs[extra_var] = {
                 "content_type": extra_content_type,
@@ -4432,7 +4445,7 @@ class CellExecutor:
             env_hash,
         )
 
-        duration_ms = (time.time() - start_time) * 1000
+        duration_ms = loop_duration_ms
         raw_displays = final_result.get("displays") if final_result else None
         display_outputs = (
             [d for d in raw_displays if isinstance(d, dict)]
