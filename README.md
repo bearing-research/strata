@@ -27,6 +27,11 @@ local `pathlib.Path` inside the cell. The whole notebook is plain `.py`
 files plus a manifest, so commits are git-diffable and there are no JSON
 blobs or execution metadata bleeding into the history.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/notebook-anatomy-dark.png">
+  <img alt="The Strata notebook UI: a Python cell with its source and an interactive table of results, sidebar panels for mounts, workers and environment, and a bottom drawer showing the cell DAG and per-cell timings." src="docs/assets/notebook-anatomy-light.png">
+</picture>
+
 **Docs:** [bearing-research.github.io/strata](https://bearing-research.github.io/strata/)
 
 ## Give your coding agent a cached scratchpad

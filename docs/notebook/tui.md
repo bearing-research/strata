@@ -95,6 +95,10 @@ is read-only, so the web UI (the driver) answers them.
 
 ## Layout and keys
 
+![The terminal viewer: a cell list on the left with status glyphs and last-run
+times including a cached entry, and on the right the selected cell's source above
+its output rendered as a table.](../assets/tui-layout.svg)
+
 The left pane lists the cells (status glyph, name, and last-run time); the right
 pane is split into two tab-groups for the selected cell - the **code** on top
 (Source, Tests source) and the **runtime** on the bottom (Output, Console, Agent,

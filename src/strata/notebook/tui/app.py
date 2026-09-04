@@ -638,10 +638,15 @@ class NotebookTUI(App[None]):
             return
         table = self.query_one("#cells", DataTable)
         status_col, cell_col, time_col = self._col_keys
+        # update_width=True or the column never re-measures: the columns were
+        # sized when the row was added, before the cell had run, so "time" was
+        # as wide as its 4-char header and every later value was clipped
+        # ("cached" -> "cach", "412ms" -> "412m"). Same for the label column
+        # when a test badge or loop-iteration counter appears.
         try:
-            table.update_cell(cid, status_col, _glyph(cell.status))
-            table.update_cell(cid, cell_col, _literal(self._cell_label(cell)))
-            table.update_cell(cid, time_col, _time_str(cell))
+            table.update_cell(cid, status_col, _glyph(cell.status), update_width=True)
+            table.update_cell(cid, cell_col, _literal(self._cell_label(cell)), update_width=True)
+            table.update_cell(cid, time_col, _time_str(cell), update_width=True)
         except Exception:  # noqa: BLE001 — row may not exist yet (pre-snapshot frame)
             return
         if cid == self._selected:
