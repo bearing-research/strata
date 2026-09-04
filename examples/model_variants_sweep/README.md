@@ -3,8 +3,8 @@
 A minimal example of variant **sweep mode**: run every variant of a group and
 compare them all in one downstream cell.
 
-The `model` group has three variant cells — `always_one`, `alternating`,
-`majority` — each producing `preds` a different way. Because the group is in
+The `model` group has three variant cells, `always_one`, `alternating`,
+`majority`: each producing `preds` a different way. Because the group is in
 **sweep mode** (`mode = "sweep"` in `notebook.toml`), all three run on every
 execution, and the downstream `compare` cell receives `preds` as a
 `{variant_name: predictions}` dict:
@@ -16,7 +16,7 @@ accuracy by variant: {'alternating': 0.5, 'always_one': 0.6, 'majority': 0.6}
 ## Fan-out with `@per_variant`
 
 The `compare` cell consumes the whole dict at once. The `score` cell shows the
-other option — **fan-out**: `# @per_variant` runs it once per variant with
+other option, **fan-out**: `# @per_variant` runs it once per variant with
 `preds` bound to that variant's list (a scalar, not the dict), so each variant
 is scored independently (in a real workload, each could carry `# @worker gpu`
 and run as its own job). A plain downstream cell, `best`, then collapses the
@@ -36,7 +36,7 @@ Same numbers as `compare`, produced by fanning the scoring out first. See
 strata run examples/model_variants_sweep
 ```
 
-Or open it in the UI (`python -m strata`) — the `model` group renders as a tab
+Or open it in the UI (`python -m strata`), the `model` group renders as a tab
 strip with a **sweep** badge; clicking a tab shows that variant's source (all
 of them still run), and the group has a run-all button + a readiness rollup.
 

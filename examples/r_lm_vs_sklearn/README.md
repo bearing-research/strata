@@ -1,16 +1,16 @@
-# R `lm()` vs scikit-learn — side-by-side linear regression
+# R `lm()` vs scikit-learn: side-by-side linear regression
 
 Fit the same housing-price model with R's `lm()` and Python's
 `scikit-learn`. Hand the coefficients + held-out predictions back to
 a Python cell over Arrow IPC and read them side by side. This is the
 mixed-language notebook that #59 (the R Phase 1 capstone) was
-designed for — Python data prep, R modeling, Python comparison +
+designed for, Python data prep, R modeling, Python comparison +
 viz, with the artifact store gluing everything together.
 
 ## What it shows
 
 - **R's formula syntax in one line.** `lm(price ~ sqft + bedrooms +
-  age + location, data = ...)` — auto-dummy-encodes `location`,
+  age + location, data = ...)`: auto-dummy-encodes `location`,
   picks a baseline level, fits with std-errors and p-values
   attached. No ColumnTransformer, no design-matrix construction.
 - **Cross-language Arrow handoff.** R returns three `data.frame`s
@@ -21,7 +21,7 @@ viz, with the artifact store gluing everything together.
   pandas). The numbers should match to ~1e-12; the demo's value is
   *how* each toolkit expresses the fit, not which is more accurate.
 - **R surfaces stats Python doesn't.** Std-errors, t-statistics,
-  p-values for every coefficient — sklearn's `LinearRegression`
+  p-values for every coefficient, sklearn's `LinearRegression`
   ships none of that. The comparison cell leaves those columns NaN
   on the sklearn side.
 
@@ -40,7 +40,7 @@ viz, with the artifact store gluing everything together.
   language handoff. On macOS: `brew install r` then `Rscript -e
   'install.packages(c("arrow", "jsonlite"))'`. On Ubuntu: see
   [CRAN](https://cran.r-project.org/). The strata-notebook server
-  surfaces a clean skip / error if R is missing — no crash.
+  surfaces a clean skip / error if R is missing, no crash.
 - **Python deps** declared in this notebook's `pyproject.toml`
   (`pandas`, `numpy`, `scikit-learn`). Strata's per-notebook `uv
   sync` handles them automatically the first time you open the
@@ -76,7 +76,7 @@ locationsuburb     -85.30          -85.30          -0.00       3.93      0.0000
  R lm()     0.9698         0.9690    1246.94            194             25.19
 sklearn     0.9698         0.9690    1246.94            194             25.19
 
-Test RMSE — R lm(): 21.97   sklearn: 21.97
+Test RMSE, R lm(): 21.97   sklearn: 21.97
 Max |R-sklearn| prediction gap on test set: 0.0000
 ```
 
@@ -87,10 +87,10 @@ solution; the `lm_p_value` column is R-only.
 
 1. **Edit the model.** Drop `bedrooms` from the R formula
    (`lm(price ~ sqft + age + location)`) and watch the comparison
-   reshape — `compare` shows the row dropping out.
+   reshape, `compare` shows the row dropping out.
 2. **Misalign the baseline level.** Comment out the
    `location_levels.sort(...)` line in `fit-sklearn`. The sklearn
-   coefficients will swap signs vs R's — a real risk in any
+   coefficients will swap signs vs R's, a real risk in any
    "translate this R analysis to Python" workflow.
 3. **Add interaction terms.** R: `price ~ sqft * location`. sklearn:
    you'll have to add the interaction columns by hand. The contrast

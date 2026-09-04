@@ -1,17 +1,17 @@
-# Loop Hill Climb — demo for the `@loop` cell primitive
+# Loop Hill Climb: demo for the `@loop` cell primitive
 
 Three-cell notebook that exercises every moving part of Strata's loop
 cell feature: the `@loop` / `@loop_until` annotations, per-iteration
 artifacts, the progress badge, the iteration picker, and the
 `@loop start_from` fork. The cell body is greedy hill climbing on
-[Himmelblau's function](https://en.wikipedia.org/wiki/Himmelblau%27s_function) —
+[Himmelblau's function](https://en.wikipedia.org/wiki/Himmelblau%27s_function) , 
 small enough to reason about and visually interesting because there
 are four equal-valued minima, so different seeds (and different forks)
 converge to different basins.
 
 ## What to look at
 
-- **`helpers`** is a module cell — imports (``random``) and a
+- **`helpers`** is a module cell, imports (``random``) and a
   reusable function (``himmelblau``). It declares no top-level
   runtime state, so Strata treats it as a shareable module whose
   names are directly referenceable from every downstream cell.
@@ -29,7 +29,7 @@ converge to different basins.
     keeps the move if it improves the score. The step size shrinks on
     every accepted move so the search sharpens.
   - ``random`` and ``himmelblau`` come from the ``helpers`` cell via
-    the DAG — no duplicate imports or redefinitions here.
+    the DAG, no duplicate imports or redefinitions here.
   - Every iteration stores the full `state` as its own artifact
     (`nb_loop-hill-climb-001_cell_evolve_var_state@iter={k}`).
 - **`summary`** is a regular downstream cell. It reads the final

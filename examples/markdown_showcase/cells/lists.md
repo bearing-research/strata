@@ -22,10 +22,10 @@
 
 ## Mixed (ordered + unordered, with content)
 
-1. **Step one** — set up the environment.
+1. **Step one**: set up the environment.
    - Install dependencies via `uv sync`.
    - Verify with `uv run pytest tests/notebook/`.
-2. **Step two** — run the notebook.
+2. **Step two**: run the notebook.
    - Open it via the Strata UI.
    - Click `Run All` to execute every Python cell in order.
-3. **Step three** — read the output.
+3. **Step three**: read the output.

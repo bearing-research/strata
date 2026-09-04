@@ -1,7 +1,7 @@
 # Read before running
 
 This notebook is the first thing you see when you open the project. It does
-nothing computationally — the real work starts in `helpers`.
+nothing computationally, the real work starts in `helpers`.
 
 ## Key facts
 
@@ -13,7 +13,7 @@ nothing computationally — the real work starts in `helpers`.
 
 2. **Every LLM call costs real money.** Every market-data call counts
    against your Alpaca rate limit (200/min free tier). The `costs` cell
-   tracks both — check it before you leave the notebook running unattended.
+   tracks both, check it before you leave the notebook running unattended.
 
 3. **Paper fills aren't realistic.** Paper fills on Alpaca are instantaneous
    and slippage-free, which is not how real markets work. We apply a modeled
@@ -22,7 +22,7 @@ nothing computationally — the real work starts in `helpers`.
 
 4. **LLM outputs are non-deterministic.** A hostile news headline could in
    principle influence a signal. We enforce a ticker whitelist
-   (`Config.TICKER_WHITELIST`) at the order layer — the LLM cannot place
+   (`Config.TICKER_WHITELIST`) at the order layer, the LLM cannot place
    orders in tickers outside that list regardless of what the signal says.
 
 5. **Nothing here is financial advice.** The strategy is a demo. Backtest on

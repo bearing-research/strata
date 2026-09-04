@@ -1,6 +1,6 @@
 # Typed library cells (PEP 563)
 
-Type annotations participate in the free-variable check by default —
+Type annotations participate in the free-variable check by default , 
 `def f(x: SomeType): ...` would block export when `SomeType` isn't
 bound in the slice.
 

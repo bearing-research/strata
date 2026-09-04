@@ -1,7 +1,7 @@
 # Library cells
 
 A *library cell* is one that defines reusable Python: functions, classes,
-constants — code that other cells will import and call. Strata Notebook
+constants, code that other cells will import and call. Strata Notebook
 re-executes the producing cell's source as a synthetic Python module so
 downstream cells get a fresh, deterministic copy of each definition.
 

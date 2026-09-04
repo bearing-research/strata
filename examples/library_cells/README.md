@@ -8,9 +8,9 @@ limitations slicing keeps in place.
 
 | Cell | Demonstrates |
 | ---- | ------------ |
-| `pure_lib` / `use_pure` | Classic pure module cell — imports + defs + literal const, no runtime work. Source survives verbatim. |
+| `pure_lib` / `use_pure` | Classic pure module cell, imports + defs + literal const, no runtime work. Source survives verbatim. |
 | `mixed_lib` / `use_mixed` | The slicing payoff: a single cell mixes runtime setup (`raw_min`, `raw_max`, a `print`) with reusable helpers (`clamp`, `CLAMP_MIN`). Runtime values still flow through the artifact path; helpers ride the synthetic module. |
-| `typed_lib` / `use_typed` | `from __future__ import annotations` lets a helper reference a type defined elsewhere — `symtable` correctly drops stringified annotations from the free-variable check. |
+| `typed_lib` / `use_typed` | `from __future__ import annotations` lets a helper reference a type defined elsewhere, `symtable` correctly drops stringified annotations from the free-variable check. |
 | `blocked` / `try_blocked` | Closure over a runtime value blocks export. The diagnostic pinpoints the function (`is_outlier`) and the unresolved name (`runtime_threshold`). |
 
 ## Running
