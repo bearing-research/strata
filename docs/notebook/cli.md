@@ -162,7 +162,7 @@ paths, even though a cell runs with its working directory set to the notebook
 dir. The mount is **pinned**, so it never gets fingerprinted (no directory
 hashing, and the project's own churn never re-stales cells). This is the
 scratchpad-friendly default when the notebook lives in a subdirectory of a
-project (see the [notebook scratchpad skill](agent.md#why-its-a-good-agent-scratchpad)).
+project (see [the notebook as an agent's scratchpad](scratchpad.md)).
 
 ## Inspecting a notebook (`cell`, `dag`, `status`)
 

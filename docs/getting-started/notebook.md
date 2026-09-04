@@ -340,7 +340,8 @@ grouped by feature.
 
 ## What's next
 
-- [Driving a notebook with a coding agent](../notebook/agent.md): let a coding agent (Claude Code) use the notebook as a persistent, **cached scratchpad** instead of throwaway scripts; installs as a one-command plugin
+- [Driving a notebook with a coding agent](../notebook/agent.md): hand this notebook to Claude Code and watch it build, in a browser or a terminal - one command sets it up
+- [Agent scratchpad](../notebook/scratchpad.md): the other way round - an agent working on something else using a notebook as **cached** throwaway compute instead of temp scripts; installs as a one-command plugin
 - [Terminal viewer (TUI)](../notebook/tui.md) to watch this notebook live from a terminal with `strata watch ./my-notebook`
 - [Concepts](../notebook/concepts.md) for how the DAG, caching, and cascade work
 - [Cell Types](../notebook/cells.md) for the full surface (Python, prompt, SQL, R, widget, markdown, loop, variant)
