@@ -37,15 +37,22 @@ producing artifacts that flow through an auto-built DAG.
 
 ### Three ways to drive it
 
-The same notebook - the same cells, the same cache, the same artifacts -
-has three front doors. Pick the one that matches how you work; they all
-operate on the same notebook directory and can be used at the same time.
+The same notebook - the same cells, the same cache, the same artifacts - has
+several front doors. They operate on the same notebook directory, and because
+opening a notebook twice reuses the same session rather than forking it, they
+can all be pointed at it at once: a browser and a terminal viewer watching the
+same cell run.
 
 | Surface | For | Start here |
 | --- | --- | --- |
 | **Web UI** | Writing and running cells yourself, with rendered tables, plots, and the DAG view. | [Quickstart - Web UI](getting-started/notebook.md) |
-| **Coding agent** | Letting Claude Code build the notebook through MCP tools, using it as a cached scratchpad instead of throwaway scripts. | [Quickstart - Coding agent](notebook/agent.md) |
+| **Coding agent** | Handing the notebook to Claude Code and watching it build, through MCP tools. The notebook is what you wanted. | [Quickstart - Coding agent](notebook/agent.md) |
 | **Terminal (TUI)** | Watching a notebook live from a terminal - a second pane, an SSH session, or beside your editor. Read-only. | [Quickstart - Terminal](notebook/tui.md) |
+
+There is also a use that is not a front door at all: an agent working on
+something else entirely, using a notebook as a **cached scratchpad** for
+throwaway Python instead of temp scripts. Nobody watches that one, which is
+rather the point - see [Agent scratchpad](notebook/scratchpad.md).
 
 [:octicons-arrow-right-24: Notebook Quickstart](getting-started/notebook.md){ .md-button .md-button--primary }
 

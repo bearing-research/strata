@@ -8,6 +8,16 @@ This is the **coding agent** quickstart. The same notebook can also be driven
 by hand in the [web UI](../getting-started/notebook.md) or watched from a
 [terminal](tui.md).
 
+!!! info "Not the same as [using a notebook as a scratchpad](scratchpad.md)"
+
+    Here the notebook is **the deliverable**: you asked for it, you watch it get
+    built, you keep it. An agent can also use a notebook as **disposable
+    infrastructure** while working on something else entirely — running
+    throwaway Python that happens to be cached instead of thrown away. That is
+    [a separate setup](scratchpad.md) with a different starting point: this page
+    starts with you running a command, that one starts with the agent noticing
+    it has a better option than `python -c`.
+
 It exists because the pieces were already there (the [MCP server](mcp.md), the
 [`strata` CLI](cli.md) ops, the [terminal viewer](tui.md)), but wiring them
 together by hand is a fiddly, ordered dance: enable the MCP endpoint *before*
@@ -17,9 +27,9 @@ of it in one step.
 
 ## Prerequisites
 
-The `[mcp]` (agent endpoint) and `[tui]` (terminal viewer) extras, plus
-[Claude Code](https://claude.com/claude-code) (or another MCP-capable
-coding agent) on your `PATH`:
+The `[mcp]` extra (the agent endpoint) and [Claude Code](https://claude.com/claude-code)
+— or another MCP-capable coding agent — on your `PATH`. Add `[tui]` for the
+terminal viewer; skip it if you plan to watch in a browser and pass `--no-tui`:
 
 === "From PyPI"
 
@@ -59,61 +69,43 @@ cd ./my-notebook && claude
 
 Claude Code discovers the notebook's `.mcp.json`, connects to the `strata-notebook`
 MCP server, reads the `CLAUDE.md` working agreement, and starts building the
-notebook by adding and running cells, each of which **lights up live in the TUI**
-you left running in the first terminal.
+notebook by adding and running cells — each of which lights up live in whatever
+you have watching, the TUI in the first terminal by default. See
+[Watching an agent work](#watching-an-agent-work) for the alternatives.
 
 When you quit the TUI, the server `strata agent` started is shut down with it. If
 you pointed it at a server you started yourself, that server is left running.
 
-## Why it's a good agent scratchpad
+## Watching an agent work
 
-Coding agents usually explore by writing throwaway `.py` scripts to a temp
-directory and running them: work that vanishes the moment it finishes, can't be
-seen, and recomputes from scratch every time. A Strata notebook is a better home
-for exactly that kind of scratch work, and the working agreement above points the
-agent at it:
+`strata agent` attaches the TUI because it is the option that needs no extra
+step. **It is not the only one, and it is not the richest.**
 
-- **It persists and it's visible.** Each snippet becomes a versioned,
-  content-addressed cell you can see building live in the TUI, not an invisible
-  script in `/tmp`.
-- **Unchanged work never recomputes.** Every cell is cached by provenance
-  (`sha256(inputs + source + env)`), *including a leaf cell that only `print`s*,
-  so an agent that re-runs an unchanged diagnostic cell gets its output back
-  instantly instead of paying for it again. The expensive step an agent ran ten
-  turns ago is still a cache hit now.
-- **Side effects stay honest.** A cell that writes a file, calls an API, or reads
-  the clock shouldn't replay a stale result. The agent marks those with
-  [`# @nocache`](annotations.md#nocache) so they always re-execute; everything
-  else stays cached.
+Everything that watches a notebook is a WebSocket client on the same session,
+and the server broadcasts each `cell_status` / `cell_output` / `cell_console`
+frame to all of them. Opening the notebook a second time reuses the existing
+session rather than creating a new one, so any of these lands on the session the
+agent is driving:
 
-The net effect: the agent's exploration is captured, watchable, and free to
-re-derive: a durable scratchpad instead of a pile of discarded scripts.
+| How | What you get | When it fits |
+| --- | --- | --- |
+| **Web UI** — open the server URL in a browser and open the same notebook | The full editor: outputs, plots, the DAG, the inspector. **Not read-only** — you can edit and run cells alongside the agent | You want to see rendered output, or take over |
+| **TUI** — `strata watch ./my-notebook` | Read-only live spectator in the terminal | No browser, over SSH, or beside the agent in a split terminal |
+| **Any WebSocket client** | The raw frames | You are building your own view — see the [client protocol](../reference/notebook-protocol.md) |
+| **Nothing, then read the directory** | `cells/*.py` is the source; `.strata/runtime.json` holds display outputs, provenance and timings; `.strata/console/` holds per-cell stdout/stderr | You would rather review afterwards than watch |
 
-Two things make the agent reach for it:
+The last row is worth knowing: a notebook is a directory of ordinary files, so
+`strata cell show`, `strata dag`, `git diff` and your editor all work on an
+agent's output with no live connection at all.
 
-- **One-call runs.** `run_snippet(session_id, source)` (MCP) and `strata cell add
-  … -c 'src' --run` (CLI) add a cell **and** run it in a single call, returning
-  `stdout`, the same cost as `python -c`, so a cell isn't the slower path.
-- **A shipped skill.** `strata-notebook` installs a `strata-scratchpad` skill
-  (under `<site-packages>/strata/.agents/skills/`) that a coding agent discovers
-  in **any** project, so it knows to use a cached notebook cell for throwaway
-  Python even when it isn't launched inside a notebook directory. A human can
-  attach a live viewer at any moment with [`strata watch ./scratch`](tui.md).
+One caveat on that row. Live *cell status* — running, ready, errored — belongs
+to the session, not to disk, so `strata status` run against the directory
+reports `idle` for cells the agent has already executed. What it does tell you
+offline is real and separately useful: each cell's **staleness** and why. For
+"what is it doing right now", attach one of the live views above.
 
-## Installing the scratchpad skill as a plugin
-
-The skill travels with the `strata-notebook` package, but the most reliable way
-to give any Claude Code session the scratchpad behavior is the **plugin**, which
-also bundles a `/strata-scratchpad:scratch` command:
-
-```
-/plugin marketplace add bearing-research/strata
-/plugin install strata-scratchpad@strata
-```
-
-Once installed the skill is auto-discovered in every project (the `strata` CLI
-still needs to be on `PATH`). The plugin source lives in the repo at
-`plugins/strata-scratchpad/`.
+If you would rather keep a browser tab than a terminal viewer, start with
+`strata agent --no-tui` and open the notebook in the web UI instead.
 
 ## What gets written into the notebook
 
@@ -160,6 +152,8 @@ If it can't, stop it and let `strata agent` start one scoped to your notebook.
 
 ## Related
 
+- [The notebook as an agent's scratchpad](scratchpad.md): the other use case,
+  where the notebook is disposable rather than the deliverable.
 - [MCP Server](mcp.md): the full tool list and the endpoint's security model.
 - [Terminal Viewer (TUI)](tui.md): the live spectator `strata agent` attaches.
 - [Authoring Programmatically](agent-authoring.md): the same ops as a Python API.
