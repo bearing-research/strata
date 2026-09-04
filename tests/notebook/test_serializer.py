@@ -1200,6 +1200,134 @@ class TestArrowTypeRegistry:
             assert callable(rule.to_table)
 
 
+class _CapsuleOnlyTable:
+    """A table type pyarrow has never heard of, exporting only the capsule.
+
+    Stands in for duckdb / cudf / ibis / datafusion: the point is that nothing
+    in the registry names this class, so if it serializes as Arrow it did so
+    through ``_matches_arrow_capsule`` alone.
+    """
+
+    def __init__(self, table):
+        self._table = table
+
+    def __arrow_c_stream__(self, requested_schema=None):
+        return self._table.__arrow_c_stream__(requested_schema)
+
+
+class _DeviceArrayStub:
+    """A dlpack exporter whose buffer lives somewhere numpy cannot read.
+
+    Module level, not nested in the test: the pickle fallback is the assertion,
+    and a locally-defined class exercises cloudpickle's by-value path instead
+    of the by-reference one a real cell variable would take.
+    """
+
+    def __dlpack__(self, *args, **kwargs):
+        raise BufferError("cannot export a device buffer to host memory")
+
+    def __dlpack_device__(self):
+        return (2, 0)  # kDLCUDA
+
+
+class _DlpackOnlyArray:
+    """An array type exporting only ``__dlpack__``, standing in for cupy / mlx."""
+
+    def __init__(self, arr):
+        self._arr = arr
+
+    def __dlpack__(self, *args, **kwargs):
+        return self._arr.__dlpack__(*args, **kwargs)
+
+    def __dlpack_device__(self):
+        return self._arr.__dlpack_device__()
+
+
+class TestGenericArrowProtocols:
+    """The two hatches that keep unknown libraries out of the pickle path."""
+
+    def test_capsule_only_type_serializes_as_arrow(self):
+        value = _CapsuleOnlyTable(pa.table({"a": [1, 2, 3], "b": ["x", "y", "z"]}))
+        with tempfile.TemporaryDirectory() as tmp:
+            meta = serialize_value(value, tmp, "v")
+            assert meta["content_type"] == ContentType.ARROW_IPC
+            assert meta["rows"] == 3
+            back = deserialize_value(meta["content_type"], Path(tmp) / meta["file"])
+
+        # A pa.Table, not pandas: the reader's untagged default is to_pandas(),
+        # so this asserts the capsule source tag is both written and honoured.
+        assert isinstance(back, pa.Table)
+        assert back.column("a").to_pylist() == [1, 2, 3]
+        assert back.column("b").to_pylist() == ["x", "y", "z"]
+
+    def test_dlpack_only_type_serializes_as_arrow(self):
+        import numpy as np
+
+        arr = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+        with tempfile.TemporaryDirectory() as tmp:
+            meta = serialize_value(_DlpackOnlyArray(arr), tmp, "v")
+            assert meta["content_type"] == ContentType.ARROW_IPC
+            back = deserialize_value(meta["content_type"], Path(tmp) / meta["file"])
+
+        assert isinstance(back, np.ndarray)
+        assert back.shape == (2, 3, 4)
+        assert back.dtype == np.float32
+        assert (back == arr).all()
+
+    def test_duckdb_relation_serializes_as_arrow(self):
+        # The real-world case the capsule rule exists for, with no shim in the
+        # way: a duckdb relation is not picklable, so before this rule the cell
+        # that produced one failed outright.
+        duckdb = pytest.importorskip("duckdb")
+
+        rel = duckdb.sql("SELECT 1 AS a UNION ALL SELECT 2 ORDER BY a")
+        with tempfile.TemporaryDirectory() as tmp:
+            meta = serialize_value(rel, tmp, "v")
+            assert meta["content_type"] == ContentType.ARROW_IPC
+            back = deserialize_value(meta["content_type"], Path(tmp) / meta["file"])
+
+        assert back.column("a").to_pylist() == [1, 2]
+
+    def test_named_rules_still_win_over_the_generic_ones(self):
+        # pandas / polars frames export __arrow_c_stream__ and ndarrays export
+        # __dlpack__, so the generic rules can only sit at the end of the
+        # registry. Reordering them ahead of the named rules downgrades all
+        # three of these to pa.Table / ndarray, which is what this pins.
+        import numpy as np
+
+        values = {
+            "df": pd.DataFrame({"a": [1, 2]}),
+            "arr": np.array([1.5, 2.5]),
+        }
+        pl = pytest.importorskip("polars")
+        values["pdf"] = pl.DataFrame({"a": [1, 2]})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            back = {}
+            for name, value in values.items():
+                meta = serialize_value(value, tmp, name)
+                back[name] = deserialize_value(meta["content_type"], Path(tmp) / meta["file"])
+
+        assert isinstance(back["df"], pd.DataFrame)
+        assert isinstance(back["arr"], np.ndarray)
+        assert isinstance(back["pdf"], pl.DataFrame)
+
+    def test_device_buffer_falls_back_to_pickle(self):
+        # np.from_dlpack refuses a non-host capsule; the arrow fallback has to
+        # turn that into a pickle rather than failing the cell.
+        value = _DeviceArrayStub()
+
+        # Asserting the match is what gives this teeth. PICKLE_OBJECT on its
+        # own is also what a value the dlpack rule never looked at would
+        # produce; the pair says the rule claimed it and the fallback caught it.
+        assert serializer_module._matches_dlpack(value) is True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            meta = serialize_value(value, tmp, "v")
+
+        assert meta["content_type"] == ContentType.PICKLE_OBJECT
+
+
 def _arrow_blob(value, name="v"):
     """Serialize *value* the way the harness does and return the raw blob bytes."""
     with tempfile.TemporaryDirectory() as tmpdir:
