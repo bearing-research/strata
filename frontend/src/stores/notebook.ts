@@ -43,6 +43,7 @@ import type {
   RegistryName,
 } from '../composables/useStrata'
 import { useWebSocket } from '../composables/useWebSocket'
+import { shouldAdoptRemoteSource } from '../utils/cellSourceSync'
 import { flattenLineage, lineageToTree, type LineageTreeNode } from '../utils/lineage'
 import { markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 import { consumePrefetchedNotebookSession } from '../utils/notebookSessionPrefetch'
@@ -933,7 +934,25 @@ function applyDisplayOutputsToCell(
   cell.output = displayOutputs.at(-1)
 }
 
+function adoptBackendSource(localCell: Cell, remote: unknown) {
+  // Follow a source edit made outside this tab — an agent driving the notebook
+  // over the CLI or MCP, or `strata cell edit`. Without this the cell's
+  // staleness and DAG update while the editor keeps showing the old text, so a
+  // human watching an agent work sees stale cells above source that still
+  // looks unchanged. The rule itself lives in utils/cellSourceSync.
+  if (
+    shouldAdoptRemoteSource({
+      remote,
+      local: localCell.source,
+      isDirty: dirtyCells.has(localCell.id),
+    })
+  ) {
+    localCell.source = remote as string
+  }
+}
+
 function applyBackendCellState(localCell: Cell, serverCell: any) {
+  adoptBackendSource(localCell, serverCell.source)
   localCell.defines = serverCell.defines || []
   localCell.references = serverCell.references || []
   localCell.upstreamIds = serverCell.upstream_ids || []
@@ -1027,9 +1046,11 @@ function updateWorkerHealth(workerName: string, health: WorkerHealth) {
 
 function syncWorkerDefinitionsEditableFromBackend(value: any) {
   // Fail closed: only treat as editable (personal mode) when the backend
-  // explicitly says so. Unknown / missing / errored responses default to
-  // service mode so the UI doesn't misreport mode before the first sync.
+  // explicitly says so. Unknown / missing / errored responses leave the
+  // editing affordances shut.
   workerDefinitionsEditable.value = value === true
+  // The backend answered, so the deployment mode is now known either way.
+  workerModeKnown.value = true
 }
 
 function syncServerManagedWorkersFromBackend(serverWorkers: any[]) {
@@ -1049,8 +1070,9 @@ function clearServerWorkerRegistryState() {
 function resetWorkerCatalogState() {
   availableWorkers.value = []
   workerCatalogLoaded.value = false
-  // Fail closed to service mode; backend will re-sync personal if applicable.
+  // Fail closed to non-editable; backend will re-sync personal if applicable.
   workerDefinitionsEditable.value = false
+  workerModeKnown.value = false
   workerHealthLoading.value = false
   workerHealthCheckedAt.value = null
   notebookWorkerError.value = null
@@ -1622,11 +1644,20 @@ const environmentJobHistory = ref<EnvironmentOperation[]>([])
 const environmentImportPreview = ref<EnvironmentImportPreview | null>(null)
 const environmentMutationActive = computed(() => environmentOperation.value?.status === 'running')
 const availableWorkers = ref<WorkerCatalogEntry[]>([])
+// One retry, far enough out to clear a rate-limiter bucket refill.
+const WORKER_FETCH_RETRIES = 1
+const WORKER_FETCH_RETRY_MS = 1500
 const workerCatalogLoaded = ref(false)
 // Default to service mode (non-editable) until the backend confirms
 // otherwise. Personal mode relaxes restrictions, so failing closed here
-// avoids the header briefly advertising the wrong mode on load.
+// keeps the editing affordances shut while the answer is unknown.
 const workerDefinitionsEditable = ref(false)
+// Whether the backend has actually answered. Failing closed is right for
+// *permissions*, but it is not an answer about deployment mode: a personal
+// server whose /workers request fails (a 429 from the client rate limiter is
+// the easy way) would otherwise have its header claim "Service mode" and keep
+// claiming it. Consumers that describe the deployment must wait for this.
+const workerModeKnown = ref(false)
 // Registry UI gate: true only when the backend reports the registry routes
 // are reachable (personal mode today). Fail closed so the dashboard stays
 // hidden until the open response confirms it.
@@ -2833,7 +2864,7 @@ async function fetchEnvironment() {
   }
 }
 
-async function fetchWorkers(forceRefresh = false) {
+async function fetchWorkers(forceRefresh = false, retriesLeft = WORKER_FETCH_RETRIES) {
   const sid = sessionId()
   if (!sid) return
   const strata = useStrata()
@@ -2854,6 +2885,14 @@ async function fetchWorkers(forceRefresh = false) {
     }
   } catch (err) {
     console.error('Failed to fetch workers:', err)
+    if (retriesLeft > 0) {
+      // Nothing else re-requests this, so without a retry one transient
+      // rejection leaves the deployment mode unknown and the workers editor
+      // disabled until the page is reloaded.
+      workerHealthLoading.value = false
+      await new Promise((resolve) => setTimeout(resolve, WORKER_FETCH_RETRY_MS))
+      return fetchWorkers(forceRefresh, retriesLeft - 1)
+    }
   } finally {
     workerHealthLoading.value = false
   }
@@ -3916,6 +3955,7 @@ export function useNotebook() {
     environmentImportPreview,
     availableWorkers,
     workerDefinitionsEditable,
+    workerModeKnown,
     registryEnabled,
     workerHealthLoading,
     workerHealthCheckedAt,

@@ -58,6 +58,7 @@ const {
   connectError,
   environmentMutationActive,
   workerDefinitionsEditable,
+  workerModeKnown,
   openBySessionId,
   openNotebook,
   updateNotebookNameAction,
@@ -592,7 +593,7 @@ function goHome() {
         </router-link>
         <ThemeToggle />
         <span
-          v-if="!loading && notebook.id"
+          v-if="!loading && notebook.id && workerModeKnown"
           class="mode-badge"
           :class="{
             service: !workerDefinitionsEditable,

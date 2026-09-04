@@ -137,15 +137,11 @@ agent is driving:
 | **Any WebSocket client** | The raw frames | You are building your own view; see the [client protocol](../reference/notebook-protocol.md) |
 | **Nothing, then read the directory** | `cells/*.py` is the source; `.strata/runtime.json` holds display outputs, provenance and timings; `.strata/console/` holds per-cell stdout/stderr | You would rather review afterwards than watch |
 
-!!! warning "An open browser tab does not follow the agent's source edits"
-
-    Status, outputs and the DAG stream to every watcher, and a cell the agent
-    edits does flip to **stale** in an open tab. The editor's own text does
-    not: a source change made outside that tab (the agent's CLI or MCP calls,
-    or your own `strata cell edit`) never reaches it, so you see stale cells
-    above source that still looks unchanged. Reload the page to pick up the
-    new source. The TUI re-reads source on its periodic resync and does not
-    have this problem.
+One thing to know about the web UI row: an open tab follows the agent's source
+edits as well as its status and outputs, but a cell **you** are part-way through
+typing in is left alone until you stop. Your unflushed keystrokes are never
+overwritten, so the two of you editing the same cell at the same moment means
+the last one to flush wins, not a merge.
 
 The last row is worth knowing: a notebook is a directory of ordinary files, so
 `strata cell show`, `strata dag`, `git diff` and your editor all work on an
