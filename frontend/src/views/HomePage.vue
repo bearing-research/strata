@@ -793,7 +793,7 @@ function formatTime(ts: number): string {
 
 .drag-overlay-card {
   background: var(--bg-surface);
-  border: 2px dashed var(--accent, #3b82f6);
+  border: 2px dashed var(--accent-primary);
   border-radius: 16px;
   padding: 2.5rem 3rem;
   text-align: center;
@@ -820,9 +820,9 @@ function formatTime(ts: number): string {
 .import-error {
   margin: 12px 0;
   padding: 0.65rem 0.9rem;
-  background: var(--bg-warning, #fef3c7);
-  border: 1px solid var(--border-warning, #fde68a);
-  color: var(--text-warning, #92400e);
+  background: var(--tint-warning);
+  border: 1px solid var(--accent-warning);
+  color: var(--accent-warning);
   border-radius: 6px;
   display: flex;
   align-items: center;

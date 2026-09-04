@@ -287,8 +287,8 @@ function nullabilityLabel(col: SchemaColumn): string {
 }
 
 .schema-error {
-  color: var(--text-error, #c0392b);
-  background: var(--bg-error, rgba(220, 53, 69, 0.08));
+  color: var(--accent-danger);
+  background: var(--tint-danger);
   border-radius: 4px;
 }
 

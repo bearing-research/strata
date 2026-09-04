@@ -107,7 +107,7 @@ const hasDropped = computed(
   align-items: center;
   justify-content: space-between;
   padding: 1rem 1.25rem;
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .import-report-header h2 {
@@ -135,8 +135,8 @@ const hasDropped = computed(
   flex-wrap: wrap;
   gap: 0.6rem 1rem;
   padding: 0.75rem 1.25rem;
-  background: var(--bg-muted, #f9fafb);
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 0.9rem;
 }
 
@@ -145,7 +145,7 @@ const hasDropped = computed(
 }
 
 .import-report-stat-warn {
-  color: var(--text-warning, #b45309);
+  color: var(--accent-warning);
 }
 
 .import-report-body {
@@ -181,7 +181,7 @@ const hasDropped = computed(
 }
 
 .import-report-body :deep(code) {
-  background: var(--bg-muted, #f3f4f6);
+  background: var(--bg-hover);
   padding: 0.1em 0.35em;
   border-radius: 3px;
   font-size: 0.85em;
@@ -192,6 +192,6 @@ const hasDropped = computed(
   justify-content: flex-end;
   gap: 0.5rem;
   padding: 0.75rem 1.25rem;
-  border-top: 1px solid var(--border-color, #e5e7eb);
+  border-top: 1px solid var(--border-subtle);
 }
 </style>

@@ -106,8 +106,8 @@ async function save(connections: typeof notebook.connections) {
 .connections-error {
   margin-top: 8px;
   padding: 6px 8px;
-  background: var(--bg-error, rgba(220, 53, 69, 0.1));
-  color: var(--text-error, #c0392b);
+  background: var(--tint-danger);
+  color: var(--accent-danger);
   border-radius: 4px;
   font-size: 12px;
 }

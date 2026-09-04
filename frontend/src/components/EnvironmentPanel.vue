@@ -1203,7 +1203,7 @@ function downloadRequirements() {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 12px;
-  background: var(--bg-card, var(--bg-input));
+  background: var(--bg-input);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1380,8 +1380,8 @@ function downloadRequirements() {
   margin-top: 6px;
   padding: 6px 8px;
   font-size: 11px;
-  color: var(--accent-error, #c0392b);
-  background: var(--tint-error, rgba(192, 57, 43, 0.08));
+  color: var(--accent-danger);
+  background: var(--tint-danger);
   border-radius: 3px;
 }
 
