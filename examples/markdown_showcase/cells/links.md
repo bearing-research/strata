@@ -15,7 +15,7 @@ Email autolink: <hello@example.com>.
 
 ## Plain URLs (linkify)
 
-A bare URL inside a sentence — like https://example.com/page — should
+A bare URL inside a sentence, like https://example.com/page, should
 auto-detect into a clickable link without explicit markdown syntax.
 The old hand-rolled parser missed this case.
 

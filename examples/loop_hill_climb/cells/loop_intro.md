@@ -1,6 +1,6 @@
 # The loop cell
 
-The cell below carries `# @loop max_iter=40 carry=state` — Strata's
+The cell below carries `# @loop max_iter=40 carry=state`: Strata's
 loop primitive. The cell body runs up to 40 times. On each iteration:
 
 1. Strata reads the current `state` from the previous iteration's

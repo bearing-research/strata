@@ -29,7 +29,7 @@ ai_model = "claude-sonnet-4-6"
 | `STRATA_PORT`                             | `8765`      | Server port                                  |
 | `STRATA_DEPLOYMENT_MODE`                  | `personal`  | `personal` or `service`                      |
 | `STRATA_ALLOW_REMOTE_CLIENTS_IN_PERSONAL` | `false`     | Allow non-localhost clients in personal mode |
-| `STRATA_CORS_ALLOW_ORIGINS`               | _(empty)_   | Origins allowed to call the API from a browser. Empty means no cross-origin access — personal mode has no auth, so any page allowed here can author and run cells |
+| `STRATA_CORS_ALLOW_ORIGINS`               | _(empty)_   | Origins allowed to call the API from a browser. Empty means no cross-origin access. Personal mode has no auth, so any page allowed here can author and run cells |
 | `STRATA_EMBED_FRAME_ANCESTORS`            | _(empty)_   | Origins allowed to embed a notebook's app view in an `<iframe>` (sets `Content-Security-Policy: frame-ancestors`). Empty means same-origin only. JSON array or comma-separated; `*` allows any host |
 | `STRATA_MCP_ENABLED`                      | `false`     | Mount the MCP server at `/mcp` so a coding agent can drive the live session. **Personal mode only** (rejected at startup in service mode) and requires the `[mcp]` extra. See [Notebook → MCP](../notebook/mcp.md) |
 | `STRATA_ARROW_MEMORY_POOL`                | `None`      | Arrow allocator: `default`, `system`, `jemalloc`, or `mimalloc`. Unset leaves the PyArrow default |
@@ -199,14 +199,14 @@ export STRATA_ARTIFACT_S3_BUCKET=my-strata-artifacts
 **Blobs must be shared too.** In service mode, a DSN with
 `STRATA_ARTIFACT_BLOB_BACKEND=local` is rejected at startup: the metadata
 would be shared while the bytes stayed on one node's disk, so another node
-would resolve an artifact and then fail to read it — at fetch time, long
+would resolve an artifact and then fail to read it, at fetch time, long
 after the request that created it appeared to succeed.
 
 Build state follows the same backend, since build rows live in the artifact
 store's database. That is what makes a build started on one node visible to
 `GET /v1/builds/{id}` on another.
 
-The schema is created on first connection. **A DSN starts an empty store** —
+The schema is created on first connection. **A DSN starts an empty store**:
 existing SQLite metadata is not carried over automatically. To move one:
 
 ```bash
@@ -220,7 +220,7 @@ strata migrate --to-dsn 'postgresql://...' --dry-run
 strata migrate --to-dsn 'postgresql://...'
 ```
 
-The copy is idempotent — rows already in the target are skipped, so an
+The copy is idempotent: rows already in the target are skipped, so an
 interrupted run can be repeated with `--allow-nonempty-target`. It refuses a
 populated target otherwise, because merging two different stores is not
 recoverable.
@@ -228,7 +228,7 @@ recoverable.
 Rows the target refuses are reported and the run continues; `strata migrate`
 then **exits non-zero**, so `strata migrate && cut-over` will not switch traffic
 to a target that is missing rows. The usual cause is a build row referencing an
-artifact version that `garbage_collect` or `delete_artifact` removed — a
+artifact version that `garbage_collect` or `delete_artifact` removed, so a
 dangling reference SQLite tolerated and Postgres does not.
 
 `--dry-run` makes no schema or data changes. It does open the source with
@@ -288,7 +288,7 @@ export STRATA_ACL_CONFIG='{"default":"deny","allow":[{"principal":"bi","tables":
 ```
 
 `principal` and each `tables` entry are glob patterns; `tenant` is an exact
-match. Every rule must list at least one table pattern — a rule with none can
+match. Every rule must list at least one table pattern; a rule with none can
 never match, so it is rejected at startup rather than sitting inert. Unknown
 keys are rejected for the same reason: a mistyped `deny` would otherwise leave
 an ACL that boots clean and enforces nothing.
@@ -317,7 +317,7 @@ Service mode with `auth_mode='api_key'` therefore requires `artifact_dir`;
 personal mode rejects the mode outright, since authenticating to your own
 loopback-bound single-user server buys nothing.
 
-Mint the first key from the CLI — no running server needed, which is what
+Mint the first key from the CLI, with no running server needed, which is what
 makes bootstrapping possible:
 
 ```bash
@@ -331,7 +331,7 @@ strata apikey revoke <key_id>
 ```
 
 The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
-shown again — by you or by us — and a database disclosure yields no usable
+shown again, by you or by us, and a database disclosure yields no usable
 credentials. Pass `--dsn` (or set `STRATA_ARTIFACT_METADATA_DSN`) when the
 metadata lives on Postgres, so the CLI writes where the server reads.
 
@@ -341,7 +341,7 @@ revoked key stops working at once rather than after a cache expiry.
 ### Running several nodes behind one address
 
 Streams cannot move between nodes. A stream holds a live task and an in-memory
-read plan, so only the node that planned it can serve it — a request for it
+read plan, so only the node that planned it can serve it. A request for it
 that lands elsewhere used to return a bare `404`, indistinguishable from an
 expired stream.
 
@@ -382,8 +382,8 @@ toggles `enabled` there.
 
 The v2-pull signed-URL routes (build manifest, signed download / upload, and
 `finalize`) have no on/off switch. They are served whenever the deployment can
-issue and honor them at all — personal mode, or service mode with transforms
-enabled — so `STRATA_TRANSFORM_SIGNING_SECRET` below matters in every such
+issue and honor them at all (personal mode, or service mode with transforms
+enabled), so `STRATA_TRANSFORM_SIGNING_SECRET` below matters in every such
 deployment, not only in one that opted in to something.
 
 | Variable                                | Default | Description                                                                                     |
@@ -417,7 +417,7 @@ deployment, not only in one that opted in to something.
 | `STRATA_PERSONAL_MODE_USER_HEADER`  | `None`                      | Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and `discover`/`delete` scope to it. Intended for proxy-fronted personal deployments. |
 | `STRATA_NOTEBOOK_REMOTE_STORE_URL`  | `None`                      | Point the ambient `strata` client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Unset → the ambient client targets the local server. See [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store). |
 | `STRATA_NOTEBOOK_REMOTE_STORE_HEADERS` | `{}`                     | Auth headers the ambient client attaches when pointed at a remote store (e.g. the trusted-proxy identity/token). JSON object; set via env so secrets stay out of committed config. |
-| `STRATA_NOTEBOOK_TEAM_CACHE_ENABLED` | `false`                    | Consult the remote store on a **local cache miss**, so a colleague's expensive cell becomes your instant result. Distinct from the URL above, which only redirects a cell's ambient client (explicit publish). Opt-in because it is a behaviour change, not only a performance one: it puts bytes another machine produced into your local store. Requires `STRATA_NOTEBOOK_REMOTE_STORE_URL` — enabling it without one is rejected at startup rather than left silently inert. |
+| `STRATA_NOTEBOOK_TEAM_CACHE_ENABLED` | `false`                    | Consult the remote store on a **local cache miss**, so a colleague's expensive cell becomes your instant result. Distinct from the URL above, which only redirects a cell's ambient client (explicit publish). Opt-in because it is a behaviour change, not only a performance one: it puts bytes another machine produced into your local store. Requires `STRATA_NOTEBOOK_REMOTE_STORE_URL`; enabling it without one is rejected at startup rather than left silently inert. |
 | `STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES` | `2147483648` (2 GiB) | Per-file cap when packing a notebook bundle for a remote worker. Values that don't parse, or are `<= 0`, fall back to the default. |
 
 ## TUI

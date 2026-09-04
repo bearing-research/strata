@@ -1,7 +1,7 @@
 # The notebook as an agent's scratchpad
 
-A coding agent working on *something else* — debugging your service, exploring a
-dataset, checking what a function returns — constantly needs to run a bit of
+A coding agent working on *something else* (debugging your service, exploring a
+dataset, checking what a function returns) constantly needs to run a bit of
 throwaway Python. The usual way is `python -c` or a temp script: work that
 vanishes the moment it finishes, that nobody can see, and that recomputes from
 scratch every time.
@@ -11,7 +11,7 @@ runs it; the cell is versioned, content-addressed, and cached.
 
 !!! info "This is not the same as [driving a notebook](agent.md)"
 
-    There the notebook is **the deliverable** — you asked for it, you watch it
+    There the notebook is **the deliverable**: you asked for it, you watch it
     being built, you keep it. Here it is **disposable infrastructure** for some
     other task, created by the agent on demand, and you may never look at it.
 
@@ -50,12 +50,12 @@ own; the plugin removes the "some".
 
 ### 3. Confirm it engaged
 
-This is worth doing once, because the whole thing is invisible by design —
-nothing announces itself, and an agent that quietly kept using `python -c` looks
+This is worth doing once, because the whole thing is invisible by design.
+Nothing announces itself, and an agent that quietly kept using `python -c` looks
 identical from the outside.
 
 Ask an agent, in any project, for something it **cannot** answer with shell
-tools — the skill only triggers when it was about to run ad-hoc *Python*, so a
+tools. The skill only triggers when it was about to run ad-hoc *Python*, so a
 question `find`/`awk` can answer proves nothing:
 
 ```text
@@ -71,14 +71,14 @@ strata cell list ./scratch     # the same thing as JSON, with each cell's output
 ```
 
 If `./scratch` exists and has cells in it, the skill engaged. If it does not,
-the agent answered with `python -c` and the skill did not fire — check that
+the agent answered with `python -c` and the skill did not fire. Check that
 `strata --help` works **in the agent's environment**, which is the usual cause.
 
-### 4. Nothing else — for the agent
+### 4. Nothing else, for the agent
 
 The agent needs no server and no session: it drives the notebook through the
 `strata` CLI against the directory. (Looking at it yourself is the one thing
-that does need a server — see [Looking at it](#looking-at-it) below.)
+that does need a server; see [Looking at it](#looking-at-it) below.)
 
 It creates the scratch notebook the first time it needs one, with
 
@@ -88,14 +88,14 @@ strata new scratch --parent . --no-env --project-mount
 
 which also mounts the project read-only as a `project` variable, so cells read
 your files as `project / "some/file.py"`. Adding `scratch/` to `.gitignore` is
-optional — it is your workspace, and some people keep it.
+optional, since it is your workspace and some people keep it.
 
 ## Why it beats a temp script
 
 - **Unchanged work never recomputes.** Every cell is cached by provenance
   (`sha256(inputs + source + env)`), *including a leaf cell that only `print`s*.
   An agent that re-runs an unchanged diagnostic gets its output back instantly.
-  The expensive step it ran ten turns ago is still a cache hit now — which is
+  The expensive step it ran ten turns ago is still a cache hit now, which is
   the whole point, because agents re-derive the same thing constantly.
 - **It persists and it can be seen.** Each snippet is a real cell on disk, not
   an invisible script in `/tmp`. You can open it later, or watch it live.
@@ -110,7 +110,7 @@ A better option that costs more gets ignored. Two things keep the cost equal:
 
 - **One call, not three.** `run_snippet(session_id, source)` over
   [MCP](mcp.md), or `strata cell add … -c 'src' --run` on the CLI, adds a cell
-  **and** runs it **and** returns `stdout` — the same shape as `python -c`.
+  **and** runs it **and** returns `stdout`, the same shape as `python -c`.
 - **No setup step.** The skill tells the agent how to create or reuse a
   scratch notebook itself, so there is no moment where using the notebook means
   stopping to configure one.
@@ -126,7 +126,7 @@ strata agent ./scratch        # starts a server scoped to it, then attaches the 
 !!! warning "`strata watch ./scratch` on its own usually won't work"
 
     A server only opens notebooks inside its configured storage root, which
-    defaults to `~/.strata/notebooks` — and a scratchpad lives in your project.
+    defaults to `~/.strata/notebooks`, and a scratchpad lives in your project.
     Pointed at a default server, opening it is rejected with *"Invalid notebook
     path: must be inside configured notebook storage"*, and the viewer sits at
     `connecting…` rather than saying so.
@@ -141,7 +141,7 @@ strata agent ./scratch        # starts a server scoped to it, then attaches the 
     ```
 
 Once something is attached, everything in
-[Watching an agent work](agent.md#watching-an-agent-work) applies here too —
+[Watching an agent work](agent.md#watching-an-agent-work) applies here too,
 including opening it in the [web UI](../getting-started/notebook.md) instead.
 
 ## Related

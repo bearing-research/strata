@@ -12,7 +12,7 @@ sensitive) and `# @cache forever` (reference-data) policies.
   reference it by name via `# @sql connection=warehouse`.
 - **Bind parameters from upstream Python.** `top_orders` resolves
   `:min_amount` from the `threshold` cell's variable. No string
-  substitution happens — the value flows through ADBC's parameter
+  substitution happens, the value flows through ADBC's parameter
   binding API, so adversarial strings round-trip as data.
 - **Two cache policies side by side.** `top_orders` uses `fingerprint`
   (folds SQLite's `PRAGMA data_version` + `schema_version` into the
@@ -23,7 +23,7 @@ sensitive) and `# @cache forever` (reference-data) policies.
   connection with `mode=ro` plus `PRAGMA query_only = ON` so a
   stray `INSERT` can't mutate the DB. The seed cell explicitly
   opts into writable execution via `# @sql connection=warehouse
-  write=true` — that's the per-cell escape hatch for setup
+  write=true`: that's the per-cell escape hatch for setup
   scripts. Other cells in the notebook stay read-only.
 - **Cross-language pipeline.** The two SQL results flow back into the
   `report` Python cell as pandas DataFrames (the Arrow IPC artifacts
@@ -42,7 +42,7 @@ sensitive) and `# @cache forever` (reference-data) policies.
 ## DAG dependencies
 
 `top_orders` and `category_summary` depend on the SQLite file that
-`seed` produces, but no Python variable flows between them — the
+`seed` produces, but no Python variable flows between them, the
 dependency is on a side effect. The `# @after seed` annotation adds
 an ordering-only edge to the DAG so cascade execution and staleness
 both see the link.
@@ -64,7 +64,7 @@ order (or hit "Run all").
 - **Change the threshold.** Edit `threshold` to `min_amount = 100`.
   `top_orders` re-executes (different bind value → different
   provenance hash). Run `top_orders` again without changing
-  anything — it cache-hits, because the canonical artifact's
+  anything, it cache-hits, because the canonical artifact's
   provenance still matches the current threshold.
 - **Mutate the schema.** From a separate shell:
 
@@ -76,4 +76,4 @@ order (or hit "Run all").
   freshness token changes, and the cell re-executes with a new schema.
 - **Try a write from a SQL cell.** Add a cell with `INSERT INTO orders
   VALUES (...)`. The executor returns an error and the database row
-  count is unchanged — read-only mode is the security boundary.
+  count is unchanged, read-only mode is the security boundary.

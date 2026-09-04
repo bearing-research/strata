@@ -1,11 +1,11 @@
-# S3 Mount — reading a public bucket from a notebook
+# S3 Mount: reading a public bucket from a notebook
 
 Demonstrates Strata's **mount** feature: a notebook cell can read a
 remote filesystem path as if it were local, with no custom code inside
 the cell.
 
 The example mounts a single file from NOAA's GSOD (Global Surface
-Summary of Day) dataset — a public, anonymous-readable S3 bucket — and
+Summary of Day) dataset, a public, anonymous-readable S3 bucket, and
 runs a small pandas analysis over it.
 
 ## What it shows
@@ -14,7 +14,7 @@ runs a small pandas analysis over it.
 - Using fsspec `options` to authenticate (here, `anon = true` for a
   public bucket).
 - Accessing the mounted path as a `pathlib.Path` inside a cell.
-- Zero AWS credentials required — `anon = true` tells fsspec to skip
+- Zero AWS credentials required, `anon = true` tells fsspec to skip
   the credential chain.
 
 ## Mount declaration

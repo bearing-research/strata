@@ -1,4 +1,4 @@
-# Pandas Basics — the core DataFrame operations
+# Pandas Basics: the core DataFrame operations
 
 A guided tour of the pandas operations you reach for every day, split
 into one cell per concept. Running cell N re-uses the artifact from
@@ -9,7 +9,7 @@ cell N-1, so edits stay fast and the DAG stays honest.
 - A linear chain where each cell reads the previous cell's output.
 - Cache-hit behavior: re-running a cell after its upstream hasn't
   changed finishes in a few milliseconds.
-- How Strata's **staleness propagation** works — edit cell 2 and cells
+- How Strata's **staleness propagation** works, edit cell 2 and cells
   3-7 turn yellow automatically.
 
 ## Cells
@@ -27,7 +27,7 @@ cell N-1, so edits stay fast and the DAG stays honest.
 ## Per-cell unit tests
 
 Four cells ship with pytest tests next to them
-(`cells/<cell-id>.test.py`) — a worked example of Strata's built-in
+(`cells/<cell-id>.test.py`), a worked example of Strata's built-in
 **cell unit tests**:
 
 | Test file | Pins |
@@ -39,7 +39,7 @@ Four cells ship with pytest tests next to them
 
 Tests run in the notebook's own venv and receive a `cell` fixture whose
 attributes are the cell's namespace **after it runs against its real
-upstream input** — so `cell.sales` is the actual DataFrame, `cell.revenue`
+upstream input**: so `cell.sales` is the actual DataFrame, `cell.revenue`
 a value it computed, `cell.my_func` a function it defined:
 
 ```python
@@ -66,6 +66,6 @@ Then open `examples/pandas_basics` from the Strata home page.
 1. Run all cells top-to-bottom.
 2. Edit `create_data` (for example, change a price).
 3. Watch cells 2-7 turn stale automatically.
-4. Run cell 7. Strata re-executes only the cells that need it — you
+4. Run cell 7. Strata re-executes only the cells that need it, you
    should see cache hits reported for any intermediate cell whose
    inputs didn't actually change.

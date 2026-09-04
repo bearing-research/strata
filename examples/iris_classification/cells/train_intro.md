@@ -1,6 +1,6 @@
 # Train and evaluate
 
-The exploration cells above don't feed the model directly — they're
+The exploration cells above don't feed the model directly, they're
 sanity checks. The cells below are the ML pipeline proper: split the
 data, fit a random forest, score it against the held-out test set,
 and visualize the confusion matrix.

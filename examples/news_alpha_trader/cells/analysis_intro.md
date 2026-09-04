@@ -1,7 +1,7 @@
 # Turn news into signals
 
 We've pulled raw headlines from the news API. The cell below is a
-**prompt cell** — it sends each headline to an LLM with an
+**prompt cell**: it sends each headline to an LLM with an
 `@output_schema` that forces a structured JSON response (ticker,
 direction, confidence). The schema-validated result becomes a
 content-addressed artifact like any Python cell's output, so

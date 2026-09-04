@@ -3,7 +3,7 @@
 Markdown cells (and `Markdown(...)` outputs) are user-controlled and
 rendered via `v-html`, so the renderer runs every output through
 DOMPurify. Each item below should appear as **literal text or a no-op**
-— never executed, never producing a popup, never with the dangerous
+,  never executed, never producing a popup, never with the dangerous
 attribute reaching the DOM.
 
 ### Script injection
@@ -23,7 +23,7 @@ remain as a paragraph with the angle-bracket text visible:
 ### `javascript:` URLs
 
 A markdown link with a `javascript:` URL should either render as
-inert text or be stripped entirely — never as a clickable executor:
+inert text or be stripped entirely, never as a clickable executor:
 
 [click here please](javascript:alert('not allowed'))
 
@@ -35,6 +35,6 @@ plumb through.
 
 ### Data URLs
 
-Data URLs in links are sanitized too — DOMPurify drops the href:
+Data URLs in links are sanitized too, DOMPurify drops the href:
 
 [image data url](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)

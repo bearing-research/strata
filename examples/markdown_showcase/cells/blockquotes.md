@@ -1,14 +1,14 @@
 ## Single-level
 
 > Long-horizon workflows have these properties: expensive, iterative,
-> branching, failure-prone. What breaks first is not compute — it's
+> branching, failure-prone. What breaks first is not compute, it's
 > state. Strata makes state explicit and durable.
 
 ## Nested
 
 > Outer layer.
 >
-> > Quoted within the quote — the inner block should render as a
+> > Quoted within the quote, the inner block should render as a
 > > nested blockquote, not lose its prefix.
 >
 > Back to the outer layer.

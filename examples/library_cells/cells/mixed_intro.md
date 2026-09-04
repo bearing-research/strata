@@ -2,7 +2,7 @@
 
 The next cell mixes runtime setup with reusable helpers. Before slicing
 this whole cell would have been blocked because of the runtime
-assignments — the user would have to split them into separate cells just
+assignments, the user would have to split them into separate cells just
 to share `clamp` downstream.
 
 After slicing, the planner drops the runtime lines from the synthetic

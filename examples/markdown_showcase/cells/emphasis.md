@@ -4,7 +4,7 @@ This is **bold** and so is __this__. This is *italic* and so is _this_.
 This is ***both*** at once. This is ~~struck through~~ via GFM.
 
 Code spans use backticks: `df.groupby("ticker").agg("sum")`. Inline
-code should keep `_underscores_` and `*asterisks*` literal — they're
+code should keep `_underscores_` and `*asterisks*` literal, they're
 data, not formatting.
 
 Edge cases the old renderer was bad at:

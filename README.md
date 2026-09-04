@@ -51,44 +51,54 @@ Install it as a one-command [Claude Code plugin](plugins/strata-scratchpad/)
 ![A coding agent builds a Strata notebook live; the model stays cached when only the evaluation changes](docs/assets/agent-demo.gif)
 -->
 
-Does the agent reach for it instead of a scratch script? There's an eval
-that measures exactly that (`evals/agent_notebook/`): in the un-primed sessions
-tested so far it reaches for the notebook every time, and building the eval
-caught real bugs. Small sample, and honest about it. See
+Whether an agent reaches for it instead of a scratch script is measured rather
+than assumed. `evals/agent_notebook/` drives the real on-ramp and grades the
+result: 9 transcript-backed tasks run in CI, and a `scratchpad` group probes
+whether an un-primed session uses the notebook at all. See
 [Driving a notebook with a coding agent](https://bearing-research.github.io/strata/latest/notebook/agent/).
 
 ## Highlights
 
-- **agent scratchpad:** a Claude Code plugin makes a coding agent use a cached notebook cell for throwaway Python instead of `/tmp` scripts - one-call add-and-run, and unchanged work is never recomputed
-- **remote cells over SSH (0.6.0):** hand a coding agent an SSH target and it provisions a `strata-worker` on the box, opens a secure tunnel, and routes heavy cells there, cached by provenance like everything else - `connect_ssh_worker` in-tool or `strata agent --worker-ssh user@host`, with `# @worker local` to keep a cell on this machine
-- **content-addressed:** every cell output is keyed by source + inputs + environment - identical work hits the cache forever
-- **reactive:** edit a cell, the cascade re-runs only the downstream cells that depend on it
-- **dag-from-ast:** Strata reads each cell's AST to wire upstream/downstream - no decorators, no manual edges
-- **dag-view:** the dependency graph renders alongside the cells - double-click any node to jump to its source
-- **ambient client (0.3.0):** every cell gets a ready `strata` client in its namespace - publish and consume artifacts across cells with no boilerplate
-- **registry in the UI (0.3.0):** promote and approve named artifacts from a notebook dashboard - pending-approval queue, alias chips, and `model ← features ← scan ← table` lineage
-- **git-friendly:** notebooks are plain `.py` files plus a TOML manifest - readable diffs, no JSON blobs
-- **prompt cells:** LLM calls are first-class DAG nodes, `{{ variable }}` interpolation from upstream cells, cached by template + inputs + model config
-- **SQL cells:** named connections, bind-parameter templating, drivers for DuckDB / SQLite / Postgres / Snowflake / BigQuery
-- **R cells (0.2.0):** Python and R cells share a DAG; cross-language Arrow exchange means a `pandas.DataFrame` is a `data.frame` for the next cell. First-class in the UI - Add-R-cell menu, an R environment panel with one-click renv bootstrap + package install, automatic `renv::restore()` on open, and inline plots (ggplot2 / base graphics render to PNG). Runs headlessly too - `strata run` executes R cells for CI
-- **loop cells:** `# @loop max_iter=N carry=state` iterates a cell with explicit carry between steps - each iteration is its own artifact
-- **variant sweep (0.4.0):** a variant group can run in sweep mode - every variant executes and the downstream cell receives a `{variant_name: value}` dict, for comparing models / hyperparameters / prompts side by side in one cell (switch mode runs only the active variant)
-- **cell unit tests (0.4.0):** a 🧪 Tests panel on any Python cell runs **real pytest** against the cell's defs and upstream inputs (`def test_x(cell): assert cell.featurize(cell.trips)…`) - assertion rewriting, fixtures, and parametrize all work; the toggle doubles as a health badge (`✓ 4/4`, red on fail, `· stale` when the cell changed)
-- **MCP server (0.5.0):** expose a running notebook session to an external coding agent (Claude Code, any MCP client) at `/mcp` - the agent reads, runs, authors, and manages dependencies against a **warm session**, and you watch it happen live in the browser or the terminal viewer. `claude mcp add --transport http strata http://localhost:8765/mcp`. Personal-mode only, behind the `[mcp]` extra
-- **interactive widgets + app view (0.5.0):** a `widget` cell is a declarative control panel (slider / number / dropdown / checkbox / text); each control is an input downstream cells consume, and with **⚡ Live** on, dragging one recomputes the cells that depend on it. Open a notebook as a read-only **app** (`/app/<id>`), **embed** that app view in another site as an `<iframe>`, or export a frozen, self-contained **snapshot** (`strata export --app-view`)
-- **interactive data viewer (0.5.0):** DataFrame outputs render in a grid you can page, sort, filter, and search - backed by the full cached artifact, not a 20-row preview - with CSV / Parquet export (in the web UI and the terminal viewer)
-- **per-variant fan-out (0.5.0):** `# @per_variant` runs a cell once per variant of a sweep group - each variant its own artifact, cache entry, and worker dispatch, so adding a variant only runs the new instance
-- **terminal viewer (0.4.0):** `strata-notebook-tui` attaches to a running notebook and renders it live in the terminal - cells flip status as they run, syntax-highlighted source, tables and markdown rendered, a layered DAG view (`d`), and an Agent tab that streams an AI agent's reasoning as it drives the notebook. Read-only - watch an agent (or a run-all) work in one terminal from another. Ships behind the `[tui]` extra (`uv tool install "strata-notebook[tui]"`)
-- **agent CLI (0.4.0):** the `strata` command drives a notebook end to end - inspect (`cell list/show`, `dag`, `status`), run one cell at a time (`cell run/test`), and author (`cell add/edit/rm/mv`, `cell annotate`, `dep add/rm`) - all with `--format json` and stable exit codes. Works **offline against a notebook directory or against a live session on a running server** (`--server/--session`), so an agent builds and runs a notebook the same way whether or not a server is up
-- **agent on-ramp:** `strata agent ./nb` is one command that stands up an MCP-enabled server, opens a session, writes `.mcp.json` + a `CLAUDE.md` working agreement, and attaches the terminal viewer - point a coding agent (Claude Code) at a live notebook and watch it build cells. The notebook doubles as the agent's **persistent, cached scratchpad**: unchanged cells (even a leaf cell that only `print`s) replay instantly instead of recomputing, so exploration is captured and watchable instead of thrown away in `/tmp`. A cell whose point is a side effect or a fresh value opts out with `# @nocache`
-- **distributed:** `# @worker gpu-fly` dispatches a single cell to a remote box - bring your own compute
-- **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3 / GCS / Azure prefix a local `pathlib.Path`
+**The graph**
+
+- **content-addressed:** every cell output is keyed by source + inputs + environment, so identical work hits the cache forever
+- **reactive:** edit a cell and the cascade re-runs only what depends on it
+- **dag-from-ast:** Strata reads each cell's AST to wire upstream and downstream, with no decorators and no manual edges
+- **git-friendly:** notebooks are plain `.py` files plus a TOML manifest, so diffs are readable
+- **dag view:** the dependency graph renders alongside the cells; double-click a node to jump to its source
+
+**Cell types**
+
+- **prompt cells:** LLM calls as DAG nodes, `{{ variable }}` interpolation from upstream, cached by template + inputs + model config
+- **SQL cells:** named connections and bind-parameter templating, with drivers for DuckDB, SQLite, Postgres, Snowflake and BigQuery
+- **R cells:** Python and R share one DAG, exchanging Arrow, so a `pandas.DataFrame` is a `data.frame` for the next cell
+- **loop cells:** `# @loop max_iter=N carry=state` iterates with an explicit carry, each step its own artifact
+- **variant sweeps:** run every variant of a group and hand the downstream cell a `{name: value}` dict, or fan out with `# @per_variant` so adding a variant only runs the new one
+- **widget cells:** declarative controls that downstream cells consume as inputs; with Live on, dragging one recomputes what depends on it
+- **cell unit tests:** a Tests panel runs real pytest against a cell's defs and upstream inputs, doubling as a health badge
+
+**Coding agents**
+
+- **scratchpad plugin:** a Claude Code plugin makes an agent use a cached notebook cell for throwaway Python instead of `/tmp` scripts
+- **MCP server:** expose a warm notebook session to any MCP client at `/mcp`, and watch it work in the browser or the terminal
+- **agent CLI:** `strata` inspects, runs and authors a notebook with `--format json` and stable exit codes, offline or against a live session
+- **one-command on-ramp:** `strata agent ./nb` stands up the server, session, config and viewer in one step
+
+**Compute and data**
+
+- **distributed:** `# @worker gpu-fly` dispatches a cell to a remote box; bring your own compute
+- **remote cells over SSH:** hand an agent an SSH target and it provisions a worker there, tunnels to it, and routes heavy cells over, cached like everything else
+- **mounts:** `# @mount data s3://bucket/prefix ro` makes any S3, GCS or Azure prefix a local `pathlib.Path`
 - **isolated envs:** every notebook gets its own uv-managed `.venv/`, locked and reproducible
-- **auto-install:** missing import in a cell? one click adds the package via uv and re-runs
-- **headless:** `strata run ./my-notebook` for CI and scheduled execution - same DAG, same cache
-- **also a library:** the materialization layer is exposed via HTTP + a `StrataClient`, usable from any Python process
-- **slim client package (0.3.0):** `pip install strata-client` pulls only httpx + pyarrow - use the store from any pipeline or service, no server install
-- **production-ready:** Iceberg-aware scans, trusted-proxy auth, multi-tenancy, S3 / GCS / Azure / local blob backends
+- **headless:** `strata run ./my-notebook` for CI and scheduled execution, same DAG and same cache
+
+**Surfaces**
+
+- **terminal viewer:** `strata watch` renders a running notebook live in the terminal, read-only, over SSH or beside your editor
+- **app view:** open a notebook as a read-only app, embed it as an `<iframe>`, or export a self-contained snapshot
+- **data viewer:** DataFrame outputs render in a grid you can page, sort, filter and search, backed by the full artifact rather than a preview
+- **also a library:** `pip install strata-client` talks to the store from any pipeline or service, with no server install
+- **production:** Iceberg-aware scans, trusted-proxy auth, multi-tenancy, and S3, GCS, Azure or local blob backends
 
 ## Quick Start
 
@@ -101,10 +111,8 @@ proxy auth. For multi-tenant or hosted deployments, see
 docker compose up -d --build
 # Then open http://localhost:8765
 
-# Or install via uv (recommended). Fetches the wheel from PyPI into a
-# uv-managed tool env at ~/.local/share/uv/tools/strata-notebook with
-# the CLI on PATH. Plain `pip install` is not supported - Strata refuses
-# to start outside a uv-managed env (see Requirements below).
+# Or install via uv (recommended). Puts the CLI on PATH in a uv-managed
+# tool env. `pip install` is not supported; see Requirements below.
 uv tool install strata-notebook
 strata-notebook
 # Then open http://localhost:8765
@@ -114,43 +122,30 @@ For the full inventory of installed commands (`strata-notebook`, `strata`,
 `strata-worker`, `python -m strata`), see the
 [Commands reference](https://bearing-research.github.io/strata/latest/getting-started/installation/#commands-reference).
 
-Source builds - `git clone + uv sync` - work too and are documented in
-[Installation](https://bearing-research.github.io/strata/latest/getting-started/installation/);
-needed only if you're modifying Strata itself.
+Source builds (`git clone + uv sync`) are documented in
+[Installation](https://bearing-research.github.io/strata/latest/getting-started/installation/).
 
 ### Requirements
 
-- **[uv](https://docs.astral.sh/uv/) ≥ 0.8** - install via the
-  [uv installer](https://docs.astral.sh/uv/getting-started/installation/)
-  (`curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux;
-  PowerShell installer on Windows). Strata refuses to start outside
-  a uv-managed environment: the startup check looks for the
-  `uv = <version>` marker that uv writes to `pyvenv.cfg`. `uv tool
-  install`, `uv add`, and `uv run` all produce envs with this
-  marker; plain `pip install` into a hand-rolled `python -m venv`
-  does not, and Strata will refuse to start there. Conda and
-  pip-venv users need to install uv and re-launch from a uv-managed
-  env - existing data and other environments are untouched. uv
-  fetches a matching Python for you, so you don't need Python
-  pre-installed.
+**[uv](https://docs.astral.sh/uv/) 0.8 or newer**, and nothing else. uv fetches
+a matching Python for you.
 
-Source build (only if you're building Strata itself from a git clone,
-not using PyPI or Docker):
+Strata runs only inside a uv-managed environment. It checks for the
+`uv = <version>` marker uv writes to `pyvenv.cfg`, which `uv tool install`,
+`uv add` and `uv run` all produce and a hand-rolled `python -m venv` does not.
+The reason is that the notebook subsystem shells out to `uv` to manage
+per-notebook `.venv/` directories; failing at startup with a clear message
+beats a confusing subprocess error later. Conda and pip-venv users install uv
+and relaunch from a uv-managed env, leaving existing data and environments
+untouched.
 
-- **[Rust toolchain](https://rustup.rs/)** (rustup) - for `maturin`
-  to compile the native extension. PyPI wheels skip this step.
-- **[Node 26+ / npm](https://nodejs.org/)** - for the frontend
-  `npm ci && npm run build` step. PyPI wheels bundle the prebuilt SPA.
-- Python 3.12+ is handled automatically by `uv sync`.
+Windows: `uv tool install strata-notebook` works directly.
 
-Windows: `uv tool install strata-notebook` works directly. Source builds
-work via WSL2 (smoother) or native Windows (uv + rustup + Node have
-Windows installers).
-
-Why uv at runtime: the notebook subsystem shells out to `uv` to
-manage per-notebook `.venv/` directories, and the project's dev
-workflow assumes uv as the install path. Failing fast at startup with
-a clear message beats a confusing subprocess error later.
+Building Strata itself from a git clone also needs a
+[Rust toolchain](https://rustup.rs/) for the native extension and
+[Node 26+](https://nodejs.org/) for the frontend. PyPI wheels ship both
+prebuilt, so this applies only if you are modifying Strata. Source builds work
+on Windows via WSL2 or natively.
 
 ## The Cache Advantage
 
@@ -164,10 +159,9 @@ Change model:  load data (✓)   → clean (✓)  → train (20s) → evaluate (
 Re-run:        load data (✓)   → clean (✓)  → train (✓)   → evaluate (✓)   = <1s
 ```
 
-This isn't a feature bolted on. It's the architecture. Every cell
-execution is a `materialize(inputs, transform, environment) → artifact` operation,
-and the cache is correct by construction because it's keyed on content,
-not time.
+This is the architecture, not a layer on top of it. Every cell execution is a
+`materialize(inputs, transform, environment) → artifact` operation, and the
+cache is keyed on content rather than time, so it is correct by construction.
 
 Even a leaf cell that only `print`s is cached: its console output is keyed
 by the same provenance hash, so an unchanged re-run replays the output
@@ -256,22 +250,19 @@ it on first read and caches the bytes locally for the session.
 | [data_viewer](https://bearing-research.github.io/strata/latest/examples/data_viewer/)                 | Interactive data viewer - page / sort / filter / search the full cached artifact     |
 | [agent_demo](https://bearing-research.github.io/strata/latest/examples/agent_demo/)                   | A coding agent builds the notebook live; only the eval re-runs when the model caches |
 
-## Known rough edges
+## What is still moving
 
-Strata is young and a few surfaces are explicitly exploratory. The core
-(materialization, artifact store, DAG, caching, headless run) is stable
-in the alpha sense; these are the bits where the API or coverage is
-still moving:
+Materialization, the artifact store, the DAG, caching and headless run are
+settled and covered by tests. Three surfaces are not:
 
-- **Prompt-cell API.** Streaming, conversation memory, and structured-output
-  validation are not yet finalized - expect breaking changes in 0.x.
-- **SQL cell cloud drivers.** DuckDB / SQLite / PostgreSQL are exercised
-  in CI. BigQuery and Snowflake adapters ship but lack integration test
-  coverage; pin a Strata version in production until that lands.
-  MotherDuck and MySQL are planned but not yet implemented.
-- **Wire / on-disk formats.** `notebook.toml`, `.strata/runtime.json`, and the
-  artifact cache layout may change between minor versions during 0.x.
-  Rely on the Python API surface, not the file shapes.
+- **Prompt-cell API.** Streaming, conversation memory and structured-output
+  validation will change.
+- **SQL cloud drivers.** DuckDB, SQLite and PostgreSQL run in CI. BigQuery and
+  Snowflake ship without integration coverage. MotherDuck and MySQL are not
+  implemented.
+- **On-disk formats.** `notebook.toml`, `.strata/runtime.json` and the artifact
+  cache layout may change between minor versions. Depend on the Python API,
+  not the file shapes.
 
 ---
 

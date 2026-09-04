@@ -1,4 +1,4 @@
-# Titanic — feature engineering + model comparison
+# Titanic: feature engineering + model comparison
 
 A canonical "first Kaggle notebook" rewritten for Strata. Shows a
 feature-engineering stage that fans out into two model trainers whose
@@ -6,12 +6,12 @@ metrics get compared in a final cell.
 
 ## What it shows
 
-- **Shared upstream with two downstream branches** — `features` feeds
+- **Shared upstream with two downstream branches**: `features` feeds
   both `train_model` and a second branch (implicit via `compare`), so
   editing `features` invalidates both branches.
-- **Ordered display outputs** — `explore` produces multiple charts
+- **Ordered display outputs**: `explore` produces multiple charts
   side-by-side, each rendered as a separate display output.
-- **Typed primitives round-trip** — accuracy floats, confusion matrices,
+- **Typed primitives round-trip**: accuracy floats, confusion matrices,
   feature importances all flow through the artifact store without
   pickle.
 

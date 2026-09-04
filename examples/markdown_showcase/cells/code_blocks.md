@@ -40,7 +40,7 @@ A fence containing markdown special chars:
 - [no links](http://example.com)
 ```
 
-Fenced HTML — should be HTML-escaped, not rendered:
+Fenced HTML, should be HTML-escaped, not rendered:
 
 ```html
 <script>alert("hi")</script>

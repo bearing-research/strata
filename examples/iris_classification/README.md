@@ -1,4 +1,4 @@
-# Iris Classification — end-to-end ML in seven cells
+# Iris Classification: end-to-end ML in seven cells
 
 Classic scikit-learn tutorial, rewritten as a Strata notebook. Shows
 what the graph looks like for a realistic ML pipeline: load → explore
@@ -9,7 +9,7 @@ what the graph looks like for a realistic ML pipeline: load → explore
 - **DAG branching.** `scatter_plot` and `train_test` both read from
   `load_data`, so editing `load_data` invalidates both branches.
 - **Mixed output types.** Cells produce DataFrames (arrow/ipc), trained
-  models (pickle), and matplotlib figures (image/png) — all stored
+  models (pickle), and matplotlib figures (image/png), all stored
   natively by Strata's serializer.
 - **Display outputs.** `_` at the end of a cell (or a trailing
   expression) becomes an inline preview on the cell.
@@ -40,5 +40,5 @@ Then open `examples/iris_classification` from the Strata home page.
 
 - Change the `test_size` in `train_test`. Cells downstream go stale;
   `scatter_plot` stays ready (it doesn't depend on the split).
-- Re-run `evaluate` without re-training — the trained model is cached,
+- Re-run `evaluate` without re-training, the trained model is cached,
   so only evaluation runs.

@@ -12,7 +12,7 @@ by hand in the [web UI](../getting-started/notebook.md) or watched from a
 
     Here the notebook is **the deliverable**: you asked for it, you watch it get
     built, you keep it. An agent can also use a notebook as **disposable
-    infrastructure** while working on something else entirely — running
+    infrastructure** while working on something else entirely, running
     throwaway Python that happens to be cached instead of thrown away. That is
     [a separate setup](scratchpad.md) with a different starting point: this page
     starts with you running a command, that one starts with the agent noticing
@@ -28,7 +28,7 @@ of it in one step.
 ## Prerequisites
 
 The `[mcp]` extra (the agent endpoint) and [Claude Code](https://claude.com/claude-code)
-— or another MCP-capable coding agent — on your `PATH`. Add `[tui]` for the
+(or another MCP-capable coding agent) on your `PATH`. Add `[tui]` for the
 terminal viewer; skip it if you plan to watch in a browser and pass `--no-tui`:
 
 === "From PyPI"
@@ -55,7 +55,7 @@ strata agent ./my-notebook
 
 This scaffolds the notebook if it does not exist, starts a server with the agent
 endpoint enabled, opens a session, and attaches the terminal viewer. It prints
-the exact line to run next, then hands the terminal to the viewer — leave it
+the exact line to run next, then hands the terminal to the viewer. Leave it
 running.
 
 ### 2. Start the agent beside it
@@ -77,10 +77,10 @@ Build it in the notebook.
 ```
 
 The agent adds cells and runs them. Each one appears in the viewer in the first
-terminal as it happens — status flipping to running, then the output landing.
+terminal as it happens: status flips to running, then the output lands.
 That is the confirmation that it is driving the notebook rather than writing
 scripts: if **nothing** appears in the viewer, it is not using the notebook. A
-cell that appears and goes red is fine — that is the notebook working and the
+cell that appears and goes red is fine. That is the notebook working and the
 code failing, which is a normal first draft.
 
 !!! tip "Asking for something that needs a library"
@@ -94,8 +94,8 @@ code failing, which is a normal first draft.
 ### 4. Take it from there
 
 The notebook is a normal notebook. Open it in the [web UI](../getting-started/notebook.md)
-to edit a cell yourself, re-run it, or keep working after the agent stops —
-[several views can watch at once](#watching-an-agent-work), and you can edit in
+to edit a cell yourself, re-run it, or keep working after the agent stops.
+[Several views can watch at once](#watching-an-agent-work), and you can edit in
 the browser while the agent is still going.
 
 When you quit the viewer, the server `strata agent` started is shut down with
@@ -109,7 +109,7 @@ running.
     1. **creates-or-opens** the notebook directory (scaffolds a new one if needed),
     2. **starts** a notebook server with the MCP endpoint enabled (or **reuses**
        one already running on the target URL),
-    3. **opens a session** — the step the agent cannot do itself, since the MCP
+    3. **opens a session**, the step the agent cannot do itself, since the MCP
        tools only see notebooks that are already open,
     4. **writes** a `.mcp.json` and a managed block in `CLAUDE.md` into the
        notebook directory, and
@@ -128,20 +128,20 @@ agent is driving:
 
 | How | What you get | When it fits |
 | --- | --- | --- |
-| **Web UI** — open the server URL in a browser and open the same notebook | The full editor: outputs, plots, the DAG, the inspector. **Not read-only** — you can edit and run cells alongside the agent | You want to see rendered output, or take over |
-| **TUI** — `strata watch ./my-notebook` | Read-only live spectator in the terminal | No browser, over SSH, or beside the agent in a split terminal |
-| **Any WebSocket client** | The raw frames | You are building your own view — see the [client protocol](../reference/notebook-protocol.md) |
+| **Web UI**, by opening the server URL in a browser | The full editor: outputs, plots, the DAG, the inspector. **Not read-only**, so you can edit and run cells alongside the agent | You want to see rendered output, or take over |
+| **TUI**, via `strata watch ./my-notebook` | Read-only live spectator in the terminal | No browser, over SSH, or beside the agent in a split terminal |
+| **Any WebSocket client** | The raw frames | You are building your own view; see the [client protocol](../reference/notebook-protocol.md) |
 | **Nothing, then read the directory** | `cells/*.py` is the source; `.strata/runtime.json` holds display outputs, provenance and timings; `.strata/console/` holds per-cell stdout/stderr | You would rather review afterwards than watch |
 
 The last row is worth knowing: a notebook is a directory of ordinary files, so
 `strata cell show`, `strata dag`, `git diff` and your editor all work on an
 agent's output with no live connection at all.
 
-One caveat on that row. Live *cell status* — running, ready, errored — belongs
-to the session, not to disk, so `strata status` run against the directory
+One caveat on that row. Live *cell status* (running, ready, errored) belongs to
+the session rather than to disk, so `strata status` run against the directory
 reports `idle` for cells the agent has already executed. What it does tell you
-offline is real and separately useful: each cell's **staleness** and why. For
-"what is it doing right now", attach one of the live views above.
+offline is separately useful: each cell's **staleness** and why. For "what is
+it doing right now", attach one of the live views above.
 
 If you would rather keep a browser tab than a terminal viewer, start with
 `strata agent --no-tui` and open the notebook in the web UI instead.
