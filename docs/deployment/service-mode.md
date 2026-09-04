@@ -340,12 +340,16 @@ answers the question a shared cache generates on day one: *"you got a hit and I
 didn't - why?"* The answer is almost always that the identities differ, and
 until they were readable there was no way to see it.
 
-Only the author column is blank on a solo notebook - personal mode has no
-authenticated identity to record. The platform and the environment identity are
-recorded on every run and always have been; what changes with a shared store is
-that they stop being the same value on every row. A graph where one step ran on
-someone else's machine, in a different environment, is the case these columns
-exist to make visible.
+The author column fills in only for steps that came *from* the store - a cell
+you ran yourself has no authenticated identity to attribute, so on a solo
+notebook it stays blank throughout. The platform and environment identity are
+recorded on every run, so what a shared store changes is not that they appear
+but that they stop being the same value on every row. A graph where one step
+ran on someone else's machine, in a different environment, is the case these
+columns exist to make visible.
+
+All of it is best-effort and recent: artifacts produced before these fields
+existed show blanks, and re-running the cell is what fills them in.
 
 The notebook's profiling panel splits the savings once a team hit happens:
 "Cache savings ~12m" alongside "From your team ~8m (4 hits, alice, bob)". The

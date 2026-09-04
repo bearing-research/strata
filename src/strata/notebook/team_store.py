@@ -348,14 +348,24 @@ async def pull_cell_outputs(
     # own when explaining staleness, so the cell would report "the environment
     # changed" forever, with nothing pointing at why. Keep the local value and
     # say so out loud instead — a signal is only a signal if it surfaces as one.
+    # Every variable, not just the first: they are written from one value, so
+    # checking one and stamping all of them would silently launder a bad
+    # env_hash on any variable that sorted later.
+    disputed = sorted(
+        {
+            artifact.env_hash
+            for _, artifact in pulled
+            if artifact.env_hash and env_hash and artifact.env_hash != env_hash
+        }
+    )
     published_env_hash = pulled[0][1].env_hash
-    if published_env_hash and env_hash and published_env_hash != env_hash:
+    if disputed:
         logger.warning(
             "Team store returned cell %s with env_hash %s but its provenance was "
             "computed under %s; these cannot both be right. Keeping the local "
             "value — treat the store's metadata as suspect.",
             cell_id,
-            published_env_hash[:12],
+            ", ".join(h[:12] for h in disputed),
             env_hash[:12],
         )
         published_env_hash = ""
@@ -377,6 +387,10 @@ async def pull_cell_outputs(
             # of where the result came from into a claim we ran it ourselves.
             build_env=artifact.build_env,
             build_duration_ms=artifact.build_duration_ms,
+            # Persisted, not just logged. The lineage view reads the local
+            # store, so without this the author column stays blank on exactly
+            # the steps someone else produced — the case it exists for.
+            principal=artifact.principal,
         )
         total_bytes += len(artifact.blob)
 

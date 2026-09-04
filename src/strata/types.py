@@ -1069,13 +1069,15 @@ class LineageNode(BaseModel):
     Once a graph can contain a step someone else ran elsewhere, they are the
     questions it is being opened to answer.
 
-    They are absent under different conditions, which is worth keeping
-    straight. ``principal`` needs an authenticated caller, so it is empty on a
-    personal-mode notebook however the artifact was produced. ``build_env``,
-    ``build_duration_ms`` and ``env_hash`` are recorded by the process that ran
-    the cell, so they are populated on a solo notebook too and empty only for
-    tables, for core transforms, and for anything stored before the fields
-    existed.
+    All of them are best-effort, and empty for tables, for core transforms, and
+    for artifacts stored before the fields existed — which, these being recent,
+    is most of what an established store holds.
+
+    ``principal`` is additionally empty for anything a notebook computed
+    itself: a local run has no authenticated identity to attribute. It is
+    populated for a result *pulled* from a shared store, where the publisher's
+    identity is known and carried across, which is the case the column exists
+    for.
     """
 
     uri: str
