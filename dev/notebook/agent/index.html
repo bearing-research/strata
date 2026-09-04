@@ -2324,6 +2324,9 @@ running.</p>
 <h2 id="watching-an-agent-work">Watching an agent work<a class="headerlink" href="#watching-an-agent-work" title="Permanent link">&para;</a></h2>
 <p><code>strata agent</code> attaches the TUI because it is the option that needs no extra
 step. <strong>It is not the only one, and it is not the richest.</strong></p>
+<p><img alt="The terminal viewer while an agent works: two finished cells showing 2.0s and
+cached, the third marked running, and its console output streaming in the pane
+below." src="../../assets/tui-agent-running.svg" /></p>
 <p>Everything that watches a notebook is a WebSocket client on the same session,
 and the server broadcasts each <code>cell_status</code> / <code>cell_output</code> / <code>cell_console</code>
 frame to all of them. Opening the notebook a second time reuses the existing
@@ -2360,6 +2363,16 @@ agent is driving:</p>
 </tr>
 </tbody>
 </table>
+<div class="admonition warning">
+<p class="admonition-title">An open browser tab does not follow the agent's source edits</p>
+<p>Status, outputs and the DAG stream to every watcher, and a cell the agent
+edits does flip to <strong>stale</strong> in an open tab. The editor's own text does
+not: a source change made outside that tab (the agent's CLI or MCP calls,
+or your own <code>strata cell edit</code>) never reaches it, so you see stale cells
+above source that still looks unchanged. Reload the page to pick up the
+new source. The TUI re-reads source on its periodic resync and does not
+have this problem.</p>
+</div>
 <p>The last row is worth knowing: a notebook is a directory of ordinary files, so
 <code>strata cell show</code>, <code>strata dag</code>, <code>git diff</code> and your editor all work on an
 agent's output with no live connection at all.</p>

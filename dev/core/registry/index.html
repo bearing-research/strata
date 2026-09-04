@@ -2231,8 +2231,18 @@ The rest of this section is the reference for what each piece does.</p>
 </div>
 <p><strong>Publishing.</strong> Inside a cell, the <a href="../../notebook/cells/#the-ambient-strata-client">ambient <code>strata</code>
 client</a> publishes with a name:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">)</span>   <span class="c1"># or materialize(…, name=…)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[],</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;ref&quot;</span><span class="p">:</span> <span class="s2">&quot;train-tip-model@v1&quot;</span><span class="p">},</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;coef&quot;</span><span class="p">:</span> <span class="n">model</span><span class="o">.</span><span class="n">coef_</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="s2">&quot;intercept&quot;</span><span class="p">:</span> <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">intercept_</span><span class="p">)]},</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">)</span>
 </code></pre></div>
+<p><code>data</code> is stored as Arrow, so it takes a <code>dict</code>, a <code>pa.Table</code>, a pandas or
+polars DataFrame, or Arrow IPC <code>bytes</code>. An estimator object is not one of
+those: publish the numbers that define it (coefficients, metrics, a path to
+the weights) rather than the fitted object. <code>strata.materialize(…, name=…)</code>
+publishes the same way for work the server builds.</p>
 <p>The artifact lands in the registry and is <strong>stamped with the cell that produced
 it</strong>, so it shows up right under that cell.</p>
 <p><strong>Per-cell strip.</strong> Below a cell that published, a compact strip shows what it

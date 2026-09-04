@@ -2202,8 +2202,16 @@ the registry with full audit + lineage - without leaving the notebook.</p>
 Python cell, use the <a href="../cells/#the-ambient-strata-client">ambient <code>strata</code> client</a>
 - it's already in the namespace, no import or setup:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># ... you&#39;ve trained `model` in this or an upstream cell ...</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">)</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[],</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;ref&quot;</span><span class="p">:</span> <span class="s2">&quot;train-tip-model@v1&quot;</span><span class="p">},</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;coef&quot;</span><span class="p">:</span> <span class="n">model</span><span class="o">.</span><span class="n">coef_</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="s2">&quot;intercept&quot;</span><span class="p">:</span> <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">intercept_</span><span class="p">)]},</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="p">)</span>
 </code></pre></div>
+<p><code>data</code> is written as Arrow, so pass a <code>dict</code>, a <code>pa.Table</code>, a pandas or polars
+DataFrame, or Arrow IPC <code>bytes</code> - the numbers that define the model, not the
+fitted estimator object.</p>
 <p>Run the cell (Shift+Enter). <code>strata.materialize(..., name="taxi/tip-model")</code>
 works the same way. The artifact lands in the registry and is <strong>stamped with the
 cell that produced it</strong>.</p>
@@ -2217,9 +2225,12 @@ cell that produced it</strong>.</p>
 <li><code>⎘</code> - open its lineage.</li>
 </ul>
 <p>Promote where you trained the model, without scrolling anywhere.</p>
-<!-- TODO(screenshot): the per-cell promote strip under a published cell, showing
-     the ⬡ name·version chip, the [Promote ▾] menu, and the ⎘ lineage button. -->
-
+<p><img alt="A published cell with the promote strip along its bottom edge: the
+taxi/tip-model v1 chip, a champion alias chip, the Promote menu and the lineage
+button." src="../../assets/registry-promote-strip-light.png#only-light" />
+<img alt="A published cell with the promote strip along its bottom edge: the
+taxi/tip-model v1 chip, a champion alias chip, the Promote menu and the lineage
+button." src="../../assets/registry-promote-strip-dark.png#only-dark" /></p>
 <h2 id="4-promote-to-champion">4. Promote to champion<a class="headerlink" href="#4-promote-to-champion" title="Permanent link">&para;</a></h2>
 <p>Click <strong><code>[Promote ▾]</code></strong> and choose <strong>champion</strong> (or <strong>candidate</strong>). A toast
 confirms the result:</p>
@@ -2244,10 +2255,14 @@ top to bottom:</p>
 <li><strong>Audit timeline</strong> (collapsible) - every name / alias / tag mutation, newest
    first, with who and from → to.</li>
 </ol>
-<!-- TODO(screenshot): the Registry tab open in the bottom drawer - pending banner
-     (with a queued protected move), the names table with ★champ/cand chips +
-     tags + [Promote ▾], and the audit timeline. The hero shot for this page. -->
-
+<p><img alt="The Registry tab in the bottom drawer: a names table with the champion alias
+chip, an rmse tag and a Promote menu, above an expanded audit timeline of every
+name, alias and tag change." src="../../assets/registry-tab-light.png#only-light" />
+<img alt="The Registry tab in the bottom drawer: a names table with the champion alias
+chip, an rmse tag and a Promote menu, above an expanded audit timeline of every
+name, alias and tag change." src="../../assets/registry-tab-dark.png#only-dark" /></p>
+<p>(No pending-approval banner here - nothing is queued. Step 6 covers what it
+looks like when a protected alias holds a move back.)</p>
 <h2 id="6-approval-gates-protected-aliases">6. Approval gates (protected aliases)<a class="headerlink" href="#6-approval-gates-protected-aliases" title="Permanent link">&para;</a></h2>
 <p>To require a human for sensitive promotions, mark aliases protected when you
 start the server:</p>
@@ -2285,7 +2300,7 @@ view. It answers "which snapshot trained this model?" in one click.</li>
 </tr>
 <tr>
 <td><strong>Registry tab is empty</strong></td>
-<td>Nothing's been published with a name yet. Run a cell with <code>strata.put(value, name="…")</code>.</td>
+<td>Nothing's been published with a name yet. Run a cell with <code>strata.put(inputs=[], transform=…, data=…, name="…")</code>.</td>
 </tr>
 <tr>
 <td><strong>A cell ran but no per-cell strip</strong></td>

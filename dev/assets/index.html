@@ -1871,6 +1871,28 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#what-is-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is here
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conventions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#agent-demogif-to-be-recorded" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1902,20 +1924,91 @@
 
 
 <h1 id="docsassets">docs/assets<a class="headerlink" href="#docsassets" title="Permanent link">&para;</a></h1>
-<p>Binary image/media assets referenced by the README and the docs site.</p>
+<p>Images the docs site and the top-level <code>README.md</code> embed.</p>
+<p>Everything here except <code>agent-demo.gif</code> is <strong>generated</strong>, not hand-made. A
+screenshot of last release's layout still looks authoritative, so the way these
+stay honest is that regenerating all of them is one command rather than an
+afternoon of cropping:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_docs_shots.py<span class="w">           </span><span class="c1"># everything</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_docs_shots.py<span class="w"> </span>--only<span class="w"> </span>tui<span class="w"> </span><span class="c1"># just the SVGs (fast, no server)</span>
+</code></pre></div>
+<p>Re-run it whenever the notebook UI or the TUI changes shape, and commit the
+result alongside that change.</p>
+<h2 id="what-is-here">What is here<a class="headerlink" href="#what-is-here" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Surface</th>
+<th>Shown on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>notebook-anatomy-{light,dark}.png</code></td>
+<td>Web UI</td>
+<td>Notebook quickstart, <code>README.md</code></td>
+</tr>
+<tr>
+<td><code>cascade-stale-{light,dark}.png</code></td>
+<td>Web UI</td>
+<td>Notebook quickstart, step 5</td>
+</tr>
+<tr>
+<td><code>registry-promote-strip-{light,dark}.png</code></td>
+<td>Web UI</td>
+<td>Registry dashboard, step 3</td>
+</tr>
+<tr>
+<td><code>registry-tab-{light,dark}.png</code></td>
+<td>Web UI</td>
+<td>Registry dashboard, step 5</td>
+</tr>
+<tr>
+<td><code>tui-layout.svg</code></td>
+<td>TUI</td>
+<td>Terminal viewer</td>
+</tr>
+<tr>
+<td><code>tui-agent-running.svg</code></td>
+<td>TUI</td>
+<td>Driving a notebook with a coding agent</td>
+</tr>
+<tr>
+<td><code>agent-demo.gif</code></td>
+<td>Screen recording</td>
+<td>Not yet recorded - see below</td>
+</tr>
+</tbody>
+</table>
+<h2 id="conventions">Conventions<a class="headerlink" href="#conventions" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Web shots are PNG and come in both themes.</strong> Reference them with Material's
+  <code>#only-light</code> / <code>#only-dark</code> suffix so a page never shows a dark screenshot on
+  a light background. <code>README.md</code> uses a <code>&lt;picture&gt;</code> element for the same reason.</li>
+<li><strong>TUI shots are SVG</strong>, exported by Textual. They stay crisp at any zoom, are
+  roughly a tenth the size of the equivalent PNG, keep the text selectable, and
+  read correctly on either docs theme, so they need only one variant.</li>
+<li><strong>Alt text is required, and no image carries information the prose omits.</strong> A
+  screenshot illustrates; it never explains. Every page must read correctly with
+  images blocked.</li>
+<li><code>mkdocs build --strict</code> fails on an image reference with no file behind it, so
+  a broken path in <code>docs/</code> is caught on every docs PR. <code>README.md</code> is not built
+  by mkdocs - check that one by eye.</li>
+</ul>
 <h2 id="agent-demogif-to-be-recorded"><code>agent-demo.gif</code> (to be recorded)<a class="headerlink" href="#agent-demogif-to-be-recorded" title="Permanent link">&para;</a></h2>
-<p>The hero clip in the top-level <code>README.md</code>: a coding agent builds a Strata
-notebook live and reuses the cached model when only the evaluation changes.</p>
+<p>A clip for the README's "cached scratchpad" section: a coding agent builds a
+Strata notebook live and reuses the cached model when only the evaluation
+changes. Unlike the shots above it cannot be scripted from here - it is a screen
+recording.</p>
 <ul>
 <li><strong>How to record it:</strong> follow <a href="https://github.com/bearing-research/strata/blob/main/examples/agent_demo/RECORDING.md"><code>examples/agent_demo/RECORDING.md</code></a>
-  (two side-by-side panes, <code>strata agent</code>, two prompts, ~15–25s, &lt; 5 MB).</li>
+  (two side-by-side panes, <code>strata agent</code>, two prompts, ~15-25s, &lt; 5 MB).</li>
 <li><strong>Where it goes:</strong> save the exported GIF here as <code>docs/assets/agent-demo.gif</code>.</li>
 <li><strong>Wire it in:</strong> uncomment the image line in the README's "Give your coding
   agent a cached scratchpad" section (it's a commented slot so the README never
   renders a broken image before the GIF exists).</li>
 </ul>
-<p>Keep assets small (GitHub inlines images up to 10 MB, but smaller loads faster)
-and give each a descriptive filename.</p>
 
 
 
