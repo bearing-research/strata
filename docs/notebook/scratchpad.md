@@ -19,11 +19,20 @@ runs it; the cell is versioned, content-addressed, and cached.
     driving starts with you running `strata agent`; scratchpad use starts with
     the agent noticing it has a better option than `python -c`.
 
-## Set it up once, in any project
+## Set it up
 
-The behavior travels with the package, but the plugin is the reliable way to get
-it into every Claude Code session — it also bundles a
-`/strata-scratchpad:scratch` command:
+### 1. Put the `strata` CLI on your `PATH`
+
+```bash
+uv tool install strata-notebook
+```
+
+The agent shells out to `strata`, so this is the one hard requirement. Check it
+with `strata --help`.
+
+### 2. Install the plugin
+
+In any Claude Code session:
 
 ```
 /plugin marketplace add bearing-research/strata
@@ -32,12 +41,48 @@ it into every Claude Code session — it also bundles a
 
 Once installed the skill is auto-discovered in **every** project, so the agent
 reaches for a cached notebook cell even when it wasn't launched anywhere near a
-notebook. The `strata` CLI still needs to be on `PATH`. The plugin source lives
-in the repo at `plugins/strata-scratchpad/`.
+notebook. The plugin also bundles a `/strata-scratchpad:scratch` command, and
+its source lives in the repo at `plugins/strata-scratchpad/`.
 
 The skill also ships inside `strata-notebook` itself (under
 `<site-packages>/strata/.agents/skills/`), which some agents discover on their
 own; the plugin removes the "some".
+
+### 3. Confirm it engaged
+
+This is worth doing once, because the whole thing is invisible by design —
+nothing announces itself, and an agent that quietly kept using `python -c` looks
+identical from the outside.
+
+Ask an agent, in any project, for something that needs a computation:
+
+```text
+What's the median of the file sizes under src/, in KB?
+```
+
+Then look for the notebook:
+
+```bash
+ls ./scratch/cells/            # one .py file per snippet it ran
+strata cell list ./scratch     # the same thing as JSON, with each cell's output
+```
+
+If `./scratch` exists and has cells in it, the skill engaged. If it does not,
+the agent answered with `python -c` and the skill did not fire — check that
+`strata --help` works **in the agent's environment**, which is the usual cause.
+
+### 4. Nothing else
+
+There is no server to start and no session to open. The agent creates the
+scratch notebook itself the first time it needs one, with
+
+```bash
+strata new scratch --parent . --no-env --project-mount
+```
+
+which also mounts the project read-only as a `project` variable, so cells read
+your files as `project / "some/file.py"`. Adding `scratch/` to `.gitignore` is
+optional — it is your workspace, and some people keep it.
 
 ## Why it beats a temp script
 

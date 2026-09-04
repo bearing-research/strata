@@ -45,36 +45,65 @@ terminal viewer; skip it if you plan to watch in a browser and pass `--no-tui`:
 
 ## Use it
 
+You need two terminals: one holding the notebook open, one for the agent.
+
+### 1. Open the notebook for an agent
+
 ```bash
 strata agent ./my-notebook
 ```
 
-That single command:
+This scaffolds the notebook if it does not exist, starts a server with the agent
+endpoint enabled, opens a session, and attaches the terminal viewer. It prints
+the exact line to run next, then hands the terminal to the viewer — leave it
+running.
 
-1. **creates-or-opens** the notebook directory (scaffolds a new one if needed),
-2. **starts** a notebook server with the MCP endpoint enabled (or **reuses** one
-   already running on the target URL),
-3. **opens a session**, the step the agent cannot do itself, since the MCP
-   tools only see notebooks that are already open,
-4. **writes** a `.mcp.json` and a managed block in `CLAUDE.md` into the notebook
-   directory, and
-5. **attaches** the read-only TUI to that session.
+### 2. Start the agent beside it
 
-It prints the one line you run on the agent's side, then hands the terminal to
-the TUI. In a second terminal:
+In a **second terminal**:
 
 ```bash
 cd ./my-notebook && claude
 ```
 
-Claude Code discovers the notebook's `.mcp.json`, connects to the `strata-notebook`
-MCP server, reads the `CLAUDE.md` working agreement, and starts building the
-notebook by adding and running cells — each of which lights up live in whatever
-you have watching, the TUI in the first terminal by default. See
-[Watching an agent work](#watching-an-agent-work) for the alternatives.
+Claude Code finds the `.mcp.json` that step 1 wrote, connects to the
+`strata-notebook` MCP server, and reads the working agreement from `CLAUDE.md`.
 
-When you quit the TUI, the server `strata agent` started is shut down with it. If
-you pointed it at a server you started yourself, that server is left running.
+### 3. Ask for something
+
+```text
+Load the iris dataset, train a classifier on it, and report the accuracy.
+Build it in the notebook.
+```
+
+The agent adds cells and runs them. Each one appears in the viewer in the first
+terminal as it happens — status flipping to running, then the output landing.
+That is the confirmation that it is driving the notebook rather than writing
+scripts: if nothing appears in the viewer, it is not using the notebook.
+
+### 4. Take it from there
+
+The notebook is a normal notebook. Open it in the [web UI](../getting-started/notebook.md)
+to edit a cell yourself, re-run it, or keep working after the agent stops —
+[several views can watch at once](#watching-an-agent-work), and you can edit in
+the browser while the agent is still going.
+
+When you quit the viewer, the server `strata agent` started is shut down with
+it. If you pointed it at a server you started yourself, that one is left
+running.
+
+??? info "What `strata agent` does under the hood"
+
+    The command exists because doing this by hand is a fiddly ordered dance:
+
+    1. **creates-or-opens** the notebook directory (scaffolds a new one if needed),
+    2. **starts** a notebook server with the MCP endpoint enabled (or **reuses**
+       one already running on the target URL),
+    3. **opens a session** — the step the agent cannot do itself, since the MCP
+       tools only see notebooks that are already open,
+    4. **writes** a `.mcp.json` and a managed block in `CLAUDE.md` into the
+       notebook directory, and
+    5. **attaches** the read-only TUI to that session.
 
 ## Watching an agent work
 
