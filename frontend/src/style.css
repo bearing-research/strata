@@ -43,6 +43,9 @@
   --cat-pink: #f5c2e7;
   --cat-rosewater: #f5e0dc;
 
+  /* Typography */
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
   /* Semantic — backgrounds */
   --bg-base: var(--cat-crust);
   --bg-surface: var(--cat-mantle);

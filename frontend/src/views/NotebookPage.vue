@@ -1014,10 +1014,10 @@ function goHome() {
   cursor: pointer;
 }
 .drawer-tab:hover {
-  color: var(--text);
+  color: var(--text-primary);
 }
 .drawer-tab.active {
-  color: var(--text);
+  color: var(--text-primary);
   border-bottom-color: var(--accent-primary, #3b82f6);
 }
 
@@ -1039,7 +1039,7 @@ function goHome() {
   min-width: 220px;
   max-width: 360px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
-  background: var(--bg, #fff);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
 }
 .toast.success {

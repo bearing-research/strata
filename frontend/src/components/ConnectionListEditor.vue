@@ -627,7 +627,7 @@ function preservedExtraSummary(d: DraftConnection): string {
 }
 
 .conn-row.has-error {
-  border-color: var(--text-error, #c0392b);
+  border-color: var(--accent-danger);
 }
 
 .conn-row-header {
@@ -673,7 +673,7 @@ function preservedExtraSummary(d: DraftConnection): string {
 }
 
 .conn-remove-btn:hover:not(:disabled) {
-  color: var(--text-error, #c0392b);
+  color: var(--accent-danger);
 }
 
 .conn-fields {
@@ -717,7 +717,7 @@ function preservedExtraSummary(d: DraftConnection): string {
 
 .conn-field input.literal-secret {
   border-color: var(--accent-warning, #f39c12);
-  background: var(--bg-warning, rgba(243, 156, 18, 0.08));
+  background: var(--tint-warning);
 }
 
 .conn-secret-hint,
@@ -781,7 +781,7 @@ function preservedExtraSummary(d: DraftConnection): string {
 
 .conn-error {
   font-size: 11px;
-  color: var(--text-error, #c0392b);
+  color: var(--accent-danger);
   margin: 4px 0 0;
 }
 </style>

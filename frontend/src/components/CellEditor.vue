@@ -1622,12 +1622,12 @@ function outputKey(output: CellOutput, index: number): string {
   cursor: pointer;
 }
 .variant-tab:hover {
-  color: var(--text-default);
-  background: var(--background-hover, rgba(127, 127, 127, 0.08));
+  color: var(--text-primary);
+  background: var(--bg-hover);
 }
 .variant-tab.active {
-  background: var(--background-elevated, var(--background-default));
-  color: var(--text-default);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
   border-color: var(--accent-primary, var(--border-strong));
   font-weight: 600;
 }
@@ -1639,7 +1639,7 @@ function outputKey(output: CellOutput, index: number): string {
   color: var(--text-muted);
 }
 .variant-tab-add:hover {
-  color: var(--accent-primary, var(--text-default));
+  color: var(--accent-primary);
 }
 .variant-group-label {
   margin-left: auto;
@@ -1655,8 +1655,8 @@ function outputKey(output: CellOutput, index: number): string {
   letter-spacing: 0.06em;
   padding: 1px 5px;
   border-radius: 8px;
-  background: var(--accent-soft, rgba(99, 102, 241, 0.15));
-  color: var(--accent, #6366f1);
+  background: var(--tint-primary);
+  color: var(--accent-primary);
 }
 
 .variant-group-rollup {
@@ -2068,14 +2068,14 @@ function outputKey(output: CellOutput, index: number): string {
   display: inline-block;
   margin-bottom: 4px;
   font-size: 10px;
-  color: var(--text-tertiary, var(--text-secondary));
+  color: var(--text-muted);
 }
 .stream-ticker {
   display: inline-block;
   margin-bottom: 4px;
   font-size: 10px;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  color: var(--text-tertiary, var(--text-secondary));
+  color: var(--text-muted);
 }
 .stream-tail {
   opacity: 0.7;

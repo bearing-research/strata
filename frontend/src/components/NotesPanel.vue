@@ -87,7 +87,7 @@ function scrollToCell(cellId: CellId) {
   width: 240px;
   flex-shrink: 0;
   border-left: 1px solid var(--border-subtle);
-  background: var(--bg-subtle);
+  background: var(--bg-hover);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -111,7 +111,7 @@ function scrollToCell(cellId: CellId) {
   color: var(--text-muted);
 }
 .notes-panel-header:hover {
-  color: var(--text);
+  color: var(--text-primary);
 }
 .notes-panel-title {
   flex: 1;
@@ -149,7 +149,7 @@ function scrollToCell(cellId: CellId) {
 }
 .note-card {
   text-align: left;
-  background: var(--bg);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 8px 10px;
@@ -165,12 +165,12 @@ function scrollToCell(cellId: CellId) {
 }
 .note-card:hover {
   border-color: var(--accent-primary);
-  background: var(--tint-primary, var(--bg-subtle));
+  background: var(--tint-primary);
 }
 .note-card-title {
   font-weight: 500;
   font-size: 12px;
-  color: var(--text);
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
