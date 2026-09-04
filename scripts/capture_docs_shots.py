@@ -302,25 +302,85 @@ def _strata(*args: str, cwd: Path | None = None) -> None:
     )
 
 
-# The registry walkthrough's fixture: one cell that trains a model and
-# publishes it under a name. Kept here rather than in ``examples/`` because it
-# exists only to give the registry surfaces something to show.
-REGISTRY_CELL = """\
+# The registry walkthrough's fixture. The page shows a lineage chain of
+# "model <- features <- scan <- table @ snapshot", so the fixture builds one for
+# real: a scan of an Iceberg table, a derived feature set, then the published
+# model. A single self-contained put would photograph a one-row lineage and
+# quietly contradict the page it illustrates.
+REGISTRY_CELLS = [
+    """\
+raw = strata.materialize(
+    inputs=[TABLE_URI],
+    transform={"ref": "scan@v1", "params": {}},
+    name="taxi/raw-trips",
+)
+print(raw.uri)
+""",
+    """\
+features = strata.put(
+    inputs=[raw.uri],
+    transform={"ref": "tip-features@v1"},
+    data={"fare": [12.5, 8.0, 22.25], "distance": [3.1, 1.4, 7.8]},
+    name="taxi/features",
+)
+print(features.uri)
+""",
+    """\
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-X = np.array([[1.0], [2.0], [3.0], [4.0]])
-y = np.array([2.0, 4.1, 5.9, 8.2])
+X = np.array([[3.1], [1.4], [7.8]])
+y = np.array([2.4, 1.1, 4.6])
 model = LinearRegression().fit(X, y)
 
 art = strata.put(
-    inputs=[],
+    inputs=[features.uri],
     transform={"ref": "train-tip-model@v1"},
     data={"coef": model.coef_.tolist(), "intercept": [float(model.intercept_)]},
     name="taxi/tip-model",
 )
 print(art.uri)
-"""
+""",
+]
+
+
+def build_warehouse(root: Path) -> str:
+    """A one-table Iceberg warehouse, so the lineage chain has a real root.
+
+    Mirrors the ``temp_warehouse`` test fixture. Small on purpose: the shot
+    needs a table with a snapshot, not a realistic dataset.
+    """
+    import pyarrow as pa
+    from pyiceberg.catalog.sql import SqlCatalog
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import DoubleType, LongType, NestedField
+
+    warehouse = root / "warehouse"
+    warehouse.mkdir(parents=True, exist_ok=True)
+    catalog = SqlCatalog(
+        "strata",
+        uri=f"sqlite:///{(warehouse / 'catalog.db').as_posix()}",
+        warehouse=warehouse.as_uri(),
+    )
+    catalog.create_namespace("taxi")
+    table = catalog.create_table(
+        "taxi.trips",
+        Schema(
+            NestedField(1, "trip_id", LongType(), required=False),
+            NestedField(2, "fare", DoubleType(), required=False),
+            NestedField(3, "distance", DoubleType(), required=False),
+        ),
+    )
+    table.append(
+        pa.table(
+            {
+                "trip_id": pa.array(range(200), type=pa.int64()),
+                "fare": pa.array([5.0 + i * 0.25 for i in range(200)], type=pa.float64()),
+                "distance": pa.array([1.0 + i * 0.05 for i in range(200)], type=pa.float64()),
+            }
+        )
+    )
+    return f"{warehouse.as_uri()}#taxi.trips"
 
 
 def _scaffold(root: Path, name: str, deps: tuple[str, ...], cells: list[str]) -> Path:
@@ -349,7 +409,13 @@ def build_fixtures(root: Path) -> tuple[Path, Path]:
         root, "iris", ("pandas", "scikit-learn", "matplotlib"), extract_quickstart_cells()
     )
     _strata("run", str(iris))
-    registry = _scaffold(root, "registry", ("scikit-learn",), [REGISTRY_CELL])
+
+    # The scan cell needs the table URI, and a cell's source is the only thing
+    # the harness carries in — so bind it as a literal rather than an env var,
+    # which would also land in the screenshot as unexplained indirection.
+    table_uri = build_warehouse(root)
+    cells = [REGISTRY_CELLS[0].replace("TABLE_URI", repr(table_uri)), *REGISTRY_CELLS[1:]]
+    registry = _scaffold(root, "registry", ("scikit-learn",), cells)
     return iris, registry
 
 

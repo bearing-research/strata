@@ -253,7 +253,7 @@ function tagList(tags: Record<string, string>): string {
 }
 .name {
   font-weight: 600;
-  color: var(--text);
+  color: var(--text-primary);
 }
 .chip {
   display: inline-block;
@@ -282,7 +282,7 @@ function tagList(tags: Record<string, string>): string {
   right: 0;
   top: 100%;
   z-index: 20;
-  background: var(--bg, #fff);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
@@ -296,10 +296,10 @@ function tagList(tags: Record<string, string>): string {
   background: none;
   border: none;
   cursor: pointer;
-  color: var(--text);
+  color: var(--text-primary);
 }
 .promote-menu button:hover {
-  background: var(--bg-subtle);
+  background: var(--bg-hover);
 }
 .promote {
   display: flex;
@@ -319,16 +319,16 @@ function tagList(tags: Record<string, string>): string {
 }
 .lineage-btn:hover {
   color: var(--accent-primary, #3b82f6);
-  background: var(--bg-subtle);
+  background: var(--bg-hover);
 }
 .btn {
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 2px 8px;
-  background: var(--bg, #fff);
+  background: var(--bg-elevated);
   cursor: pointer;
   font-size: 11px;
-  color: var(--text);
+  color: var(--text-primary);
 }
 .btn:disabled {
   opacity: 0.5;
@@ -357,7 +357,7 @@ function tagList(tags: Record<string, string>): string {
   color: var(--text-muted);
 }
 .audit-time {
-  color: var(--text);
+  color: var(--text-primary);
   min-width: 42px;
 }
 .empty {

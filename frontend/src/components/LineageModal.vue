@@ -89,7 +89,7 @@ function formatMs(ms: number): string {
   z-index: 3000;
 }
 .lineage-modal {
-  background: var(--bg, #fff);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   min-width: 420px;
@@ -108,7 +108,7 @@ function formatMs(ms: number): string {
 }
 .lineage-title {
   font-weight: 600;
-  color: var(--text);
+  color: var(--text-primary);
 }
 .lineage-close {
   background: none;
@@ -141,7 +141,7 @@ function formatMs(ms: number): string {
   color: var(--accent-primary, #3b82f6);
 }
 .llabel {
-  color: var(--text);
+  color: var(--text-primary);
 }
 .lver {
   color: var(--text-muted);

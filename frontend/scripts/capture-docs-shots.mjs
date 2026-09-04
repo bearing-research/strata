@@ -93,19 +93,21 @@ async function loadNotebook(browser, baseUrl, sessionId, theme) {
   return { context, page }
 }
 
-async function shoot(page, name, outDir, theme, locator, maxWidth) {
+async function shoot(page, name, outDir, theme, target, maxWidth) {
   const path = `${outDir}/${name}-${theme}.png`
+  // `target` is a CSS selector or an already-built Locator; omit it for the page.
+  const locator = typeof target === 'string' ? page.locator(target) : target
   if (locator && maxWidth) {
     // The drawer spans the window but its content hugs the left edge, so an
     // element screenshot would be mostly empty. Clip it instead.
-    const box = await page.locator(locator).boundingBox()
-    if (!box) throw new Error(`${locator} has no bounding box — hidden or zero-size?`)
+    const box = await locator.boundingBox()
+    if (!box) throw new Error(`${target} has no bounding box — hidden or zero-size?`)
     await page.screenshot({
       path,
       clip: { ...box, width: Math.min(box.width, maxWidth) },
     })
   } else {
-    await (locator ? page.locator(locator) : page).screenshot({ path })
+    await (locator ?? page).screenshot({ path })
   }
   console.log(`  ${name}-${theme}.png`)
 }
@@ -190,7 +192,12 @@ async function main() {
       // 3 + 4 + 5 — the registry surfaces.
       {
         const { context, page } = await loadNotebook(browser, baseUrl, registry.sessionId, theme)
-        await shoot(page, 'registry-promote-strip', outDir, theme, '.cell')
+        // Every cell in the chain publishes a name, so name the one step 3 is
+        // about rather than relying on cell order.
+        const modelCell = page
+          .locator('.cell')
+          .filter({ has: page.locator('.cell-artifact-strip', { hasText: 'taxi/tip-model' }) })
+        await shoot(page, 'registry-promote-strip', outDir, theme, modelCell)
 
         await page.locator('.drawer-tab', { hasText: 'Registry' }).click()
         await page.locator('text=taxi/tip-model').first().waitFor({ timeout: TIMEOUT_MS })
@@ -200,6 +207,18 @@ async function main() {
         await page.locator('.audit .toggle').click()
         await page.waitForTimeout(600)
         await shoot(page, 'registry-tab', outDir, theme, '.dag-drawer', 1040)
+
+        // 5 — the lineage view, opened from the model's row so the chain has
+        // every link the page describes rather than just the scan's root.
+        await page
+          .locator('tr')
+          .filter({ hasText: 'taxi/tip-model' })
+          .locator('.lineage-btn')
+          .click()
+        await page.locator('.lineage-modal').waitFor({ timeout: TIMEOUT_MS })
+        await page.locator('.lineage-row').first().waitFor({ timeout: TIMEOUT_MS })
+        await page.waitForTimeout(600)
+        await shoot(page, 'registry-lineage', outDir, theme, '.lineage-modal')
 
         await context.close()
       }
