@@ -2484,7 +2484,12 @@ usable scratchpad. A cell that must always run, because it has a side effect
 </thead>
 <tbody>
 <tr>
-<td>PyArrow tables, pandas DataFrames, numpy arrays</td>
+<td>PyArrow tables, pandas and polars frames, numpy arrays, torch and jax tensors</td>
+<td>Arrow IPC</td>
+<td><code>.arrow</code></td>
+</tr>
+<tr>
+<td>Any other type exporting <code>__arrow_c_stream__</code> or <code>__dlpack__</code></td>
 <td>Arrow IPC</td>
 <td><code>.arrow</code></td>
 </tr>
@@ -2501,6 +2506,15 @@ usable scratchpad. A cell that must always run, because it has a side effect
 </tbody>
 </table>
 <p>The content type is stored in the artifact metadata so the read side knows how to deserialize.</p>
+<p>The second row is what keeps a library Strata has never heard of out of the
+pickle path. DuckDB relations, cuDF frames, Ibis tables and anything else
+implementing the <a href="https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html">Arrow PyCapsule
+interface</a>
+are stored as real Arrow, so the artifact stays readable by other tools and the
+notebook can show its schema and row count. The trade is type identity: the
+libraries named in the first row are handed back as themselves, while a
+capsule-sourced value comes back as a <code>pyarrow.Table</code> and a DLPack-sourced one
+as a <code>numpy.ndarray</code>.</p>
 <h2 id="cascade-execution">Cascade Execution<a class="headerlink" href="#cascade-execution" title="Permanent link">&para;</a></h2>
 <p>When a cell's upstream dependencies aren't ready, the <strong>cascade planner</strong> generates an execution plan:</p>
 <ol>
