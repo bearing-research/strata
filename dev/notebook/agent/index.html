@@ -2282,13 +2282,23 @@ running.</p>
 <p>Claude Code finds the <code>.mcp.json</code> that step 1 wrote, connects to the
 <code>strata-notebook</code> MCP server, and reads the working agreement from <code>CLAUDE.md</code>.</p>
 <h3 id="3-ask-for-something">3. Ask for something<a class="headerlink" href="#3-ask-for-something" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Load the iris dataset, train a classifier on it, and report the accuracy.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Simulate 100,000 rolls of three dice and tell me how often the total beats 12.
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Build it in the notebook.
 </code></pre></div>
 <p>The agent adds cells and runs them. Each one appears in the viewer in the first
 terminal as it happens — status flipping to running, then the output landing.
 That is the confirmation that it is driving the notebook rather than writing
-scripts: if nothing appears in the viewer, it is not using the notebook.</p>
+scripts: if <strong>nothing</strong> appears in the viewer, it is not using the notebook. A
+cell that appears and goes red is fine — that is the notebook working and the
+code failing, which is a normal first draft.</p>
+<div class="admonition tip">
+<p class="admonition-title">Asking for something that needs a library</p>
+<p>A freshly scaffolded notebook's environment has only what the cell runtime
+needs (<code>pyarrow</code>, <code>orjson</code>, <code>cloudpickle</code>). Ask for pandas or scikit-learn
+and the agent adds it first with the <code>add_dependency</code> tool, so expect an
+environment sync before the first cell runs. The example above is deliberately
+dependency-free so your first run is a clean one.</p>
+</div>
 <h3 id="4-take-it-from-there">4. Take it from there<a class="headerlink" href="#4-take-it-from-there" title="Permanent link">&para;</a></h3>
 <p>The notebook is a normal notebook. Open it in the <a href="../../getting-started/notebook/">web UI</a>
 to edit a cell yourself, re-run it, or keep working after the agent stops —

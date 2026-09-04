@@ -736,10 +736,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#4-nothing-else" class="md-nav__link">
+  <a href="#4-nothing-else-for-the-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Nothing else
+        4. Nothing else — for the agent
       
     </span>
   </a>
@@ -2082,10 +2082,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#4-nothing-else" class="md-nav__link">
+  <a href="#4-nothing-else-for-the-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Nothing else
+        4. Nothing else — for the agent
       
     </span>
   </a>
@@ -2200,8 +2200,11 @@ own; the plugin removes the "some".</p>
 <p>This is worth doing once, because the whole thing is invisible by design —
 nothing announces itself, and an agent that quietly kept using <code>python -c</code> looks
 identical from the outside.</p>
-<p>Ask an agent, in any project, for something that needs a computation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>What&#39;s the median of the file sizes under src/, in KB?
+<p>Ask an agent, in any project, for something it <strong>cannot</strong> answer with shell
+tools — the skill only triggers when it was about to run ad-hoc <em>Python</em>, so a
+question <code>find</code>/<code>awk</code> can answer proves nothing:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Fit a linear regression to the points (1,2), (2,4.1), (3,5.9), (4,8.2)
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>and tell me the slope and intercept.
 </code></pre></div>
 <p>Then look for the notebook:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ls<span class="w"> </span>./scratch/cells/<span class="w">            </span><span class="c1"># one .py file per snippet it ran</span>
@@ -2210,9 +2213,11 @@ identical from the outside.</p>
 <p>If <code>./scratch</code> exists and has cells in it, the skill engaged. If it does not,
 the agent answered with <code>python -c</code> and the skill did not fire — check that
 <code>strata --help</code> works <strong>in the agent's environment</strong>, which is the usual cause.</p>
-<h3 id="4-nothing-else">4. Nothing else<a class="headerlink" href="#4-nothing-else" title="Permanent link">&para;</a></h3>
-<p>There is no server to start and no session to open. The agent creates the
-scratch notebook itself the first time it needs one, with</p>
+<h3 id="4-nothing-else-for-the-agent">4. Nothing else — for the agent<a class="headerlink" href="#4-nothing-else-for-the-agent" title="Permanent link">&para;</a></h3>
+<p>The agent needs no server and no session: it drives the notebook through the
+<code>strata</code> CLI against the directory. (Looking at it yourself is the one thing
+that does need a server — see <a href="#looking-at-it">Looking at it</a> below.)</p>
+<p>It creates the scratch notebook the first time it needs one, with</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>new<span class="w"> </span>scratch<span class="w"> </span>--parent<span class="w"> </span>.<span class="w"> </span>--no-env<span class="w"> </span>--project-mount
 </code></pre></div>
 <p>which also mounts the project read-only as a <code>project</code> variable, so cells read
@@ -2243,11 +2248,26 @@ optional — it is your workspace, and some people keep it.</p>
   stopping to configure one.</li>
 </ul>
 <h2 id="looking-at-it">Looking at it<a class="headerlink" href="#looking-at-it" title="Permanent link">&para;</a></h2>
-<p>You don't have to, and usually won't. When you want to:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>watch<span class="w"> </span>./scratch<span class="w">        </span><span class="c1"># live terminal viewer, read-only</span>
+<p>You don't have to, and usually won't. When you want to, the simplest way is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>agent<span class="w"> </span>./scratch<span class="w">        </span><span class="c1"># starts a server scoped to it, then attaches the viewer</span>
 </code></pre></div>
-<p>or open the notebook in the <a href="../../getting-started/notebook/">web UI</a>. Everything
-in <a href="../agent/#watching-an-agent-work">Watching an agent work</a> applies here too.</p>
+<div class="admonition warning">
+<p class="admonition-title"><code>strata watch ./scratch</code> on its own usually won't work</p>
+<p>A server only opens notebooks inside its configured storage root, which
+defaults to <code>~/.strata/notebooks</code> — and a scratchpad lives in your project.
+Pointed at a default server, opening it is rejected with <em>"Invalid notebook
+path: must be inside configured notebook storage"</em>, and the viewer sits at
+<code>connecting…</code> rather than saying so.</p>
+<p><code>strata agent</code> avoids this because it starts a server scoped to the
+notebook's parent directory. If you would rather use a server you already
+run, start it with its root over your project:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_NOTEBOOK_STORAGE_DIR</span><span class="o">=</span>.<span class="w"> </span>strata-notebook<span class="w"> </span><span class="p">&amp;</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>strata<span class="w"> </span>watch<span class="w"> </span>./scratch
+</code></pre></div>
+</div>
+<p>Once something is attached, everything in
+<a href="../agent/#watching-an-agent-work">Watching an agent work</a> applies here too —
+including opening it in the <a href="../../getting-started/notebook/">web UI</a> instead.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../agent/">Driving a notebook with a coding agent</a>: the other use case, where
