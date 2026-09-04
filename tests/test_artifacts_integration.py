@@ -1693,6 +1693,25 @@ class TestRegistry:
         assert resp.status_code == 200
 
 
+def queue_champion(base_url, artifact):
+    """Queue a protected champion move, asserting it actually queued.
+
+    Every caller below then approves or rejects it. Leaving this PUT unchecked
+    made a failure here surface two steps later as an unexplained 404 from
+    approve/reject ("no pending change"), which is how one CI flake reported
+    itself with nothing in the log pointing at the cause.
+    """
+    resp = httpx.put(
+        f"{base_url}/v1/names/team/model/aliases/champion",
+        json={"artifact_id": artifact.artifact_id, "version": artifact.version},
+        timeout=30.0,
+    )
+    assert resp.status_code == 202, (
+        f"queueing the protected alias returned {resp.status_code}: {resp.text}"
+    )
+    return resp
+
+
 @pytest.fixture
 def gated_server(tmp_path, multi_file_warehouse):
     """Personal-mode server where the 'champion' alias requires approval."""
@@ -1752,11 +1771,7 @@ class TestApprovalGates:
         base_url = gated_server["base_url"]
         with StrataClient(base_url=base_url) as client:
             artifact = self._make_model(client, gated_server["table_uri"])
-            httpx.put(
-                f"{base_url}/v1/names/team/model/aliases/champion",
-                json={"artifact_id": artifact.artifact_id, "version": artifact.version},
-                timeout=30.0,
-            )
+            queue_champion(base_url, artifact)
             result = client.reject_alias_change("team/model", "champion")
             assert result["status"] == "rejected"
             with pytest.raises(httpx.HTTPStatusError):
@@ -1773,11 +1788,7 @@ class TestApprovalGates:
         with StrataClient(base_url=base_url) as client:
             artifact = self._make_model(client, gated_server["table_uri"])
             # Set up champion via the approval flow
-            httpx.put(
-                f"{base_url}/v1/names/team/model/aliases/champion",
-                json={"artifact_id": artifact.artifact_id, "version": artifact.version},
-                timeout=30.0,
-            )
+            queue_champion(base_url, artifact)
             client.approve_alias_change("team/model", "champion")
 
             resp = httpx.delete(f"{base_url}/v1/names/team/model/aliases/champion", timeout=30.0)
@@ -1803,11 +1814,7 @@ class TestAliasIdempotenceOverHttp:
             artifact.to_table()
 
             # First request queues; approve applies it
-            httpx.put(
-                f"{base_url}/v1/names/team/model/aliases/champion",
-                json={"artifact_id": artifact.artifact_id, "version": artifact.version},
-                timeout=30.0,
-            )
+            queue_champion(base_url, artifact)
             client.approve_alias_change("team/model", "champion")
 
             # Identical re-request (the re-run promote cell): unchanged, no queue
@@ -1872,11 +1879,7 @@ class TestRegistryAuthzPersonalMode:
         base_url = gated_server["base_url"]
         with StrataClient(base_url=base_url) as client:
             artifact = self._make(client, gated_server["table_uri"])
-            httpx.put(
-                f"{base_url}/v1/names/team/model/aliases/champion",
-                json={"artifact_id": artifact.artifact_id, "version": artifact.version},
-                timeout=30.0,
-            )
+            queue_champion(base_url, artifact)
             result = client.approve_alias_change("team/model", "champion")
             assert result["status"] == "approved"
             assert client.resolve_alias("team/model", "champion")["version"] == artifact.version

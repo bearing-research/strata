@@ -1,7 +1,6 @@
 """Tests for adaptive concurrency control."""
 
 import asyncio
-import time
 
 import pytest
 from pydantic import ValidationError
@@ -535,15 +534,30 @@ class TestSampleAging:
     The window was count-only, so a burst of slow requests followed by an idle
     period kept re-triggering decrease signals from stale samples until the
     tier sat at ``min_slots`` with nothing running.
+
+    Time is stepped rather than slept through. Expiry is a comparison of two
+    timestamps, so sleeping past a 50ms window measures the runner's timer
+    resolution — which is how these flaked on Windows, where ``time`` has
+    ~15ms granularity (#627).
     """
 
+    @staticmethod
+    def _window(**kwargs):
+        """A window whose clock the test advances by hand."""
+        now = [1000.0]
+
+        def advance(seconds: float) -> None:
+            now[0] += seconds
+
+        return RollingLatencyWindow(clock=lambda: now[0], **kwargs), advance
+
     def test_stale_samples_stop_counting(self):
-        window = RollingLatencyWindow(size=100, max_age_seconds=0.05)
+        window, advance = self._window(size=100, max_age_seconds=60.0)
         for _ in range(10):
             window.record(900.0)
         assert window.get_p95() == 900.0
 
-        time.sleep(0.06)
+        advance(61.0)
 
         assert window.get_p95() is None
         stats = window.get_stats()
@@ -553,21 +567,29 @@ class TestSampleAging:
         assert stats["count"] == 10
 
     def test_fresh_samples_survive_alongside_expired_ones(self):
-        window = RollingLatencyWindow(size=100, max_age_seconds=0.05)
+        window, advance = self._window(size=100, max_age_seconds=60.0)
         for _ in range(10):
             window.record(900.0)
-        time.sleep(0.06)
+        advance(61.0)
         for _ in range(10):
             window.record(10.0)
 
         # The p95 describes current traffic, not the old burst.
         assert window.get_p95() == 10.0
 
-    def test_no_max_age_keeps_every_sample(self):
-        window = RollingLatencyWindow(size=100)
+    def test_a_sample_inside_the_window_is_still_live(self):
+        """The boundary the two tests above straddle: just under the age bound."""
+        window, advance = self._window(size=100, max_age_seconds=60.0)
         for _ in range(10):
             window.record(900.0)
-        time.sleep(0.06)
+        advance(59.0)
+        assert window.get_p95() == 900.0
+
+    def test_no_max_age_keeps_every_sample(self):
+        window, advance = self._window(size=100)
+        for _ in range(10):
+            window.record(900.0)
+        advance(3600.0)
         assert window.get_p95() == 900.0
 
     def test_controller_windows_inherit_the_configured_age(self):
