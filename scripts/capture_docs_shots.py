@@ -218,6 +218,18 @@ def capture_tui() -> list[Path]:
 # --------------------------------------------------------------------------
 
 
+def _anchor(text: str, heading: str) -> int:
+    """Locate a heading the fixture is keyed to, or say which one moved."""
+    index = text.find(heading)
+    if index < 0:
+        raise SystemExit(
+            f"{QUICKSTART_DOC.name} no longer contains the heading {heading!r}. "
+            "The fixture is extracted from that section; update "
+            "extract_quickstart_cells() to match the new structure."
+        )
+    return index
+
+
 def extract_quickstart_cells() -> list[str]:
     """Pull the quickstart's three python blocks out of the doc that shows them.
 
@@ -225,8 +237,8 @@ def extract_quickstart_cells() -> list[str]:
     impossible for the screenshot to show code the page doesn't.
     """
     text = QUICKSTART_DOC.read_text(encoding="utf-8")
-    start = text.index("## 3. Walk through a pipeline")
-    end = text.index("## 4. Re-run for cache hits")
+    start = _anchor(text, "## 3. Walk through a pipeline")
+    end = _anchor(text, "## 4. Re-run for cache hits")
     blocks = re.findall(r"```python\n(.*?)```", text[start:end], re.DOTALL)
     if len(blocks) != 3:
         raise SystemExit(
@@ -234,6 +246,46 @@ def extract_quickstart_cells() -> list[str]:
             "The doc was restructured; update extract_quickstart_cells()."
         )
     return blocks
+
+
+def serving_bundle() -> Path | None:
+    """The built frontend ``python -m strata`` will serve, mirroring
+    ``_mount_frontend``'s candidate order in ``server.py``."""
+    for candidate in (
+        REPO_ROOT / "src" / "strata" / "_frontend",
+        REPO_ROOT / "frontend" / "dist",
+    ):
+        if (candidate / "index.html").exists():
+            return candidate
+    return None
+
+
+def _newest_mtime(root: Path, pattern: str = "**/*") -> float:
+    return max((f.stat().st_mtime for f in root.glob(pattern) if f.is_file()), default=0.0)
+
+
+def check_bundle_is_current() -> Path:
+    """Refuse to photograph a stale bundle.
+
+    Web shots are deliberately taken against the built frontend rather than the
+    Vite dev server, because the bundle is what a user installs. The trap is
+    that ``src/strata/_frontend/`` wins over ``frontend/dist/``, is gitignored,
+    and is only refreshed by a manual copy — so "regenerate the screenshots
+    after a UI change" would otherwise silently re-shoot the old UI.
+    """
+    bundle = serving_bundle()
+    if bundle is None:
+        raise SystemExit(
+            "No built frontend found. Build it first:\n"
+            "  cd frontend && npm run build && cp -r dist/ ../src/strata/_frontend/"
+        )
+    if _newest_mtime(REPO_ROOT / "frontend" / "src") > _newest_mtime(bundle):
+        raise SystemExit(
+            f"{bundle.relative_to(REPO_ROOT)} is older than frontend/src — the shots "
+            "would show the previous UI. Rebuild it first:\n"
+            "  cd frontend && npm run build && cp -r dist/ ../src/strata/_frontend/"
+        )
+    return bundle
 
 
 def _free_port() -> int:
@@ -312,27 +364,39 @@ def serve(storage_dir: Path, port: int) -> subprocess.Popen:
         # up in the Registry tab shot.
         "STRATA_ARTIFACT_DIR": str(storage_dir / ".artifacts"),
     }
+    # Keep the output: this inherits the developer's environment, and an
+    # exported STRATA_AUTH_MODE or STRATA_MULTI_TENANT_ENABLED trips
+    # validate_mode_coherence against the personal mode forced above. Discarding
+    # stderr would report only that the process died.
+    log = storage_dir / "server.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    handle = log.open("wb")
     proc = subprocess.Popen(
         [sys.executable, "-m", "strata"],
         cwd=REPO_ROOT,
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=handle,
+        stderr=subprocess.STDOUT,
     )
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         if proc.poll() is not None:
-            raise SystemExit("strata server exited before it came up")
+            raise SystemExit(
+                f"strata server exited before it came up:\n{log.read_text(errors='replace')}"
+            )
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.5):
                 return proc
         except OSError:
             time.sleep(0.25)
     proc.terminate()
-    raise SystemExit(f"strata server did not listen on {port} within 60s")
+    raise SystemExit(
+        f"strata server did not listen on {port} within 60s:\n{log.read_text(errors='replace')}"
+    )
 
 
 def capture_web(work_dir: Path) -> None:
+    check_bundle_is_current()
     iris, registry = build_fixtures(work_dir)
     port = _free_port()
     proc = serve(work_dir, port)
@@ -355,7 +419,13 @@ def capture_web(work_dir: Path) -> None:
         )
     finally:
         proc.terminate()
-        proc.wait(timeout=30)
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            # Never let cleanup replace the in-flight capture error — and never
+            # leave a server holding the port.
+            proc.kill()
+            proc.wait(timeout=10)
 
 
 # --------------------------------------------------------------------------

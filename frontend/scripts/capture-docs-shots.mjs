@@ -99,6 +99,7 @@ async function shoot(page, name, outDir, theme, locator, maxWidth) {
     // The drawer spans the window but its content hugs the left edge, so an
     // element screenshot would be mostly empty. Clip it instead.
     const box = await page.locator(locator).boundingBox()
+    if (!box) throw new Error(`${locator} has no bounding box — hidden or zero-size?`)
     await page.screenshot({
       path,
       clip: { ...box, width: Math.min(box.width, maxWidth) },
