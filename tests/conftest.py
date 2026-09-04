@@ -360,6 +360,15 @@ def run_server_with_context(
 
     port = find_free_port()
 
+    # Request-rate limiting off unless a test asks for it. The limiter defends
+    # a real deployment from a hostile caller; in-process it just polices the
+    # test itself, and every fixture server sees one client (127.0.0.1) making
+    # a burst of legitimate requests. With the default 20-token burst, a test
+    # that materializes an artifact and then drives the registry can exhaust
+    # it, and the 429 lands on whichever request happens to be next — which is
+    # how test_reject_discards_change reported a 404 ("no pending change")
+    # after its setup PUT was silently rejected (#627).
+    config_overrides.setdefault("rate_limit_enabled", False)
     config = StrataConfig(
         host="127.0.0.1",
         port=port,
