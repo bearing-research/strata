@@ -42,8 +42,17 @@ Python cell, use the [ambient `strata` client](cells.md#the-ambient-strata-clien
 
 ```python
 # ... you've trained `model` in this or an upstream cell ...
-art = strata.put(model, name="taxi/tip-model")
+art = strata.put(
+    inputs=[],
+    transform={"ref": "train-tip-model@v1"},
+    data={"coef": model.coef_.tolist(), "intercept": [float(model.intercept_)]},
+    name="taxi/tip-model",
+)
 ```
+
+`data` is written as Arrow, so pass a `dict`, a `pa.Table`, a pandas or polars
+DataFrame, or Arrow IPC `bytes` - the numbers that define the model, not the
+fitted estimator object.
 
 Run the cell (Shift+Enter). `strata.materialize(..., name="taxi/tip-model")`
 works the same way. The artifact lands in the registry and is **stamped with the
@@ -63,8 +72,12 @@ A compact strip appears **right below the cell** that published:
 
 Promote where you trained the model, without scrolling anywhere.
 
-<!-- TODO(screenshot): the per-cell promote strip under a published cell, showing
-     the ⬡ name·version chip, the [Promote ▾] menu, and the ⎘ lineage button. -->
+![A published cell with the promote strip along its bottom edge: the
+taxi/tip-model v1 chip, a champion alias chip, the Promote menu and the lineage
+button.](../assets/registry-promote-strip-light.png#only-light)
+![A published cell with the promote strip along its bottom edge: the
+taxi/tip-model v1 chip, a champion alias chip, the Promote menu and the lineage
+button.](../assets/registry-promote-strip-dark.png#only-dark)
 
 ## 4. Promote to champion
 
@@ -93,9 +106,15 @@ top to bottom:
 3. **Audit timeline** (collapsible) - every name / alias / tag mutation, newest
    first, with who and from → to.
 
-<!-- TODO(screenshot): the Registry tab open in the bottom drawer - pending banner
-     (with a queued protected move), the names table with ★champ/cand chips +
-     tags + [Promote ▾], and the audit timeline. The hero shot for this page. -->
+![The Registry tab in the bottom drawer: a names table with the champion alias
+chip, an rmse tag and a Promote menu, above an expanded audit timeline of every
+name, alias and tag change.](../assets/registry-tab-light.png#only-light)
+![The Registry tab in the bottom drawer: a names table with the champion alias
+chip, an rmse tag and a Promote menu, above an expanded audit timeline of every
+name, alias and tag change.](../assets/registry-tab-dark.png#only-dark)
+
+(No pending-approval banner here - nothing is queued. Step 6 covers what it
+looks like when a protected alias holds a move back.)
 
 ## 6. Approval gates (protected aliases)
 
@@ -133,7 +152,7 @@ view. It answers "which snapshot trained this model?" in one click.
 | Symptom | Why |
 | --- | --- |
 | **No Registry tab / no strip at all** | You're in **service mode**. The dashboard is personal-mode only today. |
-| **Registry tab is empty** | Nothing's been published with a name yet. Run a cell with `strata.put(value, name="…")`. |
+| **Registry tab is empty** | Nothing's been published with a name yet. Run a cell with `strata.put(inputs=[], transform=…, data=…, name="…")`. |
 | **A cell ran but no per-cell strip** | The strip only shows artifacts a cell published via the ambient `strata` client (a *named* `put` / `materialize`). Artifacts created another way still appear in the **names table**, just not as a per-cell strip. |
 | **Promote said "pending" unexpectedly** | That alias is in `STRATA_REGISTRY_PROTECTED_ALIASES` - approve it from the pending banner. |
 | **Promote did nothing** | Setting an alias to the version it already points at is an idempotent **no-op** (the toast says `unchanged`). |

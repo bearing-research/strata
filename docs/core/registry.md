@@ -152,8 +152,19 @@ notebook, so promotion and approvals don't have to be code. Registry routes are
 client](../notebook/cells.md#the-ambient-strata-client) publishes with a name:
 
 ```python
-art = strata.put(model, name="taxi/tip-model")   # or materialize(…, name=…)
+art = strata.put(
+    inputs=[],
+    transform={"ref": "train-tip-model@v1"},
+    data={"coef": model.coef_.tolist(), "intercept": [float(model.intercept_)]},
+    name="taxi/tip-model",
+)
 ```
+
+`data` is stored as Arrow, so it takes a `dict`, a `pa.Table`, a pandas or
+polars DataFrame, or Arrow IPC `bytes`. An estimator object is not one of
+those: publish the numbers that define it (coefficients, metrics, a path to
+the weights) rather than the fitted object. `strata.materialize(…, name=…)`
+publishes the same way for work the server builds.
 
 The artifact lands in the registry and is **stamped with the cell that produced
 it**, so it shows up right under that cell.

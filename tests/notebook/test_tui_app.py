@@ -773,3 +773,59 @@ async def test_data_viewer_ignores_keys_when_hidden(monkeypatch):
         app.action_table_export()
         await pilot.pause()
         assert app._table_view is None
+
+
+@pytest.mark.asyncio
+async def test_time_column_widens_for_a_live_timing_update(monkeypatch):
+    """A `cached` / `412ms` timing arriving after the snapshot isn't clipped.
+
+    Columns are sized when the row is added, and a cell that hasn't run yet has
+    an empty time string — so the column was as wide as its 4-char "time"
+    header, and every later value rendered truncated ("cached" -> "cach").
+    """
+
+    async def _noop(self) -> None:
+        return None
+
+    monkeypatch.setattr(NotebookTUI, "_bootstrap", _noop)
+
+    app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="x")
+    async with app.run_test(size=(120, 30)) as pilot:
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "notebook_state",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {
+                        "name": "NB",
+                        "cells": [{"id": "a", "name": "load", "source": "import time\n"}],
+                    },
+                }
+            )
+        )
+        await pilot.pause()
+
+        table = app.query_one("#cells", DataTable)
+        time_col = list(table.columns.values())[2]
+        assert time_col.content_width == len("time")  # nothing has run yet
+
+        app._dispatch(
+            json.dumps(
+                {
+                    "type": "cell_output",
+                    "seq": 0,
+                    "ts": "t",
+                    "payload": {
+                        "cell_id": "a",
+                        "duration_ms": 38,
+                        "cache_hit": True,
+                        "outputs": [],
+                    },
+                }
+            )
+        )
+        await pilot.pause()
+
+        assert table.get_cell("a", time_col.key) == "cached"
+        assert time_col.content_width >= len("cached")

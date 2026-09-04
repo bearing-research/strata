@@ -11,6 +11,15 @@ browser. The same notebook can also be driven by a
 [coding agent](../notebook/agent.md) or watched live from a
 [terminal](../notebook/tui.md).
 
+![The Strata notebook UI: a Python cell with its source and an interactive table
+of results, the sidebar panels for mounts, workers and environment, and a bottom
+drawer showing the cell DAG and per-cell timings.](../assets/notebook-anatomy-light.png#only-light)
+![The Strata notebook UI: a Python cell with its source and an interactive table
+of results, the sidebar panels for mounts, workers and environment, and a bottom
+drawer showing the cell DAG and per-cell timings.](../assets/notebook-anatomy-dark.png#only-dark)
+
+The pipeline below is the one in that screenshot.
+
 ## 1. Start the server
 
 === "uv (recommended)"
@@ -234,6 +243,13 @@ topological order, with a live progress strip showing which cell is
 executing. There is no confirmation step: cascades run automatically,
 so running a cell always gives you a result computed from current
 inputs.
+
+![The same notebook after the loader is edited: the loader carries a "Why
+stale?" pill and the two cells that depend on it are outlined in amber, in the
+cell list and in the DAG below.](../assets/cascade-stale-light.png#only-light)
+![The same notebook after the loader is edited: the loader carries a "Why
+stale?" pill and the two cells that depend on it are outlined in amber, in the
+cell list and in the DAG below.](../assets/cascade-stale-dark.png#only-dark)
 
 Revert the edit (`time.sleep(1)` back to `time.sleep(2)`) and
 re-run: every cell becomes a cache hit on the way through, no work
