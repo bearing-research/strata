@@ -240,10 +240,28 @@ pickle path. DuckDB relations, cuDF frames, Ibis tables and anything else
 implementing the [Arrow PyCapsule
 interface](https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html)
 are stored as real Arrow, so the artifact stays readable by other tools and the
-notebook can show its schema and row count. The trade is type identity: the
-libraries named in the first row are handed back as themselves, while a
-capsule-sourced value comes back as a `pyarrow.Table` and a DLPack-sourced one
-as a `numpy.ndarray`.
+notebook can show its schema and row count.
+
+Two things to know about that row. The first is type identity: the libraries
+named in the first row are handed back as themselves, while a capsule-sourced
+value comes back as a `pyarrow.Table` and a DLPack-sourced one as a
+`numpy.ndarray`. The second matters for libraries whose values are lazy query
+expressions rather than data, Ibis among them. Storing one executes it, because
+an artifact holds data and a handle is not data. A downstream cell therefore
+receives the result rather than the expression, and cannot keep composing on it.
+Pin the query where you want it evaluated and store that.
+
+One-shot streams are refused rather than stored. A `pyarrow.RecordBatchReader`
+is consumed by reading, so storing one would leave the object empty for whatever
+reads it next; it is not picklable either, so the cell fails instead. Call
+`.read_all()` and store the table. This is best-effort: a wrapper that presents
+the Arrow protocol over a one-shot reader without being iterable itself is
+indistinguishable from a re-readable handle, and storing one will drain it.
+
+For the same reason, prefer a deterministic query. A cell whose value is also
+its last expression converts the handle twice, once for the variable and once
+for the display output, so a query over changing data, or one containing
+something like `random()`, can store two different results for a single cell.
 
 ## Cascade Execution
 
