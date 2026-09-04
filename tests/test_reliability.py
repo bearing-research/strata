@@ -60,6 +60,29 @@ def build_store(artifact_dir):
 
 
 @pytest.fixture
+def clock_build_store(artifact_dir):
+    """A build store whose clock the test advances by hand.
+
+    Lease expiry compares two stored timestamps, so a test that sleeps past a
+    lease is really asserting the runner's timer resolution plus the cost of a
+    SQLite round-trip. On Windows (~15ms ``time.time`` granularity) that flaked
+    both directions: the pre-sleep "nothing has expired yet" check failed
+    because more than the lease duration had already elapsed, and widening the
+    lease only moved which of the two assertions broke (#627).
+    """
+    from strata.transforms.build_store import BuildStore
+
+    now = [1000.0]
+    store = BuildStore(artifact_dir / "clock-builds.sqlite", clock=lambda: now[0])
+
+    def advance(seconds: float) -> None:
+        now[0] += seconds
+
+    store.advance = advance  # type: ignore[attr-defined]
+    return store
+
+
+@pytest.fixture
 def transform_registry():
     """Create a test transform registry."""
     reset_transform_registry()
@@ -148,7 +171,7 @@ class TestLeaseBasedClaiming:
         build = build_store.get_build(build_id)
         assert build.lease_owner == "runner-1"
 
-    def test_renew_lease_extends_expiry(self, build_store, artifact_store):
+    def test_renew_lease_extends_expiry(self, clock_build_store, artifact_store):
         """renew_lease should extend the lease expiry time."""
         # Create and claim build
         artifact_id = str(uuid.uuid4())
@@ -157,24 +180,23 @@ class TestLeaseBasedClaiming:
             provenance_hash="test-hash",
         )
         build_id = str(uuid.uuid4())
-        build_store.create_build(
+        clock_build_store.create_build(
             build_id=build_id,
             artifact_id=artifact_id,
             version=version,
             executor_ref="test_executor@v1",
         )
-        build_store.claim_build(build_id, "runner-1", 60.0)
+        clock_build_store.claim_build(build_id, "runner-1", 60.0)
 
         # Get initial expiry
-        build = build_store.get_build(build_id)
+        build = clock_build_store.get_build(build_id)
         initial_expiry = build.lease_expires_at
 
-        # Wait and renew
-        time.sleep(0.1)
-        result = build_store.renew_lease(build_id, "runner-1", 120.0)
+        clock_build_store.advance(30.0)
+        result = clock_build_store.renew_lease(build_id, "runner-1", 120.0)
 
         assert result is True
-        build = build_store.get_build(build_id)
+        build = clock_build_store.get_build(build_id)
         assert build.lease_expires_at > initial_expiry
 
     def test_renew_lease_fails_for_wrong_owner(self, build_store, artifact_store):
@@ -202,69 +224,60 @@ class TestLeaseBasedClaiming:
 class TestOrphanRecovery:
     """Tests for orphan build recovery."""
 
-    def test_list_expired_leases_finds_orphans(self, build_store, artifact_store):
+    def test_list_expired_leases_finds_orphans(self, clock_build_store, artifact_store):
         """list_expired_leases should find builds with expired leases."""
-        # Create and claim build with a short lease. Use 1.0s + 1.1s sleep
-        # rather than 0.1s + 0.15s: Windows' time.time() has ~15ms
-        # resolution and writes/reads to SQLite shift lease_expires_at
-        # by tens of ms, so a 100ms window can flap either side of "now"
-        # before the test's first assertion runs.
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
             provenance_hash="test-hash",
         )
         build_id = str(uuid.uuid4())
-        build_store.create_build(
+        clock_build_store.create_build(
             build_id=build_id,
             artifact_id=artifact_id,
             version=version,
             executor_ref="test_executor@v1",
         )
 
-        build_store.claim_build(build_id, "runner-1", 1.0)
+        clock_build_store.claim_build(build_id, "runner-1", 60.0)
 
-        # Initially no expired leases
-        expired = build_store.list_expired_leases()
-        assert len(expired) == 0
+        # Inside the lease: nothing is an orphan yet.
+        assert clock_build_store.list_expired_leases() == []
+        clock_build_store.advance(59.0)
+        assert clock_build_store.list_expired_leases() == []
 
-        # Wait for lease to expire
-        time.sleep(1.1)
-
-        # Now should find expired lease
-        expired = build_store.list_expired_leases()
+        # Past it: the build is reclaimable.
+        clock_build_store.advance(2.0)
+        expired = clock_build_store.list_expired_leases()
         assert len(expired) == 1
         assert expired[0].build_id == build_id
 
-    def test_reclaim_expired_build(self, build_store, artifact_store):
+    def test_reclaim_expired_build(self, clock_build_store, artifact_store):
         """reclaim_expired_build should take over orphaned builds."""
-        # Same Windows-clock-resolution concern as
-        # test_list_expired_leases_finds_orphans — use a 1s lease.
         artifact_id = str(uuid.uuid4())
         version = artifact_store.create_artifact(
             artifact_id=artifact_id,
             provenance_hash="test-hash",
         )
         build_id = str(uuid.uuid4())
-        build_store.create_build(
+        clock_build_store.create_build(
             build_id=build_id,
             artifact_id=artifact_id,
             version=version,
             executor_ref="test_executor@v1",
         )
-        build_store.claim_build(build_id, "runner-1", 1.0)
+        clock_build_store.claim_build(build_id, "runner-1", 60.0)
 
-        # Wait for lease to expire
-        time.sleep(1.1)
+        clock_build_store.advance(61.0)
 
         # Reclaim as different runner
-        result = build_store.reclaim_expired_build(build_id, "runner-2", 60.0)
+        result = clock_build_store.reclaim_expired_build(build_id, "runner-2", 60.0)
         assert result is True
 
-        # Verify new owner
-        build = build_store.get_build(build_id)
+        # Verify new owner, with a lease that runs from the reclaim.
+        build = clock_build_store.get_build(build_id)
         assert build.lease_owner == "runner-2"
-        assert build.lease_expires_at > time.time()
+        assert build.lease_expires_at == pytest.approx(1000.0 + 61.0 + 60.0)
 
     def test_reclaim_fails_for_non_expired_lease(self, build_store, artifact_store):
         """reclaim_expired_build should fail if lease is still valid."""

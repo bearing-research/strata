@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -219,7 +220,12 @@ class BuildStore:
     artifact store moved off a local file.
     """
 
-    def __init__(self, db_path: Path, dialect: SqlDialect | None = None):
+    def __init__(
+        self,
+        db_path: Path,
+        dialect: SqlDialect | None = None,
+        clock: Callable[[], float] = time.time,
+    ):
         """Initialize build store.
 
         Args:
@@ -229,9 +235,16 @@ class BuildStore:
             dialect: Optional metadata backend. Defaults to SQLite at
                 ``db_path``, which is what personal mode wants. Pass the
                 artifact store's dialect to share its database and pool.
+            clock: Wall-clock source in seconds. Injectable so a test can
+                expire a lease by stepping it instead of sleeping past it.
+                Lease expiry is a comparison between two stored timestamps;
+                sleeping on it measures the runner's timer resolution and the
+                cost of a SQLite round-trip, which is what made these tests
+                flake on Windows.
         """
         self.db_path = db_path
         self._dialect: SqlDialect = dialect if dialect is not None else SqliteDialect(db_path)
+        self._clock = clock
         self._init_schema()
 
     def _get_connection(self) -> StoreConnection:
@@ -326,7 +339,7 @@ class BuildStore:
         """
         conn = self._get_connection()
         try:
-            created_at = time.time()
+            created_at = self._clock()
             # Serialize input_uris and params to JSON
             input_uris_json = json.dumps(input_uris) if input_uris else None
             params_json = json.dumps(params) if params else None
@@ -444,7 +457,7 @@ class BuildStore:
                 SET state = 'building', started_at = ?
                 WHERE build_id = ? AND state = 'pending'
                 """,
-                (time.time(), build_id),
+                (self._clock(), build_id),
             )
             conn.commit()
             return cursor.rowcount > 0
@@ -473,7 +486,7 @@ class BuildStore:
         """
         conn = self._get_connection()
         try:
-            now = time.time()
+            now = self._clock()
             lease_expires_at = now + lease_duration_seconds
             cursor = conn.execute(
                 """
@@ -511,7 +524,7 @@ class BuildStore:
         """
         conn = self._get_connection()
         try:
-            now = time.time()
+            now = self._clock()
             lease_expires_at = now + lease_duration_seconds
             cursor = conn.execute(
                 """
@@ -549,7 +562,7 @@ class BuildStore:
         """
         conn = self._get_connection()
         try:
-            now = time.time()
+            now = self._clock()
             lease_expires_at = now + lease_duration_seconds
             cursor = conn.execute(
                 """
@@ -582,7 +595,7 @@ class BuildStore:
         """
         conn = self._get_connection()
         try:
-            now = time.time()
+            now = self._clock()
             cursor = conn.execute(
                 """
                 SELECT build_id, artifact_id, version, state, executor_ref,
@@ -638,7 +651,7 @@ class BuildStore:
                 SET state = 'ready', completed_at = ?, output_byte_count = ?, logs = ?
                 WHERE build_id = ? AND state = 'building'
             """
-            params: list[Any] = [time.time(), output_byte_count, logs, build_id]
+            params: list[Any] = [self._clock(), output_byte_count, logs, build_id]
             if lease_owner is not None:
                 sql += " AND lease_owner = ?"
                 params.append(lease_owner)
@@ -674,7 +687,7 @@ class BuildStore:
                 SET state = 'failed', completed_at = ?, error_message = ?, error_code = ?, logs = ?
                 WHERE build_id = ? AND state IN ('pending', 'building')
                 """,
-                (time.time(), error_message, error_code, logs, build_id),
+                (self._clock(), error_message, error_code, logs, build_id),
             )
             conn.commit()
             return cursor.rowcount > 0
@@ -778,7 +791,7 @@ class BuildStore:
         """
         conn = self._get_connection()
         try:
-            cutoff = time.time() - (max_age_days * 86400)
+            cutoff = self._clock() - (max_age_days * 86400)
             cursor = conn.execute(
                 """
                 DELETE FROM artifact_builds

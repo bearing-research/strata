@@ -307,6 +307,20 @@ class TestRateLimiterGlobals:
         assert get_rate_limiter() is None
 
 
+class _SteppableClock:
+    """A clock that only moves when the test says so, so no bucket refills
+    behind the test's back."""
+
+    def __init__(self, now: float = 1000.0) -> None:
+        self._now = now
+
+    def time(self) -> float:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
+
+
 class TestRateLimiterIntegration:
     """Integration tests for rate limiting with server."""
 
@@ -407,27 +421,41 @@ class TestRateLimiterIntegration:
         config = StrataConfig(cache_dir=cache_dir)
         server_module._state = ServerState(config)
 
-        # Very restrictive config
+        # Very restrictive config, on a clock the test steps by hand. The
+        # bucket refills on wall-clock time, so against a real clock the second
+        # request is only rejected if it arrives within a second of the first —
+        # a slow ASGI startup between them refills the token and the request
+        # legitimately succeeds (#627).
+        clock = _SteppableClock()
         init_rate_limiter(
             RateLimitConfig(
                 client_requests_per_second=1.0,
                 client_burst=1.0,
-            )
+            ),
+            clock=clock,
         )
 
         try:
             async with AsyncClient(
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
-                # First request allowed
+                # First request takes the bucket's only token.
                 response = await client.get("/v1/debug/rate-limits")
                 assert response.status_code == 200
 
-                # Second request should be rate limited
+                # Second one finds it empty, and no time has passed.
                 response = await client.get("/v1/debug/rate-limits")
                 assert response.status_code == 429
                 assert "Retry-After" in response.headers
                 assert "Rate limit exceeded" in response.text
+
+                # One token per second: advancing past the refill re-admits.
+                # This is also what proves the injected clock is the one the
+                # limiter reads — a frozen clock alone would pass even if the
+                # limiter had ignored it and used the system time.
+                clock.advance(1.0)
+                response = await client.get("/v1/debug/rate-limits")
+                assert response.status_code == 200
         finally:
             server_module._state._planning_executor.shutdown(wait=False)
             server_module._state._fetch_executor.shutdown(wait=False)

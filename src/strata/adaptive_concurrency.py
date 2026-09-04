@@ -28,6 +28,7 @@ import logging
 import math
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
@@ -211,9 +212,24 @@ class RollingLatencyWindow:
     over", so an idle tier keeps being adjusted off the last burst it saw.
     """
 
-    def __init__(self, size: int = 100, max_age_seconds: float | None = None):
+    def __init__(
+        self,
+        size: int = 100,
+        max_age_seconds: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        """
+        Parameters
+        ----------
+        clock : callable, optional
+            Time source in seconds, monotonic by default. Injectable so a test
+            can age samples by stepping it rather than sleeping: expiry is a
+            pure function of "what time is it", and asserting it against a real
+            sleep tests the runner's timer resolution instead of this class.
+        """
         self._size = size
         self._max_age_seconds = max_age_seconds
+        self._clock = clock
         self._lock = Lock()
         # (monotonic timestamp, latency_ms) — monotonic so a clock step can
         # never make a sample look infinitely old or infinitely fresh.
@@ -223,7 +239,7 @@ class RollingLatencyWindow:
     def record(self, latency_ms: float) -> None:
         """Record a latency observation."""
         with self._lock:
-            self._samples.append((time.monotonic(), latency_ms))
+            self._samples.append((self._clock(), latency_ms))
             self._count += 1
 
     def _live_values(self) -> list[float]:
@@ -231,7 +247,7 @@ class RollingLatencyWindow:
         with self._lock:
             if self._max_age_seconds is None:
                 return sorted(value for _, value in self._samples)
-            cutoff = time.monotonic() - self._max_age_seconds
+            cutoff = self._clock() - self._max_age_seconds
             # Samples are appended in time order, so expiry is a prefix drop.
             while self._samples and self._samples[0][0] < cutoff:
                 self._samples.popleft()
