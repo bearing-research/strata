@@ -23,7 +23,7 @@
     
     
       
-        <title>Loop Hill Climb — demo for the @loop cell primitive - Strata</title>
+        <title>Loop Hill Climb: demo for the @loop cell primitive - Strata</title>
       
     
     
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Loop Hill Climb — demo for the @loop cell primitive
+              Loop Hill Climb: demo for the @loop cell primitive
             
           </span>
         </div>
@@ -1967,18 +1967,18 @@
   
 
 
-<h1 id="loop-hill-climb-demo-for-the-loop-cell-primitive">Loop Hill Climb — demo for the <code>@loop</code> cell primitive<a class="headerlink" href="#loop-hill-climb-demo-for-the-loop-cell-primitive" title="Permanent link">&para;</a></h1>
+<h1 id="loop-hill-climb-demo-for-the-loop-cell-primitive">Loop Hill Climb: demo for the <code>@loop</code> cell primitive<a class="headerlink" href="#loop-hill-climb-demo-for-the-loop-cell-primitive" title="Permanent link">&para;</a></h1>
 <p>Three-cell notebook that exercises every moving part of Strata's loop
 cell feature: the <code>@loop</code> / <code>@loop_until</code> annotations, per-iteration
 artifacts, the progress badge, the iteration picker, and the
 <code>@loop start_from</code> fork. The cell body is greedy hill climbing on
-<a href="https://en.wikipedia.org/wiki/Himmelblau%27s_function">Himmelblau's function</a> —
+<a href="https://en.wikipedia.org/wiki/Himmelblau%27s_function">Himmelblau's function</a> , 
 small enough to reason about and visually interesting because there
 are four equal-valued minima, so different seeds (and different forks)
 converge to different basins.</p>
 <h2 id="what-to-look-at">What to look at<a class="headerlink" href="#what-to-look-at" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><code>helpers</code></strong> is a module cell — imports (<code>random</code>) and a
+<li><strong><code>helpers</code></strong> is a module cell, imports (<code>random</code>) and a
   reusable function (<code>himmelblau</code>). It declares no top-level
   runtime state, so Strata treats it as a shareable module whose
   names are directly referenceable from every downstream cell.</li>
@@ -1996,7 +1996,7 @@ converge to different basins.</p>
     keeps the move if it improves the score. The step size shrinks on
     every accepted move so the search sharpens.</li>
 <li><code>random</code> and <code>himmelblau</code> come from the <code>helpers</code> cell via
-    the DAG — no duplicate imports or redefinitions here.</li>
+    the DAG, no duplicate imports or redefinitions here.</li>
 <li>Every iteration stores the full <code>state</code> as its own artifact
     (<code>nb_loop-hill-climb-001_cell_evolve_var_state@iter={k}</code>).</li>
 <li><strong><code>summary</code></strong> is a regular downstream cell. It reads the final
@@ -2126,7 +2126,7 @@ prefix (iters 0..K) and diverge after.</p>
 <a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a><span class="n">state</span>
 </code></pre></div>
 <h1 id="the-loop-cell">The loop cell<a class="headerlink" href="#the-loop-cell" title="Permanent link">&para;</a></h1>
-<p>The cell below carries <code># @loop max_iter=40 carry=state</code> — Strata's
+<p>The cell below carries <code># @loop max_iter=40 carry=state</code>: Strata's
 loop primitive. The cell body runs up to 40 times. On each iteration:</p>
 <ol>
 <li>Strata reads the current <code>state</code> from the previous iteration's

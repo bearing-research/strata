@@ -1885,7 +1885,7 @@
 <h1 id="notebook-markdown-showcase">Notebook: Markdown Showcase<a class="headerlink" href="#notebook-markdown-showcase" title="Permanent link">&para;</a></h1>
 <h1 id="markdown-showcase">Markdown Showcase<a class="headerlink" href="#markdown-showcase" title="Permanent link">&para;</a></h1>
 <p>This notebook exercises every markdown rendering path in Strata. It's
-deliberately content-only — there's no real "computation" to run. Use it
+deliberately content-only, there's no real "computation" to run. Use it
 to verify that the renderer handles the cases listed below, and as a
 reference when you want to write a documentation cell.</p>
 <p><strong>Two surfaces are tested:</strong></p>
@@ -1895,7 +1895,7 @@ reference when you want to write a documentation cell.</p>
    to swap in the editor; blur to render again.</li>
 <li><strong>Dynamic markdown output</strong> from Python cells via <code>Markdown(...)</code>
    (the last two cells). Same rendering pipeline, different entry
-   point — useful when you want a code cell to emit a formatted report.</li>
+   point, useful when you want a code cell to emit a formatted report.</li>
 </ol>
 <p>If anything in the next few cells doesn't render the way you'd expect,
 that's a renderer bug worth filing.</p>
@@ -1912,7 +1912,7 @@ spacing between adjacent headings should be sane.</p>
 <p>This is <strong>bold</strong> and so is <strong>this</strong>. This is <em>italic</em> and so is <em>this</em>.
 This is <strong><em>both</em></strong> at once. This is ~~struck through~~ via GFM.</p>
 <p>Code spans use backticks: <code>df.groupby("ticker").agg("sum")</code>. Inline
-code should keep <code>_underscores_</code> and <code>*asterisks*</code> literal — they're
+code should keep <code>_underscores_</code> and <code>*asterisks*</code> literal, they're
 data, not formatting.</p>
 <p>Edge cases the old renderer was bad at:</p>
 <ul>
@@ -1947,13 +1947,13 @@ data, not formatting.</p>
 </ul>
 <h2 id="mixed-ordered-unordered-with-content">Mixed (ordered + unordered, with content)<a class="headerlink" href="#mixed-ordered-unordered-with-content" title="Permanent link">&para;</a></h2>
 <ol>
-<li><strong>Step one</strong> — set up the environment.</li>
+<li><strong>Step one</strong>: set up the environment.</li>
 <li>Install dependencies via <code>uv sync</code>.</li>
 <li>Verify with <code>uv run pytest tests/notebook/</code>.</li>
-<li><strong>Step two</strong> — run the notebook.</li>
+<li><strong>Step two</strong>: run the notebook.</li>
 <li>Open it via the Strata UI.</li>
 <li>Click <code>Run All</code> to execute every Python cell in order.</li>
-<li><strong>Step three</strong> — read the output.</li>
+<li><strong>Step three</strong>: read the output.</li>
 </ol>
 <h2 id="plain-table">Plain table<a class="headerlink" href="#plain-table" title="Permanent link">&para;</a></h2>
 <table>
@@ -2078,20 +2078,20 @@ data, not formatting.</p>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">-</span><span class="w"> </span><span class="sb">`no code spans`</span>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">-</span><span class="w"> </span>[<span class="nt">no links</span>](<span class="na">http://example.com</span>)
 </code></pre></div>
-<p>Fenced HTML — should be HTML-escaped, not rendered:</p>
+<p>Fenced HTML, should be HTML-escaped, not rendered:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="ni">&amp;lt;</span>script<span class="ni">&amp;gt;</span>alert(<span class="ni">&amp;quot;</span>hi<span class="ni">&amp;quot;</span>)<span class="ni">&amp;lt;</span>/script<span class="ni">&amp;gt;</span>
 </code></pre></div>
 <h2 id="single-level">Single-level<a class="headerlink" href="#single-level" title="Permanent link">&para;</a></h2>
 <blockquote>
 <p>Long-horizon workflows have these properties: expensive, iterative,
-branching, failure-prone. What breaks first is not compute — it's
+branching, failure-prone. What breaks first is not compute, it's
 state. Strata makes state explicit and durable.</p>
 </blockquote>
 <h2 id="nested_1">Nested<a class="headerlink" href="#nested_1" title="Permanent link">&para;</a></h2>
 <blockquote>
 <p>Outer layer.</p>
 <blockquote>
-<p>Quoted within the quote — the inner block should render as a
+<p>Quoted within the quote, the inner block should render as a
 nested blockquote, not lose its prefix.</p>
 </blockquote>
 <p>Back to the outer layer.</p>
@@ -2125,7 +2125,7 @@ nested blockquote, not lose its prefix.</p>
 <p>Wrapped in angle brackets: <a href="https://example.com">https://example.com</a>.</p>
 <p>Email autolink: <a href="&#109;&#97;&#105;&#108;&#116;&#111;&#58;&#104;&#101;&#108;&#108;&#111;&#64;&#101;&#120;&#97;&#109;&#112;&#108;&#101;&#46;&#99;&#111;&#109;">&#104;&#101;&#108;&#108;&#111;&#64;&#101;&#120;&#97;&#109;&#112;&#108;&#101;&#46;&#99;&#111;&#109;</a>.</p>
 <h2 id="plain-urls-linkify">Plain URLs (linkify)<a class="headerlink" href="#plain-urls-linkify" title="Permanent link">&para;</a></h2>
-<p>A bare URL inside a sentence — like https://example.com/page — should
+<p>A bare URL inside a sentence, like https://example.com/page, should
 auto-detect into a clickable link without explicit markdown syntax.
 The old hand-rolled parser missed this case.</p>
 <h2 id="reference-links">Reference links<a class="headerlink" href="#reference-links" title="Permanent link">&para;</a></h2>
@@ -2138,7 +2138,7 @@ to verify.</p>
 <p>Markdown cells (and <code>Markdown(...)</code> outputs) are user-controlled and
 rendered via <code>v-html</code>, so the renderer runs every output through
 DOMPurify. Each item below should appear as <strong>literal text or a no-op</strong>
-— never executed, never producing a popup, never with the dangerous
+,  never executed, never producing a popup, never with the dangerous
 attribute reaching the DOM.</p>
 <h3 id="script-injection">Script injection<a class="headerlink" href="#script-injection" title="Permanent link">&para;</a></h3>
 <p>Below should render as plain text inside a paragraph, not run:</p>
@@ -2150,14 +2150,14 @@ remain as a paragraph with the angle-bracket text visible:</p>
 <p>&lt;img src=&quot;x&quot; onerror=&quot;alert(&#x27;attribute XSS&#x27;)&quot; /&gt;</p>
 <h3 id="javascript-urls"><code>javascript:</code> URLs<a class="headerlink" href="#javascript-urls" title="Permanent link">&para;</a></h3>
 <p>A markdown link with a <code>javascript:</code> URL should either render as
-inert text or be stripped entirely — never as a clickable executor:</p>
+inert text or be stripped entirely, never as a clickable executor:</p>
 <p><a href="#">click here please</a>)</p>
 <h3 id="on-handler-attempts-inside-markdown"><code>on*</code> handler attempts inside markdown<a class="headerlink" href="#on-handler-attempts-inside-markdown" title="Permanent link">&para;</a></h3>
 <p>Markdown doesn't have a syntax for HTML attributes, but if a future
 extension allowed <code>{onclick=...}</code> style attribute lists, it must not
 plumb through.</p>
 <h3 id="data-urls">Data URLs<a class="headerlink" href="#data-urls" title="Permanent link">&para;</a></h3>
-<p>Data URLs in links are sanitized too — DOMPurify drops the href:</p>
+<p>Data URLs in links are sanitized too, DOMPurify drops the href:</p>
 <p><a href="#">image data url</a></p>
 <h2 id="dynamic-markdown-via-display">Dynamic Markdown via display()<a class="headerlink" href="#dynamic-markdown-via-display" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python</sub></p>

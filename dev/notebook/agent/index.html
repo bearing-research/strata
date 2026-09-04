@@ -2238,7 +2238,7 @@ by hand in the <a href="../../getting-started/notebook/">web UI</a> or watched f
 <p class="admonition-title">Not the same as <a href="../scratchpad/">using a notebook as a scratchpad</a></p>
 <p>Here the notebook is <strong>the deliverable</strong>: you asked for it, you watch it get
 built, you keep it. An agent can also use a notebook as <strong>disposable
-infrastructure</strong> while working on something else entirely — running
+infrastructure</strong> while working on something else entirely, running
 throwaway Python that happens to be cached instead of thrown away. That is
 <a href="../scratchpad/">a separate setup</a> with a different starting point: this page
 starts with you running a command, that one starts with the agent noticing
@@ -2252,7 +2252,7 @@ agent at the right session, and only then start driving. <code>strata agent</cod
 of it in one step.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <p>The <code>[mcp]</code> extra (the agent endpoint) and <a href="https://claude.com/claude-code">Claude Code</a>
-— or another MCP-capable coding agent — on your <code>PATH</code>. Add <code>[tui]</code> for the
+(or another MCP-capable coding agent) on your <code>PATH</code>. Add <code>[tui]</code> for the
 terminal viewer; skip it if you plan to watch in a browser and pass <code>--no-tui</code>:</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">From PyPI</label><label for="__tabbed_1_2">From source</label></div>
 <div class="tabbed-content">
@@ -2273,7 +2273,7 @@ terminal viewer; skip it if you plan to watch in a browser and pass <code>--no-t
 </code></pre></div>
 <p>This scaffolds the notebook if it does not exist, starts a server with the agent
 endpoint enabled, opens a session, and attaches the terminal viewer. It prints
-the exact line to run next, then hands the terminal to the viewer — leave it
+the exact line to run next, then hands the terminal to the viewer. Leave it
 running.</p>
 <h3 id="2-start-the-agent-beside-it">2. Start the agent beside it<a class="headerlink" href="#2-start-the-agent-beside-it" title="Permanent link">&para;</a></h3>
 <p>In a <strong>second terminal</strong>:</p>
@@ -2286,10 +2286,10 @@ running.</p>
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Build it in the notebook.
 </code></pre></div>
 <p>The agent adds cells and runs them. Each one appears in the viewer in the first
-terminal as it happens — status flipping to running, then the output landing.
+terminal as it happens: status flips to running, then the output lands.
 That is the confirmation that it is driving the notebook rather than writing
 scripts: if <strong>nothing</strong> appears in the viewer, it is not using the notebook. A
-cell that appears and goes red is fine — that is the notebook working and the
+cell that appears and goes red is fine. That is the notebook working and the
 code failing, which is a normal first draft.</p>
 <div class="admonition tip">
 <p class="admonition-title">Asking for something that needs a library</p>
@@ -2301,8 +2301,8 @@ dependency-free so your first run is a clean one.</p>
 </div>
 <h3 id="4-take-it-from-there">4. Take it from there<a class="headerlink" href="#4-take-it-from-there" title="Permanent link">&para;</a></h3>
 <p>The notebook is a normal notebook. Open it in the <a href="../../getting-started/notebook/">web UI</a>
-to edit a cell yourself, re-run it, or keep working after the agent stops —
-<a href="#watching-an-agent-work">several views can watch at once</a>, and you can edit in
+to edit a cell yourself, re-run it, or keep working after the agent stops.
+<a href="#watching-an-agent-work">Several views can watch at once</a>, and you can edit in
 the browser while the agent is still going.</p>
 <p>When you quit the viewer, the server <code>strata agent</code> started is shut down with
 it. If you pointed it at a server you started yourself, that one is left
@@ -2314,7 +2314,7 @@ running.</p>
 <li><strong>creates-or-opens</strong> the notebook directory (scaffolds a new one if needed),</li>
 <li><strong>starts</strong> a notebook server with the MCP endpoint enabled (or <strong>reuses</strong>
    one already running on the target URL),</li>
-<li><strong>opens a session</strong> — the step the agent cannot do itself, since the MCP
+<li><strong>opens a session</strong>, the step the agent cannot do itself, since the MCP
    tools only see notebooks that are already open,</li>
 <li><strong>writes</strong> a <code>.mcp.json</code> and a managed block in <code>CLAUDE.md</code> into the
    notebook directory, and</li>
@@ -2339,19 +2339,19 @@ agent is driving:</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>Web UI</strong> — open the server URL in a browser and open the same notebook</td>
-<td>The full editor: outputs, plots, the DAG, the inspector. <strong>Not read-only</strong> — you can edit and run cells alongside the agent</td>
+<td><strong>Web UI</strong>, by opening the server URL in a browser</td>
+<td>The full editor: outputs, plots, the DAG, the inspector. <strong>Not read-only</strong>, so you can edit and run cells alongside the agent</td>
 <td>You want to see rendered output, or take over</td>
 </tr>
 <tr>
-<td><strong>TUI</strong> — <code>strata watch ./my-notebook</code></td>
+<td><strong>TUI</strong>, via <code>strata watch ./my-notebook</code></td>
 <td>Read-only live spectator in the terminal</td>
 <td>No browser, over SSH, or beside the agent in a split terminal</td>
 </tr>
 <tr>
 <td><strong>Any WebSocket client</strong></td>
 <td>The raw frames</td>
-<td>You are building your own view — see the <a href="../../reference/notebook-protocol/">client protocol</a></td>
+<td>You are building your own view; see the <a href="../../reference/notebook-protocol/">client protocol</a></td>
 </tr>
 <tr>
 <td><strong>Nothing, then read the directory</strong></td>
@@ -2363,11 +2363,11 @@ agent is driving:</p>
 <p>The last row is worth knowing: a notebook is a directory of ordinary files, so
 <code>strata cell show</code>, <code>strata dag</code>, <code>git diff</code> and your editor all work on an
 agent's output with no live connection at all.</p>
-<p>One caveat on that row. Live <em>cell status</em> — running, ready, errored — belongs
-to the session, not to disk, so <code>strata status</code> run against the directory
+<p>One caveat on that row. Live <em>cell status</em> (running, ready, errored) belongs to
+the session rather than to disk, so <code>strata status</code> run against the directory
 reports <code>idle</code> for cells the agent has already executed. What it does tell you
-offline is real and separately useful: each cell's <strong>staleness</strong> and why. For
-"what is it doing right now", attach one of the live views above.</p>
+offline is separately useful: each cell's <strong>staleness</strong> and why. For "what is
+it doing right now", attach one of the live views above.</p>
 <p>If you would rather keep a browser tab than a terminal viewer, start with
 <code>strata agent --no-tui</code> and open the notebook in the web UI instead.</p>
 <h2 id="what-gets-written-into-the-notebook">What gets written into the notebook<a class="headerlink" href="#what-gets-written-into-the-notebook" title="Permanent link">&para;</a></h2>

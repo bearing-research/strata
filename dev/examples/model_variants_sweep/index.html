@@ -1981,8 +1981,8 @@
 <h1 id="model-variants-sweep">Model Variants Sweep<a class="headerlink" href="#model-variants-sweep" title="Permanent link">&para;</a></h1>
 <p>A minimal example of variant <strong>sweep mode</strong>: run every variant of a group and
 compare them all in one downstream cell.</p>
-<p>The <code>model</code> group has three variant cells — <code>always_one</code>, <code>alternating</code>,
-<code>majority</code> — each producing <code>preds</code> a different way. Because the group is in
+<p>The <code>model</code> group has three variant cells, <code>always_one</code>, <code>alternating</code>,
+<code>majority</code>: each producing <code>preds</code> a different way. Because the group is in
 <strong>sweep mode</strong> (<code>mode = "sweep"</code> in <code>notebook.toml</code>), all three run on every
 execution, and the downstream <code>compare</code> cell receives <code>preds</code> as a
 <code>{variant_name: predictions}</code> dict:</p>
@@ -1990,7 +1990,7 @@ execution, and the downstream <code>compare</code> cell receives <code>preds</co
 </code></pre></div>
 <h2 id="fan-out-with-per_variant">Fan-out with <code>@per_variant</code><a class="headerlink" href="#fan-out-with-per_variant" title="Permanent link">&para;</a></h2>
 <p>The <code>compare</code> cell consumes the whole dict at once. The <code>score</code> cell shows the
-other option — <strong>fan-out</strong>: <code># @per_variant</code> runs it once per variant with
+other option, <strong>fan-out</strong>: <code># @per_variant</code> runs it once per variant with
 <code>preds</code> bound to that variant's list (a scalar, not the dict), so each variant
 is scored independently (in a real workload, each could carry <code># @worker gpu</code>
 and run as its own job). A plain downstream cell, <code>best</code>, then collapses the
@@ -2003,7 +2003,7 @@ per-variant <code>accuracy</code> back to a dict and picks the winner:</p>
 <h2 id="run-it">Run it<a class="headerlink" href="#run-it" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>run<span class="w"> </span>examples/model_variants_sweep
 </code></pre></div>
-<p>Or open it in the UI (<code>python -m strata</code>) — the <code>model</code> group renders as a tab
+<p>Or open it in the UI (<code>python -m strata</code>), the <code>model</code> group renders as a tab
 strip with a <strong>sweep</strong> badge; clicking a tab shows that variant's source (all
 of them still run), and the group has a run-all button + a readiness rollup.</p>
 <h2 id="switch-vs-sweep">Switch vs sweep<a class="headerlink" href="#switch-vs-sweep" title="Permanent link">&para;</a></h2>

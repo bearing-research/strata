@@ -2604,7 +2604,7 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <tr>
 <td><code>STRATA_CORS_ALLOW_ORIGINS</code></td>
 <td><em>(empty)</em></td>
-<td>Origins allowed to call the API from a browser. Empty means no cross-origin access — personal mode has no auth, so any page allowed here can author and run cells</td>
+<td>Origins allowed to call the API from a browser. Empty means no cross-origin access. Personal mode has no auth, so any page allowed here can author and run cells</td>
 </tr>
 <tr>
 <td><code>STRATA_EMBED_FRAME_ANCESTORS</code></td>
@@ -3104,12 +3104,12 @@ Strata nodes can share one store.</p>
 <p><strong>Blobs must be shared too.</strong> In service mode, a DSN with
 <code>STRATA_ARTIFACT_BLOB_BACKEND=local</code> is rejected at startup: the metadata
 would be shared while the bytes stayed on one node's disk, so another node
-would resolve an artifact and then fail to read it — at fetch time, long
+would resolve an artifact and then fail to read it, at fetch time, long
 after the request that created it appeared to succeed.</p>
 <p>Build state follows the same backend, since build rows live in the artifact
 store's database. That is what makes a build started on one node visible to
 <code>GET /v1/builds/{id}</code> on another.</p>
-<p>The schema is created on first connection. <strong>A DSN starts an empty store</strong> —
+<p>The schema is created on first connection. <strong>A DSN starts an empty store</strong>:
 existing SQLite metadata is not carried over automatically. To move one:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># 1. Boot once against the target so the stores create their schema.</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">STRATA_ARTIFACT_METADATA_DSN</span><span class="o">=</span><span class="s1">&#39;postgresql://...&#39;</span><span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata<span class="w">   </span><span class="c1"># then stop it</span>
@@ -3120,14 +3120,14 @@ existing SQLite metadata is not carried over automatically. To move one:</p>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># 3. Move it.</span>
 <a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>strata<span class="w"> </span>migrate<span class="w"> </span>--to-dsn<span class="w"> </span><span class="s1">&#39;postgresql://...&#39;</span>
 </code></pre></div>
-<p>The copy is idempotent — rows already in the target are skipped, so an
+<p>The copy is idempotent: rows already in the target are skipped, so an
 interrupted run can be repeated with <code>--allow-nonempty-target</code>. It refuses a
 populated target otherwise, because merging two different stores is not
 recoverable.</p>
 <p>Rows the target refuses are reported and the run continues; <code>strata migrate</code>
 then <strong>exits non-zero</strong>, so <code>strata migrate &amp;&amp; cut-over</code> will not switch traffic
 to a target that is missing rows. The usual cause is a build row referencing an
-artifact version that <code>garbage_collect</code> or <code>delete_artifact</code> removed — a
+artifact version that <code>garbage_collect</code> or <code>delete_artifact</code> removed, so a
 dangling reference SQLite tolerated and Postgres does not.</p>
 <p><code>--dry-run</code> makes no schema or data changes. It does open the source with
 Strata's normal SQLite settings, which sets <code>journal_mode=WAL</code> on the file, the
@@ -3223,7 +3223,7 @@ affects callers writing build rows directly.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_ACL_CONFIG</span><span class="o">=</span><span class="s1">&#39;{&quot;default&quot;:&quot;deny&quot;,&quot;allow&quot;:[{&quot;principal&quot;:&quot;bi&quot;,&quot;tables&quot;:[&quot;file:analytics.*&quot;]}]}&#39;</span>
 </code></pre></div>
 <p><code>principal</code> and each <code>tables</code> entry are glob patterns; <code>tenant</code> is an exact
-match. Every rule must list at least one table pattern — a rule with none can
+match. Every rule must list at least one table pattern; a rule with none can
 never match, so it is rejected at startup rather than sitting inert. Unknown
 keys are rejected for the same reason: a mistyped <code>deny</code> would otherwise leave
 an ACL that boots clean and enforces nothing.</p>
@@ -3244,7 +3244,7 @@ whichever metadata backend it uses and are shared across nodes automatically.
 Service mode with <code>auth_mode='api_key'</code> therefore requires <code>artifact_dir</code>;
 personal mode rejects the mode outright, since authenticating to your own
 loopback-bound single-user server buys nothing.</p>
-<p>Mint the first key from the CLI — no running server needed, which is what
+<p>Mint the first key from the CLI, with no running server needed, which is what
 makes bootstrapping possible:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata<span class="w"> </span>apikey<span class="w"> </span>create<span class="w"> </span>svc-etl<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>--tenant<span class="w"> </span>acme<span class="w"> </span><span class="se">\</span>
@@ -3255,14 +3255,14 @@ makes bootstrapping possible:</p>
 <a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>strata<span class="w"> </span>apikey<span class="w"> </span>revoke<span class="w"> </span>&lt;key_id&gt;
 </code></pre></div>
 <p>The secret is printed once. Only a SHA-256 of it is stored, so it cannot be
-shown again — by you or by us — and a database disclosure yields no usable
+shown again, by you or by us, and a database disclosure yields no usable
 credentials. Pass <code>--dsn</code> (or set <code>STRATA_ARTIFACT_METADATA_DSN</code>) when the
 metadata lives on Postgres, so the CLI writes where the server reads.</p>
 <p><strong>Revocation is immediate</strong>: verification reads the row on each request, so a
 revoked key stops working at once rather than after a cache expiry.</p>
 <h3 id="running-several-nodes-behind-one-address">Running several nodes behind one address<a class="headerlink" href="#running-several-nodes-behind-one-address" title="Permanent link">&para;</a></h3>
 <p>Streams cannot move between nodes. A stream holds a live task and an in-memory
-read plan, so only the node that planned it can serve it — a request for it
+read plan, so only the node that planned it can serve it. A request for it
 that lands elsewhere used to return a bare <code>404</code>, indistinguishable from an
 expired stream.</p>
 <p>Set <code>STRATA_NODE_ADVERTISED_URL</code> to the address that reaches <em>this</em> node:</p>
@@ -3313,8 +3313,8 @@ artifact build pipeline). Transforms are also configured via the
 toggles <code>enabled</code> there.</p>
 <p>The v2-pull signed-URL routes (build manifest, signed download / upload, and
 <code>finalize</code>) have no on/off switch. They are served whenever the deployment can
-issue and honor them at all — personal mode, or service mode with transforms
-enabled — so <code>STRATA_TRANSFORM_SIGNING_SECRET</code> below matters in every such
+issue and honor them at all (personal mode, or service mode with transforms
+enabled), so <code>STRATA_TRANSFORM_SIGNING_SECRET</code> below matters in every such
 deployment, not only in one that opted in to something.</p>
 <table>
 <thead>
@@ -3460,7 +3460,7 @@ deployment, not only in one that opted in to something.</p>
 <tr>
 <td><code>STRATA_NOTEBOOK_TEAM_CACHE_ENABLED</code></td>
 <td><code>false</code></td>
-<td>Consult the remote store on a <strong>local cache miss</strong>, so a colleague's expensive cell becomes your instant result. Distinct from the URL above, which only redirects a cell's ambient client (explicit publish). Opt-in because it is a behaviour change, not only a performance one: it puts bytes another machine produced into your local store. Requires <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> — enabling it without one is rejected at startup rather than left silently inert.</td>
+<td>Consult the remote store on a <strong>local cache miss</strong>, so a colleague's expensive cell becomes your instant result. Distinct from the URL above, which only redirects a cell's ambient client (explicit publish). Opt-in because it is a behaviour change, not only a performance one: it puts bytes another machine produced into your local store. Requires <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>; enabling it without one is rejected at startup rather than left silently inert.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES</code></td>

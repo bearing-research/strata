@@ -23,7 +23,7 @@
     
     
       
-        <title>Widget Playground — interactive controls driving the DAG - Strata</title>
+        <title>Widget Playground: interactive controls driving the DAG - Strata</title>
       
     
     
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Widget Playground — interactive controls driving the DAG
+              Widget Playground: interactive controls driving the DAG
             
           </span>
         </div>
@@ -1978,20 +1978,20 @@
   
 
 
-<h1 id="widget-playground-interactive-controls-driving-the-dag">Widget Playground — interactive controls driving the DAG<a class="headerlink" href="#widget-playground-interactive-controls-driving-the-dag" title="Permanent link">&para;</a></h1>
+<h1 id="widget-playground-interactive-controls-driving-the-dag">Widget Playground: interactive controls driving the DAG<a class="headerlink" href="#widget-playground-interactive-controls-driving-the-dag" title="Permanent link">&para;</a></h1>
 <p>A two-cell notebook: a <strong>widget cell</strong> (a control panel) feeding a Python cell
-that renders a DataFrame. Drag a control, and the downstream cell goes stale —
+that renders a DataFrame. Drag a control, and the downstream cell goes stale , 
 run it and the grid updates.</p>
 <h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
 <ul>
 <li>A <strong>widget cell</strong> with three controls:</li>
-<li><code>alpha</code> — a slider (0–1)</li>
-<li><code>n</code> — a number input (row count)</li>
-<li><code>curve</code> — a dropdown (<code>linear</code> / <code>sqrt</code> / <code>square</code>)</li>
+<li><code>alpha</code>: a slider (0–1)</li>
+<li><code>n</code>: a number input (row count)</li>
+<li><code>curve</code>: a dropdown (<code>linear</code> / <code>sqrt</code> / <code>square</code>)</li>
 <li>A downstream Python cell that reads <code>alpha</code>, <code>n</code>, <code>curve</code> and builds a
-  DataFrame — which renders in the <strong>interactive data viewer</strong>. So the two
+  DataFrame, which renders in the <strong>interactive data viewer</strong>. So the two
   features compose: a widget drives the grid.</li>
-<li><strong>Content-addressed values</strong>: drag <code>alpha</code> to a new value and back — the
+<li><strong>Content-addressed values</strong>: drag <code>alpha</code> to a new value and back, the
   second time is a cache hit, no recompute.</li>
 </ul>
 <h2 id="cells">Cells<a class="headerlink" href="#cells" title="Permanent link">&para;</a></h2>
@@ -2020,18 +2020,18 @@ run it and the grid updates.</p>
 <p>Open <code>examples/widget_playground</code> from the Strata home page.</p>
 <h2 id="try-this">Try this<a class="headerlink" href="#try-this" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Run the <code>preview</code> cell — it materializes the widget defaults and shows a
+<li>Run the <code>preview</code> cell, it materializes the widget defaults and shows a
    20-row table in the data viewer.</li>
 <li>Drag the <code>alpha</code> slider. <code>preview</code> turns yellow (stale).</li>
-<li>Run <code>preview</code> — the <code>y</code> column reflects the new <code>alpha</code>.</li>
-<li>Switch <code>curve</code> to <code>square</code> and re-run — the shape changes.</li>
-<li>Drag <code>alpha</code> back to its previous value and run — a cache hit.</li>
+<li>Run <code>preview</code>: the <code>y</code> column reflects the new <code>alpha</code>.</li>
+<li>Switch <code>curve</code> to <code>square</code> and re-run, the shape changes.</li>
+<li>Drag <code>alpha</code> back to its previous value and run, a cache hit.</li>
 </ol>
 <p>Widget cells render in the web UI. Edit the control declaration with the
 <strong>✎ Edit controls</strong> toggle on the cell.</p>
 <h2 id="open-as-an-app">Open as an app<a class="headerlink" href="#open-as-an-app" title="Permanent link">&para;</a></h2>
 <p>Click <strong>App</strong> in the notebook header to open this notebook as a read-only
-interactive app — just the controls + the table, no editor. Turn on the
+interactive app, just the controls + the table, no editor. Turn on the
 widget cell's <strong>⚡ Live</strong> toggle first, and dragging <code>alpha</code> in the app updates
 the table live.</p>
 <h2 id="controls">Controls<a class="headerlink" href="#controls" title="Permanent link">&para;</a></h2>

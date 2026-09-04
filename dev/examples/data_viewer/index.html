@@ -23,7 +23,7 @@
     
     
       
-        <title>Data Viewer — paging and sorting a large DataFrame - Strata</title>
+        <title>Data Viewer: paging and sorting a large DataFrame - Strata</title>
       
     
     
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Data Viewer — paging and sorting a large DataFrame
+              Data Viewer: paging and sorting a large DataFrame
             
           </span>
         </div>
@@ -1956,7 +1956,7 @@
   
 
 
-<h1 id="data-viewer-paging-and-sorting-a-large-dataframe">Data Viewer — paging and sorting a large DataFrame<a class="headerlink" href="#data-viewer-paging-and-sorting-a-large-dataframe" title="Permanent link">&para;</a></h1>
+<h1 id="data-viewer-paging-and-sorting-a-large-dataframe">Data Viewer: paging and sorting a large DataFrame<a class="headerlink" href="#data-viewer-paging-and-sorting-a-large-dataframe" title="Permanent link">&para;</a></h1>
 <p>A two-cell notebook that produces DataFrames larger than the inline
 preview, so the notebook's <strong>interactive data viewer</strong> switches on.</p>
 <h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
@@ -1964,7 +1964,7 @@ preview, so the notebook's <strong>interactive data viewer</strong> switches on.
 <li>A cell whose displayed output is a <strong>2,000-row</strong> DataFrame. Instead of
   a static 20-row table, the output renders as a scrollable grid with a
   footer showing <code>1–50 of 2,000 rows</code> and <strong>Prev / Next</strong> paging.</li>
-<li><strong>Click a column header to sort</strong> — ascending, then descending, then
+<li><strong>Click a column header to sort</strong>: ascending, then descending, then
   clear. Sorting runs server-side over the whole frame (not just the
   visible page), reading the cached Arrow artifact directly.</li>
 <li>A <strong>page-size</strong> selector (25 / 50 / 100 / 250).</li>
@@ -1989,7 +1989,7 @@ Tensors and scalars keep their existing display.</p>
 </tr>
 <tr>
 <td><code>ranked</code></td>
-<td>Sorts by revenue into a derived frame — also gets the grid.</td>
+<td>Sorts by revenue into a derived frame, also gets the grid.</td>
 </tr>
 </tbody>
 </table>
@@ -2003,10 +2003,10 @@ cells.</p>
 <ol>
 <li>Run <code>generate</code>. Scroll the grid; click <strong>Next</strong> to page through all
    2,000 rows.</li>
-<li>Click the <code>revenue</code> header twice to sort descending — the top row is
+<li>Click the <code>revenue</code> header twice to sort descending, the top row is
    now the largest revenue in the <em>entire</em> frame, not just this page.</li>
 <li>Change the page size to 250 and page again.</li>
-<li>Run <code>ranked</code> and sort it by <code>ts</code> — the server re-sorts the derived
+<li>Run <code>ranked</code> and sort it by <code>ts</code>: the server re-sorts the derived
    frame on demand.</li>
 </ol>
 <h2 id="generate-transactions">Generate transactions<a class="headerlink" href="#generate-transactions" title="Permanent link">&para;</a></h2>

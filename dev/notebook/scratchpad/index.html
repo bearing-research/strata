@@ -739,7 +739,7 @@
   <a href="#4-nothing-else-for-the-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Nothing else — for the agent
+        4. Nothing else, for the agent
       
     </span>
   </a>
@@ -2085,7 +2085,7 @@
   <a href="#4-nothing-else-for-the-agent" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Nothing else — for the agent
+        4. Nothing else, for the agent
       
     </span>
   </a>
@@ -2162,8 +2162,8 @@
 
 
 <h1 id="the-notebook-as-an-agents-scratchpad">The notebook as an agent's scratchpad<a class="headerlink" href="#the-notebook-as-an-agents-scratchpad" title="Permanent link">&para;</a></h1>
-<p>A coding agent working on <em>something else</em> — debugging your service, exploring a
-dataset, checking what a function returns — constantly needs to run a bit of
+<p>A coding agent working on <em>something else</em> (debugging your service, exploring a
+dataset, checking what a function returns) constantly needs to run a bit of
 throwaway Python. The usual way is <code>python -c</code> or a temp script: work that
 vanishes the moment it finishes, that nobody can see, and that recomputes from
 scratch every time.</p>
@@ -2171,7 +2171,7 @@ scratch every time.</p>
 runs it; the cell is versioned, content-addressed, and cached.</p>
 <div class="admonition info">
 <p class="admonition-title">This is not the same as <a href="../agent/">driving a notebook</a></p>
-<p>There the notebook is <strong>the deliverable</strong> — you asked for it, you watch it
+<p>There the notebook is <strong>the deliverable</strong>: you asked for it, you watch it
 being built, you keep it. Here it is <strong>disposable infrastructure</strong> for some
 other task, created by the agent on demand, and you may never look at it.</p>
 <p>Same machinery, opposite intent. The distinction matters mostly for setup:
@@ -2197,11 +2197,11 @@ its source lives in the repo at <code>plugins/strata-scratchpad/</code>.</p>
 <code>&lt;site-packages&gt;/strata/.agents/skills/</code>), which some agents discover on their
 own; the plugin removes the "some".</p>
 <h3 id="3-confirm-it-engaged">3. Confirm it engaged<a class="headerlink" href="#3-confirm-it-engaged" title="Permanent link">&para;</a></h3>
-<p>This is worth doing once, because the whole thing is invisible by design —
-nothing announces itself, and an agent that quietly kept using <code>python -c</code> looks
+<p>This is worth doing once, because the whole thing is invisible by design.
+Nothing announces itself, and an agent that quietly kept using <code>python -c</code> looks
 identical from the outside.</p>
 <p>Ask an agent, in any project, for something it <strong>cannot</strong> answer with shell
-tools — the skill only triggers when it was about to run ad-hoc <em>Python</em>, so a
+tools. The skill only triggers when it was about to run ad-hoc <em>Python</em>, so a
 question <code>find</code>/<code>awk</code> can answer proves nothing:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Fit a linear regression to the points (1,2), (2,4.1), (3,5.9), (4,8.2)
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>and tell me the slope and intercept.
@@ -2211,24 +2211,24 @@ question <code>find</code>/<code>awk</code> can answer proves nothing:</p>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>./scratch<span class="w">     </span><span class="c1"># the same thing as JSON, with each cell&#39;s output</span>
 </code></pre></div>
 <p>If <code>./scratch</code> exists and has cells in it, the skill engaged. If it does not,
-the agent answered with <code>python -c</code> and the skill did not fire — check that
+the agent answered with <code>python -c</code> and the skill did not fire. Check that
 <code>strata --help</code> works <strong>in the agent's environment</strong>, which is the usual cause.</p>
-<h3 id="4-nothing-else-for-the-agent">4. Nothing else — for the agent<a class="headerlink" href="#4-nothing-else-for-the-agent" title="Permanent link">&para;</a></h3>
+<h3 id="4-nothing-else-for-the-agent">4. Nothing else, for the agent<a class="headerlink" href="#4-nothing-else-for-the-agent" title="Permanent link">&para;</a></h3>
 <p>The agent needs no server and no session: it drives the notebook through the
 <code>strata</code> CLI against the directory. (Looking at it yourself is the one thing
-that does need a server — see <a href="#looking-at-it">Looking at it</a> below.)</p>
+that does need a server; see <a href="#looking-at-it">Looking at it</a> below.)</p>
 <p>It creates the scratch notebook the first time it needs one, with</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>new<span class="w"> </span>scratch<span class="w"> </span>--parent<span class="w"> </span>.<span class="w"> </span>--no-env<span class="w"> </span>--project-mount
 </code></pre></div>
 <p>which also mounts the project read-only as a <code>project</code> variable, so cells read
 your files as <code>project / "some/file.py"</code>. Adding <code>scratch/</code> to <code>.gitignore</code> is
-optional — it is your workspace, and some people keep it.</p>
+optional, since it is your workspace and some people keep it.</p>
 <h2 id="why-it-beats-a-temp-script">Why it beats a temp script<a class="headerlink" href="#why-it-beats-a-temp-script" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Unchanged work never recomputes.</strong> Every cell is cached by provenance
   (<code>sha256(inputs + source + env)</code>), <em>including a leaf cell that only <code>print</code>s</em>.
   An agent that re-runs an unchanged diagnostic gets its output back instantly.
-  The expensive step it ran ten turns ago is still a cache hit now — which is
+  The expensive step it ran ten turns ago is still a cache hit now, which is
   the whole point, because agents re-derive the same thing constantly.</li>
 <li><strong>It persists and it can be seen.</strong> Each snippet is a real cell on disk, not
   an invisible script in <code>/tmp</code>. You can open it later, or watch it live.</li>
@@ -2242,7 +2242,7 @@ optional — it is your workspace, and some people keep it.</p>
 <ul>
 <li><strong>One call, not three.</strong> <code>run_snippet(session_id, source)</code> over
   <a href="../mcp/">MCP</a>, or <code>strata cell add … -c 'src' --run</code> on the CLI, adds a cell
-  <strong>and</strong> runs it <strong>and</strong> returns <code>stdout</code> — the same shape as <code>python -c</code>.</li>
+  <strong>and</strong> runs it <strong>and</strong> returns <code>stdout</code>, the same shape as <code>python -c</code>.</li>
 <li><strong>No setup step.</strong> The skill tells the agent how to create or reuse a
   scratch notebook itself, so there is no moment where using the notebook means
   stopping to configure one.</li>
@@ -2254,7 +2254,7 @@ optional — it is your workspace, and some people keep it.</p>
 <div class="admonition warning">
 <p class="admonition-title"><code>strata watch ./scratch</code> on its own usually won't work</p>
 <p>A server only opens notebooks inside its configured storage root, which
-defaults to <code>~/.strata/notebooks</code> — and a scratchpad lives in your project.
+defaults to <code>~/.strata/notebooks</code>, and a scratchpad lives in your project.
 Pointed at a default server, opening it is rejected with <em>"Invalid notebook
 path: must be inside configured notebook storage"</em>, and the viewer sits at
 <code>connecting…</code> rather than saying so.</p>
@@ -2266,7 +2266,7 @@ run, start it with its root over your project:</p>
 </code></pre></div>
 </div>
 <p>Once something is attached, everything in
-<a href="../agent/#watching-an-agent-work">Watching an agent work</a> applies here too —
+<a href="../agent/#watching-an-agent-work">Watching an agent work</a> applies here too,
 including opening it in the <a href="../../getting-started/notebook/">web UI</a> instead.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>

@@ -23,7 +23,7 @@
     
     
       
-        <title>Model Variants — switch classifiers without forking the notebook - Strata</title>
+        <title>Model Variants: switch classifiers without forking the notebook - Strata</title>
       
     
     
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Model Variants — switch classifiers without forking the notebook
+              Model Variants: switch classifiers without forking the notebook
             
           </span>
         </div>
@@ -1967,7 +1967,7 @@
   
 
 
-<h1 id="model-variants-switch-classifiers-without-forking-the-notebook">Model Variants — switch classifiers without forking the notebook<a class="headerlink" href="#model-variants-switch-classifiers-without-forking-the-notebook" title="Permanent link">&para;</a></h1>
+<h1 id="model-variants-switch-classifiers-without-forking-the-notebook">Model Variants: switch classifiers without forking the notebook<a class="headerlink" href="#model-variants-switch-classifiers-without-forking-the-notebook" title="Permanent link">&para;</a></h1>
 <p>The same iris pipeline as <code>iris_classification</code>, but with three
 alternative training cells grouped as variants of the same DAG slot.
 Pick a classifier from the variant tabs and the rest of the notebook
@@ -1981,9 +1981,9 @@ re-runs against it; switch back and the previous result is a cache hit.</p>
   re-running an already-trained variant is a cache hit. Flip-flopping
   between two variants is free after each has run once.</li>
 <li><strong>Strict contract.</strong> All variants must produce the same value
-  bindings (imports don't count — they're scaffolding). If one variant
+  bindings (imports don't count, they're scaffolding). If one variant
   accidentally adds an extra value, you get a
-  <code>variant_contract_mismatch</code> diagnostic — the contract is what makes
+  <code>variant_contract_mismatch</code> diagnostic, the contract is what makes
   downstream cells correct under any selection.</li>
 </ul>
 <h2 id="cells">Cells<a class="headerlink" href="#cells" title="Permanent link">&para;</a></h2>
@@ -2005,15 +2005,15 @@ re-runs against it; switch back and the previous result is a cache hit.</p>
 </tr>
 <tr>
 <td><code>train_logreg</code></td>
-<td><strong>Variant <code>classifier=logreg</code></strong> — <code>LogisticRegression</code>. Active by default.</td>
+<td><strong>Variant <code>classifier=logreg</code></strong>: <code>LogisticRegression</code>. Active by default.</td>
 </tr>
 <tr>
 <td><code>train_rf</code></td>
-<td><strong>Variant <code>classifier=rf</code></strong> — <code>RandomForestClassifier</code>.</td>
+<td><strong>Variant <code>classifier=rf</code></strong>: <code>RandomForestClassifier</code>.</td>
 </tr>
 <tr>
 <td><code>train_gbm</code></td>
-<td><strong>Variant <code>classifier=gbm</code></strong> — <code>GradientBoostingClassifier</code>.</td>
+<td><strong>Variant <code>classifier=gbm</code></strong>: <code>GradientBoostingClassifier</code>.</td>
 </tr>
 <tr>
 <td><code>evaluate</code></td>
@@ -2030,25 +2030,25 @@ re-runs against it; switch back and the previous result is a cache hit.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">8765</span>
 </code></pre></div>
 <p>Open <code>examples/model_variants</code> from the Strata home page. The
-classifier group renders as a tab strip on the train cell — click a
+classifier group renders as a tab strip on the train cell, click a
 tab to switch.</p>
 <h2 id="try-this">Try this<a class="headerlink" href="#try-this" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Run the notebook on <code>logreg</code>, then click the <code>rf</code> tab. <code>evaluate</code>
   and <code>confusion</code> go stale; re-run them to see the random-forest
-  numbers. Click <code>logreg</code> again — both downstream cells become cache
+  numbers. Click <code>logreg</code> again, both downstream cells become cache
   hits.</li>
 <li>Add a fourth variant: create <code>cells/train_svc.py</code> with
   <code># @variant classifier svc</code> and <code>model = SVC(...)</code>. The tab appears
   immediately after the file is saved and the source is parsed.</li>
 <li>Edit a variant cell to define an extra variable (say,
   <code>feature_importance = ...</code>). The header pill flags
-  <code>variant_contract_mismatch</code> — siblings disagree on what they
+  <code>variant_contract_mismatch</code>: siblings disagree on what they
   expose. Remove the extra binding to clear it.</li>
 </ul>
 <h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
 <p>The active selection is committed in <code>notebook.toml</code>'s
-<code>[[variant_group]]</code> table — flipping variants from the UI shows up as a
+<code>[[variant_group]]</code> table, flipping variants from the UI shows up as a
 git diff on that one line. That's intentional: the notebook records
 which experiment you ran.</p>
 <h2 id="load-iris-dataset">Load iris dataset<a class="headerlink" href="#load-iris-dataset" title="Permanent link">&para;</a></h2>
@@ -2084,7 +2084,7 @@ which experiment you ran.</p>
 </code></pre></div>
 <h1 id="pick-a-classifier">Pick a classifier<a class="headerlink" href="#pick-a-classifier" title="Permanent link">&para;</a></h1>
 <p>The three cells below are alternatives. They share the same <code>model</code>
-defines contract — each one trains a different classifier on the same
+defines contract, each one trains a different classifier on the same
 inputs and binds the result to <code>model</code>. Only the active variant
 participates in the DAG; the others render as inactive tabs in the
 notebook UI.</p>

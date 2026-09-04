@@ -2012,7 +2012,7 @@ sensitive) and <code># @cache forever</code> (reference-data) policies.</p>
   reference it by name via <code># @sql connection=warehouse</code>.</li>
 <li><strong>Bind parameters from upstream Python.</strong> <code>top_orders</code> resolves
   <code>:min_amount</code> from the <code>threshold</code> cell's variable. No string
-  substitution happens — the value flows through ADBC's parameter
+  substitution happens, the value flows through ADBC's parameter
   binding API, so adversarial strings round-trip as data.</li>
 <li><strong>Two cache policies side by side.</strong> <code>top_orders</code> uses <code>fingerprint</code>
   (folds SQLite's <code>PRAGMA data_version</code> + <code>schema_version</code> into the
@@ -2023,7 +2023,7 @@ sensitive) and <code># @cache forever</code> (reference-data) policies.</p>
   connection with <code>mode=ro</code> plus <code>PRAGMA query_only = ON</code> so a
   stray <code>INSERT</code> can't mutate the DB. The seed cell explicitly
   opts into writable execution via <code># @sql connection=warehouse
-  write=true</code> — that's the per-cell escape hatch for setup
+  write=true</code>: that's the per-cell escape hatch for setup
   scripts. Other cells in the notebook stay read-only.</li>
 <li><strong>Cross-language pipeline.</strong> The two SQL results flow back into the
   <code>report</code> Python cell as pandas DataFrames (the Arrow IPC artifacts
@@ -2068,7 +2068,7 @@ sensitive) and <code># @cache forever</code> (reference-data) policies.</p>
 </table>
 <h2 id="dag-dependencies">DAG dependencies<a class="headerlink" href="#dag-dependencies" title="Permanent link">&para;</a></h2>
 <p><code>top_orders</code> and <code>category_summary</code> depend on the SQLite file that
-<code>seed</code> produces, but no Python variable flows between them — the
+<code>seed</code> produces, but no Python variable flows between them, the
 dependency is on a side effect. The <code># @after seed</code> annotation adds
 an ordering-only edge to the DAG so cascade execution and staleness
 both see the link.</p>
@@ -2084,7 +2084,7 @@ order (or hit "Run all").</p>
 <li><strong>Change the threshold.</strong> Edit <code>threshold</code> to <code>min_amount = 100</code>.
   <code>top_orders</code> re-executes (different bind value → different
   provenance hash). Run <code>top_orders</code> again without changing
-  anything — it cache-hits, because the canonical artifact's
+  anything, it cache-hits, because the canonical artifact's
   provenance still matches the current threshold.</li>
 <li><strong>Mutate the schema.</strong> From a separate shell:</li>
 </ul>
@@ -2094,7 +2094,7 @@ order (or hit "Run all").</p>
   freshness token changes, and the cell re-executes with a new schema.
 - <strong>Try a write from a SQL cell.</strong> Add a cell with <code>INSERT INTO orders
   VALUES (...)</code>. The executor returns an error and the database row
-  count is unchanged — read-only mode is the security boundary.</p>
+  count is unchanged, read-only mode is the security boundary.</p>
 <h2 id="seed">seed<a class="headerlink" href="#seed" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> sql</sub></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span><span class="w"> </span><span class="k">write</span><span class="o">=</span><span class="k">true</span>

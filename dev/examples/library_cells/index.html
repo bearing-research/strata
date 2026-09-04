@@ -1927,7 +1927,7 @@ limitations slicing keeps in place.</p>
 <tbody>
 <tr>
 <td><code>pure_lib</code> / <code>use_pure</code></td>
-<td>Classic pure module cell — imports + defs + literal const, no runtime work. Source survives verbatim.</td>
+<td>Classic pure module cell, imports + defs + literal const, no runtime work. Source survives verbatim.</td>
 </tr>
 <tr>
 <td><code>mixed_lib</code> / <code>use_mixed</code></td>
@@ -1935,7 +1935,7 @@ limitations slicing keeps in place.</p>
 </tr>
 <tr>
 <td><code>typed_lib</code> / <code>use_typed</code></td>
-<td><code>from __future__ import annotations</code> lets a helper reference a type defined elsewhere — <code>symtable</code> correctly drops stringified annotations from the free-variable check.</td>
+<td><code>from __future__ import annotations</code> lets a helper reference a type defined elsewhere, <code>symtable</code> correctly drops stringified annotations from the free-variable check.</td>
 </tr>
 <tr>
 <td><code>blocked</code> / <code>try_blocked</code></td>
@@ -1953,7 +1953,7 @@ list. Run the cells top-to-bottom; the <code>blocked</code> cell is meant to fai
 so you can see the new diagnostic.</p>
 <h1 id="library-cells">Library cells<a class="headerlink" href="#library-cells" title="Permanent link">&para;</a></h1>
 <p>A <em>library cell</em> is one that defines reusable Python: functions, classes,
-constants — code that other cells will import and call. Strata Notebook
+constants, code that other cells will import and call. Strata Notebook
 re-executes the producing cell's source as a synthetic Python module so
 downstream cells get a fresh, deterministic copy of each definition.</p>
 <p>Originally the producing cell had to be <strong>pure</strong>: imports, defs, classes,
@@ -2003,7 +2003,7 @@ works, what's relaxed, and what's still blocked.</p>
 <h1 id="mixed-cells-the-new-payoff">Mixed cells (the new payoff)<a class="headerlink" href="#mixed-cells-the-new-payoff" title="Permanent link">&para;</a></h1>
 <p>The next cell mixes runtime setup with reusable helpers. Before slicing
 this whole cell would have been blocked because of the runtime
-assignments — the user would have to split them into separate cells just
+assignments, the user would have to split them into separate cells just
 to share <code>clamp</code> downstream.</p>
 <p>After slicing, the planner drops the runtime lines from the synthetic
 module and exports the helper. The runtime variables still flow through
@@ -2054,7 +2054,7 @@ the regular artifact path, so downstream cells see them too.</p>
 <a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="p">}</span>
 </code></pre></div>
 <h1 id="typed-library-cells-pep-563">Typed library cells (PEP 563)<a class="headerlink" href="#typed-library-cells-pep-563" title="Permanent link">&para;</a></h1>
-<p>Type annotations participate in the free-variable check by default —
+<p>Type annotations participate in the free-variable check by default , 
 <code>def f(x: SomeType): ...</code> would block export when <code>SomeType</code> isn't
 bound in the slice.</p>
 <p>Adding <code>from __future__ import annotations</code> to the cell relaxes this:
@@ -2093,21 +2093,21 @@ to import the same names.</p>
 </code></pre></div>
 <h1 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h1>
 <p>Slicing has a hard rule: the synthetic module is built from <strong>one cell's
-source only</strong> — it can't reach across cells to find names. Three failure
+source only</strong>: it can't reach across cells to find names. Three failure
 modes follow from that:</p>
 <ol>
 <li><strong>Closures over runtime values.</strong> A helper that references a value
    computed at runtime in the same cell can't be exported, because
    that value won't exist when the synthetic module re-executes.</li>
 <li><strong>Cross-cell imports.</strong> <code>import math</code> in cell A doesn't make <code>math</code>
-   visible inside a helper exported by cell B — each cell that hosts
+   visible inside a helper exported by cell B, each cell that hosts
    library code has to carry its own imports.</li>
 <li><strong>Cross-cell helpers.</strong> A helper can't call another helper that
    lives in a different cell. Move them into the same cell, or
    duplicate the dependency.</li>
 </ol>
 <p>The next cell triggers the first failure mode on purpose so you can see
-the diagnostic — it should error with a message naming the unresolved
+the diagnostic, it should error with a message naming the unresolved
 variable.</p>
 <h2 id="closure-over-a-runtime-value-intentionally-blocked">Closure over a runtime value (intentionally blocked)<a class="headerlink" href="#closure-over-a-runtime-value-intentionally-blocked" title="Permanent link">&para;</a></h2>
 <p><sub><strong>kind</strong> python</sub></p>

@@ -23,7 +23,7 @@
     
     
       
-        <title>Iris Classification — end-to-end ML in seven cells - Strata</title>
+        <title>Iris Classification: end-to-end ML in seven cells - Strata</title>
       
     
     
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Iris Classification — end-to-end ML in seven cells
+              Iris Classification: end-to-end ML in seven cells
             
           </span>
         </div>
@@ -1967,7 +1967,7 @@
   
 
 
-<h1 id="iris-classification-end-to-end-ml-in-seven-cells">Iris Classification — end-to-end ML in seven cells<a class="headerlink" href="#iris-classification-end-to-end-ml-in-seven-cells" title="Permanent link">&para;</a></h1>
+<h1 id="iris-classification-end-to-end-ml-in-seven-cells">Iris Classification: end-to-end ML in seven cells<a class="headerlink" href="#iris-classification-end-to-end-ml-in-seven-cells" title="Permanent link">&para;</a></h1>
 <p>Classic scikit-learn tutorial, rewritten as a Strata notebook. Shows
 what the graph looks like for a realistic ML pipeline: load → explore
 → split → train → evaluate → visualize.</p>
@@ -1976,7 +1976,7 @@ what the graph looks like for a realistic ML pipeline: load → explore
 <li><strong>DAG branching.</strong> <code>scatter_plot</code> and <code>train_test</code> both read from
   <code>load_data</code>, so editing <code>load_data</code> invalidates both branches.</li>
 <li><strong>Mixed output types.</strong> Cells produce DataFrames (arrow/ipc), trained
-  models (pickle), and matplotlib figures (image/png) — all stored
+  models (pickle), and matplotlib figures (image/png), all stored
   natively by Strata's serializer.</li>
 <li><strong>Display outputs.</strong> <code>_</code> at the end of a cell (or a trailing
   expression) becomes an inline preview on the cell.</li>
@@ -2029,7 +2029,7 @@ what the graph looks like for a realistic ML pipeline: load → explore
 <ul>
 <li>Change the <code>test_size</code> in <code>train_test</code>. Cells downstream go stale;
   <code>scatter_plot</code> stays ready (it doesn't depend on the split).</li>
-<li>Re-run <code>evaluate</code> without re-training — the trained model is cached,
+<li>Re-run <code>evaluate</code> without re-training, the trained model is cached,
   so only evaluation runs.</li>
 </ul>
 <h2 id="load-iris-dataset">Load iris dataset<a class="headerlink" href="#load-iris-dataset" title="Permanent link">&para;</a></h2>
@@ -2072,7 +2072,7 @@ what the graph looks like for a realistic ML pipeline: load → explore
 <a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Saved pairplot to /tmp/iris_pairplot.png&quot;</span><span class="p">)</span>
 </code></pre></div>
 <h1 id="train-and-evaluate">Train and evaluate<a class="headerlink" href="#train-and-evaluate" title="Permanent link">&para;</a></h1>
-<p>The exploration cells above don't feed the model directly — they're
+<p>The exploration cells above don't feed the model directly, they're
 sanity checks. The cells below are the ML pipeline proper: split the
 data, fit a random forest, score it against the held-out test set,
 and visualize the confusion matrix.</p>

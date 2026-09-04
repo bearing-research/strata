@@ -23,7 +23,7 @@
     
     
       
-        <title>Titanic — feature engineering + model comparison - Strata</title>
+        <title>Titanic: feature engineering + model comparison - Strata</title>
       
     
     
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Titanic — feature engineering + model comparison
+              Titanic: feature engineering + model comparison
             
           </span>
         </div>
@@ -1967,18 +1967,18 @@
   
 
 
-<h1 id="titanic-feature-engineering-model-comparison">Titanic — feature engineering + model comparison<a class="headerlink" href="#titanic-feature-engineering-model-comparison" title="Permanent link">&para;</a></h1>
+<h1 id="titanic-feature-engineering-model-comparison">Titanic: feature engineering + model comparison<a class="headerlink" href="#titanic-feature-engineering-model-comparison" title="Permanent link">&para;</a></h1>
 <p>A canonical "first Kaggle notebook" rewritten for Strata. Shows a
 feature-engineering stage that fans out into two model trainers whose
 metrics get compared in a final cell.</p>
 <h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Shared upstream with two downstream branches</strong> — <code>features</code> feeds
+<li><strong>Shared upstream with two downstream branches</strong>: <code>features</code> feeds
   both <code>train_model</code> and a second branch (implicit via <code>compare</code>), so
   editing <code>features</code> invalidates both branches.</li>
-<li><strong>Ordered display outputs</strong> — <code>explore</code> produces multiple charts
+<li><strong>Ordered display outputs</strong>: <code>explore</code> produces multiple charts
   side-by-side, each rendered as a separate display output.</li>
-<li><strong>Typed primitives round-trip</strong> — accuracy floats, confusion matrices,
+<li><strong>Typed primitives round-trip</strong>: accuracy floats, confusion matrices,
   feature importances all flow through the artifact store without
   pickle.</li>
 </ul>

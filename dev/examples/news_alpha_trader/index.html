@@ -1969,16 +1969,16 @@
 
 <h1 id="news-alpha-trader">News Alpha Trader<a class="headerlink" href="#news-alpha-trader" title="Permanent link">&para;</a></h1>
 <p><strong>An end-to-end LLM-driven trading notebook.</strong> Overnight news → structured sentiment signals → paper (or live) orders via Alpaca → cost-adjusted P&amp;L, all persisted to a local DuckDB so the data accumulates across sessions.</p>
-<p>This example is the opposite of the toy notebooks in this directory — it talks to real APIs, spends real tokens, and (if you opt in) places real orders.</p>
+<p>This example is the opposite of the toy notebooks in this directory, it talks to real APIs, spends real tokens, and (if you opt in) places real orders.</p>
 <h2 id="what-it-does">What it does<a class="headerlink" href="#what-it-does" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Pulls overnight news for a watchlist (Alpaca Market Data — Benzinga feed)</li>
+<li>Pulls overnight news for a watchlist (Alpaca Market Data, Benzinga feed)</li>
 <li>Extracts structured sentiment per headline via the LLM with <code>@output_schema</code> (validated JSON, auto-retried on failure)</li>
 <li>Fetches latest prices and computes available capital</li>
 <li>Generates a trade plan under hard risk limits (max position size, daily trade cap, ticker whitelist)</li>
-<li>Submits orders — paper by default, live only behind a two-key lock</li>
+<li>Submits orders, paper by default, live only behind a two-key lock</li>
 <li>Reconciles fills, records realized costs (slippage, TAF, spread)</li>
-<li>Reports <strong>cost-adjusted</strong> P&amp;L — the only number that matters: did the strategy beat its own API and transaction bill?</li>
+<li>Reports <strong>cost-adjusted</strong> P&amp;L, the only number that matters: did the strategy beat its own API and transaction bill?</li>
 <li>LLM writes a daily journal entry with the day's lessons</li>
 </ol>
 <h2 id="required-api-keys">Required API keys<a class="headerlink" href="#required-api-keys" title="Permanent link">&para;</a></h2>
@@ -2013,41 +2013,41 @@
 <li>Edit <code>helpers.py</code> → set <code>Config.I_UNDERSTAND_THIS_IS_REAL_MONEY = True</code></li>
 <li>Your Alpaca account must be funded</li>
 </ol>
-<p>The <code>place_orders</code> cell refuses to run live without both flags set. This is intentional — two edits on purpose.</p>
+<p>The <code>place_orders</code> cell refuses to run live without both flags set. This is intentional, two edits on purpose.</p>
 <h2 id="risk-limits-hard-enforced-in-code">Risk limits (hard, enforced in code)<a class="headerlink" href="#risk-limits-hard-enforced-in-code" title="Permanent link">&para;</a></h2>
 <p>Change in <code>helpers.py</code> → <code>Config</code> class:</p>
 <ul>
-<li><code>MAX_POSITION_USD</code> — per-ticker notional cap (default $500)</li>
-<li><code>MAX_TOTAL_EXPOSURE_USD</code> — portfolio notional cap (default $2000)</li>
-<li><code>MAX_DAILY_TRADES</code> — daily trade count cap (default 10)</li>
-<li><code>TICKER_WHITELIST</code> — the LLM <em>cannot</em> place orders in tickers outside this list, even if a headline mentions one</li>
+<li><code>MAX_POSITION_USD</code>: per-ticker notional cap (default $500)</li>
+<li><code>MAX_TOTAL_EXPOSURE_USD</code>: portfolio notional cap (default $2000)</li>
+<li><code>MAX_DAILY_TRADES</code>: daily trade count cap (default 10)</li>
+<li><code>TICKER_WHITELIST</code>: the LLM <em>cannot</em> place orders in tickers outside this list, even if a headline mentions one</li>
 </ul>
 <h2 id="duckdb-schema">DuckDB schema<a class="headerlink" href="#duckdb-schema" title="Permanent link">&para;</a></h2>
 <p>One file: <code>trading.db</code> next to the notebook. Tables:</p>
 <ul>
-<li><code>news_raw</code> — raw headlines (idempotent insert by <code>article_id</code>)</li>
-<li><code>signals</code> — extracted sentiment per article</li>
-<li><code>prices</code> — daily OHLC per ticker</li>
-<li><code>orders</code> — every order attempt, expected cost, Alpaca order id</li>
-<li><code>trades</code> — reconciled fills with realized cost</li>
-<li><code>positions</code> — current positions (rebuilt from <code>trades</code>)</li>
-<li><code>costs</code> — every dollar spent: LLM tokens, market data, commissions, TAF fees, slippage</li>
+<li><code>news_raw</code>: raw headlines (idempotent insert by <code>article_id</code>)</li>
+<li><code>signals</code>: extracted sentiment per article</li>
+<li><code>prices</code>: daily OHLC per ticker</li>
+<li><code>orders</code>: every order attempt, expected cost, Alpaca order id</li>
+<li><code>trades</code>: reconciled fills with realized cost</li>
+<li><code>positions</code>: current positions (rebuilt from <code>trades</code>)</li>
+<li><code>costs</code>: every dollar spent: LLM tokens, market data, commissions, TAF fees, slippage</li>
 </ul>
 <h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>sync
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># Open the notebook in Strata, set API keys in the Runtime panel, run-all.</span>
 </code></pre></div>
-<p>Re-run tomorrow — <code>fetch_news</code> only pulls new articles, <code>place_orders</code> is idempotent by <code>signal_id</code>. The DB grows over time; so does the history you can analyze.</p>
+<p>Re-run tomorrow, <code>fetch_news</code> only pulls new articles, <code>place_orders</code> is idempotent by <code>signal_id</code>. The DB grows over time; so does the history you can analyze.</p>
 <h2 id="disclaimers">⚠️ Disclaimers<a class="headerlink" href="#disclaimers" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>This is not financial advice.</strong> The strategy is a demo. It may lose money. Backtest thoroughly before live trading.</li>
-<li>LLM outputs are non-deterministic even with <code>temperature=0.0</code>. A prompt injection in a news headline could theoretically shift a signal — the ticker whitelist is the hard backstop.</li>
+<li>LLM outputs are non-deterministic even with <code>temperature=0.0</code>. A prompt injection in a news headline could theoretically shift a signal, the ticker whitelist is the hard backstop.</li>
 <li>Paper fills are instantaneous and slippage-free. Live fills are not. The cost model applies estimated slippage to both modes so the numbers stay honest.</li>
 <li>You are responsible for understanding every line of <code>place_orders.py</code> before flipping to live.</li>
 </ul>
 <h1 id="read-before-running">Read before running<a class="headerlink" href="#read-before-running" title="Permanent link">&para;</a></h1>
 <p>This notebook is the first thing you see when you open the project. It does
-nothing computationally — the real work starts in <code>helpers</code>.</p>
+nothing computationally, the real work starts in <code>helpers</code>.</p>
 <h2 id="key-facts">Key facts<a class="headerlink" href="#key-facts" title="Permanent link">&para;</a></h2>
 <ol>
 <li>
@@ -2060,7 +2060,7 @@ nothing computationally — the real work starts in <code>helpers</code>.</p>
 <li>
 <p><strong>Every LLM call costs real money.</strong> Every market-data call counts
    against your Alpaca rate limit (200/min free tier). The <code>costs</code> cell
-   tracks both — check it before you leave the notebook running unattended.</p>
+   tracks both, check it before you leave the notebook running unattended.</p>
 </li>
 <li>
 <p><strong>Paper fills aren't realistic.</strong> Paper fills on Alpaca are instantaneous
@@ -2071,7 +2071,7 @@ nothing computationally — the real work starts in <code>helpers</code>.</p>
 <li>
 <p><strong>LLM outputs are non-deterministic.</strong> A hostile news headline could in
    principle influence a signal. We enforce a ticker whitelist
-   (<code>Config.TICKER_WHITELIST</code>) at the order layer — the LLM cannot place
+   (<code>Config.TICKER_WHITELIST</code>) at the order layer, the LLM cannot place
    orders in tickers outside that list regardless of what the signal says.</p>
 </li>
 <li>
@@ -2500,7 +2500,7 @@ nothing computationally — the real work starts in <code>helpers</code>.</p>
 </code></pre></div>
 <h1 id="turn-news-into-signals">Turn news into signals<a class="headerlink" href="#turn-news-into-signals" title="Permanent link">&para;</a></h1>
 <p>We've pulled raw headlines from the news API. The cell below is a
-<strong>prompt cell</strong> — it sends each headline to an LLM with an
+<strong>prompt cell</strong>: it sends each headline to an LLM with an
 <code>@output_schema</code> that forces a structured JSON response (ticker,
 direction, confidence). The schema-validated result becomes a
 content-addressed artifact like any Python cell's output, so

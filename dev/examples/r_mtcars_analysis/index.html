@@ -2001,7 +2001,7 @@
 
 
 <h1 id="r-mtcars-regression-inline-plots">R: mtcars regression + inline plots<a class="headerlink" href="#r-mtcars-regression-inline-plots" title="Permanent link">&para;</a></h1>
-<p>A <strong>pure-R notebook</strong> — every cell is R. Load the built-in <code>mtcars</code>
+<p>A <strong>pure-R notebook</strong>: every cell is R. Load the built-in <code>mtcars</code>
 dataset, summarise it, fit a linear model, and draw two plots that
 render inline as PNG. Variables flow cell-to-cell through the same
 content-addressed artifact store the Python cells use; here both ends
@@ -2010,20 +2010,20 @@ of every edge happen to be R.</p>
 <ul>
 <li><strong>R cells stand on their own.</strong> No Python anywhere. The DAG, the
   provenance cache, and the cascade all work exactly as they do for
-  Python — language is per-cell, not per-notebook.</li>
+  Python, language is per-cell, not per-notebook.</li>
 <li><strong>Inline plots (0.2.0).</strong> A ggplot scatter and R's base-graphics
   2×2 <code>plot(lm)</code> diagnostic panel both render as PNG in the cell, just
   like a Python matplotlib figure. A bare trailing ggplot object
-  auto-prints — no explicit <code>print()</code>.</li>
+  auto-prints, no explicit <code>print()</code>.</li>
 <li><strong>Two kinds of R→R handoff.</strong> <code>data.frame</code>s (<code>cars</code>, <code>by_cyl</code>) cross
   as Arrow IPC. The <code>lm</code> object itself isn't tabular, so it's stored as
   RDS (<code>r_only</code>) and read straight back by the diagnostics cell with
-  full fidelity — an R-only object flowing between R cells that the
+  full fidelity, an R-only object flowing between R cells that the
   Arrow tier couldn't carry. (A <em>Python</em> cell consuming it would get a
   structured "re-export as a data.frame" error instead of a crash.)</li>
 <li><strong>renv, one click.</strong> The plotting cell needs <code>ggplot2</code>, which isn't
   in the harness baseline. It's pinned in <code>renv.lock</code> and restored
-  automatically when you open the notebook — or via the Environment
+  automatically when you open the notebook, or via the Environment
   panel's <strong>Initialize renv</strong>. A missing package surfaces a structured
   install hint, not a stack trace.</li>
 </ul>
@@ -2038,7 +2038,7 @@ of every edge happen to be R.</p>
 <tbody>
 <tr>
 <td><code>prep</code></td>
-<td>Tidy <code>mtcars</code> into a <code>data.frame</code> (<code>cars</code>) — model name column, <code>cyl</code> as a factor.</td>
+<td>Tidy <code>mtcars</code> into a <code>data.frame</code> (<code>cars</code>), model name column, <code>cyl</code> as a factor.</td>
 </tr>
 <tr>
 <td><code>summarise</code></td>
@@ -2061,7 +2061,7 @@ of every edge happen to be R.</p>
 <h2 id="what-you-need">What you need<a class="headerlink" href="#what-you-need" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>R</strong> on <code>PATH</code> (<code>Rscript</code>). The notebook's <code>arrow</code>, <code>jsonlite</code>, and
-  <code>ggplot2</code> come from <code>renv.lock</code> — opening the notebook restores them
+  <code>ggplot2</code> come from <code>renv.lock</code>: opening the notebook restores them
   into a project-scoped library automatically; no system installs
   beyond R itself.</li>
 <li>The uv-managed Python venv carries only the notebook harness baseline
@@ -2073,17 +2073,17 @@ of every edge happen to be R.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook<span class="w"> </span>--host<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span>--port<span class="w"> </span><span class="m">8765</span>
 </code></pre></div>
 <p>Open <code>examples/r_mtcars_analysis</code> from the Strata home page and run the
-cells top to bottom. Or run it headlessly — <code>strata run</code> executes R cells
+cells top to bottom. Or run it headlessly, <code>strata run</code> executes R cells
 and restores the notebook's <code>renv.lock</code> on the way in:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>strata<span class="w"> </span>run<span class="w"> </span>examples/r_mtcars_analysis
 </code></pre></div>
 <h2 id="try-this">Try this<a class="headerlink" href="#try-this" title="Permanent link">&para;</a></h2>
 <ol>
 <li><strong>Swap in another plot.</strong> Replace <code>plot-mpg</code> with
-   <code>ggplot(by_cyl, aes(factor(cyl), mean_mpg)) + geom_col()</code> — a bar of
+   <code>ggplot(by_cyl, aes(factor(cyl), mean_mpg)) + geom_col()</code>: a bar of
    mean economy by cylinder. Edit, Shift+Enter, watch it re-render.</li>
 <li><strong>Reach a non-tabular object across cells.</strong> Add a cell with
-   <code>confint(model)</code> — <code>model</code> resolves from the RDS artifact and you get
+   <code>confint(model)</code>: <code>model</code> resolves from the RDS artifact and you get
    coefficient confidence intervals, no re-fit.</li>
 <li><strong>Break, then fix, the environment.</strong> Delete the <code>renv/</code> directory
    and reopen: the ggplot cell shows the install hint; click <strong>Initialize

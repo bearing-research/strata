@@ -2035,7 +2035,7 @@ Notebook at once:</p>
 <li><strong>Prompt cells.</strong> Two cells use the LLM assistant with <code>{{ variable }}</code>
   injection to narrate the data at key points.</li>
 <li><strong>DAG invalidation.</strong> Change the model in the training cell, and every
-  upstream cell (load, aggregate, embed) still hits cache — only training
+  upstream cell (load, aggregate, embed) still hits cache, only training
   and evaluation re-execute.</li>
 </ul>
 <h2 id="the-workflow">The workflow<a class="headerlink" href="#the-workflow" title="Permanent link">&para;</a></h2>
@@ -2106,17 +2106,17 @@ Notebook at once:</p>
 </tbody>
 </table>
 <p>Cells 1, 3, 6, 8, 9 run on the user's machine. Cells 2 and 4 run on the
-DataFusion worker — close to the data, avoids round-tripping the full
+DataFusion worker, close to the data, avoids round-tripping the full
 dataset. Cells 5 and 7 run on the GPU worker.</p>
 <h2 id="running-it-locally">Running it locally<a class="headerlink" href="#running-it-locally" title="Permanent link">&para;</a></h2>
 <p>Two local HTTP executors stand in for the cloud workers during development.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Terminal 1 — start the two local worker processes</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Terminal 1: start the two local worker processes</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>./examples/arxiv_classifier/run_local_workers.sh
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Terminal 2 — start Strata</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Terminal 2: start Strata</span>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Terminal 3 — open the notebook in the UI</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># Terminal 3: open the notebook in the UI</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># http://localhost:8765</span>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Click &quot;Open Notebook&quot; and select examples/arxiv_classifier</span>
 </code></pre></div>
@@ -2130,8 +2130,8 @@ dataset. Cells 5 and 7 run on the GPU worker.</p>
 <li>Green <code>✓ cached</code> on every cell on the second run</li>
 </ul>
 <h2 id="day-1-vs-real-workload">Day 1 vs. real workload<a class="headerlink" href="#day-1-vs-real-workload" title="Permanent link">&para;</a></h2>
-<p>As of Day 1 (April 2026), the cells run placeholder workloads — tiny
-DataFrames, fake embeddings, a trivial classifier — so we can validate the
+<p>As of Day 1 (April 2026), the cells run placeholder workloads, tiny
+DataFrames, fake embeddings, a trivial classifier, so we can validate the
 distributed plumbing without downloading a 500 MB dataset or setting up
 GPU deps. The workload is swapped in over the following days as the cloud
 workers come online. The worker annotations and cell structure stay the

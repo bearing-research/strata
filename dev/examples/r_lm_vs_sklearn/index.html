@@ -23,7 +23,7 @@
     
     
       
-        <title>R lm() vs scikit-learn — side-by-side linear regression - Strata</title>
+        <title>R lm() vs scikit-learn: side-by-side linear regression - Strata</title>
       
     
     
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              R lm() vs scikit-learn — side-by-side linear regression
+              R lm() vs scikit-learn: side-by-side linear regression
             
           </span>
         </div>
@@ -2000,17 +2000,17 @@
   
 
 
-<h1 id="r-lm-vs-scikit-learn-side-by-side-linear-regression">R <code>lm()</code> vs scikit-learn — side-by-side linear regression<a class="headerlink" href="#r-lm-vs-scikit-learn-side-by-side-linear-regression" title="Permanent link">&para;</a></h1>
+<h1 id="r-lm-vs-scikit-learn-side-by-side-linear-regression">R <code>lm()</code> vs scikit-learn: side-by-side linear regression<a class="headerlink" href="#r-lm-vs-scikit-learn-side-by-side-linear-regression" title="Permanent link">&para;</a></h1>
 <p>Fit the same housing-price model with R's <code>lm()</code> and Python's
 <code>scikit-learn</code>. Hand the coefficients + held-out predictions back to
 a Python cell over Arrow IPC and read them side by side. This is the
 mixed-language notebook that #59 (the R Phase 1 capstone) was
-designed for — Python data prep, R modeling, Python comparison +
+designed for, Python data prep, R modeling, Python comparison +
 viz, with the artifact store gluing everything together.</p>
 <h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>R's formula syntax in one line.</strong> <code>lm(price ~ sqft + bedrooms +
-  age + location, data = ...)</code> — auto-dummy-encodes <code>location</code>,
+  age + location, data = ...)</code>: auto-dummy-encodes <code>location</code>,
   picks a baseline level, fits with std-errors and p-values
   attached. No ColumnTransformer, no design-matrix construction.</li>
 <li><strong>Cross-language Arrow handoff.</strong> R returns three <code>data.frame</code>s
@@ -2021,7 +2021,7 @@ viz, with the artifact store gluing everything together.</p>
   pandas). The numbers should match to ~1e-12; the demo's value is
   <em>how</em> each toolkit expresses the fit, not which is more accurate.</li>
 <li><strong>R surfaces stats Python doesn't.</strong> Std-errors, t-statistics,
-  p-values for every coefficient — sklearn's <code>LinearRegression</code>
+  p-values for every coefficient, sklearn's <code>LinearRegression</code>
   ships none of that. The comparison cell leaves those columns NaN
   on the sklearn side.</li>
 </ul>
@@ -2063,7 +2063,7 @@ viz, with the artifact store gluing everything together.</p>
   language handoff. On macOS: <code>brew install r</code> then <code>Rscript -e
   'install.packages(c("arrow", "jsonlite"))'</code>. On Ubuntu: see
   <a href="https://cran.r-project.org/">CRAN</a>. The strata-notebook server
-  surfaces a clean skip / error if R is missing — no crash.</li>
+  surfaces a clean skip / error if R is missing, no crash.</li>
 <li><strong>Python deps</strong> declared in this notebook's <code>pyproject.toml</code>
   (<code>pandas</code>, <code>numpy</code>, <code>scikit-learn</code>). Strata's per-notebook <code>uv
   sync</code> handles them automatically the first time you open the
@@ -2091,7 +2091,7 @@ run the cells top-to-bottom.</p>
 <a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a> R lm()     0.9698         0.9690    1246.94            194             25.19
 <a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>sklearn     0.9698         0.9690    1246.94            194             25.19
 <a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>Test RMSE — R lm(): 21.97   sklearn: 21.97
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>Test RMSE, R lm(): 21.97   sklearn: 21.97
 <a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>Max |R-sklearn| prediction gap on test set: 0.0000
 </code></pre></div>
 <p>The 0.00 deltas are the point: both toolkits compute the same OLS
@@ -2100,10 +2100,10 @@ solution; the <code>lm_p_value</code> column is R-only.</p>
 <ol>
 <li><strong>Edit the model.</strong> Drop <code>bedrooms</code> from the R formula
    (<code>lm(price ~ sqft + age + location)</code>) and watch the comparison
-   reshape — <code>compare</code> shows the row dropping out.</li>
+   reshape, <code>compare</code> shows the row dropping out.</li>
 <li><strong>Misalign the baseline level.</strong> Comment out the
    <code>location_levels.sort(...)</code> line in <code>fit-sklearn</code>. The sklearn
-   coefficients will swap signs vs R's — a real risk in any
+   coefficients will swap signs vs R's, a real risk in any
    "translate this R analysis to Python" workflow.</li>
 <li><strong>Add interaction terms.</strong> R: <code>price ~ sqft * location</code>. sklearn:
    you'll have to add the interaction columns by hand. The contrast

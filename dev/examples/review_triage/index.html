@@ -23,7 +23,7 @@
     
     
       
-        <title>Review Triage — Structured Prompt Output - Strata</title>
+        <title>Review Triage: Structured Prompt Output - Strata</title>
       
     
     
@@ -112,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Review Triage — Structured Prompt Output
+              Review Triage: Structured Prompt Output
             
           </span>
         </div>
@@ -1945,22 +1945,22 @@
   
 
 
-<h1 id="review-triage-structured-prompt-output">Review Triage — Structured Prompt Output<a class="headerlink" href="#review-triage-structured-prompt-output" title="Permanent link">&para;</a></h1>
+<h1 id="review-triage-structured-prompt-output">Review Triage: Structured Prompt Output<a class="headerlink" href="#review-triage-structured-prompt-output" title="Permanent link">&para;</a></h1>
 <p>Demonstrates <code># @output_schema</code> on a prompt cell.</p>
 <p>The <code>triage</code> cell sends a list of customer reviews to an LLM and gets
-back a <strong>schema-validated JSON array</strong> — not free-form text that a
+back a <strong>schema-validated JSON array</strong>: not free-form text that a
 downstream cell has to regex. The schema is passed through as native
 structured-output (OpenAI's <code>response_format: {type: "json_schema"}</code>,
 or <code>json_object</code> fallback for providers that don't support schemas).</p>
 <p>Because the schema is part of the cell's provenance hash, editing the
-schema invalidates the cached response — exactly what you want when
+schema invalidates the cached response, exactly what you want when
 you're iterating on the shape of the output.</p>
 <h2 id="cells">Cells<a class="headerlink" href="#cells" title="Permanent link">&para;</a></h2>
 <ol>
-<li><code>reviews.py</code> — hand-picked list of customer reviews</li>
-<li><code>triage.py</code> — prompt cell with <code>@output_schema</code> enforcing
+<li><code>reviews.py</code>: hand-picked list of customer reviews</li>
+<li><code>triage.py</code>: prompt cell with <code>@output_schema</code> enforcing
    <code>{sentiment, priority, tags}</code> per review</li>
-<li><code>summary.py</code> — pandas aggregation of the structured results</li>
+<li><code>summary.py</code>: pandas aggregation of the structured results</li>
 </ol>
 <h2 id="running">Running<a class="headerlink" href="#running" title="Permanent link">&para;</a></h2>
 <p>Set an API key (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, etc.) in the
