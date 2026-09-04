@@ -691,13 +691,63 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#set-it-up-once-in-any-project" class="md-nav__link">
+  <a href="#set-it-up" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Set it up once, in any project
+        Set it up
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Set it up">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-put-the-strata-cli-on-your-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Put the strata CLI on your PATH
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-install-the-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Install the plugin
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-confirm-it-engaged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Confirm it engaged
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-nothing-else" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Nothing else
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1987,13 +2037,63 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#set-it-up-once-in-any-project" class="md-nav__link">
+  <a href="#set-it-up" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Set it up once, in any project
+        Set it up
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Set it up">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-put-the-strata-cli-on-your-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Put the strata CLI on your PATH
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-install-the-plugin" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Install the plugin
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-confirm-it-engaged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Confirm it engaged
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-nothing-else" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Nothing else
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2078,20 +2178,46 @@ other task, created by the agent on demand, and you may never look at it.</p>
 driving starts with you running <code>strata agent</code>; scratchpad use starts with
 the agent noticing it has a better option than <code>python -c</code>.</p>
 </div>
-<h2 id="set-it-up-once-in-any-project">Set it up once, in any project<a class="headerlink" href="#set-it-up-once-in-any-project" title="Permanent link">&para;</a></h2>
-<p>The behavior travels with the package, but the plugin is the reliable way to get
-it into every Claude Code session — it also bundles a
-<code>/strata-scratchpad:scratch</code> command:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>/plugin marketplace add bearing-research/strata
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>/plugin install strata-scratchpad@strata
+<h2 id="set-it-up">Set it up<a class="headerlink" href="#set-it-up" title="Permanent link">&para;</a></h2>
+<h3 id="1-put-the-strata-cli-on-your-path">1. Put the <code>strata</code> CLI on your <code>PATH</code><a class="headerlink" href="#1-put-the-strata-cli-on-your-path" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>strata-notebook
+</code></pre></div>
+<p>The agent shells out to <code>strata</code>, so this is the one hard requirement. Check it
+with <code>strata --help</code>.</p>
+<h3 id="2-install-the-plugin">2. Install the plugin<a class="headerlink" href="#2-install-the-plugin" title="Permanent link">&para;</a></h3>
+<p>In any Claude Code session:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>/plugin marketplace add bearing-research/strata
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>/plugin install strata-scratchpad@strata
 </code></pre></div>
 <p>Once installed the skill is auto-discovered in <strong>every</strong> project, so the agent
 reaches for a cached notebook cell even when it wasn't launched anywhere near a
-notebook. The <code>strata</code> CLI still needs to be on <code>PATH</code>. The plugin source lives
-in the repo at <code>plugins/strata-scratchpad/</code>.</p>
+notebook. The plugin also bundles a <code>/strata-scratchpad:scratch</code> command, and
+its source lives in the repo at <code>plugins/strata-scratchpad/</code>.</p>
 <p>The skill also ships inside <code>strata-notebook</code> itself (under
 <code>&lt;site-packages&gt;/strata/.agents/skills/</code>), which some agents discover on their
 own; the plugin removes the "some".</p>
+<h3 id="3-confirm-it-engaged">3. Confirm it engaged<a class="headerlink" href="#3-confirm-it-engaged" title="Permanent link">&para;</a></h3>
+<p>This is worth doing once, because the whole thing is invisible by design —
+nothing announces itself, and an agent that quietly kept using <code>python -c</code> looks
+identical from the outside.</p>
+<p>Ask an agent, in any project, for something that needs a computation:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>What&#39;s the median of the file sizes under src/, in KB?
+</code></pre></div>
+<p>Then look for the notebook:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ls<span class="w"> </span>./scratch/cells/<span class="w">            </span><span class="c1"># one .py file per snippet it ran</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>./scratch<span class="w">     </span><span class="c1"># the same thing as JSON, with each cell&#39;s output</span>
+</code></pre></div>
+<p>If <code>./scratch</code> exists and has cells in it, the skill engaged. If it does not,
+the agent answered with <code>python -c</code> and the skill did not fire — check that
+<code>strata --help</code> works <strong>in the agent's environment</strong>, which is the usual cause.</p>
+<h3 id="4-nothing-else">4. Nothing else<a class="headerlink" href="#4-nothing-else" title="Permanent link">&para;</a></h3>
+<p>There is no server to start and no session to open. The agent creates the
+scratch notebook itself the first time it needs one, with</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>new<span class="w"> </span>scratch<span class="w"> </span>--parent<span class="w"> </span>.<span class="w"> </span>--no-env<span class="w"> </span>--project-mount
+</code></pre></div>
+<p>which also mounts the project read-only as a <code>project</code> variable, so cells read
+your files as <code>project / "some/file.py"</code>. Adding <code>scratch/</code> to <code>.gitignore</code> is
+optional — it is your workspace, and some people keep it.</p>
 <h2 id="why-it-beats-a-temp-script">Why it beats a temp script<a class="headerlink" href="#why-it-beats-a-temp-script" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Unchanged work never recomputes.</strong> Every cell is cached by provenance
@@ -2118,7 +2244,7 @@ own; the plugin removes the "some".</p>
 </ul>
 <h2 id="looking-at-it">Looking at it<a class="headerlink" href="#looking-at-it" title="Permanent link">&para;</a></h2>
 <p>You don't have to, and usually won't. When you want to:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>strata<span class="w"> </span>watch<span class="w"> </span>./scratch<span class="w">        </span><span class="c1"># live terminal viewer, read-only</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>watch<span class="w"> </span>./scratch<span class="w">        </span><span class="c1"># live terminal viewer, read-only</span>
 </code></pre></div>
 <p>or open the notebook in the <a href="../../getting-started/notebook/">web UI</a>. Everything
 in <a href="../agent/#watching-an-agent-work">Watching an agent work</a> applies here too.</p>

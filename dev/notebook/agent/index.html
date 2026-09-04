@@ -682,6 +682,56 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Use it">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-open-the-notebook-for-an-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Open the notebook for an agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-start-the-agent-beside-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Start the agent beside it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-ask-for-something" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Ask for something
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-take-it-from-there" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Take it from there
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2039,6 +2089,56 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Use it">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-open-the-notebook-for-an-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Open the notebook for an agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-start-the-agent-beside-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Start the agent beside it
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-ask-for-something" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Ask for something
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-take-it-from-there" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Take it from there
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2167,30 +2267,50 @@ terminal viewer; skip it if you plan to watch in a browser and pass <code>--no-t
 </div>
 </div>
 <h2 id="use-it">Use it<a class="headerlink" href="#use-it" title="Permanent link">&para;</a></h2>
+<p>You need two terminals: one holding the notebook open, one for the agent.</p>
+<h3 id="1-open-the-notebook-for-an-agent">1. Open the notebook for an agent<a class="headerlink" href="#1-open-the-notebook-for-an-agent" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>agent<span class="w"> </span>./my-notebook
 </code></pre></div>
-<p>That single command:</p>
-<ol>
-<li><strong>creates-or-opens</strong> the notebook directory (scaffolds a new one if needed),</li>
-<li><strong>starts</strong> a notebook server with the MCP endpoint enabled (or <strong>reuses</strong> one
-   already running on the target URL),</li>
-<li><strong>opens a session</strong>, the step the agent cannot do itself, since the MCP
-   tools only see notebooks that are already open,</li>
-<li><strong>writes</strong> a <code>.mcp.json</code> and a managed block in <code>CLAUDE.md</code> into the notebook
-   directory, and</li>
-<li><strong>attaches</strong> the read-only TUI to that session.</li>
-</ol>
-<p>It prints the one line you run on the agent's side, then hands the terminal to
-the TUI. In a second terminal:</p>
+<p>This scaffolds the notebook if it does not exist, starts a server with the agent
+endpoint enabled, opens a session, and attaches the terminal viewer. It prints
+the exact line to run next, then hands the terminal to the viewer — leave it
+running.</p>
+<h3 id="2-start-the-agent-beside-it">2. Start the agent beside it<a class="headerlink" href="#2-start-the-agent-beside-it" title="Permanent link">&para;</a></h3>
+<p>In a <strong>second terminal</strong>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">cd</span><span class="w"> </span>./my-notebook<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>claude
 </code></pre></div>
-<p>Claude Code discovers the notebook's <code>.mcp.json</code>, connects to the <code>strata-notebook</code>
-MCP server, reads the <code>CLAUDE.md</code> working agreement, and starts building the
-notebook by adding and running cells — each of which lights up live in whatever
-you have watching, the TUI in the first terminal by default. See
-<a href="#watching-an-agent-work">Watching an agent work</a> for the alternatives.</p>
-<p>When you quit the TUI, the server <code>strata agent</code> started is shut down with it. If
-you pointed it at a server you started yourself, that server is left running.</p>
+<p>Claude Code finds the <code>.mcp.json</code> that step 1 wrote, connects to the
+<code>strata-notebook</code> MCP server, and reads the working agreement from <code>CLAUDE.md</code>.</p>
+<h3 id="3-ask-for-something">3. Ask for something<a class="headerlink" href="#3-ask-for-something" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Load the iris dataset, train a classifier on it, and report the accuracy.
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>Build it in the notebook.
+</code></pre></div>
+<p>The agent adds cells and runs them. Each one appears in the viewer in the first
+terminal as it happens — status flipping to running, then the output landing.
+That is the confirmation that it is driving the notebook rather than writing
+scripts: if nothing appears in the viewer, it is not using the notebook.</p>
+<h3 id="4-take-it-from-there">4. Take it from there<a class="headerlink" href="#4-take-it-from-there" title="Permanent link">&para;</a></h3>
+<p>The notebook is a normal notebook. Open it in the <a href="../../getting-started/notebook/">web UI</a>
+to edit a cell yourself, re-run it, or keep working after the agent stops —
+<a href="#watching-an-agent-work">several views can watch at once</a>, and you can edit in
+the browser while the agent is still going.</p>
+<p>When you quit the viewer, the server <code>strata agent</code> started is shut down with
+it. If you pointed it at a server you started yourself, that one is left
+running.</p>
+<details class="info">
+<summary>What <code>strata agent</code> does under the hood</summary>
+<p>The command exists because doing this by hand is a fiddly ordered dance:</p>
+<ol>
+<li><strong>creates-or-opens</strong> the notebook directory (scaffolds a new one if needed),</li>
+<li><strong>starts</strong> a notebook server with the MCP endpoint enabled (or <strong>reuses</strong>
+   one already running on the target URL),</li>
+<li><strong>opens a session</strong> — the step the agent cannot do itself, since the MCP
+   tools only see notebooks that are already open,</li>
+<li><strong>writes</strong> a <code>.mcp.json</code> and a managed block in <code>CLAUDE.md</code> into the
+   notebook directory, and</li>
+<li><strong>attaches</strong> the read-only TUI to that session.</li>
+</ol>
+</details>
 <h2 id="watching-an-agent-work">Watching an agent work<a class="headerlink" href="#watching-an-agent-work" title="Permanent link">&para;</a></h2>
 <p><code>strata agent</code> attaches the TUI because it is the option that needs no extra
 step. <strong>It is not the only one, and it is not the richest.</strong></p>
