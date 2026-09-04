@@ -334,6 +334,12 @@ be asked.
 Lineage answers the follow-up. Opening a result's lineage (from the cell's
 artifact strip, or the registry panel) shows each step with **who computed it,
 on what, and what it cost** - `alice@lab · cpython-3.14-linux-x86_64 · 38s`.
+Each step also carries its **environment identity** - `env:3d731494` (which
+package set) alongside the platform (on what). Those two together are what
+answers the question a shared cache generates on day one: *"you got a hit and I
+didn't - why?"* The answer is almost always that the identities differ, and
+until they were readable there was no way to see it.
+
 Those columns are blank on a solo notebook and always were worth nothing there:
 "who" was you and "which environment" was this machine. They start meaning
 something the moment a step in your graph was run by someone else.

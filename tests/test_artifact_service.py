@@ -35,13 +35,15 @@ def _art(
     )
 
 
-def _notebook_spec(*, build_env="", build_duration_ms=None):
+def _notebook_spec(*, build_env="", build_duration_ms=None, env_hash=""):
     """A stored transform spec as the notebook writes one."""
     params = {"content_type": "json/object"}
     if build_env:
         params["build_env"] = build_env
     if build_duration_ms is not None:
         params["build_duration_ms"] = str(build_duration_ms)
+    if env_hash:
+        params["env_hash"] = env_hash
     return json.dumps({"executor": "notebook/cell@v1", "params": params, "inputs": []})
 
 
@@ -249,3 +251,42 @@ def test_lineage_survives_a_transform_spec_it_cannot_parse():
     node = graph.nodes[0]
     assert node.build_env == ""
     assert node.build_duration_ms == 0
+
+
+def test_lineage_exposes_the_environment_identity_of_each_step():
+    """ "You got a cache hit and I did not" is the question a shared cache
+    generates on day one, and comparing environment identities is the only way
+    to answer it.
+
+    ``env_hash`` has always participated in the provenance key and has never
+    been readable through anything — fine while a cache is one person's,
+    useless the moment it is a team's. With ``build_env`` it says which package
+    set, on what.
+    """
+    upstream = _art(
+        "raw",
+        1,
+        principal="alice@lab",
+        transform_spec=_notebook_spec(build_env="cpython-3.14-linux-x86_64", env_hash="a" * 64),
+    )
+    root = _art(
+        "model",
+        1,
+        inputs={"strata://artifact/raw@v=1": "raw@v=1"},
+        transform_spec=_notebook_spec(build_env="cpython-3.14-darwin-arm64", env_hash="b" * 64),
+    )
+
+    graph = artifact_service.build_lineage(
+        _FakeStore(upstream, root),
+        artifact=root,
+        artifact_id="model",
+        version=1,
+        tenant_filter=None,
+        max_depth=5,
+    )
+    by_uri = {n.uri: n for n in graph.nodes}
+
+    # Two steps, two environments — visible side by side, which is the point.
+    assert by_uri["strata://artifact/model@v=1"].env_hash == "b" * 64
+    assert by_uri["strata://artifact/raw@v=1"].env_hash == "a" * 64
+    assert by_uri["strata://artifact/raw@v=1"].build_env == "cpython-3.14-linux-x86_64"

@@ -44,6 +44,14 @@ function formatMs(ms: number): string {
             <span v-if="row.buildDurationMs > 0" class="lmeta lcost">{{
               formatMs(row.buildDurationMs)
             }}</span>
+            <!--
+              Abbreviated, and titled with the full digest. Nobody reads a
+              sha256, but two of them side by side answer "why did mine miss?"
+              at a glance, which is what this is for.
+            -->
+            <span v-if="row.envHash" class="lmeta lenvhash" :title="row.envHash"
+              >env:{{ row.envHash.slice(0, 8) }}</span
+            >
           </div>
         </div>
       </div>
@@ -66,6 +74,10 @@ function formatMs(ms: number): string {
 }
 .lcost {
   opacity: 0.55;
+}
+.lenvhash {
+  font-family: var(--font-mono, monospace);
+  opacity: 0.5;
 }
 .lineage-overlay {
   position: fixed;

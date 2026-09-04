@@ -147,6 +147,8 @@ export interface LineageNode {
   build_env?: string
   /** How long the producing run took. */
   build_duration_ms?: number
+  /** Digest of the environment it ran in — with build_env, the identity. */
+  env_hash?: string
 }
 export interface LineageEdge {
   from_uri: string

@@ -64,6 +64,7 @@ class TeamArtifact:
     blob: bytes
     build_env: str = ""
     build_duration_ms: int = 0
+    env_hash: str = ""
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,7 @@ class TeamStore:
             blob=blob,
             build_env=str(match.get("build_env") or ""),
             build_duration_ms=int(match.get("build_duration_ms") or 0),
+            env_hash=str(match.get("env_hash") or ""),
         )
 
     async def publish(
@@ -165,6 +167,7 @@ class TeamStore:
         variable_name: str | None = None,
         build_env: str = "",
         build_duration_ms: int = 0,
+        env_hash: str = "",
     ) -> bool:
         """Offer a result to the team, keyed by provenance. Never raises.
 
@@ -180,6 +183,11 @@ class TeamStore:
             metadata["build_env"] = build_env
         if build_duration_ms > 0:
             metadata["build_duration_ms"] = str(build_duration_ms)
+        # Half of the environment identity — which package set. The other half,
+        # the platform, rides in build_env. Both travel because "you got a hit
+        # and I did not" is answered by comparing them and by nothing else.
+        if env_hash:
+            metadata["env_hash"] = env_hash
         files = {
             "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
             "data": ("data.bin", blob, "application/octet-stream"),
@@ -338,7 +346,12 @@ async def pull_cell_outputs(
             content_type=artifact.content_type,
             provenance_hash=artifact.provenance_hash,
             source_hash=source_hash,
-            env_hash=env_hash,
+            # The publisher's environment, not this machine's — same reason
+            # build_env is preserved rather than restamped. They are equal
+            # whenever a pull is legitimate (identical provenance implies an
+            # identical env_hash), so a disagreement is a signal worth keeping
+            # rather than one worth overwriting.
+            env_hash=artifact.env_hash or env_hash,
             variant=variant,
             # Preserved, not restamped. The bytes were produced on the
             # publisher's machine, so the local copy has to keep saying so —
@@ -416,6 +429,7 @@ async def publish_cell_outputs(
             variable_name=var,
             build_env=_spec_param(stored, "build_env"),
             build_duration_ms=_spec_int(stored, "build_duration_ms"),
+            env_hash=_spec_param(stored, "env_hash"),
         ):
             published += 1
 

@@ -413,6 +413,9 @@ async def put_artifact_by_provenance(
     build_duration_ms = metadata.get("build_duration_ms")
     if build_duration_ms:
         params["build_duration_ms"] = str(build_duration_ms)
+    env_hash = metadata.get("env_hash")
+    if env_hash:
+        params["env_hash"] = str(env_hash)
 
     artifact_id = str(metadata.get("artifact_id") or uuid.uuid4())
     version = store.create_artifact(
@@ -515,6 +518,7 @@ async def find_artifact_by_provenance(
         content_type=_spec_param(artifact, "content_type"),
         build_env=_spec_param(artifact, "build_env"),
         build_duration_ms=_spec_int(artifact, "build_duration_ms"),
+        env_hash=_spec_param(artifact, "env_hash"),
         state=artifact.state,
         arrow_schema=artifact.schema_json,
         row_count=artifact.row_count,
