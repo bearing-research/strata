@@ -570,14 +570,22 @@ def _run_one_batched_cell(
                         }
 
                 display_values = display_capture.resolve(display_value)
+                written = [
+                    (namespace[name], payload)
+                    for name, payload in outputs.items()
+                    if name in namespace
+                ]
                 serialized_displays: list[dict[str, Any]] = []
                 for idx, display in enumerate(display_values):
                     try:
-                        # ``__display__N`` is the variable-name convention the
-                        # serializer recognizes as display output for content-
-                        # type detection (serializer.py ``_is_display_variable_name``).
-                        # ``display_N`` would be classified as a regular pickle.
-                        meta = _ser.serialize_value(display, cell_output_dir, f"__display__{idx}")
+                        # serialize_display_value applies the ``__display__N``
+                        # variable-name convention the serializer recognizes for
+                        # content-type detection (serializer.py
+                        # ``_is_display_variable_name``); ``display_N`` would be
+                        # classified as a regular pickle. It also reuses the
+                        # payload when this display *is* one of the variables
+                        # just written above.
+                        meta = _ser.serialize_display_value(display, cell_output_dir, idx, written)
                         serialized_displays.append(meta)
                     except Exception:
                         # Display serialization errors don't abort the cell;
@@ -838,13 +846,19 @@ def main():
             except Exception as e:
                 serialized[var_name] = {"error": str(e), "type": type(value).__name__}
 
+        # Pairs the display loop can reuse: a cell whose last expression is one
+        # of its own variables would otherwise serialize that object twice.
+        written = [
+            (value, serialized[name]) for name, value in outputs.items() if name in serialized
+        ]
         serialized_displays: list[dict[str, Any]] = []
         for index, value in enumerate(display_values):
             try:
-                serialized_display = _ser.serialize_value(
+                serialized_display = _ser.serialize_display_value(
                     value,
                     output_dir,
-                    f"__display__{index}",
+                    index,
+                    written,
                 )
             except Exception as e:
                 serialized_display = {"error": str(e), "type": type(value).__name__}

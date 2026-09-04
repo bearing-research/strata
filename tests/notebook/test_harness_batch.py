@@ -93,6 +93,53 @@ def _run_in_thread(
 # ---------------------------------------------------------------------------
 
 
+def test_batch_display_that_is_a_variable_reuses_its_payload(batch_pipes):
+    """The batch path deduplicates the same way the single-cell path does.
+
+    A cell ending in a bare consumed variable hands one object to both
+    serialization loops; writing it twice is wasted work, and for a lazy or
+    one-shot source the two writes disagree.
+    """
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+
+    cells = [
+        {
+            "cell_id": "c1",
+            "source": "import pandas as pd\ndf = pd.DataFrame({'a': [1, 2, 3]})\ndf",
+            "consumed_vars": ["df"],
+            "env": {},
+            "mount_manifest": {},
+            "source_hash": "src-c1",
+            "env_hash": "env",
+        },
+    ]
+
+    thread, errors = _run_in_thread(cells, {}, output_dir, frame_w, resp_r)
+
+    frames: list[dict] = []
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        frames.append(frame)
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "abc"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True, "uri": "strata://test/c1"})
+        elif frame["type"] == "batch_end":
+            break
+
+    thread.join(timeout=5)
+    assert not errors, f"harness raised: {errors!r}"
+
+    persist = next(f["payload"] for f in frames if f["type"] == "persist")
+    variable = persist["outputs"]["df"]
+    display = persist["display_outputs"][0]
+
+    assert display["file"] == variable["file"]
+    assert not list((output_dir / "c1").glob("__display__*"))
+
+
 def test_batch_runs_two_cells_with_cache_miss_then_persist(batch_pipes):
     """Two cells, both cache-miss, both succeed. Verify frame sequence
     and that serialized blobs land at output_dir/<cell_id>/{var}{ext}.

@@ -160,3 +160,37 @@ class TestExecuteHarnessClientCellId:
         result = execute_harness(manifest)
         assert result["success"] is True, result.get("error")
         assert result["variables"]["principal"]["preview"] == "alice"
+
+
+class TestExecuteHarnessDisplayDeduplication:
+    """The warm pool is the default execution path, so it needs the same
+    display deduplication as the cold subprocess: a cell ending in a bare
+    consumed variable must not serialize that object a second time."""
+
+    def test_display_that_is_a_variable_reuses_its_payload(self, tmp_path: Path) -> None:
+        manifest = {
+            "source": "import pandas as pd\ndf = pd.DataFrame({'a': [1, 2, 3]})\ndf",
+            "inputs": {},
+            "output_dir": str(tmp_path),
+        }
+
+        result = execute_harness(manifest)
+
+        assert result["success"] is True
+        variable = result["variables"]["df"]
+        display = result["displays"][0]
+        assert display["file"] == variable["file"]
+        assert not list(tmp_path.glob("__display__*"))
+
+    def test_display_that_is_not_a_variable_is_written(self, tmp_path: Path) -> None:
+        manifest = {
+            "source": ("import pandas as pd\ndf = pd.DataFrame({'a': [1, 2, 3]})\ndf.head(2)"),
+            "inputs": {},
+            "output_dir": str(tmp_path),
+        }
+
+        result = execute_harness(manifest)
+
+        assert result["success"] is True
+        assert result["displays"][0]["file"] != result["variables"]["df"]["file"]
+        assert list(tmp_path.glob("__display__*"))

@@ -1322,6 +1322,86 @@ def _capture_serializer_logs():
         logger.removeHandler(handler)
 
 
+class _CountingCapsuleTable:
+    """A capsule exporter that counts how often its stream is pulled.
+
+    Stands in for a lazy query handle: every conversion re-runs the query, so
+    the count is what says whether a value was written once or twice.
+    """
+
+    def __init__(self, table):
+        self._table = table
+        self.stream_pulls = 0
+
+    def __arrow_c_stream__(self, requested_schema=None):
+        self.stream_pulls += 1
+        return self._table.__arrow_c_stream__(requested_schema)
+
+
+class TestDisplayValueDeduplication:
+    """A cell's last expression is often one of its own variables."""
+
+    def test_display_that_is_a_variable_reuses_the_variable_payload(self):
+        value = _CountingCapsuleTable(pa.table({"a": [1, 2, 3]}))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            var = serialize_value(value, tmp, "frame")
+            display = serializer_module.serialize_display_value(value, tmp, 0, [(value, var)])
+            written = sorted(f.name for f in Path(tmp).iterdir())
+
+        # One conversion, one file, and the display points at it.
+        assert value.stream_pulls == 1
+        assert written == ["frame.arrow"]
+        assert display["file"] == var["file"]
+        assert display["content_type"] == var["content_type"]
+
+    def test_a_distinct_value_is_still_written(self):
+        var_value = _CountingCapsuleTable(pa.table({"a": [1]}))
+        display_value = _CountingCapsuleTable(pa.table({"b": [2]}))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            var = serialize_value(var_value, tmp, "frame")
+            display = serializer_module.serialize_display_value(
+                display_value, tmp, 0, [(var_value, var)]
+            )
+            back = deserialize_value(display["content_type"], Path(tmp) / display["file"])
+
+        assert display["file"] == "__display__0.arrow"
+        assert display["file"] != var["file"]
+        assert back.column_names == ["b"]
+
+    def test_a_display_only_content_type_is_not_reused(self):
+        # A figure is pickle/object as a variable and image/png as a display,
+        # because the display name unlocks a detection path the variable name
+        # does not. Reusing on identity alone would store the pickle as the
+        # display and the UI would render nothing.
+        value = _SerializerPngDisplay()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            var = serialize_value(value, tmp, "fig")
+            display = serializer_module.serialize_display_value(value, tmp, 0, [(value, var)])
+
+        assert var["content_type"] == ContentType.PICKLE_OBJECT
+        assert display["content_type"] == ContentType.IMAGE_PNG
+        assert display["file"] != var["file"]
+
+    def test_reuse_survives_a_drained_one_shot_source(self):
+        # The case the __next__ guard cannot catch: a wrapper presenting the
+        # capsule over a one-shot reader without being an iterator. The first
+        # write drains it; reuse means the display never asks again, so the
+        # zero-row second artifact cannot happen.
+        table = pa.table({"a": [1, 2, 3]})
+        reader = pa.RecordBatchReader.from_batches(table.schema, table.to_batches())
+        value = _CountingCapsuleTable(reader)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            var = serialize_value(value, tmp, "stream")
+            display = serializer_module.serialize_display_value(value, tmp, 0, [(value, var)])
+
+        assert var["rows"] == 3
+        assert display["rows"] == 3
+
+
 class TestGenericArrowProtocols:
     """The two hatches that keep unknown libraries out of the pickle path."""
 

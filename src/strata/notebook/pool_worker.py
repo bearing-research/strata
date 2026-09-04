@@ -336,11 +336,14 @@ def execute_harness(manifest: dict) -> dict:
                     variables[key] = {"content_type": "error", "error": str(e)}
 
         display_values = display_capture.resolve(_display_value)
+        written = [
+            (namespace[name], payload) for name, payload in variables.items() if name in namespace
+        ]
         serialized_displays: list[dict[str, Any]] = []
         for index, value in enumerate(display_values):
             try:
                 serialized_displays.append(
-                    _ser.serialize_value(value, output_dir, f"__display__{index}")
+                    _ser.serialize_display_value(value, output_dir, index, written)
                 )
             except Exception:
                 continue

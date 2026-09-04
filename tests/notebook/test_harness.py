@@ -204,6 +204,57 @@ x = 1
         assert result["success"] is True
         assert "error" in result["stderr"]
 
+    def test_harness_reuses_the_variable_payload_for_an_identical_display(
+        self, harness_script, tmp_path
+    ):
+        """A bare trailing variable must not be serialized a second time.
+
+        The display loop and the variable loop are handed the same object, so
+        writing it twice costs a full re-serialization of the frame — and for a
+        lazy or one-shot source the second write does not even produce the same
+        bytes. Runs the harness directly rather than through ``run_harness`` so
+        the output directory survives for inspection.
+        """
+        manifest_path = tmp_path / "manifest.json"
+        manifest = {
+            "source": "import pandas as pd\ndf = pd.DataFrame({'a': [1, 2, 3]})\ndf",
+            "inputs": {},
+            "output_dir": str(tmp_path),
+        }
+        manifest_path.write_text(json.dumps(manifest))
+        subprocess.run(
+            [sys.executable, str(harness_script), str(manifest_path)],
+            cwd=str(tmp_path),
+            capture_output=True,
+        )
+        result = json.loads((tmp_path / "harness-result.json").read_text())
+
+        assert result["success"] is True
+        variable = result["variables"]["df"]
+        display = result["displays"][0]
+        assert display["file"] == variable["file"]
+        assert not list(tmp_path.glob("__display__*"))
+
+    def test_harness_still_writes_a_display_that_is_not_a_variable(self, harness_script, tmp_path):
+        """The counterpart: an expression that is not a bound variable."""
+        manifest_path = tmp_path / "manifest.json"
+        manifest = {
+            "source": ("import pandas as pd\ndf = pd.DataFrame({'a': [1, 2, 3]})\ndf.head(2)"),
+            "inputs": {},
+            "output_dir": str(tmp_path),
+        }
+        manifest_path.write_text(json.dumps(manifest))
+        subprocess.run(
+            [sys.executable, str(harness_script), str(manifest_path)],
+            cwd=str(tmp_path),
+            capture_output=True,
+        )
+        result = json.loads((tmp_path / "harness-result.json").read_text())
+
+        assert result["success"] is True
+        assert result["displays"][0]["file"] != result["variables"]["df"]["file"]
+        assert list(tmp_path.glob("__display__*"))
+
     def test_harness_captures_last_expression_png_display(self, harness_script):
         """Bare-expression values exposing _repr_png_ should be serialized as display output."""
         manifest = {

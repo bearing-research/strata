@@ -47,7 +47,7 @@ import logging
 import os
 import pickle
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, NamedTuple, NotRequired, Protocol, TypedDict, cast
@@ -451,6 +451,46 @@ def serialize_value(value: Any, output_dir: Path | str, variable_name: str) -> S
     return handler.serialize(value, output_dir, variable_name)
 
 
+def serialize_display_value(
+    value: Any,
+    output_dir: Path | str,
+    index: int,
+    written: Iterable[tuple[Any, SerializedPayload]] = (),
+) -> SerializedPayload:
+    """Serialize one display value, reusing a variable's payload when they are
+    the same object.
+
+    A cell whose last expression is one of its own variables hands the same
+    object to both serialization loops. Writing it twice is wasted work for a
+    large frame, and wrong outright for anything whose bytes are not a pure
+    function of the object: converting a lazy query handle re-runs the query,
+    so a non-deterministic source stores different data under the variable and
+    under the display, and a one-shot stream is already drained by the time the
+    display is written.
+
+    *written* carries the ``(value, payload)`` pairs this cell has already
+    serialized. Reuse needs the content type to agree as well as the identity,
+    because a display name unlocks the markdown and PNG paths that a variable
+    name does not (see :func:`_is_display_variable_name`): a matplotlib figure
+    that is also a consumed variable is legitimately ``pickle/object`` as a
+    variable and ``image/png`` as a display, and must be written twice.
+    """
+    variable_name = f"__display__{index}"
+    content_type = detect_content_type(value, variable_name)
+    for written_value, payload in written:
+        if (
+            written_value is value
+            and payload.get("content_type") == content_type
+            and payload.get("file")
+        ):
+            # The bytes are already on disk under the variable's filename. The
+            # caller reads display payloads by their ``file`` key and stores
+            # them under a display-specific artifact id, so sharing one file
+            # between two payloads is safe.
+            return cast(SerializedPayload, dict(payload))
+    return serialize_value(value, output_dir, variable_name)
+
+
 def _serialize_arrow_with_fallback(
     value: Any, output_dir: Path, variable_name: str
 ) -> SerializedPayload:
@@ -841,14 +881,14 @@ def _matches_arrow_capsule(value: Any) -> bool:
 
     Iterators are excluded as well: an exporter that is itself an iterator
     (``pa.RecordBatchReader``, and the readers other libraries hand back) is a
-    one-shot stream, and reading it consumes it. That matters because a cell
-    whose value is also its display output serializes the same object twice,
-    so the second artifact would record zero rows with nothing logged. Note
-    this only catches exporters that *are* iterators: a wrapper presenting
-    ``__arrow_c_stream__`` over a one-shot reader without being iterable
-    itself is indistinguishable from a re-readable handle, and will still be
-    drained. The protocol carries no re-readability signal, so nothing here
-    can close that case.
+    one-shot stream, and reading it consumes it, leaving the caller's object
+    spent. This only catches exporters that *are* iterators — the protocol
+    carries no re-readability signal, so a wrapper presenting
+    ``__arrow_c_stream__`` over a one-shot reader without being iterable is
+    indistinguishable from a re-readable handle and gets stored. That is
+    survivable now that :func:`serialize_display_value` writes each object
+    once per cell: the value is read exactly once, so it lands in its artifact
+    intact rather than producing a second, empty one.
     """
     cls = type(value)
     if hasattr(cls, "__next__"):

@@ -254,14 +254,15 @@ Pin the query where you want it evaluated and store that.
 One-shot streams are refused rather than stored. A `pyarrow.RecordBatchReader`
 is consumed by reading, so storing one would leave the object empty for whatever
 reads it next; it is not picklable either, so the cell fails instead. Call
-`.read_all()` and store the table. This is best-effort: a wrapper that presents
-the Arrow protocol over a one-shot reader without being iterable itself is
-indistinguishable from a re-readable handle, and storing one will drain it.
+`.read_all()` and store the table. The check looks for an iterator, so a wrapper
+that presents the Arrow protocol over a one-shot reader without being iterable
+itself is not caught: it is stored, correctly, but the object is spent
+afterwards.
 
-For the same reason, prefer a deterministic query. A cell whose value is also
-its last expression converts the handle twice, once for the variable and once
-for the display output, so a query over changing data, or one containing
-something like `random()`, can store two different results for a single cell.
+Each value a cell produces is serialized once, even when it is both a variable
+and the cell's last expression. That matters for a lazy handle, where writing is
+what runs the query: a cell ending in a bare `df` evaluates it once, not once
+per artifact.
 
 ## Cascade Execution
 
