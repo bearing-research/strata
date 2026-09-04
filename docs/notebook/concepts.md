@@ -228,11 +228,22 @@ Cell outputs are serialized based on their Python type:
 
 | Type | Format | File extension |
 |------|--------|---------------|
-| PyArrow tables, pandas DataFrames, numpy arrays | Arrow IPC | `.arrow` |
+| PyArrow tables, pandas and polars frames, numpy arrays, torch and jax tensors | Arrow IPC | `.arrow` |
+| Any other type exporting `__arrow_c_stream__` or `__dlpack__` | Arrow IPC | `.arrow` |
 | Dicts, lists, scalars (int, float, str, bool, None) | JSON | `.json` |
 | Everything else | Pickle | `.pickle` |
 
 The content type is stored in the artifact metadata so the read side knows how to deserialize.
+
+The second row is what keeps a library Strata has never heard of out of the
+pickle path. DuckDB relations, cuDF frames, Ibis tables and anything else
+implementing the [Arrow PyCapsule
+interface](https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html)
+are stored as real Arrow, so the artifact stays readable by other tools and the
+notebook can show its schema and row count. The trade is type identity: the
+libraries named in the first row are handed back as themselves, while a
+capsule-sourced value comes back as a `pyarrow.Table` and a DLPack-sourced one
+as a `numpy.ndarray`.
 
 ## Cascade Execution
 

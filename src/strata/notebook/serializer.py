@@ -4,9 +4,10 @@ Supports these content types:
   arrow/ipc    — Anything Arrow-representable (PyArrow Tables/RecordBatch,
                  pandas DataFrames/Series, numpy ndarrays of any dim,
                  numpy scalars, typed Python primitives like datetime /
-                 Decimal / UUID / bytes / complex). Shape is encoded in
-                 schema metadata: ``strata.arrow.shape`` = "table" |
-                 "tensor" | "scalar".
+                 Decimal / UUID / bytes / complex), plus any third-party
+                 type that exports itself through ``__arrow_c_stream__``
+                 or ``__dlpack__``. Shape is encoded in schema metadata:
+                 ``strata.arrow.shape`` = "table" | "tensor" | "scalar".
   json/object  — dicts, lists, scalars (int/float/str/bool/None)
   image/png    — Displayable PNG output (figures, images)
   text/markdown — Displayable markdown output
@@ -300,7 +301,8 @@ def detect_content_type(value: Any, variable_name: str | None = None) -> Content
       1. Anything Arrow-representable → arrow/ipc
          (pyarrow Table/RecordBatch, pandas DataFrame/Series, numpy
          ndarray of any dim, numpy scalars, typed Python primitives
-         like datetime/Decimal/UUID/bytes/complex)
+         like datetime/Decimal/UUID/bytes/complex, and any type
+         exporting __arrow_c_stream__ / __dlpack__)
       2. Markdown / PNG display value → text/markdown or image/png
       3. JSON-serializable primitive  → json/object
       4. Python module                → module/import
@@ -350,9 +352,14 @@ def _is_arrow_representable(value: Any) -> bool:
     there.
 
     The covered set: tables (pyarrow / pandas / polars), n-d arrays and scalars
-    (numpy, plus torch / jax tensors via the numpy bridge), and typed Python
+    (numpy, plus torch / jax tensors via the numpy bridge), typed Python
     primitives with a native or tagged Arrow representation (datetime family,
-    Decimal, bytes; UUID and complex via metadata tags).
+    Decimal, bytes; UUID and complex via metadata tags), and — via the two
+    generic rules at the end of the registry — any third-party type that
+    exports ``__arrow_c_stream__`` or ``__dlpack__``. Those two keep an
+    unrecognised library's values readable as Arrow instead of dropping them
+    into an opaque pickle; they come back as a pa.Table / ndarray rather than
+    the original type, which only the named rules above them can rebuild.
     """
     return any(rule.matches(value) for rule in _ARROW_TYPE_RULES)
 
@@ -521,6 +528,11 @@ _SOURCE_POLARS_DATAFRAME = b"polars.DataFrame"
 _SOURCE_POLARS_SERIES = b"polars.Series"
 _SOURCE_TORCH = b"torch.Tensor"
 _SOURCE_JAX = b"jax.Array"
+# Not a library name: the value reached us through the Arrow PyCapsule
+# interface, so we know it was tabular but not what type it was. Recorded
+# rather than reusing the pyarrow.Table tag so lineage does not claim an
+# origin the writer never had.
+_SOURCE_ARROW_CAPSULE = b"arrow.capsule"
 
 # Values of _META_SCALAR_TYPE — set only for non-native typed scalars
 # that need round-trip help beyond what pyarrow's native types give us.
@@ -781,11 +793,61 @@ def _table_from_typed_scalar(value: Any) -> Any:
     return _python_scalar_to_table(value)
 
 
-# Order matters only across overlapping predicates; these type families are
-# disjoint, so the order is just cheapest-first: pyarrow (no-op), then the
-# DataFrame libs, then the array libs, then typed Python primitives. torch / jax
-# detection probes sys.modules (a tensor implies its library is imported), so
-# they cost nothing in notebooks that never touch them.
+def _matches_arrow_capsule(value: Any) -> bool:
+    """Anything that exports itself through the Arrow PyCapsule interface.
+
+    The generic table hatch. A library implementing ``__arrow_c_stream__``
+    (duckdb, cudf, ibis, datafusion, delta-rs, chdb, ...) has declared itself
+    tabular and will hand us the data, so supporting it costs no rule of its
+    own. What it cannot do is name the type on the way back, which is why this
+    sits *below* the pandas / polars rules: those types implement the capsule
+    too, and reaching them here first would silently downgrade every DataFrame
+    in the codebase to a pa.Table.
+    """
+    return hasattr(value, "__arrow_c_stream__")
+
+
+def _table_from_arrow_capsule(value: Any) -> Any:
+    import pyarrow as pa
+
+    return _stamp_metadata(
+        pa.table(value), {_META_SHAPE: _SHAPE_TABLE, _META_SOURCE: _SOURCE_ARROW_CAPSULE}
+    )
+
+
+def _matches_dlpack(value: Any) -> bool:
+    """Anything that exports a raw n-d buffer through DLPack.
+
+    The generic array hatch, covering cupy / tensorflow / mlx without a rule
+    each. Deliberately ``__dlpack__`` and not ``__array__``: dlpack is an
+    opt-in declaration of *being* a buffer, whereas ``__array__`` is a
+    coercion hook that richer types (xarray, astropy Quantity, PIL images)
+    also implement to offer a lossy array view of themselves. Routing on the
+    latter would quietly discard coordinates, units and image-ness that the
+    pickle fallback preserves today — and, since arrow detection runs ahead
+    of the display checks, would capture PNG display values as tensors.
+    """
+    return hasattr(value, "__dlpack__")
+
+
+def _table_from_dlpack(value: Any) -> Any:
+    import numpy as np
+
+    # Device buffers (a CUDA cupy array) raise here: numpy cannot import a
+    # non-host capsule. The arrow fallback turns that into a pickle, which is
+    # exactly what the value got before this rule existed.
+    return _ndarray_to_table(np.from_dlpack(value))
+
+
+# Order is load-bearing from the pyarrow rule down to the two generic hatches
+# at the end. The named rules stamp a _META_SOURCE tag that rebuilds the exact
+# Python type; the generic rules cannot, so every type we want handed back
+# unchanged has to match before them: pandas and polars frames export
+# __arrow_c_stream__, and ndarrays / torch / jax tensors export __dlpack__.
+# Among the named rules themselves the families are disjoint and the order is
+# just cheapest-first. torch / jax detection probes sys.modules (a tensor
+# implies its library is imported), so they cost nothing in notebooks that
+# never touch them.
 _ARROW_TYPE_RULES: tuple[_ArrowRule, ...] = (
     _ArrowRule(_matches_pyarrow, _table_from_pyarrow),
     _ArrowRule(_matches_pandas, _table_from_pandas),
@@ -794,6 +856,8 @@ _ARROW_TYPE_RULES: tuple[_ArrowRule, ...] = (
     _ArrowRule(_matches_torch, _table_from_torch),
     _ArrowRule(_matches_jax, _table_from_jax),
     _ArrowRule(_matches_typed_scalar, _table_from_typed_scalar),
+    _ArrowRule(_matches_arrow_capsule, _table_from_arrow_capsule),
+    _ArrowRule(_matches_dlpack, _table_from_dlpack),
 )
 
 
@@ -1585,7 +1649,7 @@ def _table_to_pandas_or_arrow(table: Any) -> Any:
     meta = table.schema.metadata or {}
     source = meta.get(_META_SOURCE, b"")
 
-    if source == _SOURCE_PYARROW_TABLE:
+    if source in (_SOURCE_PYARROW_TABLE, _SOURCE_ARROW_CAPSULE):
         return table
     if source == _SOURCE_PYARROW_RECORD_BATCH:
         import pyarrow as pa
