@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://bearing-research.github.io/strata/dev/notebook/environment/">
+        <link rel="canonical" href="https://bearing-research.github.io/strata/dev/notebook/scratchpad/">
       
       
-        <link rel="prev" href="../ai/">
+        <link rel="prev" href="../agent/">
       
       
-        <link rel="next" href="../secrets/">
+        <link rel="next" href="../tui/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Environment - Strata</title>
+        <title>Agent scratchpad - Strata</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#environment-management" class="md-skip">
+        <a href="#the-notebook-as-an-agents-scratchpad" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Environment
+              Agent scratchpad
             
           </span>
         </div>
@@ -515,8 +515,10 @@
                 
   
   
+    
   
   
+  
     
     
     
@@ -530,13 +532,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_1" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" checked>
         
           
           <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="">
@@ -557,7 +557,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -628,10 +628,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../scratchpad/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent scratchpad
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -647,6 +674,81 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#set-it-up-once-in-any-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Set it up once, in any project
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-it-beats-a-temp-script" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why it beats a temp script
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-agent-actually-reaches-for-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the agent actually reaches for it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#looking-at-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Looking at it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Related
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -972,37 +1074,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Environment
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../environment/" class="md-nav__link">
         
   
   
@@ -1018,153 +1093,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        How It Works
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#python-version" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Python Version
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#installing-packages" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Installing Packages
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Installing Packages">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#from-the-ui" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        From the UI
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#import-from-requirementstxt" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Import from requirements.txt
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#import-from-environmentyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Import from environment.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#export" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Export
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#environment-operations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Environment Operations
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cache-invalidation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cache Invalidation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#missing-package-detection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Missing Package Detection
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#file-layout" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        File Layout
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2059,10 +1987,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#how-it-works" class="md-nav__link">
+  <a href="#set-it-up-once-in-any-project" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How It Works
+        Set it up once, in any project
       
     </span>
   </a>
@@ -2070,10 +1998,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#python-version" class="md-nav__link">
+  <a href="#why-it-beats-a-temp-script" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Python Version
+        Why it beats a temp script
       
     </span>
   </a>
@@ -2081,71 +2009,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#installing-packages" class="md-nav__link">
+  <a href="#why-the-agent-actually-reaches-for-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Installing Packages
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Installing Packages">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#from-the-ui" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        From the UI
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#import-from-requirementstxt" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Import from requirements.txt
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#import-from-environmentyaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Import from environment.yaml
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#export" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Export
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#environment-operations" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Environment Operations
+        Why the agent actually reaches for it
       
     </span>
   </a>
@@ -2153,10 +2020,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#cache-invalidation" class="md-nav__link">
+  <a href="#looking-at-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Cache Invalidation
+        Looking at it
       
     </span>
   </a>
@@ -2164,21 +2031,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#missing-package-detection" class="md-nav__link">
+  <a href="#related" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Missing Package Detection
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#file-layout" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        File Layout
+        Related
       
     </span>
   </a>
@@ -2205,101 +2061,74 @@
   
 
 
-<h1 id="environment-management">Environment Management<a class="headerlink" href="#environment-management" title="Permanent link">&para;</a></h1>
-<p>Each notebook has its own isolated Python environment managed by <a href="https://docs.astral.sh/uv/">uv</a>.</p>
-<h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
-<p>When you create a notebook, Strata:</p>
-<ol>
-<li>Generates a <code>pyproject.toml</code> with <code>pyarrow</code> as the default dependency</li>
-<li>Runs <code>uv sync</code> to create a <code>.venv/</code> and <code>uv.lock</code></li>
-<li>All cell execution uses this notebook-local venv</li>
-</ol>
-<p>The environment lockfile hash (<code>sha256(uv.lock)</code>) participates in provenance. Changing the environment invalidates all cached cell outputs.</p>
-<h2 id="python-version">Python Version<a class="headerlink" href="#python-version" title="Permanent link">&para;</a></h2>
-<p>At notebook creation time, you can select a Python version from the versions configured on the server. The default is the server's own Python version.</p>
-<div class="admonition note">
-<p class="admonition-title">Note</p>
-<p>The available versions depend on the server's <code>STRATA_NOTEBOOK_PYTHON_VERSIONS</code> configuration. On the hosted preview, both 3.12 and 3.13 are available.</p>
-</div>
-<h2 id="installing-packages">Installing Packages<a class="headerlink" href="#installing-packages" title="Permanent link">&para;</a></h2>
-<h3 id="from-the-ui">From the UI<a class="headerlink" href="#from-the-ui" title="Permanent link">&para;</a></h3>
-<p>Open the <strong>Environment</strong> panel in the sidebar. Type a package name and click <strong>Add</strong>.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pandas&gt;=2.0
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>scikit-learn
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>matplotlib
-</code></pre></div>
-<p>The operation runs asynchronously, you can continue editing cells while it installs.</p>
-<h3 id="import-from-requirementstxt">Import from requirements.txt<a class="headerlink" href="#import-from-requirementstxt" title="Permanent link">&para;</a></h3>
-<p>In the Environment panel, click <strong>Import</strong> and paste a <code>requirements.txt</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pandas&gt;=2.0
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>numpy&gt;=2.0
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>scikit-learn&gt;=1.5
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>matplotlib&gt;=3.9
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>seaborn&gt;=0.13
-</code></pre></div>
-<p>Strata previews the changes (additions, removals, unchanged) before applying.</p>
-<h3 id="import-from-environmentyaml">Import from environment.yaml<a class="headerlink" href="#import-from-environmentyaml" title="Permanent link">&para;</a></h3>
-<p>Conda-style <code>environment.yaml</code> files are supported on a best-effort basis. Strata extracts <code>pip</code> dependencies and ignores conda-specific packages.</p>
-<h3 id="export">Export<a class="headerlink" href="#export" title="Permanent link">&para;</a></h3>
-<p>Click <strong>Export</strong> to download the current dependencies as <code>requirements.txt</code>.</p>
-<h2 id="environment-operations">Environment Operations<a class="headerlink" href="#environment-operations" title="Permanent link">&para;</a></h2>
-<p>All environment mutations run as <strong>async jobs</strong> with four actions:</p>
-<table>
-<thead>
-<tr>
-<th>Action</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>add</code></td>
-<td>Install a new package</td>
-</tr>
-<tr>
-<td><code>remove</code></td>
-<td>Remove a package</td>
-</tr>
-<tr>
-<td><code>sync</code></td>
-<td>Rebuild the environment from <code>pyproject.toml</code></td>
-</tr>
-<tr>
-<td><code>import</code></td>
-<td>Bulk import from requirements.txt or environment.yaml</td>
-</tr>
-</tbody>
-</table>
-<p>The UI shows:</p>
-<ul>
-<li>Current job status (running, success, failed)</li>
-<li>Recent operation history (persisted across server restarts)</li>
-<li>Resolved package count and lockfile hash</li>
-</ul>
-<h2 id="cache-invalidation">Cache Invalidation<a class="headerlink" href="#cache-invalidation" title="Permanent link">&para;</a></h2>
-<p>When you install or remove a package:</p>
-<ol>
-<li><code>uv sync</code> runs to update <code>uv.lock</code></li>
-<li>The lockfile hash changes</li>
-<li>All cells become <strong>stale</strong> (their provenance no longer matches)</li>
-<li>Re-running any cell recomputes with the new environment</li>
-</ol>
+<h1 id="the-notebook-as-an-agents-scratchpad">The notebook as an agent's scratchpad<a class="headerlink" href="#the-notebook-as-an-agents-scratchpad" title="Permanent link">&para;</a></h1>
+<p>A coding agent working on <em>something else</em> — debugging your service, exploring a
+dataset, checking what a function returns — constantly needs to run a bit of
+throwaway Python. The usual way is <code>python -c</code> or a temp script: work that
+vanishes the moment it finishes, that nobody can see, and that recomputes from
+scratch every time.</p>
+<p>A Strata notebook is a better home for exactly that. The agent adds a cell and
+runs it; the cell is versioned, content-addressed, and cached.</p>
 <div class="admonition info">
-<p class="admonition-title">Switching back</p>
-<p>If you remove a package and then re-add it (returning to the same <code>uv.lock</code>), the original provenance hashes match again and cells get <strong>cache hits</strong>. This is free by construction, no special logic needed.</p>
+<p class="admonition-title">This is not the same as <a href="../agent/">driving a notebook</a></p>
+<p>There the notebook is <strong>the deliverable</strong> — you asked for it, you watch it
+being built, you keep it. Here it is <strong>disposable infrastructure</strong> for some
+other task, created by the agent on demand, and you may never look at it.</p>
+<p>Same machinery, opposite intent. The distinction matters mostly for setup:
+driving starts with you running <code>strata agent</code>; scratchpad use starts with
+the agent noticing it has a better option than <code>python -c</code>.</p>
 </div>
-<h2 id="missing-package-detection">Missing Package Detection<a class="headerlink" href="#missing-package-detection" title="Permanent link">&para;</a></h2>
-<p>When a cell fails with <code>ModuleNotFoundError</code>, Strata detects the missing package and offers a one-click install button:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>ModuleNotFoundError: No module named &#39;pandas&#39;
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>→ [Install pandas]
+<h2 id="set-it-up-once-in-any-project">Set it up once, in any project<a class="headerlink" href="#set-it-up-once-in-any-project" title="Permanent link">&para;</a></h2>
+<p>The behavior travels with the package, but the plugin is the reliable way to get
+it into every Claude Code session — it also bundles a
+<code>/strata-scratchpad:scratch</code> command:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>/plugin marketplace add bearing-research/strata
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>/plugin install strata-scratchpad@strata
 </code></pre></div>
-<h2 id="file-layout">File Layout<a class="headerlink" href="#file-layout" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>my_notebook/
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>├── pyproject.toml    # Package declarations
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>├── uv.lock           # Locked dependency graph
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>└── .venv/            # Virtual environment (auto-created, not committed)
+<p>Once installed the skill is auto-discovered in <strong>every</strong> project, so the agent
+reaches for a cached notebook cell even when it wasn't launched anywhere near a
+notebook. The <code>strata</code> CLI still needs to be on <code>PATH</code>. The plugin source lives
+in the repo at <code>plugins/strata-scratchpad/</code>.</p>
+<p>The skill also ships inside <code>strata-notebook</code> itself (under
+<code>&lt;site-packages&gt;/strata/.agents/skills/</code>), which some agents discover on their
+own; the plugin removes the "some".</p>
+<h2 id="why-it-beats-a-temp-script">Why it beats a temp script<a class="headerlink" href="#why-it-beats-a-temp-script" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Unchanged work never recomputes.</strong> Every cell is cached by provenance
+  (<code>sha256(inputs + source + env)</code>), <em>including a leaf cell that only <code>print</code>s</em>.
+  An agent that re-runs an unchanged diagnostic gets its output back instantly.
+  The expensive step it ran ten turns ago is still a cache hit now — which is
+  the whole point, because agents re-derive the same thing constantly.</li>
+<li><strong>It persists and it can be seen.</strong> Each snippet is a real cell on disk, not
+  an invisible script in <code>/tmp</code>. You can open it later, or watch it live.</li>
+<li><strong>Side effects stay honest.</strong> A cell that writes a file, calls an API, or
+  reads the clock must not replay a stale result. Those get
+  <a href="../annotations/#nocache"><code># @nocache</code></a> and always re-execute; everything else
+  stays cached.</li>
+</ul>
+<h2 id="why-the-agent-actually-reaches-for-it">Why the agent actually reaches for it<a class="headerlink" href="#why-the-agent-actually-reaches-for-it" title="Permanent link">&para;</a></h2>
+<p>A better option that costs more gets ignored. Two things keep the cost equal:</p>
+<ul>
+<li><strong>One call, not three.</strong> <code>run_snippet(session_id, source)</code> over
+  <a href="../mcp/">MCP</a>, or <code>strata cell add … -c 'src' --run</code> on the CLI, adds a cell
+  <strong>and</strong> runs it <strong>and</strong> returns <code>stdout</code> — the same shape as <code>python -c</code>.</li>
+<li><strong>No setup step.</strong> The skill tells the agent how to create or reuse a
+  scratch notebook itself, so there is no moment where using the notebook means
+  stopping to configure one.</li>
+</ul>
+<h2 id="looking-at-it">Looking at it<a class="headerlink" href="#looking-at-it" title="Permanent link">&para;</a></h2>
+<p>You don't have to, and usually won't. When you want to:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>strata<span class="w"> </span>watch<span class="w"> </span>./scratch<span class="w">        </span><span class="c1"># live terminal viewer, read-only</span>
 </code></pre></div>
-<p>The <code>pyproject.toml</code> and <code>uv.lock</code> are the source of truth. The <code>.venv/</code> is recreated by <code>uv sync</code> when needed.</p>
+<p>or open the notebook in the <a href="../../getting-started/notebook/">web UI</a>. Everything
+in <a href="../agent/#watching-an-agent-work">Watching an agent work</a> applies here too.</p>
+<h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../agent/">Driving a notebook with a coding agent</a>: the other use case, where
+  the notebook is the point.</li>
+<li><a href="../mcp/">MCP Server</a>: the tool list and the endpoint's security model.</li>
+<li><a href="../annotations/">Cell Annotations</a>: <code># @nocache</code> and the rest.</li>
+</ul>
 
 
 

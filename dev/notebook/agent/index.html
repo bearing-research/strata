@@ -16,7 +16,7 @@
         <link rel="prev" href="../../getting-started/notebook/">
       
       
-        <link rel="next" href="../tui/">
+        <link rel="next" href="../scratchpad/">
       
       
         
@@ -685,21 +685,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#why-its-a-good-agent-scratchpad" class="md-nav__link">
+  <a href="#watching-an-agent-work" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why it's a good agent scratchpad
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#installing-the-scratchpad-skill-as-a-plugin" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Installing the scratchpad skill as a plugin
+        Watching an agent work
       
     </span>
   </a>
@@ -765,6 +754,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scratchpad/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent scratchpad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2025,21 +2042,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#why-its-a-good-agent-scratchpad" class="md-nav__link">
+  <a href="#watching-an-agent-work" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why it's a good agent scratchpad
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#installing-the-scratchpad-skill-as-a-plugin" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Installing the scratchpad skill as a plugin
+        Watching an agent work
       
     </span>
   </a>
@@ -2128,6 +2134,16 @@ attaches a terminal viewer so you watch it happen in real time.</p>
 <p>This is the <strong>coding agent</strong> quickstart. The same notebook can also be driven
 by hand in the <a href="../../getting-started/notebook/">web UI</a> or watched from a
 <a href="../tui/">terminal</a>.</p>
+<div class="admonition info">
+<p class="admonition-title">Not the same as <a href="../scratchpad/">using a notebook as a scratchpad</a></p>
+<p>Here the notebook is <strong>the deliverable</strong>: you asked for it, you watch it get
+built, you keep it. An agent can also use a notebook as <strong>disposable
+infrastructure</strong> while working on something else entirely — running
+throwaway Python that happens to be cached instead of thrown away. That is
+<a href="../scratchpad/">a separate setup</a> with a different starting point: this page
+starts with you running a command, that one starts with the agent noticing
+it has a better option than <code>python -c</code>.</p>
+</div>
 <p>It exists because the pieces were already there (the <a href="../mcp/">MCP server</a>, the
 <a href="../cli/"><code>strata</code> CLI</a> ops, the <a href="../tui/">terminal viewer</a>), but wiring them
 together by hand is a fiddly, ordered dance: enable the MCP endpoint <em>before</em>
@@ -2135,9 +2151,9 @@ the server boots, open a session (the agent can't do that itself), point the
 agent at the right session, and only then start driving. <code>strata agent</code> does all
 of it in one step.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
-<p>The <code>[mcp]</code> (agent endpoint) and <code>[tui]</code> (terminal viewer) extras, plus
-<a href="https://claude.com/claude-code">Claude Code</a> (or another MCP-capable
-coding agent) on your <code>PATH</code>:</p>
+<p>The <code>[mcp]</code> extra (the agent endpoint) and <a href="https://claude.com/claude-code">Claude Code</a>
+— or another MCP-capable coding agent — on your <code>PATH</code>. Add <code>[tui]</code> for the
+terminal viewer; skip it if you plan to watch in a browser and pass <code>--no-tui</code>:</p>
 <div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">From PyPI</label><label for="__tabbed_1_2">From source</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
@@ -2170,53 +2186,60 @@ the TUI. In a second terminal:</p>
 </code></pre></div>
 <p>Claude Code discovers the notebook's <code>.mcp.json</code>, connects to the <code>strata-notebook</code>
 MCP server, reads the <code>CLAUDE.md</code> working agreement, and starts building the
-notebook by adding and running cells, each of which <strong>lights up live in the TUI</strong>
-you left running in the first terminal.</p>
+notebook by adding and running cells — each of which lights up live in whatever
+you have watching, the TUI in the first terminal by default. See
+<a href="#watching-an-agent-work">Watching an agent work</a> for the alternatives.</p>
 <p>When you quit the TUI, the server <code>strata agent</code> started is shut down with it. If
 you pointed it at a server you started yourself, that server is left running.</p>
-<h2 id="why-its-a-good-agent-scratchpad">Why it's a good agent scratchpad<a class="headerlink" href="#why-its-a-good-agent-scratchpad" title="Permanent link">&para;</a></h2>
-<p>Coding agents usually explore by writing throwaway <code>.py</code> scripts to a temp
-directory and running them: work that vanishes the moment it finishes, can't be
-seen, and recomputes from scratch every time. A Strata notebook is a better home
-for exactly that kind of scratch work, and the working agreement above points the
-agent at it:</p>
-<ul>
-<li><strong>It persists and it's visible.</strong> Each snippet becomes a versioned,
-  content-addressed cell you can see building live in the TUI, not an invisible
-  script in <code>/tmp</code>.</li>
-<li><strong>Unchanged work never recomputes.</strong> Every cell is cached by provenance
-  (<code>sha256(inputs + source + env)</code>), <em>including a leaf cell that only <code>print</code>s</em>,
-  so an agent that re-runs an unchanged diagnostic cell gets its output back
-  instantly instead of paying for it again. The expensive step an agent ran ten
-  turns ago is still a cache hit now.</li>
-<li><strong>Side effects stay honest.</strong> A cell that writes a file, calls an API, or reads
-  the clock shouldn't replay a stale result. The agent marks those with
-  <a href="../annotations/#nocache"><code># @nocache</code></a> so they always re-execute; everything
-  else stays cached.</li>
-</ul>
-<p>The net effect: the agent's exploration is captured, watchable, and free to
-re-derive: a durable scratchpad instead of a pile of discarded scripts.</p>
-<p>Two things make the agent reach for it:</p>
-<ul>
-<li><strong>One-call runs.</strong> <code>run_snippet(session_id, source)</code> (MCP) and <code>strata cell add
-  … -c 'src' --run</code> (CLI) add a cell <strong>and</strong> run it in a single call, returning
-  <code>stdout</code>, the same cost as <code>python -c</code>, so a cell isn't the slower path.</li>
-<li><strong>A shipped skill.</strong> <code>strata-notebook</code> installs a <code>strata-scratchpad</code> skill
-  (under <code>&lt;site-packages&gt;/strata/.agents/skills/</code>) that a coding agent discovers
-  in <strong>any</strong> project, so it knows to use a cached notebook cell for throwaway
-  Python even when it isn't launched inside a notebook directory. A human can
-  attach a live viewer at any moment with <a href="../tui/"><code>strata watch ./scratch</code></a>.</li>
-</ul>
-<h2 id="installing-the-scratchpad-skill-as-a-plugin">Installing the scratchpad skill as a plugin<a class="headerlink" href="#installing-the-scratchpad-skill-as-a-plugin" title="Permanent link">&para;</a></h2>
-<p>The skill travels with the <code>strata-notebook</code> package, but the most reliable way
-to give any Claude Code session the scratchpad behavior is the <strong>plugin</strong>, which
-also bundles a <code>/strata-scratchpad:scratch</code> command:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>/plugin marketplace add bearing-research/strata
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>/plugin install strata-scratchpad@strata
-</code></pre></div>
-<p>Once installed the skill is auto-discovered in every project (the <code>strata</code> CLI
-still needs to be on <code>PATH</code>). The plugin source lives in the repo at
-<code>plugins/strata-scratchpad/</code>.</p>
+<h2 id="watching-an-agent-work">Watching an agent work<a class="headerlink" href="#watching-an-agent-work" title="Permanent link">&para;</a></h2>
+<p><code>strata agent</code> attaches the TUI because it is the option that needs no extra
+step. <strong>It is not the only one, and it is not the richest.</strong></p>
+<p>Everything that watches a notebook is a WebSocket client on the same session,
+and the server broadcasts each <code>cell_status</code> / <code>cell_output</code> / <code>cell_console</code>
+frame to all of them. Opening the notebook a second time reuses the existing
+session rather than creating a new one, so any of these lands on the session the
+agent is driving:</p>
+<table>
+<thead>
+<tr>
+<th>How</th>
+<th>What you get</th>
+<th>When it fits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Web UI</strong> — open the server URL in a browser and open the same notebook</td>
+<td>The full editor: outputs, plots, the DAG, the inspector. <strong>Not read-only</strong> — you can edit and run cells alongside the agent</td>
+<td>You want to see rendered output, or take over</td>
+</tr>
+<tr>
+<td><strong>TUI</strong> — <code>strata watch ./my-notebook</code></td>
+<td>Read-only live spectator in the terminal</td>
+<td>No browser, over SSH, or beside the agent in a split terminal</td>
+</tr>
+<tr>
+<td><strong>Any WebSocket client</strong></td>
+<td>The raw frames</td>
+<td>You are building your own view — see the <a href="../../reference/notebook-protocol/">client protocol</a></td>
+</tr>
+<tr>
+<td><strong>Nothing, then read the directory</strong></td>
+<td><code>cells/*.py</code> is the source; <code>.strata/runtime.json</code> holds display outputs, provenance and timings; <code>.strata/console/</code> holds per-cell stdout/stderr</td>
+<td>You would rather review afterwards than watch</td>
+</tr>
+</tbody>
+</table>
+<p>The last row is worth knowing: a notebook is a directory of ordinary files, so
+<code>strata cell show</code>, <code>strata dag</code>, <code>git diff</code> and your editor all work on an
+agent's output with no live connection at all.</p>
+<p>One caveat on that row. Live <em>cell status</em> — running, ready, errored — belongs
+to the session, not to disk, so <code>strata status</code> run against the directory
+reports <code>idle</code> for cells the agent has already executed. What it does tell you
+offline is real and separately useful: each cell's <strong>staleness</strong> and why. For
+"what is it doing right now", attach one of the live views above.</p>
+<p>If you would rather keep a browser tab than a terminal viewer, start with
+<code>strata agent --no-tui</code> and open the notebook in the web UI instead.</p>
 <h2 id="what-gets-written-into-the-notebook">What gets written into the notebook<a class="headerlink" href="#what-gets-written-into-the-notebook" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong><code>.mcp.json</code></strong>: registers the running server's <code>/mcp</code> endpoint as an MCP
@@ -2278,6 +2301,8 @@ storage root, so a reused server only opens notebooks that live under that root.
 If it can't, stop it and let <code>strata agent</code> start one scoped to your notebook.</p>
 <h2 id="related">Related<a class="headerlink" href="#related" title="Permanent link">&para;</a></h2>
 <ul>
+<li><a href="../scratchpad/">The notebook as an agent's scratchpad</a>: the other use case,
+  where the notebook is disposable rather than the deliverable.</li>
 <li><a href="../mcp/">MCP Server</a>: the full tool list and the endpoint's security model.</li>
 <li><a href="../tui/">Terminal Viewer (TUI)</a>: the live spectator <code>strata agent</code> attaches.</li>
 <li><a href="../agent-authoring/">Authoring Programmatically</a>: the same ops as a Python API.</li>

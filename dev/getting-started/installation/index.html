@@ -623,6 +623,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../notebook/scratchpad/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent scratchpad
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../notebook/tui/" class="md-nav__link">
         
   
@@ -2274,7 +2302,7 @@ and CLI binary are both named <code>strata</code>.</p>
 </tr>
 <tr>
 <td><code>uv run strata agent &lt;notebook-dir&gt;</code></td>
-<td>One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the <code>.mcp.json</code> + <code>CLAUDE.md</code> the agent needs, and attach the TUI. Then run <code>claude</code> in the notebook directory to drive it live. Needs the <code>[mcp]</code> and <code>[tui]</code> extras. See <a href="../../notebook/agent/">Driving a notebook with a coding agent</a>.</td>
+<td>One-command on-ramp for driving a notebook with a coding agent: create-or-open the notebook, start (or reuse) a server with the MCP endpoint enabled, open a session, write the <code>.mcp.json</code> + <code>CLAUDE.md</code> the agent needs, and attach the TUI (skip it with <code>--no-tui</code> and watch in the web UI instead). Then run <code>claude</code> in the notebook directory to drive it live. Needs the <code>[mcp]</code> extra, plus <code>[tui]</code> unless you pass <code>--no-tui</code>. See <a href="../../notebook/agent/">Driving a notebook with a coding agent</a>.</td>
 </tr>
 <tr>
 <td><code>uv run strata export &lt;notebook-dir&gt;</code></td>
