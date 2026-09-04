@@ -48,6 +48,31 @@ test('undefinedTokens sees through a fallback into a nested reference', () => {
   assert.deepEqual([...undefinedTokens(usage).keys()], ['--typo'])
 })
 
+test('a reference is found even when the token name wraps to the next line', () => {
+  // Collected per line, this reference is invisible — and silently exempt from
+  // the check the whole module exists to perform.
+  const usage = collectTokens([
+    { path: 'a.css', text: '.x {\n  color: var(\n    --wrapped\n  );\n}' },
+  ])
+  assert.deepEqual([...undefinedTokens(usage).keys()], ['--wrapped'])
+})
+
+test('prose in a comment is not a definition', () => {
+  // This module's own docstring names tokens. Treating a comment as a
+  // declaration would let a real typo pass whenever some comment mentions it.
+  const usage = collectTokens([
+    { path: 'a.css', text: '/* --documented: what it does */\n.x { color: var(--documented); }' },
+  ])
+  assert.deepEqual([...undefinedTokens(usage).keys()], ['--documented'])
+})
+
+test('blanking a comment keeps later line numbers honest', () => {
+  const usage = collectTokens([
+    { path: 'a.css', text: '/* a\n   multi-line\n   comment */\n.x { color: var(--nope); }' },
+  ])
+  assert.deepEqual(usage.referenced.get('--nope'), ['a.css:4'])
+})
+
 test('every CSS variable the frontend references is defined somewhere', () => {
   // The regression guard. A `var(--typo)` fails silently — with a fallback it
   // uses a hardcoded literal (theme-blind, so wrong in one theme), without one

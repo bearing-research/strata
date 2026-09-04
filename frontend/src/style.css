@@ -44,8 +44,7 @@
   --cat-rosewater: #f5e0dc;
 
   /* Typography */
-  --font-mono:
-    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   /* Semantic — backgrounds */
   --bg-base: var(--cat-crust);

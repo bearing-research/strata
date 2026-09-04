@@ -135,7 +135,7 @@ const hasDropped = computed(
   flex-wrap: wrap;
   gap: 0.6rem 1rem;
   padding: 0.75rem 1.25rem;
-  background: var(--bg-hover);
+  background: var(--bg-pressed);
   border-bottom: 1px solid var(--border-subtle);
   font-size: 0.9rem;
 }
@@ -181,7 +181,7 @@ const hasDropped = computed(
 }
 
 .import-report-body :deep(code) {
-  background: var(--bg-hover);
+  background: var(--bg-pressed);
   padding: 0.1em 0.35em;
   border-radius: 3px;
   font-size: 0.85em;

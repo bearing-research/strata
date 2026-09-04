@@ -822,7 +822,9 @@ function formatTime(ts: number): string {
   padding: 0.65rem 0.9rem;
   background: var(--tint-warning);
   border: 1px solid var(--accent-warning);
-  color: var(--accent-warning);
+  /* The tint is what marks this as a warning; the text still has to be read,
+     and --accent-warning on it is about 2:1 in the light theme. */
+  color: var(--text-primary);
   border-radius: 6px;
   display: flex;
   align-items: center;
