@@ -337,6 +337,29 @@ async def pull_cell_outputs(
         if artifact is not None
     ]
 
+    # The publisher's environment identity, kept rather than restamped — same
+    # reason their platform is. An honest pull cannot disagree: env_hash is
+    # part of the provenance key, so a matching provenance implies a matching
+    # env_hash.
+    #
+    # If they disagree anyway, something upstream is wrong, and importing the
+    # value would push that wrongness somewhere it cannot be read as a problem:
+    # `causality._get_stored_hash` prefers the stored env_hash over the cell's
+    # own when explaining staleness, so the cell would report "the environment
+    # changed" forever, with nothing pointing at why. Keep the local value and
+    # say so out loud instead — a signal is only a signal if it surfaces as one.
+    published_env_hash = pulled[0][1].env_hash
+    if published_env_hash and env_hash and published_env_hash != env_hash:
+        logger.warning(
+            "Team store returned cell %s with env_hash %s but its provenance was "
+            "computed under %s; these cannot both be right. Keeping the local "
+            "value — treat the store's metadata as suspect.",
+            cell_id,
+            published_env_hash[:12],
+            env_hash[:12],
+        )
+        published_env_hash = ""
+
     total_bytes = 0
     for var, artifact in pulled:
         artifact_mgr.store_cell_output(
@@ -346,12 +369,7 @@ async def pull_cell_outputs(
             content_type=artifact.content_type,
             provenance_hash=artifact.provenance_hash,
             source_hash=source_hash,
-            # The publisher's environment, not this machine's — same reason
-            # build_env is preserved rather than restamped. They are equal
-            # whenever a pull is legitimate (identical provenance implies an
-            # identical env_hash), so a disagreement is a signal worth keeping
-            # rather than one worth overwriting.
-            env_hash=artifact.env_hash or env_hash,
+            env_hash=published_env_hash or env_hash,
             variant=variant,
             # Preserved, not restamped. The bytes were produced on the
             # publisher's machine, so the local copy has to keep saying so —
