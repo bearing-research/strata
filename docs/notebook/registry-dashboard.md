@@ -142,8 +142,12 @@ model ← features ← scan ← table @ snapshot
 - the same chain `strata artifact lineage` prints on the CLI, as an interactive
 view. It answers "which snapshot trained this model?" in one click.
 
-<!-- TODO(screenshot): the lineage view/modal showing the model ← features ← scan
-     ← table @ snapshot chain. -->
+![The lineage view for taxi/tip-model: the training transform above the feature
+set, the scan below it, and the Iceberg table at the
+root.](../assets/registry-lineage-light.png#only-light)
+![The lineage view for taxi/tip-model: the training transform above the feature
+set, the scan below it, and the Iceberg table at the
+root.](../assets/registry-lineage-dark.png#only-dark)
 
 ---
 

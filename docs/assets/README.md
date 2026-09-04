@@ -23,6 +23,7 @@ result alongside that change.
 | `cascade-stale-{light,dark}.png` | Web UI | Notebook quickstart, step 5 |
 | `registry-promote-strip-{light,dark}.png` | Web UI | Registry dashboard, step 3 |
 | `registry-tab-{light,dark}.png` | Web UI | Registry dashboard, step 5 |
+| `registry-lineage-{light,dark}.png` | Web UI | Registry dashboard, step 7 |
 | `tui-layout.svg` | TUI | Terminal viewer |
 | `tui-agent-running.svg` | TUI | Driving a notebook with a coding agent |
 | `agent-demo.gif` | Screen recording | Not yet recorded - see below |
