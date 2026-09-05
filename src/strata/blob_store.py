@@ -517,6 +517,11 @@ def _resolve_gcs_credentials(credentials: str) -> str:
     directory; a content-addressed one is rewritten in place by the next start,
     so the worst case is a single file rather than an unbounded pile. It is
     written 0600 and removed at exit when the process gets to exit normally.
+
+    The 0600 is POSIX-only. On Windows ``chmod`` reaches nothing but the
+    read-only flag, so the key lands with whatever the temp directory's ACLs
+    give it; restricting it there needs a Windows-specific ACL call. Prefer a
+    mounted credential file on Windows over inline key material.
     """
     import atexit
     import json

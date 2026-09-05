@@ -2,6 +2,7 @@
 
 import json
 import stat
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -616,6 +617,10 @@ class TestGCSCredentialResolution:
     looks healthy.
     """
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows has no Unix mode bits; chmod only toggles the read-only flag",
+    )
     def test_inline_key_material_is_written_to_a_private_file(self, tmp_path):
         from strata.blob_store import _resolve_gcs_credentials
 
@@ -643,8 +648,11 @@ class TestGCSCredentialResolution:
 
         assert first == second
         assert other != first
-        assert stat.S_IMODE(Path(first).stat().st_mode) == 0o600
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows has no Unix mode bits; chmod only toggles the read-only flag",
+    )
     def test_a_file_left_world_readable_is_tightened(self):
         # A leftover from a previous run, or a temp dir with a permissive
         # umask: the mode has to be fixed rather than assumed.
