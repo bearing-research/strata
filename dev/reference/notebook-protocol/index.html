@@ -2520,7 +2520,7 @@ from those models into <code>frontend/src/types/ws-payloads.generated.ts</code>:
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">isTypedFrame</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;@/types/notebook&#39;</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">isTypedFrame</span><span class="p">(</span><span class="nx">msg</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;error&#39;</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="c1">// msg.payload.code narrows without a cast</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="c1">// msg.payload.code narrows to the union of known codes, without a cast</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
 </code></pre></div>
 <p>The file is committed, so the frontend build needs no Python step. Regenerate it
@@ -2529,8 +2529,8 @@ after changing a payload model:</p>
 </code></pre></div>
 <p>A test fails if the committed file and the models disagree, so the two cannot
 drift apart quietly. Frames without a model keep <code>payload: unknown</code> and have to
-be read from the emit site - <code>WsServerPayloadMap</code> is the list of those that do
-not.</p>
+be read from the emit site; <code>WsServerPayloadMap</code> lists the frames that do have
+one.</p>
 <h3 id="the-error-frame">The <code>error</code> frame<a class="headerlink" href="#the-error-frame" title="Permanent link">&para;</a></h3>
 <p>Any request can be answered with <code>error</code> instead of the frame you expected,
 so a client has to handle it on every message it sends:</p>
