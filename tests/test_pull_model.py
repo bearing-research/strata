@@ -1214,6 +1214,71 @@ class TestManifestClaimsTheBuild:
         assert build.state == "building"
         assert build.lease_owner == "runner-9"
 
+    def test_a_capability_from_a_previous_claim_publishes_nothing(
+        self, client, build_store, artifact_store
+    ):
+        """The ordering #582 could not fix by fencing.
+
+        finalize_and_set_name commits the artifact and moves the name pointer
+        before the fence at the end of the handler runs, so a stale executor
+        used to publish its bytes and only then be told it had lost the build.
+        Rejecting it needs the request to say *which claim* it belongs to,
+        which is what the lease token in the signed URL is for.
+        """
+        self._pending(build_store, artifact_store, "stale-1")
+        manifest = client.get("/v1/builds/stale-1/manifest").json()
+        finalize_url = manifest["finalize_url"]
+        artifact_store.write_blob("out-stale-1", 1, create_test_arrow_blob())
+
+        # The sweep hands the build to a runner: same build, new claim.
+        conn = build_store._get_connection()
+        conn.execute(
+            "UPDATE artifact_builds SET lease_expires_at = ? WHERE build_id = ?",
+            (time.time() - 1.0, "stale-1"),
+        )
+        conn.commit()
+        conn.close()
+        assert build_store.reclaim_expired_build("stale-1", new_lease_owner="runner-9")
+
+        response = client.post(finalize_url)
+
+        assert response.status_code == 409
+        # The point of the change: refused *before* anything was written.
+        assert artifact_store.get_latest_version("out-stale-1") is None
+        assert build_store.get_build("stale-1").lease_owner == "runner-9"
+
+    def test_the_current_holder_can_still_finalize(self, client, build_store, artifact_store):
+        self._pending(build_store, artifact_store, "fresh-1")
+        manifest = client.get("/v1/builds/fresh-1/manifest").json()
+        artifact_store.write_blob("out-fresh-1", 1, create_test_arrow_blob())
+
+        response = client.post(manifest["finalize_url"])
+
+        assert response.status_code == 200
+        assert artifact_store.get_latest_version("out-fresh-1") is not None
+
+    def test_refetching_a_manifest_retires_the_previous_capability(
+        self, client, build_store, artifact_store
+    ):
+        """The open question in #583, answered by the deadline moving.
+
+        A re-fetch renews the lease to cover its fresh URLs, so the earlier
+        set stops verifying instead of staying usable alongside them. One live
+        capability set at a time is the property that makes two writers
+        impossible by construction rather than by durations lining up.
+        """
+        self._pending(build_store, artifact_store, "refetch-1")
+        first = client.get("/v1/builds/refetch-1/manifest").json()["finalize_url"]
+        second = client.get("/v1/builds/refetch-1/manifest").json()["finalize_url"]
+        assert first != second
+        artifact_store.write_blob("out-refetch-1", 1, create_test_arrow_blob())
+
+        # 409, not 403: the older URL is properly signed, so it is not a
+        # forgery — it names a claim that is no longer current.
+        assert client.post(first).status_code == 409
+        assert artifact_store.get_latest_version("out-refetch-1") is None
+        assert client.post(second).status_code == 200
+
     def test_manifest_refused_once_the_runner_holds_the_lease(
         self, client, build_store, artifact_store
     ):

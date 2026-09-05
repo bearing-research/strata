@@ -362,6 +362,50 @@ class TestFinalizeURL:
 
         assert valid is False
 
+    def test_a_lease_bound_url_verifies_only_with_its_lease(self):
+        url = self.signer.generate_finalize_url(
+            base_url="http://localhost:8765",
+            build_id="build-1",
+            lease_owner="external:manifest",
+            lease_expires_at=1234.5,
+        )
+        token = "external:manifest:1234.5"
+        assert "lease=" in url.url
+
+        assert self.signer.verify_finalize_signature(
+            build_id="build-1",
+            expires_at=url.expires_at,
+            signature=url.url.split("signature=")[1].split("&")[0].replace("%3D", "="),
+            lease=token,
+        )
+        # A stale holder editing itself into the current claim: the lease is
+        # inside the signed payload, so the signature stops matching.
+        assert not self.signer.verify_finalize_signature(
+            build_id="build-1",
+            expires_at=url.expires_at,
+            signature=url.url.split("signature=")[1].split("&")[0].replace("%3D", "="),
+            lease="external:manifest:9999.0",
+        )
+
+    def test_a_url_minted_without_a_lease_still_verifies(self):
+        """URLs from before this existed, and the in-process notebook path.
+
+        Both mint without a lease, and both must keep working: the notebook
+        assembles its manifest in-process and never claims, and a URL signed by
+        an older server is in flight for at most its expiry window across an
+        upgrade.
+        """
+        url = self.signer.generate_finalize_url(
+            base_url="http://localhost:8765", build_id="build-1"
+        )
+        assert "lease=" not in url.url
+
+        assert self.signer.verify_finalize_signature(
+            build_id="build-1",
+            expires_at=url.expires_at,
+            signature=url.url.split("signature=")[1].split("&")[0].replace("%3D", "="),
+        )
+
     def test_verify_finalize_signature_tampered(self):
         """Tampered finalize parameters are rejected."""
         url = self.signer.generate_finalize_url(

@@ -24,6 +24,28 @@ from typing import Any
 from urllib.parse import urlencode
 
 
+def lease_token(lease_owner: str | None, lease_expires_at: float | None) -> str:
+    """Render a claim as the string a finalize signature covers.
+
+    Empty when there is no lease, which is what keeps the in-process notebook
+    path and legacy rows working unchanged.
+
+    The deadline is what makes this per-*claim* rather than per-owner: the
+    orphan sweep hands a reclaimed build to a runner with a new deadline, and
+    the route that re-issues a manifest renews the lease to cover the fresh
+    URLs. Either way the token moves, so capabilities minted against the
+    previous claim stop verifying -- including the earlier set from a re-fetch,
+    which until now stayed usable alongside the new one.
+
+    ``repr`` on the float, so the token a URL carries and the token rebuilt
+    from the stored row are the same string for the same value rather than two
+    roundings of it.
+    """
+    if not lease_owner or lease_expires_at is None:
+        return ""
+    return f"{lease_owner}:{lease_expires_at!r}"
+
+
 @dataclass(frozen=True)
 class SignedDownloadURL:
     """Signed URL for downloading an input artifact.
@@ -376,6 +398,8 @@ class URLSigner:
         base_url: str,
         build_id: str,
         expiry_seconds: float = 600.0,
+        lease_owner: str | None = None,
+        lease_expires_at: float | None = None,
     ) -> SignedFinalizeURL:
         """Sign a URL for finalizing a build.
 
@@ -387,6 +411,13 @@ class URLSigner:
             Build to finalize.
         expiry_seconds : float, optional
             URL validity window in seconds (default 600, i.e. 10 minutes).
+        lease_owner, lease_expires_at : optional
+            The claim this capability belongs to. Without them a finalize URL
+            names only its build, so two executors handed capabilities for the
+            same build at different times present indistinguishable requests
+            and the server cannot tell a current holder from a reclaimed one.
+            Signed, so a stale holder cannot edit itself into the current
+            claim. Omitted by the in-process notebook path, which has no lease.
 
         Returns
         -------
@@ -394,15 +425,19 @@ class URLSigner:
             The signed URL and its metadata.
         """
         expires_at = time.time() + expiry_seconds
+        lease = lease_token(lease_owner, lease_expires_at)
         data = {
             "op": "finalize",
             "build_id": build_id,
             "expires_at": expires_at,
+            "lease": lease,
         }
         params = {
             "expires_at": str(expires_at),
             "signature": self._sign(data),
         }
+        if lease:
+            params["lease"] = lease
         url = f"{base_url}/v1/builds/{build_id}/finalize?{urlencode(params)}"
         return SignedFinalizeURL(
             url=url,
@@ -415,6 +450,7 @@ class URLSigner:
         build_id: str,
         expires_at: float,
         signature: str,
+        lease: str = "",
     ) -> bool:
         """Verify a finalize URL's signature and expiry.
 
@@ -438,6 +474,7 @@ class URLSigner:
             "op": "finalize",
             "build_id": build_id,
             "expires_at": expires_at,
+            "lease": lease,
         }
         return self._verify(data, signature)
 
@@ -449,6 +486,8 @@ class URLSigner:
         input_artifacts: list[tuple[str, int]],
         max_output_bytes: int,
         url_expiry_seconds: float = 600.0,
+        lease_owner: str | None = None,
+        lease_expires_at: float | None = None,
     ) -> BuildManifest:
         """Assemble the full signed-URL manifest for a build.
 
@@ -495,6 +534,8 @@ class URLSigner:
             base_url=base_url,
             build_id=build_id,
             expiry_seconds=url_expiry_seconds,
+            lease_owner=lease_owner,
+            lease_expires_at=lease_expires_at,
         ).url
         return BuildManifest(
             build_id=build_id,
