@@ -49,6 +49,11 @@ proxy that:
    | `X-Strata-Scopes` | Space-separated capability set (e.g. `notebook:read notebook:write artifacts:write admin:cache`) | For scope-gated endpoints |
    | `X-Strata-Proxy-Token` | Shared secret matching `STRATA_PROXY_TOKEN` | Yes, proves the request came from the proxy, not a direct connection |
 
+Machine callers that do not sit behind the proxy — a CI job, an ETL
+service — authenticate with an API key instead: `strata apikey create`
+issues one, and the key carries its own principal, tenant and scopes.
+See [Configuration → API keys](../reference/configuration.md#api-key-authentication).
+
 3. **Is the only path to Strata.** Strata is on a private network /
    VPC / Kubernetes namespace; the proxy is the only ingress.
    Without that, anything that can reach Strata directly can forge
@@ -116,20 +121,31 @@ restart proxy`).
                                                └──────┬───────┘
                                                       │
                                                       ▼
-                                               ┌──────────────┐
-                                               │ Artifact     │
-                                               │ store (S3 /  │
-                                               │  GCS / Azure │
-                                               │  / local)    │
-                                               └──────────────┘
+                                        ┌─────────────────────────┐
+                                        │ Artifact store          │
+                                        │                         │
+                                        │  metadata → Postgres    │
+                                        │  blobs    → S3 / GCS /  │
+                                        │             Azure       │
+                                        └─────────────────────────┘
 ```
 
 Strata sits on a private network, only the auth proxy can reach it.
-Artifacts persist to a blob backend (S3, GCS, Azure) rather than a
-local volume so it survives container churn and is shared across
-replicas. Notebook execution dispatches to executors; the demo
-stack runs one locally, production typically uses HTTP executors
-on dedicated nodes or remote backends like Modal / Fly Machines.
+Notebook execution dispatches to executors; the demo stack runs one
+locally, production typically uses HTTP executors on dedicated nodes
+or remote backends like Modal / Fly Machines.
+
+**The artifact store is two halves, and both have to be shared before
+you can run a second replica.** Blobs go to S3, GCS or Azure rather
+than a local volume, so they survive container churn. Metadata is a
+SQLite file under `STRATA_ARTIFACT_DIR` by default, which is local to
+one machine — set `STRATA_ARTIFACT_METADATA_DSN` to put it on Postgres
+instead. A DSN with `STRATA_ARTIFACT_BLOB_BACKEND=local` is rejected at
+startup for the same reason: shared metadata pointing at blobs only one
+node can read is worse than either alone. See
+[Configuration → artifact metadata](../reference/configuration.md#sharing-one-artifact-store-across-nodes)
+for the settings and `strata migrate` for moving an existing store
+across.
 
 ## Minimum service-mode env vars
 
