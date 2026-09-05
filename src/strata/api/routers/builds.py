@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
+from hmac import compare_digest
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -32,6 +33,7 @@ from strata.api.dependencies import (
 )
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.services.build import build_service
+from strata.transforms.signed_urls import lease_token
 from strata.types import BuildStatusResponse
 
 router = APIRouter(tags=["builds"])
@@ -272,6 +274,12 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
     store = _get_artifact_store(allow_server_mode=True)
     base_url = str(request.base_url).rstrip("/")
 
+    # Re-read: the claim or renewal above moved the lease deadline, and the URLs
+    # have to be signed against the claim they are actually being issued under.
+    # Signing the pre-claim row would stamp them with a deadline that no longer
+    # exists, and every one of them would be rejected on arrival.
+    leased = build_store.get_build(build_id) or build
+
     try:
         return build_service.assemble_manifest(
             store,
@@ -280,6 +288,8 @@ async def get_build_manifest(build_id: str, request: Request, build_store: Build
             base_url=base_url,
             max_output_bytes=state.config.max_transform_output_bytes,
             url_expiry_seconds=state.config.signed_url_expiry_seconds,
+            lease_owner=leased.lease_owner,
+            lease_expires_at=leased.lease_expires_at,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -464,6 +474,7 @@ async def finalize_build(
     build_store: BuildTransportStore,
     expires_at: str | None = None,
     signature: str | None = None,
+    lease: str = "",
 ):
     """Finalize a build after upload (pull-model execution).
 
@@ -508,8 +519,29 @@ async def finalize_build(
             build_id=build_id,
             expires_at=expires_at_float,
             signature=signature,
+            lease=lease,
         ):
             raise HTTPException(status_code=403, detail="Invalid or expired signature")
+
+        # Ownership before publication. Everything below this point writes:
+        # finalize_and_set_name commits the artifact and moves the name pointer,
+        # and the fence at the end can only refuse to record the build row
+        # afterwards — it cannot un-publish bytes. The signature proves the
+        # capability was minted by this server; the lease token proves it was
+        # minted for the claim that is current now, which is the part a stale
+        # executor cannot satisfy. Both are read from the row as it stands
+        # here, not from the copy taken at the top of the request.
+        if lease:
+            current = build_store.get_build(build_id)
+            expected = lease_token(
+                current.lease_owner if current else None,
+                current.lease_expires_at if current else None,
+            )
+            if not compare_digest(lease, expected):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Build lease is no longer held by this caller; nothing was published",
+                )
     else:
         _authorize_build_access(
             owner_principal=build.principal_id,

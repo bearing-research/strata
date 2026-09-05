@@ -82,6 +82,8 @@ class BuildService:
         base_url: str,
         max_output_bytes: int,
         url_expiry_seconds: float,
+        lease_owner: str | None = None,
+        lease_expires_at: float | None = None,
     ) -> dict:
         """Resolve a build's inputs and assemble its signed-URL manifest.
 
@@ -111,6 +113,8 @@ class BuildService:
             input_artifacts=input_artifacts,
             max_output_bytes=max_output_bytes,
             url_expiry_seconds=url_expiry_seconds,
+            lease_owner=lease_owner,
+            lease_expires_at=lease_expires_at,
         )
         return manifest.to_dict()
 
