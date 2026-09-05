@@ -391,6 +391,10 @@ def check_cache_evictions() -> DependencyCheck:
 
         details: JsonObject = {
             "total_evictions": stats.total_evictions,
+            # Both windows, because the rate is the worse of them: without the
+            # minute an operator sees a band that the hourly figure beside it
+            # does not account for, and cannot tell a burst from a trickle.
+            "evictions_last_minute": stats.evictions_last_minute,
             "evictions_last_hour": stats.evictions_last_hour,
             "eviction_rate_per_minute": stats.eviction_rate_per_minute,
             "pressure_level": stats.pressure_level,

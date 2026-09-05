@@ -117,7 +117,8 @@ class TestCacheEvictionTracker:
         assert tracker.get_stats().pressure_level == "low"
 
         # Simulate high eviction rate (many events in last hour)
-        # Rate = evictions_hour / 60, need rate >= 10 for critical
+        # The rate is the worse of the last minute and the observed-span mean;
+        # 600 events recorded at once are all inside the last minute.
         for _ in range(600):  # 600 in last hour = 10/minute
             tracker.record_eviction(
                 files_evicted=1,
@@ -128,6 +129,79 @@ class TestCacheEvictionTracker:
 
         stats = tracker.get_stats()
         assert stats.pressure_level == "critical"
+
+    def test_a_young_server_reports_the_traffic_it_is_seeing(self):
+        """The denominator has to be the span observed, not a constant hour.
+
+        A server up for 90 seconds that evicted 50 times was dividing by 60
+        minutes it had not lived -- 0.83/min, reported LOW -- while the
+        documented band for that traffic is CRITICAL. It took 60 evictions in
+        total to leave LOW at all, however fast they arrived.
+        """
+        from strata.cache_metrics import CacheEvictionTracker
+
+        now = [1000.0]
+        tracker = CacheEvictionTracker(clock=lambda: now[0])
+        for _ in range(50):
+            tracker.record_eviction(1, 1024, 1000, 999)
+        # Past the last-minute window, so this measures the hourly arm alone.
+        now[0] += 90
+
+        stats = tracker.get_stats()
+
+        assert stats.evictions_last_minute == 0
+        assert stats.eviction_rate_per_minute > 10
+        assert stats.pressure_level == "critical"
+
+    def test_a_steady_hour_is_unchanged(self):
+        """The fix is identical to the old arithmetic once an hour has passed."""
+        from strata.cache_metrics import CacheEvictionTracker
+
+        now = [1000.0]
+        tracker = CacheEvictionTracker(clock=lambda: now[0])
+        for _ in range(60):
+            tracker.record_eviction(1, 1024, 1000, 999)
+            now[0] += 60  # one per minute, for an hour
+
+        stats = tracker.get_stats()
+
+        assert stats.eviction_rate_per_minute == pytest.approx(1.0, abs=0.05)
+        assert stats.pressure_level == "medium"
+
+    def test_a_burst_raises_the_band_the_hourly_mean_would_hide(self):
+        """An hourly mean cannot tell a thrash from a trickle.
+
+        A quiet hour with a burst at the end averages out to nothing, which is
+        precisely when an operator wants to hear about it.
+        """
+        from strata.cache_metrics import CacheEvictionTracker
+
+        now = [1000.0]
+        tracker = CacheEvictionTracker(clock=lambda: now[0])
+        now[0] += 3600  # an hour of history, no evictions in it
+        for _ in range(12):
+            tracker.record_eviction(1, 1024, 1000, 999)
+
+        stats = tracker.get_stats()
+
+        # 12 events over an observed hour is 0.2/min -- LOW on the mean alone.
+        assert stats.evictions_last_hour == 12
+        assert stats.pressure_level == "critical"
+
+    def test_the_first_seconds_do_not_extrapolate_into_a_crisis(self):
+        """Floored at a minute, so one sweep on a one-second-old process is not
+        divided by a second and reported as 60/min."""
+        from strata.cache_metrics import CacheEvictionTracker
+
+        now = [1000.0]
+        tracker = CacheEvictionTracker(clock=lambda: now[0])
+        tracker.record_eviction(1, 1024, 1000, 999)
+        now[0] += 1
+
+        stats = tracker.get_stats()
+
+        assert stats.eviction_rate_per_minute == pytest.approx(1.0)
+        assert stats.pressure_level == "medium"
 
     def test_recent_events(self):
         """Test getting recent eviction events."""
