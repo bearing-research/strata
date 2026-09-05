@@ -493,6 +493,126 @@ def _ipc_bytes(num_rows: int) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
+class TestVersionPromotion:
+    """Re-pointing ``latest`` at a result the artifact already holds.
+
+    Consumers read an artifact's current value through ``get_latest_version``,
+    so an older version carrying the right bytes is unreachable by pointing at
+    it. Promotion re-records it, which is what makes returning to a previous
+    provenance a cache hit instead of a recomputation.
+    """
+
+    def _ready(self, store, artifact_id, provenance, blob):
+        version = store.create_artifact(artifact_id, provenance)
+        store.blob_store.write_blob(artifact_id, version, blob)
+        store.finalize_artifact(artifact_id, version, "{}", 1, len(blob))
+        return version
+
+    def test_finds_a_superseded_version_of_the_same_artifact(self, store):
+        # v1 is superseded by the time we look for it: an intervening rebuild
+        # under the same provenance demotes it. That row is the one worth
+        # finding, so the search cannot be restricted to ready.
+        self._ready(store, "art-1", "prov-a", b"a1")
+        self._ready(store, "art-1", "prov-a", b"a2")
+        assert store.get_artifact("art-1", 1).state == "superseded"
+
+        found = store.find_version_by_provenance("art-1", "prov-a")
+        assert found is not None
+        assert found.version == 2
+
+    def test_does_not_reach_into_another_artifact(self, store):
+        # find_by_provenance answers "does anyone hold this"; this answers
+        # "does *this* artifact hold it", and must not confuse the two.
+        self._ready(store, "art-other", "prov-a", b"a1")
+
+        assert store.find_version_by_provenance("art-1", "prov-a") is None
+
+    def test_promotion_makes_an_older_version_current(self, store):
+        self._ready(store, "art-1", "prov-a", b"first")
+        self._ready(store, "art-1", "prov-b", b"second")
+        assert store.get_latest_version("art-1").provenance_hash == "prov-b"
+
+        promoted = store.promote_version("art-1", 1)
+
+        assert promoted is not None
+        assert promoted.id == "art-1"
+        assert promoted.version == 3
+        assert promoted.provenance_hash == "prov-a"
+        # What a consumer sees, which is the whole point.
+        latest = store.get_latest_version("art-1")
+        assert latest.version == 3
+        assert latest.provenance_hash == "prov-a"
+        assert store.read_blob("art-1", 3) == b"first"
+        # And the row it was copied from steps aside, exactly as a rebuild
+        # under the same provenance would leave it.
+        assert store.get_artifact("art-1", 1).state == "superseded"
+
+    def test_promotion_reports_failure_when_the_blob_is_gone(self, store):
+        # A GC pass can take the blob while the row survives. The caller falls
+        # back to recomputing, so this must say so rather than register a
+        # version pointing at nothing.
+        self._ready(store, "art-1", "prov-a", b"first")
+        self._ready(store, "art-1", "prov-b", b"second")
+        store.blob_store.delete_blob("art-1", 1)
+
+        assert store.promote_version("art-1", 1) is None
+        assert store.get_latest_version("art-1").provenance_hash == "prov-b"
+        # And nothing was registered on the way out: opening the source before
+        # inserting the row is what keeps a failed promotion from stranding a
+        # building version that points at no blob.
+        assert store.get_artifact("art-1", 3) is None
+
+    def test_promotion_refuses_a_version_that_was_never_ready(self, store):
+        # A building row may be a partial or abandoned write and a failed one
+        # was rejected on purpose. Neither is a result to make current.
+        self._ready(store, "art-1", "prov-a", b"first")
+        building = store.create_artifact("art-1", "prov-c")
+        store.blob_store.write_blob("art-1", building, b"partial")
+
+        assert store.promote_version("art-1", building) is None
+        assert store.get_latest_version("art-1").provenance_hash == "prov-a"
+
+    def test_lookup_does_not_cross_tenants(self, store):
+        # An artifact id is not an isolation boundary, so a tenantless lookup
+        # must not select a row another tenant wrote — the reason
+        # find_by_provenance is tenant-scoped.
+        version = store.create_artifact("art-1", "prov-a", tenant="acme")
+        store.blob_store.write_blob("art-1", version, b"theirs")
+        store.finalize_artifact("art-1", version, "{}", 1, 6)
+
+        assert store.find_version_by_provenance("art-1", "prov-a") is None
+        assert store.find_version_by_provenance("art-1", "prov-a", tenant="acme") is not None
+
+    def test_promotion_copies_a_blob_larger_than_one_stream_chunk(self, store):
+        # The copy is streamed rather than read into memory; a payload spanning
+        # several chunks is what tells a chunk-boundary bug from a working one.
+        from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+
+        payload = bytes(range(256)) * ((BLOB_STREAM_CHUNK_BYTES * 2) // 256 + 3)
+        self._ready(store, "art-1", "prov-a", payload)
+        self._ready(store, "art-1", "prov-b", b"small")
+
+        promoted = store.promote_version("art-1", 1)
+
+        assert promoted is not None
+        assert store.read_blob("art-1", promoted.version) == payload
+        assert promoted.byte_size == len(payload)
+
+    def test_promotion_keeps_the_canonical_id_when_dedup_diverts(self, store):
+        # Another artifact already holds this provenance in ready state, so
+        # finalize_artifact would hand back *its* id and fail ours. Callers
+        # resolve by id, so the promotion has to end with our id current.
+        self._ready(store, "art-1", "prov-a", b"first")
+        self._ready(store, "art-1", "prov-b", b"second")
+        self._ready(store, "art-twin", "prov-a", b"first")
+
+        promoted = store.promote_version("art-1", 1)
+
+        assert promoted is not None
+        assert promoted.id == "art-1"
+        assert store.get_latest_version("art-1").provenance_hash == "prov-a"
+
+
 class TestRefreshSupersede:
     """Refresh rebuilds become new versions of the same artifact (#123)."""
 

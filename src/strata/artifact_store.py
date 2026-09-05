@@ -853,6 +853,161 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    def find_version_by_provenance(
+        self, artifact_id: str, provenance_hash: str, tenant: str | None = None
+    ) -> ArtifactVersion | None:
+        """Return this artifact's newest version carrying *provenance_hash*.
+
+        Unlike :meth:`find_by_provenance`, which answers "does any artifact
+        anywhere hold this result", this stays inside one id — the question a
+        caller asks when it wants *this* artifact's own history. Superseded
+        versions count: only one row per (tenant, provenance_hash) may be
+        ready at a time, so a result that was once current and has since been
+        overtaken is superseded rather than deleted, and it is exactly the row
+        worth finding again when the caller returns to that provenance.
+
+        Tenant-scoped for the same reason :meth:`find_by_provenance` is: an id
+        is not an isolation boundary, and a tenantless lookup must not select a
+        row another tenant wrote. Tenantless rows are stored as ``''``.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """
+                SELECT id, version, state, provenance_hash, schema_json,
+                       row_count, byte_size, created_at, transform_spec,
+                       input_versions, tenant, principal
+                FROM artifact_versions
+                WHERE id = ? AND provenance_hash = ? AND tenant = ?
+                  AND state IN ('ready', 'superseded')
+                ORDER BY version DESC
+                LIMIT 1
+                """,
+                (artifact_id, provenance_hash, tenant if tenant is not None else ""),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return ArtifactVersion(
+                id=row["id"],
+                version=row["version"],
+                state=row["state"],
+                provenance_hash=row["provenance_hash"],
+                schema_json=row["schema_json"],
+                row_count=row["row_count"],
+                byte_size=row["byte_size"],
+                created_at=row["created_at"],
+                transform_spec=row["transform_spec"],
+                input_versions=row["input_versions"],
+                tenant=row["tenant"],
+                principal=row["principal"],
+            )
+        finally:
+            conn.close()
+
+    def promote_version(self, artifact_id: str, version: int) -> ArtifactVersion | None:
+        """Re-record an existing version so it becomes the artifact's latest.
+
+        Callers resolve an artifact's current value through
+        :meth:`get_latest_version`, so "latest" *is* the value — an older
+        version holding the right bytes is not reachable by simply pointing at
+        it. This writes a fresh version carrying the same provenance, spec and
+        blob, which :meth:`finalize_artifact` then makes canonical, superseding
+        the row it was copied from.
+
+        The end state is byte-identical to recomputing the result, because
+        recomputing writes a new version and supersedes the old one in exactly
+        the same way. What it saves is the computing.
+
+        Returns ``None`` when the source version or its blob is gone (a GC pass
+        may have taken it), leaving the caller to fall back to recomputation.
+        """
+        source = self.get_artifact(artifact_id, version)
+        if source is None:
+            return None
+        if source.state not in ("ready", "superseded"):
+            # A building row may be a partial or abandoned write and a failed
+            # one was rejected on purpose; neither is a result to make current.
+            return None
+        # Open the source before registering anything. A blob that has gone
+        # missing must leave no trace behind: registering the row first would
+        # strand a ``building`` version pointing at nothing when the read fails.
+        reader_cm = self.blob_store.open_blob_reader(artifact_id, version)
+        if reader_cm is None:
+            return None
+
+        conn = self._get_connection()
+        try:
+            # Same write serialization as create_artifact: MAX(version)+1 must
+            # not race a concurrent create for this id.
+            self._dialect.begin_write(conn, artifact_id)
+            cursor = conn.execute(
+                "SELECT COALESCE(MAX(version), 0) + 1 FROM artifact_versions WHERE id = ?",
+                (artifact_id,),
+            )
+            new_version = int(cursor.fetchone()[0])
+            conn.execute(
+                """
+                INSERT INTO artifact_versions
+                    (id, version, state, provenance_hash, created_at,
+                     transform_spec, input_versions, tenant, principal)
+                VALUES (?, ?, 'building', ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    artifact_id,
+                    new_version,
+                    source.provenance_hash,
+                    time.time(),
+                    source.transform_spec,
+                    source.input_versions,
+                    source.tenant if source.tenant is not None else "",
+                    source.principal,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Streamed, not read_blob/write_blob: an artifact is as large as the
+        # value a cell produced, and pulling a multi-GB frame through process
+        # memory — a full download and re-upload on the object-store backends —
+        # to re-point a pointer would cost more than the run this avoids.
+        from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+
+        copied = 0
+        with (
+            reader_cm as reader,
+            self.blob_store.open_blob_writer(artifact_id, new_version) as writer,
+        ):
+            while chunk := reader.read(BLOB_STREAM_CHUNK_BYTES):
+                writer.write(chunk)
+                copied += len(chunk)
+
+        schema_json = source.schema_json or ""
+        row_count = source.row_count or 0
+        byte_size = source.byte_size or copied
+        finalized = self.finalize_artifact(
+            artifact_id=artifact_id,
+            version=new_version,
+            schema_json=schema_json,
+            row_count=row_count,
+            byte_size=byte_size,
+        )
+        if finalized is not None and finalized.id != artifact_id:
+            # Dedup sent us to another artifact holding the same provenance —
+            # two notebooks running the same cell source is enough. The caller
+            # asked to make *this* id current, and resolves by id, so the
+            # equivalent artifact under a different id is no answer. Same
+            # recovery store_cell_output uses on the write path.
+            return self.force_finalize_canonical(
+                artifact_id=artifact_id,
+                version=new_version,
+                schema_json=schema_json,
+                row_count=row_count,
+                byte_size=byte_size,
+            )
+        return finalized
+
     def force_finalize_canonical(
         self,
         artifact_id: str,
