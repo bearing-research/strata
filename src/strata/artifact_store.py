@@ -2915,10 +2915,9 @@ class ArtifactStore:
                 "DELETE FROM artifact_aliases WHERE artifact_id = ? AND version = ?",
                 (artifact_id, version),
             )
-            conn.execute(
-                "DELETE FROM artifact_tags WHERE artifact_id = ? AND version = ?",
-                (artifact_id, version),
-            )
+            # Tags and builds, through the same helper garbage_collect uses so
+            # the two paths cannot drift on what a version has to shed first.
+            self._delete_version_children(conn, artifact_id, version)
 
             # Delete metadata
             conn.execute(
@@ -2934,6 +2933,31 @@ class ArtifactStore:
         # Holding a pooled one across it parks a slot for the round trip.
         self.blob_store.delete_blob(artifact_id, version)
         return True
+
+    def _delete_version_children(
+        self, conn: StoreConnection, artifact_id: str, version: int
+    ) -> None:
+        """Remove the rows that reference *version*, before the version itself.
+
+        Tags carry no foreign key but orphan just as readily; builds carry one
+        and are the reason enforcement could not be switched on before. Build
+        rows cascade rather than survive with a null pointer: ``artifact_id``
+        and ``version`` are ``NOT NULL`` and are what a build row is *about*,
+        so a build of a collected artifact has no subject left to describe.
+
+        ``artifact_builds`` belongs to the build store, which shares this
+        database — the foreign key crossing that line already couples them, and
+        a store used without a build runner may not have the table at all.
+        """
+        conn.execute(
+            "DELETE FROM artifact_tags WHERE artifact_id = ? AND version = ?",
+            (artifact_id, version),
+        )
+        if self._dialect.schema_exists(conn, "artifact_builds"):
+            conn.execute(
+                "DELETE FROM artifact_builds WHERE artifact_id = ? AND version = ?",
+                (artifact_id, version),
+            )
 
     def garbage_collect(
         self,
@@ -3030,10 +3054,25 @@ class ArtifactStore:
             for row in rows:
                 artifact_id, version, byte_size = row["id"], row["version"], row["byte_size"] or 0
 
-                conn.execute(
-                    "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
-                    (artifact_id, version),
-                )
+                self._delete_version_children(conn, artifact_id, version)
+                try:
+                    conn.execute(
+                        "DELETE FROM artifact_versions WHERE id = ? AND version = ?",
+                        (artifact_id, version),
+                    )
+                except self._dialect.integrity_error:
+                    # A name or alias was pointed at this version between the
+                    # SELECT above and here. Enforcement doing its job — the
+                    # pointer wins — but one unlucky race must not fail an
+                    # entire sweep, so skip this artifact and keep going. It is
+                    # not counted and its blob is not touched.
+                    logger.info(
+                        "garbage_collect: skipping %s@v=%d, something referenced "
+                        "it after it was selected.",
+                        artifact_id,
+                        version,
+                    )
+                    continue
 
                 collected.append((artifact_id, version))
                 deleted_count += 1

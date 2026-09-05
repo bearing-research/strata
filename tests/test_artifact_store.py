@@ -493,6 +493,87 @@ def _ipc_bytes(num_rows: int) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
+class TestForeignKeyEnforcement:
+    """The declared foreign keys are enforced, and deletes clean up after
+    themselves so that enforcement does not break collection.
+
+    SQLite ignores FOREIGN KEY clauses unless ``PRAGMA foreign_keys=ON`` is set
+    per connection, so these constraints were decorative for as long as they
+    have existed. Postgres always enforced them.
+    """
+
+    def _ready(self, store, artifact_id, provenance):
+        version = store.create_artifact(artifact_id, provenance)
+        store.blob_store.write_blob(artifact_id, version, b"x")
+        store.finalize_artifact(artifact_id, version, "{}", 1, 1)
+        return version
+
+    def test_a_name_cannot_point_at_a_version_that_does_not_exist(self, store):
+        conn = store._get_connection()
+        try:
+            with pytest.raises(store.dialect.integrity_error):
+                conn.execute(
+                    "INSERT INTO artifact_names (name, artifact_id, version, updated_at, tenant) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    ("ghost", "art-missing", 1, 0.0, ""),
+                )
+                conn.commit()
+        finally:
+            conn.close()
+
+    def test_a_version_cannot_be_deleted_out_from_under_its_name(self, store):
+        self._ready(store, "art-1", "prov-a")
+        store.set_name("team/model", "art-1", 1)
+
+        conn = store._get_connection()
+        try:
+            with pytest.raises(store.dialect.integrity_error):
+                conn.execute(
+                    "DELETE FROM artifact_versions WHERE id = ? AND version = ?", ("art-1", 1)
+                )
+                conn.commit()
+        finally:
+            conn.close()
+
+        assert store.get_artifact("art-1", 1) is not None
+
+    def test_delete_artifact_takes_the_build_row_with_it(self, tmp_path, store):
+        from strata.transforms.build_store import BuildStore
+
+        builds = BuildStore(store.db_path)
+        self._ready(store, "art-1", "prov-a")
+        builds.create_build("build-1", "art-1", 1, "exec@v1")
+
+        # Without the cascade this raises: every server-built artifact has a
+        # build row, so the foreign key would make it undeletable.
+        assert store.delete_artifact("art-1", 1) is True
+        assert builds.get_build("build-1") is None
+
+    def test_garbage_collect_takes_build_rows_with_it(self, tmp_path, store):
+        from strata.transforms.build_store import BuildStore
+
+        builds = BuildStore(store.db_path)
+        self._ready(store, "art-1", "prov-a")
+        self._ready(store, "art-1", "prov-b")
+        builds.create_build("build-1", "art-1", 1, "exec@v1")
+        # Age v1 past the cutoff; v2 stays as the artifact's current value.
+        conn = store._get_connection()
+        try:
+            conn.execute(
+                "UPDATE artifact_versions SET created_at = 0 WHERE id = ? AND version = 1",
+                ("art-1",),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        stats = store.garbage_collect(max_age_days=1.0)
+
+        assert stats["deleted_count"] == 1
+        assert store.get_artifact("art-1", 1) is None
+        assert builds.get_build("build-1") is None
+
+
 class TestVersionPromotion:
     """Re-pointing ``latest`` at a result the artifact already holds.
 
