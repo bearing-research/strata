@@ -240,10 +240,29 @@ pickle path. DuckDB relations, cuDF frames, Ibis tables and anything else
 implementing the [Arrow PyCapsule
 interface](https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html)
 are stored as real Arrow, so the artifact stays readable by other tools and the
-notebook can show its schema and row count. The trade is type identity: the
-libraries named in the first row are handed back as themselves, while a
-capsule-sourced value comes back as a `pyarrow.Table` and a DLPack-sourced one
-as a `numpy.ndarray`.
+notebook can show its schema and row count.
+
+Two things to know about that row. The first is type identity: the libraries
+named in the first row are handed back as themselves, while a capsule-sourced
+value comes back as a `pyarrow.Table` and a DLPack-sourced one as a
+`numpy.ndarray`. The second matters for libraries whose values are lazy query
+expressions rather than data, Ibis among them. Storing one executes it, because
+an artifact holds data and a handle is not data. A downstream cell therefore
+receives the result rather than the expression, and cannot keep composing on it.
+Pin the query where you want it evaluated and store that.
+
+One-shot streams are refused rather than stored. A `pyarrow.RecordBatchReader`
+is consumed by reading, so storing one would leave the object empty for whatever
+reads it next; it is not picklable either, so the cell fails instead. Call
+`.read_all()` and store the table. The check looks for an iterator, so a wrapper
+that presents the Arrow protocol over a one-shot reader without being iterable
+itself is not caught: it is stored, correctly, but the object is spent
+afterwards.
+
+Each value a cell produces is serialized once, even when it is both a variable
+and the cell's last expression. That matters for a lazy handle, where writing is
+what runs the query: a cell ending in a bare `df` evaluates it once, not once
+per artifact.
 
 ## Cascade Execution
 

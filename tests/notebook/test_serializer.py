@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
 import pickle
+import sys
 import tempfile
 from datetime import date
 from decimal import Decimal
@@ -111,9 +114,34 @@ class _SerializerMarkdownDisplay:
         return "# Title\n\n- one\n- two"
 
 
-def _mark_as_cell_module(cls, module_source: str) -> None:
-    import sys
+@pytest.fixture(autouse=True)
+def _undo_cell_module_marking():
+    """Strip the cell-module marks the round-trip tests leave on this module.
 
+    ``_mark_as_cell_module`` stamps *this test module* as a cell module, and
+    deserializing a ``module/cell-instance`` artifact then walks that module
+    and sets ``__strata_cell_exported_class__`` on every class defined in it
+    (``serializer.py`` ``_load_cell_module``) — not just the one under test.
+    Left behind, every module-level class in this file is detected as a cell
+    instance for the rest of the session, so an unrelated test asserting
+    ``pickle/object`` passes or fails depending on what ran before it.
+    """
+    yield
+    module = sys.modules[__name__]
+    module.__dict__.pop("__strata_cell_module__", None)
+    module.__dict__.pop("__strata_cell_module_source__", None)
+    for value in list(module.__dict__.values()):
+        # Mirrors the ``__module__`` check in ``_load_cell_module``: imported
+        # names (pd.DataFrame, pa.Table) live in this dict too and were never
+        # stamped, and extension types refuse delattr outright.
+        if isinstance(value, type) and getattr(value, "__module__", None) == __name__:
+            try:
+                delattr(value, "__strata_cell_exported_class__")
+            except AttributeError:
+                continue
+
+
+def _mark_as_cell_module(cls, module_source: str) -> None:
     module = sys.modules[cls.__module__]
     module.__dict__["__strata_cell_module__"] = True
     module.__dict__["__strata_cell_module_source__"] = module_source
@@ -1097,6 +1125,16 @@ def fake_torch(monkeypatch):
         def numpy(self):
             return self._arr
 
+        def __dlpack__(self, *args, **kwargs):
+            # The real torch.Tensor exports DLPack, so the fake has to as
+            # well: without it the generic dlpack rule never matches these
+            # values and the tests below would pass with the rule ordering
+            # reversed, which is exactly what they exist to catch.
+            return self._arr.__dlpack__(*args, **kwargs)
+
+        def __dlpack_device__(self):
+            return self._arr.__dlpack_device__()
+
     mod.Tensor = Tensor
     mod.from_numpy = Tensor
     monkeypatch.setitem(sys.modules, "torch", mod)
@@ -1119,6 +1157,14 @@ def fake_jax(monkeypatch):
 
         def __array__(self, dtype=None):
             return self._arr if dtype is None else self._arr.astype(dtype)
+
+        def __dlpack__(self, *args, **kwargs):
+            # As with the torch fake: real jax.Arrays export DLPack, and
+            # omitting it would leave the rule ordering untested.
+            return self._arr.__dlpack__(*args, **kwargs)
+
+        def __dlpack_device__(self):
+            return self._arr.__dlpack_device__()
 
     jax_mod.Array = Array
     jnp_mod.asarray = Array
@@ -1215,6 +1261,20 @@ class _CapsuleOnlyTable:
         return self._table.__arrow_c_stream__(requested_schema)
 
 
+class _HostileProxy:
+    """A stand-in for a detached-session proxy or lazy remote handle.
+
+    Its ``__getattr__`` raises ``RuntimeError``, not ``AttributeError``, which
+    is what makes an instance-level ``hasattr`` probe dangerous rather than
+    merely wasteful: ``hasattr`` swallows only ``AttributeError``, so anything
+    else escapes. That is also what gives the test its teeth — an instance-level
+    probe would raise out of the assertion rather than return the wrong answer.
+    """
+
+    def __getattr__(self, name):
+        raise RuntimeError(f"session detached; cannot load {name!r}")
+
+
 class _DeviceArrayStub:
     """A dlpack exporter whose buffer lives somewhere numpy cannot read.
 
@@ -1241,6 +1301,105 @@ class _DlpackOnlyArray:
 
     def __dlpack_device__(self):
         return self._arr.__dlpack_device__()
+
+
+@contextlib.contextmanager
+def _capture_serializer_logs():
+    """Collect this module's log records.
+
+    ``caplog`` cannot see them: ``configure_logging`` sets ``propagate = False``
+    on the ``strata`` logger, so records never reach the root handler pytest
+    installs. Attaching to the module's own logger is the way in.
+    """
+    records: list[logging.LogRecord] = []
+    logger = logging.getLogger("strata.notebook.serializer")
+    handler = logging.Handler()
+    handler.emit = records.append
+    logger.addHandler(handler)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+
+
+class _CountingCapsuleTable:
+    """A capsule exporter that counts how often its stream is pulled.
+
+    Stands in for a lazy query handle: every conversion re-runs the query, so
+    the count is what says whether a value was written once or twice.
+    """
+
+    def __init__(self, table):
+        self._table = table
+        self.stream_pulls = 0
+
+    def __arrow_c_stream__(self, requested_schema=None):
+        self.stream_pulls += 1
+        return self._table.__arrow_c_stream__(requested_schema)
+
+
+class TestDisplayValueDeduplication:
+    """A cell's last expression is often one of its own variables."""
+
+    def test_display_that_is_a_variable_reuses_the_variable_payload(self):
+        value = _CountingCapsuleTable(pa.table({"a": [1, 2, 3]}))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            var = serialize_value(value, tmp, "frame")
+            display = serializer_module.serialize_display_value(value, tmp, 0, [(value, var)])
+            written = sorted(f.name for f in Path(tmp).iterdir())
+
+        # One conversion, one file, and the display points at it.
+        assert value.stream_pulls == 1
+        assert written == ["frame.arrow"]
+        assert display["file"] == var["file"]
+        assert display["content_type"] == var["content_type"]
+
+    def test_a_distinct_value_is_still_written(self):
+        var_value = _CountingCapsuleTable(pa.table({"a": [1]}))
+        display_value = _CountingCapsuleTable(pa.table({"b": [2]}))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            var = serialize_value(var_value, tmp, "frame")
+            display = serializer_module.serialize_display_value(
+                display_value, tmp, 0, [(var_value, var)]
+            )
+            back = deserialize_value(display["content_type"], Path(tmp) / display["file"])
+
+        assert display["file"] == "__display__0.arrow"
+        assert display["file"] != var["file"]
+        assert back.column_names == ["b"]
+
+    def test_a_display_only_content_type_is_not_reused(self):
+        # A figure is pickle/object as a variable and image/png as a display,
+        # because the display name unlocks a detection path the variable name
+        # does not. Reusing on identity alone would store the pickle as the
+        # display and the UI would render nothing.
+        value = _SerializerPngDisplay()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            var = serialize_value(value, tmp, "fig")
+            display = serializer_module.serialize_display_value(value, tmp, 0, [(value, var)])
+
+        assert var["content_type"] == ContentType.PICKLE_OBJECT
+        assert display["content_type"] == ContentType.IMAGE_PNG
+        assert display["file"] != var["file"]
+
+    def test_reuse_survives_a_drained_one_shot_source(self):
+        # The case the __next__ guard cannot catch: a wrapper presenting the
+        # capsule over a one-shot reader without being an iterator. The first
+        # write drains it; reuse means the display never asks again, so the
+        # zero-row second artifact cannot happen.
+        table = pa.table({"a": [1, 2, 3]})
+        reader = pa.RecordBatchReader.from_batches(table.schema, table.to_batches())
+        value = _CountingCapsuleTable(reader)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            var = serialize_value(value, tmp, "stream")
+            display = serializer_module.serialize_display_value(value, tmp, 0, [(value, var)])
+
+        assert var["rows"] == 3
+        assert display["rows"] == 3
 
 
 class TestGenericArrowProtocols:
@@ -1298,9 +1457,14 @@ class TestGenericArrowProtocols:
         values = {
             "df": pd.DataFrame({"a": [1, 2]}),
             "arr": np.array([1.5, 2.5]),
+            # A RecordBatch exports the capsule too, and the generic rule would
+            # hand it back as a pa.Table — a quieter identity loss than the
+            # DataFrame one, but the same bug.
+            "batch": pa.record_batch({"a": [1, 2]}),
         }
         pl = pytest.importorskip("polars")
         values["pdf"] = pl.DataFrame({"a": [1, 2]})
+        values["pseries"] = pl.Series("n", [1, 2])
 
         with tempfile.TemporaryDirectory() as tmp:
             back = {}
@@ -1310,7 +1474,94 @@ class TestGenericArrowProtocols:
 
         assert isinstance(back["df"], pd.DataFrame)
         assert isinstance(back["arr"], np.ndarray)
+        assert isinstance(back["batch"], pa.RecordBatch)
         assert isinstance(back["pdf"], pl.DataFrame)
+        assert isinstance(back["pseries"], pl.Series)
+        assert back["pseries"].name == "n"
+
+    def test_one_shot_reader_is_left_on_the_pickle_path(self):
+        # A RecordBatchReader is consumed by reading. The harness serializes
+        # one object twice when a cell's value is also its display output, so
+        # routing this through Arrow makes the second artifact report zero
+        # rows with no error anywhere. Refusing it keeps the pre-existing
+        # visible failure instead of silently storing an empty table.
+        table = pa.table({"a": [1, 2, 3]})
+        reader = pa.RecordBatchReader.from_batches(table.schema, table.to_batches())
+
+        assert hasattr(reader, "__arrow_c_stream__")
+        assert serializer_module._matches_arrow_capsule(reader) is False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with pytest.raises(TypeError):
+                serialize_value(reader, tmp, "v")
+
+        # Still readable afterwards: refusing it did not consume the stream.
+        assert reader.read_all().num_rows == 3
+
+    def test_class_objects_are_not_mistaken_for_their_instances(self):
+        # ``Frame = pd.DataFrame`` binds a class, which carries its instances'
+        # protocol methods. Detecting it as tabular sends it down the Arrow
+        # path to fail, and the value is not tabular at all.
+        import numpy as np
+
+        assert serializer_module._matches_arrow_capsule(pd.DataFrame) is False
+        assert serializer_module._matches_dlpack(np.ndarray) is False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            meta = serialize_value(pd.DataFrame, tmp, "Frame")
+            back = deserialize_value(meta["content_type"], Path(tmp) / meta["file"])
+
+        assert meta["content_type"] == ContentType.PICKLE_OBJECT
+        assert back is pd.DataFrame
+
+    def test_hostile_getattr_is_never_invoked_by_detection(self):
+        # An instance-level hasattr runs the object's __getattr__. Proxies that
+        # raise something other than AttributeError when detached would escape
+        # detection entirely — past the Arrow fallback, out of serialize_value —
+        # and the caller turns that into an error entry, losing a value that
+        # used to pickle without complaint. Probing type(value) never calls it.
+        value = _HostileProxy()
+
+        assert serializer_module._matches_arrow_capsule(value) is False
+        assert serializer_module._matches_dlpack(value) is False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            meta = serialize_value(value, tmp, "proxy")
+
+        assert meta["content_type"] == ContentType.PICKLE_OBJECT
+
+    def test_generic_only_conversion_failure_is_not_warned_about(self):
+        # A ChunkedArray exports a non-struct stream, so pa.table() refuses it
+        # and pickle is the right answer. The loud "downstream cells expecting
+        # tabular shape will break" warning is for a *named* type that failed
+        # to encode; claiming it here would be false.
+        value = pa.chunked_array([[1, 2], [3]])
+        assert serializer_module._matched_only_generic_rules(value) is True
+
+        records = _capture_serializer_logs()
+        with records as seen:
+            with tempfile.TemporaryDirectory() as tmp:
+                meta = serialize_value(value, tmp, "ca")
+
+        assert meta["content_type"] == ContentType.PICKLE_OBJECT
+        assert [r.levelno for r in seen if r.levelno >= logging.WARNING] == []
+
+    def test_named_type_conversion_failure_still_warns(self):
+        # The counterpart: a structured-dtype ndarray is matched by the *named*
+        # numpy rule and then fails to encode, which does break a downstream
+        # cell expecting an array. That path keeps its warning.
+        import numpy as np
+
+        value = np.array([(1, "x")], dtype=[("i", "i4"), ("s", "U1")])
+        assert serializer_module._matched_only_generic_rules(value) is False
+
+        records = _capture_serializer_logs()
+        with records as seen:
+            with tempfile.TemporaryDirectory() as tmp:
+                meta = serialize_value(value, tmp, "sa")
+
+        assert meta["content_type"] == ContentType.PICKLE_OBJECT
+        assert [r.levelno for r in seen if r.levelno >= logging.WARNING] != []
 
     def test_device_buffer_falls_back_to_pickle(self):
         # np.from_dlpack refuses a non-host capsule; the arrow fallback has to
