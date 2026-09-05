@@ -1,3 +1,5 @@
+import type { TypedWsFrame, WsServerPayloadMap } from './ws-payloads.generated'
+
 /** Core notebook types — maps to Strata's artifact/transform model */
 
 export type CellId = string
@@ -818,4 +820,29 @@ export interface WsMessage {
   /** Server timestamp (ISO 8601) */
   ts: string
   payload: unknown
+}
+
+/**
+ * A frame whose payload shape is generated from the backend models.
+ *
+ * `WsMessage.payload` is `unknown` because most frames still build their dict
+ * by hand at the emit site. For the frames listed in `WsServerPayloadMap` the
+ * shape is known, so narrow to this and the payload comes with it:
+ *
+ * ```ts
+ * if (isTypedFrame(msg, 'error')) {
+ *   // msg.payload.code is 'ENVIRONMENT_BUSY' | undefined, not a cast
+ * }
+ * ```
+ */
+export interface TypedWsMessage<T extends TypedWsFrame> extends WsMessage {
+  type: T
+  payload: WsServerPayloadMap[T]
+}
+
+export function isTypedFrame<T extends TypedWsFrame>(
+  message: WsMessage,
+  frame: T,
+): message is TypedWsMessage<T> {
+  return message.type === frame
 }

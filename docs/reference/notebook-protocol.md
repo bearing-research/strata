@@ -187,6 +187,32 @@ The enum is the single source of truth; the docs are organized for
 human readability but the values match exactly. If you see a frame whose
 `type` doesn't match an enum value, treat that as a bug to report.
 
+### Payload types
+
+`MessageType` names the frames; it does not describe what rides in `payload`.
+For the frames that have a payload model, TypeScript declarations are generated
+from those models into `frontend/src/types/ws-payloads.generated.ts`:
+
+```ts
+import { isTypedFrame } from '@/types/notebook'
+
+if (isTypedFrame(msg, 'error')) {
+  // msg.payload.code narrows without a cast
+}
+```
+
+The file is committed, so the frontend build needs no Python step. Regenerate it
+after changing a payload model:
+
+```bash
+uv run python scripts/generate_ws_types.py
+```
+
+A test fails if the committed file and the models disagree, so the two cannot
+drift apart quietly. Frames without a model keep `payload: unknown` and have to
+be read from the emit site - `WsServerPayloadMap` is the list of those that do
+not.
+
 ### The `error` frame
 
 Any request can be answered with `error` instead of the frame you expected,
