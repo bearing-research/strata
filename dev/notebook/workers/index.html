@@ -1024,6 +1024,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#pooling-machines-you-own" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pooling machines you own
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#flyio-cpu-worker" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2154,6 +2165,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#pooling-machines-you-own" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pooling machines you own
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#flyio-cpu-worker" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2415,132 +2437,147 @@
 </tbody>
 </table>
 <p>You can register many workers per notebook; each cell picks its target independently. Mixing Fly (cheap CPU) and Modal (on-demand GPU) is a common setup.</p>
+<h3 id="pooling-machines-you-own">Pooling machines you own<a class="headerlink" href="#pooling-machines-you-own" title="Permanent link">&para;</a></h3>
+<p>The walkthroughs above register long-lived workers you start yourself. If you
+would rather hand out machines from a pool - start them on demand, hold them
+for a tenant, stop paying when the work finishes - <code>strata-pool</code> is a separate
+package that does exactly that:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>pip<span class="w"> </span>install<span class="w"> </span>strata-pool<span class="w">            </span><span class="c1"># library</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;strata-pool[server]&quot;</span><span class="w">  </span><span class="c1"># plus the HTTP service</span>
+</code></pre></div>
+<p>It ships Docker and RunPod backends, per-worker credentials, tenant-scoped
+machines, a fleet cap, and usage metering. Cloud SDKs live in the backend
+extras, so the base install pulls only <code>httpx</code>.</p>
+<p>This is the bring-your-own-hardware path. It manages machines you own, and it
+is deliberately feature-complete rather than growing - if you want someone else
+to autoscale for you, a serverless executor registered as a worker (above) is
+the better shape.</p>
 <h3 id="flyio-cpu-worker">Fly.io (CPU worker)<a class="headerlink" href="#flyio-cpu-worker" title="Permanent link">&para;</a></h3>
 <p><strong>Prerequisites:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Install the Fly CLI (macOS; see https://fly.io/docs/flyctl/install/ for others)</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>brew<span class="w"> </span>install<span class="w"> </span>flyctl
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># Log in (opens a browser)</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>fly<span class="w"> </span>auth<span class="w"> </span>login
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Install the Fly CLI (macOS; see https://fly.io/docs/flyctl/install/ for others)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>brew<span class="w"> </span>install<span class="w"> </span>flyctl
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Log in (opens a browser)</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>fly<span class="w"> </span>auth<span class="w"> </span>login
 </code></pre></div>
 <p><strong>1. Create a project directory with three files:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>my-strata-worker/
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>├── Dockerfile
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>├── fly.toml
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>└── .dockerignore
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>my-strata-worker/
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>├── Dockerfile
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>├── fly.toml
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>└── .dockerignore
 </code></pre></div>
 <p><strong><code>Dockerfile</code></strong> - installs <code>strata-notebook</code> and your workload deps from a uv-managed venv. Unlike <code>strata-notebook</code>, the worker entry (<code>strata-worker</code>) is not gated by Strata's runtime guard, so a plain <code>pip install</code> would also work - but the uv-python base image keeps tooling consistent across server + worker and drops a few hundred MB of build stage versus a source install.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/astral-sh/uv:python3.12-bookworm-slim</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="k">ENV</span><span class="w"> </span><span class="nv">VIRTUAL_ENV</span><span class="o">=</span>/opt/strata-venv
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="k">ENV</span><span class="w"> </span><span class="nv">PATH</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VIRTUAL_ENV</span><span class="s2">/bin:</span><span class="nv">$PATH</span><span class="s2">&quot;</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="c"># Install strata-notebook + your workload deps into a uv-managed</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="c"># venv. Pin to an exact strata-notebook version in production so</span>
-<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="c"># workers can&#39;t drift relative to the notebook server&#39;s expected</span>
-<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="c"># protocol version.</span>
-<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="k">RUN</span><span class="w"> </span>uv<span class="w"> </span>venv<span class="w"> </span><span class="nv">$VIRTUAL_ENV</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="w">    </span>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">      </span>strata-notebook<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">      </span><span class="s2">&quot;datafusion&gt;=42&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="w">      </span><span class="s2">&quot;pandas&gt;=2&quot;</span><span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="w">      </span><span class="s2">&quot;pyarrow&gt;=18&quot;</span>
-<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a>
-<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="k">EXPOSE</span><span class="w"> </span><span class="s">8080</span>
-<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="k">CMD</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;strata-worker&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;--host&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;0.0.0.0&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;--port&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;8080&quot;</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/astral-sh/uv:python3.12-bookworm-slim</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="k">ENV</span><span class="w"> </span><span class="nv">VIRTUAL_ENV</span><span class="o">=</span>/opt/strata-venv
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="k">ENV</span><span class="w"> </span><span class="nv">PATH</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VIRTUAL_ENV</span><span class="s2">/bin:</span><span class="nv">$PATH</span><span class="s2">&quot;</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="c"># Install strata-notebook + your workload deps into a uv-managed</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="c"># venv. Pin to an exact strata-notebook version in production so</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="c"># workers can&#39;t drift relative to the notebook server&#39;s expected</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="c"># protocol version.</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="k">RUN</span><span class="w"> </span>uv<span class="w"> </span>venv<span class="w"> </span><span class="nv">$VIRTUAL_ENV</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="w">    </span>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">      </span>strata-notebook<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">      </span><span class="s2">&quot;datafusion&gt;=42&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">      </span><span class="s2">&quot;pandas&gt;=2&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="w">      </span><span class="s2">&quot;pyarrow&gt;=18&quot;</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="k">EXPOSE</span><span class="w"> </span><span class="s">8080</span>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="k">CMD</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;strata-worker&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;--host&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;0.0.0.0&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;--port&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;8080&quot;</span><span class="p">]</span>
 </code></pre></div>
 <p><strong><code>fly.toml</code></strong>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">app</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;my-strata-worker&quot;</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">primary_region</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;iad&quot;</span><span class="w">  </span><span class="c1"># pick a region close to your Strata server</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="k">[http_service]</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span><span class="n">internal_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8080</span>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span><span class="n">force_https</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span><span class="n">auto_stop_machines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;stop&quot;</span>
-<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="w">  </span><span class="n">auto_start_machines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
-<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="w">  </span><span class="n">min_machines_running</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w">  </span><span class="c1"># set to 1 for always-on; 0 for scale-to-zero</span>
-<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>
-<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="k">[[vm]]</span>
-<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="w">  </span><span class="n">cpu_kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;shared&quot;</span>
-<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="w">  </span><span class="n">cpus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>
-<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="w">  </span><span class="n">memory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;1gb&quot;</span><span class="w">  </span><span class="c1"># bump for pandas/duckdb workloads</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">app</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;my-strata-worker&quot;</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">primary_region</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;iad&quot;</span><span class="w">  </span><span class="c1"># pick a region close to your Strata server</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="k">[http_service]</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">  </span><span class="n">internal_port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8080</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">  </span><span class="n">force_https</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">  </span><span class="n">auto_stop_machines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;stop&quot;</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">  </span><span class="n">auto_start_machines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="w">  </span><span class="n">min_machines_running</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w">  </span><span class="c1"># set to 1 for always-on; 0 for scale-to-zero</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="k">[[vm]]</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="w">  </span><span class="n">cpu_kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;shared&quot;</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="w">  </span><span class="n">cpus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span>
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="w">  </span><span class="n">memory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;1gb&quot;</span><span class="w">  </span><span class="c1"># bump for pandas/duckdb workloads</span>
 </code></pre></div>
 <p><strong><code>.dockerignore</code></strong> (keeps the build context small):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>.git
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>*.pyc
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>__pycache__
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>.venv
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>.git
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>*.pyc
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>__pycache__
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>.venv
 </code></pre></div>
 <p><strong>2. Deploy:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>fly<span class="w"> </span>launch<span class="w"> </span>--no-deploy<span class="w">   </span><span class="c1"># first time only - creates the app, accepts fly.toml</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>fly<span class="w"> </span>deploy
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>fly<span class="w"> </span>launch<span class="w"> </span>--no-deploy<span class="w">   </span><span class="c1"># first time only - creates the app, accepts fly.toml</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>fly<span class="w"> </span>deploy
 </code></pre></div>
 <p>The first build takes ~30 seconds (wheel download + layer assembly). Subsequent deploys reuse the layer cache and finish in seconds.</p>
 <p><strong>3. Verify the deployed worker:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>curl<span class="w"> </span>https://my-strata-worker.fly.dev/health
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>curl<span class="w"> </span>https://my-strata-worker.fly.dev/health
 </code></pre></div>
 <p>Expect the same JSON as the local-worker step. If you see a 404 or timeout, jump to <a href="#troubleshooting">Troubleshooting</a>.</p>
 <p><strong>4. Register in <code>notebook.toml</code>:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="k">[[workers]]</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;fly-cpu&quot;</span>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;executor&quot;</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;fly-cpu-v1&quot;</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="k">[workers.config]</span>
-<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://my-strata-worker.fly.dev/v1/execute&quot;</span>
-<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="k">[[workers]]</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;fly-cpu&quot;</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;executor&quot;</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;fly-cpu-v1&quot;</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="k">[workers.config]</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://my-strata-worker.fly.dev/v1/execute&quot;</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
 </code></pre></div>
 <h3 id="modal-gpu-worker">Modal (GPU worker)<a class="headerlink" href="#modal-gpu-worker" title="Permanent link">&para;</a></h3>
 <p><strong>Prerequisites:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>pip<span class="w"> </span>install<span class="w"> </span>modal
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>modal<span class="w"> </span>token<span class="w"> </span>new<span class="w">   </span><span class="c1"># one-time browser auth</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>pip<span class="w"> </span>install<span class="w"> </span>modal
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>modal<span class="w"> </span>token<span class="w"> </span>new<span class="w">   </span><span class="c1"># one-time browser auth</span>
 </code></pre></div>
 <p><strong>1. Create <code>worker.py</code>:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">modal</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="c1"># Modal&#39;s pip_install pulls wheels from PyPI. strata-notebook ships</span>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="c1"># pre-built abi3-py312 wheels so no Rust toolchain is needed, and the</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="c1"># worker entry isn&#39;t gated by the runtime guard (only strata-notebook is)</span>
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="c1"># so Modal&#39;s standard image stack works without going through uv.</span>
-<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="n">gpu_image</span> <span class="o">=</span> <span class="p">(</span>
-<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>    <span class="n">modal</span><span class="o">.</span><span class="n">Image</span><span class="o">.</span><span class="n">debian_slim</span><span class="p">(</span><span class="n">python_version</span><span class="o">=</span><span class="s2">&quot;3.12&quot;</span><span class="p">)</span>
-<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>    <span class="o">.</span><span class="n">pip_install</span><span class="p">(</span>
-<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>        <span class="s2">&quot;pyarrow&gt;=18.0.0&quot;</span><span class="p">,</span> <span class="s2">&quot;pandas&gt;=2.0.0&quot;</span><span class="p">,</span> <span class="s2">&quot;numpy&gt;=1.26.0&quot;</span><span class="p">,</span>
-<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a>        <span class="c1"># Your workload dependencies:</span>
-<a id="__codelineno-19-12" name="__codelineno-19-12" href="#__codelineno-19-12"></a>        <span class="s2">&quot;torch&gt;=2.3&quot;</span><span class="p">,</span>
-<a id="__codelineno-19-13" name="__codelineno-19-13" href="#__codelineno-19-13"></a>        <span class="s2">&quot;sentence-transformers&gt;=3.0&quot;</span><span class="p">,</span>
-<a id="__codelineno-19-14" name="__codelineno-19-14" href="#__codelineno-19-14"></a>        <span class="c1"># Pin to an exact version in production so the worker</span>
-<a id="__codelineno-19-15" name="__codelineno-19-15" href="#__codelineno-19-15"></a>        <span class="c1"># protocol can&#39;t drift relative to the notebook server.</span>
-<a id="__codelineno-19-16" name="__codelineno-19-16" href="#__codelineno-19-16"></a>        <span class="s2">&quot;strata-notebook&quot;</span><span class="p">,</span>
-<a id="__codelineno-19-17" name="__codelineno-19-17" href="#__codelineno-19-17"></a>    <span class="p">)</span>
-<a id="__codelineno-19-18" name="__codelineno-19-18" href="#__codelineno-19-18"></a><span class="p">)</span>
-<a id="__codelineno-19-19" name="__codelineno-19-19" href="#__codelineno-19-19"></a>
-<a id="__codelineno-19-20" name="__codelineno-19-20" href="#__codelineno-19-20"></a><span class="n">app</span> <span class="o">=</span> <span class="n">modal</span><span class="o">.</span><span class="n">App</span><span class="p">(</span><span class="s2">&quot;my-gpu-worker&quot;</span><span class="p">,</span> <span class="n">image</span><span class="o">=</span><span class="n">gpu_image</span><span class="p">)</span>
-<a id="__codelineno-19-21" name="__codelineno-19-21" href="#__codelineno-19-21"></a>
-<a id="__codelineno-19-22" name="__codelineno-19-22" href="#__codelineno-19-22"></a>
-<a id="__codelineno-19-23" name="__codelineno-19-23" href="#__codelineno-19-23"></a><span class="nd">@app</span><span class="o">.</span><span class="n">function</span><span class="p">(</span><span class="n">gpu</span><span class="o">=</span><span class="s2">&quot;A10G&quot;</span><span class="p">,</span> <span class="n">scaledown_window</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
-<a id="__codelineno-19-24" name="__codelineno-19-24" href="#__codelineno-19-24"></a><span class="nd">@modal</span><span class="o">.</span><span class="n">asgi_app</span><span class="p">()</span>
-<a id="__codelineno-19-25" name="__codelineno-19-25" href="#__codelineno-19-25"></a><span class="k">def</span><span class="w"> </span><span class="nf">gpu_executor</span><span class="p">():</span>
-<a id="__codelineno-19-26" name="__codelineno-19-26" href="#__codelineno-19-26"></a>    <span class="kn">from</span><span class="w"> </span><span class="nn">strata.notebook.remote_executor</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_notebook_executor_app</span>
-<a id="__codelineno-19-27" name="__codelineno-19-27" href="#__codelineno-19-27"></a>    <span class="k">return</span> <span class="n">create_notebook_executor_app</span><span class="p">()</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">modal</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="c1"># Modal&#39;s pip_install pulls wheels from PyPI. strata-notebook ships</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1"># pre-built abi3-py312 wheels so no Rust toolchain is needed, and the</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="c1"># worker entry isn&#39;t gated by the runtime guard (only strata-notebook is)</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="c1"># so Modal&#39;s standard image stack works without going through uv.</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="n">gpu_image</span> <span class="o">=</span> <span class="p">(</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>    <span class="n">modal</span><span class="o">.</span><span class="n">Image</span><span class="o">.</span><span class="n">debian_slim</span><span class="p">(</span><span class="n">python_version</span><span class="o">=</span><span class="s2">&quot;3.12&quot;</span><span class="p">)</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>    <span class="o">.</span><span class="n">pip_install</span><span class="p">(</span>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a>        <span class="s2">&quot;pyarrow&gt;=18.0.0&quot;</span><span class="p">,</span> <span class="s2">&quot;pandas&gt;=2.0.0&quot;</span><span class="p">,</span> <span class="s2">&quot;numpy&gt;=1.26.0&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a>        <span class="c1"># Your workload dependencies:</span>
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a>        <span class="s2">&quot;torch&gt;=2.3&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a>        <span class="s2">&quot;sentence-transformers&gt;=3.0&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a>        <span class="c1"># Pin to an exact version in production so the worker</span>
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a>        <span class="c1"># protocol can&#39;t drift relative to the notebook server.</span>
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a>        <span class="s2">&quot;strata-notebook&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a>    <span class="p">)</span>
+<a id="__codelineno-20-18" name="__codelineno-20-18" href="#__codelineno-20-18"></a><span class="p">)</span>
+<a id="__codelineno-20-19" name="__codelineno-20-19" href="#__codelineno-20-19"></a>
+<a id="__codelineno-20-20" name="__codelineno-20-20" href="#__codelineno-20-20"></a><span class="n">app</span> <span class="o">=</span> <span class="n">modal</span><span class="o">.</span><span class="n">App</span><span class="p">(</span><span class="s2">&quot;my-gpu-worker&quot;</span><span class="p">,</span> <span class="n">image</span><span class="o">=</span><span class="n">gpu_image</span><span class="p">)</span>
+<a id="__codelineno-20-21" name="__codelineno-20-21" href="#__codelineno-20-21"></a>
+<a id="__codelineno-20-22" name="__codelineno-20-22" href="#__codelineno-20-22"></a>
+<a id="__codelineno-20-23" name="__codelineno-20-23" href="#__codelineno-20-23"></a><span class="nd">@app</span><span class="o">.</span><span class="n">function</span><span class="p">(</span><span class="n">gpu</span><span class="o">=</span><span class="s2">&quot;A10G&quot;</span><span class="p">,</span> <span class="n">scaledown_window</span><span class="o">=</span><span class="mi">60</span><span class="p">)</span>
+<a id="__codelineno-20-24" name="__codelineno-20-24" href="#__codelineno-20-24"></a><span class="nd">@modal</span><span class="o">.</span><span class="n">asgi_app</span><span class="p">()</span>
+<a id="__codelineno-20-25" name="__codelineno-20-25" href="#__codelineno-20-25"></a><span class="k">def</span><span class="w"> </span><span class="nf">gpu_executor</span><span class="p">():</span>
+<a id="__codelineno-20-26" name="__codelineno-20-26" href="#__codelineno-20-26"></a>    <span class="kn">from</span><span class="w"> </span><span class="nn">strata.notebook.remote_executor</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_notebook_executor_app</span>
+<a id="__codelineno-20-27" name="__codelineno-20-27" href="#__codelineno-20-27"></a>    <span class="k">return</span> <span class="n">create_notebook_executor_app</span><span class="p">()</span>
 </code></pre></div>
 <p><strong>2. Deploy:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>modal<span class="w"> </span>deploy<span class="w"> </span>worker.py
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>modal<span class="w"> </span>deploy<span class="w"> </span>worker.py
 </code></pre></div>
 <p>Modal prints the deployed URL after the build finishes - something like <code>https://your-username--my-gpu-worker-gpu-executor.modal.run</code>. The first build with torch + sentence-transformers takes ~5 minutes; redeploys with no changes hit the layer cache and finish in seconds.</p>
 <p><strong>3. Verify:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>curl<span class="w"> </span>https://your-username--my-gpu-worker-gpu-executor.modal.run/health
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>curl<span class="w"> </span>https://your-username--my-gpu-worker-gpu-executor.modal.run/health
 </code></pre></div>
 <p>The first request after a scale-down cold-starts the container (~20–30 s for GPU). Health-check requests do <strong>not</strong> start the GPU function on most Modal plans - if <code>/health</code> returns immediately, the function is warm; if it doesn't respond, send a real cell from the notebook to wake it.</p>
 <p><strong>4. Register in <code>notebook.toml</code>:</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="k">[[workers]]</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;modal-gpu&quot;</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;executor&quot;</span>
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;modal-a10g-v1&quot;</span>
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a>
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="k">[workers.config]</span>
-<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://your-username--my-gpu-worker-gpu-executor.modal.run/v1/execute&quot;</span>
-<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="k">[[workers]]</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;modal-gpu&quot;</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;executor&quot;</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;modal-a10g-v1&quot;</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="k">[workers.config]</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://your-username--my-gpu-worker-gpu-executor.modal.run/v1/execute&quot;</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
 </code></pre></div>
 <h2 id="registering-workers">Registering workers<a class="headerlink" href="#registering-workers" title="Permanent link">&para;</a></h2>
 <p>Workers live in <code>notebook.toml</code> under <code>[[workers]]</code>. You can add them through the <strong>Workers panel</strong> sidebar (which writes the same TOML) or edit the file directly:</p>
@@ -2583,62 +2620,62 @@
 </tbody>
 </table>
 <p>A typical multi-worker notebook ends up with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="k">[[workers]]</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;fly-cpu&quot;</span>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;executor&quot;</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;fly-cpu-v1&quot;</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="k">[workers.config]</span>
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://my-strata-worker.fly.dev/v1/execute&quot;</span>
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
-<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;STRATA_FLY_WORKER_TOKEN&quot;</span>
-<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a>
-<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="k">[[workers]]</span>
-<a id="__codelineno-23-11" name="__codelineno-23-11" href="#__codelineno-23-11"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;modal-gpu&quot;</span>
-<a id="__codelineno-23-12" name="__codelineno-23-12" href="#__codelineno-23-12"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;executor&quot;</span>
-<a id="__codelineno-23-13" name="__codelineno-23-13" href="#__codelineno-23-13"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;modal-a10g-v1&quot;</span>
-<a id="__codelineno-23-14" name="__codelineno-23-14" href="#__codelineno-23-14"></a><span class="k">[workers.config]</span>
-<a id="__codelineno-23-15" name="__codelineno-23-15" href="#__codelineno-23-15"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://...--my-gpu-worker-gpu-executor.modal.run/v1/execute&quot;</span>
-<a id="__codelineno-23-16" name="__codelineno-23-16" href="#__codelineno-23-16"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
-<a id="__codelineno-23-17" name="__codelineno-23-17" href="#__codelineno-23-17"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;STRATA_MODAL_WORKER_TOKEN&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="k">[[workers]]</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;fly-cpu&quot;</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;executor&quot;</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;fly-cpu-v1&quot;</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="k">[workers.config]</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://my-strata-worker.fly.dev/v1/execute&quot;</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;STRATA_FLY_WORKER_TOKEN&quot;</span>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a>
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="k">[[workers]]</span>
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;modal-gpu&quot;</span>
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a><span class="n">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;executor&quot;</span>
+<a id="__codelineno-24-13" name="__codelineno-24-13" href="#__codelineno-24-13"></a><span class="n">runtime_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;modal-a10g-v1&quot;</span>
+<a id="__codelineno-24-14" name="__codelineno-24-14" href="#__codelineno-24-14"></a><span class="k">[workers.config]</span>
+<a id="__codelineno-24-15" name="__codelineno-24-15" href="#__codelineno-24-15"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://...--my-gpu-worker-gpu-executor.modal.run/v1/execute&quot;</span>
+<a id="__codelineno-24-16" name="__codelineno-24-16" href="#__codelineno-24-16"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
+<a id="__codelineno-24-17" name="__codelineno-24-17" href="#__codelineno-24-17"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;STRATA_MODAL_WORKER_TOKEN&quot;</span>
 </code></pre></div>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <p>By default the worker accepts any caller that can reach its URL. For any worker deployed to a public endpoint, set a bearer token so only your notebook server can dispatch cells.</p>
 <p><strong>1. Generate a token</strong> (any opaque string; 32+ random bytes is plenty):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import secrets; print(secrets.token_urlsafe(32))&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import secrets; print(secrets.token_urlsafe(32))&quot;</span>
 </code></pre></div>
 <p><strong>2. Set <code>STRATA_WORKER_TOKEN</code> on the worker.</strong></p>
 <p>For Fly.io, store it as a secret (encrypted, injected at runtime, not visible in fly.toml):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>fly<span class="w"> </span>secrets<span class="w"> </span><span class="nb">set</span><span class="w"> </span><span class="nv">STRATA_WORKER_TOKEN</span><span class="o">=</span>&lt;paste-token-here&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>fly<span class="w"> </span>secrets<span class="w"> </span><span class="nb">set</span><span class="w"> </span><span class="nv">STRATA_WORKER_TOKEN</span><span class="o">=</span>&lt;paste-token-here&gt;
 </code></pre></div>
 <p>For Modal, attach a secret to the function:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="nd">@app</span><span class="o">.</span><span class="n">function</span><span class="p">(</span>
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>    <span class="n">gpu</span><span class="o">=</span><span class="s2">&quot;A10G&quot;</span><span class="p">,</span>
-<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a>    <span class="n">scaledown_window</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span>
-<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a>    <span class="n">secrets</span><span class="o">=</span><span class="p">[</span><span class="n">modal</span><span class="o">.</span><span class="n">Secret</span><span class="o">.</span><span class="n">from_name</span><span class="p">(</span><span class="s2">&quot;strata-worker-token&quot;</span><span class="p">)],</span>
-<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="p">)</span>
-<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="nd">@modal</span><span class="o">.</span><span class="n">asgi_app</span><span class="p">()</span>
-<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">gpu_executor</span><span class="p">():</span>
-<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a>    <span class="o">...</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="nd">@app</span><span class="o">.</span><span class="n">function</span><span class="p">(</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>    <span class="n">gpu</span><span class="o">=</span><span class="s2">&quot;A10G&quot;</span><span class="p">,</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>    <span class="n">scaledown_window</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>    <span class="n">secrets</span><span class="o">=</span><span class="p">[</span><span class="n">modal</span><span class="o">.</span><span class="n">Secret</span><span class="o">.</span><span class="n">from_name</span><span class="p">(</span><span class="s2">&quot;strata-worker-token&quot;</span><span class="p">)],</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="p">)</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="nd">@modal</span><span class="o">.</span><span class="n">asgi_app</span><span class="p">()</span>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a><span class="k">def</span><span class="w"> </span><span class="nf">gpu_executor</span><span class="p">():</span>
+<a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a>    <span class="o">...</span>
 </code></pre></div>
 <p>…then create the Modal secret once: <code>modal secret create strata-worker-token STRATA_WORKER_TOKEN=&lt;paste-token-here&gt;</code>.</p>
 <p><strong>3. Tell the notebook server about the token.</strong> Export it as an environment variable wherever you run <code>strata-notebook</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_FLY_WORKER_TOKEN</span><span class="o">=</span>&lt;paste-token-here&gt;
-<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">STRATA_FLY_WORKER_TOKEN</span><span class="o">=</span>&lt;paste-token-here&gt;
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>uv<span class="w"> </span>run<span class="w"> </span>strata-notebook
 </code></pre></div>
 <p>…and reference that env var in <code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="k">[workers.config]</span>
-<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://my-strata-worker.fly.dev/v1/execute&quot;</span>
-<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
-<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;STRATA_FLY_WORKER_TOKEN&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="k">[workers.config]</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="n">url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;https://my-strata-worker.fly.dev/v1/execute&quot;</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;STRATA_FLY_WORKER_TOKEN&quot;</span>
 </code></pre></div>
 <p><code>token_env</code> is preferred over <code>token</code> because the literal-token form gets committed to your notebook repo. Use <code>token = "..."</code> only for one-off local experiments.</p>
 <p>A worker with <code>STRATA_WORKER_TOKEN</code> set rejects unauthenticated requests with <code>401 Unauthorized</code>. <code>/health</code> stays open so platform health probes work without the secret.</p>
 <h2 id="using-workers-in-cells">Using workers in cells<a class="headerlink" href="#using-workers-in-cells" title="Permanent link">&para;</a></h2>
 <p>Annotate any cell with <code># @worker &lt;name&gt;</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="c1"># @name Embed Abstracts</span>
-<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="c1"># @worker modal-gpu</span>
-<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="c1"># @timeout 300</span>
-<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="n">embeddings</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">abstracts</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="c1"># @name Embed Abstracts</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="c1"># @worker modal-gpu</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="c1"># @timeout 300</span>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="n">embeddings</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">encode</span><span class="p">(</span><span class="n">abstracts</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">256</span><span class="p">)</span>
 </code></pre></div>
 <p>The worker annotation is the <strong>only</strong> change needed; the cell code itself is identical to local execution. If the worker has the right packages installed, it just works.</p>
 <h3 id="precedence">Precedence<a class="headerlink" href="#precedence" title="Permanent link">&para;</a></h3>
@@ -2690,7 +2727,7 @@ the isolation boundary makes it a footgun worth designing around explicitly.</p>
 <p>If you don't set <code>runtime_id</code>, Strata uses the worker <code>name</code> as a fallback. That's fine for solo notebooks but risks cache surprises if two notebooks both have a worker named <code>gpu</code> pointing at different deployments - set <code>runtime_id</code> explicitly in shared notebooks.</p>
 <h2 id="health-checks">Health checks<a class="headerlink" href="#health-checks" title="Permanent link">&para;</a></h2>
 <p>Every worker exposes <code>GET /health</code>. The notebook UI polls this and shows a green/red badge next to cells that use the worker; cells refuse to dispatch to an unhealthy worker.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>curl<span class="w"> </span>https://my-worker.example.com/health
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>curl<span class="w"> </span>https://my-worker.example.com/health
 </code></pre></div>
 <p>The <code>/health</code> endpoint is <strong>not</strong> gated by <code>STRATA_WORKER_TOKEN</code> - platform health probes (Fly, k8s liveness, Cloudflare) don't need the secret.</p>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
