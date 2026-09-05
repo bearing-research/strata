@@ -39,20 +39,31 @@ class UnsupportedSchema(RuntimeError):
     """A construct the emitter does not know how to render."""
 
 
-def _ts_type(schema: dict[str, Any], required: bool) -> str:
+def _ts_literal(value: object) -> str:
+    """Render an enum member as a TypeScript string literal.
+
+    Escaped, because an unescaped quote or backslash produces a file that is
+    not TypeScript at all -- caught by vue-tsc eventually, but only after the
+    generator has reported success.
+    """
+    text = str(value).replace("\\", "\\\\").replace("'", "\\'")
+    return f"'{text}'"
+
+
+def _ts_type(schema: dict[str, Any]) -> str:
     """Render one JSON Schema node as a TypeScript type."""
     if "$ref" in schema:
         return schema["$ref"].rsplit("/", 1)[-1]
 
     if "anyOf" in schema:
-        parts = [_ts_type(s, True) for s in schema["anyOf"]]
+        parts = [_ts_type(s) for s in schema["anyOf"]]
         # Optionals arrive as anyOf[T, null]; "| null" is kept rather than
         # folded into "?" because the wire really can carry an explicit null,
         # and a consumer that only checks for absence would miss it.
         return " | ".join(dict.fromkeys(parts))
 
     if "enum" in schema:
-        return " | ".join(f"'{v}'" for v in schema["enum"])
+        return " | ".join(_ts_literal(v) for v in schema["enum"])
 
     kind = schema.get("type")
     if kind == "string":
@@ -64,24 +75,57 @@ def _ts_type(schema: dict[str, Any], required: bool) -> str:
     if kind == "null":
         return "null"
     if kind == "array":
-        return f"{_ts_type(schema.get('items', {}), True)}[]"
+        # An array with no ``items`` is a tuple (pydantic emits ``prefixItems``)
+        # or something else this does not model. Rendering it ``unknown[]``
+        # would type-check and describe nothing, so refuse it.
+        if "items" not in schema:
+            raise UnsupportedSchema(f"array without items: {schema!r}")
+        return f"{_ts_type(schema['items'])}[]"
     if kind == "object":
         # A free-form mapping (dict[str, Any] passthrough fields).
         return "Record<string, unknown>"
-    if not schema:
+    if schema == {}:
+        # A genuinely unconstrained field (bare ``Any``). Distinct from a node
+        # this emitter failed to understand, which raises below.
         return "unknown"
     raise UnsupportedSchema(f"cannot render {schema!r}")
 
 
+def _is_optional(spec: dict[str, Any]) -> bool:
+    """Whether a field can actually be absent from the wire dict.
+
+    Not JSON Schema's ``required``: a field with a default is "not required" to
+    *construct*, but ``model_dump`` still emits it, so the client always sees
+    it. What removes a key is ``exclude_none``, which drops exactly the fields
+    holding ``None``. So nullability is the question, not defaultedness --
+    otherwise every defaulted field is typed ``?`` and consumers write
+    existence checks for keys that are always there.
+    """
+    return any(part.get("type") == "null" for part in spec.get("anyOf", []))
+
+
+def _doc_comment(text: str) -> str:
+    # ``*/`` inside a description would close the comment early and break the
+    # file; the generator would still report success.
+    return f"  /** {' '.join(text.split()).replace('*/', '*\\/')} */"
+
+
 def _interface(name: str, schema: dict[str, Any]) -> str:
-    required = set(schema.get("required", []))
+    if "enum" in schema:
+        # A Python Enum reaches $defs as a bare enum node with no properties.
+        # Rendering it as an interface yields ``{}``, which accepts almost
+        # anything -- the "type that promises nothing" this emitter exists to
+        # refuse.
+        return f"export type {name} = {_ts_type(schema)}"
+    if "properties" not in schema:
+        raise UnsupportedSchema(f"{name}: not an object or enum: {schema!r}")
     lines = [f"export interface {name} {{"]
     for field, spec in schema.get("properties", {}).items():
-        optional = "" if field in required else "?"
+        optional = "?" if _is_optional(spec) else ""
         doc = spec.get("description")
         if doc:
-            lines.append(f"  /** {' '.join(doc.split())} */")
-        lines.append(f"  {field}{optional}: {_ts_type(spec, field in required)}")
+            lines.append(_doc_comment(doc))
+        lines.append(f"  {field}{optional}: {_ts_type(spec)}")
     lines.append("}")
     return "\n".join(lines)
 

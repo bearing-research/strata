@@ -376,6 +376,12 @@ def dag_update_payload(raw: dict[str, Any]) -> dict[str, Any]:
     return DagUpdatePayload.model_validate(raw).model_dump(mode="json")
 
 
+# The machine-readable classes an ``error`` frame can carry. Named so the
+# builder can be typed to it too: a mistyped code at an emit site should be a
+# type error, not a value the frontend silently fails to match.
+ErrorCode = Literal["ENVIRONMENT_BUSY", "cell_busy", "read_only", "insufficient_scope"]
+
+
 class ErrorPayload(WsPayload):
     """``error`` — a request could not be served.
 
@@ -392,13 +398,13 @@ class ErrorPayload(WsPayload):
     """
 
     error: str
-    code: str | None = None
+    code: ErrorCode | None = None
     # Only on ``cell_busy``, which names the cell that refused the edit.
     cell_id: str | None = None
 
 
 def error_payload(
-    error: str, code: str | None = None, cell_id: str | None = None
+    error: str, code: ErrorCode | None = None, cell_id: str | None = None
 ) -> dict[str, Any]:
     """Build the wire dict for an ``error`` frame.
 
