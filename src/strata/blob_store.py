@@ -499,6 +499,49 @@ class S3BlobStore(BlobStore):
         )
 
 
+def _resolve_gcs_credentials(credentials: str) -> str:
+    """Return a filesystem path for *credentials*, writing it out if inline.
+
+    ``GOOGLE_APPLICATION_CREDENTIALS`` is a path and nothing else, so inline
+    key material handed to it fails at first blob access -- long after the
+    deployment looks healthy -- with a file-not-found that names a path the
+    operator never wrote.
+
+    A value that parses as a JSON object is key material and gets spilled to a
+    private file; anything else is passed through as the path it already is.
+    Parsing, not a ``{`` prefix, so a path is never mistaken for a key.
+
+    The filename is derived from the key's own digest rather than being random,
+    because ``atexit`` does not run on SIGKILL or an OOM kill. A random name
+    would leave one private key per hard-killed process lying in the temp
+    directory; a content-addressed one is rewritten in place by the next start,
+    so the worst case is a single file rather than an unbounded pile. It is
+    written 0600 and removed at exit when the process gets to exit normally.
+    """
+    import atexit
+    import json
+
+    text = credentials.strip()
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return credentials
+    if not isinstance(parsed, dict):
+        return credentials
+
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    path = Path(tempfile.gettempdir()) / f"strata_gcs_{digest}.json"
+    # Opened by descriptor with an explicit mode: writing through Path would
+    # leave the key world-readable for the moment before a chmod lands, and
+    # would not fix the mode of a file left behind by a previous run.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    os.chmod(path, 0o600)
+    atexit.register(lambda: path.unlink(missing_ok=True))
+    return str(path)
+
+
 class GCSBlobStore(BlobStore):
     """Google Cloud Storage blob storage.
 
@@ -513,7 +556,7 @@ class GCSBlobStore(BlobStore):
         self,
         bucket: str,
         prefix: str = "artifacts",
-        project_id: str | None = None,
+        default_bucket_location: str | None = None,
         credentials_json: str | None = None,
         anonymous: bool = False,
         endpoint_override: str | None = None,
@@ -523,8 +566,11 @@ class GCSBlobStore(BlobStore):
         Args:
             bucket: GCS bucket name
             prefix: Key prefix within bucket (default: "artifacts")
-            project_id: GCP project ID (uses default if not specified)
-            credentials_json: Path to service account JSON key file
+            default_bucket_location: GCS location new buckets default to
+                (``US``, ``europe-west1``). Not a project id: GcsFileSystem
+                takes no project parameter.
+            credentials_json: Service-account key, as either a path to the
+                JSON file or the JSON itself
             anonymous: Use anonymous access for public buckets
             endpoint_override: Custom endpoint for GCS-compatible services (e.g., fake-gcs-server)
         """
@@ -535,16 +581,21 @@ class GCSBlobStore(BlobStore):
 
         # Build GcsFileSystem
         kwargs = {}
-        if project_id:
-            kwargs["default_bucket_location"] = project_id
+        if default_bucket_location:
+            kwargs["default_bucket_location"] = default_bucket_location
         if credentials_json:
             kwargs["access_token"] = None  # Disable token auth
-            # GcsFileSystem uses GOOGLE_APPLICATION_CREDENTIALS env var
-            # or explicit credentials via access_token
-            # For service account key files, set the env var before creating
+            # GcsFileSystem reads GOOGLE_APPLICATION_CREDENTIALS, which the
+            # Google client resolves strictly as a filesystem path. The setting
+            # is named ...CREDENTIALS_JSON, so operators paste key material
+            # into it -- and a container deployment usually has the credential
+            # as an env var rather than a mounted file. Spill that to a private
+            # file so both readings work.
             import os
 
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_json
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _resolve_gcs_credentials(
+                credentials_json
+            )
         if anonymous:
             kwargs["anonymous"] = True
         if endpoint_override:
@@ -656,7 +707,7 @@ class GCSBlobStore(BlobStore):
         return cls(
             bucket=bucket,
             prefix=prefix,
-            project_id=config.gcs_project_id,
+            default_bucket_location=config.gcs_default_bucket_location,
             credentials_json=config.gcs_credentials_json,
             anonymous=config.gcs_anonymous,
             endpoint_override=config.gcs_endpoint_override,

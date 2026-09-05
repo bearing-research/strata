@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tomllib
 from pathlib import Path
@@ -27,6 +28,9 @@ from strata.types import CacheGranularity
 # ---------------------------------------------------------------------------
 # ACL Configuration Types
 # ---------------------------------------------------------------------------
+
+
+logger = logging.getLogger(__name__)
 
 
 class AclRule(BaseModel):
@@ -211,6 +215,9 @@ class StrataConfig(BaseSettings):
         env_prefix="STRATA_",
         env_nested_delimiter="__",
         extra="ignore",  # Ignore extra fields from pyproject.toml
+        # A field carrying validation_alias still has to be settable by its own
+        # name, because load() passes pyproject keys as init kwargs.
+        populate_by_name=True,
     )
 
     # Server settings
@@ -441,7 +448,29 @@ class StrataConfig(BaseSettings):
     artifact_azure_prefix: str = "artifacts"
 
     # GCS configuration
-    gcs_project_id: str | None = None
+    #
+    # Named for what it does. PyArrow's GcsFileSystem has no project parameter
+    # at all, so the old STRATA_GCS_PROJECT_ID never set one — it fed whatever
+    # it was given to ``default_bucket_location``, a GCS location like ``US``
+    # or ``europe-west1``. The old name stays accepted so a deployment setting
+    # it keeps the behaviour it had; ``validate_gcs_settings`` says what it
+    # actually controls.
+    # Both entries carry the STRATA_ prefix deliberately. validation_alias
+    # *replaces* env_prefix rather than combining with it, so a bare
+    # "gcs_project_id" here would make the unprefixed GCS_PROJECT_ID live
+    # config — and in a GCP deployment that variable is ambient, which would
+    # feed a project id into the location field exactly as before. No other
+    # setting in this class is reachable without the prefix.
+    gcs_default_bucket_location: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "STRATA_GCS_DEFAULT_BUCKET_LOCATION",
+            "STRATA_GCS_PROJECT_ID",
+        ),
+    )
+    # Either a path to a service-account key file or the key material itself.
+    # The name invites pasting JSON, which container deployments want to do,
+    # so both are accepted (see ``GCSBlobStore``).
     gcs_credentials_json: str | None = None
     gcs_anonymous: bool = False
     gcs_endpoint_override: str | None = None
@@ -689,6 +718,35 @@ class StrataConfig(BaseSettings):
                 "notebook_team_cache_enabled=True without notebook_remote_store_url "
                 "(there is no store to look results up in, so every lookup would "
                 "miss and every cell would recompute; set notebook_remote_store_url)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def warn_on_gcs_project_id(self) -> StrataConfig:
+        """Say what STRATA_GCS_PROJECT_ID actually controls.
+
+        It never set a project: PyArrow's GcsFileSystem takes no project
+        parameter, so the value went to ``default_bucket_location`` — a GCS
+        location like ``US``. An operator who read the name and set a project
+        id has a bogus location configured, which is inert until something
+        creates a bucket, at which point it is not. The setting keeps working
+        under either name; this is the only place that can point out the two
+        do not mean the same thing.
+        """
+        import os
+
+        # Only when the old name is what supplied the value: with both set the
+        # new one wins and the old is already being ignored, so saying "rename
+        # it" would be advice about a setting that is doing nothing.
+        if os.environ.get("STRATA_GCS_PROJECT_ID") and not os.environ.get(
+            "STRATA_GCS_DEFAULT_BUCKET_LOCATION"
+        ):
+            logger.warning(
+                "STRATA_GCS_PROJECT_ID does not set a GCP project — GcsFileSystem "
+                "has no project parameter. Its value is used as the default bucket "
+                "location (a GCS location such as 'US' or 'europe-west1'). Rename "
+                "it to STRATA_GCS_DEFAULT_BUCKET_LOCATION, and check the value is "
+                "a location rather than a project id."
             )
         return self
 
@@ -1059,8 +1117,34 @@ class StrataConfig(BaseSettings):
         # (e.g. STRATA_AUTH_MODE silently ignored). Drop any pyproject key that a
         # STRATA_* env var overrides, letting the env source win.
         env_var_names = {name.upper() for name in os.environ}
+
+        # A field with a validation_alias answers to more than one env name, so
+        # the STRATA_{KEY} rule below cannot see all of them. gcs_project_id is
+        # the legacy spelling of gcs_default_bucket_location: fold it into the
+        # current name first (warning, since it names something it never set),
+        # and record every env name that should shadow it.
+        _ALIASED_FILE_KEYS = {
+            "gcs_project_id": (
+                "gcs_default_bucket_location",
+                ("STRATA_GCS_PROJECT_ID", "STRATA_GCS_DEFAULT_BUCKET_LOCATION"),
+            ),
+        }
+        extra_shadow_names: dict[str, tuple[str, ...]] = {}
+        for legacy, (current, shadowing) in _ALIASED_FILE_KEYS.items():
+            if legacy in file_config:
+                logger.warning(
+                    "[tool.strata] %s is the old name for %s and does not set a "
+                    "GCP project; rename it.",
+                    legacy,
+                    current,
+                )
+                file_config.setdefault(current, file_config.pop(legacy))
+            if current in file_config:
+                extra_shadow_names[current] = shadowing
+
         for key in list(file_config):
-            if f"STRATA_{key.upper()}" in env_var_names:
+            names = (f"STRATA_{key.upper()}", *extra_shadow_names.get(key, ()))
+            if any(name in env_var_names for name in names):
                 del file_config[key]
 
         # Deep-merge nested dict configs so an env override of one key (e.g.

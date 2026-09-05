@@ -1,5 +1,7 @@
 """Tests for blob storage backends."""
 
+import json
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -602,6 +604,72 @@ class TestS3BlobStore:
         result = store.read_blob("artifact-1", 1)
 
         assert result == data
+
+
+class TestGCSCredentialResolution:
+    """``GOOGLE_APPLICATION_CREDENTIALS`` resolves paths and nothing else.
+
+    The setting is named ``STRATA_GCS_CREDENTIALS_JSON``, so operators paste
+    key material into it — and a container deployment usually holds the
+    credential as an env var rather than a mounted file. Handing that string
+    straight to Google fails at first blob access, well after the deployment
+    looks healthy.
+    """
+
+    def test_inline_key_material_is_written_to_a_private_file(self, tmp_path):
+        from strata.blob_store import _resolve_gcs_credentials
+
+        key = '{"type": "service_account", "project_id": "p", "private_key": "k"}'
+
+        path = _resolve_gcs_credentials(key)
+
+        assert path != key, "inline JSON must become a path"
+        written = Path(path)
+        assert json.loads(written.read_text()) == json.loads(key)
+        # Key material on disk: readable by its owner and nobody else.
+        assert stat.S_IMODE(written.stat().st_mode) == 0o600
+
+    def test_the_same_key_reuses_one_file(self):
+        # atexit does not run on SIGKILL or an OOM kill, so a random filename
+        # would leave one private key behind per hard-killed process. The name
+        # is derived from the key, so a restart rewrites the same file.
+        from strata.blob_store import _resolve_gcs_credentials
+
+        key = '{"type": "service_account", "private_key": "k"}'
+
+        first = _resolve_gcs_credentials(key)
+        second = _resolve_gcs_credentials(key)
+        other = _resolve_gcs_credentials('{"type": "service_account", "private_key": "j"}')
+
+        assert first == second
+        assert other != first
+        assert stat.S_IMODE(Path(first).stat().st_mode) == 0o600
+
+    def test_a_file_left_world_readable_is_tightened(self):
+        # A leftover from a previous run, or a temp dir with a permissive
+        # umask: the mode has to be fixed rather than assumed.
+        from strata.blob_store import _resolve_gcs_credentials
+
+        key = '{"type": "service_account", "private_key": "loose"}'
+        path = Path(_resolve_gcs_credentials(key))
+        path.chmod(0o644)
+
+        _resolve_gcs_credentials(key)
+
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    def test_a_path_is_passed_through_untouched(self):
+        from strata.blob_store import _resolve_gcs_credentials
+
+        assert _resolve_gcs_credentials("/etc/strata/gcs-key.json") == "/etc/strata/gcs-key.json"
+
+    def test_a_json_scalar_is_treated_as_a_path(self):
+        # Parsed rather than sniffed for a leading brace, but a bare JSON
+        # scalar still parses. A relative filename must not be mistaken for
+        # key material just because json.loads accepts it.
+        from strata.blob_store import _resolve_gcs_credentials
+
+        assert _resolve_gcs_credentials("123") == "123"
 
 
 class TestGCSBlobStore:

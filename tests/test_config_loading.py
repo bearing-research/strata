@@ -196,3 +196,90 @@ class TestNestedConfigMerge:
             "warehouse": "/wh",
             "uri": "postgresql://host/db",
         }
+
+
+class TestGCSBucketLocationRename:
+    """``STRATA_GCS_PROJECT_ID`` never set a project.
+
+    ``GcsFileSystem`` takes no project parameter, so whatever the setting held
+    went to ``default_bucket_location``. The field is named for that now, and
+    the old name still reaches it so a deployment using it keeps the behaviour
+    it had rather than silently losing the setting.
+    """
+
+    def test_the_new_name_populates_the_field(self, monkeypatch):
+        monkeypatch.setenv("STRATA_GCS_DEFAULT_BUCKET_LOCATION", "europe-west1")
+
+        assert StrataConfig().gcs_default_bucket_location == "europe-west1"
+
+    def test_the_old_name_still_reaches_the_field(self, monkeypatch):
+        monkeypatch.delenv("STRATA_GCS_DEFAULT_BUCKET_LOCATION", raising=False)
+        monkeypatch.setenv("STRATA_GCS_PROJECT_ID", "US")
+
+        assert StrataConfig().gcs_default_bucket_location == "US"
+
+    def test_the_field_is_not_reachable_without_the_prefix(self, monkeypatch):
+        """validation_alias replaces env_prefix rather than combining with it.
+
+        A bare ``gcs_project_id`` in the alias list would therefore make the
+        unprefixed ``GCS_PROJECT_ID`` live config — and in a GCP deployment
+        that variable is ambient, so a project id would land in the location
+        field exactly as before. No other setting is reachable unprefixed.
+        """
+        monkeypatch.delenv("STRATA_GCS_PROJECT_ID", raising=False)
+        monkeypatch.delenv("STRATA_GCS_DEFAULT_BUCKET_LOCATION", raising=False)
+        monkeypatch.setenv("GCS_PROJECT_ID", "my-gcp-project")
+        monkeypatch.setenv("GCS_DEFAULT_BUCKET_LOCATION", "europe-west1")
+
+        assert StrataConfig().gcs_default_bucket_location is None
+
+    def test_env_still_beats_the_legacy_pyproject_key(self, tmp_path, monkeypatch):
+        """Documented precedence is pyproject < env.
+
+        load() drops a pyproject key that ``STRATA_{KEY}`` shadows, but this
+        field answers to two env names, so the legacy spelling in a file would
+        otherwise survive and — being passed as an init kwarg — outrank the
+        env source.
+        """
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.strata]\ngcs_project_id = "US"\n', encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("STRATA_GCS_PROJECT_ID", raising=False)
+        monkeypatch.setenv("STRATA_GCS_DEFAULT_BUCKET_LOCATION", "europe-west1")
+
+        assert StrataConfig.load().gcs_default_bucket_location == "europe-west1"
+
+    def test_the_legacy_env_name_also_beats_the_file(self, tmp_path, monkeypatch):
+        """The case the generic STRATA_{KEY} rule cannot see.
+
+        After the file key is folded onto the current name, that rule looks for
+        STRATA_GCS_DEFAULT_BUCKET_LOCATION. An operator still using the old env
+        name sets STRATA_GCS_PROJECT_ID, which the rule does not recognise as
+        shadowing anything — so the file key survives and, as an init kwarg,
+        outranks the env source.
+        """
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.strata]\ngcs_project_id = "US"\n', encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("STRATA_GCS_DEFAULT_BUCKET_LOCATION", raising=False)
+        monkeypatch.setenv("STRATA_GCS_PROJECT_ID", "europe-west1")
+
+        assert StrataConfig.load().gcs_default_bucket_location == "europe-west1"
+
+    def test_the_legacy_pyproject_key_still_reaches_the_field(self, tmp_path, monkeypatch):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.strata]\ngcs_project_id = "US"\n', encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("STRATA_GCS_PROJECT_ID", raising=False)
+        monkeypatch.delenv("STRATA_GCS_DEFAULT_BUCKET_LOCATION", raising=False)
+
+        assert StrataConfig.load().gcs_default_bucket_location == "US"
+
+    def test_the_new_name_wins_when_both_are_set(self, monkeypatch):
+        monkeypatch.setenv("STRATA_GCS_PROJECT_ID", "US")
+        monkeypatch.setenv("STRATA_GCS_DEFAULT_BUCKET_LOCATION", "europe-west1")
+
+        assert StrataConfig().gcs_default_bucket_location == "europe-west1"
