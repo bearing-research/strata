@@ -29,6 +29,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from strata.notebook.models import CellTestCase
+from strata.notebook.protocol import MessageType
 
 
 class WsPayload(BaseModel):
@@ -408,3 +409,30 @@ def error_payload(
     return ErrorPayload(error=error, code=code, cell_id=cell_id).model_dump(
         mode="json", exclude_none=True
     )
+
+
+# Which model describes which frame's payload.
+#
+# The frames absent here still send hand-built dicts (the notebook-state
+# aggregate cluster, ``inspect_result``); a client gets ``unknown`` for those
+# and has to read the emit site, which is the situation this registry exists to
+# shrink. Generated TypeScript is derived from this map, so adding a model
+# without registering it means the frontend never learns about it -- a drift
+# test asserts every payload model here is reachable.
+FRAME_PAYLOADS: dict[MessageType, type[WsPayload]] = {
+    MessageType.CASCADE_PROGRESS: CascadeProgressPayload,
+    MessageType.CASCADE_PROMPT: CascadePromptPayload,
+    MessageType.CELL_CONSOLE: CellConsolePayload,
+    MessageType.CELL_ITERATION_PROGRESS: CellIterationProgressPayload,
+    MessageType.CELL_OUTPUT_DELTA: CellOutputDeltaPayload,
+    MessageType.CELL_STATUS: CellStatusPayload,
+    MessageType.CELL_TEST_RESULTS: CellTestResultsPayload,
+    MessageType.CELL_TEST_STATUS: CellTestStatusPayload,
+    MessageType.CELL_VARIANT_PROGRESS: CellVariantProgressPayload,
+    MessageType.DAG_UPDATE: DagUpdatePayload,
+    MessageType.ENVIRONMENT_JOB_PROGRESS: EnvironmentJobEventPayload,
+    MessageType.ENVIRONMENT_JOB_STARTED: EnvironmentJobEventPayload,
+    MessageType.ERROR: ErrorPayload,
+    MessageType.IMPACT_PREVIEW: ImpactPreviewPayload,
+    MessageType.PROFILING_SUMMARY: ProfilingSummaryPayload,
+}
