@@ -4,20 +4,19 @@ import { test } from 'node:test'
 import { isTypedFrame } from './notebook.ts'
 import type { WsMessage } from './notebook.ts'
 
+// Runtime behaviour only. This file is excluded from tsconfig.app.json and
+// node --test strips types without checking them, so nothing here can pin a
+// narrowing property -- the assertions in wsFrames.assertions.ts do that, and
+// vue-tsc enforces them.
+
 function frame(type: string, payload: unknown): WsMessage {
   return { type, seq: 1, ts: '2026-01-01T00:00:00Z', payload } as WsMessage
 }
 
-test('narrows a matching frame to its generated payload', () => {
+test('accepts a frame of the matching type', () => {
   const msg = frame('error', { error: 'busy', code: 'ENVIRONMENT_BUSY' })
 
   assert.ok(isTypedFrame(msg, 'error'))
-  if (isTypedFrame(msg, 'error')) {
-    // The point of the helper: `code` is reachable without a cast, and a
-    // mistyped code would be a compile error rather than a dead branch.
-    assert.equal(msg.payload.code, 'ENVIRONMENT_BUSY')
-    assert.equal(msg.payload.error, 'busy')
-  }
 })
 
 test('rejects a frame of a different type', () => {
@@ -28,10 +27,11 @@ test('rejects a frame of a different type', () => {
   assert.equal(isTypedFrame(msg, 'error'), false)
 })
 
-test('a frame with no payload model is not typed', () => {
-  // notebook_state has no model yet; its payload stays `unknown` and the
-  // helper must not claim otherwise.
-  const msg = frame('notebook_state', { cells: [] })
+test('does not match on payload shape, only on frame type', () => {
+  // An error-shaped payload arriving under another frame name must not pass:
+  // the predicate is the frame contract, not a duck-type check, so a frame
+  // renamed on the server stops narrowing instead of quietly still matching.
+  const msg = frame('cell_error', { error: 'boom', code: 'cell_busy' })
 
   assert.equal(isTypedFrame(msg, 'error'), false)
 })

@@ -40,14 +40,26 @@ class UnsupportedSchema(RuntimeError):
 
 
 def _ts_literal(value: object) -> str:
-    """Render an enum member as a TypeScript string literal.
+    """Render one enum / const member as a TypeScript literal.
 
-    Escaped, because an unescaped quote or backslash produces a file that is
-    not TypeScript at all -- caught by vue-tsc eventually, but only after the
-    generator has reported success.
+    Typed by the member, not stringified: an ``IntEnum`` carries ``1`` on the
+    wire, so quoting it produces ``'1'`` -- a union that compiles and can never
+    match, since ``=== 1`` is then a type error and ``=== '1'`` is always
+    false. That is the same dead type this emitter exists to refuse.
+
+    Strings are escaped, because an unescaped quote or backslash produces a
+    file that is not TypeScript at all, reported as a success.
     """
-    text = str(value).replace("\\", "\\\\").replace("'", "\\'")
-    return f"'{text}'"
+    if isinstance(value, bool):
+        # Before int: bool is a subclass of it.
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+    raise UnsupportedSchema(f"cannot render literal {value!r}")
 
 
 def _ts_type(schema: dict[str, Any]) -> str:
@@ -64,6 +76,12 @@ def _ts_type(schema: dict[str, Any]) -> str:
 
     if "enum" in schema:
         return " | ".join(_ts_literal(v) for v in schema["enum"])
+
+    if "const" in schema:
+        # A single-member Literal arrives as ``const`` with no ``enum`` key, so
+        # it would otherwise fall through to its base type and lose exactly the
+        # constraint it was written to express.
+        return _ts_literal(schema["const"])
 
     kind = schema.get("type")
     if kind == "string":
