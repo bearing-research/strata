@@ -45,6 +45,7 @@ from strata.notebook.ws_payloads import (
     CellVariantProgressPayload,
     cell_status_payload,
     dag_update_payload,
+    error_payload,
     impact_preview_payload,
     profiling_summary_payload,
 )
@@ -233,7 +234,9 @@ async def _send_error_message(
     error: str,
 ) -> None:
     """Send a protocol error to one WebSocket client."""
-    await websocket.send_text(_json_encode(_make_message(MessageType.ERROR, seq, {"error": error})))
+    await websocket.send_text(
+        _json_encode(_make_message(MessageType.ERROR, seq, error_payload(error)))
+    )
 
 
 async def _set_cell_idle(
@@ -874,7 +877,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                         _make_message(
                             MessageType.ERROR,
                             execution_state.sequence,
-                            {"error": f"Unknown message type: {msg_type}"},
+                            error_payload(f"Unknown message type: {msg_type}"),
                         )
                     )
                 )
@@ -889,7 +892,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                         _make_message(
                             MessageType.ERROR,
                             execution_state.sequence,
-                            {"error": scope_error, "code": "insufficient_scope"},
+                            error_payload(scope_error, code="insufficient_scope"),
                         )
                     )
                 )
@@ -900,10 +903,10 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
                         _make_message(
                             MessageType.ERROR,
                             execution_state.sequence,
-                            {
-                                "error": f"'{msg_type}' is not allowed in read-only app view",
-                                "code": "read_only",
-                            },
+                            error_payload(
+                                f"'{msg_type}' is not allowed in read-only app view",
+                                code="read_only",
+                            ),
                         )
                     )
                 )
@@ -950,7 +953,7 @@ async def _handle_cell_execute(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, execution_state.sequence, {"error": "Missing cell_id"}
+                    MessageType.ERROR, execution_state.sequence, error_payload("Missing cell_id")
                 )
             )
         )
@@ -1003,10 +1006,7 @@ async def _handle_cell_execute_reserved(
                 _make_message(
                     MessageType.ERROR,
                     seq,
-                    {
-                        "error": environment_block_reason,
-                        "code": "ENVIRONMENT_BUSY",
-                    },
+                    error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
         )
@@ -1018,7 +1018,7 @@ async def _handle_cell_execute_reserved(
         await _release_execution_request(execution_state, cell_id)
         await websocket.send_text(
             _json_encode(
-                _make_message(MessageType.ERROR, seq, {"error": f"Cell {cell_id} not found"})
+                _make_message(MessageType.ERROR, seq, error_payload(f"Cell {cell_id} not found"))
             )
         )
         return
@@ -1121,10 +1121,7 @@ async def _handle_notebook_run_all(
                 _make_message(
                     MessageType.ERROR,
                     seq,
-                    {
-                        "error": environment_block_reason,
-                        "code": "ENVIRONMENT_BUSY",
-                    },
+                    error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
         )
@@ -1195,10 +1192,7 @@ async def _handle_notebook_rerun_all(
                 _make_message(
                     MessageType.ERROR,
                     seq,
-                    {
-                        "error": environment_block_reason,
-                        "code": "ENVIRONMENT_BUSY",
-                    },
+                    error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
         )
@@ -1244,7 +1238,7 @@ async def _handle_cell_execute_cascade(
                 _make_message(
                     MessageType.ERROR,
                     execution_state.sequence,
-                    {"error": "Missing cell_id or plan_id"},
+                    error_payload("Missing cell_id or plan_id"),
                 )
             )
         )
@@ -1273,10 +1267,7 @@ async def _handle_cell_execute_cascade(
                 _make_message(
                     MessageType.ERROR,
                     seq,
-                    {
-                        "error": environment_block_reason,
-                        "code": "ENVIRONMENT_BUSY",
-                    },
+                    error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
         )
@@ -1289,7 +1280,7 @@ async def _handle_cell_execute_cascade(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, seq, {"error": "Cascade plan not found or expired"}
+                    MessageType.ERROR, seq, error_payload("Cascade plan not found or expired")
                 )
             )
         )
@@ -1324,7 +1315,7 @@ async def _handle_cell_execute_force(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, execution_state.sequence, {"error": "Missing cell_id"}
+                    MessageType.ERROR, execution_state.sequence, error_payload("Missing cell_id")
                 )
             )
         )
@@ -1353,10 +1344,7 @@ async def _handle_cell_execute_force(
                 _make_message(
                     MessageType.ERROR,
                     seq,
-                    {
-                        "error": environment_block_reason,
-                        "code": "ENVIRONMENT_BUSY",
-                    },
+                    error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
         )
@@ -1394,7 +1382,7 @@ async def _handle_cell_execute_rerun(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, execution_state.sequence, {"error": "Missing cell_id"}
+                    MessageType.ERROR, execution_state.sequence, error_payload("Missing cell_id")
                 )
             )
         )
@@ -1443,10 +1431,7 @@ async def _handle_cell_execute_rerun_reserved(
                 _make_message(
                     MessageType.ERROR,
                     seq,
-                    {
-                        "error": environment_block_reason,
-                        "code": "ENVIRONMENT_BUSY",
-                    },
+                    error_payload(environment_block_reason, code="ENVIRONMENT_BUSY"),
                 )
             )
         )
@@ -1663,7 +1648,7 @@ async def _handle_cell_source_update(
                 _make_message(
                     MessageType.ERROR,
                     execution_state.sequence,
-                    {"error": "Missing cell_id or source"},
+                    error_payload("Missing cell_id or source"),
                 )
             )
         )
@@ -1675,7 +1660,7 @@ async def _handle_cell_source_update(
                 _make_message(
                     MessageType.ERROR,
                     execution_state.sequence,
-                    {"error": "Cell source exceeds 1MB limit"},
+                    error_payload("Cell source exceeds 1MB limit"),
                 )
             )
         )
@@ -1699,14 +1684,12 @@ async def _handle_cell_source_update(
                 _make_message(
                     MessageType.ERROR,
                     execution_state.sequence,
-                    {
-                        "error": (
-                            f"Cannot update cell {cell_id} while it is executing; "
-                            "retry after cell finishes"
-                        ),
-                        "code": "cell_busy",
-                        "cell_id": cell_id,
-                    },
+                    error_payload(
+                        f"Cannot update cell {cell_id} while it is executing; "
+                        "retry after cell finishes",
+                        code="cell_busy",
+                        cell_id=cell_id,
+                    ),
                 )
             )
         )
@@ -1790,7 +1773,7 @@ async def _handle_cell_source_update(
 
     except Exception as e:
         await websocket.send_text(
-            _json_encode(_make_message(MessageType.ERROR, seq, {"error": str(e)}))
+            _json_encode(_make_message(MessageType.ERROR, seq, error_payload(str(e))))
         )
 
 
@@ -1814,7 +1797,9 @@ async def _handle_variant_set_active(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, execution_state.sequence, {"error": "Missing group or name"}
+                    MessageType.ERROR,
+                    execution_state.sequence,
+                    error_payload("Missing group or name"),
                 )
             )
         )
@@ -1887,7 +1872,7 @@ async def _handle_variant_set_active(
 
     except Exception as e:
         await websocket.send_text(
-            _json_encode(_make_message(MessageType.ERROR, seq, {"error": str(e)}))
+            _json_encode(_make_message(MessageType.ERROR, seq, error_payload(str(e))))
         )
 
 
@@ -1909,7 +1894,7 @@ async def _handle_variant_add(
         await websocket.send_text(
             _json_encode(
                 _make_message(
-                    MessageType.ERROR, execution_state.sequence, {"error": "Missing group"}
+                    MessageType.ERROR, execution_state.sequence, error_payload("Missing group")
                 )
             )
         )
@@ -1945,11 +1930,11 @@ async def _handle_variant_add(
 
     except ValueError as e:
         await websocket.send_text(
-            _json_encode(_make_message(MessageType.ERROR, seq, {"error": str(e)}))
+            _json_encode(_make_message(MessageType.ERROR, seq, error_payload(str(e))))
         )
     except Exception as e:
         await websocket.send_text(
-            _json_encode(_make_message(MessageType.ERROR, seq, {"error": str(e)}))
+            _json_encode(_make_message(MessageType.ERROR, seq, error_payload(str(e))))
         )
 
 
@@ -2961,7 +2946,7 @@ async def _handle_dependency_add(
                 _make_message(
                     MessageType.ERROR,
                     execution_state.next_sequence(),
-                    {"error": "Missing 'package' in payload"},
+                    error_payload("Missing 'package' in payload"),
                 )
             )
         )
@@ -2972,7 +2957,9 @@ async def _handle_dependency_add(
     except ValueError as e:
         await websocket.send_text(
             _json_encode(
-                _make_message(MessageType.ERROR, execution_state.next_sequence(), {"error": str(e)})
+                _make_message(
+                    MessageType.ERROR, execution_state.next_sequence(), error_payload(str(e))
+                )
             )
         )
         return
@@ -2985,7 +2972,7 @@ async def _handle_dependency_add(
                 _make_message(
                     MessageType.ERROR,
                     execution_state.next_sequence(),
-                    {"error": str(exc), "code": "ENVIRONMENT_BUSY"},
+                    error_payload(str(exc), code="ENVIRONMENT_BUSY"),
                 )
             )
         )
@@ -3008,7 +2995,7 @@ async def _handle_dependency_remove(
                 _make_message(
                     MessageType.ERROR,
                     execution_state.next_sequence(),
-                    {"error": "Missing 'package' in payload"},
+                    error_payload("Missing 'package' in payload"),
                 )
             )
         )
@@ -3019,7 +3006,9 @@ async def _handle_dependency_remove(
     except ValueError as e:
         await websocket.send_text(
             _json_encode(
-                _make_message(MessageType.ERROR, execution_state.next_sequence(), {"error": str(e)})
+                _make_message(
+                    MessageType.ERROR, execution_state.next_sequence(), error_payload(str(e))
+                )
             )
         )
         return
@@ -3032,7 +3021,7 @@ async def _handle_dependency_remove(
                 _make_message(
                     MessageType.ERROR,
                     execution_state.next_sequence(),
-                    {"error": str(exc), "code": "ENVIRONMENT_BUSY"},
+                    error_payload(str(exc), code="ENVIRONMENT_BUSY"),
                 )
             )
         )

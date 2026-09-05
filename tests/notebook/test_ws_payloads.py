@@ -342,3 +342,48 @@ def test_dag_update_payload_rejects_unmodeled_cell_field():
                 ],
             }
         )
+
+
+class TestErrorPayload:
+    """The ``error`` frame, whose ``code`` is a live contract.
+
+    ``stores/notebook.ts`` branches on ``ENVIRONMENT_BUSY`` to raise its
+    environment-busy banner, so ``code`` is not decoration and its absence on
+    a plain error is equally part of the shape.
+    """
+
+    def test_a_plain_error_keeps_its_two_key_shape(self):
+        from strata.notebook.ws_payloads import error_payload
+
+        # Not {"error": ..., "code": None, "cell_id": None}: clients have never
+        # been sent those keys and should not have to learn to ignore them.
+        assert error_payload("boom") == {"error": "boom"}
+
+    def test_a_coded_error_carries_its_code(self):
+        from strata.notebook.ws_payloads import error_payload
+
+        assert error_payload("busy", code="ENVIRONMENT_BUSY") == {
+            "error": "busy",
+            "code": "ENVIRONMENT_BUSY",
+        }
+
+    def test_cell_busy_names_the_cell(self):
+        from strata.notebook.ws_payloads import error_payload
+
+        assert error_payload("nope", code="cell_busy", cell_id="c1") == {
+            "error": "nope",
+            "code": "cell_busy",
+            "cell_id": "c1",
+        }
+
+    def test_an_unmodelled_field_is_refused(self):
+        import pytest as _pytest
+        from pydantic import ValidationError
+
+        from strata.notebook.ws_payloads import ErrorPayload
+
+        # extra="forbid" is what makes the model a contract rather than a
+        # suggestion: a new key has to be added here before it can reach a
+        # client, so the TUI and the Vue store cannot silently diverge.
+        with _pytest.raises(ValidationError):
+            ErrorPayload(error="boom", retry_after=5)
