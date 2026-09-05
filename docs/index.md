@@ -46,8 +46,8 @@ same cell run.
 | Surface | For | Start here |
 | --- | --- | --- |
 | **Web UI** | Writing and running cells yourself, with rendered tables, plots, and the DAG view. | [Quickstart - Web UI](getting-started/notebook.md) |
-| **Coding agent** | Handing the notebook to Claude Code and watching it build, through MCP tools. The notebook is what you wanted. | [Quickstart - Coding agent](notebook/agent.md) |
 | **Terminal (TUI)** | Watching a notebook live from a terminal - a second pane, an SSH session, or beside your editor. Read-only. | [Quickstart - Terminal](notebook/tui.md) |
+| **Coding agent** | Handing the notebook to Claude Code and watching it build, through MCP tools. The notebook is what you wanted. | [Quickstart - Coding agent](notebook/agent.md) |
 
 There is also a use that is not a front door at all: an agent working on
 something else entirely, using a notebook as a **cached scratchpad** for

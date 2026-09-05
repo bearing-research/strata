@@ -65,9 +65,9 @@ nav:
   - Notebook:
     - Start here:
       - Quickstart - Web UI: getting-started/notebook.md
-      - Quickstart - Coding agent: notebook/agent.md
-      - Agent scratchpad: notebook/scratchpad.md
       - Quickstart - Terminal (TUI): notebook/tui.md
+      - Quickstart - Coding agent: notebook/agent.md
+      - Quickstart - Agent scratchpad: notebook/scratchpad.md
     - Concepts: notebook/concepts.md
     - vs Jupyter, Marimo, Pluto: notebook/comparison.md
     - Examples: notebook/examples.md
