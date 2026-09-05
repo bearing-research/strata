@@ -2323,6 +2323,10 @@ proxy that:</p>
 </tr>
 </tbody>
 </table>
+<p>Machine callers that do not sit behind the proxy — a CI job, an ETL
+service — authenticate with an API key instead: <code>strata apikey create</code>
+issues one, and the key carries its own principal, tenant and scopes.
+See <a href="../../reference/configuration/#api-key-authentication">Configuration → API keys</a>.</p>
 <ol>
 <li><strong>Is the only path to Strata.</strong> Strata is on a private network /
    VPC / Kubernetes namespace; the proxy is the only ingress.
@@ -2397,19 +2401,29 @@ restart proxy</code>).</p>
 <a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>                                               └──────┬───────┘
 <a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>                                                      │
 <a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>                                                      ▼
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>                                               ┌──────────────┐
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>                                               │ Artifact     │
-<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>                                               │ store (S3 /  │
-<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>                                               │  GCS / Azure │
-<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>                                               │  / local)    │
-<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>                                               └──────────────┘
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>                                        ┌─────────────────────────┐
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>                                        │ Artifact store          │
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>                                        │                         │
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>                                        │  metadata → Postgres    │
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>                                        │  blobs    → S3 / GCS /  │
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>                                        │             Azure       │
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>                                        └─────────────────────────┘
 </code></pre></div>
 <p>Strata sits on a private network, only the auth proxy can reach it.
-Artifacts persist to a blob backend (S3, GCS, Azure) rather than a
-local volume so it survives container churn and is shared across
-replicas. Notebook execution dispatches to executors; the demo
-stack runs one locally, production typically uses HTTP executors
-on dedicated nodes or remote backends like Modal / Fly Machines.</p>
+Notebook execution dispatches to executors; the demo stack runs one
+locally, production typically uses HTTP executors on dedicated nodes
+or remote backends like Modal / Fly Machines.</p>
+<p><strong>The artifact store is two halves, and both have to be shared before
+you can run a second replica.</strong> Blobs go to S3, GCS or Azure rather
+than a local volume, so they survive container churn. Metadata is a
+SQLite file under <code>STRATA_ARTIFACT_DIR</code> by default, which is local to
+one machine — set <code>STRATA_ARTIFACT_METADATA_DSN</code> to put it on Postgres
+instead. A DSN with <code>STRATA_ARTIFACT_BLOB_BACKEND=local</code> is rejected at
+startup for the same reason: shared metadata pointing at blobs only one
+node can read is worse than either alone. See
+<a href="../../reference/configuration/#sharing-one-artifact-store-across-nodes">Configuration → artifact metadata</a>
+for the settings and <code>strata migrate</code> for moving an existing store
+across.</p>
 <h2 id="minimum-service-mode-env-vars">Minimum service-mode env vars<a class="headerlink" href="#minimum-service-mode-env-vars" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Required</span>
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
