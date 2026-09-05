@@ -1,13 +1,21 @@
 # strata-pool
 
-Worker pool for dispatching Strata jobs to ephemeral machines. Not published
-yet — it ships with the hosted workers service.
+Worker pool for dispatching Strata jobs to ephemeral machines. This is the
+bring-your-own-hardware path: it manages machines *you* own. It is complete and
+tested rather than growing — if you want a provider to autoscale for you,
+register a serverless executor as a Strata worker instead.
+
+```bash
+pip install strata-pool            # library
+pip install "strata-pool[server]"  # plus the HTTP service
+```
 
 Jobs arrive with a machine type. The pool hands each one to a warm worker of
 that type, starts a machine when there is none, forwards the payload over
-HTTP, records the result, and meters the execution. Backends (local Docker,
-Fly, EC2) provide start / stop / health; the pool does not know which it is
-talking to.
+HTTP, records the result, and meters the execution. A backend provides start /
+stop / health and nothing else, so the pool does not know which it is talking
+to. Two ship: local Docker and RunPod. Anything satisfying the `Backend`
+protocol works.
 
 ```python
 from strata_pool import DockerBackend, MachineType, Pool, PoolStore
@@ -118,7 +126,7 @@ identity**: it authenticates as itself and asserts whose work this is. The
 pool does not authenticate end users and must never be reachable from
 anywhere but the proxy.
 
-## The RunPod backend (unverified)
+## The RunPod backend
 
 Rents real hardware. `MachineType.gpu_type` is the provider's own string —
 `"NVIDIA H100 80GB PCIe"` — deliberately not a normalised label, because one
@@ -136,12 +144,22 @@ MachineType(
 )
 ```
 
-**The request shapes have not been run against a live account.** They come
-from RunPod's documented API, and RunPod has moved its API surface before.
-Every field lives in `_create_body` and is asserted by a test, so a wrong one
-is a one-line fix; `provider_options` overrides anything in the body, so a
-deployment can correct a field without waiting for a release; and `base_url`
-can be repointed. To actually verify:
+**Verified against a live account** on 2026-09-02: the base URL, `POST /pods`
+with `imageName` / `ports` / `env` / `containerDiskInGb` / `name`, the `id` in
+the create response, the proxy endpoint, health through that proxy, and
+`DELETE /pods/{id}` including a second delete of the same pod. A CPU pod
+booted, answered, and terminated with nothing left running.
+
+**Two things that run stayed silent on**, because a CPU pod does not exercise
+them: `gpuTypeIds` + `gpuCount`, and reading a region from `machine`. Every pod
+in the account listing carried `machine: {}` with no `dataCenterId`, so `region`
+is probably always `None` today — harmless, being metadata, but do not trust it.
+
+RunPod has moved its API surface before. Every field lives in `_create_body`
+and is asserted by a test, so a wrong one is a one-line fix; `provider_options`
+overrides anything in the body, so a deployment can correct a field without
+waiting for a release; and `base_url` can be repointed. To re-verify, or to
+close the GPU gap with `STRATA_POOL_RUNPOD_GPU`:
 
 ```bash
 export RUNPOD_API_KEY=...
