@@ -197,7 +197,7 @@ from those models into `frontend/src/types/ws-payloads.generated.ts`:
 import { isTypedFrame } from '@/types/notebook'
 
 if (isTypedFrame(msg, 'error')) {
-  // msg.payload.code narrows without a cast
+  // msg.payload.code narrows to the union of known codes, without a cast
 }
 ```
 
@@ -210,8 +210,8 @@ uv run python scripts/generate_ws_types.py
 
 A test fails if the committed file and the models disagree, so the two cannot
 drift apart quietly. Frames without a model keep `payload: unknown` and have to
-be read from the emit site - `WsServerPayloadMap` is the list of those that do
-not.
+be read from the emit site; `WsServerPayloadMap` lists the frames that do have
+one.
 
 ### The `error` frame
 

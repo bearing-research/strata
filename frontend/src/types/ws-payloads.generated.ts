@@ -22,22 +22,22 @@ export interface CascadeStepModel {
   cell_id: string
   cell_name: string
   reason: string
-  skip?: boolean
-  estimated_ms?: number
+  skip: boolean
+  estimated_ms: number
 }
 
 export interface CellAnalysisModel {
   id: string
-  defines?: string[]
-  references?: string[]
-  upstream_ids?: string[]
-  downstream_ids?: string[]
+  defines: string[]
+  references: string[]
+  upstream_ids: string[]
+  downstream_ids: string[]
   is_leaf: boolean
-  annotation_diagnostics?: Record<string, unknown>[]
+  annotation_diagnostics: Record<string, unknown>[]
   variant_group?: string | null
   variant_name?: string | null
   variant_active?: boolean | null
-  is_module_cell?: boolean
+  is_module_cell: boolean
   module_exports?: ModuleExportModel[] | null
 }
 
@@ -53,7 +53,7 @@ export interface CellIterationProgressPayload {
   max_iter: number
   artifact_uri?: string | null
   content_type?: string | null
-  until_reached?: boolean
+  until_reached: boolean
   duration_ms: number
 }
 
@@ -87,11 +87,11 @@ export interface CellTestCase {
   /** Test function name (pytest nodeid tail) */
   name: string
   /** Full pytest nodeid */
-  nodeid?: string
+  nodeid: string
   /** passed | failed | error | skipped */
-  outcome: string
+  outcome: 'passed' | 'failed' | 'error' | 'skipped'
   /** Failure/error message (the rewritten-assert diff for fails) */
-  message?: string
+  message: string
 }
 
 export interface CellTestResultsPayload {
@@ -104,7 +104,7 @@ export interface CellTestResultsPayload {
   stale: boolean
   pytest_unavailable: boolean
   ran_at: number
-  auto_installed?: string[]
+  auto_installed: string[]
 }
 
 export interface CellTestStatusPayload {
@@ -129,19 +129,19 @@ export interface DagEdgeModel {
 }
 
 export interface DagUpdatePayload {
-  edges?: DagEdgeModel[]
-  roots?: string[]
-  leaves?: string[]
-  topological_order?: string[]
-  cells?: CellAnalysisModel[]
-  variant_groups?: Record<string, unknown>[]
+  edges: DagEdgeModel[]
+  roots: string[]
+  leaves: string[]
+  topological_order: string[]
+  cells: CellAnalysisModel[]
+  variant_groups: Record<string, unknown>[]
 }
 
 export interface DownstreamImpactModel {
   cell_id: string
   cell_name: string
   current_status: string
-  new_status?: string
+  new_status: string
 }
 
 export interface EnvironmentJobEventPayload {
@@ -157,28 +157,28 @@ export interface EnvironmentJobModel {
   package?: string | null
   phase?: string | null
   duration_ms?: number | null
-  stdout?: string
-  stderr?: string
-  stdout_truncated?: boolean
-  stderr_truncated?: boolean
+  stdout: string
+  stderr: string
+  stdout_truncated: boolean
+  stderr_truncated: boolean
   finished_at?: number | null
-  lockfile_changed?: boolean
-  stale_cell_count?: number
-  stale_cell_ids?: string[]
+  lockfile_changed: boolean
+  stale_cell_count: number
+  stale_cell_ids: string[]
   error?: string | null
 }
 
 export interface ErrorPayload {
   error: string
-  code?: string | null
+  code?: 'ENVIRONMENT_BUSY' | 'cell_busy' | 'read_only' | 'insufficient_scope' | null
   cell_id?: string | null
 }
 
 export interface ImpactPreviewPayload {
   target_cell_id: string
-  upstream?: CascadeStepModel[]
-  downstream?: DownstreamImpactModel[]
-  estimated_ms?: number
+  upstream: CascadeStepModel[]
+  downstream: DownstreamImpactModel[]
+  estimated_ms: number
 }
 
 export interface ModuleExportModel {
@@ -191,11 +191,11 @@ export interface ProfilingSummaryPayload {
   cache_hits: number
   cache_misses: number
   cache_savings_ms: number
-  team_cache_savings_ms?: number
-  team_cache_hits?: number
-  team_contributors?: string[]
+  team_cache_savings_ms: number
+  team_cache_hits: number
+  team_contributors: string[]
   total_artifact_bytes: number
-  cell_profiles?: CellProfileModel[]
+  cell_profiles: CellProfileModel[]
 }
 
 /** Frames whose payload shape is generated. Anything absent stays `unknown`. */

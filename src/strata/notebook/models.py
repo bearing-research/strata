@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -503,7 +503,13 @@ class CellTestCase(BaseModel):
 
     name: str = Field(..., description="Test function name (pytest nodeid tail)")
     nodeid: str = Field(default="", description="Full pytest nodeid")
-    outcome: str = Field(..., description="passed | failed | error | skipped")
+    # Literal, not str-with-a-prose-description: the frontend hand-wrote this
+    # union years ago, so the constraint was real and only the model was vague.
+    # Generated TypeScript now matches that declaration instead of colliding
+    # with it.
+    outcome: Literal["passed", "failed", "error", "skipped"] = Field(
+        ..., description="passed | failed | error | skipped"
+    )
     message: str = Field(
         default="",
         description="Failure/error message (the rewritten-assert diff for fails)",

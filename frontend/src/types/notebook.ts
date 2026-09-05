@@ -831,7 +831,8 @@ export interface WsMessage {
  *
  * ```ts
  * if (isTypedFrame(msg, 'error')) {
- *   // msg.payload.code is 'ENVIRONMENT_BUSY' | undefined, not a cast
+ *   // msg.payload.code narrows to the union of known codes (or null/absent),
+ *   // so a mistyped branch is a compile error rather than dead code.
  * }
  * ```
  */

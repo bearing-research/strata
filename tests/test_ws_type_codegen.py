@@ -28,10 +28,18 @@ def test_the_committed_typescript_matches_the_models() -> None:
         text=True,
         cwd=_REPO,
     )
+    # Distinguish the two ways this exits nonzero. The generator raises
+    # UnsupportedSchema on a construct it cannot render, and telling that
+    # developer to regenerate sends them to run the same crash again.
+    crashed = "Traceback" in result.stderr
     assert result.returncode == 0, (
-        f"{_GENERATED.relative_to(_REPO)} is stale.\n"
-        "Run: uv run python scripts/generate_ws_types.py\n"
-        f"{result.stderr}"
+        f"the generator failed on a schema it cannot render:\n{result.stderr}"
+        if crashed
+        else (
+            f"{_GENERATED.relative_to(_REPO)} is stale.\n"
+            "Run: uv run python scripts/generate_ws_types.py\n"
+            f"{result.stderr}"
+        )
     )
 
 
@@ -53,18 +61,22 @@ def test_every_payload_model_is_registered() -> None:
     import strata.notebook.ws_payloads as module
 
     registered = set(FRAME_PAYLOADS.values())
-    nested = {
-        name
-        for name, obj in vars(module).items()
-        if isinstance(obj, type) and issubclass(obj, WsPayload) and name.endswith("Model")
-    }
+    # Reachability, not a name suffix. "endswith('Model')" happens to match
+    # today's nested models, but it would fail a future nested payload named
+    # otherwise, and would silently skip the guard for a frame payload that
+    # happened to end in Model -- exempting exactly the case the test exists
+    # to catch.
+    reachable: set[str] = set()
+    for model in registered:
+        reachable.update(model.model_json_schema().get("$defs", {}))
+
     unregistered = {
         name
         for name, obj in vars(module).items()
         if isinstance(obj, type)
         and issubclass(obj, WsPayload)
         and obj is not WsPayload
-        and name not in nested
+        and name not in reachable
         and obj not in registered
     }
     assert not unregistered, (
