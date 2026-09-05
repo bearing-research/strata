@@ -187,6 +187,31 @@ The enum is the single source of truth; the docs are organized for
 human readability but the values match exactly. If you see a frame whose
 `type` doesn't match an enum value, treat that as a bug to report.
 
+### The `error` frame
+
+Any request can be answered with `error` instead of the frame you expected,
+so a client has to handle it on every message it sends:
+
+| Field     | Always present | Meaning                                             |
+| --------- | -------------- | --------------------------------------------------- |
+| `error`   | yes            | Human-readable message. Not a stable identifier      |
+| `code`    | no             | Machine-readable class, when the error has one       |
+| `cell_id` | no             | The cell concerned, on `cell_busy`                   |
+
+Branch on `code`, never on the text of `error`. The codes:
+
+| Code                 | Meaning                                                       |
+| -------------------- | ------------------------------------------------------------- |
+| `ENVIRONMENT_BUSY`   | An environment job holds the notebook; retry when it finishes  |
+| `cell_busy`          | The cell is executing and its source cannot be edited yet      |
+| `read_only`          | The message is not allowed in app view                         |
+| `insufficient_scope` | The connection's scopes do not cover the request               |
+
+An error carrying no `code` is a plain failure with no machine-readable class;
+the key is absent rather than null, so test for presence. The shape is defined
+by `ErrorPayload` in `strata.notebook.ws_payloads`, which every emit site
+builds through - a field that is not on that model cannot reach a client.
+
 ## Where to go next
 
 - [REST API Reference](rest-api.md) - every endpoint with request /

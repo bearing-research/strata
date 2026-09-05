@@ -373,3 +373,38 @@ class DagUpdatePayload(WsPayload):
 def dag_update_payload(raw: dict[str, Any]) -> dict[str, Any]:
     """Validate an assembled ``dag_update`` dict → the wire dict."""
     return DagUpdatePayload.model_validate(raw).model_dump(mode="json")
+
+
+class ErrorPayload(WsPayload):
+    """``error`` — a request could not be served.
+
+    ``code`` is a live part of the contract, not decoration: the frontend
+    branches on ``ENVIRONMENT_BUSY`` to show its environment-busy banner
+    (``stores/notebook.ts``). It is absent on the plain errors that carry no
+    machine-readable class, which is why it is optional here and why the
+    builder drops unset fields rather than sending nulls -- every site keeps
+    the exact shape it sends today.
+
+    Known codes: ``ENVIRONMENT_BUSY`` (an environment job holds the notebook),
+    ``cell_busy`` (edit refused while the cell runs), ``read_only`` (message
+    not allowed in app view), ``insufficient_scope`` (auth).
+    """
+
+    error: str
+    code: str | None = None
+    # Only on ``cell_busy``, which names the cell that refused the edit.
+    cell_id: str | None = None
+
+
+def error_payload(
+    error: str, code: str | None = None, cell_id: str | None = None
+) -> dict[str, Any]:
+    """Build the wire dict for an ``error`` frame.
+
+    ``exclude_none`` so a plain error stays ``{"error": ...}`` on the wire, as
+    it has always been, rather than gaining null ``code`` / ``cell_id`` keys
+    that clients would have to learn to ignore.
+    """
+    return ErrorPayload(error=error, code=code, cell_id=cell_id).model_dump(
+        mode="json", exclude_none=True
+    )
