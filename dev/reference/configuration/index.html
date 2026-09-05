@@ -2952,14 +2952,14 @@ Unset credentials fall back to Application Default Credentials.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>STRATA_GCS_PROJECT_ID</code></td>
+<td><code>STRATA_GCS_DEFAULT_BUCKET_LOCATION</code></td>
 <td><code>None</code></td>
-<td>Despite the name, this is passed to PyArrow as the <strong>default bucket location</strong> (<code>US</code>, <code>europe-west1</code>), not a project id (<a href="https://github.com/bearing-research/strata/issues/604">#604</a>)</td>
+<td>GCS location new buckets default to (<code>US</code>, <code>europe-west1</code>). <code>STRATA_GCS_PROJECT_ID</code> is still accepted for it and warns: it never set a project, since <code>GcsFileSystem</code> has no project parameter</td>
 </tr>
 <tr>
 <td><code>STRATA_GCS_CREDENTIALS_JSON</code></td>
 <td><code>None</code></td>
-<td><strong>Path</strong> to a service-account key file (it is assigned to <code>GOOGLE_APPLICATION_CREDENTIALS</code>, which the Google client resolves as a path). Inline JSON does not work (<a href="https://github.com/bearing-research/strata/issues/605">#605</a>)</td>
+<td>Service-account key, as either a path to the JSON file or the JSON itself. Inline key material is written to a private temp file, because <code>GOOGLE_APPLICATION_CREDENTIALS</code> only resolves paths</td>
 </tr>
 <tr>
 <td><code>STRATA_GCS_ANONYMOUS</code></td>
