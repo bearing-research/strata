@@ -1555,6 +1555,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#payload-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Payload types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#the-error-frame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2200,6 +2211,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#payload-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Payload types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#the-error-frame" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2491,6 +2513,24 @@ source. A non-Vue client can enumerate the full set by iterating it:</p>
 <p>The enum is the single source of truth; the docs are organized for
 human readability but the values match exactly. If you see a frame whose
 <code>type</code> doesn't match an enum value, treat that as a bug to report.</p>
+<h3 id="payload-types">Payload types<a class="headerlink" href="#payload-types" title="Permanent link">&para;</a></h3>
+<p><code>MessageType</code> names the frames; it does not describe what rides in <code>payload</code>.
+For the frames that have a payload model, TypeScript declarations are generated
+from those models into <code>frontend/src/types/ws-payloads.generated.ts</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">isTypedFrame</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;@/types/notebook&#39;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">isTypedFrame</span><span class="p">(</span><span class="nx">msg</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;error&#39;</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="c1">// msg.payload.code narrows without a cast</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="p">}</span>
+</code></pre></div>
+<p>The file is committed, so the frontend build needs no Python step. Regenerate it
+after changing a payload model:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/generate_ws_types.py
+</code></pre></div>
+<p>A test fails if the committed file and the models disagree, so the two cannot
+drift apart quietly. Frames without a model keep <code>payload: unknown</code> and have to
+be read from the emit site - <code>WsServerPayloadMap</code> is the list of those that do
+not.</p>
 <h3 id="the-error-frame">The <code>error</code> frame<a class="headerlink" href="#the-error-frame" title="Permanent link">&para;</a></h3>
 <p>Any request can be answered with <code>error</code> instead of the frame you expected,
 so a client has to handle it on every message it sends:</p>
