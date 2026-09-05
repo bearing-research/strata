@@ -5,6 +5,139 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
+## Unreleased
+
+Three things arrived together, and each one is about work you no longer have to
+do twice. **Service mode runs on Postgres**, so the artifact store is no longer
+one node's SQLite file. **A worker pool** starts machines on demand, holds them
+for a tenant, and stops paying when the work finishes. And the **team cache**
+lets a cell be served by a colleague's earlier run — not a named artifact
+somebody chose to publish, but the expensive middle of a pipeline that nobody
+names.
+
+### Added
+
+- **The artifact store runs on Postgres.** `STRATA_ARTIFACT_METADATA_DSN` points
+  the store at a real database instead of a node-local SQLite file, which is what
+  lets more than one server share it (needs the `postgres` extra). Connections are pooled
+  re-entrantly, the build store sits on the same dialect seam, and API keys
+  authenticate callers that do not arrive through a trusted proxy. A stream
+  request that lands on the wrong node is redirected to the one holding it. See
+  [Service mode](docs/deployment/service-mode.md).
+- **Migrate an existing store onto Postgres.** `strata migrate` copies an
+  established SQLite store across, per-row and idempotently, so an interrupted
+  run can simply be run again. It reports the rows Postgres refuses — a store
+  that has been collecting artifacts for months has dangling references SQLite
+  never enforced — rather than failing the whole move. Metadata only: blobs are
+  configured separately and are not copied.
+- **A worker pool, as its own package.** `pip install strata-pool` manages
+  machines you own: it starts one when no warm worker of that type is free,
+  forwards the job, meters the execution, and stops paying for machines that
+  finished. A machine belongs to one tenant for its life and is destroyed rather
+  than handed on. Docker and RunPod backends ship; the fleet has a global cap,
+  not just a per-tenant one. Optional HTTP service via
+  `pip install "strata-pool[server]"`. See
+  [Distributed workers](docs/notebook/workers.md).
+- **The team cache: a cell served by a colleague's run.** With
+  `STRATA_NOTEBOOK_TEAM_CACHE_ENABLED=true`, a local cache miss asks the shared
+  store whether anyone has already run this exact computation, and a cell that
+  does run offers its outputs back. It works because a cell's provenance key
+  carries no notebook id and no cell id. The notebook shows what the cache
+  actually saved, and lineage now says who computed each step, on which machine,
+  and in which environment — the questions you ask first when a result came from
+  somewhere else. See
+  [Service mode → the team cache](docs/deployment/service-mode.md#the-team-cache-sharing-results-nobody-named).
+- **Artifacts are addressable by provenance hash**, which is what makes the
+  lookup above a single request rather than a scan.
+- **Unknown libraries are stored as Arrow, not pickle.** A value from a library
+  Strata has never heard of — a DuckDB relation, a cuDF frame — is stored as
+  Arrow if it exports `__arrow_c_stream__` or `__dlpack__`, so the artifact stays
+  readable by other tools and the notebook can show its schema and row count. A
+  DuckDB relation could not be stored at all before: it is not picklable.
+- **Typed WebSocket payloads, with TypeScript generated from them.** Fifteen
+  frames now have a payload model, and `frontend/src/types/ws-payloads.generated.ts`
+  is generated from those models, so a second client narrows `payload` instead of
+  casting. See [Notebook protocol](docs/reference/notebook-protocol.md).
+- **An empty notebook says what to do next** instead of presenting a blank cell.
+
+### Security
+
+- **The notebook WebSocket is authenticated** and enforces notebook scopes; a
+  connection could previously drive a notebook without one.
+- **A web page can no longer drive the loopback notebook API.** Any origin could
+  reach a personal-mode server on localhost.
+- **Build manifests require trusted-proxy auth in service mode**, and a build is
+  claimed when its manifest is issued — two executors could otherwise be handed
+  capabilities for the same build.
+- **Only the lease holder publishes a build's result**, and ownership is checked
+  *before* the artifact is committed rather than after. A fence that runs after
+  publication keeps the build row consistent; it cannot un-publish bytes.
+- **ACL rules that can never match now fail closed**, and `STRATA_ACL_CONFIG` no
+  longer silently discards every rule it was given. An API-key caller is
+  authorized, not merely authenticated.
+- **Transform inputs are tenant-gated**, the table ACL applies to the cache-warm
+  endpoints, and lineage reads are gated. Three cache-plane information leaks are
+  closed.
+- **The environment attestation was forgeable and could be revoked**; a notebook
+  no longer publishes from an environment that is not its lockfile.
+- **The SSH worker token stays out of `argv` and error messages.**
+
+### Fixed
+
+- **Reverting a cell edit is a cache hit again.** Running a cell, editing it, and
+  reverting recomputed a result the store already held, immutable and valid —
+  the one loop where content addressing should never let you wait.
+- **Iceberg merge-on-read tables are refused rather than silently returning
+  deleted rows.** Applying delete files is tracked separately; returning wrong
+  rows is not a thing to leave running while it is designed.
+- **Foreign keys are enforced.** SQLite ignores `FOREIGN KEY` unless a
+  per-connection pragma is set, and nothing set it, so a name or a build row
+  could outlive the version it pointed at. Garbage collection now clears the rows
+  that reference a version before removing it.
+- **Garbage collection stopped deleting current values.** An unnamed artifact's
+  latest version is how the store resolves "the current value", and notebook cell
+  outputs are never named — a routine sweep deleted the live state of any
+  notebook older than a week.
+- **Several ways a machine could keep billing unwatched**: a pool that leaked
+  machines it could no longer vouch for, a claimed machine nobody was watching,
+  five paths where the RunPod backend could strand a billed pod, and freed fleet
+  capacity with no route back to the work waiting on it.
+- **The migration no longer reports copying rows it dropped.** Without a per-row
+  savepoint, one rejected row rolled back every uncommitted insert in its batch —
+  measured at 99 of 100 lost, reported as copied.
+- **Resource leaks under load**: a QoS slot the admission actually holds is now
+  released, the fetcher's file-handle cache is synchronized and stops closing live
+  handles, per-client rate-limit tracking is bounded, the Prometheus scrape no
+  longer blocks the event loop, and the v1 push executor protocol is bounded in
+  memory.
+- **Data-plane correctness**: Iceberg schema evolution is detected while planning
+  rather than mid-stream, persisted Parquet stats are keyed by column path rather
+  than leaf name, a scan's projection is validated and reflected in the plan
+  schema, the pre-flight size estimate uses the projected columns, and a damaged
+  cache entry no longer poisons its key forever.
+- **Notebook execution**: a loop cell's non-carry consumed variables are stored,
+  fan-out cells record their base provenance so they survive a staleness
+  recompute, prompt-cell inputs and `max_tokens` are in the cache key, DAG edges
+  are wired for variables that shadow builtins, `notebook.toml` is written
+  atomically, REST- and MCP-driven runs take the execution reservation, and
+  reordering cells no longer deletes the ones it never saw.
+- **Each cell value is serialized once**, not once per artifact. A cell ending in
+  a bare variable handed the same object to two serialization loops, so a lazy
+  query handle ran its query twice and a one-shot stream was already drained by
+  the second write.
+- **Eviction pressure is measured over the time actually observed**, not a
+  constant hour, so a server that has been up for ninety seconds no longer
+  reports a fraction of the traffic it is seeing. A burst raises the band instead
+  of averaging away.
+- **`STRATA_GCS_CREDENTIALS_JSON` accepts inline JSON**, which is what its name
+  invites and what a container deployment usually has. `STRATA_GCS_PROJECT_ID` is
+  renamed to `STRATA_GCS_DEFAULT_BUCKET_LOCATION` — it never set a project — with
+  the old name still accepted.
+- Also: an agent's edits reach an open browser tab, the deployment-mode badge
+  stops mislabelling a personal server, profiling stats survive a restart,
+  deleting a sweep variant's displayed cell no longer hides the whole group, and
+  the TUI stops reading cell output as Rich markup.
+
 ## 0.6.0 - 2026-08-27
 
 0.6.0 makes the notebook a **coding agent's cached scratchpad** and lets it reach
