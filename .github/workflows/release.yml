@@ -112,6 +112,23 @@ jobs:
               )
               sys.exit(1)
 
+          # strata-pool ships from the same tag for the same reason: it is the
+          # bring-your-own-hardware self-host path, run *alongside* a server, so
+          # a version that matches that server is the useful one. Lockstep also
+          # guarantees each tag publishes a version PyPI has not seen — the PyPI
+          # job deliberately has no skip-existing, so a stale sub-package version
+          # would fail the upload and take the whole release with it.
+          with open("packages/strata-pool/pyproject.toml", "rb") as f:
+              pool_version = tomllib.load(f)["project"]["version"]
+          if pool_version != version:
+              print(
+                  f"::error::strata-pool version {pool_version!r} doesn't match the "
+                  f"release version {version!r}. Keep packages/strata-pool/pyproject.toml "
+                  "in lockstep with the root pyproject.toml.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
           changelog = open("CHANGELOG.md").read()
           if not re.search(rf"^##\s+{re.escape(version)}(?:\s|$)", changelog, re.MULTILINE):
               print(
@@ -330,6 +347,63 @@ jobs:
           path: dist
           if-no-files-found: error
 
+  # --- strata-pool wheel (pure-Python, independent distribution) ------
+  # Same shape as client-wheel: one py3-none-any wheel + sdist, uploaded as a
+  # dist-* artifact so the publish jobs pick it up by pattern.
+  pool-wheel:
+    name: wheel · strata-pool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', inputs.version) || github.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          version: "latest"
+
+      - name: Build the strata-pool wheel + sdist
+        run: uv build --package strata-pool --out-dir dist
+
+      - name: Smoke-test the strata-pool wheel
+        # Two things this has to prove, and the second is the one that would
+        # break quietly. First, that the wheel imports at all. Second, that the
+        # base install stays slim: __init__ imports both backends eagerly, so a
+        # cloud SDK accidentally promoted out of its extra would be pulled into
+        # every install. Asserting the absence is what catches that -- importing
+        # successfully would not.
+        run: |
+          set -euo pipefail
+          POOL_WHEEL=$(ls dist/strata_pool-*-py3-none-any.whl | head -1)
+          echo "::notice::Testing pool wheel ${POOL_WHEEL}"
+          uv venv /tmp/pool-smoke
+          VIRTUAL_ENV=/tmp/pool-smoke uv pip install \
+            --index https://pypi.org/simple/ "${POOL_WHEEL}"
+          /tmp/pool-smoke/bin/python -c "
+          import importlib.util, sys
+          from strata_pool import Pool, PoolStore, Backend, DockerBackend, RunPodBackend
+          from strata_pool import Job, JobState, MachineType, UsageEvent, Worker, WorkerState
+          for sdk in ('docker', 'fastapi', 'uvicorn'):
+              if importlib.util.find_spec(sdk) is not None:
+                  sys.exit(f'{sdk} reached the base install; it belongs in an extra')
+          print('strata_pool imports ok, base install stayed slim')
+          "
+          # The server extra is a documented install path, so it is built too.
+          uv venv /tmp/pool-server-smoke
+          VIRTUAL_ENV=/tmp/pool-server-smoke uv pip install \
+            --index https://pypi.org/simple/ "${POOL_WHEEL}[server]"
+          /tmp/pool-server-smoke/bin/python -c "
+          from strata_pool.api import create_app
+          print('strata_pool[server] imports ok')
+          "
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: dist-pool
+          path: dist
+          if-no-files-found: error
+
   # --- wheel smoke test ----------------------------------------------
   # Install the just-built Linux x86_64 wheel in a fresh uv-managed
   # venv, exercise the import surface, all three console scripts, and
@@ -448,7 +522,7 @@ jobs:
   testpypi:
     name: Publish to TestPyPI
     runs-on: ubuntu-latest
-    needs: [linux, macos, windows, client-wheel, wheel-test]
+    needs: [linux, macos, windows, client-wheel, pool-wheel, wheel-test]
     environment:
       name: testpypi
       url: https://test.pypi.org/p/strata-notebook

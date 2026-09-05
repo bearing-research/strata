@@ -1,6 +1,6 @@
 [project]
 name = "strata-pool"
-version = "0.1.0"
+version = "0.6.0"
 description = "Worker pool for dispatching Strata jobs to ephemeral machines."
 readme = "README.md"
 requires-python = ">=3.12"
