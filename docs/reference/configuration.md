@@ -422,8 +422,8 @@ deployment, not only in one that opted in to something.
 
 ## TUI
 
-Defaults for the `strata tui` client; each is also a command-line flag, and the
-flag wins.
+Defaults for the `strata-notebook-tui` client; each is also a command-line
+flag, and the flag wins.
 
 | Variable                       | Default                 | Description                                                       |
 | ------------------------------ | ----------------------- | ----------------------------------------------------------------- |
