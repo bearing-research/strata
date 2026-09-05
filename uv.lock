@@ -4045,7 +4045,7 @@ docs = [
 
 [[package]]
 name = "strata-pool"
-version = "0.1.0"
+version = "0.6.0"
 source = { editable = "packages/strata-pool" }
 dependencies = [
     { name = "httpx" },

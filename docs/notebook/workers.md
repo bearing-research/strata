@@ -135,6 +135,27 @@ Strata ships a reference executor as the `strata-worker` console script. Any pla
 
 You can register many workers per notebook; each cell picks its target independently. Mixing Fly (cheap CPU) and Modal (on-demand GPU) is a common setup.
 
+### Pooling machines you own
+
+The walkthroughs above register long-lived workers you start yourself. If you
+would rather hand out machines from a pool - start them on demand, hold them
+for a tenant, stop paying when the work finishes - `strata-pool` is a separate
+package that does exactly that:
+
+```bash
+pip install strata-pool            # library
+pip install "strata-pool[server]"  # plus the HTTP service
+```
+
+It ships Docker and RunPod backends, per-worker credentials, tenant-scoped
+machines, a fleet cap, and usage metering. Cloud SDKs live in the backend
+extras, so the base install pulls only `httpx`.
+
+This is the bring-your-own-hardware path. It manages machines you own, and it
+is deliberately feature-complete rather than growing - if you want someone else
+to autoscale for you, a serverless executor registered as a worker (above) is
+the better shape.
+
 ### Fly.io (CPU worker)
 
 **Prerequisites:**
