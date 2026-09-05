@@ -51,6 +51,127 @@ def sample_notebook(tmp_path):
     return session
 
 
+class TestRevertHitsTheCache:
+    """Reverting a cell edit must not recompute a result the store already holds.
+
+    Provenance is content-addressed, so P1 -> P2 -> back to P1 has a valid,
+    immutable result for P1 sitting in the store. Re-running it is exactly the
+    work the cache exists to avoid.
+    """
+
+    @pytest.mark.asyncio
+    async def test_reverting_an_edit_reuses_the_original_result(self, sample_notebook):
+        cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
+        cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
+        # cell2 consumes x, so cell1's output is stored as a canonical artifact.
+        cell2.source = "y = x + 1"
+        executor = CellExecutor(sample_notebook)
+
+        cell1.source = "x = 1"
+        sample_notebook.re_analyze_cell("cell1")
+        sample_notebook.re_analyze_cell("cell2")
+        first = await executor.execute_cell("cell1", "x = 1")
+        assert first.cache_hit is False
+
+        cell1.source = "x = 2"
+        sample_notebook.re_analyze_cell("cell1")
+        edited = await executor.execute_cell("cell1", "x = 2")
+        assert edited.cache_hit is False
+
+        cell1.source = "x = 1"
+        sample_notebook.re_analyze_cell("cell1")
+        reverted = await executor.execute_cell("cell1", "x = 1")
+
+        assert reverted.cache_hit is True, "revert re-executed a result already in the store"
+
+        # The safety property, and the reason the obvious fix is wrong: a
+        # downstream cell resolves its inputs through the *latest* version, so
+        # serving the cache from an older version without re-pointing latest
+        # would feed it the edited value while the cell above claims to hold
+        # the reverted one. y must be 2 (from x = 1), never 3.
+        sample_notebook.re_analyze_cell("cell2")
+        downstream = await executor.execute_cell("cell2", "y = x + 1")
+        assert downstream.success is True
+        assert downstream.outputs["y"]["preview"] == 2
+
+        # The result reports the version it actually made current, not the
+        # superseded row the provenance lookup happened to land on.
+        store = sample_notebook.artifact_manager.artifact_store
+        x_id = f"nb_{sample_notebook.notebook_state.id}_cell_cell1_var_x"
+        latest = store.get_latest_version(x_id)
+        assert reverted.artifact_uri == f"strata://artifact/{x_id}@v={latest.version}"
+        assert latest.state == "ready"
+
+    @pytest.mark.asyncio
+    async def test_revert_keeps_the_display_output(self, sample_notebook):
+        cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
+        cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
+        cell2.source = "y = x + 1"
+        executor = CellExecutor(sample_notebook)
+
+        src1 = 'x = 1\ndisplay(Markdown("# One"))'
+        src2 = 'x = 2\ndisplay(Markdown("# Two"))'
+
+        cell1.source = src1
+        sample_notebook.re_analyze_cell("cell1")
+        sample_notebook.re_analyze_cell("cell2")
+        first = await executor.execute_cell("cell1", src1)
+        assert first.display_outputs, "setup: first run should have a display output"
+
+        cell1.source = src2
+        sample_notebook.re_analyze_cell("cell1")
+        await executor.execute_cell("cell1", src2)
+
+        cell1.source = src1
+        sample_notebook.re_analyze_cell("cell1")
+        reverted = await executor.execute_cell("cell1", src1)
+
+        assert reverted.display_outputs, "revert lost the display output"
+
+    @pytest.mark.asyncio
+    async def test_a_cell_that_must_run_anyway_promotes_nothing(self, sample_notebook):
+        """One variable promotable and another not means the cell runs.
+
+        Promoting the first one regardless would leave its artifact pointing at
+        a result the rest of the cell no longer agrees with, until the run that
+        was going to happen anyway overwrites it.
+        """
+        cell1 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
+        cell2 = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell2")
+        cell2.source = "z = a + b"
+        executor = CellExecutor(sample_notebook)
+        store = sample_notebook.artifact_manager.artifact_store
+        notebook_id = sample_notebook.notebook_state.id
+        a_id = f"nb_{notebook_id}_cell_cell1_var_a"
+        b_id = f"nb_{notebook_id}_cell_cell1_var_b"
+
+        cell1.source = "a = 1\nb = 10"
+        sample_notebook.re_analyze_cell("cell1")
+        sample_notebook.re_analyze_cell("cell2")
+        await executor.execute_cell("cell1", "a = 1\nb = 10")
+
+        cell1.source = "a = 2\nb = 20"
+        sample_notebook.re_analyze_cell("cell1")
+        await executor.execute_cell("cell1", "a = 2\nb = 20")
+
+        # b's original result is gone, so the revert cannot be served entirely
+        # from the store.
+        assert store.delete_artifact(b_id, 1) is True
+
+        cell1.source = "a = 1\nb = 10"
+        sample_notebook.re_analyze_cell("cell1")
+        reverted = await executor.execute_cell("cell1", "a = 1\nb = 10")
+
+        assert reverted.cache_hit is False
+        # a went v1, v2, then the re-execution's v3. A promotion would have
+        # slipped an extra version in before that.
+        assert store.get_latest_version(a_id).version == 3
+        # Both variables end up current under the reverted provenance, via the
+        # run rather than via a promotion.
+        assert reverted.outputs["a"]["preview"] == 1
+        assert reverted.outputs["b"]["preview"] == 10
+
+
 class TestManifestTablesDuplicates:
     """Duplicate @table names must be rejected before manifest/provenance — the
     name-keyed snapshot map otherwise collapses them (one wins namespace

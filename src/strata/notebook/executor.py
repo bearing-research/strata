@@ -64,8 +64,8 @@ import httpx
 # the ``[notebook]`` extra and isn't available in slim deployments like the
 # Docker image, which only installs ``[otel]``. The batch protocol frames
 # we serialize/deserialize here are small dicts — stdlib json is plenty.
+from strata.artifact_store import ArtifactVersion, get_artifact_store
 from strata.artifact_store import TransformSpec as ArtifactTransformSpec
-from strata.artifact_store import get_artifact_store
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
@@ -1228,7 +1228,25 @@ class CellExecutor:
             # verify the LOCAL canonical artifact exists AND has the
             # expected provenance hash — not just that it exists.
             if use_cache and cached_artifact is not None and consumed_vars:
-                for var_name in consumed_vars:
+                # Two passes on purpose. A variable whose canonical latest does
+                # not match may still have the right result under an older
+                # version — reverting a cell edit (P1, P2, back to P1) is the
+                # everyday way to get there, and the P1 bytes are still in the
+                # store, immutable and valid. Promoting re-points "latest" at
+                # them, reaching the same end state recomputation would, without
+                # running the cell.
+                #
+                # Deciding before writing matters for a multi-variable cell: if
+                # one variable can be promoted and another cannot, the cell has
+                # to run anyway, and a promotion already applied would leave its
+                # variable pointing at a result the rest of the cell no longer
+                # agrees with until the run overwrites it.
+                to_promote: list[tuple[str, int]] = []
+                invalid: tuple[str, ArtifactVersion | None, str] | None = None
+                # sorted() so the variable a mismatch is reported against, and
+                # the order promotions apply in, do not vary run to run with
+                # set iteration. session._resolve_cached_outputs already sorts.
+                for var_name in sorted(consumed_vars):
                     canonical_id = artifact_mgr.cell_artifact_id(
                         cell_id, var_name, variant=fanout_variant
                     )
@@ -1236,23 +1254,108 @@ class CellExecutor:
                     canonical_art = artifact_mgr.artifact_store.get_latest_version(
                         canonical_id,
                     )
-                    if canonical_art is None or canonical_art.provenance_hash != var_prov:
+                    if canonical_art is not None and canonical_art.provenance_hash == var_prov:
+                        continue
+                    older = artifact_mgr.artifact_store.find_version_by_provenance(
+                        canonical_id, var_prov
+                    )
+                    if older is None or not artifact_mgr.artifact_store.blob_exists(
+                        canonical_id, older.version
+                    ):
+                        invalid = (canonical_id, canonical_art, var_prov)
+                        break
+                    to_promote.append((canonical_id, older.version))
+
+                # A cell's display outputs are sub-artifacts of the same
+                # provenance, and the resolver above already returned []
+                # because their canonical latest carries the edited hash. Left
+                # out of the promotion set, a reverted cell would come back as
+                # a cache hit with its plot silently gone. The count is
+                # index-driven off the cell's current list because that is what
+                # _resolve_cached_display_outputs will iterate; a cell whose
+                # display count changed across the edit cannot be restored that
+                # way, so it re-executes.
+                if invalid is None:
+                    for index in range(len(current_display_outputs)):
+                        display_id = artifact_mgr.cell_artifact_id(
+                            cell_id, f"__display__{index}", variant=fanout_variant
+                        )
+                        display_prov = derive_subkey(provenance_hash, f"__display__{index}")
+                        display_art = artifact_mgr.artifact_store.get_latest_version(display_id)
+                        if display_art is not None and display_art.provenance_hash == display_prov:
+                            continue
+                        older_display = artifact_mgr.artifact_store.find_version_by_provenance(
+                            display_id, display_prov
+                        )
+                        if older_display is None or not artifact_mgr.artifact_store.blob_exists(
+                            display_id, older_display.version
+                        ):
+                            invalid = (display_id, display_art, display_prov)
+                            break
+                        to_promote.append((display_id, older_display.version))
+
+                if invalid is not None:
+                    canonical_id, canonical_art, var_prov = invalid
+                    logger.info(
+                        "Cache hit for cell %s invalidated: "
+                        "canonical artifact %s %s "
+                        "(provenance hit was %s@v=%d, "
+                        "expected provenance %s).",
+                        cell_id,
+                        canonical_id,
+                        "not found"
+                        if canonical_art is None
+                        else f"has stale provenance {canonical_art.provenance_hash[:12]}",
+                        cached_artifact.id,
+                        cached_artifact.version,
+                        var_prov[:12],
+                    )
+                    cached_artifact = None
+                else:
+                    for canonical_id, source_version in to_promote:
+                        promoted = artifact_mgr.artifact_store.promote_version(
+                            canonical_id, source_version
+                        )
+                        if promoted is None:
+                            # The blob went away between the check and here (a
+                            # GC pass is the plausible one). Run the cell.
+                            logger.info(
+                                "Cell %s could not promote %s@v=%d; re-executing.",
+                                cell_id,
+                                canonical_id,
+                                source_version,
+                            )
+                            cached_artifact = None
+                            break
                         logger.info(
-                            "Cache hit for cell %s invalidated: "
-                            "canonical artifact %s %s "
-                            "(provenance hit was %s@v=%d, "
-                            "expected provenance %s).",
+                            "Cell %s reverted to a known provenance: promoted "
+                            "%s@v=%d to @v=%d instead of re-executing.",
                             cell_id,
                             canonical_id,
-                            "not found"
-                            if canonical_art is None
-                            else f"has stale provenance {canonical_art.provenance_hash[:12]}",
-                            cached_artifact.id,
-                            cached_artifact.version,
-                            var_prov[:12],
+                            source_version,
+                            promoted.version,
                         )
-                        cached_artifact = None
-                        break
+                    if cached_artifact is not None and to_promote and cell is not None:
+                        # The display resolver ran before any of this and saw
+                        # the pre-promotion state, so its answer is stale now.
+                        cached_display_outputs = self.session._resolve_cached_display_outputs(
+                            cell_id,
+                            provenance_hash,
+                            current_display_outputs,
+                        )
+                        # Likewise the hit itself: cached_artifact was read
+                        # before the promotion and now names a superseded
+                        # version, which the result would report as the cell's
+                        # artifact_uri while cell.artifact_uris — re-read from
+                        # latest below — names the promoted one.
+                        first_var = sorted(consumed_vars)[0]
+                        refreshed = artifact_mgr.artifact_store.get_latest_version(
+                            artifact_mgr.cell_artifact_id(
+                                cell_id, first_var, variant=fanout_variant
+                            )
+                        )
+                        if refreshed is not None:
+                            cached_artifact = refreshed
 
             logger.info(
                 "execute_cell %s: consumed_vars=%s use_cache=%s cache_hit=%s",
