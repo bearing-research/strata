@@ -1551,6 +1551,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Message types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-error-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The error frame
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2179,6 +2196,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Message types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-error-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The error frame
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2457,6 +2491,66 @@ source. A non-Vue client can enumerate the full set by iterating it:</p>
 <p>The enum is the single source of truth; the docs are organized for
 human readability but the values match exactly. If you see a frame whose
 <code>type</code> doesn't match an enum value, treat that as a bug to report.</p>
+<h3 id="the-error-frame">The <code>error</code> frame<a class="headerlink" href="#the-error-frame" title="Permanent link">&para;</a></h3>
+<p>Any request can be answered with <code>error</code> instead of the frame you expected,
+so a client has to handle it on every message it sends:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Always present</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>error</code></td>
+<td>yes</td>
+<td>Human-readable message. Not a stable identifier</td>
+</tr>
+<tr>
+<td><code>code</code></td>
+<td>no</td>
+<td>Machine-readable class, when the error has one</td>
+</tr>
+<tr>
+<td><code>cell_id</code></td>
+<td>no</td>
+<td>The cell concerned, on <code>cell_busy</code></td>
+</tr>
+</tbody>
+</table>
+<p>Branch on <code>code</code>, never on the text of <code>error</code>. The codes:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ENVIRONMENT_BUSY</code></td>
+<td>An environment job holds the notebook; retry when it finishes</td>
+</tr>
+<tr>
+<td><code>cell_busy</code></td>
+<td>The cell is executing and its source cannot be edited yet</td>
+</tr>
+<tr>
+<td><code>read_only</code></td>
+<td>The message is not allowed in app view</td>
+</tr>
+<tr>
+<td><code>insufficient_scope</code></td>
+<td>The connection's scopes do not cover the request</td>
+</tr>
+</tbody>
+</table>
+<p>An error carrying no <code>code</code> is a plain failure with no machine-readable class;
+the key is absent rather than null, so test for presence. The shape is defined
+by <code>ErrorPayload</code> in <code>strata.notebook.ws_payloads</code>, which every emit site
+builds through - a field that is not on that model cannot reach a client.</p>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../rest-api/">REST API Reference</a> - every endpoint with request /
