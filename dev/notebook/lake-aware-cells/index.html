@@ -2296,6 +2296,15 @@ inputs change; <code>@table</code> adds the lake snapshot to the mix.</p>
 <li><strong>Personal mode for the embedded scan.</strong> <code>scan@v1</code> runs as a built-in
   transform in personal mode. In service mode, scanning goes through a
   registered executor.</li>
+<li><strong>Merge-on-read tables are refused.</strong> A table whose snapshot carries
+  positional or equality delete files - what Spark or Flink <code>MERGE</code> / <code>DELETE</code>
+  writes - raises <code>UnsupportedTableFormatError</code> rather than scanning. Strata
+  reads Parquet row groups directly and does not apply delete files yet, so
+  scanning one would return deleted rows <em>and</em> cache them under the snapshot
+  key, where they would be served forever. Compact to copy-on-write
+  (<code>rewrite_data_files</code>), or pin a snapshot taken before the deletes. Applying
+  delete files is tracked in
+  <a href="https://github.com/bearing-research/strata/issues/536">#536</a>.</li>
 </ul>
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
