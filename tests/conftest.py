@@ -12,10 +12,11 @@ import socket
 import sys
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
 # Python 3.10 compatibility: UTC is in timezone module
@@ -557,3 +558,45 @@ def server_with_client(temp_warehouse, tmp_path):
     client.close()
     server_instance.should_exit = True
     server_thread.join(timeout=2.0)
+
+
+# The placeholder artifact ids the build-store tests build against, plus the
+# canonical id ``update_build_output`` repoints a deduped build at.
+BUILD_TARGET_IDS: tuple[str, ...] = (
+    "a",
+    "art-123",
+    "canonical-artifact",
+    *(f"art-{i}" for i in range(4)),
+    *(f"artifact-{i}" for i in range(1, 4)),
+)
+
+
+def seed_build_targets(
+    artifact_dir: Path,
+    artifact_ids: Iterable[str] = BUILD_TARGET_IDS,
+    versions: Iterable[int] = range(1, 8),
+) -> None:
+    """Create the artifact versions that build rows are allowed to reference.
+
+    ``artifact_builds`` declares a foreign key on ``(artifact_id, version)``,
+    and both production callers create the artifact version first — the server
+    at ``server.py`` and the notebook executor, which calls ``create_artifact``
+    immediately before ``create_build``. A build row for an artifact that never
+    existed is an impossible state, so a build-store test that fabricates one
+    needs this to supply the other half.
+
+    Constructing the artifact store also creates ``artifact_versions`` in the
+    shared database: a build store opened on a file of its own has no such
+    table, and the foreign key cannot even be resolved against it.
+    """
+    from strata.artifact_store import ArtifactStore
+
+    store = ArtifactStore(artifact_dir)
+    try:
+        for artifact_id in artifact_ids:
+            for version in versions:
+                created = store.create_artifact(artifact_id, f"seed-{artifact_id}-{version}")
+                store.blob_store.write_blob(artifact_id, created, b"seed")
+                store.finalize_artifact(artifact_id, created, "{}", 1, 4)
+    finally:
+        store.close()

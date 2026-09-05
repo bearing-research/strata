@@ -10,13 +10,20 @@ from strata.transforms.build_store import (
     get_build_store,
     reset_build_store,
 )
+from tests.conftest import seed_build_targets
 
 
 @pytest.fixture
 def build_store(tmp_path):
-    """Create a temporary build store."""
-    db_path = tmp_path / "test.sqlite"
-    store = BuildStore(db_path)
+    """Create a temporary build store over a database that also holds artifacts.
+
+    ``artifact_builds`` has a foreign key into ``artifact_versions``, so the
+    build store cannot live in a file of its own: the constraint would have
+    nothing to resolve against. Production shares one database for exactly
+    this reason.
+    """
+    seed_build_targets(tmp_path)
+    store = BuildStore(tmp_path / "artifacts.sqlite")
     yield store
 
 

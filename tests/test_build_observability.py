@@ -21,6 +21,7 @@ from strata.transforms.build_metrics import (
     reset_build_metrics,
 )
 from strata.transforms.build_store import BuildStore
+from tests.conftest import seed_build_targets
 
 
 class TestBuildMetricsCollector:
@@ -291,9 +292,11 @@ class TestBuildStoreLogs:
 
     @pytest.fixture
     def build_store(self, tmp_path: Path) -> BuildStore:
-        """Create a temporary build store."""
-        db_path = tmp_path / "test.sqlite"
-        return BuildStore(db_path)
+        """Create a temporary build store over a database that also holds
+        artifacts, so ``artifact_builds``' foreign key has something to
+        resolve against."""
+        seed_build_targets(tmp_path)
+        return BuildStore(tmp_path / "artifacts.sqlite")
 
     def test_complete_build_with_logs(self, build_store: BuildStore):
         """Test completing a build with logs."""

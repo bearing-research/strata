@@ -16,6 +16,33 @@ from strata.migrate import MIGRATED_TABLES, migrate, plan_migration
 from strata.sql_backend import PostgresDialect, SqliteDialect
 
 
+def _insert_dangling_build(db_path, build_id: str) -> None:
+    """Write a build row pointing at an artifact that does not exist.
+
+    Foreign keys are enforced now, so this state can no longer be produced
+    through the build store — which is the point of the fix that enforced them.
+    Databases written before it are full of these, though: garbage_collect and
+    delete_artifact removed artifact_versions rows without touching
+    artifact_builds for as long as they have existed. The migration still has
+    to carry such a store onto Postgres, which has always refused them, so the
+    row is written the way that older Strata left it: with enforcement off.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute(
+            "INSERT INTO artifact_builds "
+            "(build_id, artifact_id, version, state, executor_ref, created_at) "
+            "VALUES (?, ?, ?, 'pending', ?, ?)",
+            (build_id, "does-not-exist", 1, "duckdb_sql_v1", 0.0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _docker_daemon_reachable() -> bool:
     try:
         docker.from_env().ping()
@@ -186,13 +213,8 @@ class TestMigration:
         # checked. One bad row must not strand the whole migration.
         from strata.transforms.build_store import BuildStore
 
-        builds = BuildStore(tmp_path / "src" / "artifacts.sqlite")
-        builds.create_build(
-            build_id="orphan",
-            artifact_id="does-not-exist",
-            version=1,
-            executor_ref="duckdb_sql_v1",
-        )
+        BuildStore(tmp_path / "src" / "artifacts.sqlite")
+        _insert_dangling_build(tmp_path / "src" / "artifacts.sqlite", "orphan")
         # The target needs the table too: a deployment with builds has booted
         # its build store on both sides.
         BuildStore(tmp_path / "tgt" / "artifacts.sqlite", dialect=target)
@@ -291,9 +313,7 @@ class TestMigration:
             builds.create_build(
                 build_id=f"good-{i}", artifact_id="a1", version=version, executor_ref="x"
             )
-        builds.create_build(
-            build_id="orphan", artifact_id="does-not-exist", version=1, executor_ref="x"
-        )
+        _insert_dangling_build(tmp_path / "src" / "artifacts.sqlite", "orphan")
         BuildStore(tmp_path / "tgt" / "artifacts.sqlite", dialect=target)
 
         result = migrate(self._source(tmp_path), target)

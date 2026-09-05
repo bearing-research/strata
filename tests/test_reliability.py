@@ -28,6 +28,7 @@ from strata.transforms.registry import (
     set_transform_registry,
 )
 from strata.transforms.runner import BuildRunner, RunnerConfig
+from tests.conftest import seed_build_targets
 
 
 @pytest.fixture
@@ -53,6 +54,7 @@ def build_store(artifact_dir):
     reset_build_store()
     from strata.transforms.build_store import get_build_store
 
+    seed_build_targets(artifact_dir)
     db_path = artifact_dir / "artifacts.sqlite"
     store = get_build_store(db_path)
     yield store
@@ -72,8 +74,12 @@ def clock_build_store(artifact_dir):
     """
     from strata.transforms.build_store import BuildStore
 
+    # The shared database, not a file of its own: build rows carry a foreign
+    # key into artifact_versions, and these tests create their artifacts
+    # through the artifact_store fixture. A separate file puts the two halves
+    # in different databases, where the constraint cannot resolve at all.
     now = [1000.0]
-    store = BuildStore(artifact_dir / "clock-builds.sqlite", clock=lambda: now[0])
+    store = BuildStore(artifact_dir / "artifacts.sqlite", clock=lambda: now[0])
 
     def advance(seconds: float) -> None:
         now[0] += seconds
