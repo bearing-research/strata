@@ -3181,6 +3181,19 @@ names.</p>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A notebook artifact's lineage now walks past its first hop.</strong> Cell outputs
+  recorded their inputs as bare provenance digests, which neither the lineage
+  API nor <code>strata artifact lineage</code> can resolve — so every upstream showed up
+  as an unidentifiable leaf and the walk stopped there. A chain three cells
+  deep reported one node. Loop cells were worse: they recorded no inputs at
+  all, leaving an empty graph for exactly the artifact a training run produces.
+  Cached results are unaffected — what is <em>hashed</em> did not change, only what is
+  recorded.</li>
+<li><strong>Cell outputs carry the source that produced them.</strong> An artifact recorded
+  only <code>source_hash</code>, which explains nothing to a reader who does not already
+  have the notebook. The source is now stored with the artifact, captured at
+  execution — so editing a cell afterwards cannot pair a cached result with
+  code that did not produce it.</li>
 <li><strong>Reverting a cell edit is a cache hit again.</strong> Running a cell, editing it, and
   reverting recomputed a result the store already held, immutable and valid —
   the one loop where content addressing should never let you wait.</li>
