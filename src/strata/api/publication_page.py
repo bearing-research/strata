@@ -91,6 +91,7 @@ def render_publication(
     content_type: str,
     image_src: str | None,
     bundle_filename: str | None = None,
+    oembed_url: str | None = None,
 ) -> str:
     """Render the page for one published artifact.
 
@@ -251,7 +252,7 @@ def render_publication(
         "would take.</p></div>"
     )
 
-    return _document(title=title, body="".join(parts))
+    return _document(title=title, body="".join(parts), oembed_url=oembed_url)
 
 
 def content_type_of(artifact) -> str:
@@ -281,6 +282,77 @@ CLAIMS = {
     ),
     "reproduction": "Not claimed. Re-running is left to the reader.",
 }
+
+
+_EMBED_STYLE = """
+:root { color-scheme: light dark; --fg:#12151a; --muted:#5b6472; --card:#fff;
+        --line:#e3e6ec; --accent:#2a5db0; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg:#e6e8ee; --muted:#9aa3b2; --card:#1b1f26; --line:#2a2f38;
+          --accent:#8ab4ff; }
+}
+* { box-sizing: border-box; }
+body { margin:0; background:transparent; color:var(--fg);
+       font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+a.card { display:block; text-decoration:none; color:inherit; background:var(--card);
+         border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+a.card:hover { border-color:var(--accent); }
+.fig { display:block; width:100%; max-height:300px; object-fit:contain;
+       background:#fff; }
+.body { padding:.7rem .85rem; }
+.title { font-weight:600; font-size:14px; margin:0 0 .2rem; }
+.meta { color:var(--muted); margin:0; }
+.more { color:var(--accent); margin:.35rem 0 0; }
+"""
+
+
+def render_embed(*, publication, artifact, lineage, image_src: str | None, page_url: str) -> str:
+    """A compact card for an iframe on someone else's page.
+
+    Not a smaller copy of the full page. An embed lives in a post or a wiki
+    where the surrounding text is doing the explaining, so it carries the
+    result, what it is, and an honest one-line summary of the chain — then
+    links out. Reproducing the claim language in a 300px card would either
+    crowd out the figure or, worse, abbreviate the caveats into the badge this
+    feature deliberately does not have.
+
+    The whole card is the link, and it opens the full page: whatever a reader
+    decides on the strength of a figure in someone else's blog, the provenance
+    is one click away rather than paraphrased here.
+
+    The figure is height-capped rather than left to its natural size. A square
+    plot at full width is taller than the frame an oEmbed consumer reserves,
+    which pushed the title and the link to the provenance below the fold — an
+    embed that is only an image, which is the one thing it must not be.
+    """
+    # Every non-root node, matching what the full page lists as an ancestor.
+    # Counting only artifacts dropped table inputs, so a figure read straight
+    # from a table reported no steps at all while the page showed one.
+    root = next((node for node in lineage.nodes if node.artifact_id == artifact.id), None)
+    steps = sum(1 for node in lineage.nodes if node is not root)
+    title = publication.title or f"{artifact.id}@v={artifact.version}"
+
+    bits = []
+    if steps > 0:
+        bits.append(f"{steps} step{'s' if steps != 1 else ''} behind it")
+    if artifact.created_at:
+        bits.append(_when(artifact.created_at))
+    summary = " · ".join(bits)
+
+    figure = f"<img class='fig' alt='' src='{escape(image_src)}'>" if image_src else ""
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<meta name='robots' content='noindex'>"
+        f"<title>{escape(title)}</title><style>{_EMBED_STYLE}</style></head><body>"
+        f"<a class='card' href='{escape(page_url)}' target='_blank' rel='noopener'>"
+        f"{figure}"
+        "<div class='body'>"
+        f"<p class='title'>{escape(title)}</p>"
+        f"<p class='meta'>{escape(summary)}</p>"
+        "<p class='more'>See what produced it →</p>"
+        "</div></a></body></html>"
+    )
 
 
 def build_record(
@@ -334,11 +406,21 @@ def build_record(
     }
 
 
-def _document(*, title: str, body: str) -> str:
+def _document(*, title: str, body: str, oembed_url: str | None = None) -> str:
+    # The discovery link is how a wiki or CMS turns a pasted URL into the card
+    # without being told the endpoint exists. Omitted for the archival bundle,
+    # which has no server to ask.
+    discovery = (
+        f"<link rel='alternate' type='application/json+oembed' "
+        f"href='{escape(oembed_url)}' title='{escape(title)}'>"
+        if oembed_url
+        else ""
+    )
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<meta name='robots' content='noindex'>"
+        f"{discovery}"
         f"<title>{escape(title)}</title><style>{_STYLE}</style></head>"
         f"<body><main>{body}</main></body></html>"
     )

@@ -359,7 +359,37 @@ def _is_public_publication_request(request: Request) -> bool:
     path = request.url.path
     if path == "/v1/publications":  # the authenticated listing, not one record
         return False
+    # ``/oembed`` belongs here too: it is the endpoint a wiki or CMS calls to
+    # unfurl a pasted link, and it answers only for tokens on this server that
+    # someone deliberately published. Behind the gate it would 401 for exactly
+    # the consumers it exists to serve.
+    if path == "/oembed":
+        return True
     return path.startswith("/p/") or path.startswith("/v1/publications/")
+
+
+def _is_public_embed_request(request: Request) -> bool:
+    """Return True for a published artifact's embed card.
+
+    The default ``frame-ancestors 'self'`` protects the notebook app view,
+    where framing a live session is a real clickjacking surface. An embed card
+    is the opposite case: it exists to be put in someone else's page, and one
+    that only its own origin may frame is not an embed at all.
+
+    Narrow on purpose — only this path, only for a token someone deliberately
+    published, and the card is read-only with no control to hijack.
+
+    Matched on the *shape* of the path, not on an ``/embed`` suffix. The SPA
+    catch-all serves ``index.html`` for any unmatched path, so a suffix test
+    also opened ``/anything/embed`` — and the frontend is hash-routed, so
+    framing ``/x/embed#/notebook/<session>`` from any origin would have handed
+    an attacker the live notebook app. That is the exact surface this
+    middleware exists to close.
+    """
+    if request.method != "GET":
+        return False
+    parts = [segment for segment in request.url.path.split("/") if segment]
+    return len(parts) == 3 and parts[0] == "p" and parts[2] == "embed"
 
 
 def _deny_build_access() -> None:
@@ -1175,8 +1205,11 @@ async def frame_ancestors_middleware(request: Request, call_next):
     a stray page could silently iframe Strata.
     """
     response = await call_next(request)
-    origins = list(getattr(_state.config, "embed_frame_ancestors", [])) if _state else []
-    ancestors = "*" if "*" in origins else " ".join(["'self'", *origins])
+    if _is_public_embed_request(request):
+        ancestors = "*"
+    else:
+        origins = list(getattr(_state.config, "embed_frame_ancestors", [])) if _state else []
+        ancestors = "*" if "*" in origins else " ".join(["'self'", *origins])
     response.headers["Content-Security-Policy"] = f"frame-ancestors {ancestors}"
     return response
 

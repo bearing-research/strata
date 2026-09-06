@@ -5,6 +5,16 @@ All notable changes to Strata will be documented in this file.
 Entries focus on user-visible changes and release framing rather than
 exhaustive commit history.
 
+## Unreleased
+
+### Added
+
+- **A published artifact embeds elsewhere.** Paste its link into a wiki or CMS
+  that speaks oEmbed and it unfurls into a card — the figure, a one-line
+  summary of the chain, and a link through to the full provenance — or take the
+  `/p/{token}/embed` iframe directly. The card is framable from any origin
+  because that is the point of it; the full page keeps its restrictive default.
+
 ## 0.7.0 - 2026-09-06
 
 A result can now leave the notebook without leaving its history behind. **A

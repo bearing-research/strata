@@ -113,6 +113,8 @@ class TestAuthExemption:
             "/p/sometoken/data",
             "/p/sometoken/verify",
             "/v1/publications/sometoken",
+            "/p/sometoken/embed",
+            "/oembed",
         ],
     )
     def test_public_reads_are_exempt(self, path):
@@ -504,3 +506,136 @@ class TestImportAcrossStores:
             figure.id,
             upstream.id,
         ]
+
+
+class TestEmbedding:
+    """The card, and the oEmbed endpoint that unfurls a pasted link."""
+
+    def test_the_card_carries_the_link_to_the_provenance(self, published_server):
+        """An embed that is only an image defeats its own purpose.
+
+        The card lives in someone else's page, so the one thing it must always
+        show — whatever the figure's shape — is that there is a chain behind
+        this and where to see it.
+        """
+        import httpx
+
+        base_url, token, _ = published_server
+
+        card = httpx.get(f"{base_url}/p/{token}/embed", timeout=10)
+
+        assert card.status_code == 200
+        assert "See what produced it" in card.text
+        assert f"{base_url}/p/{token}" in card.text
+
+    def test_the_card_may_be_framed_anywhere(self, published_server):
+        """The default `frame-ancestors 'self'` protects the notebook app view.
+
+        Applied here it would make an embed framable only by its own origin,
+        which is not an embed. The full page keeps the restrictive default.
+        """
+        import httpx
+
+        base_url, token, _ = published_server
+
+        card = httpx.get(f"{base_url}/p/{token}/embed", timeout=10)
+        page = httpx.get(f"{base_url}/p/{token}", timeout=10)
+
+        assert card.headers["content-security-policy"] == "frame-ancestors *"
+        assert page.headers["content-security-policy"] == "frame-ancestors 'self'"
+
+    @pytest.mark.parametrize(
+        "path",
+        ["/anything/embed", "/notebook/embed", "/a/b/c/embed", "/embed"],
+    )
+    def test_only_the_real_embed_route_may_be_framed(self, published_server, path):
+        """The SPA catch-all serves index.html for any unmatched path.
+
+        A suffix test on "/embed" therefore also opened `/anything/embed`, and
+        the frontend is hash-routed — so framing `/x/embed#/notebook/<session>`
+        from any origin handed an attacker the live notebook app, which is the
+        surface this middleware exists to close.
+        """
+        import httpx
+
+        base_url, _, _ = published_server
+
+        response = httpx.get(f"{base_url}{path}", timeout=10)
+
+        assert response.headers["content-security-policy"] == "frame-ancestors 'self'"
+
+    def test_oembed_matches_a_host_written_differently(self, published_server):
+        """A consumer pastes whatever the address bar held.
+
+        Case and an explicit default port name the same server; 404ing over
+        that would reject the tools this endpoint exists for.
+        """
+        import httpx
+
+        base_url, token, _ = published_server
+        loud = base_url.replace("127.0.0.1", "127.0.0.1").upper().replace("HTTP", "http")
+
+        response = httpx.get(f"{base_url}/oembed", params={"url": f"{loud}/p/{token}"}, timeout=10)
+
+        assert response.status_code == 200
+
+    def test_oembed_describes_the_card(self, published_server):
+        import httpx
+
+        base_url, token, _ = published_server
+
+        payload = httpx.get(
+            f"{base_url}/oembed", params={"url": f"{base_url}/p/{token}"}, timeout=10
+        ).json()
+
+        assert payload["version"] == "1.0"
+        assert payload["type"] == "rich"
+        assert f"/p/{token}/embed" in payload["html"]
+        assert payload["width"] > 0 and payload["height"] > 0
+
+    def test_oembed_refuses_a_url_on_another_host(self, published_server):
+        """A provider that described other people's URLs would be answering
+        for pages it has never seen."""
+        import httpx
+
+        base_url, token, _ = published_server
+
+        response = httpx.get(
+            f"{base_url}/oembed",
+            params={"url": f"https://example.invalid/p/{token}"},
+            timeout=10,
+        )
+
+        assert response.status_code == 404
+
+    def test_oembed_says_so_rather_than_serving_empty_xml(self, published_server):
+        import httpx
+
+        base_url, token, _ = published_server
+
+        response = httpx.get(
+            f"{base_url}/oembed",
+            params={"url": f"{base_url}/p/{token}", "format": "xml"},
+            timeout=10,
+        )
+
+        assert response.status_code == 501
+
+    def test_the_page_advertises_the_oembed_endpoint(self, published_server):
+        """Discovery is how a wiki turns a pasted link into the card without
+        being told the endpoint exists."""
+        import httpx
+
+        base_url, token, _ = published_server
+
+        page = httpx.get(f"{base_url}/p/{token}", timeout=10).text
+
+        assert "application/json+oembed" in page
+
+    def test_a_withdrawn_publication_has_no_card(self, published_server):
+        import httpx
+
+        base_url, token, _ = published_server
+        httpx.delete(f"{base_url}/v1/publications/{token}", timeout=10)
+
+        assert httpx.get(f"{base_url}/p/{token}/embed", timeout=10).status_code == 410

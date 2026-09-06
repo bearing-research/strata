@@ -7,6 +7,16 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
+## Unreleased
+
+### Added
+
+- **A published artifact embeds elsewhere.** Paste its link into a wiki or CMS
+  that speaks oEmbed and it unfurls into a card — the figure, a one-line
+  summary of the chain, and a link through to the full provenance — or take the
+  `/p/{token}/embed` iframe directly. The card is framable from any origin
+  because that is the point of it; the full page keeps its restrictive default.
+
 ## 0.7.0 - 2026-09-06
 
 A result can now leave the notebook without leaving its history behind. **A
