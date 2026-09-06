@@ -48,6 +48,23 @@ from strata.config import StrataConfig
 
 
 @pytest.fixture(autouse=True)
+def _never_publish_into_the_real_store(monkeypatch):
+    """Keep ``strata artifact publish`` away from the developer's own store.
+
+    Publishing resolves the *server's* artifact directory through
+    ``StrataConfig.load()`` and copies into it, so a link minted from a
+    notebook resolves. Loaded in a test that sets no override, that is
+    ``~/.strata/artifacts`` — and a CLI test duly wrote four fixture artifacts
+    and two publications into the real one before this existed.
+
+    Returning ``None`` makes ``cmd_publish`` mint in whatever store the test
+    opened, which is what every test but the bridge one wants. The bridge test
+    monkeypatches this again, and being function-scoped it wins.
+    """
+    monkeypatch.setattr("strata.artifact_cli._server_store", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _reset_process_globals():
     """Nuke process-global server state after every test.
 

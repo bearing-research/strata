@@ -299,6 +299,15 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_store_args(publish_parser)
     publish_parser.add_argument("--title", default=None, help="Human label for the page")
     publish_parser.add_argument(
+        "--here",
+        action="store_true",
+        help=(
+            "Publish into the store named by --artifact-dir instead of copying "
+            "into the server's. The link only resolves if the server serves "
+            "that same store."
+        ),
+    )
+    publish_parser.add_argument(
         "--author",
         default=None,
         help=(

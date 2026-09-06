@@ -278,7 +278,13 @@ class TestPublish:
         from strata.artifact_cli import cmd_publish
 
         rc = cmd_publish(
-            _args(ref="demo/model", artifact_dir=chain_store["dir"], title=None, max_depth=10)
+            _args(
+                ref="demo/model",
+                artifact_dir=chain_store["dir"],
+                title=None,
+                max_depth=10,
+                here=False,
+            )
         )
 
         assert rc == 0
@@ -287,11 +293,64 @@ class TestPublish:
         for step in ("model-1@v=1", "feat-1@v=1", "scan-1@v=1"):
             assert step in out, f"{step} is exposed by the link but was not disclosed"
 
+    def test_a_shared_upstream_is_disclosed_once(self, chain_store, capsys):
+        """A diamond listed the same step twice, under two different names.
+
+        ``_walk_lineage`` renders a tree, so a step two cells depend on appears
+        expanded once and as a bare ``strata://artifact/...`` leaf where the
+        recursion stops. This is the text someone reads to decide whether to
+        send a link, so it has to be the actual set of steps — not a longer
+        list naming some of them twice.
+        """
+        from strata.artifact_cli import cmd_publish
+
+        store = chain_store["store"]
+        # Make it a diamond: the model reads the scan directly as well as
+        # through the features.
+        store.create_artifact(
+            "diamond-1",
+            "prov-diamond",
+            transform_spec=TransformSpec(executor="train@v1", params={}, inputs=[]),
+            input_versions={
+                "strata://artifact/feat-1@v=1": "feat-1@v=1",
+                "strata://artifact/scan-1@v=1": "scan-1@v=1",
+            },
+        )
+        store.finalize_artifact("diamond-1", 1, schema_json="", row_count=1, byte_size=1)
+
+        cmd_publish(
+            _args(
+                ref="diamond-1",
+                artifact_dir=chain_store["dir"],
+                title=None,
+                max_depth=10,
+                here=False,
+            )
+        )
+
+        listed = [
+            line.strip("  - ").strip()
+            for line in capsys.readouterr().out.splitlines()
+            if line.startswith("  - ")
+        ]
+
+        assert len(listed) == len(set(listed)), f"a step was disclosed twice: {listed}"
+        assert not any(s.startswith("strata://") for s in listed), (
+            f"steps must be named one way, not two: {listed}"
+        )
+        assert "scan-1@v=1" in listed
+
     def test_unpublish_withdraws_and_is_not_repeatable(self, chain_store, capsys):
         from strata.artifact_cli import cmd_publish, cmd_unpublish
 
         cmd_publish(
-            _args(ref="demo/model", artifact_dir=chain_store["dir"], title=None, max_depth=10)
+            _args(
+                ref="demo/model",
+                artifact_dir=chain_store["dir"],
+                title=None,
+                max_depth=10,
+                here=False,
+            )
         )
         token = chain_store["store"].list_publications()[0].token
 
@@ -310,7 +369,12 @@ class TestPublishAuthor:
         """
         from strata.artifact_cli import cmd_publish
 
-        base = {"ref": "demo/model", "artifact_dir": chain_store["dir"], "max_depth": 10}
+        base = {
+            "ref": "demo/model",
+            "artifact_dir": chain_store["dir"],
+            "max_depth": 10,
+            "here": False,
+        }
         cmd_publish(_args(title=None, author=None, **base))
         capsys.readouterr()
 
