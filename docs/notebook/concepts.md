@@ -5,26 +5,46 @@
 Strata Notebook is a content-addressed compute graph over Python. Every cell output is an artifact, and every cell execution is a `materialize(inputs, transform, environment) → artifact` operation.
 
 ```
-┌─────────────────────────────────────────────┐
-│ Notebook UI (Vue.js + WebSocket)            │
-│ (cell editing, run buttons, DAG view)       │
-└─────────────────────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────┐
-│ Notebook Backend (FastAPI + WebSocket)       │
-│ (session mgmt, cascade planner, executor)   │
-└─────────────────────────────────────────────┘
-                    │
-                    ▼
-┌─────────────────────────────────────────────┐
-│ Strata Artifact Store                       │
-│ (SQLite metadata + blob storage, provenance │
-│  dedup, lineage)                            │
-└─────────────────────────────────────────────┘
+┌───────────────┬───────────────┬─────────────────────────────┐
+│ Web UI (Vue)  │ Terminal TUI  │ Coding agent (CLI / MCP)    │
+│ edit and run  │ read-only     │ drives a session remotely   │
+└───────────────┴───────────────┴─────────────────────────────┘
+        │               │                      │
+        └───────────────┴──────────────────────┘
+                        │  REST + WebSocket
+                        ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Notebook Backend (FastAPI + WebSocket)                       │
+│ (session mgmt, DAG, cascade planner, executor)               │
+└──────────────────────────────────────────────────────────────┘
+            │                                │
+            │ local subprocess               │ HTTP
+            ▼                                ▼
+   ┌──────────────────┐         ┌──────────────────────────┐
+   │ Cell harness     │         │ Remote worker            │
+   │ (notebook venv)  │         │ (SSH / Fly / Modal /     │
+   │                  │         │  a pool-run machine)     │
+   └──────────────────┘         └──────────────────────────┘
+            └───────────────┬────────────────┘
+                            ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Strata Artifact Store                                        │
+│ metadata: SQLite, or Postgres when several servers share one │
+│ blobs: local disk, S3, GCS, Azure                            │
+│ provenance dedup, lineage, and an optional team cache that   │
+│ answers a local miss from a shared store                     │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 The notebook is an **orchestration layer**: it decides what to run next. The cell harness is an **executor**: it runs Python code. The artifact store decides whether a result already exists and persists it.
+
+The three surfaces are **peers on one protocol**, not a primary and two
+add-ons: they speak the same REST and WebSocket API. A cell an agent runs
+against a live session appears in the web UI and the [terminal viewer](tui.md)
+as it happens - though only when the agent addresses the session rather than
+the notebook directory, since [the local backend edits files and the server
+learns nothing](cli.md#working-against-a-live-session-server-session). Of the
+three, only the TUI is deliberately read-only.
 
 ## Why "every output is an artifact"
 
@@ -195,7 +215,10 @@ When you run a cell, this happens:
 1. **Compute provenance hash**: `sha256(sorted_input_hashes + source_hash + env_hash)`
 2. **Cache check**: Look up the hash in the artifact store → return immediately on hit
 3. **Resolve inputs**: Load upstream variable artifacts into a temp directory
-4. **Execute**: Spawn a subprocess running the cell harness in the notebook's venv
+4. **Execute**: Spawn a subprocess running the cell harness in the notebook's
+   venv - or, for a cell annotated with a [`# @worker`](workers.md), POST the
+   work to that worker over HTTP instead. Everything either side of this step
+   is identical; only where the Python runs changes.
 5. **Harness**: Deserializes inputs → `exec(source, namespace)` → serializes new variables
 6. **Store outputs**: Each consumed variable becomes an artifact
 7. **Broadcast**: WebSocket sends status, output, and console messages to the UI
@@ -209,10 +232,19 @@ The provenance hash determines cache identity. It includes:
 | Source code | Yes | Different code = different result |
 | Upstream artifact hashes | Yes | Different inputs = different result |
 | Environment lockfile hash | Yes | Different packages = different result |
+| Mount fingerprints | Yes | Different mounted data = different result |
 | Cell ID | No | Same code in a different cell = same result |
 | Execution time | No | Same inputs should produce same output |
 
 When you change a cell's source, its provenance hash changes, and all downstream cells become **stale**.
+
+Because the hash describes the computation rather than the machine, a match
+found somewhere else is just as valid. That is what the optional
+[team cache](../deployment/service-mode.md#the-team-cache-sharing-results-nobody-named) trades on: with a shared store configured, a local
+miss asks whether a colleague has already run this exact computation, and a
+cell that does run offers its outputs back. Nobody has to decide in advance
+which results are worth publishing - the expensive middle of a pipeline is
+shared on the same terms as anything else.
 
 This applies even to a **leaf cell**, one with no downstream consumer, like a
 cell that only `print`s a diagnostic. It has no output artifact to cache, but
