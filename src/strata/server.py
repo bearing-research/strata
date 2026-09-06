@@ -378,8 +378,18 @@ def _is_public_embed_request(request: Request) -> bool:
 
     Narrow on purpose — only this path, only for a token someone deliberately
     published, and the card is read-only with no control to hijack.
+
+    Matched on the *shape* of the path, not on an ``/embed`` suffix. The SPA
+    catch-all serves ``index.html`` for any unmatched path, so a suffix test
+    also opened ``/anything/embed`` — and the frontend is hash-routed, so
+    framing ``/x/embed#/notebook/<session>`` from any origin would have handed
+    an attacker the live notebook app. That is the exact surface this
+    middleware exists to close.
     """
-    return request.method == "GET" and request.url.path.endswith("/embed")
+    if request.method != "GET":
+        return False
+    parts = [segment for segment in request.url.path.split("/") if segment]
+    return len(parts) == 3 and parts[0] == "p" and parts[2] == "embed"
 
 
 def _deny_build_access() -> None:

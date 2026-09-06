@@ -122,8 +122,15 @@ result and an honest one-line summary, then links out — abbreviating the
 caveats into a card would produce exactly the badge this feature avoids.
 
 The card is framable from any origin, because being embeddable is the whole
-point of it. The full page keeps the default `frame-ancestors 'self'`, and
-`embed_frame_ancestors` still governs the notebook app view.
+point of it. That applies to `/p/{token}/embed` and nothing else — the full
+page keeps the default `frame-ancestors 'self'`, and `embed_frame_ancestors`
+still governs the notebook app view.
+
+**Behind a reverse proxy, set `STRATA_PUBLIC_BASE_URL`** to the address readers
+use. The URLs in an embed are consumed by someone else's page, and a server
+that only knows its internal origin will advertise an oEmbed endpoint nobody
+can reach and reject the public link a wiki pastes. Unset, the request's own
+origin is used, which is right for a directly-reachable server.
 
 ## Archiving: the copy that needs no server
 

@@ -26,6 +26,7 @@ exactly what would become public, before it does.
 
 from __future__ import annotations
 
+from html import escape
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
@@ -307,13 +308,43 @@ _EMBED_HEIGHT = 420
 
 
 def _public_base(request: Request) -> str:
-    """The origin a reader reached this server on.
+    """The origin a *reader* reaches this server on.
 
-    Taken from the request rather than configuration because an embed's URLs
-    are consumed by someone else's page: a link built from an internal
-    hostname resolves for the server and for nobody the embed was made for.
+    An embed's URLs are consumed by someone else's page, so they have to be
+    the public ones. ``request.base_url`` is right for a directly-reachable
+    server and wrong behind a reverse proxy on another host, where it is the
+    internal address: the published page would advertise an oEmbed endpoint no
+    consumer can resolve, and that endpoint would reject the public URL a wiki
+    actually pastes. ``public_base_url`` is how an operator says what the
+    outside sees.
     """
-    return str(request.base_url).rstrip("/")
+    from strata.server import get_state
+
+    try:
+        configured = get_state().config.public_base_url
+    except RuntimeError:
+        configured = None
+    return (configured or str(request.base_url)).rstrip("/")
+
+
+def _same_host(left: str, right: str) -> bool:
+    """Compare two origins' hosts, ignoring case and a default port.
+
+    A consumer pastes whatever the reader's address bar held, which may differ
+    from the canonical form in case or an explicit ``:443``. Rejecting those
+    would 404 the tools this endpoint exists for, over a difference that names
+    the same server.
+    """
+    from urllib.parse import urlparse
+
+    def _key(value: str) -> tuple[str, str]:
+        parsed = urlparse(value if "//" in value else f"//{value}")
+        host = (parsed.hostname or "").lower()
+        default = {"http": 80, "https": 443}.get(parsed.scheme or "")
+        port = parsed.port if parsed.port != default else None
+        return host, str(port or "")
+
+    return _key(left) == _key(right)
 
 
 @router.get("/p/{token}/embed", response_class=HTMLResponse)
@@ -370,8 +401,11 @@ async def oembed(url: str, store: ReadStore, http_request: Request, format: str 
         "title": publication.title or f"{artifact.id}@v={artifact.version}",
         "width": _EMBED_WIDTH,
         "height": _EMBED_HEIGHT,
+        # Escaped: ``base`` derives from the Host header, and this string is
+        # rendered verbatim by whatever page consumes the oEmbed response.
         "html": (
-            f'<iframe src="{base}/p/{token}/embed" width="{_EMBED_WIDTH}" '
+            f'<iframe src="{escape(base, quote=True)}/p/{escape(token, quote=True)}/embed" '
+            f'width="{_EMBED_WIDTH}" '
             f'height="{_EMBED_HEIGHT}" frameborder="0" '
             'style="border:0;max-width:100%" '
             'title="Strata published artifact" loading="lazy"></iframe>'
@@ -389,7 +423,7 @@ def _token_from_url(url: str, base: str) -> str | None:
     from urllib.parse import urlparse
 
     parsed = urlparse(url)
-    if urlparse(base).netloc != parsed.netloc:
+    if not _same_host(base, url):
         return None
     parts = [segment for segment in parsed.path.split("/") if segment]
     if len(parts) < 2 or parts[0] != "p":

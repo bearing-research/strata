@@ -544,6 +544,41 @@ class TestEmbedding:
         assert card.headers["content-security-policy"] == "frame-ancestors *"
         assert page.headers["content-security-policy"] == "frame-ancestors 'self'"
 
+    @pytest.mark.parametrize(
+        "path",
+        ["/anything/embed", "/notebook/embed", "/a/b/c/embed", "/embed"],
+    )
+    def test_only_the_real_embed_route_may_be_framed(self, published_server, path):
+        """The SPA catch-all serves index.html for any unmatched path.
+
+        A suffix test on "/embed" therefore also opened `/anything/embed`, and
+        the frontend is hash-routed — so framing `/x/embed#/notebook/<session>`
+        from any origin handed an attacker the live notebook app, which is the
+        surface this middleware exists to close.
+        """
+        import httpx
+
+        base_url, _, _ = published_server
+
+        response = httpx.get(f"{base_url}{path}", timeout=10)
+
+        assert response.headers["content-security-policy"] == "frame-ancestors 'self'"
+
+    def test_oembed_matches_a_host_written_differently(self, published_server):
+        """A consumer pastes whatever the address bar held.
+
+        Case and an explicit default port name the same server; 404ing over
+        that would reject the tools this endpoint exists for.
+        """
+        import httpx
+
+        base_url, token, _ = published_server
+        loud = base_url.replace("127.0.0.1", "127.0.0.1").upper().replace("HTTP", "http")
+
+        response = httpx.get(f"{base_url}/oembed", params={"url": f"{loud}/p/{token}"}, timeout=10)
+
+        assert response.status_code == 200
+
     def test_oembed_describes_the_card(self, published_server):
         import httpx
 

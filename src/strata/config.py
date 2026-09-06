@@ -224,6 +224,15 @@ class StrataConfig(BaseSettings):
     host: str = "127.0.0.1"
     port: Annotated[int, Field(ge=1, le=65535)] = 8765
 
+    # The origin readers reach this server on, when that differs from what the
+    # server sees. Behind a reverse proxy on another host, ``request.base_url``
+    # is the internal address — so a published page would advertise an oEmbed
+    # endpoint nobody can reach, and the endpoint would reject the public URL a
+    # wiki actually pastes. Only publication URLs consult this; unset, the
+    # request's own origin is used, which is right for a directly-reachable
+    # server.
+    public_base_url: str | None = None
+
     # Cache settings
     cache_dir: Path = Field(default_factory=lambda: Path.home() / ".strata" / "cache")
     max_cache_size_bytes: Annotated[int, Field(gt=0)] = 10 * 1024 * 1024 * 1024  # 10 GB

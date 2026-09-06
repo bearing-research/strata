@@ -325,7 +325,11 @@ def render_embed(*, publication, artifact, lineage, image_src: str | None, page_
     which pushed the title and the link to the provenance below the fold — an
     embed that is only an image, which is the one thing it must not be.
     """
-    steps = sum(1 for node in lineage.nodes if node.type == "artifact") - 1
+    # Every non-root node, matching what the full page lists as an ancestor.
+    # Counting only artifacts dropped table inputs, so a figure read straight
+    # from a table reported no steps at all while the page showed one.
+    root = next((node for node in lineage.nodes if node.artifact_id == artifact.id), None)
+    steps = sum(1 for node in lineage.nodes if node is not root)
     title = publication.title or f"{artifact.id}@v={artifact.version}"
 
     bits = []
