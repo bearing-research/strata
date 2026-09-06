@@ -722,6 +722,99 @@ class TestRoCrate:
 
         assert not dangling, f"references nothing declares: {sorted(dangling)}"
 
+    def test_a_table_input_is_declared_not_just_referenced(self, store, tmp_path):
+        """Non-artifact inputs are named by ``object`` and need an entity.
+
+        The first version of this only emitted entities for artifact nodes, so
+        a figure read from an Iceberg table produced a reference to a
+        `@id` nothing declared. The dangling-reference test missed it because
+        its fixture had only artifact inputs.
+        """
+        from strata.api.provenance_ld import build_crate
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+        from strata.services.artifact import ArtifactService
+
+        table_uri = "iceberg://warehouse/test_db.events"
+        manager = NotebookArtifactManager("nb", artifact_dir=tmp_path / "tbl")
+        figure = manager.store_cell_output(
+            cell_id="c1",
+            variable_name="__display__0",
+            blob_data=b"PNG",
+            content_type="image/png",
+            provenance_hash="a" * 64,
+            input_versions={table_uri: "12345"},
+            source="plt.plot(events)",
+        )
+        publication = manager.artifact_store.publish_artifact(figure.id, figure.version)
+        lineage = ArtifactService().build_lineage(
+            manager.artifact_store,
+            artifact=figure,
+            artifact_id=figure.id,
+            version=figure.version,
+            tenant_filter=None,
+            max_depth=10,
+        )
+
+        crate = build_crate(
+            publication=publication,
+            artifact=figure,
+            lineage=lineage,
+            content_type="image/png",
+            payload_id="artifact.png",
+            include_descriptor=True,
+        )
+        ids = {entity["@id"] for entity in crate["@graph"]}
+        dangling = {
+            ref
+            for entity in crate["@graph"]
+            for ref in self._refs(entity)
+            if ref not in ids and not ref.startswith("http")
+        }
+
+        assert table_uri in ids, "the table input is referenced but never declared"
+        assert not dangling, f"references nothing declares: {sorted(dangling)}"
+
+    def test_two_versions_of_one_id_get_separate_entities(self, store, tmp_path):
+        """JSON-LD flattening merges nodes that share an @id.
+
+        Fragment ids keyed on the artifact id alone collapsed two versions of a
+        cell's output into one, asserting that a single source blob produced
+        both — silently wrong for exactly the machine consumers this is for.
+        """
+        from strata.api.provenance_ld import _action_id, _source_id
+
+        class _Node:
+            def __init__(self, version):
+                self.artifact_id = "nb_x_cell_c_var_x"
+                self.version = version
+
+        assert _source_id(_Node(1)) != _source_id(_Node(2))
+        assert _action_id(_Node(1)) != _action_id(_Node(2))
+
+    def test_the_digest_survives_json_ld_expansion(self, store, tmp_path):
+        """`sha256` is not an RO-Crate 1.1 term, and undefined terms are
+        discarded on expansion — the integrity claim would look present in the
+        raw JSON and be invisible in RDF."""
+        crate, _, _ = self._crate(store, tmp_path)
+
+        context = crate["@context"]
+
+        assert isinstance(context, list), "a bare context string defines no sha256"
+        assert any(isinstance(part, dict) and "sha256" in part for part in context), (
+            "sha256 has no definition, so a processor drops it"
+        )
+
+    def test_an_author_with_a_space_is_a_usable_identifier(self, store, tmp_path):
+        """`--author "F. Li"` produced `@id: "#agent-F. Li"`. A space is
+        illegal in an IRI, so strict processors drop the node and the
+        authorship link vanishes."""
+        crate, _, _ = self._crate(store, tmp_path)
+
+        agents = [e for e in crate["@graph"] if e.get("@type") == "Person"]
+
+        assert agents, "the publisher should appear as an agent"
+        assert all(" " not in agent["@id"] for agent in agents)
+
     def test_upstream_steps_are_described_but_not_claimed_as_files(self, store, tmp_path):
         """Publishing shows which steps produced a result; it does not hand
         over the upstream data. Listing them under hasPart would assert files
@@ -738,7 +831,13 @@ class TestRoCrate:
     def test_each_step_records_its_code_as_the_instrument(self, store, tmp_path):
         crate, _, figure = self._crate(store, tmp_path)
 
-        action = next(e for e in crate["@graph"] if e["@id"] == f"#action-{figure.id}")
+        from strata.api.provenance_ld import _action_id
+
+        class _Ref:
+            artifact_id = figure.id
+            version = figure.version
+
+        action = next(e for e in crate["@graph"] if e["@id"] == _action_id(_Ref))
         source = next(e for e in crate["@graph"] if e["@id"] == action["instrument"]["@id"])
 
         assert action["@type"] == "CreateAction"

@@ -424,11 +424,19 @@ def _document(
         else ""
     )
     # The same graph the crate carries, inline, for anything that reads
-    # structured data off a page. Escaped for `</script>` rather than by
-    # html.escape: JSON-LD is script content, where entity-escaping would
-    # corrupt the JSON while leaving the injection.
+    # structured data off a page.
+    #
+    # Every `<` becomes `\u003c`, not just `</`. HTML-escaping is wrong here —
+    # JSON-LD is script content, and entities would corrupt the JSON while
+    # leaving the injection — but escaping only the closing form is not enough
+    # either: `<!--<script>` puts the tokenizer in script-data-double-escaped
+    # state, where this block's own `</script>` no longer closes the element
+    # and the rest of the document is swallowed as script text. The page then
+    # renders blank, which is a self-inflicted defacement of the one page this
+    # feature exists to serve. `\u003c` is a JSON string escape, so the parsed
+    # value is unchanged.
     structured = (
-        f"<script type='application/ld+json'>{json_ld.replace('</', '<\\/')}</script>"
+        f"<script type='application/ld+json'>{json_ld.replace('<', '\\u003c')}</script>"
         if json_ld
         else ""
     )

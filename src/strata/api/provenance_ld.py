@@ -28,7 +28,14 @@ from __future__ import annotations
 
 import datetime
 
-_CONTEXT = "https://w3id.org/ro/crate/1.1/context"
+# The crate context plus one local term. ``sha256`` is not defined in RO-Crate
+# 1.1, and an undefined term is *discarded* on JSON-LD expansion — so the
+# integrity digest this whole feature rests on would look present in the raw
+# JSON and be invisible in RDF, which is the worst of both.
+_CONTEXT = [
+    "https://w3id.org/ro/crate/1.1/context",
+    {"sha256": "http://pending.schema.org/sha256"},
+]
 _PROFILE = "https://w3id.org/ro/crate/1.1"
 
 
@@ -42,6 +49,31 @@ def _prune(entity: dict) -> dict:
     """Drop empty values. An absent field says "not recorded"; a null says it
     was recorded as nothing, which is a different and false claim."""
     return {k: v for k, v in entity.items() if v not in (None, "", [], {})}
+
+
+def _fragment(value: str) -> str:
+    """Percent-encode a value for use in a fragment identifier.
+
+    Author names and principals are free-form — ``--author "F. Li"`` produces a
+    space, which is illegal in an IRI. A strict processor drops or errors on
+    the node, and the authorship link simply vanishes from the RDF while
+    looking fine in the JSON.
+    """
+    from urllib.parse import quote
+
+    return quote(value, safe="")
+
+
+def _source_id(node) -> str:
+    return f"#source-{_fragment(f'{node.artifact_id}@v={node.version}')}"
+
+
+def _action_id(node) -> str:
+    return f"#action-{_fragment(f'{node.artifact_id}@v={node.version}')}"
+
+
+def _agent_id(name: str) -> str:
+    return f"#agent-{_fragment(name)}"
 
 
 def build_crate(
@@ -74,11 +106,18 @@ def build_crate(
 
     root_id = f"{artifact.id}@v={artifact.version}"
     steps = [
-        node
-        for node in lineage.nodes
-        if node.type == "artifact" and node.artifact_id is not None
+        node for node in lineage.nodes if node.type == "artifact" and node.artifact_id is not None
     ]
-    upstream = [node for node in steps if node.artifact_id != artifact.id]
+    # Compared with the version, not the id alone. One id can appear at two
+    # versions in a single graph — a stale cell re-run, or a loop carry — and
+    # matching on the id would drop a genuine ancestor while still mapping it
+    # onto the payload, producing an action whose result is someone else's
+    # output.
+    upstream = [
+        node
+        for node in steps
+        if (node.artifact_id, node.version) != (artifact.id, artifact.version)
+    ]
 
     graph.append(
         _prune(
@@ -92,13 +131,13 @@ def build_crate(
                 ),
                 "datePublished": _iso(publication.published_at),
                 "author": (
-                    {"@id": f"#agent-{publication.published_by}"}
+                    {"@id": _agent_id(publication.published_by)}
                     if publication.published_by
                     else None
                 ),
                 "hasPart": [{"@id": payload_id}],
                 "mainEntity": {"@id": payload_id},
-                "mentions": [{"@id": f"#action-{node.artifact_id}"} for node in steps],
+                "mentions": [{"@id": _action_id(node)} for node in steps],
             }
         )
     )
@@ -130,6 +169,23 @@ def build_crate(
             )
         )
 
+    # Table inputs and unresolved leaves are referenced by ``_inputs_for`` and
+    # would otherwise be named by nothing — a dangling @id, which is exactly
+    # the invariant this module claims to hold. They are Datasets rather than
+    # Files: a table lives in a lake, not in this crate.
+    for node in lineage.nodes:
+        if node.type != "artifact":
+            graph.append(
+                _prune(
+                    {
+                        "@id": node.uri,
+                        "@type": "Dataset",
+                        "name": node.uri,
+                        "description": "An input read from outside this store.",
+                    }
+                )
+            )
+
     agents: dict[str, dict] = {}
     for node in steps:
         step_id = f"{node.artifact_id}@v={node.version}"
@@ -139,7 +195,7 @@ def build_crate(
         if node.source:
             graph.append(
                 {
-                    "@id": f"#source-{node.artifact_id}",
+                    "@id": _source_id(node),
                     "@type": "SoftwareSourceCode",
                     "name": f"Source of {step_id}",
                     "programmingLanguage": "Python",
@@ -151,7 +207,7 @@ def build_crate(
             agents.setdefault(
                 node.principal,
                 {
-                    "@id": f"#agent-{node.principal}",
+                    "@id": _agent_id(node.principal),
                     "@type": "Person",
                     "name": node.principal,
                 },
@@ -160,23 +216,17 @@ def build_crate(
         graph.append(
             _prune(
                 {
-                    "@id": f"#action-{node.artifact_id}",
+                    "@id": _action_id(node),
                     "@type": "CreateAction",
                     "name": f"Computation of {step_id}",
                     "endTime": _iso(node.created_at),
-                    "instrument": (
-                        {"@id": f"#source-{node.artifact_id}"} if node.source else None
-                    ),
+                    "instrument": ({"@id": _source_id(node)} if node.source else None),
                     "object": [{"@id": ref} for ref in inputs],
                     "result": {"@id": produced},
-                    "agent": (
-                        {"@id": f"#agent-{node.principal}"} if node.principal else None
-                    ),
+                    "agent": ({"@id": _agent_id(node.principal)} if node.principal else None),
                     # Recorded rather than asserted: it says where these bytes
                     # were made, not that they would be made again there.
-                    "description": (
-                        f"Ran under {node.build_env}" if node.build_env else None
-                    ),
+                    "description": (f"Ran under {node.build_env}" if node.build_env else None),
                 }
             )
         )
@@ -185,7 +235,7 @@ def build_crate(
         agents.setdefault(
             publication.published_by,
             {
-                "@id": f"#agent-{publication.published_by}",
+                "@id": _agent_id(publication.published_by),
                 "@type": "Person",
                 "name": publication.published_by,
             },

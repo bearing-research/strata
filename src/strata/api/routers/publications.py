@@ -467,7 +467,11 @@ async def publication_ro_crate(token: str, store: ReadStore, http_request: Reque
             lineage=lineage,
             content_type=content_type_of(artifact),
             payload_id=f"{base}/p/{token}/data",
-            include_descriptor=False,
+            # Unlike the inline block, this response *is* the crate document,
+            # so it carries the descriptor. Without it there is no
+            # ``conformsTo`` and a harvester cannot tell an RO-Crate from any
+            # other JSON-LD — which is the whole reason to fetch this endpoint.
+            include_descriptor=True,
         ),
         media_type="application/ld+json",
     )
