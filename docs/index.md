@@ -2,6 +2,13 @@
 
 **Strata is a content-addressed computation graph with an interactive notebook UI.**
 
+![The Strata notebook UI: a Python cell with its source and an interactive table
+of results, the sidebar panels for mounts, workers and environment, and a bottom
+drawer showing the cell DAG and per-cell timings.](assets/notebook-anatomy-light.png#only-light)
+![The Strata notebook UI: a Python cell with its source and an interactive table
+of results, the sidebar panels for mounts, workers and environment, and a bottom
+drawer showing the cell DAG and per-cell timings.](assets/notebook-anatomy-dark.png#only-dark)
+
 Every cell output is a versioned artifact keyed by its provenance: source,
 inputs, and environment. Strata reads each cell's AST to build the
 dependency graph automatically, so re-running a notebook is mostly a series
