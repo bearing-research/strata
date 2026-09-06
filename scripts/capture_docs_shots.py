@@ -200,10 +200,139 @@ async def _tui_agent_running(app, pilot) -> None:
     await pilot.press("5")  # Console tab
 
 
+async def _capture_tui_frames(title: str, script) -> list[str]:
+    """Run ``script`` against a pilot-driven TUI, returning one SVG per beat.
+
+    Same canned-frame basis as the stills: no server, no network, no agent. The
+    script is handed a ``snap`` callback and decides where the beats fall, so
+    the storyboard reads as a sequence rather than being inferred from timing.
+    """
+    from strata.notebook.tui.app import NotebookTUI
+    from strata.notebook.tui.client import TuiClient
+
+    async def _noop(self) -> None:
+        return None
+
+    frames: list[str] = []
+    original_bootstrap = NotebookTUI._bootstrap
+    NotebookTUI._bootstrap = _noop  # type: ignore[method-assign]
+    try:
+        app = NotebookTUI(client=TuiClient("http://localhost:8765"), session_id="docs")
+        async with app.run_test(size=TUI_SIZE) as pilot:
+            app._set_connection("connected")
+            for _ in range(3):
+                await pilot.press("ctrl+right")
+
+            async def snap() -> None:
+                await pilot.pause()
+                frames.append(app.export_screenshot(title=title))
+
+            await script(app, pilot, snap)
+    finally:
+        NotebookTUI._bootstrap = original_bootstrap  # type: ignore[method-assign]
+    return frames
+
+
+async def _tui_cache_payoff(app, pilot, snap) -> None:
+    """The beat the README slot is for: an edit downstream, and the expensive
+    upstream never runs again.
+
+    ``load`` sleeps two seconds by design in the quickstart, which is what makes
+    the payoff legible: it is the step you would notice re-running, and it does
+    not.
+    """
+    ready = [dict(c) for c in QUICKSTART_CELLS]
+
+    # 1 — settled. Everything green, load cost 2s.
+    app._dispatch(_frame("notebook_state", {"name": "iris", "cells": ready}))
+    await pilot.pause()
+    app._dispatch(_timing("a1b2c3d4", duration_ms=2043))
+    app._dispatch(_timing("e5f6a7b8", duration_ms=38))
+    app._dispatch(_timing("c9d0e1f2", duration_ms=380))
+    app._select_cell("c9d0e1f2")
+    await snap()
+
+    # 2 — the plot cell is edited, so it and only it goes stale.
+    app._dispatch(_frame("cell_status", {"cell_id": "c9d0e1f2", "status": "idle"}))
+    await snap()
+
+    # 3 — the run starts. Upstream resolves from cache without executing.
+    app._dispatch(_timing("a1b2c3d4", duration_ms=1, cache_hit=True))
+    app._dispatch(_timing("e5f6a7b8", duration_ms=1, cache_hit=True))
+    app._dispatch(_frame("cell_status", {"cell_id": "c9d0e1f2", "status": "running"}))
+    # Switch to Console as the run starts, which is what a watcher does and what
+    # makes the next beat visible: console lines land on a tab that has to be
+    # showing, or the frame is byte-identical to this one.
+    await pilot.press("5")
+    await snap()
+
+    # 4 — only the edited cell actually computes, and it says so.
+    for line in (
+        "loading cached df from nb_iris_cell_a1b2c3d4_var_df\n",
+        "rendering scatter for 3 species\n",
+    ):
+        app._dispatch(
+            _frame("cell_console", {"cell_id": "c9d0e1f2", "stream": "stdout", "text": line})
+        )
+    await snap()
+
+    # 5 — done. load still reads cached; the two seconds were not paid again.
+    app._dispatch(_frame("cell_status", {"cell_id": "c9d0e1f2", "status": "ready"}))
+    app._dispatch(_timing("c9d0e1f2", duration_ms=412))
+    await snap()
+
+
+TUI_ANIMATIONS = {
+    "tui-cache-payoff": ("strata watch", _tui_cache_payoff),
+}
+
+
+def capture_tui_animation_frames(out_dir: Path) -> dict[str, list[Path]]:
+    """Write each animation's SVG beats to *out_dir*; rasterising is a separate step."""
+    written: dict[str, list[Path]] = {}
+    for name, (title, script) in TUI_ANIMATIONS.items():
+        frames = asyncio.run(_capture_tui_frames(title, script))
+        paths = []
+        for i, svg in enumerate(frames):
+            f = out_dir / f"{name}-{i:02d}.svg"
+            f.write_text(svg, encoding="utf-8")
+            paths.append(f)
+        written[name] = paths
+    return written
+
+
 TUI_SHOTS = {
     "tui-layout": ("strata watch", _tui_layout),
     "tui-agent-running": ("strata agent", _tui_agent_running),
 }
+
+
+def capture_animations(frame_dir: Path) -> list[Path]:
+    """SVG beats → PNG (node/Playwright) → GIF (Pillow).
+
+    Three stages because nothing in this environment renders SVG from Python.
+    Playwright is already a frontend dependency and renders it as a browser
+    would, which is how a reader will see it anyway.
+    """
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    for old in frame_dir.glob("*.png"):
+        old.unlink()  # stale frames would be packed into the next GIF
+    written = capture_tui_animation_frames(frame_dir)
+
+    subprocess.run(
+        ["node", "scripts/rasterize-svg.mjs", "--in", str(frame_dir)],
+        cwd=REPO_ROOT / "frontend",
+        check=True,
+    )
+    out = []
+    for name in written:
+        subprocess.run(
+            [sys.executable, "scripts/assemble_gif.py", "--in", str(frame_dir), "--name", name],
+            cwd=REPO_ROOT,
+            check=True,
+        )
+        out.append(ASSETS / f"{name}.gif")
+    return out
 
 
 def capture_tui() -> list[Path]:
@@ -499,7 +628,7 @@ def capture_web(work_dir: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--only", choices=("all", "tui", "web"), default="all")
+    parser.add_argument("--only", choices=("all", "tui", "web", "anim"), default="all")
     parser.add_argument(
         "--work-dir",
         default="/tmp/strata-docs-shots",
@@ -514,6 +643,8 @@ def main() -> None:
     if args.only in ("all", "web"):
         capture_web(Path(args.work_dir))
         written += sorted(ASSETS.glob("*.png"))
+    if args.only in ("all", "anim"):
+        written += capture_animations(Path(args.work_dir) / "frames")
 
     for path in written:
         print(f"{path.relative_to(REPO_ROOT)}  {path.stat().st_size // 1024} KB")

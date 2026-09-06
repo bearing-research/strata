@@ -152,6 +152,20 @@ Cell status glyphs:
 | `⊘` | stale |
 | `…` | queued |
 
+## Watching a re-run
+
+The last-run time is where caching becomes visible. Edit one cell and run: the
+cells above it resolve from cache without executing, and only the edited one
+computes.
+
+![The viewer through a re-run: the plot cell is edited and goes idle, then runs
+while the load and summarize cells above it both read cached, and finishes -
+the two-second load never executes again.](../assets/tui-cache-payoff.gif)
+
+`load` sleeps two seconds on purpose in the
+[quickstart](../getting-started/notebook.md); that is what makes the point
+legible. It is the step you would notice re-running, and it does not.
+
 ## Options
 
 ```bash
