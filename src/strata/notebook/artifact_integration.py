@@ -185,6 +185,7 @@ class NotebookArtifactManager:
         provenance_hash: str = "",
         input_versions: dict[str, str] | None = None,
         source_hash: str = "",
+        source: str = "",
         env_hash: str = "",
         iteration: int | None = None,
         variant: str | None = None,
@@ -204,6 +205,19 @@ class NotebookArtifactManager:
             provenance_hash: Provenance hash for deduplication
             input_versions: Mapping of input URI -> version
             source_hash: SHA-256 of cell source code (for causality tracking)
+            source: The cell source that produced these bytes. Recorded, never
+                hashed — ``source_hash`` already carries it into the provenance
+                key, and folding the text in too would change nothing but the
+                cost.
+
+                Stored because a hash is not an explanation: a reader outside
+                this notebook has no ``cells/{id}.py`` to compare a digest
+                against, so a lineage view could only ever show them
+                ``source_hash: 3f2a…``. Captured here, at execution, rather
+                than read back from the cell later — the cell can be edited
+                after the fact, and pairing a cached artifact with source that
+                did not produce it is the one failure a provenance record must
+                not have.
             env_hash: SHA-256 of lockfile (for causality tracking)
             iteration: Optional loop iteration index. When set, the artifact
                 id is suffixed with ``@iter={k}`` so each loop iteration is
@@ -248,6 +262,8 @@ class NotebookArtifactManager:
             params["variant"] = variant
         if source_hash:
             params["source_hash"] = source_hash
+        if source:
+            params["source"] = source
         if env_hash:
             params["env_hash"] = env_hash
         if build_env:

@@ -1704,6 +1704,61 @@ class NotebookSession:
 
         return hashes
 
+    def _collect_input_refs(self, cell_id: str) -> dict[str, str]:
+        """Upstream artifact refs in the form the lineage walk resolves.
+
+        Returns ``{strata://artifact/<id>@v=<n>: <id>@v=<n>}`` — the shape
+        ``services.artifact._input_version_to_artifact_ref`` and
+        ``artifact_cli._walk_lineage`` both require before they will follow an
+        input. Anything else is recorded as an unidentifiable leaf and the walk
+        stops there.
+
+        Deliberately *not* derived from the input provenance hashes, even
+        though those are already on hand at store time. A provenance hash does
+        not identify an artifact: the cell id is not folded into it, so an
+        identical cell in *another notebook sharing this store* hashes the
+        same, and storing it marks the earlier row ``superseded`` and takes
+        ``ready`` for itself. ``find_by_provenance`` filters to ``ready``, so
+        it hands back the other notebook's artifact while this cell goes on
+        reading its own.
+
+        No end-to-end misattribution is known today, because a superseded
+        upstream makes the consumer re-materialize and reclaim ``ready``. That
+        is a lucky interaction, not a guarantee: it would make recorded
+        ancestry depend on a store-wide invariant nothing enforces and that
+        the executor separately works around at its cache check ("the global
+        find_by_provenance can return artifacts from old notebook sessions").
+        Walking the upstream pointers the inputs were actually loaded from
+        needs no such invariant — and costs no lookups, where resolving by
+        hash queried the store once per input on every store.
+
+        Walking the same upstream pointers the inputs were loaded from keeps
+        that ambiguity out: ``artifact_uris`` carries the exact ``id@v=n`` per
+        variable, so no lookup, and no collision to lose.
+        """
+        cell = self.notebook_state.get_cell(cell_id)
+        if cell is None or not cell.upstream_ids:
+            return {}
+
+        refs: dict[str, str] = {}
+        for upstream_id in cell.upstream_ids:
+            upstream_cell = self.notebook_state.get_cell(upstream_id)
+            if upstream_cell is None:
+                continue
+
+            uris: list[str] = list(upstream_cell.artifact_uris.values())
+            if not uris and upstream_cell.artifact_uri:
+                uris = [upstream_cell.artifact_uri]
+
+            for uri in uris:
+                ref = uri.split("/")[-1]
+                # Sweep variants and loop iterations are separate artifacts
+                # and each gets its own edge; unlike the hashed side, nothing
+                # here has to collapse them into one grouped token.
+                if "@v=" in ref:
+                    refs[uri] = ref
+        return refs
+
     def _collect_mount_fingerprints(self, cell: Any) -> tuple[list[str], bool]:
         """Return deterministic mount provenance components for a cell.
 

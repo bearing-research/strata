@@ -94,6 +94,19 @@ names.
 
 ### Fixed
 
+- **A notebook artifact's lineage now walks past its first hop.** Cell outputs
+  recorded their inputs as bare provenance digests, which neither the lineage
+  API nor `strata artifact lineage` can resolve — so every upstream showed up
+  as an unidentifiable leaf and the walk stopped there. A chain three cells
+  deep reported one node. Loop cells were worse: they recorded no inputs at
+  all, leaving an empty graph for exactly the artifact a training run produces.
+  Cached results are unaffected — what is *hashed* did not change, only what is
+  recorded.
+- **Cell outputs carry the source that produced them.** An artifact recorded
+  only `source_hash`, which explains nothing to a reader who does not already
+  have the notebook. The source is now stored with the artifact, captured at
+  execution — so editing a cell afterwards cannot pair a cached result with
+  code that did not produce it.
 - **Reverting a cell edit is a cache hit again.** Running a cell, editing it, and
   reverting recomputed a result the store already held, immutable and valid —
   the one loop where content addressing should never let you wait.

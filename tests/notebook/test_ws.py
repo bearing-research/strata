@@ -633,6 +633,7 @@ async def test_cell_execute_uses_warm_pool_when_available(notebook_session, monk
         input_hashes,
         *,
         source_hash="",
+        source="",
         env_hash="",
         variant=None,
         # Mirrors the real signature. A stub that pins an outdated one turns

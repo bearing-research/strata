@@ -57,6 +57,37 @@ def test_provenance_hash_stability():
     assert hash1 == hash2
 
 
+def test_provenance_hash_is_pinned_to_a_known_value():
+    """The provenance hash is a cache key, and every cache is keyed on it.
+
+    The other tests here compare a hash against another hash computed the
+    same way, so they hold just as well after a change to the algorithm —
+    they pin determinism, not the value. Changing the value is not a test
+    failure in the abstract; it silently invalidates every cached artifact
+    in every existing store, including a published artifact whose recorded
+    hash a reader is being asked to trust. If this test fails, that is the
+    decision being made, and it needs to be deliberate.
+    """
+    assert (
+        compute_provenance_hash(["in-b", "in-a"], "src-hash", "env-hash")
+        == "7858572f099e516f8fabf133abbbf6cbd2ec3681c877b6decea0f95674918218"
+    )
+
+
+def test_display_subkey_is_pinned_to_a_known_value():
+    """A plot's artifact id derives from its cell's hash through this.
+
+    Same stakes as above: move it and every cached display output — the
+    figures themselves — stops resolving.
+    """
+    cell_hash = compute_provenance_hash(["in-b", "in-a"], "src-hash", "env-hash")
+
+    assert (
+        derive_subkey(cell_hash, "__display__0")
+        == "c30ab4b98c75d402bc93b4d18de59464dd011b0ba35965f8409f3bae3744c4bc"
+    )
+
+
 def test_provenance_hash_ordering_invariance():
     """Input order should not affect provenance hash."""
     input_hashes1 = ["hash1", "hash2", "hash3"]
