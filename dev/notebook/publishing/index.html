@@ -1079,6 +1079,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#embedding-it-elsewhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Embedding it elsewhere
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#archiving-the-copy-that-needs-no-server" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2109,6 +2120,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#embedding-it-elsewhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Embedding it elsewhere
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#archiving-the-copy-that-needs-no-server" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2240,25 +2262,46 @@ published artifact's own bytes are downloadable, at <code>/p/&lt;token&gt;/data<
 chasing a footnote deserves that answer rather than one that reads like a typo.
 The token is never reissued for other content, so a URL already in print fails
 closed instead of quietly starting to resolve to something else.</p>
+<h2 id="embedding-it-elsewhere">Embedding it elsewhere<a class="headerlink" href="#embedding-it-elsewhere" title="Permanent link">&para;</a></h2>
+<p>Paste the link into a wiki, CMS or note-taking tool that speaks oEmbed and it
+unfurls into a card: the figure, what it is, how many steps are behind it, and
+a link through to the full provenance. Tools that do not, take the iframe
+directly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">&lt;</span><span class="nt">iframe</span> <span class="na">src</span><span class="o">=</span><span class="s">&quot;https://your-strata/p/&lt;token&gt;/embed&quot;</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>        <span class="na">width</span><span class="o">=</span><span class="s">&quot;480&quot;</span> <span class="na">height</span><span class="o">=</span><span class="s">&quot;420&quot;</span> <span class="na">frameborder</span><span class="o">=</span><span class="s">&quot;0&quot;</span><span class="p">&gt;&lt;/</span><span class="nt">iframe</span><span class="p">&gt;</span>
+</code></pre></div>
+<p>The card is deliberately not a smaller copy of the page. An embed sits in a
+post where the surrounding text is doing the explaining, so it carries the
+result and an honest one-line summary, then links out — abbreviating the
+caveats into a card would produce exactly the badge this feature avoids.</p>
+<p>The card is framable from any origin, because being embeddable is the whole
+point of it. That applies to <code>/p/{token}/embed</code> and nothing else — the full
+page keeps the default <code>frame-ancestors 'self'</code>, and <code>embed_frame_ancestors</code>
+still governs the notebook app view.</p>
+<p><strong>Behind a reverse proxy, set <code>STRATA_PUBLIC_BASE_URL</code></strong> to the address readers
+use. The URLs in an embed are consumed by someone else's page, and a server
+that only knows its internal origin will advertise an oEmbed endpoint nobody
+can reach and reject the public link a wiki pastes. Unset, the request's own
+origin is used, which is right for a directly-reachable server.</p>
 <h2 id="archiving-the-copy-that-needs-no-server">Archiving: the copy that needs no server<a class="headerlink" href="#archiving-the-copy-that-needs-no-server" title="Permanent link">&para;</a></h2>
 <p>A hosted link resolves for as long as your server does. A URL printed in a
 paper outlives most servers, so there is a second form:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>archive<span class="w"> </span>nb_paper_cell_c2_var___display__0<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--to<span class="w"> </span>./figure3-bundle<span class="w"> </span>--title<span class="w"> </span><span class="s2">&quot;Figure 3&quot;</span><span class="w"> </span>--author<span class="w"> </span><span class="s2">&quot;F. Li&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>archive<span class="w"> </span>nb_paper_cell_c2_var___display__0<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>--to<span class="w"> </span>./figure3-bundle<span class="w"> </span>--title<span class="w"> </span><span class="s2">&quot;Figure 3&quot;</span><span class="w"> </span>--author<span class="w"> </span><span class="s2">&quot;F. Li&quot;</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>figure3-bundle/
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── index.html      the page — opens in a browser, no server, no external requests
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>├── artifact.png    the bytes
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>├── manifest.json   the same record, machine-readable
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>└── README.md       what it is and how to check it
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>figure3-bundle/
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>├── index.html      the page — opens in a browser, no server, no external requests
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>├── artifact.png    the bytes
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>├── manifest.json   the same record, machine-readable
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>└── README.md       what it is and how to check it
 </code></pre></div>
 <p>Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.</p>
 <p>The page is the same document as the hosted one, with one difference: it points
 at the file beside it rather than at routes, and it tells the reader how to
 check the bytes themselves:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sha256sum artifact.png
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a># 6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sha256sum artifact.png
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a># 6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca
 </code></pre></div>
 <p>Archiving is not publishing. It grants nobody access to a running server and
 mints no link — it writes files you choose who to hand to.</p>
@@ -2312,6 +2355,16 @@ apart deliberately.</p>
 <td><code>GET /p/{token}/verify</code></td>
 <td><strong>no</strong></td>
 <td>Re-read and compare against the recorded digest.</td>
+</tr>
+<tr>
+<td><code>GET /p/{token}/embed</code></td>
+<td><strong>no</strong></td>
+<td>The card, for an <code>&lt;iframe&gt;</code>. Framable from any origin.</td>
+</tr>
+<tr>
+<td><code>GET /oembed?url=…</code></td>
+<td><strong>no</strong></td>
+<td>oEmbed provider, so a pasted link unfurls.</td>
 </tr>
 <tr>
 <td><code>GET /v1/publications/{token}</code></td>
