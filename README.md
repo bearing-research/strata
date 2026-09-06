@@ -51,10 +51,12 @@ Install it as a one-command [Claude Code plugin](plugins/strata-scratchpad/)
 /plugin install strata-scratchpad@strata
 ```
 
-<!-- Demo GIF slot. Record with examples/agent_demo/RECORDING.md, save to
-     docs/assets/agent-demo.gif, then uncomment the line below:
-![A coding agent builds a Strata notebook live; the model stays cached when only the evaluation changes](docs/assets/agent-demo.gif)
--->
+![The terminal viewer over five moments: an empty notebook, a cell arriving,
+that cell finishing in 1.0s with its output, a second cell arriving that reads
+the first one's variable, and both cells green.](https://raw.githubusercontent.com/bearing-research/strata/main/docs/assets/tui-agent-live.gif)
+
+*A coding agent drives the notebook in one terminal; `strata-notebook-tui`
+mirrors it live in another. Captured from a real run, not a mock-up.*
 
 Whether an agent reaches for it instead of a scratch script is measured rather
 than assumed. `evals/agent_notebook/` drives the real on-ramp and grades the

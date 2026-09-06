@@ -56,6 +56,14 @@ same cell run.
 | **Terminal (TUI)** | Watching a notebook live from a terminal - a second pane, an SSH session, or beside your editor. Read-only. | [Quickstart - Terminal](notebook/tui.md) |
 | **Coding agent** | Handing the notebook to Claude Code and watching it build, through MCP tools. The notebook is what you wanted. | [Quickstart - Coding agent](notebook/agent.md) |
 
+![The terminal viewer over five moments: an empty notebook, a cell arriving,
+that cell finishing in 1.0s with its output, a second cell arriving that reads
+the first one's variable, and both cells green.](assets/tui-agent-live.gif)
+
+Two of those front doors at once: a coding agent adds and runs cells through
+the CLI while `strata-notebook-tui` mirrors it live in another terminal.
+Captured from a real run rather than assembled from canned frames.
+
 There is also a use that is not a front door at all: an agent working on
 something else entirely, using a notebook as a **cached scratchpad** for
 throwaway Python instead of temp scripts. Nobody watches that one, which is
