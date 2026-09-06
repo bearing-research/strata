@@ -9,6 +9,12 @@ exhaustive commit history.
 
 ### Added
 
+- **The chain is published as RO-Crate JSON-LD.** Inline on the page, at
+  `/p/{token}/ro-crate`, and as `ro-crate-metadata.json` in an archived
+  bundle — so a repository can index the provenance instead of only displaying
+  it. Each step is a `CreateAction` whose instrument is the cell source;
+  upstream steps are described but never declared as files the crate does not
+  contain.
 - **A published artifact embeds elsewhere.** Paste its link into a wiki or CMS
   that speaks oEmbed and it unfurls into a card — the figure, a one-line
   summary of the chain, and a link through to the full provenance — or take the

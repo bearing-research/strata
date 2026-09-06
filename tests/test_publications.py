@@ -639,3 +639,157 @@ class TestEmbedding:
         httpx.delete(f"{base_url}/v1/publications/{token}", timeout=10)
 
         assert httpx.get(f"{base_url}/p/{token}/embed", timeout=10).status_code == 410
+
+
+class TestRoCrate:
+    """The chain as RO-Crate JSON-LD — the form software reads."""
+
+    @staticmethod
+    def _crate(store, tmp_path, *, source="rows = [1]"):
+        from strata.api.provenance_ld import build_crate
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+        from strata.services.artifact import ArtifactService
+
+        manager = NotebookArtifactManager("nb", artifact_dir=tmp_path / "nb")
+        upstream = manager.store_cell_output(
+            cell_id="c1",
+            variable_name="rows",
+            blob_data=b"[1]",
+            content_type="json/object",
+            provenance_hash="a" * 64,
+            input_versions={},
+            source=source,
+        )
+        ref = f"{upstream.id}@v={upstream.version}"
+        figure = manager.store_cell_output(
+            cell_id="c2",
+            variable_name="__display__0",
+            blob_data=b"PNG",
+            content_type="image/png",
+            provenance_hash="b" * 64,
+            input_versions={f"strata://artifact/{ref}": ref},
+            source="plt.plot(rows)",
+        )
+        publication = manager.artifact_store.publish_artifact(
+            figure.id, figure.version, title="Figure 3", published_by="F. Li"
+        )
+        lineage = ArtifactService().build_lineage(
+            manager.artifact_store,
+            artifact=figure,
+            artifact_id=figure.id,
+            version=figure.version,
+            tenant_filter=None,
+            max_depth=10,
+        )
+        return (
+            build_crate(
+                publication=publication,
+                artifact=figure,
+                lineage=lineage,
+                content_type="image/png",
+                payload_id="artifact.png",
+                include_descriptor=True,
+            ),
+            upstream,
+            figure,
+        )
+
+    @staticmethod
+    def _refs(value):
+        if isinstance(value, dict):
+            if set(value) == {"@id"}:
+                yield value["@id"]
+            else:
+                for inner in value.values():
+                    yield from TestRoCrate._refs(inner)
+        elif isinstance(value, list):
+            for inner in value:
+                yield from TestRoCrate._refs(inner)
+
+    def test_every_reference_resolves_inside_the_crate(self, store, tmp_path):
+        """A dangling @id makes the graph useless to the software it is for,
+        and nothing about the crate looks wrong until something tries to walk
+        it."""
+        crate, _, _ = self._crate(store, tmp_path)
+        ids = {entity["@id"] for entity in crate["@graph"]}
+
+        dangling = {
+            ref
+            for entity in crate["@graph"]
+            for ref in self._refs(entity)
+            if ref not in ids and not ref.startswith("http")
+        }
+
+        assert not dangling, f"references nothing declares: {sorted(dangling)}"
+
+    def test_upstream_steps_are_described_but_not_claimed_as_files(self, store, tmp_path):
+        """Publishing shows which steps produced a result; it does not hand
+        over the upstream data. Listing them under hasPart would assert files
+        that are not in the crate — a lie no validator would catch."""
+        crate, upstream, _ = self._crate(store, tmp_path)
+        root = next(e for e in crate["@graph"] if e["@id"] == "./")
+        upstream_id = f"{upstream.id}@v={upstream.version}"
+
+        described = next(e for e in crate["@graph"] if e["@id"] == upstream_id)
+
+        assert described["@type"] == "CreativeWork"
+        assert [part["@id"] for part in root["hasPart"]] == ["artifact.png"]
+
+    def test_each_step_records_its_code_as_the_instrument(self, store, tmp_path):
+        crate, _, figure = self._crate(store, tmp_path)
+
+        action = next(e for e in crate["@graph"] if e["@id"] == f"#action-{figure.id}")
+        source = next(e for e in crate["@graph"] if e["@id"] == action["instrument"]["@id"])
+
+        assert action["@type"] == "CreateAction"
+        assert source["@type"] == "SoftwareSourceCode"
+        assert source["text"] == "plt.plot(rows)"
+
+    def test_the_deposited_crate_declares_what_it_conforms_to(self, store, tmp_path):
+        """Without the descriptor a repository has a folder of JSON, not a
+        crate it can recognise."""
+        crate, _, _ = self._crate(store, tmp_path)
+
+        descriptor = next(e for e in crate["@graph"] if e["@id"] == "ro-crate-metadata.json")
+
+        assert descriptor["conformsTo"]["@id"] == "https://w3id.org/ro/crate/1.1"
+        assert descriptor["about"]["@id"] == "./"
+
+    def test_source_cannot_break_out_of_the_inline_script(self, store, tmp_path):
+        """Cell source is user-written and the page embeds it inside a
+        <script> block, where html.escape would corrupt the JSON while leaving
+        the injection."""
+        import json as jsonlib
+        import re
+
+        from strata.api.publication_page import render_publication
+        from strata.services.artifact import ArtifactService
+
+        evil = "x = 1  # </script><script>alert(1)</script>"
+        crate, _, figure = self._crate(store, tmp_path, source=evil)
+        manager_store = ArtifactStore(tmp_path / "nb")
+        artifact = manager_store.get_latest_version(figure.id)
+        lineage = ArtifactService().build_lineage(
+            manager_store,
+            artifact=artifact,
+            artifact_id=artifact.id,
+            version=artifact.version,
+            tenant_filter=None,
+            max_depth=10,
+        )
+        publication = manager_store.list_publications()[0]
+
+        html = render_publication(
+            publication=publication,
+            artifact=artifact,
+            lineage=lineage,
+            content_type="image/png",
+            image_src=None,
+            json_ld=jsonlib.dumps(crate),
+        )
+
+        block = re.search(r"<script type='application/ld\+json'>(.*?)</script>", html, re.S)
+        assert block is not None
+        assert "</script>" not in block.group(1)
+        # …and the escaping must leave valid JSON behind, not just safe text.
+        assert isinstance(jsonlib.loads(block.group(1).replace("<\\/", "</")), dict)

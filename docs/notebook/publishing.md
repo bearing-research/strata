@@ -104,6 +104,26 @@ chasing a footnote deserves that answer rather than one that reads like a typo.
 The token is never reissued for other content, so a URL already in print fails
 closed instead of quietly starting to resolve to something else.
 
+## Machine-readable provenance
+
+The chain is also published as [RO-Crate](https://w3id.org/ro/crate/) JSON-LD,
+which repositories and provenance tooling read directly:
+
+- inline on the page, in a `application/ld+json` script block;
+- at `/p/{token}/ro-crate`, so a harvester need not scrape the page;
+- as `ro-crate-metadata.json` in an archived bundle, which is what turns a
+  Zenodo deposit from a folder someone can read into something the archive can
+  index.
+
+The graph maps each step to a `CreateAction` whose `instrument` is the cell
+source as `SoftwareSourceCode`, its `object` the inputs and its `result` the
+output — the shape PROV-O and RO-Crate both expect for "this code, on these
+inputs, made this".
+
+Upstream steps are `CreativeWork` entities, **not** files, and they are not
+listed under `hasPart`. Their bytes are deliberately not in the crate, and
+declaring files that are not there is a claim no validator would catch.
+
 ## Embedding it elsewhere
 
 Paste the link into a wiki, CMS or note-taking tool that speaks oEmbed and it
@@ -192,6 +212,7 @@ apart deliberately.
 | `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. |
 | `GET /p/{token}/embed` | **no** | The card, for an `<iframe>`. Framable from any origin. |
 | `GET /oembed?url=…` | **no** | oEmbed provider, so a pasted link unfurls. |
+| `GET /p/{token}/ro-crate` | **no** | The chain as RO-Crate JSON-LD. |
 | `GET /v1/publications/{token}` | **no** | The same record as JSON. |
 
 The unauthenticated routes are exempt from the auth and tenant middleware by

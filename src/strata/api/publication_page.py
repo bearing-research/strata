@@ -92,6 +92,7 @@ def render_publication(
     image_src: str | None,
     bundle_filename: str | None = None,
     oembed_url: str | None = None,
+    json_ld: str | None = None,
 ) -> str:
     """Render the page for one published artifact.
 
@@ -252,7 +253,7 @@ def render_publication(
         "would take.</p></div>"
     )
 
-    return _document(title=title, body="".join(parts), oembed_url=oembed_url)
+    return _document(title=title, body="".join(parts), oembed_url=oembed_url, json_ld=json_ld)
 
 
 def content_type_of(artifact) -> str:
@@ -406,7 +407,13 @@ def build_record(
     }
 
 
-def _document(*, title: str, body: str, oembed_url: str | None = None) -> str:
+def _document(
+    *,
+    title: str,
+    body: str,
+    oembed_url: str | None = None,
+    json_ld: str | None = None,
+) -> str:
     # The discovery link is how a wiki or CMS turns a pasted URL into the card
     # without being told the endpoint exists. Omitted for the archival bundle,
     # which has no server to ask.
@@ -416,11 +423,20 @@ def _document(*, title: str, body: str, oembed_url: str | None = None) -> str:
         if oembed_url
         else ""
     )
+    # The same graph the crate carries, inline, for anything that reads
+    # structured data off a page. Escaped for `</script>` rather than by
+    # html.escape: JSON-LD is script content, where entity-escaping would
+    # corrupt the JSON while leaving the injection.
+    structured = (
+        f"<script type='application/ld+json'>{json_ld.replace('</', '<\\/')}</script>"
+        if json_ld
+        else ""
+    )
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<meta name='robots' content='noindex'>"
-        f"{discovery}"
+        f"{discovery}{structured}"
         f"<title>{escape(title)}</title><style>{_STYLE}</style></head>"
         f"<body><main>{body}</main></body></html>"
     )
