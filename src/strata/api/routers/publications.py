@@ -26,11 +26,12 @@ exactly what would become public, before it does.
 
 from __future__ import annotations
 
+import json
 from html import escape
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from strata.api.dependencies import (
@@ -39,6 +40,7 @@ from strata.api.dependencies import (
     ReadStore,
     require_scope,
 )
+from strata.api.provenance_ld import build_crate
 from strata.api.publication_page import (
     build_record,
     content_type_of,
@@ -210,6 +212,14 @@ async def publication_page(token: str, store: ReadStore, http_request: Request):
 
     base = _public_base(http_request)
     page_url = quote(f"{base}/p/{token}", safe="")
+    crate = build_crate(
+        publication=publication,
+        artifact=artifact,
+        lineage=lineage,
+        content_type=content_type,
+        payload_id=f"{base}/p/{token}/data",
+        include_descriptor=False,
+    )
     return HTMLResponse(
         render_publication(
             publication=publication,
@@ -218,6 +228,7 @@ async def publication_page(token: str, store: ReadStore, http_request: Request):
             content_type=content_type,
             image_src=inline_png,
             oembed_url=f"{base}/oembed?url={page_url}",
+            json_ld=json.dumps(crate),
         )
     )
 
@@ -429,3 +440,38 @@ def _token_from_url(url: str, base: str) -> str | None:
     if len(parts) < 2 or parts[0] != "p":
         return None
     return parts[1]
+
+
+@router.get("/p/{token}/ro-crate")
+async def publication_ro_crate(token: str, store: ReadStore, http_request: Request):
+    """The chain as RO-Crate JSON-LD, for software rather than readers.
+
+    The same graph the page carries inline and a deposited bundle ships as
+    ``ro-crate-metadata.json`` — served on its own so a harvester can fetch it
+    without scraping a page for a script tag.
+    """
+    publication, artifact = _load_published(store, token, require_active=True)
+    lineage = ArtifactService().build_lineage(
+        store,
+        artifact=artifact,
+        artifact_id=publication.artifact_id,
+        version=publication.version,
+        tenant_filter=None,
+        max_depth=25,
+    )
+    base = _public_base(http_request)
+    return JSONResponse(
+        build_crate(
+            publication=publication,
+            artifact=artifact,
+            lineage=lineage,
+            content_type=content_type_of(artifact),
+            payload_id=f"{base}/p/{token}/data",
+            # Unlike the inline block, this response *is* the crate document,
+            # so it carries the descriptor. Without it there is no
+            # ``conformsTo`` and a harvester cannot tell an RO-Crate from any
+            # other JSON-LD — which is the whole reason to fetch this endpoint.
+            include_descriptor=True,
+        ),
+        media_type="application/ld+json",
+    )

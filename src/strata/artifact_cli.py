@@ -531,6 +531,7 @@ def cmd_archive(args: argparse.Namespace) -> int:
     suitable for a Zenodo or OSF deposit, where it gets a DOI and an archive's
     retention promise rather than yours.
     """
+    from strata.api.provenance_ld import build_crate
     from strata.api.publication_page import (
         build_record,
         content_type_of,
@@ -633,12 +634,28 @@ def cmd_archive(args: argparse.Namespace) -> int:
         ),
         encoding="utf-8",
     )
+    # RO-Crate is what a repository ingests. Without it a Zenodo deposit is a
+    # folder a human can read; with it the chain is data the archive can index.
+    (dest / "ro-crate-metadata.json").write_text(
+        json.dumps(
+            build_crate(
+                publication=publication,
+                artifact=artifact,
+                lineage=lineage,
+                content_type=content_type,
+                payload_id=filename,
+                include_descriptor=True,
+            ),
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     (dest / "README.md").write_text(
         _bundle_readme(publication, artifact, filename, digest), encoding="utf-8"
     )
 
     print(f"Wrote {dest}/")
-    for name in ("index.html", filename, "manifest.json", "README.md"):
+    for name in ("index.html", filename, "manifest.json", "ro-crate-metadata.json", "README.md"):
         print(f"  {name}")
     print()
     print("Opens with no server. index.html is the page; manifest.json is the")
@@ -657,6 +674,8 @@ A Strata artifact and the record of what produced it.
   server and makes no external requests.
 - `{filename}` — the bytes themselves.
 - `manifest.json` — the same record, machine-readable.
+- `ro-crate-metadata.json` — the same chain as [RO-Crate](https://w3id.org/ro/crate/)
+  JSON-LD, which repositories and provenance tooling read directly.
 
 ## Checking it
 

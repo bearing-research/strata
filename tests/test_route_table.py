@@ -36,6 +36,7 @@ EXPECTED_ROUTES = [
     ("/p/{token}", "GET", 0),
     ("/p/{token}/data", "GET", 0),
     ("/p/{token}/embed", "GET", 0),
+    ("/p/{token}/ro-crate", "GET", 0),
     ("/p/{token}/verify", "GET", 0),
     ("/v1/admin/notebook-workers", "GET", 1),
     ("/v1/admin/notebook-workers", "POST", 1),
