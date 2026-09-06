@@ -2,10 +2,11 @@
 
 Images the docs site and the top-level `README.md` embed.
 
-Everything here except `agent-demo.gif` is **generated**, not hand-made. A
-screenshot of last release's layout still looks authoritative, so the way these
-stay honest is that regenerating all of them is one command rather than an
-afternoon of cropping:
+Everything here except `agent-demo.gif` is **generated**, not hand-made -
+including `tui-cache-payoff.gif`, which is assembled from canned TUI frames
+rather than recorded. A screenshot of last release's layout still looks
+authoritative, so the way these stay honest is that regenerating all of them is
+one command rather than an afternoon of cropping:
 
 ```bash
 uv run python scripts/capture_docs_shots.py           # everything
@@ -26,6 +27,7 @@ result alongside that change.
 | `registry-lineage-{light,dark}.png` | Web UI | Registry dashboard, step 7 |
 | `tui-layout.svg` | TUI | Terminal viewer |
 | `tui-agent-running.svg` | TUI | Driving a notebook with a coding agent |
+| `tui-cache-payoff.gif` | TUI | Terminal viewer, watching a re-run |
 | `agent-demo.gif` | Screen recording | Not yet recorded - see below |
 
 ## Conventions
@@ -42,6 +44,29 @@ result alongside that change.
 - `mkdocs build --strict` fails on an image reference with no file behind it, so
   a broken path in `docs/` is caught on every docs PR. `README.md` is not built
   by mkdocs - check that one by eye.
+
+## Animations
+
+`tui-cache-payoff.gif` is generated like the stills, in three stages, because
+nothing in the Python environment renders SVG:
+
+```bash
+uv run python scripts/capture_docs_shots.py --only anim
+```
+
+Textual writes each storyboard beat as an SVG, `frontend/scripts/rasterize-svg.mjs`
+turns those into PNG through Playwright (already a frontend dependency, and it
+renders SVG the way a reader's browser will), and `scripts/assemble_gif.py`
+packs them with per-beat hold times.
+
+Frame timings live in `assemble_gif.py`, not in the storyboard: how long a
+reader needs on a frame is a property of the finished animation. Adding or
+removing a beat without retiming it is a hard error rather than a silently
+mistimed GIF.
+
+This is **not** the agent demo below. It shows the TUI - which is the right-hand
+pane of that recording - and carries the cache payoff, but no agent appears in
+it. The two are different assets.
 
 ## `agent-demo.gif` (to be recorded)
 
