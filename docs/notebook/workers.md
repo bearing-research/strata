@@ -126,12 +126,20 @@ strata worker rm-ssh gpu-box --server http://localhost:8765 --session <session-i
 
 ## Deploy to the cloud
 
-Strata ships a reference executor as the `strata-worker` console script. Any platform that can run an HTTP service on a Python image will work. Two walkthroughs follow:
+Strata ships a reference executor as the `strata-worker` console script. **There is no supported-platform list.** A worker is a plain HTTP service, and Strata holds no code for any particular host - `# @worker` resolves to one of two backends, `local` or `executor`, and `executor` is simply a URL. Kubernetes, EC2, Cloud Run, a box under a desk and the two platforms below are all the same thing to it.
 
-| Platform | Best for | Cost model |
+The two walkthroughs that follow are worked examples chosen to bracket the tradeoff, not the options:
+
+| Worked example | Best for | Cost model |
 | -------- | -------- | ---------- |
 | **Fly.io** | CPU workloads (DataFusion, pandas-heavy pipelines) that need always-on or fast cold starts | Per-second VM billing; can scale to zero |
 | **Modal** | GPU workloads (torch, embeddings, fine-tuning) that benefit from scale-to-zero | Per-second VM billing; cold-start ~10–30 s for GPU |
+
+Two other routes are documented elsewhere on this page and are often the
+shorter path:
+
+- **A machine you can SSH to** - [one command](#run-cells-on-a-machine-you-can-ssh-to), no deploy, no account. Usually the fastest way to reach a GPU you already have.
+- **Machines started per job** - [worker pools](#worker-pools-a-different-layer), whose Docker and RunPod backends boot hardware on demand. A different layer, dispatched by a proxy rather than by the notebook.
 
 You can register many workers per notebook; each cell picks its target independently. Mixing Fly (cheap CPU) and Modal (on-demand GPU) is a common setup.
 
