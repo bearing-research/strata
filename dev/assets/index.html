@@ -1893,6 +1893,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#animations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Animations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#agent-demogif-to-be-recorded" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1925,10 +1936,11 @@
 
 <h1 id="docsassets">docs/assets<a class="headerlink" href="#docsassets" title="Permanent link">&para;</a></h1>
 <p>Images the docs site and the top-level <code>README.md</code> embed.</p>
-<p>Everything here except <code>agent-demo.gif</code> is <strong>generated</strong>, not hand-made. A
-screenshot of last release's layout still looks authoritative, so the way these
-stay honest is that regenerating all of them is one command rather than an
-afternoon of cropping:</p>
+<p>Everything here except <code>agent-demo.gif</code> is <strong>generated</strong>, not hand-made -
+including <code>tui-cache-payoff.gif</code>, which is assembled from canned TUI frames
+rather than recorded. A screenshot of last release's layout still looks
+authoritative, so the way these stay honest is that regenerating all of them is
+one command rather than an afternoon of cropping:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_docs_shots.py<span class="w">           </span><span class="c1"># everything</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_docs_shots.py<span class="w"> </span>--only<span class="w"> </span>tui<span class="w"> </span><span class="c1"># just the SVGs (fast, no server)</span>
 </code></pre></div>
@@ -1980,6 +1992,11 @@ result alongside that change.</p>
 <td>Driving a notebook with a coding agent</td>
 </tr>
 <tr>
+<td><code>tui-cache-payoff.gif</code></td>
+<td>TUI</td>
+<td>Terminal viewer, watching a re-run</td>
+</tr>
+<tr>
 <td><code>agent-demo.gif</code></td>
 <td>Screen recording</td>
 <td>Not yet recorded - see below</td>
@@ -2001,6 +2018,22 @@ result alongside that change.</p>
   a broken path in <code>docs/</code> is caught on every docs PR. <code>README.md</code> is not built
   by mkdocs - check that one by eye.</li>
 </ul>
+<h2 id="animations">Animations<a class="headerlink" href="#animations" title="Permanent link">&para;</a></h2>
+<p><code>tui-cache-payoff.gif</code> is generated like the stills, in three stages, because
+nothing in the Python environment renders SVG:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_docs_shots.py<span class="w"> </span>--only<span class="w"> </span>anim
+</code></pre></div>
+<p>Textual writes each storyboard beat as an SVG, <code>frontend/scripts/rasterize-svg.mjs</code>
+turns those into PNG through Playwright (already a frontend dependency, and it
+renders SVG the way a reader's browser will), and <code>scripts/assemble_gif.py</code>
+packs them with per-beat hold times.</p>
+<p>Frame timings live in <code>assemble_gif.py</code>, not in the storyboard: how long a
+reader needs on a frame is a property of the finished animation. Adding or
+removing a beat without retiming it is a hard error rather than a silently
+mistimed GIF.</p>
+<p>This is <strong>not</strong> the agent demo below. It shows the TUI - which is the right-hand
+pane of that recording - and carries the cache payoff, but no agent appears in
+it. The two are different assets.</p>
 <h2 id="agent-demogif-to-be-recorded"><code>agent-demo.gif</code> (to be recorded)<a class="headerlink" href="#agent-demogif-to-be-recorded" title="Permanent link">&para;</a></h2>
 <p>A clip for the README's "cached scratchpad" section: a coding agent builds a
 Strata notebook live and reuses the cached model when only the evaluation
