@@ -1208,10 +1208,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#reading-a-live-session-server-session" class="md-nav__link">
+  <a href="#working-against-a-live-session-server-session" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reading a live session (--server / --session)
+        Working against a live session (--server / --session)
       
     </span>
   </a>
@@ -2204,10 +2204,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#reading-a-live-session-server-session" class="md-nav__link">
+  <a href="#working-against-a-live-session-server-session" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reading a live session (--server / --session)
+        Working against a live session (--server / --session)
       
     </span>
   </a>
@@ -2450,9 +2450,9 @@ success, <code>1</code> operation failure (e.g. unknown cell - a structured <cod
 on stdout), <code>2</code> invocation error (bad path) on stderr.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>my_analysis<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.cells[] | select(.status == &quot;error&quot;) | .id&#39;</span>
 </code></pre></div>
-<h3 id="reading-a-live-session-server-session">Reading a live session (<code>--server</code> / <code>--session</code>)<a class="headerlink" href="#reading-a-live-session-server-session" title="Permanent link">&para;</a></h3>
-<p>The four read commands also inspect a session on a <strong>running</strong> <code>strata-notebook</code>
-- the same session a human is watching in the TUI or web UI - instead of a local
+<h3 id="working-against-a-live-session-server-session">Working against a live session (<code>--server</code> / <code>--session</code>)<a class="headerlink" href="#working-against-a-live-session-server-session" title="Permanent link">&para;</a></h3>
+<p>Every command above also targets a session on a <strong>running</strong> <code>strata-notebook</code> -
+the same session a human is watching in the TUI or web UI - instead of a local
 directory. Pass <code>--server &lt;url&gt; --session &lt;id&gt;</code> in place of the notebook path:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>strata<span class="w"> </span>cell<span class="w"> </span>list<span class="w"> </span>--server<span class="w"> </span>http://localhost:8765<span class="w"> </span>--session<span class="w"> </span><span class="nv">$SID</span>
 <a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>strata<span class="w"> </span>cell<span class="w"> </span>show<span class="w"> </span>--server<span class="w"> </span>http://localhost:8765<span class="w"> </span>--session<span class="w"> </span><span class="nv">$SID</span><span class="w"> </span>&lt;cell_id&gt;
@@ -2466,6 +2466,13 @@ a script written against a local notebook works unchanged against a live session
 (see below), so the entire surface works against a live session. Remote
 operations target a personal-mode server (the use case is driving the session
 you're watching locally).</p>
+<p><strong>The selector decides who sees the change.</strong> Given a notebook <em>path</em>, the
+authoring commands edit the files directly and a running server learns nothing
+until its next resync - so a colleague watching in the TUI or web UI sees
+nothing happen. Given <code>--server</code>/<code>--session</code>, the same command goes through the
+server, which broadcasts it, and the change appears in every viewer as it lands.
+Both are correct; they are for different jobs. Use the path to prepare a
+notebook, and the session to drive one somebody is watching.</p>
 <h2 id="running-a-cell-or-its-tests-cell-run-cell-test">Running a cell or its tests (<code>cell run</code>, <code>cell test</code>)<a class="headerlink" href="#running-a-cell-or-its-tests-cell-run-cell-test" title="Permanent link">&para;</a></h2>
 <p>Beyond inspection, an agent can execute one cell at a time (not the whole
 notebook) and run a cell's unit tests, both with structured output:</p>

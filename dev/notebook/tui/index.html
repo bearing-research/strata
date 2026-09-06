@@ -732,6 +732,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Watching an agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-coding-agent-in-another-terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A coding agent in another terminal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-in-app-assistant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The in-app assistant
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2117,6 +2145,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Watching an agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-coding-agent-in-another-terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A coding agent in another terminal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-in-app-assistant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The in-app assistant
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2236,11 +2292,31 @@ the separate binary on <code>PATH</code>:</p>
 notebook live. Point it at a scratchpad an agent is driving to see the cells land
 in real time.</p>
 <h2 id="watching-an-agent">Watching an agent<a class="headerlink" href="#watching-an-agent" title="Permanent link">&para;</a></h2>
-<p>The viewer's headline use case is following an AI agent as it drives a notebook
-in another terminal:</p>
+<p>The viewer's headline use case is following an agent as it drives a notebook
+somewhere else. There are two shapes of that, depending on which agent.</p>
+<h3 id="a-coding-agent-in-another-terminal">A coding agent in another terminal<a class="headerlink" href="#a-coding-agent-in-another-terminal" title="Permanent link">&para;</a></h3>
+<p>A coding agent - Claude Code, or anything that can run a command - drives the
+notebook through the <a href="../cli/">CLI</a> while you watch it happen:</p>
+<ol>
+<li><code>strata-notebook</code> in one terminal, and open the notebook.</li>
+<li><code>strata-notebook-tui</code> in a second, pointed at it.</li>
+<li>In a third, let the agent work, giving it <code>--server</code>/<code>--session</code> rather than
+   the notebook path (this is what the <a href="../agent/">scratchpad skill</a> tells it to
+   do).</li>
+</ol>
+<p><img alt="The terminal viewer over five moments: an empty notebook, a cell arriving,
+that cell finishing in 1.0s with its output, a second cell arriving that reads
+the first one's variable, and both cells green." src="../../assets/tui-agent-live.gif" /></p>
+<p>Cells appear, flip to running, and report their output as the agent works -
+nothing to refresh, and no need to share the agent's terminal. The selector is
+what makes it live: given a notebook path the same commands edit files on disk
+and the viewer sees nothing, which is <a href="../cli/#working-against-a-live-session-server-session">the distinction the CLI page
+draws</a>.</p>
+<h3 id="the-in-app-assistant">The in-app assistant<a class="headerlink" href="#the-in-app-assistant" title="Permanent link">&para;</a></h3>
+<p>The <a href="../ai/">AI agent</a> built into the web UI streams into the viewer too:</p>
 <ol>
 <li>Start the server and open the notebook in the web UI.</li>
-<li>Kick off the <a href="../ai/">AI agent</a> there.</li>
+<li>Kick off the agent there.</li>
 <li>In a terminal, run <code>strata-notebook-tui</code> and open the <strong>Agent</strong> tab.</li>
 </ol>
 <p>The agent's reasoning streams into the Agent tab while cells flip status, the

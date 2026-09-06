@@ -1901,6 +1901,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Animations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#live-captures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live captures
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tui-cache-payoffgif-vs-the-agent-demo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        tui-cache-payoff.gif vs the agent demo
+      
+    </span>
+  </a>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1938,7 +1966,8 @@
 <p>Images the docs site and the top-level <code>README.md</code> embed.</p>
 <p>Everything here except <code>agent-demo.gif</code> is <strong>generated</strong>, not hand-made -
 including <code>tui-cache-payoff.gif</code>, which is assembled from canned TUI frames
-rather than recorded. A screenshot of last release's layout still looks
+rather than recorded, and <code>tui-agent-live.gif</code>, which is not canned at all
+(see <a href="#live-captures">Live captures</a>). A screenshot of last release's layout still looks
 authoritative, so the way these stay honest is that regenerating all of them is
 one command rather than an afternoon of cropping:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_docs_shots.py<span class="w">           </span><span class="c1"># everything</span>
@@ -2002,6 +2031,11 @@ result alongside that change.</p>
 <td>Terminal viewer, watching a re-run</td>
 </tr>
 <tr>
+<td><code>tui-agent-live.gif</code></td>
+<td>TUI</td>
+<td>Terminal viewer, watching a coding agent</td>
+</tr>
+<tr>
 <td><code>agent-demo.gif</code></td>
 <td>Screen recording</td>
 <td>Not yet recorded - see below</td>
@@ -2036,6 +2070,22 @@ packs them with per-beat hold times.</p>
 reader needs on a frame is a property of the finished animation. Adding or
 removing a beat without retiming it is a hard error rather than a silently
 mistimed GIF.</p>
+<h3 id="live-captures">Live captures<a class="headerlink" href="#live-captures" title="Permanent link">&para;</a></h3>
+<p><code>tui-agent-live.gif</code> is the exception to everything above: it is not fed canned
+frames. It runs a real server, scaffolds a real notebook, drives it with the
+real <code>strata</code> CLI over <code>--server</code>/<code>--session</code> — the same path a coding agent
+takes — and screenshots a real TUI attached over a real WebSocket.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/capture_agent_drive.py
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">cd</span><span class="w"> </span>frontend<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>node<span class="w"> </span>scripts/rasterize-svg.mjs<span class="w"> </span>--in<span class="w"> </span>/tmp/strata-agent-drive/frames
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/assemble_gif.py<span class="w"> </span>--in<span class="w"> </span>/tmp/strata-agent-drive/frames<span class="w"> </span>--name<span class="w"> </span>tui-agent-live
+</code></pre></div>
+<p>The cost is a slower, more fragile capture; the reason to pay it is that the
+claim being illustrated is <em>that the mirror works</em>, and canned frames would
+illustrate it just as convincingly if it did not. Every beat asserts the change
+reached the viewer's own model, so a regression that broke the broadcast fails
+the capture instead of producing a still-looking animation. It doubles as an
+end-to-end check of the live-mirror path.</p>
+<h2 id="tui-cache-payoffgif-vs-the-agent-demo"><code>tui-cache-payoff.gif</code> vs the agent demo<a class="headerlink" href="#tui-cache-payoffgif-vs-the-agent-demo" title="Permanent link">&para;</a></h2>
 <p>This is <strong>not</strong> the agent demo below. It shows the TUI - which is the right-hand
 pane of that recording - and carries the cache payoff, but no agent appears in
 it. The two are different assets.</p>
