@@ -38,6 +38,14 @@ names.
   not just a per-tenant one. Optional HTTP service via
   `pip install "strata-pool[server]"`. See
   [Distributed workers](docs/notebook/workers.md).
+- **`strata-worker` is now a worker-pool worker.** The pool dispatches to
+  `POST /execute`, which the worker did not serve — so a pool had no image to
+  drive, and the one the docs named did not exist. The worker now answers that
+  path (delegating to the same handler as `/v1/execute-manifest`, so the two
+  cannot validate differently), and `worker.Dockerfile` builds the image
+  the pool's examples reference. The payload is a build manifest: the worker
+  fetches its own inputs and uploads its own result, so job bytes never flow
+  through the pool. See [Worker pool](docs/notebook/worker-pool.md).
 - **The team cache: a cell served by a colleague's run.** With
   `STRATA_NOTEBOOK_TEAM_CACHE_ENABLED=true`, a local cache miss asks the shared
   store whether anyone has already run this exact computation, and a cell that

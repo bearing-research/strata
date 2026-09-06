@@ -107,3 +107,57 @@ def test_malformed_authorization_header_rejected(client_with_token):
             headers={"Authorization": bad},
         )
         assert resp.status_code == 401, (bad, resp.text)
+
+
+class TestPoolContractPath:
+    """``POST /execute`` — the path ``strata-pool`` dispatches to.
+
+    The pool forwards a job payload verbatim and sets no content type, so
+    these pin the wire shape it actually produces rather than a convenient
+    one. A worker that only answered a well-formed JSON request would look
+    healthy here and 400 in production.
+    """
+
+    def test_requires_the_bearer_token(self, client_with_token):
+        resp = client_with_token.post("/execute", content=b"{}")
+        assert resp.status_code == 401
+
+    def test_accepts_the_token_the_pool_mints(self, client_with_token):
+        """Not 401. The manifest is empty, so a 400 is the expected rejection.
+
+        What matters is that it got *past* auth: the pool mints
+        ``STRATA_WORKER_TOKEN`` per machine, which is the same variable this
+        app reads, so the two halves agree on the secret without translation.
+        """
+        resp = client_with_token.post(
+            "/execute",
+            content=b"{}",
+            headers={"Authorization": "Bearer test-secret-xyz"},
+        )
+        assert resp.status_code == 400
+
+    def test_parses_a_body_sent_without_a_content_type(self, client_without_token):
+        """The pool posts ``content=<bytes>``, which sets no Content-Type.
+
+        If the body were only parsed when declared as JSON, every pool
+        dispatch would fail — so this asserts the header's *absence* is fine.
+        A 400 naming the manifest proves the body was read and understood as
+        JSON, not rejected unparsed.
+        """
+        resp = client_without_token.post("/execute", content=b'{"metadata": {}}')
+        assert "content-type" not in {k.lower() for k in resp.request.headers}
+        assert resp.status_code == 400
+        assert "executor ref" in resp.json()["detail"].lower()
+
+    def test_rejects_a_body_that_is_not_json(self, client_without_token):
+        resp = client_without_token.post("/execute", content=b"not json at all")
+        assert resp.status_code == 400
+        assert "invalid manifest payload" in resp.json()["detail"].lower()
+
+    def test_matches_the_v1_manifest_endpoint(self, client_without_token):
+        """The alias must not drift from the endpoint it aliases."""
+        body = b'{"metadata": {"executor_ref": "nope"}}'
+        alias = client_without_token.post("/execute", content=body)
+        canonical = client_without_token.post("/v1/execute-manifest", content=body)
+        assert alias.status_code == canonical.status_code
+        assert alias.json() == canonical.json()
