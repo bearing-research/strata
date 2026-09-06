@@ -526,6 +526,51 @@ def _scaffold(root: Path, name: str, deps: tuple[str, ...], cells: list[str]) ->
     return nb
 
 
+# Tests for the quickstart's ``summarize`` cell. Real assertions against the
+# real frame, not placeholders: the shot is of a passing run, and a reader who
+# copies these should find they hold.
+#
+# Two, not more, and the count is a layout constraint rather than taste.
+# ``.tests-panel`` caps at 420px and splits it between the source editor and a
+# scrolling result list, so a longer file clips the editor mid-word and pushes
+# half the results out of view. That photographs as a rendering bug even though
+# it is a real scroll boundary. Two tests fit whole.
+SUMMARIZE_TESTS = """\
+def test_one_row_per_species(cell):
+    assert len(cell.stats) == 3
+
+
+def test_setosa_has_the_shortest_petals(cell):
+    assert cell.stats["petal length (cm)"].idxmin() == "setosa"
+"""
+
+
+def _cell_id(notebook: Path, snippet: str) -> str:
+    """Resolve a cell id by a distinctive fragment of its source.
+
+    Ids are backend-generated, so nothing can hardcode one. Name annotations
+    would be the obvious handle, but these cells come from the quickstart's own
+    code blocks, which carry none — and adding annotations purely to find a cell
+    would put scaffolding into the source the screenshot shows. Position is the
+    other option and is worse: inserting a step in the quickstart would silently
+    move the tests onto the wrong cell rather than failing.
+    """
+    out = subprocess.run(
+        [sys.executable, "-m", "strata.cli", "cell", "list", str(notebook), "--format", "json"],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=REPO_ROOT,
+    )
+    matches = [c for c in json.loads(out.stdout) if snippet in (c.get("source") or "")]
+    if len(matches) != 1:
+        raise SystemExit(
+            f"{len(matches)} cells in {notebook} contain {snippet!r}; expected exactly one. "
+            "The quickstart source changed — pick a fragment that is still unique."
+        )
+    return str(matches[0]["id"])
+
+
 def build_fixtures(root: Path) -> tuple[Path, Path]:
     """Scaffold the two fixture notebooks the web shots photograph.
 
@@ -538,6 +583,14 @@ def build_fixtures(root: Path) -> tuple[Path, Path]:
         root, "iris", ("pandas", "scikit-learn", "matplotlib"), extract_quickstart_cells()
     )
     _strata("run", str(iris))
+
+    # Give one cell tests and run them, so the Tests panel photographs a real
+    # result. `--file` sets the source and runs in one step; results persist to
+    # runtime.json and rehydrate on open, so the browser finds them already
+    # there rather than waiting on a live run.
+    tests = root / "summarize.test.py"
+    tests.write_text(SUMMARIZE_TESTS, encoding="utf-8")
+    _strata("cell", "test", str(iris), _cell_id(iris, "stats = df.groupby"), "--file", str(tests))
 
     # The scan cell needs the table URI, and a cell's source is the only thing
     # the harness carries in — so bind it as a literal rather than an env var,

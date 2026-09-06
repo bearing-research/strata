@@ -22,6 +22,7 @@ result alongside that change.
 | ---- | ------- | -------- |
 | `notebook-anatomy-{light,dark}.png` | Web UI | Notebook quickstart, `README.md` |
 | `cascade-stale-{light,dark}.png` | Web UI | Notebook quickstart, step 5 |
+| `cell-tests-{light,dark}.png` | Web UI | Cell unit tests, the Tests panel |
 | `registry-promote-strip-{light,dark}.png` | Web UI | Registry dashboard, step 3 |
 | `registry-tab-{light,dark}.png` | Web UI | Registry dashboard, step 5 |
 | `registry-lineage-{light,dark}.png` | Web UI | Registry dashboard, step 7 |

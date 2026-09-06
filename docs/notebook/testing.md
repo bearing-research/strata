@@ -57,6 +57,15 @@ of the cell source, the upstream inputs, and your test file staged under a
 `test_*.py` name (which is what gives you native collection **and** assertion
 rewriting).
 
+![A Python cell with its results table above an open Tests panel: the test
+source, a green "2 passed" summary, and a tick beside each test name. The flask
+toggle on the cell's left rail carries a green 2/2
+badge.](../assets/cell-tests-light.png#only-light)
+![A Python cell with its results table above an open Tests panel: the test
+source, a green "2 passed" summary, and a tick beside each test name. The flask
+toggle on the cell's left rail carries a green 2/2
+badge.](../assets/cell-tests-dark.png#only-dark)
+
 ### The health badge
 
 The `🧪` toggle doubles as a status badge, so a cell's test health is visible

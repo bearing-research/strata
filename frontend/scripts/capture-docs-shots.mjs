@@ -189,6 +189,27 @@ async function main() {
         })
       }
 
+      // 2b — the Tests panel, on the cell whose tests the fixture ran.
+      // Results persist to runtime.json and rehydrate on open, so the badge is
+      // already green here; nothing waits on a live pytest run.
+      {
+        const { context, page } = await loadNotebook(browser, baseUrl, iris.sessionId, theme)
+        const cell = page
+          .locator('.cell')
+          .filter({ has: page.locator('.tests-badge') })
+          .first()
+        await cell.locator('.tests-toggle').click()
+        await page.locator('.tests-panel').waitFor({ timeout: TIMEOUT_MS })
+        // Wait for a per-test row, not just the panel: an empty panel would
+        // photograph as "tests exist but nothing ran", the opposite of the point.
+        await page.locator('.tests-panel .tests-row').first().waitFor({
+          timeout: TIMEOUT_MS,
+        })
+        await page.waitForTimeout(400)
+        await shoot(page, 'cell-tests', outDir, theme, cell)
+        await context.close()
+      }
+
       // 3 + 4 + 5 — the registry surfaces.
       {
         const { context, page } = await loadNotebook(browser, baseUrl, registry.sessionId, theme)
