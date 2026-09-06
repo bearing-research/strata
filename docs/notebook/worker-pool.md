@@ -10,4 +10,4 @@
     workers you start and manage yourself, see
     [Distributed Workers](workers.md) instead.
 
---8<-- "packages/strata-pool/README.md"
+--8<-- "packages/strata-pool/README.md:body"

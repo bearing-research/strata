@@ -158,6 +158,11 @@ the pool's worker contract, so the pool can drive it unmodified:
 docker build -f worker.Dockerfile -t strata-worker:latest .
 ```
 
+The image installs `strata-notebook` from PyPI and needs **0.7.0 or newer** —
+`POST /execute`, the path the pool dispatches to, ships in that release. It
+also means building inside a checkout does not pick up local worker changes;
+build a wheel for that.
+
 See **[Worker Pool](worker-pool.md)** for machine types, dispatch, the HTTP
 service, and the one rule that matters most: the pool is not a cache, so the
 caller checks `find_by_provenance` *before* submitting.

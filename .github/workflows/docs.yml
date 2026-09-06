@@ -32,12 +32,20 @@ on:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+      # A docs page includes this via pymdownx.snippets, so editing it alone
+      # still has to run the strict build and redeploy -- otherwise the
+      # published page silently serves the old README.
+      - 'packages/*/README.md'
     tags:
       - 'v*'
   pull_request:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+      # A docs page includes this via pymdownx.snippets, so editing it alone
+      # still has to run the strict build and redeploy -- otherwise the
+      # published page silently serves the old README.
+      - 'packages/*/README.md'
 
 # Serialize gh-pages deploys. The `mike` push to gh-pages is rejected
 # non-fast-forward if two deploys run at once. Every *push* deploy — main

@@ -1,5 +1,6 @@
 # strata-pool
 
+<!-- --8<-- [start:body] -->
 Worker pool for dispatching Strata jobs to ephemeral machines. This is the
 bring-your-own-hardware path: it manages machines *you* own. It is complete and
 tested rather than growing — if you want a provider to autoscale for you,
@@ -185,10 +186,27 @@ it unmodified:
 docker build -f worker.Dockerfile -t strata-worker:latest .
 ```
 
+The image installs `strata-notebook` from PyPI and needs **0.7.0 or newer** —
+`POST /execute`, the path the pool dispatches to, ships in that release. It
+also means building inside a checkout does not pick up local worker changes;
+build a wheel for that.
+
 Layer your cells' dependencies on top (`FROM strata-worker:latest`). The image
 binds 8080 because that is `DockerBackend`'s default `worker_port`; the
 worker's own default is 9000, so the two are made to agree explicitly rather
 than by luck. The pool does not pull, so build on the host that will run it.
+It runs as a non-root user and **refuses to start without
+`STRATA_WORKER_TOKEN`** — the pool mints one per machine, so this only bites
+when running it by hand.
+
+**Local Docker needs the SSRF guard relaxed.** The worker rejects manifest
+URLs that resolve to loopback or private addresses — a real defense, since a
+buggy or compromised orchestrator could otherwise point it at internal
+services. With `DockerBackend` on a local daemon the Strata server *is* at a
+private address, so the first job fails with `resolves to non-routable
+address` until the worker starts with `STRATA_WORKER_ALLOW_LOCAL_HOSTS=1`.
+That is a local-development setting: leave it unset anywhere the server is
+reachable at a routable address, which is every real deployment.
 
 The payload the pool forwards is a **build manifest** — the same JSON document
 `/v1/execute-manifest` takes, carrying signed URLs for the inputs, the output,
@@ -236,3 +254,4 @@ socket moved fails loudly rather than reporting coverage it never ran.
 
 CI additionally installs the package into a venv with only its own
 dependencies, to keep it from quietly growing a dependency on the server.
+<!-- --8<-- [end:body] -->
