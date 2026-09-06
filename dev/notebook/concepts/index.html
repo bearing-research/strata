@@ -2280,25 +2280,44 @@
 <h1 id="notebook-concepts">Notebook Concepts<a class="headerlink" href="#notebook-concepts" title="Permanent link">&para;</a></h1>
 <h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
 <p>Strata Notebook is a content-addressed compute graph over Python. Every cell output is an artifact, and every cell execution is a <code>materialize(inputs, transform, environment) → artifact</code> operation.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────────────────────────────────────┐
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│ Notebook UI (Vue.js + WebSocket)            │
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│ (cell editing, run buttons, DAG view)       │
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>└─────────────────────────────────────────────┘
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>                    │
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                    ▼
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>┌─────────────────────────────────────────────┐
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│ Notebook Backend (FastAPI + WebSocket)       │
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│ (session mgmt, cascade planner, executor)   │
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>└─────────────────────────────────────────────┘
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>                    │
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>                    ▼
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>┌─────────────────────────────────────────────┐
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│ Strata Artifact Store                       │
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│ (SQLite metadata + blob storage, provenance │
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│  dedup, lineage)                            │
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>└─────────────────────────────────────────────┘
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌───────────────┬───────────────┬─────────────────────────────┐
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│ Web UI (Vue)  │ Terminal TUI  │ Coding agent (CLI / MCP)    │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│ edit and run  │ read-only     │ drives a session remotely   │
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>└───────────────┴───────────────┴─────────────────────────────┘
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        │               │                      │
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>        └───────────────┴──────────────────────┘
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                        │  REST + WebSocket
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                        ▼
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>┌──────────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│ Notebook Backend (FastAPI + WebSocket)                       │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│ (session mgmt, DAG, cascade planner, executor)               │
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>└──────────────────────────────────────────────────────────────┘
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>            │                                │
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>            │ local subprocess               │ HTTP
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>            ▼                                ▼
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>   ┌──────────────────┐         ┌──────────────────────────┐
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>   │ Cell harness     │         │ Remote worker            │
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>   │ (notebook venv)  │         │ (SSH / Fly / Modal /     │
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>   │                  │         │  a pool-run machine)     │
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>   └──────────────────┘         └──────────────────────────┘
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>            └───────────────┬────────────────┘
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>                            ▼
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>┌──────────────────────────────────────────────────────────────┐
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│ Strata Artifact Store                                        │
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>│ metadata: SQLite, or Postgres when several servers share one │
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│ blobs: local disk, S3, GCS, Azure                            │
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>│ provenance dedup, lineage, and an optional team cache that   │
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a>│ answers a local miss from a shared store                     │
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a>└──────────────────────────────────────────────────────────────┘
 </code></pre></div>
 <p>The notebook is an <strong>orchestration layer</strong>: it decides what to run next. The cell harness is an <strong>executor</strong>: it runs Python code. The artifact store decides whether a result already exists and persists it.</p>
+<p>The three surfaces are <strong>peers on one protocol</strong>, not a primary and two
+add-ons: they speak the same REST and WebSocket API. A cell an agent runs
+against a live session appears in the web UI and the <a href="../tui/">terminal viewer</a>
+as it happens - though only when the agent addresses the session rather than
+the notebook directory, since <a href="../cli/#working-against-a-live-session-server-session">the local backend edits files and the server
+learns nothing</a>. Of the
+three, only the TUI is deliberately read-only.</p>
 <h2 id="why-every-output-is-an-artifact">Why "every output is an artifact"<a class="headerlink" href="#why-every-output-is-an-artifact" title="Permanent link">&para;</a></h2>
 <p>The guarantees fall out of two design choices:</p>
 <ol>
@@ -2449,7 +2468,10 @@ work</em>, not <em>what happened during the last run</em>.</p>
 <li><strong>Compute provenance hash</strong>: <code>sha256(sorted_input_hashes + source_hash + env_hash)</code></li>
 <li><strong>Cache check</strong>: Look up the hash in the artifact store → return immediately on hit</li>
 <li><strong>Resolve inputs</strong>: Load upstream variable artifacts into a temp directory</li>
-<li><strong>Execute</strong>: Spawn a subprocess running the cell harness in the notebook's venv</li>
+<li><strong>Execute</strong>: Spawn a subprocess running the cell harness in the notebook's
+   venv - or, for a cell annotated with a <a href="../workers/"><code># @worker</code></a>, POST the
+   work to that worker over HTTP instead. Everything either side of this step
+   is identical; only where the Python runs changes.</li>
 <li><strong>Harness</strong>: Deserializes inputs → <code>exec(source, namespace)</code> → serializes new variables</li>
 <li><strong>Store outputs</strong>: Each consumed variable becomes an artifact</li>
 <li><strong>Broadcast</strong>: WebSocket sends status, output, and console messages to the UI</li>
@@ -2481,6 +2503,11 @@ work</em>, not <em>what happened during the last run</em>.</p>
 <td>Different packages = different result</td>
 </tr>
 <tr>
+<td>Mount fingerprints</td>
+<td>Yes</td>
+<td>Different mounted data = different result</td>
+</tr>
+<tr>
 <td>Cell ID</td>
 <td>No</td>
 <td>Same code in a different cell = same result</td>
@@ -2493,6 +2520,13 @@ work</em>, not <em>what happened during the last run</em>.</p>
 </tbody>
 </table>
 <p>When you change a cell's source, its provenance hash changes, and all downstream cells become <strong>stale</strong>.</p>
+<p>Because the hash describes the computation rather than the machine, a match
+found somewhere else is just as valid. That is what the optional
+<a href="../../deployment/service-mode/#the-team-cache-sharing-results-nobody-named">team cache</a> trades on: with a shared store configured, a local
+miss asks whether a colleague has already run this exact computation, and a
+cell that does run offers its outputs back. Nobody has to decide in advance
+which results are worth publishing - the expensive middle of a pipeline is
+shared on the same terms as anything else.</p>
 <p>This applies even to a <strong>leaf cell</strong>, one with no downstream consumer, like a
 cell that only <code>print</code>s a diagnostic. It has no output artifact to cache, but
 its console output is keyed by the same provenance hash and replayed on an
