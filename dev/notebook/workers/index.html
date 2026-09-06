@@ -2480,6 +2480,10 @@ extras, so the base install pulls only <code>httpx</code>.</p>
 the pool's worker contract, so the pool can drive it unmodified:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>worker.Dockerfile<span class="w"> </span>-t<span class="w"> </span>strata-worker:latest<span class="w"> </span>.
 </code></pre></div>
+<p>The image installs <code>strata-notebook</code> from PyPI and needs <strong>0.7.0 or newer</strong> —
+<code>POST /execute</code>, the path the pool dispatches to, ships in that release. It
+also means building inside a checkout does not pick up local worker changes;
+build a wheel for that.</p>
 <p>See <strong><a href="../worker-pool/">Worker Pool</a></strong> for machine types, dispatch, the HTTP
 service, and the one rule that matters most: the pool is not a cache, so the
 caller checks <code>find_by_provenance</code> <em>before</em> submitting.</p>

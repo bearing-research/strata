@@ -956,6 +956,24 @@
         
       
       
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worker Pool
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
       <a href="./" class="md-nav__link md-nav__link--active">
         
   
@@ -972,6 +990,113 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Isolation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-it-as-a-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running it as a service
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-runpod-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The RunPod backend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-worker-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The worker contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-docker-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Docker backend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
       
     </li>
   
@@ -1916,6 +2041,102 @@
     
   
   
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Isolation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-it-as-a-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running it as a service
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-runpod-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The RunPod backend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-worker-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The worker contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-docker-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Docker backend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
 </nav>
                   </div>
                 </div>
@@ -1944,7 +2165,6 @@ notebook never imports it; a proxy composes the two. For long-lived
 workers you start and manage yourself, see
 <a href="../workers/">Distributed Workers</a> instead.</p>
 </div>
-<h1 id="strata-pool">strata-pool<a class="headerlink" href="#strata-pool" title="Permanent link">&para;</a></h1>
 <p>Worker pool for dispatching Strata jobs to ephemeral machines. This is the
 bring-your-own-hardware path: it manages machines <em>you</em> own. It is complete and
 tested rather than growing — if you want a provider to autoscale for you,
@@ -2143,10 +2363,25 @@ it.</p>
 it unmodified:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>worker.Dockerfile<span class="w"> </span>-t<span class="w"> </span>strata-worker:latest<span class="w"> </span>.
 </code></pre></div>
+<p>The image installs <code>strata-notebook</code> from PyPI and needs <strong>0.7.0 or newer</strong> —
+<code>POST /execute</code>, the path the pool dispatches to, ships in that release. It
+also means building inside a checkout does not pick up local worker changes;
+build a wheel for that.</p>
 <p>Layer your cells' dependencies on top (<code>FROM strata-worker:latest</code>). The image
 binds 8080 because that is <code>DockerBackend</code>'s default <code>worker_port</code>; the
 worker's own default is 9000, so the two are made to agree explicitly rather
-than by luck. The pool does not pull, so build on the host that will run it.</p>
+than by luck. The pool does not pull, so build on the host that will run it.
+It runs as a non-root user and <strong>refuses to start without
+<code>STRATA_WORKER_TOKEN</code></strong> — the pool mints one per machine, so this only bites
+when running it by hand.</p>
+<p><strong>Local Docker needs the SSRF guard relaxed.</strong> The worker rejects manifest
+URLs that resolve to loopback or private addresses — a real defense, since a
+buggy or compromised orchestrator could otherwise point it at internal
+services. With <code>DockerBackend</code> on a local daemon the Strata server <em>is</em> at a
+private address, so the first job fails with <code>resolves to non-routable
+address</code> until the worker starts with <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS=1</code>.
+That is a local-development setting: leave it unset anywhere the server is
+reachable at a routable address, which is every real deployment.</p>
 <p>The payload the pool forwards is a <strong>build manifest</strong> — the same JSON document
 <code>/v1/execute-manifest</code> takes, carrying signed URLs for the inputs, the output,
 and finalization. The worker fetches its own inputs and uploads its own result,
