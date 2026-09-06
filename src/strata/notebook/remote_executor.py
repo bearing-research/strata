@@ -783,6 +783,22 @@ def create_notebook_executor_app() -> FastAPI:
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
+    @app.post("/execute", dependencies=[Depends(require_worker_token)])
+    async def execute_pool_contract(http_request: Request) -> Response:
+        """The worker-pool contract path.
+
+        ``strata-pool`` dispatches to ``POST {endpoint}/execute`` and forwards
+        the job payload verbatim, setting no content type. That rules out the
+        multipart ``/v1/*`` endpoints and makes the body self-describing by
+        necessity — which is exactly a build manifest, so this delegates to the
+        same handler ``/v1/execute-manifest`` uses.
+
+        An alias rather than a second implementation: a manifest that arrives
+        via the pool and one the server pushes directly must not be able to
+        diverge in what they validate or accept.
+        """
+        return await execute_manifest(http_request)
+
     return app
 
 

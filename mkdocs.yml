@@ -35,6 +35,9 @@ theme:
 markdown_extensions:
   - admonition
   - pymdownx.details
+  - pymdownx.snippets:
+      base_path: [.]
+      check_paths: true
   - pymdownx.superfences
   - pymdownx.highlight:
       anchor_linenums: true
@@ -77,6 +80,7 @@ nav:
     - Lake-Aware Cells: notebook/lake-aware-cells.md
     - Registry Dashboard: notebook/registry-dashboard.md
     - Distributed Workers: notebook/workers.md
+    - Worker Pool: notebook/worker-pool.md
     - AI Integration: notebook/ai.md
     - Environment: notebook/environment.md
     - Secret Manager: notebook/secrets.md

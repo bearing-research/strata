@@ -151,6 +151,17 @@ It ships Docker and RunPod backends, per-worker credentials, tenant-scoped
 machines, a fleet cap, and usage metering. Cloud SDKs live in the backend
 extras, so the base install pulls only `httpx`.
 
+`strata-worker` — the same executor the walkthroughs above register — satisfies
+the pool's worker contract, so the pool can drive it unmodified:
+
+```bash
+docker build -f worker.Dockerfile -t strata-worker:latest .
+```
+
+See **[Worker Pool](worker-pool.md)** for machine types, dispatch, the HTTP
+service, and the one rule that matters most: the pool is not a cache, so the
+caller checks `find_by_provenance` *before* submitting.
+
 This is the bring-your-own-hardware path. It manages machines you own, and it
 is deliberately feature-complete rather than growing - if you want someone else
 to autoscale for you, a serverless executor registered as a worker (above) is

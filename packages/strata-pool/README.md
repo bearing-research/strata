@@ -177,7 +177,26 @@ it.
 
 ## The worker contract
 
-The pool is image-agnostic, but an image has to hold up four things:
+`strata-worker`, shipped in `strata-notebook`, satisfies this contract as of
+0.7.0 — build it with the Dockerfile in the Strata repo and the pool can drive
+it unmodified:
+
+```bash
+docker build -f worker.Dockerfile -t strata-worker:latest .
+```
+
+Layer your cells' dependencies on top (`FROM strata-worker:latest`). The image
+binds 8080 because that is `DockerBackend`'s default `worker_port`; the
+worker's own default is 9000, so the two are made to agree explicitly rather
+than by luck. The pool does not pull, so build on the host that will run it.
+
+The payload the pool forwards is a **build manifest** — the same JSON document
+`/v1/execute-manifest` takes, carrying signed URLs for the inputs, the output,
+and finalization. The worker fetches its own inputs and uploads its own result,
+so the bytes never flow through the pool. That is also why the payload has to
+be self-describing: the pool forwards it verbatim and sets no content type.
+
+The pool remains image-agnostic — anything holding up these four points works:
 
 | | |
 |---|---|
