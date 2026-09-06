@@ -3183,6 +3183,12 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A provenance badge for a README.</strong> <code>/p/{token}/badge.svg</code> reports the size
+  of the recorded chain and links to the page. It claims nothing about the
+  result and is deliberately not green, since green is the badge convention for
+  "passing". A withdrawn publication still renders, reading <code>withdrawn</code>, rather
+  than leaving a broken image. The page hands over ready-made snippets for the
+  badge, the iframe and the RO-Crate URL.</li>
 <li><strong>The chain is published as RO-Crate JSON-LD.</strong> Inline on the page, at
   <code>/p/{token}/ro-crate</code>, and as <code>ro-crate-metadata.json</code> in an archived
   bundle — so a repository can index the provenance instead of only displaying
