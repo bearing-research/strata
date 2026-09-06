@@ -25,6 +25,10 @@ ASSETS = REPO_ROOT / "docs" / "assets"
 # the longest holds; the loop should leave a reader on the payoff, not mid-run.
 HOLDS = {
     "tui-cache-payoff": [1800, 1400, 2000, 1600, 2800],
+    # The agent-drive beats. The empty notebook is held briefly -- it is the
+    # "before", not the point -- and each arrival gets long enough to read the
+    # cell that appeared without the reader having to scrub.
+    "tui-agent-live": [1400, 2200, 2200, 2200, 3000],
 }
 
 # The SVG has rounded corners, so it rasterises with a transparent margin and

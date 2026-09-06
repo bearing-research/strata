@@ -4,7 +4,8 @@ Images the docs site and the top-level `README.md` embed.
 
 Everything here except `agent-demo.gif` is **generated**, not hand-made -
 including `tui-cache-payoff.gif`, which is assembled from canned TUI frames
-rather than recorded. A screenshot of last release's layout still looks
+rather than recorded, and `tui-agent-live.gif`, which is not canned at all
+(see [Live captures](#live-captures)). A screenshot of last release's layout still looks
 authoritative, so the way these stay honest is that regenerating all of them is
 one command rather than an afternoon of cropping:
 
@@ -29,6 +30,7 @@ result alongside that change.
 | `tui-layout.svg` | TUI | Terminal viewer |
 | `tui-agent-running.svg` | TUI | Driving a notebook with a coding agent |
 | `tui-cache-payoff.gif` | TUI | Terminal viewer, watching a re-run |
+| `tui-agent-live.gif` | TUI | Terminal viewer, watching a coding agent |
 | `agent-demo.gif` | Screen recording | Not yet recorded - see below |
 
 ## Conventions
@@ -64,6 +66,28 @@ Frame timings live in `assemble_gif.py`, not in the storyboard: how long a
 reader needs on a frame is a property of the finished animation. Adding or
 removing a beat without retiming it is a hard error rather than a silently
 mistimed GIF.
+
+### Live captures
+
+`tui-agent-live.gif` is the exception to everything above: it is not fed canned
+frames. It runs a real server, scaffolds a real notebook, drives it with the
+real `strata` CLI over `--server`/`--session` — the same path a coding agent
+takes — and screenshots a real TUI attached over a real WebSocket.
+
+```bash
+uv run python scripts/capture_agent_drive.py
+cd frontend && node scripts/rasterize-svg.mjs --in /tmp/strata-agent-drive/frames
+uv run python scripts/assemble_gif.py --in /tmp/strata-agent-drive/frames --name tui-agent-live
+```
+
+The cost is a slower, more fragile capture; the reason to pay it is that the
+claim being illustrated is *that the mirror works*, and canned frames would
+illustrate it just as convincingly if it did not. Every beat asserts the change
+reached the viewer's own model, so a regression that broke the broadcast fails
+the capture instead of producing a still-looking animation. It doubles as an
+end-to-end check of the live-mirror path.
+
+## `tui-cache-payoff.gif` vs the agent demo
 
 This is **not** the agent demo below. It shows the TUI - which is the right-hand
 pane of that recording - and carries the cache payoff, but no agent appears in

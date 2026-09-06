@@ -81,11 +81,36 @@ in real time.
 
 ## Watching an agent
 
-The viewer's headline use case is following an AI agent as it drives a notebook
-in another terminal:
+The viewer's headline use case is following an agent as it drives a notebook
+somewhere else. There are two shapes of that, depending on which agent.
+
+### A coding agent in another terminal
+
+A coding agent - Claude Code, or anything that can run a command - drives the
+notebook through the [CLI](cli.md) while you watch it happen:
+
+1. `strata-notebook` in one terminal, and open the notebook.
+2. `strata-notebook-tui` in a second, pointed at it.
+3. In a third, let the agent work, giving it `--server`/`--session` rather than
+   the notebook path (this is what the [scratchpad skill](agent.md) tells it to
+   do).
+
+![The terminal viewer over five moments: an empty notebook, a cell arriving,
+that cell finishing in 1.0s with its output, a second cell arriving that reads
+the first one's variable, and both cells green.](../assets/tui-agent-live.gif)
+
+Cells appear, flip to running, and report their output as the agent works -
+nothing to refresh, and no need to share the agent's terminal. The selector is
+what makes it live: given a notebook path the same commands edit files on disk
+and the viewer sees nothing, which is [the distinction the CLI page
+draws](cli.md#working-against-a-live-session-server-session).
+
+### The in-app assistant
+
+The [AI agent](ai.md) built into the web UI streams into the viewer too:
 
 1. Start the server and open the notebook in the web UI.
-2. Kick off the [AI agent](ai.md) there.
+2. Kick off the agent there.
 3. In a terminal, run `strata-notebook-tui` and open the **Agent** tab.
 
 The agent's reasoning streams into the Agent tab while cells flip status, the
