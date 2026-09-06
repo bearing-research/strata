@@ -135,43 +135,6 @@ Strata ships a reference executor as the `strata-worker` console script. Any pla
 
 You can register many workers per notebook; each cell picks its target independently. Mixing Fly (cheap CPU) and Modal (on-demand GPU) is a common setup.
 
-### Pooling machines you own
-
-The walkthroughs above register long-lived workers you start yourself. If you
-would rather hand out machines from a pool - start them on demand, hold them
-for a tenant, stop paying when the work finishes - `strata-pool` is a separate
-package that does exactly that:
-
-```bash
-pip install strata-pool            # library
-pip install "strata-pool[server]"  # plus the HTTP service
-```
-
-It ships Docker and RunPod backends, per-worker credentials, tenant-scoped
-machines, a fleet cap, and usage metering. Cloud SDKs live in the backend
-extras, so the base install pulls only `httpx`.
-
-`strata-worker` — the same executor the walkthroughs above register — satisfies
-the pool's worker contract, so the pool can drive it unmodified:
-
-```bash
-docker build -f worker.Dockerfile -t strata-worker:latest .
-```
-
-The image installs `strata-notebook` from PyPI and needs **0.7.0 or newer** —
-`POST /execute`, the path the pool dispatches to, ships in that release. It
-also means building inside a checkout does not pick up local worker changes;
-build a wheel for that.
-
-See **[Worker Pool](worker-pool.md)** for machine types, dispatch, the HTTP
-service, and the one rule that matters most: the pool is not a cache, so the
-caller checks `find_by_provenance` *before* submitting.
-
-This is the bring-your-own-hardware path. It manages machines you own, and it
-is deliberately feature-complete rather than growing - if you want someone else
-to autoscale for you, a serverless executor registered as a worker (above) is
-the better shape.
-
 ### Fly.io (CPU worker)
 
 **Prerequisites:**
@@ -343,6 +306,64 @@ runtime_id = "modal-a10g-v1"
 url = "https://your-username--my-gpu-worker-gpu-executor.modal.run/v1/execute"
 transport = "direct"
 ```
+
+## Worker pools: a different layer
+
+Everything above is a worker **you** run and **the notebook** dispatches to.
+[`strata-pool`](worker-pool.md) is a separate package that hands out machines
+on demand instead - starting one when no warm machine of that type is free,
+holding it for a tenant, and stopping it when the work finishes.
+
+The distinction that matters is *who calls whom*:
+
+| | Registered worker | Pool-run machine |
+| --- | --- | --- |
+| Who starts it | You, and it stays up | The pool, on demand; stopped once idle |
+| Who dispatches to it | The notebook, from `# @worker` | A caller **above** the notebook |
+| Entry point | `POST /v1/execute` (multipart push) or `/v1/execute-manifest` (signed-URL pull), by transport | `POST /execute`, always a manifest |
+| Default port | 9000 | 8080 (`DockerBackend`'s `worker_port`) |
+| Lifetime | Long-lived, shared across cells | Belongs to one tenant, then destroyed |
+
+Both rows are the **same `strata-worker` binary**, which serves every one of
+those paths - so one image covers both uses, and what differs is who dispatches
+and which way the input bytes move. Under the push model Strata sends the
+inputs; under a manifest the worker fetches its own inputs and uploads its own
+result, which is why job bytes never pass through the pool.
+
+**The notebook has no pool client.** Nothing in `strata` imports `strata_pool`,
+and `# @worker` cannot name a pool machine: the annotation resolves against the
+effective worker policy - notebook-scoped `[[workers]]` in personal mode, the
+server-managed registry in service mode - and a pool machine appears in
+neither. Composing the two is the job of a proxy above both, which checks the
+artifact store first and submits to the pool only on a miss. Getting that order
+wrong boots machines to recompute results that already exist.
+
+So the choice is not which platform, but which shape:
+
+- **Hardware you keep** - register it as a worker and point cells at it.
+- **Hardware you rent per job**, with metering and tenant isolation, driven by
+  a service you are building around Strata - that is the pool.
+
+```bash
+pip install strata-pool            # library
+pip install "strata-pool[server]"  # plus the HTTP service
+```
+
+It ships Docker and RunPod backends, per-worker credentials, tenant-scoped
+machines, a fleet cap, and usage metering. Cloud SDKs live in the backend
+extras, so the base install pulls only `httpx`. Build the image the pool
+drives with:
+
+```bash
+docker build -f worker.Dockerfile -t strata-worker:latest .
+```
+
+That image needs `strata-notebook` **0.7.0 or newer** - `POST /execute` ships
+in that release - and it installs from PyPI, so building it inside a checkout
+does not pick up local worker changes.
+
+See [Worker Pool](worker-pool.md) for machine types, dispatch, the HTTP
+service, and the isolation model.
 
 ## Registering workers
 
