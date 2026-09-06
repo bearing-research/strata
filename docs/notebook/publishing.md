@@ -104,6 +104,27 @@ chasing a footnote deserves that answer rather than one that reads like a typo.
 The token is never reissued for other content, so a URL already in print fails
 closed instead of quietly starting to resolve to something else.
 
+## Embedding it elsewhere
+
+Paste the link into a wiki, CMS or note-taking tool that speaks oEmbed and it
+unfurls into a card: the figure, what it is, how many steps are behind it, and
+a link through to the full provenance. Tools that do not, take the iframe
+directly:
+
+```html
+<iframe src="https://your-strata/p/<token>/embed"
+        width="480" height="420" frameborder="0"></iframe>
+```
+
+The card is deliberately not a smaller copy of the page. An embed sits in a
+post where the surrounding text is doing the explaining, so it carries the
+result and an honest one-line summary, then links out — abbreviating the
+caveats into a card would produce exactly the badge this feature avoids.
+
+The card is framable from any origin, because being embeddable is the whole
+point of it. The full page keeps the default `frame-ancestors 'self'`, and
+`embed_frame_ancestors` still governs the notebook app view.
+
 ## Archiving: the copy that needs no server
 
 A hosted link resolves for as long as your server does. A URL printed in a
@@ -162,6 +183,8 @@ apart deliberately.
 | `GET /p/{token}` | **no** | The page. |
 | `GET /p/{token}/data` | **no** | The published bytes. |
 | `GET /p/{token}/verify` | **no** | Re-read and compare against the recorded digest. |
+| `GET /p/{token}/embed` | **no** | The card, for an `<iframe>`. Framable from any origin. |
+| `GET /oembed?url=…` | **no** | oEmbed provider, so a pasted link unfurls. |
 | `GET /v1/publications/{token}` | **no** | The same record as JSON. |
 
 The unauthenticated routes are exempt from the auth and tenant middleware by

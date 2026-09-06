@@ -26,7 +26,9 @@ exactly what would become public, before it does.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from urllib.parse import quote
+
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -36,7 +38,12 @@ from strata.api.dependencies import (
     ReadStore,
     require_scope,
 )
-from strata.api.publication_page import build_record, content_type_of, render_publication
+from strata.api.publication_page import (
+    build_record,
+    content_type_of,
+    render_embed,
+    render_publication,
+)
 from strata.services.artifact import ArtifactService
 
 router = APIRouter(tags=["publications"])
@@ -182,7 +189,7 @@ async def read_publication_record(token: str, store: ReadStore):
 
 
 @router.get("/p/{token}", response_class=HTMLResponse)
-async def publication_page(token: str, store: ReadStore):
+async def publication_page(token: str, store: ReadStore, http_request: Request):
     """The page a citation points at. Unauthenticated, self-contained HTML."""
     publication, artifact = _load_published(store, token, require_active=False)
 
@@ -200,6 +207,8 @@ async def publication_page(token: str, store: ReadStore):
     if publication.is_active and content_type == "image/png":
         inline_png = _inline_png(store, publication)
 
+    base = _public_base(http_request)
+    page_url = quote(f"{base}/p/{token}", safe="")
     return HTMLResponse(
         render_publication(
             publication=publication,
@@ -207,6 +216,7 @@ async def publication_page(token: str, store: ReadStore):
             lineage=lineage,
             content_type=content_type,
             image_src=inline_png,
+            oembed_url=f"{base}/oembed?url={page_url}",
         )
     )
 
@@ -284,3 +294,104 @@ async def verify_publication(token: str, store: ReadStore):
         "actual_sha256": actual,
         "checks": "That the bytes are unchanged since publication. Not that they are correct.",
     }
+
+
+# ---------------------------------------------------------------------------
+# Embedding — the card, and the oEmbed endpoint that unfurls a pasted link
+# ---------------------------------------------------------------------------
+
+# The card's natural size. oEmbed consumers use these to reserve space before
+# the iframe loads; the card itself is fluid and fills whatever it is given.
+_EMBED_WIDTH = 480
+_EMBED_HEIGHT = 420
+
+
+def _public_base(request: Request) -> str:
+    """The origin a reader reached this server on.
+
+    Taken from the request rather than configuration because an embed's URLs
+    are consumed by someone else's page: a link built from an internal
+    hostname resolves for the server and for nobody the embed was made for.
+    """
+    return str(request.base_url).rstrip("/")
+
+
+@router.get("/p/{token}/embed", response_class=HTMLResponse)
+async def publication_embed(token: str, store: ReadStore, http_request: Request):
+    """A compact card, sized for an iframe in a post or a wiki."""
+    publication, artifact = _load_published(store, token, require_active=True)
+    lineage = ArtifactService().build_lineage(
+        store,
+        artifact=artifact,
+        artifact_id=publication.artifact_id,
+        version=publication.version,
+        tenant_filter=None,
+        max_depth=25,
+    )
+    content_type = content_type_of(artifact)
+    image_src = _inline_png(store, publication) if content_type == "image/png" else None
+
+    return HTMLResponse(
+        render_embed(
+            publication=publication,
+            artifact=artifact,
+            lineage=lineage,
+            image_src=image_src,
+            page_url=f"{_public_base(http_request)}/p/{token}",
+        )
+    )
+
+
+@router.get("/oembed")
+async def oembed(url: str, store: ReadStore, http_request: Request, format: str = "json"):
+    """oEmbed provider, so pasting a link unfurls into the card.
+
+    The endpoint every wiki, CMS and note-taking tool already knows how to ask.
+    Without it an embed means hand-writing an ``<iframe>``, which most of those
+    tools will not accept from an author in the first place.
+
+    Only ``json`` is served. XML is in the spec and nothing has asked for it
+    this decade; a 501 naming the reason beats a silently empty document.
+    """
+    if format != "json":
+        raise HTTPException(status_code=501, detail="Only format=json is supported")
+
+    token = _token_from_url(url, _public_base(http_request))
+    if token is None:
+        raise HTTPException(status_code=404, detail="Not a publication URL on this server")
+
+    publication, artifact = _load_published(store, token, require_active=True)
+    base = _public_base(http_request)
+    return {
+        "version": "1.0",
+        "type": "rich",
+        "provider_name": "Strata",
+        "provider_url": base,
+        "title": publication.title or f"{artifact.id}@v={artifact.version}",
+        "width": _EMBED_WIDTH,
+        "height": _EMBED_HEIGHT,
+        "html": (
+            f'<iframe src="{base}/p/{token}/embed" width="{_EMBED_WIDTH}" '
+            f'height="{_EMBED_HEIGHT}" frameborder="0" '
+            'style="border:0;max-width:100%" '
+            'title="Strata published artifact" loading="lazy"></iframe>'
+        ),
+    }
+
+
+def _token_from_url(url: str, base: str) -> str | None:
+    """Pull the token out of a publication URL, or ``None`` if it is not one.
+
+    Matched against this server's own origin. An oEmbed provider that happily
+    described URLs on other hosts would be answering for pages it has never
+    seen.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if urlparse(base).netloc != parsed.netloc:
+        return None
+    parts = [segment for segment in parsed.path.split("/") if segment]
+    if len(parts) < 2 or parts[0] != "p":
+        return None
+    return parts[1]
