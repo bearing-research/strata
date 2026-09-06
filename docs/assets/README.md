@@ -27,6 +27,7 @@ result alongside that change.
 | `registry-promote-strip-{light,dark}.png` | Web UI | Registry dashboard, step 3 |
 | `registry-tab-{light,dark}.png` | Web UI | Registry dashboard, step 5 |
 | `registry-lineage-{light,dark}.png` | Web UI | Registry dashboard, step 7 |
+| `publication-page-{light,dark}.png` | Published page | Publishing an artifact |
 | `tui-layout.svg` | TUI | Terminal viewer |
 | `tui-agent-running.svg` | TUI | Driving a notebook with a coding agent |
 | `tui-cache-payoff.gif` | TUI | Terminal viewer, watching a re-run |
