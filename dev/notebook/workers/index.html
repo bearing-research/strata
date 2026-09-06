@@ -2442,11 +2442,12 @@
 <li><strong>A remote cell runs on the box's filesystem.</strong> Its <code>file://</code> mounts and absolute paths resolve there, not on your machine, and cloud mounts use the box's own credentials. Results are cached under the remote environment's identity, so they don't collide with local runs.</li>
 </ul>
 <h2 id="deploy-to-the-cloud">Deploy to the cloud<a class="headerlink" href="#deploy-to-the-cloud" title="Permanent link">&para;</a></h2>
-<p>Strata ships a reference executor as the <code>strata-worker</code> console script. Any platform that can run an HTTP service on a Python image will work. Two walkthroughs follow:</p>
+<p>Strata ships a reference executor as the <code>strata-worker</code> console script. <strong>There is no supported-platform list.</strong> A worker is a plain HTTP service, and Strata holds no code for any particular host - <code># @worker</code> resolves to one of two backends, <code>local</code> or <code>executor</code>, and <code>executor</code> is simply a URL. Kubernetes, EC2, Cloud Run, a box under a desk and the two platforms below are all the same thing to it.</p>
+<p>The two walkthroughs that follow are worked examples chosen to bracket the tradeoff, not the options:</p>
 <table>
 <thead>
 <tr>
-<th>Platform</th>
+<th>Worked example</th>
 <th>Best for</th>
 <th>Cost model</th>
 </tr>
@@ -2464,6 +2465,12 @@
 </tr>
 </tbody>
 </table>
+<p>Two other routes are documented elsewhere on this page and are often the
+shorter path:</p>
+<ul>
+<li><strong>A machine you can SSH to</strong> - <a href="#run-cells-on-a-machine-you-can-ssh-to">one command</a>, no deploy, no account. Usually the fastest way to reach a GPU you already have.</li>
+<li><strong>Machines started per job</strong> - <a href="#worker-pools-a-different-layer">worker pools</a>, whose Docker and RunPod backends boot hardware on demand. A different layer, dispatched by a proxy rather than by the notebook.</li>
+</ul>
 <p>You can register many workers per notebook; each cell picks its target independently. Mixing Fly (cheap CPU) and Modal (on-demand GPU) is a common setup.</p>
 <h3 id="flyio-cpu-worker">Fly.io (CPU worker)<a class="headerlink" href="#flyio-cpu-worker" title="Permanent link">&para;</a></h3>
 <p><strong>Prerequisites:</strong></p>
