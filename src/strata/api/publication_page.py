@@ -89,9 +89,18 @@ def render_publication(
     artifact,
     lineage,
     content_type: str,
-    inline_png: str | None,
+    image_src: str | None,
+    bundle_filename: str | None = None,
 ) -> str:
-    """Render the public page for one published artifact."""
+    """Render the page for one published artifact.
+
+    ``bundle_filename`` switches it from *hosted* to *archival*: the same
+    document, but pointing at a file sitting next to it rather than at routes
+    on a server. That is the only difference between the two, and keeping it to
+    one branch is deliberate — a bundle that drifted from the live page would
+    make the archived copy a second, less trustworthy account of the same
+    result.
+    """
     title = publication.title or f"{artifact.id}@v={artifact.version}"
 
     if publication.revoked_at is not None:
@@ -112,7 +121,8 @@ def render_publication(
 
     parts: list[str] = [
         f"<h1>{escape(title)}</h1>",
-        f"<p class='sub'>Published {escape(_when(publication.published_at))}"
+        f"<p class='sub'>{'Archived' if bundle_filename else 'Published'} "
+        f"{escape(_when(publication.published_at))}"
         + (f" by {escape(publication.published_by)}" if publication.published_by else "")
         + ".</p>",
         "<div class='banner'><strong>What this page shows.</strong> The code, "
@@ -121,13 +131,14 @@ def render_publication(
         "was reproduced — that needs a re-run, and randomness, thread counts, "
         "floating-point order and unavailable input data each break it. The "
         "integrity digest below shows the bytes have not changed since "
-        "publication; it cannot show they were honestly produced.</div>",
+        + ("this bundle was made" if bundle_filename else "publication")
+        + "; it cannot show they were honestly produced.</div>",
     ]
 
-    if inline_png:
+    if image_src:
         parts.append(
             "<h2>Result</h2><figure class='card'>"
-            f"<img alt='The published artifact' src='{escape(inline_png)}'></figure>"
+            f"<img alt='The result' src='{escape(image_src)}'></figure>"
         )
 
     parts.append("<h2>This artifact</h2><div class='card'>")
@@ -138,7 +149,12 @@ def render_publication(
                 ("Content type", escape(content_type) if content_type else ""),
                 ("Produced", escape(_when(artifact.created_at))),
                 (
-                    "Author",
+                    # "Computed by", not "Author": the page header already
+                    # names whoever published it, and the two are different
+                    # facts. Sitting one under the other as "Published by F.
+                    # Li" and "Author: not recorded" read as a contradiction
+                    # rather than as the distinction it is.
+                    "Computed by",
                     escape(artifact.principal)
                     if artifact.principal
                     else "<span class='note'>not recorded — a local run has "
@@ -194,18 +210,114 @@ def render_publication(
             parts.append(_source_block(node.source))
         parts.append("</div>")
 
+    parts.append("<h2>Checking it yourself</h2><div class='card'>")
+    if bundle_filename is not None:
+        # A bundle has no server behind it, so the check is one the reader runs
+        # themselves. Naming the command matters more than it looks: an
+        # archived page that says "verified" and offers no way to test the
+        # claim is asking to be taken on faith, which is the opposite of why
+        # the bundle exists.
+        parts.append(
+            f"<p>The bytes are the file <code>{escape(bundle_filename)}</code> "
+            "beside this page. Check it against the digest recorded when this "
+            "bundle was made:</p>"
+            f"<pre>sha256sum {escape(bundle_filename)}\n"
+            f"# {escape(publication.content_sha256 or 'no digest recorded')}</pre>"
+        )
+    else:
+        parts.append(
+            f"<p>The bytes are at <a href='/p/{escape(publication.token)}/data'>"
+            f"/p/{escape(publication.token)}/data</a>. "
+            f"<a href='/p/{escape(publication.token)}/verify'>Verify</a> re-reads "
+            "them and compares against the digest recorded at publication.</p>"
+        )
     parts.append(
-        "<h2>Checking it yourself</h2><div class='card'>"
-        f"<p>The bytes are at <a href='/p/{escape(publication.token)}/data'>"
-        f"/p/{escape(publication.token)}/data</a>. "
-        f"<a href='/p/{escape(publication.token)}/verify'>Verify</a> re-reads "
-        "them and compares against the digest recorded at publication.</p>"
         "<p class='note'>Re-running the computation is a separate matter, and "
         "one only you can do: the source and environment above are what it "
         "would take.</p></div>"
     )
 
     return _document(title=title, body="".join(parts))
+
+
+def content_type_of(artifact) -> str:
+    """The stored ``content_type`` param, or '' when the spec says nothing.
+
+    Shared by the hosted page and the archival bundle. Two copies decided the
+    bundle's filename and the page's "Content type" row independently, which is
+    the same drift ``build_record`` exists to prevent.
+    """
+    import json
+
+    if not artifact.transform_spec:
+        return ""
+    try:
+        params = json.loads(artifact.transform_spec).get("params", {})
+    except (json.JSONDecodeError, ValueError):
+        return ""
+    return str(params.get("content_type") or "") if isinstance(params, dict) else ""
+
+
+CLAIMS = {
+    "transparency": "Source, inputs and environment as recorded at execution.",
+    "integrity": (
+        "content_sha256 is the digest of the bytes at publication. It shows "
+        "they have not changed since; it does not show they were honestly "
+        "produced."
+    ),
+    "reproduction": "Not claimed. Re-running is left to the reader.",
+}
+
+
+def build_record(
+    *, publication, artifact, lineage, content_type: str, archived: bool = False
+) -> dict:
+    """The machine-readable account behind the page.
+
+    Shared by the hosted JSON route and the archival bundle's manifest so the
+    two cannot drift. A bundle that described a result differently from the
+    live page would be a second, quieter account of the same thing — exactly
+    what a reader checking a citation should never have to reconcile.
+
+    The *event* block is the one part that legitimately differs. Archiving is
+    not publishing — no link is minted and nothing is served — so a bundle
+    reporting a ``published_at`` would be dating an event that never happened,
+    to a machine consumer of a deposit that has no way to know better.
+    """
+    event = (
+        {
+            "archived_at": publication.published_at,
+            "archived_by": publication.published_by,
+        }
+        if archived
+        else {
+            "token": publication.token or None,
+            "published_at": publication.published_at,
+            "published_by": publication.published_by,
+            "revoked_at": publication.revoked_at,
+        }
+    )
+    return {
+        ("archive" if archived else "publication"): {
+            "artifact_id": publication.artifact_id,
+            "version": publication.version,
+            "title": publication.title,
+            **event,
+        },
+        "artifact": {
+            "artifact_id": artifact.id,
+            "version": artifact.version,
+            "provenance_hash": artifact.provenance_hash,
+            "content_type": content_type,
+            "created_at": artifact.created_at,
+            "byte_size": artifact.byte_size,
+            "row_count": artifact.row_count,
+            "principal": artifact.principal,
+        },
+        "content_sha256": publication.content_sha256,
+        "lineage": lineage.model_dump(),
+        "claims": CLAIMS,
+    }
 
 
 def _document(*, title: str, body: str) -> str:

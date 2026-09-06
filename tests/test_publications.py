@@ -186,7 +186,7 @@ class TestPublicationPage:
             artifact=figure,
             lineage=lineage,
             content_type="image/png",
-            inline_png=None,
+            image_src=None,
         )
 
     def test_cell_source_is_escaped(self, store):
@@ -223,6 +223,20 @@ class TestPublicationPage:
 
         assert "verified" not in html.lower()
         assert "does <em>not</em> claim the result was reproduced" in html
+
+    def test_it_distinguishes_who_published_from_who_computed(self, store):
+        """Two different facts, and stacking them confused the page.
+
+        The byline names whoever published; the table row names whoever
+        produced the bytes, which for a local run is nobody the store can
+        attest to. Labelling the second "Author" put "Published by X" directly
+        above "Author: not recorded", which reads as a contradiction rather
+        than the distinction it is.
+        """
+        html = self._render(store, source="rows = []")
+
+        assert "Computed by" in html
+        assert ">Author<" not in html
 
     def test_a_withdrawn_publication_says_so_rather_than_404ing(self, store):
         """A reader chasing a footnote deserves 'withdrawn', not what reads as

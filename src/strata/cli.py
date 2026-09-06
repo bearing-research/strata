@@ -299,6 +299,15 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_store_args(publish_parser)
     publish_parser.add_argument("--title", default=None, help="Human label for the page")
     publish_parser.add_argument(
+        "--author",
+        default=None,
+        help=(
+            "Who to credit on the page. A local run has no authenticated "
+            "identity, so without this the page says the author was not "
+            "recorded rather than showing a blank."
+        ),
+    )
+    publish_parser.add_argument(
         "--max-depth", type=int, default=10, help="Recursion limit when listing the chain"
     )
     _add_tenant_arg(publish_parser)
@@ -317,6 +326,33 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_artifact_dir_arg(unpublish_parser)
     _add_tenant_arg(unpublish_parser)
     unpublish_parser.set_defaults(func=_dispatch_artifact("cmd_unpublish"))
+
+    archive_parser = artifact_sub.add_parser(
+        "archive",
+        help="Write a self-contained bundle: page, bytes, manifest, README",
+        description=(
+            "Write a directory that opens with no server -- the page, the "
+            "bytes, and a machine-readable manifest. A hosted link resolves "
+            "for as long as the server does, and a URL printed in a paper "
+            "outlives most servers; this is the copy for a Zenodo or OSF "
+            "deposit. <ref> as in `show`."
+        ),
+    )
+    archive_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
+    archive_parser.add_argument("--to", required=True, help="Directory to write")
+    _add_artifact_dir_arg(archive_parser)
+    archive_parser.add_argument("--title", default=None, help="Human label for the page")
+    archive_parser.add_argument("--author", default=None, help="Who to credit on the page")
+    archive_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Write into a non-empty directory (may leave a stale payload beside the new one)",
+    )
+    archive_parser.add_argument(
+        "--max-depth", type=int, default=10, help="Recursion limit when walking the chain"
+    )
+    _add_tenant_arg(archive_parser)
+    archive_parser.set_defaults(func=_dispatch_artifact("cmd_archive"))
 
     pull_parser = artifact_sub.add_parser(
         "pull",
