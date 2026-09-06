@@ -1035,6 +1035,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#where-the-artifact-ends-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the artifact ends up
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-the-page-claims-and-what-it-does-not" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2054,6 +2065,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#where-the-artifact-ends-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the artifact ends up
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#what-the-page-claims-and-what-it-does-not" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2160,6 +2182,21 @@ install, no notebook.</p>
 stored under its own id with a provenance hash binding it to its inputs, its
 source, and the environment it ran in. Publishing does not create any of that.
 It grants read access to one version of it.</p>
+<h2 id="where-the-artifact-ends-up">Where the artifact ends up<a class="headerlink" href="#where-the-artifact-ends-up" title="Permanent link">&para;</a></h2>
+<p>A notebook writes its cell outputs to its own <code>.strata/artifacts</code>; the server
+serves whatever <code>artifact_dir</code> it was started with, <code>~/.strata/artifacts</code> by
+default. Publishing therefore copies the artifact — and every step behind it,
+since the page shows their code — into the store the server serves, and mints
+the token there. The command says how many it moved:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Copied 4 artifacts into the server&#39;s store so the link resolves.
+</code></pre></div>
+<p>The copies keep their original ids, versions, provenance hashes, authors and
+timestamps. An artifact that moves into a served store has to keep saying who
+computed it and when; publishing is not a re-computation and must not read like
+one.</p>
+<p><code>--here</code> skips the copy and publishes into whatever <code>--artifact-dir</code> names.
+That link only resolves if the server serves that same directory — useful when
+it does, misleading when it does not.</p>
 <h2 id="what-the-page-claims-and-what-it-does-not">What the page claims, and what it does not<a class="headerlink" href="#what-the-page-claims-and-what-it-does-not" title="Permanent link">&para;</a></h2>
 <p>This matters more here than in most features, because the reader is being
 asked to trust what they see.</p>
@@ -2190,7 +2227,7 @@ the link will expose before you use it.</p>
 <p>Upstream <strong>data</strong> is never served. The page describes the steps; only the
 published artifact's own bytes are downloadable, at <code>/p/&lt;token&gt;/data</code>.</p>
 <h2 id="withdrawing">Withdrawing<a class="headerlink" href="#withdrawing" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>unpublish<span class="w"> </span>&lt;token&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>unpublish<span class="w"> </span>&lt;token&gt;
 </code></pre></div>
 <p>The link then reports that it was withdrawn, rather than 404ing — a reader
 chasing a footnote deserves that answer rather than one that reads like a typo.
@@ -2199,22 +2236,22 @@ closed instead of quietly starting to resolve to something else.</p>
 <h2 id="archiving-the-copy-that-needs-no-server">Archiving: the copy that needs no server<a class="headerlink" href="#archiving-the-copy-that-needs-no-server" title="Permanent link">&para;</a></h2>
 <p>A hosted link resolves for as long as your server does. A URL printed in a
 paper outlives most servers, so there is a second form:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>archive<span class="w"> </span>nb_paper_cell_c2_var___display__0<span class="w"> </span><span class="se">\</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--to<span class="w"> </span>./figure3-bundle<span class="w"> </span>--title<span class="w"> </span><span class="s2">&quot;Figure 3&quot;</span><span class="w"> </span>--author<span class="w"> </span><span class="s2">&quot;F. Li&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>archive<span class="w"> </span>nb_paper_cell_c2_var___display__0<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span>--to<span class="w"> </span>./figure3-bundle<span class="w"> </span>--title<span class="w"> </span><span class="s2">&quot;Figure 3&quot;</span><span class="w"> </span>--author<span class="w"> </span><span class="s2">&quot;F. Li&quot;</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>figure3-bundle/
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>├── index.html      the page — opens in a browser, no server, no external requests
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>├── artifact.png    the bytes
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>├── manifest.json   the same record, machine-readable
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>└── README.md       what it is and how to check it
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>figure3-bundle/
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── index.html      the page — opens in a browser, no server, no external requests
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>├── artifact.png    the bytes
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>├── manifest.json   the same record, machine-readable
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>└── README.md       what it is and how to check it
 </code></pre></div>
 <p>Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.</p>
 <p>The page is the same document as the hosted one, with one difference: it points
 at the file beside it rather than at routes, and it tells the reader how to
 check the bytes themselves:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sha256sum artifact.png
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a># 6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sha256sum artifact.png
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a># 6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca
 </code></pre></div>
 <p>Archiving is not publishing. It grants nobody access to a running server and
 mints no link — it writes files you choose who to hand to.</p>
