@@ -1068,10 +1068,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#reachability" class="md-nav__link">
+  <a href="#archiving-the-copy-that-needs-no-server" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reachability
+        Archiving: the copy that needs no server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#crediting-an-author" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crediting an author
       
     </span>
   </a>
@@ -2076,10 +2087,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#reachability" class="md-nav__link">
+  <a href="#archiving-the-copy-that-needs-no-server" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reachability
+        Archiving: the copy that needs no server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#crediting-an-author" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Crediting an author
       
     </span>
   </a>
@@ -2174,12 +2196,39 @@ published artifact's own bytes are downloadable, at <code>/p/&lt;token&gt;/data<
 chasing a footnote deserves that answer rather than one that reads like a typo.
 The token is never reissued for other content, so a URL already in print fails
 closed instead of quietly starting to resolve to something else.</p>
-<h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
-<p>The URL is on your Strata server, so it resolves for as long as that server is
-reachable to the reader. For a lab or team server that is usually what you
-want. A link printed in a published paper has a longer life than most servers,
-and an archival export — a self-contained bundle suitable for Zenodo or OSF —
-is the honest answer to that; it is not built yet.</p>
+<h2 id="archiving-the-copy-that-needs-no-server">Archiving: the copy that needs no server<a class="headerlink" href="#archiving-the-copy-that-needs-no-server" title="Permanent link">&para;</a></h2>
+<p>A hosted link resolves for as long as your server does. A URL printed in a
+paper outlives most servers, so there is a second form:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>archive<span class="w"> </span>nb_paper_cell_c2_var___display__0<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>--to<span class="w"> </span>./figure3-bundle<span class="w"> </span>--title<span class="w"> </span><span class="s2">&quot;Figure 3&quot;</span><span class="w"> </span>--author<span class="w"> </span><span class="s2">&quot;F. Li&quot;</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>figure3-bundle/
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>├── index.html      the page — opens in a browser, no server, no external requests
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>├── artifact.png    the bytes
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>├── manifest.json   the same record, machine-readable
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>└── README.md       what it is and how to check it
+</code></pre></div>
+<p>Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
+retention promise then stands behind the link instead of yours.</p>
+<p>The page is the same document as the hosted one, with one difference: it points
+at the file beside it rather than at routes, and it tells the reader how to
+check the bytes themselves:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>sha256sum artifact.png
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a># 6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca
+</code></pre></div>
+<p>Archiving is not publishing. It grants nobody access to a running server and
+mints no link — it writes files you choose who to hand to.</p>
+<h2 id="crediting-an-author">Crediting an author<a class="headerlink" href="#crediting-an-author" title="Permanent link">&para;</a></h2>
+<p>The page carries two different facts, and they come from different places.</p>
+<p><strong>Who published or archived it</strong> is the byline under the title. <code>--author</code> sets
+it on either command; in service mode a publish through the API uses the
+authenticated principal instead. Omit it and there is simply no byline.</p>
+<p><strong>Who computed it</strong> is the <em>Computed by</em> row, and it comes from the artifact
+itself — recorded when the cell ran, not when you published. A local run has no
+authenticated identity to record, so that row usually reads "not recorded".
+<code>--author</code> does not change it: crediting yourself for publishing a result is
+not the same as the store attesting who produced it, and the page keeps them
+apart deliberately.</p>
 <h2 id="http">HTTP<a class="headerlink" href="#http" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
