@@ -30,10 +30,11 @@ import json
 from html import escape
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from strata.api.badge import badge_for
 from strata.api.dependencies import (
     CurrentPrincipal,
     CurrentTenant,
@@ -229,6 +230,21 @@ async def publication_page(token: str, store: ReadStore, http_request: Request):
             image_src=inline_png,
             oembed_url=f"{base}/oembed?url={page_url}",
             json_ld=json.dumps(crate),
+            # Nobody assembles a linked badge by hand, and a snippet that has
+            # to be reconstructed from three route names is a snippet nobody
+            # uses.
+            share=[
+                (
+                    "A badge for a README, linking here:",
+                    f"[![provenance]({base}/p/{token}/badge.svg)]({base}/p/{token})",
+                ),
+                (
+                    "The card, embedded in a page:",
+                    f'<iframe src="{base}/p/{token}/embed" width="480" '
+                    'height="420" frameborder="0"></iframe>',
+                ),
+                ("The chain, as RO-Crate JSON-LD:", f"{base}/p/{token}/ro-crate"),
+            ],
         )
     )
 
@@ -474,4 +490,34 @@ async def publication_ro_crate(token: str, store: ReadStore, http_request: Reque
             include_descriptor=True,
         ),
         media_type="application/ld+json",
+    )
+
+
+@router.get("/p/{token}/badge.svg")
+async def publication_badge(token: str, store: ReadStore):
+    """A README-sized pill reporting the size of the recorded chain.
+
+    Served rather than snapshotted so a withdrawn publication stops asserting.
+    Note that GitHub proxies badge images through its own cache, so a
+    withdrawal can take a while to show — a badge is a pointer, never a
+    revocation mechanism, and the docs say so.
+    """
+    publication, artifact = _load_published(store, token, require_active=False)
+    lineage = ArtifactService().build_lineage(
+        store,
+        artifact=artifact,
+        artifact_id=publication.artifact_id,
+        version=publication.version,
+        tenant_filter=None,
+        max_depth=25,
+    )
+    root = next((node for node in lineage.nodes if node.artifact_id == artifact.id), None)
+    steps = sum(1 for node in lineage.nodes if node is not root)
+
+    return Response(
+        content=badge_for(publication=publication, step_count=steps),
+        media_type="image/svg+xml",
+        # Short, because the badge is the only surface that can go stale in
+        # someone else's page after a withdrawal.
+        headers={"Cache-Control": "public, max-age=300"},
     )

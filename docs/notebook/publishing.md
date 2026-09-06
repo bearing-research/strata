@@ -104,6 +104,28 @@ chasing a footnote deserves that answer rather than one that reads like a typo.
 The token is never reissued for other content, so a URL already in print fails
 closed instead of quietly starting to resolve to something else.
 
+## A badge for a README
+
+```markdown
+[![provenance](https://your-strata/p/<token>/badge.svg)](https://your-strata/p/<token>)
+```
+
+It reports the size of the recorded chain — `provenance · 4 steps` — and links
+to the page. It says nothing about whether the result is right, and it is
+deliberately not green: in badge convention green means "passing", and
+borrowing that would smuggle back the claim the rest of this is careful to
+avoid.
+
+A withdrawn publication still renders a badge, reading `withdrawn`. A broken
+image tells a reader nothing except that something is wrong with the server.
+
+**A badge is a pointer, not a revocation mechanism.** GitHub proxies badge
+images through its own cache, so a withdrawal can take a while to show. The
+page and the bytes stop immediately; the pill in someone's README lags.
+
+The page carries ready-made snippets for the badge, the iframe and the RO-Crate
+URL, under *Putting it somewhere*.
+
 ## Machine-readable provenance
 
 The chain is also published as [RO-Crate](https://w3id.org/ro/crate/) JSON-LD,
@@ -213,6 +235,7 @@ apart deliberately.
 | `GET /p/{token}/embed` | **no** | The card, for an `<iframe>`. Framable from any origin. |
 | `GET /oembed?url=…` | **no** | oEmbed provider, so a pasted link unfurls. |
 | `GET /p/{token}/ro-crate` | **no** | The chain as RO-Crate JSON-LD. |
+| `GET /p/{token}/badge.svg` | **no** | A README pill reporting the chain size. |
 | `GET /v1/publications/{token}` | **no** | The same record as JSON. |
 
 The unauthenticated routes are exempt from the auth and tenant middleware by
