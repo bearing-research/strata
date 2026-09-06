@@ -2160,10 +2160,15 @@
 <p class="admonition-title">This page is the <code>strata-pool</code> package README</p>
 <p>It is included verbatim from <code>packages/strata-pool/README.md</code>, which is
 also the package's PyPI landing page. One source, so the two cannot drift.</p>
-<p>The pool is a <strong>separate package</strong> — <code>pip install strata-pool</code>. The
-notebook never imports it; a proxy composes the two. For long-lived
-workers you start and manage yourself, see
-<a href="../workers/">Distributed Workers</a> instead.</p>
+<p>The pool is a <strong>separate package</strong> — <code>pip install strata-pool</code>.</p>
+<p>It sits at a <strong>different layer</strong> from the workers a notebook dispatches to:
+nothing in <code>strata</code> imports it, and <code># @worker</code> cannot name a pool machine.
+A proxy above both composes them, checking the artifact store first and
+submitting to the pool only on a miss. Machines run the same
+<code>strata-worker</code> binary either way.</p>
+<p>If what you want is hardware you keep running and point cells at, see
+<a href="../workers/#worker-pools-a-different-layer">Distributed Workers</a>, which
+compares the two side by side.</p>
 </div>
 <p>Worker pool for dispatching Strata jobs to ephemeral machines. This is the
 bring-your-own-hardware path: it manages machines <em>you</em> own. It is complete and
