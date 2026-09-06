@@ -7,9 +7,23 @@ exhaustive commit history.
 
 The authoritative copy of this file lives at [`CHANGELOG.md`](https://github.com/bearing-research/strata/blob/main/CHANGELOG.md) in the repo root; this docs page mirrors it. Maintainers: keep the two in sync when editing.
 
-## Unreleased
+## 0.7.0 - 2026-09-06
 
-Three things arrived together, and each one is about work you no longer have to
+A result can now leave the notebook without leaving its history behind. **A
+figure gets a URL**: open it and you see the plot, the code that produced it,
+and the code and environment of every step behind it — no account, no install.
+Or **a self-contained bundle** to deposit with Zenodo or OSF, because a link
+printed in a paper outlives most servers.
+
+What that page claims is deliberately narrow, and it says so in words rather
+than showing a badge. It shows what was recorded when the bytes were produced,
+and that they have not changed since. It does not claim the result was
+reproduced — that needs a re-run, and random seeds, thread counts,
+floating-point order and unavailable input data each break it. A green check
+would be read as "someone reproduced this", and a badge that can be wrong is
+worse than no badge.
+
+Three more things arrived alongside it, each about work you no longer have to
 do twice. **Service mode runs on Postgres**, so the artifact store is no longer
 one node's SQLite file. **A worker pool** starts machines on demand, holds them
 for a tenant, and stops paying when the work finishes. And the **team cache**
