@@ -326,7 +326,7 @@ def cmd_lineage(args: argparse.Namespace) -> int:
     if artifact is None:
         return 1
 
-    tree = _walk_lineage(store, artifact, max_depth=args.max_depth)
+    tree = _walk_lineage(store, artifact, max_depth=getattr(args, "max_depth", 10))
     if args.format == "json":
         print(json.dumps(tree, indent=2))
     else:
@@ -339,6 +339,64 @@ def cmd_lineage(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _server_store() -> ArtifactStore | None:
+    """The store the running server serves from, or ``None`` if unresolvable."""
+    from strata.config import StrataConfig
+
+    artifact_dir = StrataConfig.load().artifact_dir
+    return ArtifactStore(artifact_dir) if artifact_dir else None
+
+
+def _copy_for_publication(
+    source: ArtifactStore, target: ArtifactStore, artifact: ArtifactVersion, max_depth: int
+) -> int:
+    """Copy an artifact and everything behind it into the served store.
+
+    Notebook cells write to the notebook's own ``.strata/artifacts``; the server
+    serves whatever ``artifact_dir`` it was configured with, which by default is
+    ``~/.strata/artifacts``. Publishing a figure therefore minted a token in a
+    store the page route never reads, and the link 404'd — the primary case the
+    feature exists for, working only when the two happened to be the same
+    directory.
+
+    The ancestry goes too, and has to: the page shows the code and environment
+    of every upstream step, so copying the artifact alone would publish a
+    result whose chain resolves to nothing.
+
+    Ancestors first, so a descendant is never briefly readable with edges
+    pointing at rows that have not landed. Returns how many artifacts were
+    newly written.
+    """
+    from strata.services.artifact import ArtifactService
+
+    lineage = ArtifactService().build_lineage(
+        source,
+        artifact=artifact,
+        artifact_id=artifact.id,
+        version=artifact.version,
+        tenant_filter=None,
+        max_depth=max_depth,
+    )
+    copied = 0
+    for node in reversed(lineage.nodes):
+        # Table nodes are leaves naming an external source, not artifacts this
+        # store holds; there is nothing to copy and nothing to serve.
+        if node.type != "artifact" or node.artifact_id is None or node.version is None:
+            continue
+
+        record = source.get_artifact(node.artifact_id, node.version)
+        if record is None:
+            continue
+        reader_cm = source.open_blob_reader(node.artifact_id, node.version)
+        blob = None
+        if reader_cm is not None:
+            with reader_cm as reader:
+                blob = reader.read()
+        if target.import_artifact(record, blob):
+            copied += 1
+    return copied
+
+
 def cmd_publish(args: argparse.Namespace) -> int:
     store = _open_store(args.artifact_dir)
     if store is None:
@@ -347,8 +405,21 @@ def cmd_publish(args: argparse.Namespace) -> int:
     if artifact is None:
         return 1
 
+    # Publish into the store the server actually serves, copying the artifact
+    # and its chain across when they differ. Minting the token in the notebook's
+    # own store produced a link the page route could not resolve.
+    target = store
+    copied = 0
+    if not getattr(args, "here", False):
+        server_store = _server_store()
+        if server_store is not None and server_store.db_path != store.db_path:
+            copied = _copy_for_publication(
+                store, server_store, artifact, getattr(args, "max_depth", 10)
+            )
+            target = server_store
+
     try:
-        publication = store.publish_artifact(
+        publication = target.publish_artifact(
             artifact.id,
             artifact.version,
             tenant=getattr(args, "tenant", None),
@@ -375,12 +446,17 @@ def cmd_publish(args: argparse.Namespace) -> int:
             f"(which mints a new token)."
         )
 
+    if copied:
+        print(
+            f"Copied {copied} artifact{'s' if copied != 1 else ''} into the "
+            f"server's store so the link resolves."
+        )
     print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
     print()
     print("Anyone with that link can read the artifact, its source, and the")
     print("source and environment of every step behind it. That is the point,")
     print("and it is worth knowing before sending the link:")
-    for step in _published_steps(store, artifact, args.max_depth):
+    for step in _published_steps(store, artifact, getattr(args, "max_depth", 10)):
         print(f"  - {step}")
     print()
     print(f"Withdraw it with: strata artifact unpublish {publication.token}")
@@ -388,15 +464,29 @@ def cmd_publish(args: argparse.Namespace) -> int:
 
 
 def _published_steps(store: ArtifactStore, artifact: ArtifactVersion, max_depth: int) -> list[str]:
-    """One line per step whose code and environment the page will expose."""
+    """One line per step whose code and environment the page will expose.
+
+    Deduplicated, and normalized to ``id@v=N``. ``_walk_lineage`` renders a
+    *tree*, so a step two cells depend on appears twice — once expanded, and
+    once as a bare ``strata://artifact/...`` leaf where the recursion stops on
+    an already-seen node. Printed raw, a diamond made the disclosure list the
+    same step under two different names and overstate how much was being
+    exposed. This is the text someone reads to decide whether to send a link,
+    so it has to be the actual set.
+    """
     tree = _walk_lineage(store, artifact, max_depth=max_depth)
     steps: list[str] = []
 
+    def _add(label: str) -> None:
+        if label and label not in steps:
+            steps.append(label)
+
     def _walk(node: dict) -> None:
         if "artifact_id" in node:
-            steps.append(f"{node['artifact_id']}@v={node['version']}")
+            _add(f"{node['artifact_id']}@v={node['version']}")
         else:
-            steps.append(str(node.get("uri", "")))
+            uri = str(node.get("uri", ""))
+            _add(uri.removeprefix("strata://artifact/"))
         for child in node.get("inputs", []):
             _walk(child)
 

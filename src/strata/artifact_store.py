@@ -796,6 +796,67 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    def import_artifact(self, record: ArtifactVersion, blob: bytes | None) -> bool:
+        """Copy an artifact from another store, keeping its id *and* version.
+
+        Returns False when this store already holds that exact ``id@v=N``, so a
+        repeated import is a no-op rather than a duplicate or an error.
+
+        The preserved version is the whole point. Lineage edges are recorded as
+        ``id@v=N`` strings, so a copy that let the destination assign a fresh
+        version would land the ancestors under numbers the descendants' edges
+        do not name — an imported graph that resolves to nothing. ``create_``
+        ``artifact`` takes ``MAX(version)+1`` by design and cannot be used here.
+
+        Deliberately not a merge: the row is written as it stands in the source,
+        including ``provenance_hash``, ``principal`` and ``created_at``. An
+        artifact copied into a served store has to keep saying who computed it
+        and when, or publishing would quietly relabel someone else's work as
+        freshly made here.
+        """
+        conn = self._get_connection()
+        try:
+            self._dialect.begin_write(conn, record.id)
+            existing = conn.execute(
+                "SELECT 1 FROM artifact_versions WHERE id = ? AND version = ?",
+                (record.id, record.version),
+            ).fetchone()
+            if existing is not None:
+                conn.commit()
+                return False
+
+            conn.execute(
+                """
+                INSERT INTO artifact_versions
+                    (id, version, state, provenance_hash, schema_json, row_count,
+                     byte_size, created_at, transform_spec, input_versions,
+                     tenant, principal)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.id,
+                    record.version,
+                    record.state,
+                    record.provenance_hash,
+                    record.schema_json,
+                    record.row_count,
+                    record.byte_size,
+                    record.created_at,
+                    record.transform_spec,
+                    record.input_versions,
+                    record.tenant if record.tenant is not None else "",
+                    record.principal,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        if blob is not None:
+            with self.open_blob_writer(record.id, record.version) as writer:
+                writer.write(blob)
+        return True
+
     def finalize_artifact(
         self,
         artifact_id: str,

@@ -211,6 +211,64 @@ class TestPublicationPage:
         assert "plt.plot(rows)" in html, "the artifact's own source"
         assert "rows = [1, 2, 3]" in html, "the upstream step's source"
 
+    def test_sibling_variables_from_one_cell_show_their_code_once(self, store):
+        """A cell defining several consumed variables contributes one ancestor
+        each, all carrying that cell's source.
+
+        Printed straight, a cell defining five variables repeats its code five
+        times on the page, which reads as a rendering fault rather than as five
+        artifacts from one step.
+        """
+        from strata.api.publication_page import render_publication
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+        from strata.services.artifact import ArtifactService
+
+        manager = NotebookArtifactManager("paper", artifact_dir=store.artifact_dir)
+        shared_source = "dose = load()\nresponse = measure(dose)"
+        refs = {}
+        for index, var in enumerate(("dose", "response")):
+            produced = manager.store_cell_output(
+                cell_id="load",
+                variable_name=var,
+                blob_data=b"[]",
+                content_type="json/object",
+                provenance_hash=str(index) * 64,
+                input_versions={},
+                source=shared_source,
+            )
+            ref = f"{produced.id}@v={produced.version}"
+            refs[f"strata://artifact/{ref}"] = ref
+
+        figure = manager.store_cell_output(
+            cell_id="figure",
+            variable_name="__display__0",
+            blob_data=b"PNG",
+            content_type="image/png",
+            provenance_hash="b" * 64,
+            input_versions=refs,
+            source="plt.plot(dose, response)",
+        )
+        publication = manager.artifact_store.publish_artifact(figure.id, figure.version)
+        lineage = ArtifactService().build_lineage(
+            manager.artifact_store,
+            artifact=figure,
+            artifact_id=figure.id,
+            version=figure.version,
+            tenant_filter=None,
+            max_depth=10,
+        )
+
+        html = render_publication(
+            publication=publication,
+            artifact=figure,
+            lineage=lineage,
+            content_type="image/png",
+            image_src=None,
+        )
+
+        assert html.count("response = measure(dose)") == 1, "the shared source was repeated"
+        assert "Produced by the same cell as" in html
+
     def test_it_never_claims_the_result_was_verified_or_reproduced(self, store):
         """A green check reads as 'someone reproduced this' to a referee.
 
@@ -337,3 +395,112 @@ class TestPublicRoutesEndToEnd:
         base_url, _, _ = published_server
 
         assert httpx.get(f"{base_url}/p/nosuchtoken", timeout=10).status_code == 404
+
+
+class TestImportAcrossStores:
+    """Copying an artifact into the store that will serve it.
+
+    Notebook cells write to the notebook's own ``.strata/artifacts``; the server
+    serves whatever ``artifact_dir`` it was configured with. Publishing minted a
+    token in a store the page route never reads, so the link 404'd — the primary
+    case the feature exists for, working only when the two directories happened
+    to coincide.
+    """
+
+    def test_import_preserves_the_version(self, store, tmp_path):
+        """Lineage edges are ``id@v=N`` strings.
+
+        A copy that let the destination assign a fresh version would land
+        ancestors under numbers the descendants' edges do not name, producing an
+        imported graph that resolves to nothing.
+        """
+        other = ArtifactStore(tmp_path / "other")
+        _ready_artifact(other, "pad", b"a")
+        _ready_artifact(other, "pad", b"b")  # so the next id would not be v=1
+
+        version = _ready_artifact(store, "fig", b"x")
+        record = store.get_artifact("fig", version)
+
+        assert other.import_artifact(record, b"x") is True
+
+        imported = other.get_artifact("fig", version)
+        assert imported is not None
+        assert imported.version == record.version
+        assert imported.provenance_hash == record.provenance_hash
+
+    def test_import_is_idempotent(self, store, tmp_path):
+        other = ArtifactStore(tmp_path / "other")
+        version = _ready_artifact(store, "fig", b"x")
+        record = store.get_artifact("fig", version)
+
+        assert other.import_artifact(record, b"x") is True
+        assert other.import_artifact(record, b"x") is False
+
+    def test_publishing_copies_the_chain_into_the_served_store(self, store, tmp_path, monkeypatch):
+        """The end-to-end fix: a token minted here resolves over there.
+
+        The ancestry has to travel too — the page shows the code and
+        environment of every upstream step, so copying the artifact alone would
+        publish a result whose chain resolves to nothing.
+        """
+        from strata.artifact_cli import cmd_publish
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+        from strata.services.artifact import ArtifactService
+
+        notebook_store = NotebookArtifactManager("nb", artifact_dir=tmp_path / "notebook")
+        upstream = notebook_store.store_cell_output(
+            cell_id="c1",
+            variable_name="rows",
+            blob_data=b"[1]",
+            content_type="json/object",
+            provenance_hash="a" * 64,
+            input_versions={},
+            source="rows = [1]",
+        )
+        ref = f"{upstream.id}@v={upstream.version}"
+        figure = notebook_store.store_cell_output(
+            cell_id="c2",
+            variable_name="__display__0",
+            blob_data=b"PNG",
+            content_type="image/png",
+            provenance_hash="b" * 64,
+            input_versions={f"strata://artifact/{ref}": ref},
+            source="plt.plot(rows)",
+        )
+
+        served = ArtifactStore(tmp_path / "served")
+        monkeypatch.setattr("strata.artifact_cli._server_store", lambda: served)
+
+        import argparse
+
+        rc = cmd_publish(
+            argparse.Namespace(
+                ref=figure.id,
+                artifact_dir=str(tmp_path / "notebook"),
+                format="human",
+                title=None,
+                author=None,
+                here=False,
+                max_depth=10,
+            )
+        )
+
+        assert rc == 0
+        published = served.list_publications()
+        assert len(published) == 1, "the token must be minted in the store that serves it"
+
+        # And the chain came with it, resolvable from the served store alone.
+        copied = served.get_artifact(figure.id, figure.version)
+        assert copied is not None
+        lineage = ArtifactService().build_lineage(
+            served,
+            artifact=copied,
+            artifact_id=copied.id,
+            version=copied.version,
+            tenant_filter=None,
+            max_depth=10,
+        )
+        assert [n.artifact_id for n in lineage.nodes if n.type == "artifact"] == [
+            figure.id,
+            upstream.id,
+        ]

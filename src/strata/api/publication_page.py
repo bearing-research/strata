@@ -192,6 +192,11 @@ def render_publication(
             "<div class='card'><p class='note'>No recorded inputs. This step "
             "read nothing from another step in the same store.</p></div>"
         )
+    # A cell that produces several consumed variables contributes one ancestor
+    # per variable, each carrying that cell's source. Printed straight, a cell
+    # defining five variables repeats its code five times, which reads as a
+    # rendering fault rather than as five artifacts from one step.
+    shown_sources: dict[str, str] = {}
     for node in ancestors:
         parts.append("<div class='card step'>")
         parts.append(f"<h3>{_artifact_label(node)}</h3>")
@@ -207,7 +212,16 @@ def render_publication(
             )
         )
         if node.type == "artifact":
-            parts.append(_source_block(node.source))
+            first = shown_sources.get(node.source) if node.source else None
+            if first is not None:
+                parts.append(
+                    "<p class='note'>Produced by the same cell as "
+                    f"<code>{escape(first)}</code>, shown above.</p>"
+                )
+            else:
+                if node.source:
+                    shown_sources[node.source] = f"{node.artifact_id}@v={node.version}"
+                parts.append(_source_block(node.source))
         parts.append("</div>")
 
     parts.append("<h2>Checking it yourself</h2><div class='card'>")

@@ -28,6 +28,12 @@ names.
   chain it will expose before you send the link; `strata artifact unpublish`
   withdraws it, and the token is never reissued for other content. See
   [Publishing an artifact](docs/notebook/publishing.md).
+- **Publishing copies the artifact into the store that serves it.** A notebook
+  writes to its own `.strata/artifacts` while the server serves
+  `~/.strata/artifacts`, so a published link could 404 unless the two happened
+  to be the same directory. Publishing now moves the artifact and its whole
+  chain across, keeping their ids, versions, authors and timestamps, and says
+  how many it copied.
 - **Archive an artifact to a bundle that needs no server.** `strata artifact
   archive` writes a directory — the page, the bytes, a machine-readable
   manifest, and a README — that opens in a browser with no server and no

@@ -26,6 +26,27 @@ stored under its own id with a provenance hash binding it to its inputs, its
 source, and the environment it ran in. Publishing does not create any of that.
 It grants read access to one version of it.
 
+## Where the artifact ends up
+
+A notebook writes its cell outputs to its own `.strata/artifacts`; the server
+serves whatever `artifact_dir` it was started with, `~/.strata/artifacts` by
+default. Publishing therefore copies the artifact — and every step behind it,
+since the page shows their code — into the store the server serves, and mints
+the token there. The command says how many it moved:
+
+```
+Copied 4 artifacts into the server's store so the link resolves.
+```
+
+The copies keep their original ids, versions, provenance hashes, authors and
+timestamps. An artifact that moves into a served store has to keep saying who
+computed it and when; publishing is not a re-computation and must not read like
+one.
+
+`--here` skips the copy and publishes into whatever `--artifact-dir` names.
+That link only resolves if the server serves that same directory — useful when
+it does, misleading when it does not.
+
 ## What the page claims, and what it does not
 
 This matters more here than in most features, because the reader is being
