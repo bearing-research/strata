@@ -1079,6 +1079,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#machine-readable-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Machine-readable provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#embedding-it-elsewhere" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2120,6 +2131,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#machine-readable-provenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Machine-readable provenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#embedding-it-elsewhere" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2262,6 +2284,23 @@ published artifact's own bytes are downloadable, at <code>/p/&lt;token&gt;/data<
 chasing a footnote deserves that answer rather than one that reads like a typo.
 The token is never reissued for other content, so a URL already in print fails
 closed instead of quietly starting to resolve to something else.</p>
+<h2 id="machine-readable-provenance">Machine-readable provenance<a class="headerlink" href="#machine-readable-provenance" title="Permanent link">&para;</a></h2>
+<p>The chain is also published as <a href="https://w3id.org/ro/crate/">RO-Crate</a> JSON-LD,
+which repositories and provenance tooling read directly:</p>
+<ul>
+<li>inline on the page, in a <code>application/ld+json</code> script block;</li>
+<li>at <code>/p/{token}/ro-crate</code>, so a harvester need not scrape the page;</li>
+<li>as <code>ro-crate-metadata.json</code> in an archived bundle, which is what turns a
+  Zenodo deposit from a folder someone can read into something the archive can
+  index.</li>
+</ul>
+<p>The graph maps each step to a <code>CreateAction</code> whose <code>instrument</code> is the cell
+source as <code>SoftwareSourceCode</code>, its <code>object</code> the inputs and its <code>result</code> the
+output — the shape PROV-O and RO-Crate both expect for "this code, on these
+inputs, made this".</p>
+<p>Upstream steps are <code>CreativeWork</code> entities, <strong>not</strong> files, and they are not
+listed under <code>hasPart</code>. Their bytes are deliberately not in the crate, and
+declaring files that are not there is a claim no validator would catch.</p>
 <h2 id="embedding-it-elsewhere">Embedding it elsewhere<a class="headerlink" href="#embedding-it-elsewhere" title="Permanent link">&para;</a></h2>
 <p>Paste the link into a wiki, CMS or note-taking tool that speaks oEmbed and it
 unfurls into a card: the figure, what it is, how many steps are behind it, and
@@ -2365,6 +2404,11 @@ apart deliberately.</p>
 <td><code>GET /oembed?url=…</code></td>
 <td><strong>no</strong></td>
 <td>oEmbed provider, so a pasted link unfurls.</td>
+</tr>
+<tr>
+<td><code>GET /p/{token}/ro-crate</code></td>
+<td><strong>no</strong></td>
+<td>The chain as RO-Crate JSON-LD.</td>
 </tr>
 <tr>
 <td><code>GET /v1/publications/{token}</code></td>

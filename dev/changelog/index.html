@@ -3183,6 +3183,12 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>The chain is published as RO-Crate JSON-LD.</strong> Inline on the page, at
+  <code>/p/{token}/ro-crate</code>, and as <code>ro-crate-metadata.json</code> in an archived
+  bundle — so a repository can index the provenance instead of only displaying
+  it. Each step is a <code>CreateAction</code> whose instrument is the cell source;
+  upstream steps are described but never declared as files the crate does not
+  contain.</li>
 <li><strong>A published artifact embeds elsewhere.</strong> Paste its link into a wiki or CMS
   that speaks oEmbed and it unfurls into a card — the figure, a one-line
   summary of the chain, and a link through to the full provenance — or take the
