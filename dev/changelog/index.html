@@ -1546,6 +1546,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../notebook/worker-pool/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Worker Pool
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../notebook/ai/" class="md-nav__link">
         
   
@@ -3099,6 +3127,14 @@ names.</p>
   not just a per-tenant one. Optional HTTP service via
   <code>pip install "strata-pool[server]"</code>. See
   <a href="../notebook/workers/">Distributed workers</a>.</li>
+<li><strong><code>strata-worker</code> is now a worker-pool worker.</strong> The pool dispatches to
+  <code>POST /execute</code>, which the worker did not serve — so a pool had no image to
+  drive, and the one the docs named did not exist. The worker now answers that
+  path (delegating to the same handler as <code>/v1/execute-manifest</code>, so the two
+  cannot validate differently), and <code>worker.Dockerfile</code> builds the image
+  the pool's examples reference. The payload is a build manifest: the worker
+  fetches its own inputs and uploads its own result, so job bytes never flow
+  through the pool. See <a href="../notebook/worker-pool/">Worker pool</a>.</li>
 <li><strong>The team cache: a cell served by a colleague's run.</strong> With
   <code>STRATA_NOTEBOOK_TEAM_CACHE_ENABLED=true</code>, a local cache miss asks the shared
   store whether anyone has already run this exact computation, and a cell that
