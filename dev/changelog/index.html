@@ -1574,6 +1574,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../notebook/publishing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Publishing an artifact
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../notebook/ai/" class="md-nav__link">
         
   
@@ -3106,6 +3134,17 @@ somebody chose to publish, but the expensive middle of a pipeline that nobody
 names.</p>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Publish an artifact so anyone with the link can check it.</strong> <code>strata artifact
+  publish</code> mints a URL that resolves to a page showing the result, the code that
+  produced it, and the code and environment of every step behind it — the thing
+  a figure in a paper needs to be checkable by a reader with no account and no
+  install. The page states what it checked in words rather than showing a badge:
+  it can prove the bytes have not changed since publication (a digest is
+  recorded then), and it says plainly that it does not claim the result was
+  reproduced. Publishing is explicit, per artifact version, and lists the whole
+  chain it will expose before you send the link; <code>strata artifact unpublish</code>
+  withdraws it, and the token is never reissued for other content. See
+  <a href="../notebook/publishing/">Publishing an artifact</a>.</li>
 <li><strong>The artifact store runs on Postgres.</strong> <code>STRATA_ARTIFACT_METADATA_DSN</code> points
   the store at a real database instead of a node-local SQLite file, which is what
   lets more than one server share it (needs the <code>postgres</code> extra). Connections are pooled
