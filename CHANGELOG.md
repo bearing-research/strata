@@ -17,6 +17,17 @@ names.
 
 ### Added
 
+- **Publish an artifact so anyone with the link can check it.** `strata artifact
+  publish` mints a URL that resolves to a page showing the result, the code that
+  produced it, and the code and environment of every step behind it — the thing
+  a figure in a paper needs to be checkable by a reader with no account and no
+  install. The page states what it checked in words rather than showing a badge:
+  it can prove the bytes have not changed since publication (a digest is
+  recorded then), and it says plainly that it does not claim the result was
+  reproduced. Publishing is explicit, per artifact version, and lists the whole
+  chain it will expose before you send the link; `strata artifact unpublish`
+  withdraws it, and the token is never reissued for other content. See
+  [Publishing an artifact](docs/notebook/publishing.md).
 - **The artifact store runs on Postgres.** `STRATA_ARTIFACT_METADATA_DSN` points
   the store at a real database instead of a node-local SQLite file, which is what
   lets more than one server share it (needs the `postgres` extra). Connections are pooled

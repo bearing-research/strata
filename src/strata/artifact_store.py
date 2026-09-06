@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,6 +82,47 @@ class ArtifactVersion:
     input_versions: str | None = None  # JSON: {"uri": "version_string", ...}
     tenant: str | None = None  # Tenant ID for multi-tenant isolation
     principal: str | None = None  # Principal ID that created this artifact
+
+
+@dataclass(frozen=True)
+class Publication:
+    """An opt-in public read grant for one artifact version.
+
+    Attributes:
+        token: URL-safe secret naming this publication. Unguessable, because
+            it is the only thing standing between an unauthenticated reader
+            and the artifact.
+        artifact_id: The published artifact.
+        version: The published version. Bound to the token permanently — a
+            citation whose target could be repointed would be worthless.
+        tenant: Tenant that owns the publication ('' when tenantless).
+        title: Optional human label for the page.
+        published_at: When the grant was made.
+        published_by: Who made it, when an authenticated identity was
+            available. Empty for a personal-mode publish, which has none.
+        content_sha256: Digest of the bytes as published. Nothing else in the
+            store records one — ``provenance_hash`` covers inputs and
+            transform, not content — so without this the page could make no
+            checkable integrity claim at all. It proves the bytes a reader
+            downloads are the bytes that were published; it proves nothing
+            about whether they were honestly produced, and the page says so.
+        revoked_at: When the grant was withdrawn, else ``None``. The row
+            survives revocation so the token is never reissued.
+    """
+
+    token: str
+    artifact_id: str
+    version: int
+    tenant: str = ""
+    title: str | None = None
+    published_at: float = 0.0
+    published_by: str | None = None
+    content_sha256: str | None = None
+    revoked_at: float | None = None
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None
 
 
 @dataclass(frozen=True)
@@ -370,6 +412,30 @@ CREATE TABLE IF NOT EXISTS registry_pending (
 );
 """
 
+# Publications: opt-in, per-artifact-version public read grants.
+#
+# A token is bound to one (artifact_id, version) for good. Revoking sets
+# ``revoked_at`` and keeps the row, so a token can never be reused to point at
+# different content — the whole value of a URL printed in a paper is that what
+# it resolves to cannot change under the reader. A revoked citation has to fail
+# closed, not resolve to something else.
+_PUBLICATION_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS artifact_publications (
+    token TEXT PRIMARY KEY,
+    artifact_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    tenant TEXT NOT NULL DEFAULT '',
+    title TEXT,
+    published_at REAL NOT NULL,
+    published_by TEXT,
+    content_sha256 TEXT,
+    revoked_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_publications_artifact
+ON artifact_publications(artifact_id, version);
+CREATE INDEX IF NOT EXISTS idx_publications_tenant ON artifact_publications(tenant);
+"""
+
 # Migration SQL to add tenant columns to existing tables
 _MIGRATION_SQL = """
 -- Add tenant and principal columns to artifact_versions if they don't exist
@@ -529,6 +595,7 @@ class ArtifactStore:
                 self._dialect.begin_write(conn, "__schema__")
                 conn.executescript(self._dialect.adapt_ddl(_SCHEMA_SQL))
                 conn.executescript(self._dialect.adapt_ddl(_REGISTRY_SCHEMA_SQL))
+                conn.executescript(self._dialect.adapt_ddl(_PUBLICATION_SCHEMA_SQL))
                 conn.commit()
                 return
 
@@ -640,6 +707,7 @@ class ArtifactStore:
             # Registry tables (aliases/tags/audit) — idempotent, applies to
             # fresh and existing databases alike (#129).
             conn.executescript(_REGISTRY_SCHEMA_SQL)
+            conn.executescript(_PUBLICATION_SCHEMA_SQL)
             cursor = conn.execute("PRAGMA table_info(registry_audit)")
             audit_columns = {row["name"] for row in cursor.fetchall()}
             if "from_artifact_id" not in audit_columns:
@@ -1877,6 +1945,167 @@ class ArtifactStore:
     # ------------------------------------------------------------------
     # Registry: aliases, tags, audit (#129)
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Publications — opt-in public read grants
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _publication_from_row(row) -> Publication:
+        return Publication(
+            token=row["token"],
+            artifact_id=row["artifact_id"],
+            version=row["version"],
+            tenant=row["tenant"] or "",
+            title=row["title"],
+            published_at=row["published_at"],
+            published_by=row["published_by"],
+            content_sha256=row["content_sha256"],
+            revoked_at=row["revoked_at"],
+        )
+
+    def blob_digest(self, artifact_id: str, version: int) -> str | None:
+        """SHA-256 of an artifact's bytes, streamed. ``None`` if there is no blob.
+
+        Streamed rather than read whole: a published artifact can be a table of
+        any size, and publishing must not be the operation that decides how
+        much memory the server needs.
+        """
+        reader_cm = self.open_blob_reader(artifact_id, version)
+        if reader_cm is None:
+            return None
+        hasher = hashlib.sha256()
+        with reader_cm as reader:
+            while chunk := reader.read(1024 * 1024):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    def publish_artifact(
+        self,
+        artifact_id: str,
+        version: int,
+        *,
+        tenant: str | None = None,
+        published_by: str | None = None,
+        title: str | None = None,
+    ) -> Publication:
+        """Grant unauthenticated read access to one artifact version.
+
+        Publishing the same version twice returns the existing active grant
+        rather than minting a second token. Two live URLs for one artifact
+        would mean revoking one and believing the artifact was withdrawn.
+
+        Raises:
+            ValueError: If the artifact does not exist, is not readable, or
+                belongs to a different tenant.
+        """
+        effective_tenant = tenant if tenant is not None else ""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT state, tenant FROM artifact_versions WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            if row["state"] not in ("ready", "superseded"):
+                raise ValueError(
+                    f"Artifact {artifact_id}@v={version} is not readable (state={row['state']})"
+                )
+            artifact_tenant = row["tenant"] or ""
+            if artifact_tenant != effective_tenant:
+                raise ValueError(
+                    f"Artifact {artifact_id}@v={version} belongs to tenant "
+                    f"{artifact_tenant!r}, cannot publish in tenant {effective_tenant!r}"
+                )
+
+            existing = conn.execute(
+                "SELECT * FROM artifact_publications "
+                "WHERE artifact_id = ? AND version = ? AND tenant = ? AND revoked_at IS NULL",
+                (artifact_id, version, effective_tenant),
+            ).fetchone()
+            if existing is not None:
+                return self._publication_from_row(existing)
+
+            publication = Publication(
+                content_sha256=self.blob_digest(artifact_id, version),
+                token=secrets.token_urlsafe(32),
+                artifact_id=artifact_id,
+                version=version,
+                tenant=effective_tenant,
+                title=title,
+                published_at=time.time(),
+                published_by=published_by,
+            )
+            conn.execute(
+                "INSERT INTO artifact_publications "
+                "(token, artifact_id, version, tenant, title, published_at, "
+                "published_by, content_sha256) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    publication.token,
+                    publication.artifact_id,
+                    publication.version,
+                    publication.tenant,
+                    publication.title,
+                    publication.published_at,
+                    publication.published_by,
+                    publication.content_sha256,
+                ),
+            )
+            conn.commit()
+            return publication
+        finally:
+            conn.close()
+
+    def get_publication(self, token: str) -> Publication | None:
+        """Look up a publication by token, revoked ones included.
+
+        Revoked grants are returned rather than hidden so the caller can
+        answer "this citation was withdrawn" instead of "no such page" —
+        different facts, and a reader chasing a footnote deserves the first.
+        """
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM artifact_publications WHERE token = ?", (token,)
+            ).fetchone()
+            return self._publication_from_row(row) if row is not None else None
+        finally:
+            conn.close()
+
+    def revoke_publication(self, token: str, tenant: str | None = None) -> bool:
+        """Withdraw a grant. Returns False if it was unknown or already gone."""
+        effective_tenant = tenant if tenant is not None else ""
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                "UPDATE artifact_publications SET revoked_at = ? "
+                "WHERE token = ? AND tenant = ? AND revoked_at IS NULL",
+                (time.time(), token, effective_tenant),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def list_publications(
+        self,
+        tenant: str | None = None,
+        include_revoked: bool = False,
+    ) -> list[Publication]:
+        """Every grant in a tenant, newest first."""
+        effective_tenant = tenant if tenant is not None else ""
+        sql = "SELECT * FROM artifact_publications WHERE tenant = ?"
+        if not include_revoked:
+            sql += " AND revoked_at IS NULL"
+        sql += " ORDER BY published_at DESC"
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(sql, (effective_tenant,)).fetchall()
+            return [self._publication_from_row(row) for row in rows]
+        finally:
+            conn.close()
 
     def set_alias(
         self,

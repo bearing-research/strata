@@ -339,6 +339,29 @@ def _is_signed_data_plane_request(request: Request) -> bool:
     ) or _is_signed_finalize_request(request)
 
 
+def _is_public_publication_request(request: Request) -> bool:
+    """Return True for the read routes of an explicitly published artifact.
+
+    These self-authenticate the way the signed data-plane routes do: the token
+    in the URL *is* the credential, and it exists only because someone with
+    authority over that artifact deliberately minted it for one version.
+    Without this exemption the auth and tenant middleware would reject them,
+    and the feature would work only where nobody needs it — a published figure
+    is for a reader with no account and no tenant.
+
+    Deliberately narrow. Only GET, and only the two shapes a reader needs: the
+    page tree under ``/p/`` and the machine-readable record. Publishing,
+    revoking and listing stay behind the gate, so no unauthenticated caller can
+    mint a grant, withdraw someone else's, or enumerate what exists.
+    """
+    if request.method != "GET":
+        return False
+    path = request.url.path
+    if path == "/v1/publications":  # the authenticated listing, not one record
+        return False
+    return path.startswith("/p/") or path.startswith("/v1/publications/")
+
+
 def _deny_build_access() -> None:
     """Raise the configured build access error."""
     state = get_state()
@@ -1249,13 +1272,18 @@ async def tenant_context_middleware(request: Request, call_next):
     """
     # Skip tenant setup for health/metrics endpoints and signed data-plane routes.
     path = request.url.path
-    if path in (
-        "/health",
-        "/health/ready",
-        "/health/dependencies",
-        "/metrics",
-        "/metrics/prometheus",
-    ) or _is_signed_data_plane_request(request):
+    if (
+        path
+        in (
+            "/health",
+            "/health/ready",
+            "/health/dependencies",
+            "/metrics",
+            "/metrics/prometheus",
+        )
+        or _is_signed_data_plane_request(request)
+        or _is_public_publication_request(request)
+    ):
         return await call_next(request)
 
     state = get_state()
@@ -1333,13 +1361,18 @@ async def auth_middleware(request: Request, call_next):
 
     # Skip auth for health/metrics endpoints and signed data-plane routes.
     path = request.url.path
-    if path in (
-        "/health",
-        "/health/ready",
-        "/health/dependencies",
-        "/metrics",
-        "/metrics/prometheus",
-    ) or _is_signed_data_plane_request(request):
+    if (
+        path
+        in (
+            "/health",
+            "/health/ready",
+            "/health/dependencies",
+            "/metrics",
+            "/metrics/prometheus",
+        )
+        or _is_signed_data_plane_request(request)
+        or _is_public_publication_request(request)
+    ):
         return await call_next(request)
 
     # Under api_key auth the key *is* the credential, so there is no proxy in
@@ -1408,6 +1441,7 @@ from strata.api.routers.materialize import router as materialize_router  # noqa:
 from strata.api.routers.metadata import router as metadata_router  # noqa: E402
 from strata.api.routers.metrics_health import router as metrics_health_router  # noqa: E402
 from strata.api.routers.names import router as names_router  # noqa: E402
+from strata.api.routers.publications import router as publications_router  # noqa: E402
 from strata.api.routers.registry import router as registry_router  # noqa: E402
 from strata.notebook import router as notebook_router  # noqa: E402
 from strata.notebook.ws import router as notebook_ws_router  # noqa: E402
@@ -1423,6 +1457,7 @@ app.include_router(metrics_health_router)
 app.include_router(admin_router)
 app.include_router(artifacts_router)
 app.include_router(names_router)
+app.include_router(publications_router)
 app.include_router(builds_router)
 app.include_router(materialize_router)
 

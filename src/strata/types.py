@@ -1063,6 +1063,11 @@ class LineageNode(BaseModel):
         env_hash: Digest of the environment it was computed in. With
             ``build_env``, the step's environment identity — which package set,
             on what.
+        source: The code that produced it. Empty for tables, for core
+            transforms, and for artifacts stored before it was recorded. A
+            reader outside the notebook has no ``cells/{id}.py`` to check a
+            hash against, so this is the only form in which a step's
+            computation can be shown to them at all.
 
     These carried no information before results could be shared: every step in
     a graph had the same author (you) and the same environment (this machine).
@@ -1090,6 +1095,7 @@ class LineageNode(BaseModel):
     build_env: str = ""
     build_duration_ms: int = 0
     env_hash: str = ""
+    source: str = ""
 
 
 class LineageEdge(BaseModel):

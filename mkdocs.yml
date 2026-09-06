@@ -81,6 +81,7 @@ nav:
     - Registry Dashboard: notebook/registry-dashboard.md
     - Distributed Workers: notebook/workers.md
     - Worker Pool: notebook/worker-pool.md
+    - Publishing an artifact: notebook/publishing.md
     - AI Integration: notebook/ai.md
     - Environment: notebook/environment.md
     - Secret Manager: notebook/secrets.md
