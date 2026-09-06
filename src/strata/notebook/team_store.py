@@ -294,7 +294,9 @@ async def pull_cell_outputs(
     provenance_hash: str,
     consumed_vars: set[str],
     source_hash: str = "",
+    source: str = "",
     env_hash: str = "",
+    input_versions: dict[str, str] | None = None,
     variant: str | None = None,
 ) -> TeamPull | None:
     """Materialise a teammate's result for this cell in the local store.
@@ -378,7 +380,21 @@ async def pull_cell_outputs(
             blob_data=artifact.blob,
             content_type=artifact.content_type,
             provenance_hash=artifact.provenance_hash,
+            # The same upstream refs a local run would have recorded. Without
+            # them a pulled artifact has no ancestry at all, and whether a
+            # chain's lineage is complete comes to depend on which of its
+            # cells happened to hit the shared cache.
+            input_versions=input_versions or {},
             source_hash=source_hash,
+            # The local source, not the publisher's. A pull happens only on a
+            # provenance match and the provenance folds in ``source_hash``, so
+            # the two are AST-identical — but no more than that:
+            # ``compute_source_hash`` normalizes away comments and formatting,
+            # and a cell's annotations (``# @worker``, ``# @env``, ``# @mount``)
+            # are comments. The recorded text is what this machine would have
+            # run, which is the honest thing to show, and it can differ from
+            # the publisher's in exactly those places.
+            source=source,
             env_hash=published_env_hash or env_hash,
             variant=variant,
             # Preserved, not restamped. The bytes were produced on the

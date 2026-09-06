@@ -465,7 +465,9 @@ async def test_the_pull_is_off_unless_it_is_switched_on(tmp_path, monkeypatch):
             provenance_hash=CELL_PROVENANCE,
             consumed_vars={"x"},
             source_hash="",
+            source="",
             env_hash="",
+            input_versions={},
         )
         is None
     )

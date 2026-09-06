@@ -207,6 +207,7 @@ async def execute_sql_cell(
         content_type="arrow/ipc",
         provenance_hash=var_provenance,
         source_hash=provenance_hash,  # cell-level provenance for staleness
+        source=source,
     )
     uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
 
@@ -400,6 +401,7 @@ async def _execute_write_cell(
         content_type="arrow/ipc",
         provenance_hash=var_provenance,
         source_hash=provenance_hash,
+        source=source,
     )
     uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
 

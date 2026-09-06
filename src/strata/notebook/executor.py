@@ -1213,7 +1213,9 @@ class CellExecutor:
                         provenance_hash=provenance_hash,
                         consumed_vars=consumed_vars,
                         source_hash=source_hash,
+                        source=source,
                         env_hash=env_hash,
+                        input_versions=self.session._collect_input_refs(cell_id),
                         variant=fanout_variant,
                     )
                     if team_pull is not None:
@@ -1516,6 +1518,7 @@ class CellExecutor:
                         provenance_hash,
                         input_hashes,
                         source_hash=source_hash,
+                        source=source,
                         env_hash=env_hash,
                         variant=fanout_variant,
                         # Reported by whatever actually ran the cell — the
@@ -1561,6 +1564,7 @@ class CellExecutor:
                             input_hashes,
                             exec_result.display_outputs,
                             source_hash=source_hash,
+                            source=source,
                             env_hash=env_hash,
                         )
                         exec_result.display_output = (
@@ -1577,6 +1581,7 @@ class CellExecutor:
                                 exec_result.stderr,
                                 input_hashes,
                                 source_hash=source_hash,
+                                source=source,
                                 env_hash=env_hash,
                             )
 
@@ -1860,7 +1865,9 @@ class CellExecutor:
                         provenance_hash=provenance_hash,
                         consumed_vars=consumed_vars,
                         source_hash=source_hash,
+                        source=source,
                         env_hash=env_hash,
+                        input_versions=self.session._collect_input_refs(cell_id),
                     )
                     if team_pull is not None:
                         cached_artifact = artifact_mgr.find_cached(
@@ -1979,6 +1986,7 @@ class CellExecutor:
                         provenance_hash,
                         input_hashes,
                         source_hash=source_hash,
+                        source=source,
                         env_hash=env_hash,
                     )
                     if not stored_ok:
@@ -2011,6 +2019,7 @@ class CellExecutor:
                             input_hashes,
                             exec_result.display_outputs,
                             source_hash=source_hash,
+                            source=source,
                             env_hash=env_hash,
                         )
                         exec_result.display_output = (
@@ -2932,7 +2941,9 @@ class CellExecutor:
         provenance_hash: str,
         consumed_vars: set[str],
         source_hash: str,
+        source: str,
         env_hash: str,
+        input_versions: dict[str, str],
         variant: str | None = None,
     ) -> TeamPull | None:
         """Try to serve this cell from a colleague's result.
@@ -2963,7 +2974,9 @@ class CellExecutor:
                 provenance_hash=provenance_hash,
                 consumed_vars=consumed_vars,
                 source_hash=source_hash,
+                source=source,
                 env_hash=env_hash,
+                input_versions=input_versions,
                 variant=variant,
             )
         finally:
@@ -3633,6 +3646,7 @@ class CellExecutor:
         input_hashes: list[str],
         *,
         source_hash: str = "",
+        source: str = "",
         env_hash: str = "",
         variant: str | None = None,
         build_env: str = "",
@@ -3649,6 +3663,7 @@ class CellExecutor:
             return True
 
         artifact_mgr = self.session.get_artifact_manager()
+        input_versions = self.session._collect_input_refs(cell_id)
         consumed_vars = self.session.dag.consumed_variables.get(cell_id, set())
 
         try:
@@ -3740,8 +3755,9 @@ class CellExecutor:
                     blob_data=blob_data,
                     content_type=content_type,
                     provenance_hash=var_provenance,
-                    input_versions={h: h for h in input_hashes},
+                    input_versions=input_versions,
                     source_hash=source_hash,
+                    source=source,
                     env_hash=env_hash,
                     variant=variant,
                     build_env=build_env,
@@ -3778,6 +3794,7 @@ class CellExecutor:
         input_hashes: list[str],
         *,
         source_hash: str = "",
+        source: str = "",
         env_hash: str = "",
     ) -> None:
         """Persist a leaf cell's console output as a provenance-keyed artifact.
@@ -3789,6 +3806,7 @@ class CellExecutor:
         if not stdout and not stderr:
             return
         artifact_mgr = self.session.get_artifact_manager()
+        input_versions = self.session._collect_input_refs(cell_id)
         blob = json.dumps({"stdout": stdout, "stderr": stderr}).encode("utf-8")
         artifact_mgr.store_cell_output(
             cell_id=cell_id,
@@ -3796,8 +3814,9 @@ class CellExecutor:
             blob_data=blob,
             content_type="json/object",
             provenance_hash=derive_subkey(provenance_hash, "__console__"),
-            input_versions={h: h for h in input_hashes},
+            input_versions=input_versions,
             source_hash=source_hash,
+            source=source,
             env_hash=env_hash,
         )
 
@@ -3810,6 +3829,7 @@ class CellExecutor:
         display_outputs: list[dict[str, Any]] | None,
         *,
         source_hash: str = "",
+        source: str = "",
         env_hash: str = "",
     ) -> list[dict[str, Any]]:
         """Persist ordered cell display outputs as canonical artifacts."""
@@ -3817,6 +3837,7 @@ class CellExecutor:
             return []
 
         artifact_mgr = self.session.get_artifact_manager()
+        input_versions = self.session._collect_input_refs(cell_id)
         stored_displays: list[dict[str, Any]] = []
 
         for index, display_output in enumerate(display_outputs):
@@ -3839,8 +3860,9 @@ class CellExecutor:
                 content_type=content_type,
                 row_count=row_count if isinstance(row_count, int) else None,
                 provenance_hash=display_provenance,
-                input_versions={h: h for h in input_hashes},
+                input_versions=input_versions,
                 source_hash=source_hash,
+                source=source,
                 env_hash=env_hash,
             )
             display_uri = f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
@@ -4008,6 +4030,7 @@ class CellExecutor:
             content_type=spec.get("content_type", "pickle/object"),
             provenance_hash=derive_subkey(provenance_hash, var_name),
             source_hash=compute_source_hash(source),
+            source=source,
         )
         return f"strata://artifact/{artifact_version.id}@v={artifact_version.version}"
 
@@ -4426,6 +4449,7 @@ class CellExecutor:
                     content_type=new_content_type,
                     provenance_hash=iter_provenance,
                     source_hash=source_hash,
+                    source=source,
                     iteration=k,
                 )
                 final_artifact_uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
@@ -4492,13 +4516,21 @@ class CellExecutor:
         loop_build_env = str((final_result or {}).get("build_env") or "")
         loop_duration_ms = (time.time() - start_time) * 1000
 
+        # A loop cell consumes upstream variables like any other, but recorded
+        # no inputs at all — so the one artifact a research notebook most wants
+        # to trace, the output of a training loop, had an empty lineage graph
+        # rather than merely an opaque one.
+        loop_input_versions = self.session._collect_input_refs(cell_id)
+
         canonical_artifact = artifact_mgr.store_cell_output(
             cell_id=cell_id,
             variable_name=loop.carry,
             blob_data=carry_blob,
             content_type=carry_content_type,
             provenance_hash=carry_var_provenance,
+            input_versions=loop_input_versions,
             source_hash=source_hash,
+            source=source,
             env_hash=env_hash,
             build_env=loop_build_env,
             build_duration_ms=loop_duration_ms,
@@ -4526,7 +4558,9 @@ class CellExecutor:
                 blob_data=extra_blob,
                 content_type=extra_content_type,
                 provenance_hash=derive_subkey(cell_provenance, extra_var),
+                input_versions=loop_input_versions,
                 source_hash=source_hash,
+                source=source,
                 env_hash=env_hash,
                 build_env=loop_build_env,
                 build_duration_ms=loop_duration_ms,
@@ -5321,6 +5355,7 @@ class CellExecutor:
             provenance_hash,
             input_hashes,
             source_hash=source_hash,
+            source=cell.source,
             env_hash=env_hash,
         )
 
@@ -5340,6 +5375,7 @@ class CellExecutor:
                     input_hashes,
                     display_outputs_meta,
                     source_hash=source_hash,
+                    source=cell.source,
                     env_hash=env_hash,
                 )
             except Exception as exc:

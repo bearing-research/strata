@@ -84,6 +84,7 @@ def execute_widget_cell(
                 content_type="json/object",
                 row_count=1,
                 provenance_hash=var_provenance,
+                source=source,
             )
             version = stored.version
 

@@ -139,3 +139,113 @@ async def test_loop_cell_stores_non_carry_consumed_variables(tmp_path: Path):
     # (previously `summary` was never materialized → NameError).
     use_result = await executor.execute_cell("use", use_src)
     assert use_result.success, use_result.error
+
+
+@pytest.mark.asyncio
+async def test_executed_cells_record_lineage_the_graph_walk_can_resolve(tmp_path: Path):
+    """A three-cell chain must produce a lineage graph three artifacts deep.
+
+    ``input_versions`` is what both the lineage API and ``strata artifact
+    lineage`` walk, and both resolve an input only when its key is a
+    ``strata://artifact/`` URI. The executor recorded raw provenance digests
+    instead, so a notebook artifact's ancestry stopped one hop out at a node
+    the reader could not identify — the entire graph a published artifact
+    would show.
+
+    Asserted through ``build_lineage`` against a real execution rather than on
+    the recorded dict: the format only matters insofar as the walk consumes
+    it, and only the executor can prove the refs are recorded where the
+    resolution actually happens.
+    """
+    from strata.services.artifact import ArtifactService
+
+    nb_dir = create_notebook(tmp_path, "lineage_chain")
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "rows = [1, 2, 3]")
+    add_cell_to_notebook(nb_dir, "c2", after_cell_id="c1")
+    write_cell(nb_dir, "c2", "doubled = [r * 2 for r in rows]")
+    add_cell_to_notebook(nb_dir, "c3", after_cell_id="c2")
+    write_cell(nb_dir, "c3", "total = sum(doubled)")
+    # Only *consumed* variables are stored as artifacts, so the chain needs a
+    # cell downstream of c3 or ``total`` never reaches the store and the walk
+    # has nothing to start from.
+    add_cell_to_notebook(nb_dir, "c4", after_cell_id="c3")
+    write_cell(nb_dir, "c4", "scaled = total * 10")
+
+    session = SessionManager().open_notebook(nb_dir)
+    session.ensure_venv_synced()
+    executor = CellExecutor(session)
+
+    for cell_id, source in (
+        ("c1", "rows = [1, 2, 3]"),
+        ("c2", "doubled = [r * 2 for r in rows]"),
+        ("c3", "total = sum(doubled)"),
+        ("c4", "scaled = total * 10"),
+    ):
+        result = await executor.execute_cell(cell_id, source)
+        assert result.success, f"{cell_id}: {result.error}"
+
+    manager = session.get_artifact_manager()
+    leaf = manager.artifact_store.get_latest_version(manager.cell_artifact_id("c3", "total"))
+    assert leaf is not None, "the last cell's output was never stored"
+
+    lineage = ArtifactService().build_lineage(
+        manager.artifact_store,
+        artifact=leaf,
+        artifact_id=leaf.id,
+        version=leaf.version,
+        tenant_filter=None,
+        max_depth=10,
+    )
+
+    def uri_for(cell_id: str, var: str) -> str:
+        return f"strata://artifact/{manager.cell_artifact_id(cell_id, var)}@v=1"
+
+    resolved = [n.uri for n in lineage.nodes if n.type == "artifact"]
+    assert resolved == [
+        uri_for("c3", "total"),
+        uri_for("c2", "doubled"),
+        uri_for("c1", "rows"),
+    ], f"lineage did not walk the chain: {resolved}"
+    assert lineage.depth == 2
+
+
+@pytest.mark.asyncio
+async def test_stored_artifact_carries_the_source_that_produced_it(tmp_path: Path):
+    """The artifact records the executed source, and keeps it after an edit.
+
+    A reader outside the notebook has no ``cells/{id}.py`` to check a digest
+    against, so ``source_hash`` alone explains nothing to them. What makes the
+    recorded text trustworthy is *when* it is captured: the cell can be edited
+    after the run, and reading the source back at publish time would pair a
+    cached artifact with code that did not produce it. So the edit below is
+    the point of the test, not decoration.
+    """
+    import json
+
+    nb_dir = create_notebook(tmp_path, "source_capture")
+    add_cell_to_notebook(nb_dir, "c1")
+    write_cell(nb_dir, "c1", "rows = [1, 2, 3]")
+    add_cell_to_notebook(nb_dir, "c2", after_cell_id="c1")
+    write_cell(nb_dir, "c2", "doubled = [r * 2 for r in rows]")
+
+    session = SessionManager().open_notebook(nb_dir)
+    session.ensure_venv_synced()
+    executor = CellExecutor(session)
+
+    assert (await executor.execute_cell("c1", "rows = [1, 2, 3]")).success
+    assert (await executor.execute_cell("c2", "doubled = [r * 2 for r in rows]")).success
+
+    manager = session.get_artifact_manager()
+
+    def stored_source(cell_id: str, var: str) -> str:
+        artifact = manager.artifact_store.get_latest_version(manager.cell_artifact_id(cell_id, var))
+        assert artifact is not None, f"{cell_id}.{var} was never stored"
+        return json.loads(artifact.transform_spec)["params"].get("source", "")
+
+    assert stored_source("c1", "rows") == "rows = [1, 2, 3]"
+
+    # Edit the cell without re-running it. The artifact still describes the
+    # run that happened, not the source now sitting on disk.
+    write_cell(nb_dir, "c1", "rows = [9, 9, 9]")
+    assert stored_source("c1", "rows") == "rows = [1, 2, 3]"

@@ -440,3 +440,101 @@ class TestVariantArtifacts:
             provenance_hash="prov-one-shot",
         )
         assert manager.list_variants("c1", "score") == []
+
+
+class TestLineageRefShape:
+    """The recorded ``input_versions`` shape the lineage walk resolves.
+
+    The walk follows an input only when its key is a ``strata://artifact/``
+    URI and its value carries ``@v=``. Recording raw provenance digests
+    instead made every upstream an unidentifiable leaf, so these pin the shape
+    producers have to write. Which refs a cell writes is decided by
+    ``NotebookSession._collect_input_refs`` and proved end-to-end against a
+    real run in ``test_e2e_provenance_persistence``.
+    """
+
+    def test_lineage_walks_transitively_through_resolved_refs(self, manager):
+        from strata.services.artifact import ArtifactService
+
+        def ref(artifact) -> dict[str, str]:
+            tail = f"{artifact.id}@v={artifact.version}"
+            return {f"strata://artifact/{tail}": tail}
+
+        raw = manager.store_cell_output(
+            cell_id="c0",
+            variable_name="raw",
+            blob_data=b"[0]",
+            content_type="json/object",
+            provenance_hash="c" * 64,
+            input_versions={},
+        )
+        rows = manager.store_cell_output(
+            cell_id="c1",
+            variable_name="rows",
+            blob_data=b"[1, 2]",
+            content_type="json/object",
+            provenance_hash="a" * 64,
+            input_versions=ref(raw),
+        )
+        plot = manager.store_cell_output(
+            cell_id="c2",
+            variable_name="__display__0",
+            blob_data=b"PNG",
+            content_type="image/png",
+            provenance_hash="b" * 64,
+            input_versions=ref(rows),
+        )
+
+        lineage = ArtifactService().build_lineage(
+            manager.artifact_store,
+            artifact=plot,
+            artifact_id=plot.id,
+            version=plot.version,
+            tenant_filter=None,
+            max_depth=10,
+        )
+
+        assert lineage.depth == 2
+        assert [n.uri for n in lineage.nodes if n.type == "artifact"] == [
+            "strata://artifact/nb_nb1_cell_c2_var___display__0@v=1",
+            "strata://artifact/nb_nb1_cell_c1_var_rows@v=1",
+            "strata://artifact/nb_nb1_cell_c0_var_raw@v=1",
+        ]
+
+    def test_a_shared_store_moves_ready_to_the_newest_writer(self, tmp_path):
+        """Why refs are not resolved from provenance hashes.
+
+        The cell id is not folded into a provenance hash, so an identical cell
+        in another notebook sharing this store hashes the same. Storing it
+        supersedes the first row and takes ``ready``, and
+        ``find_by_provenance`` filters to ``ready`` — so the lookup returns the
+        *other* notebook's artifact while this notebook goes on reading its
+        own. This pins the collision, so reintroducing that shortcut fails a
+        test rather than silently misattributing a producer.
+        """
+        shared_dir = tmp_path / "shared"
+        mine = NotebookArtifactManager("mine", artifact_dir=shared_dir)
+        theirs = NotebookArtifactManager("theirs", artifact_dir=shared_dir)
+        provenance = "d" * 64
+
+        ours = mine.store_cell_output(
+            cell_id="c1",
+            variable_name="x",
+            blob_data=b"1",
+            content_type="json/object",
+            provenance_hash=provenance,
+            input_versions={},
+        )
+        theirs.store_cell_output(
+            cell_id="zz",
+            variable_name="x",
+            blob_data=b"1",
+            content_type="json/object",
+            provenance_hash=provenance,
+            input_versions={},
+        )
+
+        # Our row is still the one our cells read, by id — but it is no longer
+        # what the hash resolves to.
+        assert mine.artifact_store.get_artifact(ours.id, ours.version).state == "superseded"
+        assert mine.artifact_store.find_by_provenance(provenance).id != ours.id
