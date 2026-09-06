@@ -189,10 +189,10 @@ on stdout), `2` invocation error (bad path) on stderr.
 strata cell list my_analysis | jq '.cells[] | select(.status == "error") | .id'
 ```
 
-### Reading a live session (`--server` / `--session`)
+### Working against a live session (`--server` / `--session`)
 
-The four read commands also inspect a session on a **running** `strata-notebook`
-- the same session a human is watching in the TUI or web UI - instead of a local
+Every command above also targets a session on a **running** `strata-notebook` -
+the same session a human is watching in the TUI or web UI - instead of a local
 directory. Pass `--server <url> --session <id>` in place of the notebook path:
 
 ```bash
@@ -209,6 +209,14 @@ a script written against a local notebook works unchanged against a live session
 (see below), so the entire surface works against a live session. Remote
 operations target a personal-mode server (the use case is driving the session
 you're watching locally).
+
+**The selector decides who sees the change.** Given a notebook *path*, the
+authoring commands edit the files directly and a running server learns nothing
+until its next resync - so a colleague watching in the TUI or web UI sees
+nothing happen. Given `--server`/`--session`, the same command goes through the
+server, which broadcasts it, and the change appears in every viewer as it lands.
+Both are correct; they are for different jobs. Use the path to prepare a
+notebook, and the session to drive one somebody is watching.
 
 ## Running a cell or its tests (`cell run`, `cell test`)
 
