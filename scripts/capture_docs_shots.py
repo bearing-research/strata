@@ -37,6 +37,7 @@ import socket
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -571,6 +572,49 @@ def _cell_id(notebook: Path, snippet: str) -> str:
     return str(matches[0]["id"])
 
 
+def publish_figure(notebook: Path, storage_dir: Path) -> str:
+    """Publish the quickstart's plot and return its token.
+
+    The shot has to be of a real published artifact, not a mock: the page is
+    assembled from what the store holds, so a hand-made screenshot could show a
+    layout the code no longer produces — the exact drift every asset here is
+    generated to avoid.
+
+    ``STRATA_ARTIFACT_DIR`` points publishing at the same store ``serve()``
+    will read. That is the copy step working for real: the notebook's outputs
+    live in its own ``.strata/artifacts``, and publishing moves them across so
+    the link resolves.
+    """
+    plot_cell = _cell_id(notebook, "fig, ax = plt.subplots")
+    notebook_id = tomllib.loads((notebook / "notebook.toml").read_text(encoding="utf-8"))[
+        "notebook_id"
+    ]
+    artifact_id = f"nb_{notebook_id}_cell_{plot_cell}_var___display__0"
+
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "strata.cli",
+            "artifact",
+            "publish",
+            artifact_id,
+            "--artifact-dir",
+            str(notebook / ".strata" / "artifacts"),
+            "--title",
+            "Iris feature distributions",
+            "--format",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=REPO_ROOT,
+        env={**os.environ, "STRATA_ARTIFACT_DIR": str(storage_dir / ".artifacts")},
+    )
+    return str(json.loads(out.stdout)["token"])
+
+
 def build_fixtures(root: Path) -> tuple[Path, Path]:
     """Scaffold the two fixture notebooks the web shots photograph.
 
@@ -646,6 +690,7 @@ def serve(storage_dir: Path, port: int) -> subprocess.Popen:
 def capture_web(work_dir: Path) -> None:
     check_bundle_is_current()
     iris, registry = build_fixtures(work_dir)
+    token = publish_figure(iris, work_dir)
     port = _free_port()
     proc = serve(work_dir, port)
     try:
@@ -659,6 +704,8 @@ def capture_web(work_dir: Path) -> None:
                 str(iris),
                 "--registry-path",
                 str(registry),
+                "--publication-token",
+                token,
                 "--out",
                 str(ASSETS),
             ],

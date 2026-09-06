@@ -117,6 +117,7 @@ async function main() {
   const outDir = argFor('--out', '../docs/assets')
   const irisPath = argFor('--iris-path')
   const registryPath = argFor('--registry-path')
+  const publicationToken = argFor('--publication-token')
   if (!irisPath || !registryPath) {
     throw new Error('--iris-path and --registry-path are required')
   }
@@ -241,6 +242,25 @@ async function main() {
         await page.waitForTimeout(600)
         await shoot(page, 'registry-lineage', outDir, theme, '.lineage-modal')
 
+        await context.close()
+      }
+
+      // 7 — the published artifact's page. Server-rendered, so it follows
+      // `prefers-color-scheme` rather than the app's stored theme: emulate the
+      // OS preference instead of seeding localStorage as loadNotebook does.
+      if (publicationToken) {
+        const context = await browser.newContext({
+          viewport: VIEWPORT,
+          deviceScaleFactor: SCALE,
+          colorScheme: theme,
+        })
+        const page = await context.newPage()
+        await page.goto(`${baseUrl}/p/${publicationToken}`, { waitUntil: 'networkidle' })
+        // The figure is a data URI, so it is decoded rather than fetched, and
+        // `networkidle` can land before it has painted. Waiting on the image
+        // itself is what keeps the shot from showing an empty Result card.
+        await page.locator('figure img').waitFor({ state: 'visible' })
+        await shoot(page, 'publication-page', outDir, theme)
         await context.close()
       }
     }

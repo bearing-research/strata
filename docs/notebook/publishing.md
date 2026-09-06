@@ -47,6 +47,14 @@ one.
 That link only resolves if the server serves that same directory — useful when
 it does, misleading when it does not.
 
+![The published page for a figure: the plot itself, then the artifact's id,
+provenance hash and content digest, and below them the code that produced it
+and every step behind
+it.](../assets/publication-page-light.png#only-light)
+![The published page for a figure: the plot itself, then the artifact's id,
+provenance hash and content digest, and below them the code that produced it
+and every step behind it.](../assets/publication-page-dark.png#only-dark)
+
 ## What the page claims, and what it does not
 
 This matters more here than in most features, because the reader is being
