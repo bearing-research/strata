@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -329,6 +330,77 @@ def cmd_lineage(args: argparse.Namespace) -> int:
         print(json.dumps(tree, indent=2))
     else:
         _render_lineage(tree)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# publish / unpublish
+# ---------------------------------------------------------------------------
+
+
+def cmd_publish(args: argparse.Namespace) -> int:
+    store = _open_store(args.artifact_dir)
+    if store is None:
+        return 2
+    artifact = _resolve_for_cmd(store, args)
+    if artifact is None:
+        return 1
+
+    try:
+        publication = store.publish_artifact(
+            artifact.id,
+            artifact.version,
+            tenant=getattr(args, "tenant", None),
+            title=args.title,
+        )
+    except ValueError as exc:
+        print(f"Cannot publish: {exc}")
+        return 1
+
+    if args.format == "json":
+        print(json.dumps(asdict(publication), indent=2))
+        return 0
+
+    print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
+    print()
+    print("Anyone with that link can read the artifact, its source, and the")
+    print("source and environment of every step behind it. That is the point,")
+    print("and it is worth knowing before sending the link:")
+    for step in _published_steps(store, artifact, args.max_depth):
+        print(f"  - {step}")
+    print()
+    print(f"Withdraw it with: strata artifact unpublish {publication.token}")
+    return 0
+
+
+def _published_steps(store: ArtifactStore, artifact: ArtifactVersion, max_depth: int) -> list[str]:
+    """One line per step whose code and environment the page will expose."""
+    tree = _walk_lineage(store, artifact, max_depth=max_depth)
+    steps: list[str] = []
+
+    def _walk(node: dict) -> None:
+        if "artifact_id" in node:
+            steps.append(f"{node['artifact_id']}@v={node['version']}")
+        else:
+            steps.append(str(node.get("uri", "")))
+        for child in node.get("inputs", []):
+            _walk(child)
+
+    _walk(tree)
+    return steps
+
+
+def cmd_unpublish(args: argparse.Namespace) -> int:
+    store = _open_store(args.artifact_dir)
+    if store is None:
+        return 2
+
+    if not store.revoke_publication(args.token, tenant=getattr(args, "tenant", None)):
+        print("No active publication with that token")
+        return 1
+
+    print("Withdrawn. The link now reports that it was withdrawn rather than")
+    print("resolving to anything — it is never reissued for other content.")
     return 0
 
 

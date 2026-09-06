@@ -261,3 +261,41 @@ class TestAliasRefsAndAudit:
         assert rc == 0
         entries = json.loads(capsys.readouterr().out)
         assert any(e["action"] == "tag_set" and e["key"] == "auc" for e in entries)
+
+
+class TestPublish:
+    """``strata artifact publish`` and the disclosure it prints first."""
+
+    def test_publish_lists_every_step_the_link_will_expose(self, chain_store, capsys):
+        """Publishing exposes the whole ancestry, not just the artifact.
+
+        That is the transparency being asked for, but it is also the thing a
+        researcher can be surprised by — upstream cell source can name private
+        dataset paths. So the chain is printed back before the link is used,
+        and this pins that it names every step rather than only the one being
+        published.
+        """
+        from strata.artifact_cli import cmd_publish
+
+        rc = cmd_publish(
+            _args(ref="demo/model", artifact_dir=chain_store["dir"], title=None, max_depth=10)
+        )
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "/p/" in out
+        for step in ("model-1@v=1", "feat-1@v=1", "scan-1@v=1"):
+            assert step in out, f"{step} is exposed by the link but was not disclosed"
+
+    def test_unpublish_withdraws_and_is_not_repeatable(self, chain_store, capsys):
+        from strata.artifact_cli import cmd_publish, cmd_unpublish
+
+        cmd_publish(
+            _args(ref="demo/model", artifact_dir=chain_store["dir"], title=None, max_depth=10)
+        )
+        token = chain_store["store"].list_publications()[0].token
+
+        assert cmd_unpublish(_args(token=token, artifact_dir=chain_store["dir"])) == 0
+        assert "Withdrawn" in capsys.readouterr().out
+
+        assert cmd_unpublish(_args(token=token, artifact_dir=chain_store["dir"])) == 1

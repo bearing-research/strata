@@ -1,0 +1,218 @@
+"""Server-rendered page for a published artifact.
+
+Self-contained HTML with no external requests: a page meant to outlive the
+work it documents should not depend on a CDN still being there, and a referee
+opening a link from a paper should not be reporting requests to third parties
+to read it.
+
+Everything interpolated here is attacker-controlled in the sense that matters —
+cell source, titles, variable names and table URIs are all written by whoever
+used the notebook, and this page is served unauthenticated. Every value goes
+through :func:`html.escape`; there is no path that writes a caller-supplied
+string into the document unescaped.
+"""
+
+from __future__ import annotations
+
+import datetime
+from html import escape
+
+_STYLE = """
+:root { color-scheme: light dark; --fg:#12151a; --muted:#5b6472; --bg:#fbfbfd;
+        --card:#fff; --line:#e3e6ec; --code:#f5f6f9; --accent:#2a5db0; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg:#e6e8ee; --muted:#9aa3b2; --bg:#14171c; --card:#1b1f26;
+          --line:#2a2f38; --code:#11141a; --accent:#8ab4ff; }
+}
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+       font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+h1 { font-size: 1.5rem; margin: 0 0 .35rem; }
+h2 { font-size: 1rem; margin: 2.25rem 0 .75rem; letter-spacing:.02em;
+     text-transform: uppercase; color: var(--muted); }
+.sub { color: var(--muted); margin: 0 0 2rem; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px;
+        padding:1rem 1.15rem; margin-bottom:1rem; }
+pre { background:var(--code); border:1px solid var(--line); border-radius:8px;
+      padding:.85rem 1rem; overflow-x:auto; margin:0;
+      font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+table { width:100%; border-collapse:collapse; }
+td { padding:.3rem 0; vertical-align:top; }
+td.k { color:var(--muted); width:11rem; white-space:nowrap; padding-right:1rem; }
+code { font:13px ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all; }
+figure { margin:0; }
+figure img { max-width:100%; border:1px solid var(--line); border-radius:8px; }
+.step { border-left:2px solid var(--line); padding-left:1rem; margin-left:.4rem; }
+.step h3 { font-size:.95rem; margin:0 0 .4rem; font-weight:600; }
+.note { font-size:13px; color:var(--muted); }
+.banner { border:1px solid var(--line); border-left:3px solid var(--accent);
+          background:var(--card); border-radius:8px; padding:.85rem 1rem;
+          margin-bottom:1.75rem; font-size:13.5px; }
+a { color:var(--accent); }
+"""
+
+
+def _when(ts: float | None) -> str:
+    if not ts:
+        return "not recorded"
+    return datetime.datetime.fromtimestamp(ts, datetime.UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _rows(pairs: list[tuple[str, str]]) -> str:
+    body = "".join(f"<tr><td class='k'>{escape(k)}</td><td>{v}</td></tr>" for k, v in pairs if v)
+    return f"<table>{body}</table>"
+
+
+def _code(value: str) -> str:
+    return f"<code>{escape(value)}</code>"
+
+
+def _source_block(source: str) -> str:
+    if not source:
+        return (
+            "<p class='note'>No source recorded. Artifacts stored before the "
+            "source was captured, tables, and core transforms have none.</p>"
+        )
+    return f"<pre>{escape(source)}</pre>"
+
+
+def _artifact_label(node) -> str:
+    if node.type != "artifact":
+        return escape(node.uri)
+    return escape(f"{node.artifact_id}@v={node.version}")
+
+
+def render_publication(
+    *,
+    publication,
+    artifact,
+    lineage,
+    content_type: str,
+    inline_png: str | None,
+) -> str:
+    """Render the public page for one published artifact."""
+    title = publication.title or f"{artifact.id}@v={artifact.version}"
+
+    if publication.revoked_at is not None:
+        return _document(
+            title="Withdrawn",
+            body=(
+                "<h1>This artifact has been withdrawn</h1>"
+                f"<p class='sub'>Published {escape(_when(publication.published_at))}, "
+                f"withdrawn {escape(_when(publication.revoked_at))}.</p>"
+                "<div class='banner'>The link is intact and still names the same "
+                "artifact — it was never repointed at other content. Whoever "
+                "published it has withdrawn public access.</div>"
+            ),
+        )
+
+    root = next((n for n in lineage.nodes if n.artifact_id == artifact.id), None)
+    ancestors = [n for n in lineage.nodes if n is not root]
+
+    parts: list[str] = [
+        f"<h1>{escape(title)}</h1>",
+        f"<p class='sub'>Published {escape(_when(publication.published_at))}"
+        + (f" by {escape(publication.published_by)}" if publication.published_by else "")
+        + ".</p>",
+        "<div class='banner'><strong>What this page shows.</strong> The code, "
+        "inputs and environment recorded when these bytes were produced, and "
+        "the chain of steps behind them. It does <em>not</em> claim the result "
+        "was reproduced — that needs a re-run, and randomness, thread counts, "
+        "floating-point order and unavailable input data each break it. The "
+        "integrity digest below shows the bytes have not changed since "
+        "publication; it cannot show they were honestly produced.</div>",
+    ]
+
+    if inline_png:
+        parts.append(
+            "<h2>Result</h2><figure class='card'>"
+            f"<img alt='The published artifact' src='{escape(inline_png)}'></figure>"
+        )
+
+    parts.append("<h2>This artifact</h2><div class='card'>")
+    parts.append(
+        _rows(
+            [
+                ("Artifact", _code(f"{artifact.id}@v={artifact.version}")),
+                ("Content type", escape(content_type) if content_type else ""),
+                ("Produced", escape(_when(artifact.created_at))),
+                (
+                    "Author",
+                    escape(artifact.principal)
+                    if artifact.principal
+                    else "<span class='note'>not recorded — a local run has "
+                    "no authenticated identity</span>",
+                ),
+                (
+                    "Environment",
+                    escape(root.build_env) if root and root.build_env else "",
+                ),
+                ("Provenance hash", _code(artifact.provenance_hash)),
+                (
+                    "Content digest (SHA-256)",
+                    _code(publication.content_sha256) if publication.content_sha256 else "",
+                ),
+                (
+                    "Size",
+                    f"{artifact.byte_size:,} bytes" if artifact.byte_size else "",
+                ),
+                (
+                    "Rows",
+                    f"{artifact.row_count:,}" if artifact.row_count else "",
+                ),
+            ]
+        )
+    )
+    parts.append("</div>")
+
+    parts.append("<h2>The code that produced it</h2><div class='card'>")
+    parts.append(_source_block(root.source if root else ""))
+    parts.append("</div>")
+
+    parts.append("<h2>What it was built from</h2>")
+    if not ancestors:
+        parts.append(
+            "<div class='card'><p class='note'>No recorded inputs. This step "
+            "read nothing from another step in the same store.</p></div>"
+        )
+    for node in ancestors:
+        parts.append("<div class='card step'>")
+        parts.append(f"<h3>{_artifact_label(node)}</h3>")
+        parts.append(
+            _rows(
+                [
+                    ("Kind", escape(node.type)),
+                    ("Produced", escape(_when(node.created_at))),
+                    ("Author", escape(node.principal) if node.principal else ""),
+                    ("Environment", escape(node.build_env)),
+                    ("Environment hash", _code(node.env_hash) if node.env_hash else ""),
+                ]
+            )
+        )
+        if node.type == "artifact":
+            parts.append(_source_block(node.source))
+        parts.append("</div>")
+
+    parts.append(
+        "<h2>Checking it yourself</h2><div class='card'>"
+        f"<p>The bytes are at <a href='/p/{escape(publication.token)}/data'>"
+        f"/p/{escape(publication.token)}/data</a>. "
+        f"<a href='/p/{escape(publication.token)}/verify'>Verify</a> re-reads "
+        "them and compares against the digest recorded at publication.</p>"
+        "<p class='note'>Re-running the computation is a separate matter, and "
+        "one only you can do: the source and environment above are what it "
+        "would take.</p></div>"
+    )
+
+    return _document(title=title, body="".join(parts))
+
+
+def _document(*, title: str, body: str) -> str:
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<meta name='robots' content='noindex'>"
+        f"<title>{escape(title)}</title><style>{_STYLE}</style></head>"
+        f"<body><main>{body}</main></body></html>"
+    )

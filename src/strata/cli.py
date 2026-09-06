@@ -285,6 +285,39 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_tenant_arg(lineage_parser)
     lineage_parser.set_defaults(func=_dispatch_artifact("cmd_lineage"))
 
+    publish_parser = artifact_sub.add_parser(
+        "publish",
+        help="Make an artifact readable by anyone with the link",
+        description=(
+            "Mint a public URL for one artifact version. The page shows the "
+            "artifact, the code that produced it, and the code and environment "
+            "of every step behind it -- publishing exposes the whole chain, "
+            "which is the point and is listed back to you. <ref> as in `show`."
+        ),
+    )
+    publish_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
+    _add_store_args(publish_parser)
+    publish_parser.add_argument("--title", default=None, help="Human label for the page")
+    publish_parser.add_argument(
+        "--max-depth", type=int, default=10, help="Recursion limit when listing the chain"
+    )
+    _add_tenant_arg(publish_parser)
+    publish_parser.set_defaults(func=_dispatch_artifact("cmd_publish"))
+
+    unpublish_parser = artifact_sub.add_parser(
+        "unpublish",
+        help="Withdraw a published link",
+        description=(
+            "Revoke public access. The token is never reissued for other "
+            "content, so a URL already in print fails closed rather than "
+            "starting to resolve to something else."
+        ),
+    )
+    unpublish_parser.add_argument("token", help="The publication token")
+    _add_artifact_dir_arg(unpublish_parser)
+    _add_tenant_arg(unpublish_parser)
+    unpublish_parser.set_defaults(func=_dispatch_artifact("cmd_unpublish"))
+
     pull_parser = artifact_sub.add_parser(
         "pull",
         help="Write an artifact's blob to a local Arrow IPC file",

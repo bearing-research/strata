@@ -10,7 +10,7 @@ response shaping; the service walks the graph and returns plain response models.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from strata.artifact_store import TransformSpec
 from strata.types import (
@@ -58,30 +58,39 @@ def _transform_ref(transform_spec: str | None) -> str | None:
         return None
 
 
-def _build_metadata(transform_spec: str | None) -> tuple[str, int, str]:
-    """``(build_env, build_duration_ms, env_hash)`` from a stored transform_spec.
+class BuildMetadata(NamedTuple):
+    """What the producing run recorded about itself.
 
-    Recorded by the process that ran the cell, so both are absent for tables,
-    for core transforms, and for anything stored before those fields existed.
-    An unparseable spec means "not recorded" rather than an error — the same
-    reading ``_transform_ref`` takes of the same field.
+    Absent for tables, for core transforms, and for anything stored before the
+    fields existed. An unparseable spec means "not recorded" rather than an
+    error — the same reading ``_transform_ref`` takes of the same field.
     """
+
+    build_env: str = ""
+    build_duration_ms: int = 0
+    env_hash: str = ""
+    source: str = ""
+
+
+def _build_metadata(transform_spec: str | None) -> BuildMetadata:
+    """Read the producing run's self-report out of a stored transform_spec."""
     if not transform_spec:
-        return "", 0, ""
+        return BuildMetadata()
     try:
         params = json.loads(transform_spec).get("params", {})
     except (json.JSONDecodeError, ValueError):
-        return "", 0, ""
+        return BuildMetadata()
     if not isinstance(params, dict):
-        return "", 0, ""
+        return BuildMetadata()
     try:
         duration = int(params.get("build_duration_ms") or 0)
     except (TypeError, ValueError):
         duration = 0
-    return (
-        str(params.get("build_env") or ""),
-        duration,
-        str(params.get("env_hash") or ""),
+    return BuildMetadata(
+        build_env=str(params.get("build_env") or ""),
+        build_duration_ms=duration,
+        env_hash=str(params.get("env_hash") or ""),
+        source=str(params.get("source") or ""),
     )
 
 
@@ -122,7 +131,7 @@ class ArtifactService:
         queue: list[tuple[str, str, int, int]] = []  # (uri, artifact_id, version, depth)
 
         # Add root node
-        root_env, root_duration, root_env_hash = _build_metadata(artifact.transform_spec)
+        root_meta = _build_metadata(artifact.transform_spec)
         nodes[artifact_uri] = LineageNode(
             uri=artifact_uri,
             artifact_id=artifact_id,
@@ -131,9 +140,10 @@ class ArtifactService:
             transform_ref=_transform_ref(artifact.transform_spec),
             created_at=artifact.created_at,
             principal=artifact.principal,
-            build_env=root_env,
-            build_duration_ms=root_duration,
-            env_hash=root_env_hash,
+            build_env=root_meta.build_env,
+            build_duration_ms=root_meta.build_duration_ms,
+            env_hash=root_meta.env_hash,
+            source=root_meta.source,
         )
         visited.add(artifact_uri)
 
@@ -193,9 +203,7 @@ class ArtifactService:
                 )
                 continue
 
-            input_env, input_duration, input_env_hash = _build_metadata(
-                input_artifact.transform_spec
-            )
+            input_meta = _build_metadata(input_artifact.transform_spec)
             nodes[node_uri] = LineageNode(
                 uri=node_uri,
                 artifact_id=art_id,
@@ -204,9 +212,10 @@ class ArtifactService:
                 transform_ref=_transform_ref(input_artifact.transform_spec),
                 created_at=input_artifact.created_at,
                 principal=input_artifact.principal,
-                build_env=input_env,
-                build_duration_ms=input_duration,
-                env_hash=input_env_hash,
+                build_env=input_meta.build_env,
+                build_duration_ms=input_meta.build_duration_ms,
+                env_hash=input_meta.env_hash,
+                source=input_meta.source,
             )
 
             # Add this artifact's inputs to queue
