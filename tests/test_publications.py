@@ -892,3 +892,79 @@ class TestRoCrate:
         assert "</script>" not in block.group(1)
         # …and the escaping must leave valid JSON behind, not just safe text.
         assert isinstance(jsonlib.loads(block.group(1).replace("<\\/", "</")), dict)
+
+
+class TestBadge:
+    """The README pill, and the claim its shape invites.
+
+    A shields-style badge reads `label | status`, green for good — a grammar
+    that asserts. Everything else here has been careful not to say a result was
+    verified, so these pin the ways the badge could quietly start saying it.
+    """
+
+    def test_it_reports_the_chain_size_and_claims_nothing(self, published_server):
+        import httpx
+
+        base_url, token, _ = published_server
+
+        svg = httpx.get(f"{base_url}/p/{token}/badge.svg", timeout=10)
+
+        assert svg.status_code == 200
+        assert svg.headers["content-type"].startswith("image/svg+xml")
+        assert "provenance" in svg.text
+        for claim in ("verified", "valid", "reproduced", "passing", "trusted"):
+            assert claim not in svg.text.lower(), f"the badge asserts {claim!r}"
+
+    def test_it_is_not_green(self, published_server):
+        """Green is the badge convention for "passing".
+
+        Borrowing it would smuggle back the reading every other surface here
+        refuses, without a word of text changing.
+        """
+        import httpx
+
+        base_url, token, _ = published_server
+
+        svg = httpx.get(f"{base_url}/p/{token}/badge.svg", timeout=10).text.lower()
+
+        for green in ("#4c1", "brightgreen", "#2ea44f", "#3fb950", "green"):
+            assert green not in svg
+
+    def test_a_withdrawn_publication_still_renders_and_says_so(self, published_server):
+        """A broken image in someone's README tells a reader nothing except
+        that the server is unwell. The badge has to keep rendering and stop
+        asserting."""
+        import httpx
+
+        base_url, token, _ = published_server
+        httpx.delete(f"{base_url}/v1/publications/{token}", timeout=10)
+
+        svg = httpx.get(f"{base_url}/p/{token}/badge.svg", timeout=10)
+
+        assert svg.status_code == 200
+        assert "withdrawn" in svg.text
+
+    def test_the_text_cannot_overflow_its_pill(self, published_server):
+        """Widths are estimated from a font this server cannot know renders.
+
+        Every run is drawn with `textLength`, so a bad estimate looks loose or
+        tight but never spills text past the edge — which is the one failure
+        that would look like a broken build rather than a design choice.
+        """
+        from strata.api.badge import render_badge
+
+        svg = render_badge(label="provenance", value="1234 steps", title="t")
+
+        assert svg.count('textLength="') == 4  # two runs, drawn twice each
+        assert 'lengthAdjust="spacingAndGlyphs"' in svg
+
+    def test_the_page_hands_over_a_ready_made_badge_snippet(self, published_server):
+        """Nobody assembles a linked badge by hand from three route names."""
+        import httpx
+
+        base_url, token, _ = published_server
+
+        page = httpx.get(f"{base_url}/p/{token}", timeout=10).text
+
+        assert f"/p/{token}/badge.svg" in page
+        assert "Putting it somewhere" in page

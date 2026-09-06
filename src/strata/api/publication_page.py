@@ -50,6 +50,9 @@ figure img { max-width:100%; border:1px solid var(--line); border-radius:8px; }
           background:var(--card); border-radius:8px; padding:.85rem 1rem;
           margin-bottom:1.75rem; font-size:13.5px; }
 a { color:var(--accent); }
+.snippet { margin:0 0 .9rem; }
+.snippet:last-child { margin-bottom:0; }
+.snippet p { margin:0 0 .3rem; font-size:13px; color:var(--muted); }
 """
 
 
@@ -93,6 +96,7 @@ def render_publication(
     bundle_filename: str | None = None,
     oembed_url: str | None = None,
     json_ld: str | None = None,
+    share: list[tuple[str, str]] | None = None,
 ) -> str:
     """Render the page for one published artifact.
 
@@ -224,6 +228,14 @@ def render_publication(
                 if node.source:
                     shown_sources[node.source] = f"{node.artifact_id}@v={node.version}"
                 parts.append(_source_block(node.source))
+        parts.append("</div>")
+
+    if share is not None:
+        parts.append("<h2>Putting it somewhere</h2><div class='card'>")
+        for caption, snippet in share:
+            parts.append(
+                f"<div class='snippet'><p>{escape(caption)}</p><pre>{escape(snippet)}</pre></div>"
+            )
         parts.append("</div>")
 
     parts.append("<h2>Checking it yourself</h2><div class='card'>")
@@ -413,6 +425,7 @@ def _document(
     body: str,
     oembed_url: str | None = None,
     json_ld: str | None = None,
+    share: list[tuple[str, str]] | None = None,
 ) -> str:
     # The discovery link is how a wiki or CMS turns a pasted URL into the card
     # without being told the endpoint exists. Omitted for the archival bundle,

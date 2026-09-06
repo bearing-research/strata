@@ -9,6 +9,12 @@ exhaustive commit history.
 
 ### Added
 
+- **A provenance badge for a README.** `/p/{token}/badge.svg` reports the size
+  of the recorded chain and links to the page. It claims nothing about the
+  result and is deliberately not green, since green is the badge convention for
+  "passing". A withdrawn publication still renders, reading `withdrawn`, rather
+  than leaving a broken image. The page hands over ready-made snippets for the
+  badge, the iframe and the RO-Crate URL.
 - **The chain is published as RO-Crate JSON-LD.** Inline on the page, at
   `/p/{token}/ro-crate`, and as `ro-crate-metadata.json` in an archived
   bundle — so a repository can index the provenance instead of only displaying
