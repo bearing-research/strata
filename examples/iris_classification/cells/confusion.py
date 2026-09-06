@@ -22,5 +22,4 @@ ax.set_xlabel("Predicted")
 ax.set_ylabel("Actual")
 ax.set_title("Confusion Matrix")
 plt.tight_layout()
-plt.savefig("/tmp/iris_confusion.png", dpi=100)
-print("Saved confusion matrix to /tmp/iris_confusion.png")
+fig
