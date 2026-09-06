@@ -75,13 +75,53 @@ chasing a footnote deserves that answer rather than one that reads like a typo.
 The token is never reissued for other content, so a URL already in print fails
 closed instead of quietly starting to resolve to something else.
 
-## Reachability
+## Archiving: the copy that needs no server
 
-The URL is on your Strata server, so it resolves for as long as that server is
-reachable to the reader. For a lab or team server that is usually what you
-want. A link printed in a published paper has a longer life than most servers,
-and an archival export — a self-contained bundle suitable for Zenodo or OSF —
-is the honest answer to that; it is not built yet.
+A hosted link resolves for as long as your server does. A URL printed in a
+paper outlives most servers, so there is a second form:
+
+```bash
+strata artifact archive nb_paper_cell_c2_var___display__0 \
+  --to ./figure3-bundle --title "Figure 3" --author "F. Li"
+```
+
+```
+figure3-bundle/
+├── index.html      the page — opens in a browser, no server, no external requests
+├── artifact.png    the bytes
+├── manifest.json   the same record, machine-readable
+└── README.md       what it is and how to check it
+```
+
+Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
+retention promise then stands behind the link instead of yours.
+
+The page is the same document as the hosted one, with one difference: it points
+at the file beside it rather than at routes, and it tells the reader how to
+check the bytes themselves:
+
+```
+sha256sum artifact.png
+# 6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca
+```
+
+Archiving is not publishing. It grants nobody access to a running server and
+mints no link — it writes files you choose who to hand to.
+
+## Crediting an author
+
+The page carries two different facts, and they come from different places.
+
+**Who published or archived it** is the byline under the title. `--author` sets
+it on either command; in service mode a publish through the API uses the
+authenticated principal instead. Omit it and there is simply no byline.
+
+**Who computed it** is the *Computed by* row, and it comes from the artifact
+itself — recorded when the cell ran, not when you published. A local run has no
+authenticated identity to record, so that row usually reads "not recorded".
+`--author` does not change it: crediting yourself for publishing a result is
+not the same as the store attesting who produced it, and the page keeps them
+apart deliberately.
 
 ## HTTP
 

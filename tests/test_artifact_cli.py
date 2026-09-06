@@ -299,3 +299,173 @@ class TestPublish:
         assert "Withdrawn" in capsys.readouterr().out
 
         assert cmd_unpublish(_args(token=token, artifact_dir=chain_store["dir"])) == 1
+
+
+class TestPublishAuthor:
+    def test_republishing_says_the_author_did_not_take(self, chain_store, capsys):
+        """Publishing is idempotent, so a later --author is quietly dropped.
+
+        Printing the usual success banner would report an author that never
+        reached the page, with no indication anything was ignored.
+        """
+        from strata.artifact_cli import cmd_publish
+
+        base = {"ref": "demo/model", "artifact_dir": chain_store["dir"], "max_depth": 10}
+        cmd_publish(_args(title=None, author=None, **base))
+        capsys.readouterr()
+
+        cmd_publish(_args(title=None, author="F. Li", **base))
+
+        out = capsys.readouterr().out
+        assert "already published" in out
+        assert "does not change that" in out
+
+
+class TestArchive:
+    """``strata artifact archive`` — the copy that needs no server."""
+
+    @staticmethod
+    def _archive(chain_store, tmp_path, **overrides):
+        from strata.artifact_cli import cmd_archive
+
+        dest = tmp_path / "bundle"
+        args = {
+            "ref": "demo/model",
+            "artifact_dir": chain_store["dir"],
+            "to": str(dest),
+            "title": "Figure 3",
+            "author": "F. Li",
+            "max_depth": 10,
+        }
+        args.update(overrides)
+        assert cmd_archive(_args(**args)) == 0
+        return dest
+
+    def test_the_bundle_opens_without_a_server(self, chain_store, tmp_path):
+        """No route references: the page has to work from a Zenodo download."""
+        dest = self._archive(chain_store, tmp_path)
+        html = (dest / "index.html").read_text()
+
+        assert "/p/" not in html, "an archived page must not link at a server"
+        assert (dest / "manifest.json").exists()
+        assert (dest / "README.md").exists()
+
+    def test_the_recorded_digest_is_the_one_a_reader_computes(self, chain_store, tmp_path):
+        """The README tells the reader to run sha256sum and compare.
+
+        If the recorded digest were taken from anything but the bytes actually
+        written into the bundle, that instruction would fail for every reader
+        who followed it — the one check the bundle offers, broken.
+        """
+        import hashlib
+        import json as jsonlib
+
+        dest = self._archive(chain_store, tmp_path)
+        manifest = jsonlib.loads((dest / "manifest.json").read_text())
+        payload = next(p for p in dest.iterdir() if p.name.startswith("artifact."))
+
+        assert manifest["content_sha256"] == hashlib.sha256(payload.read_bytes()).hexdigest()
+        assert manifest["content_sha256"] in (dest / "README.md").read_text()
+
+    def test_archiving_grants_nobody_access_to_the_server(self, chain_store, tmp_path):
+        """Archiving is not publishing, and must not quietly become it.
+
+        A bundle is a file someone chooses to hand over. Minting a live public
+        link as a side effect would put the artifact on the network without
+        anyone asking for that.
+        """
+        self._archive(chain_store, tmp_path)
+
+        assert chain_store["store"].list_publications() == []
+
+    def test_it_carries_the_whole_chain_not_just_the_artifact(self, chain_store, tmp_path):
+        import json as jsonlib
+
+        dest = self._archive(chain_store, tmp_path)
+        manifest = jsonlib.loads((dest / "manifest.json").read_text())
+
+        uris = {n["uri"] for n in manifest["lineage"]["nodes"]}
+        assert any("feat-1" in u for u in uris)
+        assert any("scan-1" in u for u in uris)
+
+    def test_it_does_not_date_itself_as_a_publication(self, chain_store, tmp_path):
+        """Archiving mints no link and serves nothing, so it publishes nothing.
+
+        A bundle reporting a ``published_at`` dates an event that never
+        happened — to a reader, and to a machine consuming a deposit that has
+        no way to know better.
+        """
+        import json as jsonlib
+
+        dest = self._archive(chain_store, tmp_path)
+        manifest = jsonlib.loads((dest / "manifest.json").read_text())
+
+        assert "publication" not in manifest
+        assert "archived_at" in manifest["archive"]
+        assert "Archived" in (dest / "index.html").read_text()
+
+    def test_a_payload_is_referenced_not_embedded(self, chain_store, tmp_path):
+        """The file sits beside the page, so base64 would only double the size.
+
+        Unbounded, it also turns a large figure into an index.html no browser
+        will open, which is the single thing a bundle has to guarantee.
+        """
+        dest = self._archive(chain_store, tmp_path)
+
+        assert "data:image/png;base64," not in (dest / "index.html").read_text()
+
+    def test_it_refuses_a_non_empty_destination(self, chain_store, tmp_path):
+        """`--to .` was a one-keystroke way to clobber someone's README."""
+        from strata.artifact_cli import cmd_archive
+
+        dest = tmp_path / "occupied"
+        dest.mkdir()
+        (dest / "README.md").write_text("someone else's work")
+
+        rc = cmd_archive(
+            _args(
+                ref="demo/model",
+                artifact_dir=chain_store["dir"],
+                to=str(dest),
+                title=None,
+                author=None,
+                max_depth=10,
+            )
+        )
+
+        assert rc == 1
+        assert (dest / "README.md").read_text() == "someone else's work"
+
+    def test_an_unfinished_artifact_is_not_archivable(self, chain_store, tmp_path):
+        """A half-written blob digests like any other.
+
+        Without the guard the bundle presents truncated bytes as a
+        deposit-ready record, with a sha256sum line vouching for the fragment.
+        """
+        from strata.artifact_cli import cmd_archive
+
+        store = chain_store["store"]
+        store.create_artifact("halfway", "f" * 64)
+        with store.open_blob_writer("halfway", 1) as writer:
+            writer.write(b"partial")
+
+        rc = cmd_archive(
+            _args(
+                ref="halfway",
+                artifact_dir=chain_store["dir"],
+                to=str(tmp_path / "bundle"),
+                title=None,
+                author=None,
+                max_depth=10,
+            )
+        )
+
+        assert rc == 1
+        assert not (tmp_path / "bundle").exists()
+
+    def test_the_author_is_credited_when_given(self, chain_store, tmp_path):
+        """A local run has no authenticated identity, so this is the only way
+        a lone researcher's name reaches the page."""
+        dest = self._archive(chain_store, tmp_path)
+
+        assert "F. Li" in (dest / "index.html").read_text()

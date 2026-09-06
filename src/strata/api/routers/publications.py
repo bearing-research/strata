@@ -36,7 +36,7 @@ from strata.api.dependencies import (
     ReadStore,
     require_scope,
 )
-from strata.api.publication_page import render_publication
+from strata.api.publication_page import build_record, content_type_of, render_publication
 from strata.services.artifact import ArtifactService
 
 router = APIRouter(tags=["publications"])
@@ -159,19 +159,6 @@ def _load_published(store, token: str, *, require_active: bool):
     return publication, artifact
 
 
-def _content_type_of(artifact) -> str:
-    """The stored ``content_type`` param, or '' when the spec says nothing."""
-    import json
-
-    if not artifact.transform_spec:
-        return ""
-    try:
-        params = json.loads(artifact.transform_spec).get("params", {})
-    except (json.JSONDecodeError, ValueError):
-        return ""
-    return str(params.get("content_type") or "") if isinstance(params, dict) else ""
-
-
 @router.get("/v1/publications/{token}", response_model=None)
 async def read_publication_record(token: str, store: ReadStore):
     """The machine-readable record behind the page. Unauthenticated."""
@@ -184,30 +171,14 @@ async def read_publication_record(token: str, store: ReadStore):
         tenant_filter=None,
         max_depth=25,
     )
-    return {
-        "publication": _to_response(publication).model_dump(),
-        "artifact": {
-            "artifact_id": artifact.id,
-            "version": artifact.version,
-            "provenance_hash": artifact.provenance_hash,
-            "content_type": _content_type_of(artifact),
-            "created_at": artifact.created_at,
-            "byte_size": artifact.byte_size,
-            "row_count": artifact.row_count,
-            "principal": artifact.principal,
-        },
-        "content_sha256": publication.content_sha256,
-        "lineage": lineage.model_dump(),
-        "claims": {
-            "transparency": "Source, inputs and environment as recorded at execution.",
-            "integrity": (
-                "content_sha256 is the digest of the bytes at publication. It "
-                "shows they have not changed since; it does not show they were "
-                "honestly produced."
-            ),
-            "reproduction": "Not claimed. Re-running is left to the reader.",
-        },
-    }
+    record = build_record(
+        publication=publication,
+        artifact=artifact,
+        lineage=lineage,
+        content_type=content_type_of(artifact),
+    )
+    record["publication"]["url"] = f"/p/{publication.token}"
+    return record
 
 
 @router.get("/p/{token}", response_class=HTMLResponse)
@@ -223,7 +194,7 @@ async def publication_page(token: str, store: ReadStore):
         tenant_filter=None,
         max_depth=25,
     )
-    content_type = _content_type_of(artifact)
+    content_type = content_type_of(artifact)
 
     inline_png = None
     if publication.is_active and content_type == "image/png":
@@ -235,7 +206,7 @@ async def publication_page(token: str, store: ReadStore):
             artifact=artifact,
             lineage=lineage,
             content_type=content_type,
-            inline_png=inline_png,
+            image_src=inline_png,
         )
     )
 
@@ -285,9 +256,7 @@ async def publication_data(token: str, store: ReadStore):
 
     return StreamingResponse(
         _iter_blob(),
-        media_type=_content_type_of(
-            store.get_artifact(publication.artifact_id, publication.version)
-        )
+        media_type=content_type_of(store.get_artifact(publication.artifact_id, publication.version))
         or "application/octet-stream",
     )
 

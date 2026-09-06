@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -351,6 +352,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
             artifact.id,
             artifact.version,
             tenant=getattr(args, "tenant", None),
+            published_by=getattr(args, "author", None),
             title=args.title,
         )
     except ValueError as exc:
@@ -360,6 +362,18 @@ def cmd_publish(args: argparse.Namespace) -> int:
     if args.format == "json":
         print(json.dumps(asdict(publication), indent=2))
         return 0
+
+    requested_author = getattr(args, "author", None)
+    if requested_author and publication.published_by != requested_author:
+        # Publishing is idempotent, so this returned an existing grant and the
+        # byline is whatever that one recorded. Saying nothing would print a
+        # success banner for an author that never reached the page.
+        print(
+            f"Note: already published, and the page credits "
+            f"{publication.published_by or 'nobody'} — republishing does not "
+            f"change that. Unpublish and publish again to set an author "
+            f"(which mints a new token)."
+        )
 
     print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
     print()
@@ -402,6 +416,173 @@ def cmd_unpublish(args: argparse.Namespace) -> int:
     print("Withdrawn. The link now reports that it was withdrawn rather than")
     print("resolving to anything — it is never reissued for other content.")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# archive
+# ---------------------------------------------------------------------------
+
+# Extension by content type, for naming the file inside a bundle. A reader
+# should be able to double-click it; ``.bin`` helps nobody.
+_BUNDLE_EXTENSIONS = {
+    "image/png": ".png",
+    "text/markdown": ".md",
+    "json/object": ".json",
+    "arrow/ipc": ".arrow",
+    "pickle/object": ".pickle",
+}
+
+
+def cmd_archive(args: argparse.Namespace) -> int:
+    """Write a self-contained bundle: page, bytes, manifest, README.
+
+    A hosted link resolves for as long as the server does, and a URL printed in
+    a paper outlives most servers. This is the copy that does not need one —
+    suitable for a Zenodo or OSF deposit, where it gets a DOI and an archive's
+    retention promise rather than yours.
+    """
+    from strata.api.publication_page import (
+        build_record,
+        content_type_of,
+        render_publication,
+    )
+    from strata.artifact_store import Publication
+    from strata.services.artifact import ArtifactService
+
+    store = _open_store(args.artifact_dir)
+    if store is None:
+        return 2
+    artifact = _resolve_for_cmd(store, args)
+    if artifact is None:
+        return 1
+
+    # The same guard `pull` and `publish` apply. A half-written blob has a
+    # digest like any other, so without this an artifact still `building`
+    # archives cleanly and the bundle presents truncated bytes as a
+    # deposit-ready record — with a sha256sum line vouching for the fragment.
+    if artifact.state not in ("ready", "superseded"):
+        print(
+            f"Cannot archive: {artifact.id}@v={artifact.version} is not "
+            f"readable (state={artifact.state})"
+        )
+        return 1
+
+    digest = store.blob_digest(artifact.id, artifact.version)
+    if digest is None:
+        print(f"{artifact.id}@v={artifact.version} has no stored bytes to archive")
+        return 1
+
+    content_type = content_type_of(artifact)
+    filename = f"artifact{_BUNDLE_EXTENSIONS.get(content_type, '.bin')}"
+
+    # Not inserted in the store: archiving grants nobody access to a running
+    # server, so it is not a publication and must not create one. The record
+    # shape is reused because the page and manifest are the same documents.
+    publication = Publication(
+        token="",
+        artifact_id=artifact.id,
+        version=artifact.version,
+        title=args.title,
+        published_at=time.time(),
+        published_by=getattr(args, "author", None),
+        content_sha256=digest,
+    )
+
+    lineage = ArtifactService().build_lineage(
+        store,
+        artifact=artifact,
+        artifact_id=artifact.id,
+        version=artifact.version,
+        tenant_filter=getattr(args, "tenant", None),
+        max_depth=args.max_depth,
+    )
+
+    dest = Path(args.to)
+    # A bundle is a set of files that describe each other — index.html and
+    # README.md both name one payload and one digest. Writing into an occupied
+    # directory leaves the previous run's payload sitting beside the new one,
+    # with nothing naming it, and would happily clobber a README that was
+    # never ours. `--to .` made that a one-keystroke mistake.
+    if dest.exists() and any(dest.iterdir()) and not getattr(args, "force", False):
+        print(f"{dest}/ is not empty. Use --force to write into it anyway.")
+        return 1
+    dest.mkdir(parents=True, exist_ok=True)
+
+    reader_cm = store.open_blob_reader(artifact.id, artifact.version)
+    with reader_cm as reader, open(dest / filename, "wb") as out:
+        while chunk := reader.read(1024 * 1024):
+            out.write(chunk)
+
+    # A relative reference, not a data URI: the file is right there, so
+    # embedding it would double the bundle's size for nothing and turn a large
+    # figure into an index.html no browser will open — the one thing a bundle
+    # has to guarantee. (The hosted page inlines because it has no such file.)
+    image_src = filename if content_type == "image/png" else None
+
+    (dest / "index.html").write_text(
+        render_publication(
+            publication=publication,
+            artifact=artifact,
+            lineage=lineage,
+            content_type=content_type,
+            image_src=image_src,
+            bundle_filename=filename,
+        ),
+        encoding="utf-8",
+    )
+    (dest / "manifest.json").write_text(
+        json.dumps(
+            build_record(
+                publication=publication,
+                artifact=artifact,
+                lineage=lineage,
+                content_type=content_type,
+                archived=True,
+            ),
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (dest / "README.md").write_text(
+        _bundle_readme(publication, artifact, filename, digest), encoding="utf-8"
+    )
+
+    print(f"Wrote {dest}/")
+    for name in ("index.html", filename, "manifest.json", "README.md"):
+        print(f"  {name}")
+    print()
+    print("Opens with no server. index.html is the page; manifest.json is the")
+    print("same record as machine-readable JSON.")
+    return 0
+
+
+def _bundle_readme(publication: Any, artifact: ArtifactVersion, filename: str, digest: str) -> str:
+    title = publication.title or f"{artifact.id}@v={artifact.version}"
+    return f"""# {title}
+
+A Strata artifact and the record of what produced it.
+
+- `index.html` — the result, the code that produced it, and the code and
+  environment of every step behind it. Open it in a browser; it needs no
+  server and makes no external requests.
+- `{filename}` — the bytes themselves.
+- `manifest.json` — the same record, machine-readable.
+
+## Checking it
+
+The bytes are byte-identical to what was archived if:
+
+```
+sha256sum {filename}
+# {digest}
+```
+
+That is the whole of what this bundle can prove about the contents. It shows
+nothing about whether the result was honestly produced — no digest could — and
+it does not claim the computation was reproduced. Re-running it is a separate
+matter, and one only you can do: the source and environment in `index.html`
+are what it would take.
+"""
 
 
 # ---------------------------------------------------------------------------

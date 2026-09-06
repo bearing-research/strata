@@ -28,6 +28,14 @@ names.
   chain it will expose before you send the link; `strata artifact unpublish`
   withdraws it, and the token is never reissued for other content. See
   [Publishing an artifact](docs/notebook/publishing.md).
+- **Archive an artifact to a bundle that needs no server.** `strata artifact
+  archive` writes a directory — the page, the bytes, a machine-readable
+  manifest, and a README — that opens in a browser with no server and no
+  external requests, for depositing with Zenodo or OSF. A hosted link resolves
+  for as long as your server does; a URL printed in a paper outlives most
+  servers. The bundle records the digest a reader gets from `sha256sum`, so the
+  one check it offers is one they can actually run. Archiving grants nobody
+  access to a running server and mints no link.
 - **The artifact store runs on Postgres.** `STRATA_ARTIFACT_METADATA_DSN` points
   the store at a real database instead of a node-local SQLite file, which is what
   lets more than one server share it (needs the `postgres` extra). Connections are pooled
