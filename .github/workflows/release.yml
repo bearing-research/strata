@@ -114,10 +114,10 @@ jobs:
 
           # strata-pool ships from the same tag for the same reason: it is the
           # bring-your-own-hardware self-host path, run *alongside* a server, so
-          # a version that matches that server is the useful one. Lockstep also
-          # guarantees each tag publishes a version PyPI has not seen — the PyPI
-          # job deliberately has no skip-existing, so a stale sub-package version
-          # would fail the upload and take the whole release with it.
+          # a version that matches that server is the useful one. This check is
+          # what guarantees a tag never publishes a version PyPI has already
+          # seen — which is why the PyPI job can afford ``skip-existing`` (see
+          # the note there).
           with open("packages/strata-pool/pyproject.toml", "rb") as f:
               pool_version = tomllib.load(f)["project"]["version"]
           if pool_version != version:
@@ -567,6 +567,18 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # release/v1
+        with:
+          # Publishing is one upload per file, and a failure part-way leaves
+          # the earlier ones live. Without this a retry 400s on those and dies
+          # before reaching the package that actually failed, so a release that
+          # stumbles on its last package cannot be finished at all — which is
+          # exactly what 0.7.0 did, on a new sub-package with no publisher yet.
+          #
+          # This does not weaken the "a tag never republishes" guarantee: the
+          # pre-flight job fails the whole run when any of the three package
+          # versions disagrees with the tag, which is the check that was
+          # actually enforcing it.
+          skip-existing: true
 
   # --- GitHub Release (release notes from CHANGELOG) -----------------
   # Drafted only after PyPI publish succeeds — a Release that points
