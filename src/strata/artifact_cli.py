@@ -18,7 +18,7 @@ import argparse
 import json
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -379,9 +379,32 @@ def _publication_target(
     return server_store, f"{server_store.artifact_dir} (the store your server serves)"
 
 
+def _remap_input_versions(record: ArtifactVersion, remap: dict[str, str]) -> ArtifactVersion:
+    """Point a record's lineage edges at the rows its ancestors landed on.
+
+    Edges are recorded twice over, as the key ``strata://artifact/<id>@v=<n>``
+    and again as the value ``<id>@v=<n>``; the walk reads the key
+    (``_walk_lineage``) and staleness reads the value, so both have to move or
+    the two disagree about the same edge.
+    """
+    if not record.input_versions:
+        return record
+    edges = json.loads(record.input_versions)
+    prefix = "strata://artifact/"
+    moved = {}
+    for uri, version in edges.items():
+        ref = uri[len(prefix) :] if uri.startswith(prefix) else None
+        landed = remap.get(ref) if ref else None
+        if landed is None:
+            moved[uri] = version
+        else:
+            moved[f"{prefix}{landed}"] = landed
+    return replace(record, input_versions=json.dumps(moved))
+
+
 def _copy_for_publication(
     source: ArtifactStore, target: ArtifactStore, artifact: ArtifactVersion, max_depth: int
-) -> int:
+) -> tuple[int, str]:
     """Copy an artifact and everything behind it into the served store.
 
     Notebook cells write to the notebook's own ``.strata/artifacts``; the server
@@ -396,8 +419,13 @@ def _copy_for_publication(
     result whose chain resolves to nothing.
 
     Ancestors first, so a descendant is never briefly readable with edges
-    pointing at rows that have not landed. Returns how many artifacts were
-    newly written.
+    pointing at rows that have not landed, and so each descendant can be
+    rewritten to name where its ancestors actually landed: an ancestor whose
+    computation the target already holds under another id resolves to that row,
+    and an edge still naming the source's id would resolve to nothing here.
+
+    Returns how many artifacts were newly written, and the ref the published
+    artifact itself landed on, which is not the caller's when it deduplicated.
     """
     from strata.services.artifact import ArtifactService
 
@@ -410,6 +438,9 @@ def _copy_for_publication(
         max_depth=max_depth,
     )
     copied = 0
+    remap: dict[str, str] = {}
+    published_ref = f"{artifact.id}@v={artifact.version}"
+    landed_ref = published_ref
     for node in reversed(lineage.nodes):
         # Table nodes are leaves naming an external source, not artifacts this
         # store holds; there is nothing to copy and nothing to serve.
@@ -419,14 +450,22 @@ def _copy_for_publication(
         record = source.get_artifact(node.artifact_id, node.version)
         if record is None:
             continue
+        record = _remap_input_versions(record, remap)
         reader_cm = source.open_blob_reader(node.artifact_id, node.version)
         blob = None
         if reader_cm is not None:
             with reader_cm as reader:
                 blob = reader.read()
-        if target.import_artifact(record, blob):
+        imported = target.import_artifact(record, blob)
+        if imported.written:
             copied += 1
-    return copied
+
+        source_ref = f"{node.artifact_id}@v={node.version}"
+        if imported.ref != source_ref:
+            remap[source_ref] = imported.ref
+            if source_ref == published_ref:
+                landed_ref = imported.ref
+    return copied, landed_ref
 
 
 def cmd_publish(args: argparse.Namespace) -> int:
@@ -439,13 +478,21 @@ def cmd_publish(args: argparse.Namespace) -> int:
 
     target, destination = _publication_target(args, store)
     copied = 0
+    published_id, published_version = artifact.id, artifact.version
     if target.db_path != store.db_path:
-        copied = _copy_for_publication(store, target, artifact, getattr(args, "max_depth", 10))
+        copied, landed_ref = _copy_for_publication(
+            store, target, artifact, getattr(args, "max_depth", 10)
+        )
+        # The copy deduplicates against the target, so the grant has to be
+        # minted on the row that is actually there. Minting on the source's id
+        # would fail on a store that already held the same computation.
+        published_id, _, landed_version = landed_ref.partition("@v=")
+        published_version = int(landed_version)
 
     try:
         publication = target.publish_artifact(
-            artifact.id,
-            artifact.version,
+            published_id,
+            published_version,
             tenant=getattr(args, "tenant", None),
             published_by=getattr(args, "author", None),
             title=args.title,

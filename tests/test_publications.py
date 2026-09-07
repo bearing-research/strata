@@ -9,12 +9,14 @@ unescaped.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from strata.artifact_store import ArtifactStore
+from strata.artifact_store import ArtifactStore, ArtifactVersion
 
 
 @pytest.fixture
@@ -513,7 +515,7 @@ class TestImportAcrossStores:
         version = _ready_artifact(store, "fig", b"x")
         record = store.get_artifact("fig", version)
 
-        assert other.import_artifact(record, b"x") is True
+        assert other.import_artifact(record, b"x").written is True
 
         imported = other.get_artifact("fig", version)
         assert imported is not None
@@ -525,8 +527,8 @@ class TestImportAcrossStores:
         version = _ready_artifact(store, "fig", b"x")
         record = store.get_artifact("fig", version)
 
-        assert other.import_artifact(record, b"x") is True
-        assert other.import_artifact(record, b"x") is False
+        assert other.import_artifact(record, b"x").written is True
+        assert other.import_artifact(record, b"x").written is False
 
     def test_publishing_copies_the_chain_into_the_served_store(self, store, tmp_path, monkeypatch):
         """The end-to-end fix: a token minted here resolves over there.
@@ -596,6 +598,132 @@ class TestImportAcrossStores:
             figure.id,
             upstream.id,
         ]
+
+    def test_import_deduplicates_against_the_same_computation_under_another_id(
+        self, store, tmp_path
+    ):
+        """A provenance hash does not carry the cell id.
+
+        Two people whose notebooks ran the identical cell produce the same hash
+        under different notebook-derived ids, and the store permits one ready
+        row per ``(tenant, provenance_hash)``. Importing the second used to
+        raise a bare ``IntegrityError``.
+        """
+        alice = ArtifactStore(tmp_path / "alice")
+        bob = ArtifactStore(tmp_path / "bob")
+        target = ArtifactStore(tmp_path / "central")
+
+        payload = b"identical"
+        a_version = _ready_artifact(alice, "nb_alice_cell_c1_var_rows", payload)
+        b_version = _ready_artifact(bob, "nb_bob_cell_c1_var_rows", payload)
+        a_record = alice.get_artifact("nb_alice_cell_c1_var_rows", a_version)
+        b_record = bob.get_artifact("nb_bob_cell_c1_var_rows", b_version)
+        assert a_record.provenance_hash == b_record.provenance_hash
+
+        first = target.import_artifact(a_record, payload)
+        second = target.import_artifact(b_record, payload)
+
+        assert first.written is True
+        assert second.written is False
+        assert second.ref == first.ref, "the second import must resolve to the row already here"
+
+    def test_import_does_not_deduplicate_across_tenants(self, tmp_path):
+        """The uniqueness the dedup mirrors is per tenant, and so is this.
+
+        Resolving one tenant's import onto another tenant's row would handa
+        caller a ref it cannot read.
+        """
+        target = ArtifactStore(tmp_path / "central")
+        record = ArtifactVersion(
+            id="shared",
+            version=1,
+            state="ready",
+            provenance_hash="d" * 64,
+            created_at=1.0,
+            tenant="acme",
+        )
+        other_tenant = replace(record, id="shared-other", tenant="globex")
+
+        assert target.import_artifact(record, b"x").written is True
+        assert target.import_artifact(other_tenant, b"x").written is True
+
+    def test_a_shared_upstream_still_resolves_for_the_second_publisher(self, tmp_path, monkeypatch):
+        """Two chains over one computation, published into one served store.
+
+        The realistic case for a team: two people share a data-prep cell and
+        make different figures from it. The second publisher's upstream
+        deduplicates onto the first's row, so the second figure's edge has to
+        be rewritten to name it — otherwise the chain the page exists to show
+        resolves to nothing.
+        """
+        from strata.artifact_cli import cmd_publish
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+        from strata.services.artifact import ArtifactService
+
+        served = ArtifactStore(tmp_path / "served")
+        monkeypatch.setattr("strata.artifact_cli._server_store", lambda: served)
+
+        def publish_a_figure(notebook: str, figure_provenance: str):
+            manager = NotebookArtifactManager(notebook, artifact_dir=tmp_path / notebook)
+            upstream = manager.store_cell_output(
+                cell_id="c1",
+                variable_name="rows",
+                blob_data=b"[1]",
+                content_type="json/object",
+                # The shared cell: identical source, identical hash, and an id
+                # that differs only because the notebook does.
+                provenance_hash="a" * 64,
+                input_versions={},
+                source="rows = [1]",
+            )
+            ref = f"{upstream.id}@v={upstream.version}"
+            figure = manager.store_cell_output(
+                cell_id="c2",
+                variable_name="__display__0",
+                blob_data=b"PNG",
+                content_type="image/png",
+                provenance_hash=figure_provenance,
+                input_versions={f"strata://artifact/{ref}": ref},
+                source="plt.plot(rows)",
+            )
+            rc = cmd_publish(
+                argparse.Namespace(
+                    ref=figure.id,
+                    artifact_dir=str(tmp_path / notebook),
+                    format="human",
+                    title=None,
+                    author=None,
+                    here=False,
+                    max_depth=10,
+                )
+            )
+            return rc, upstream, figure
+
+        first_rc, alice_upstream, _ = publish_a_figure("alice", "b" * 64)
+        second_rc, bob_upstream, bob_figure = publish_a_figure("bob", "c" * 64)
+
+        assert first_rc == 0
+        assert second_rc == 0, "the second publisher must not crash on the shared upstream"
+        assert len(served.list_publications()) == 2
+
+        assert served.get_artifact(bob_upstream.id, bob_upstream.version) is None, (
+            "the shared computation is stored once, under whoever published it first"
+        )
+
+        copied = served.get_artifact(bob_figure.id, bob_figure.version)
+        assert copied is not None
+        lineage = ArtifactService().build_lineage(
+            served,
+            artifact=copied,
+            artifact_id=copied.id,
+            version=copied.version,
+            tenant_filter=None,
+            max_depth=10,
+        )
+        assert [n.artifact_id for n in lineage.nodes if n.type == "artifact"] == [
+            bob_figure.id,
+            alice_upstream.id,
+        ], "the second figure's edge must name the row its upstream landed on"
 
 
 class TestEmbedding:

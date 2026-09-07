@@ -85,6 +85,31 @@ class ArtifactVersion:
 
 
 @dataclass(frozen=True)
+class ImportedArtifact:
+    """Where an imported record landed in the destination store.
+
+    ``id`` and ``version`` are not always the caller's: an import whose
+    computation the store already holds under another id resolves to that row.
+    A caller copying a chain has to read them rather than assume, or the
+    descendants it imports next will name edges the store never received.
+
+    Attributes:
+        id: The artifact id the record resolved to in this store
+        version: The version it resolved to
+        written: Whether a new row was inserted (False for either no-op)
+    """
+
+    id: str
+    version: int
+    written: bool
+
+    @property
+    def ref(self) -> str:
+        """The ``id@v=N`` form lineage edges are recorded in."""
+        return f"{self.id}@v={self.version}"
+
+
+@dataclass(frozen=True)
 class Publication:
     """An opt-in public read grant for one artifact version.
 
@@ -796,11 +821,49 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    def import_artifact(self, record: ArtifactVersion, blob: bytes | None) -> bool:
+    @staticmethod
+    def _ready_with_provenance(
+        conn: StoreConnection, record: ArtifactVersion
+    ) -> tuple[str, int] | None:
+        """The ready row this record's computation already occupies, if any.
+
+        Scoped exactly as ``idx_tenant_provenance_unique`` is, because its
+        whole job is to find the row that index would refuse to duplicate:
+        ready rows only, within one tenant, with ``''`` and legacy ``NULL``
+        read as the same tenantless namespace. Runs on the caller's open write
+        transaction rather than through ``find_by_provenance``, which opens its
+        own connection and would leave a window for the row to appear between
+        the check and the insert.
+        """
+        if record.state != "ready":
+            # The index covers ready rows only, so nothing else can collide.
+            return None
+
+        tenant = record.tenant if record.tenant is not None else ""
+        if tenant:
+            row = conn.execute(
+                "SELECT id, version FROM artifact_versions "
+                "WHERE provenance_hash = ? AND state = 'ready' AND tenant = ?",
+                (record.provenance_hash, tenant),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT id, version FROM artifact_versions "
+                "WHERE provenance_hash = ? AND state = 'ready' "
+                "AND (tenant = '' OR tenant IS NULL)",
+                (record.provenance_hash,),
+            ).fetchone()
+        return (row["id"], row["version"]) if row is not None else None
+
+    def import_artifact(self, record: ArtifactVersion, blob: bytes | None) -> ImportedArtifact:
         """Copy an artifact from another store, keeping its id *and* version.
 
-        Returns False when this store already holds that exact ``id@v=N``, so a
-        repeated import is a no-op rather than a duplicate or an error.
+        Returns where the record landed and whether anything was written, so a
+        caller copying a chain can point the descendants it imports next at the
+        row this one actually resolved to. ``written`` is False both when this
+        store already holds that exact ``id@v=N`` and when it already holds the
+        same computation under another id, so a repeated import is a no-op
+        rather than a duplicate or an error.
 
         The preserved version is the whole point. Lineage edges are recorded as
         ``id@v=N`` strings, so a copy that let the destination assign a fresh
@@ -813,6 +876,26 @@ class ArtifactStore:
         artifact copied into a served store has to keep saying who computed it
         and when, or publishing would quietly relabel someone else's work as
         freshly made here.
+
+        The id is not the only way this store can already hold the record. A
+        provenance hash does not carry the cell id, so two people whose
+        notebooks ran the identical cell produce the same hash under different
+        notebook-derived ids (``nb_<notebook>_cell_<cell>_var_<name>``), and
+        ``idx_tenant_provenance_unique`` permits one ready row per
+        ``(tenant, provenance_hash)``. Importing the second raised a bare
+        ``IntegrityError`` — reachable today by publishing two notebooks that
+        share an upstream cell into one served store. It resolves to the row
+        already here instead: same computation, same bytes, so the caller's
+        descendants can name it and the chain still resolves. Skipping the
+        insert *without* saying so would be the worse failure, since the
+        descendants' edges would name an id this store never received.
+
+        ``finalize_artifact`` meets the same index and resolves it the other
+        way, superseding the older row so the newcomer takes ``ready``. That is
+        right for a fresh local computation and wrong here: the row already in
+        a served store may be published or named, and knocking it out of
+        ``ready`` to make room for a copy of itself would break the page it
+        serves.
         """
         conn = self._get_connection()
         try:
@@ -823,7 +906,12 @@ class ArtifactStore:
             ).fetchone()
             if existing is not None:
                 conn.commit()
-                return False
+                return ImportedArtifact(record.id, record.version, written=False)
+
+            duplicate = self._ready_with_provenance(conn, record)
+            if duplicate is not None:
+                conn.commit()
+                return ImportedArtifact(duplicate[0], duplicate[1], written=False)
 
             conn.execute(
                 """
@@ -855,7 +943,7 @@ class ArtifactStore:
         if blob is not None:
             with self.open_blob_writer(record.id, record.version) as writer:
                 writer.write(blob)
-        return True
+        return ImportedArtifact(record.id, record.version, written=True)
 
     def finalize_artifact(
         self,
