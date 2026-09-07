@@ -126,9 +126,11 @@ reach it (network-layer enforced). Proxy injects `X-Strata-Principal`,
 `X-Strata-Tenant`, `X-Strata-Scopes`, `X-Strata-Proxy-Token`. ACL evaluation
 is **deny-first** (deny rules → allow rules → default). Enforcement points:
 `POST /v1/materialize` (table/artifact), `GET /v1/streams/{id}` (stream
-ownership), `POST /v1/cache/clear` (`admin:cache` scope). See `auth.py`,
-`tenant_acl.py`. **Cache stays shared across principals** — ACL gates request
-admission and result retrieval, not cache contents.
+ownership), `POST /v1/cache/clear` (`admin:cache` scope). Table ACL lives in
+`auth.py` (`AclEvaluator`); tenant scoping of a concrete record is the
+`CurrentTenant` dependency plus `_ensure_artifact_access` in `server.py`.
+**Cache stays shared across principals** — ACL gates request admission and
+result retrieval, not cache contents.
 
 ### Artifact store & transforms
 
@@ -157,7 +159,7 @@ pure request-shaping logic in `services/` (`artifact`, `registry`, `build`).
 Data plane: `types.py`, `planner.py`, `cache.py`, `fetcher.py`, `metadata_*.py`,
 `fast_io.py` (+ `rust/src/lib.rs`).
 Artifact / build: `artifact_store.py`, `blob_store.py`, `transforms/`.
-Auth / tenancy: `auth.py`, `tenant.py`, `tenant_acl.py`, `tenant_registry.py`.
+Auth / tenancy: `auth.py`, `tenant.py`, `tenant_registry.py`.
 Observability: `tracing.py`, `logging.py`, `health.py`, `circuit_breaker.py`,
 `rate_limiter.py`, `cache_metrics.py`, `cache_stats.py`, `pool_metrics.py`.
 
