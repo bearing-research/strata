@@ -399,6 +399,96 @@ class TestPublicRoutesEndToEnd:
         assert httpx.get(f"{base_url}/p/nosuchtoken", timeout=10).status_code == 404
 
 
+class TestPublishDestination:
+    """Where a grant is written, and whether the caller is told.
+
+    ``--artifact-dir`` says where to read. Where the publication lands is a
+    different question, and it used to be answered from configuration without
+    ever being named — which is how a test run wrote fixtures into a
+    developer's real ``~/.strata/artifacts``.
+    """
+
+    @staticmethod
+    def _publish(tmp_path, capsys, **overrides):
+        import argparse
+
+        from strata.artifact_cli import cmd_publish
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+
+        manager = NotebookArtifactManager("nb", artifact_dir=tmp_path / "source")
+        figure = manager.store_cell_output(
+            cell_id="c1",
+            variable_name="__display__0",
+            blob_data=b"PNG",
+            content_type="image/png",
+            provenance_hash="a" * 64,
+            input_versions={},
+            source="plt.plot()",
+        )
+        args = {
+            "ref": figure.id,
+            "artifact_dir": str(tmp_path / "source"),
+            "format": "human",
+            "title": None,
+            "author": None,
+            "here": False,
+            "into": None,
+            "max_depth": 10,
+        }
+        args.update(overrides)
+        assert cmd_publish(argparse.Namespace(**args)) == 0
+        return capsys.readouterr().out, figure
+
+    def test_the_destination_is_always_reported(self, tmp_path, capsys):
+        """Even when nothing is copied.
+
+        A caller who is never told where the grant lives cannot tell a working
+        link from one their own server will never resolve — and the silent case
+        was exactly the one where source and destination already matched.
+        """
+        out, _ = self._publish(tmp_path, capsys, here=True)
+
+        assert "Published into" in out
+        assert str(tmp_path / "source") in out
+
+    def test_into_sends_it_somewhere_named(self, tmp_path, capsys):
+        from strata.artifact_store import ArtifactStore
+
+        elsewhere = tmp_path / "elsewhere"
+        out, figure = self._publish(tmp_path, capsys, into=str(elsewhere))
+
+        assert str(elsewhere) in out
+        assert len(ArtifactStore(elsewhere).list_publications()) == 1
+        # …and not in the store it was read from.
+        assert ArtifactStore(tmp_path / "source").list_publications() == []
+
+    def test_here_keeps_it_in_the_source_store(self, tmp_path, capsys):
+        from strata.artifact_store import ArtifactStore
+
+        self._publish(tmp_path, capsys, here=True)
+
+        assert len(ArtifactStore(tmp_path / "source").list_publications()) == 1
+
+    def test_into_and_here_are_mutually_exclusive(self, tmp_path):
+        """Naming both a directory and "the source" is a contradiction, not a
+        preference, so it should be refused rather than silently resolved."""
+        from strata.cli import main
+
+        with pytest.raises(SystemExit) as exit_info:
+            main(
+                [
+                    "artifact",
+                    "publish",
+                    "x",
+                    "--here",
+                    "--into",
+                    str(tmp_path / "somewhere"),
+                ]
+            )
+
+        assert exit_info.value.code != 0
+
+
 class TestImportAcrossStores:
     """Copying an artifact into the store that will serve it.
 

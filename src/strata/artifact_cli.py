@@ -347,6 +347,38 @@ def _server_store() -> ArtifactStore | None:
     return ArtifactStore(artifact_dir) if artifact_dir else None
 
 
+def _publication_target(
+    args: argparse.Namespace, source: ArtifactStore
+) -> tuple[ArtifactStore, str]:
+    """Where the grant is minted, and how to describe that to the caller.
+
+    ``--artifact-dir`` says where to *read* from, consistently with every other
+    subcommand. Where a publication is *written* is a separate question,
+    because a link only resolves from the store the server serves — and that is
+    usually not the notebook's own.
+
+    It used to be implicit: resolved from configuration and never named, so
+    ``publish --artifact-dir X`` wrote somewhere the command line did not
+    mention. That is how a test run put fixtures in a developer's real
+    ``~/.strata/artifacts``. It is a named argument now, and the caller is told
+    the destination whether or not it differs from the source.
+    """
+    into = getattr(args, "into", None)
+    if into:
+        return ArtifactStore(Path(into)), str(into)
+
+    if getattr(args, "here", False):
+        return source, str(source.artifact_dir)
+
+    server_store = _server_store()
+    if server_store is None:
+        # Nothing configured to serve from, so there is nowhere else to put it.
+        # Publishing in place and saying so beats minting a link that resolves
+        # nowhere.
+        return source, f"{source.artifact_dir} (no server store is configured)"
+    return server_store, f"{server_store.artifact_dir} (the store your server serves)"
+
+
 def _copy_for_publication(
     source: ArtifactStore, target: ArtifactStore, artifact: ArtifactVersion, max_depth: int
 ) -> int:
@@ -405,18 +437,10 @@ def cmd_publish(args: argparse.Namespace) -> int:
     if artifact is None:
         return 1
 
-    # Publish into the store the server actually serves, copying the artifact
-    # and its chain across when they differ. Minting the token in the notebook's
-    # own store produced a link the page route could not resolve.
-    target = store
+    target, destination = _publication_target(args, store)
     copied = 0
-    if not getattr(args, "here", False):
-        server_store = _server_store()
-        if server_store is not None and server_store.db_path != store.db_path:
-            copied = _copy_for_publication(
-                store, server_store, artifact, getattr(args, "max_depth", 10)
-            )
-            target = server_store
+    if target.db_path != store.db_path:
+        copied = _copy_for_publication(store, target, artifact, getattr(args, "max_depth", 10))
 
     try:
         publication = target.publish_artifact(
@@ -446,12 +470,14 @@ def cmd_publish(args: argparse.Namespace) -> int:
             f"(which mints a new token)."
         )
 
-    if copied:
-        print(
-            f"Copied {copied} artifact{'s' if copied != 1 else ''} into the "
-            f"server's store so the link resolves."
-        )
     print(f"{artifact.id}@v={artifact.version} is public at /p/{publication.token}")
+    # Always, not only when a copy happened. A caller who is never told where
+    # the grant lives cannot tell a working link from one their own server will
+    # never resolve.
+    print(f"Published into {destination}.")
+    if copied:
+        plural = "s" if copied != 1 else ""
+        print(f"Copied {copied} artifact{plural} across so the link resolves.")
     print()
     print("Anyone with that link can read the artifact, its source, and the")
     print("source and environment of every step behind it. That is the point,")

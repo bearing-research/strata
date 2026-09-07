@@ -9,6 +9,12 @@ exhaustive commit history.
 
 ### Added
 
+- **Publishing names where it writes.** `--artifact-dir` says where to read
+  from, as in every other subcommand; `--into` says where to publish, and
+  defaults to the store your server serves. The destination is printed on every
+  publish rather than only when something is copied — previously it was
+  resolved from configuration and never mentioned, so `publish --artifact-dir X`
+  wrote somewhere the command line did not name.
 - **A provenance badge for a README.** `/p/{token}/badge.svg` reports the size
   of the recorded chain and links to the page. It claims nothing about the
   result and is deliberately not green, since green is the badge convention for
