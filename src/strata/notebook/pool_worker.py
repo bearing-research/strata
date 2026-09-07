@@ -277,44 +277,54 @@ def execute_harness(manifest: dict) -> dict:
                 return _MISSING
             try:
                 return _ser.deserialize_value(spec.get("content_type", ""), full_path)
+            except _ser.StrataPrecisionError as exc:
+                raise _ser.StrataPrecisionError(
+                    exc.stored_dtype, exc.reconstructed_dtype, variable_name=var_name
+                ) from exc
             except _ser.StrataRArtifactError as exc:
                 raise _ser.StrataRArtifactError(exc.file_path, variable_name=var_name) from exc
             except Exception as exc:
                 print(f"Error deserializing {var_name}: {exc}", file=sys.stderr)
                 return _MISSING
 
-        for var_name, spec in inputs.items():
-            # Sweep-group input → {variant_name: value} dict (parity with
-            # harness.deserialize_inputs; a pooled @worker cell would otherwise
-            # never bind the var and crash with NameError).
-            if isinstance(spec, dict) and spec.get("kind") == "sweep_dict":
-                bundle: dict[str, Any] = {}
-                for variant_name, variant_spec in spec.get("variants", {}).items():
-                    value = _deser_one(variant_spec, var_name)
-                    if value is not _MISSING:
-                        bundle[variant_name] = value
-                namespace[var_name] = bundle
-                continue
-            value = _deser_one(spec, var_name)
-            if value is not _MISSING:
-                namespace[var_name] = value
-
-        _inject_mounts(manifest, namespace)
-        _inject_tables(manifest, namespace)
-        ambient_client = _inject_client(manifest, namespace)
-        display_capture.install(namespace)
-
-        namespace_before = set(namespace.keys())
-        input_identities = {name: id(namespace[name]) for name in namespace_before}
-        input_snapshots = _immut.snapshot_inputs(
-            namespace, [n for n in namespace_before if n not in _AMBIENT_NAMES]
-        )
-        mutation_set = set(manifest.get("mutation_defines") or [])
-
-        sys.stdout = stdout_buf
-        sys.stderr = stderr_buf
-
+        # Opened before deserialization, not just around the cell body. This
+        # worker is warm and reused, and deserializing imports whatever library
+        # produced a value; a library that reads its configuration once at
+        # import — jax and JAX_ENABLE_X64 above all — would otherwise be
+        # configured from the worker's own environment rather than the
+        # notebook's. That silently downcast float64 inputs to float32.
         with _apply_env_overrides(manifest):
+            for var_name, spec in inputs.items():
+                # Sweep-group input → {variant_name: value} dict (parity with
+                # harness.deserialize_inputs; a pooled @worker cell would otherwise
+                # never bind the var and crash with NameError).
+                if isinstance(spec, dict) and spec.get("kind") == "sweep_dict":
+                    bundle: dict[str, Any] = {}
+                    for variant_name, variant_spec in spec.get("variants", {}).items():
+                        value = _deser_one(variant_spec, var_name)
+                        if value is not _MISSING:
+                            bundle[variant_name] = value
+                    namespace[var_name] = bundle
+                    continue
+                value = _deser_one(spec, var_name)
+                if value is not _MISSING:
+                    namespace[var_name] = value
+
+            _inject_mounts(manifest, namespace)
+            _inject_tables(manifest, namespace)
+            ambient_client = _inject_client(manifest, namespace)
+            display_capture.install(namespace)
+
+            namespace_before = set(namespace.keys())
+            input_identities = {name: id(namespace[name]) for name in namespace_before}
+            input_snapshots = _immut.snapshot_inputs(
+                namespace, [n for n in namespace_before if n not in _AMBIENT_NAMES]
+            )
+            mutation_set = set(manifest.get("mutation_defines") or [])
+
+            sys.stdout = stdout_buf
+            sys.stderr = stderr_buf
+
             with display_capture.capture_side_effects():
                 _display_value = _exec_with_display(source, namespace)
 

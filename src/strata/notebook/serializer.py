@@ -124,6 +124,52 @@ class StrataRArtifactError(RuntimeError):
         super().__init__(message)
 
 
+class StrataPrecisionError(RuntimeError):
+    """Raised when reconstructing a stored array would narrow its dtype.
+
+    Only JAX can hit this. ``jnp.asarray`` silently downcasts 64-bit values to
+    32-bit whenever ``jax_enable_x64`` is off in the reading process, so a cell
+    that stored ``float64`` could hand its consumer ``float32`` with no warning
+    and no failure — the values still look plausible, which is what makes it
+    dangerous. It usually surfaces, if at all, somewhere far away: a
+    ``lax.while_loop`` refusing a carry whose dtype no longer matches.
+
+    A 64-bit JAX array can only exist if x64 was enabled where it was made, so
+    this firing means the reading environment disagrees with the writing one.
+    That is a configuration error with a specific fix, and saying so beats
+    handing back quietly wrong numbers.
+
+    ``code``          — stable identifier ``PRECISION_NARROWED``
+    ``stored_dtype``  — dtype recorded with the artifact
+    ``reconstructed`` — dtype the reading process produced
+    ``variable_name`` — upstream variable, when known. Populated by the
+                        harness and the pool worker during input
+                        deserialization.
+    """
+
+    code = "PRECISION_NARROWED"
+
+    def __init__(
+        self,
+        stored_dtype: str,
+        reconstructed_dtype: str,
+        *,
+        variable_name: str | None = None,
+    ) -> None:
+        self.stored_dtype = stored_dtype
+        self.reconstructed_dtype = reconstructed_dtype
+        self.variable_name = variable_name
+        target = f"variable '{variable_name}'" if variable_name else "a stored array"
+        super().__init__(
+            f"Reading {target} as a JAX array would narrow {stored_dtype} to "
+            f"{reconstructed_dtype}, losing precision silently. JAX only keeps "
+            f"64-bit dtypes when jax_enable_x64 is on, and it reads "
+            f"JAX_ENABLE_X64 once, when jax is first imported. Set "
+            f'JAX_ENABLE_X64 = "1" in this notebook\'s [env] so it is applied '
+            f"before anything imports jax."
+        )
+
+
 class SerializedPayload(TypedDict):
     """Metadata dict returned by ``serialize_value`` and every ``_serialize_*`` helper.
 
@@ -1851,7 +1897,13 @@ def _tensor_from_table(table: Any) -> Any:
             import jax.numpy as jnp
         except ImportError:
             return arr
-        return jnp.asarray(arr)
+        converted = jnp.asarray(arr)
+        if converted.dtype != arr.dtype:
+            # Checked on the outcome rather than by predicting JAX's promotion
+            # rules, so it stays right across versions and covers float64,
+            # complex128 and int64 alike.
+            raise StrataPrecisionError(str(arr.dtype), str(converted.dtype))
+        return converted
     return arr
 
 
