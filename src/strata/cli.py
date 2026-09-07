@@ -298,13 +298,27 @@ def _build_parser() -> argparse.ArgumentParser:
     publish_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
     _add_store_args(publish_parser)
     publish_parser.add_argument("--title", default=None, help="Human label for the page")
-    publish_parser.add_argument(
+    # Where to read and where to publish are different questions, so they are
+    # different arguments. Mutually exclusive because naming both a directory
+    # and "the source" is a contradiction rather than a preference.
+    publish_target = publish_parser.add_mutually_exclusive_group()
+    publish_target.add_argument(
+        "--into",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Artifact store to publish into. Defaults to the one your server "
+            "serves, so the link resolves; the artifact and its chain are "
+            "copied there if they are not already."
+        ),
+    )
+    publish_target.add_argument(
         "--here",
         action="store_true",
         help=(
-            "Publish into the store named by --artifact-dir instead of copying "
-            "into the server's. The link only resolves if the server serves "
-            "that same store."
+            "Publish into the store named by --artifact-dir rather than the "
+            "server's. The link then only resolves if your server serves that "
+            "same directory."
         ),
     )
     publish_parser.add_argument(

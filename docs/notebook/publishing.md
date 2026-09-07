@@ -43,9 +43,26 @@ timestamps. An artifact that moves into a served store has to keep saying who
 computed it and when; publishing is not a re-computation and must not read like
 one.
 
-`--here` skips the copy and publishes into whatever `--artifact-dir` names.
-That link only resolves if the server serves that same directory — useful when
-it does, misleading when it does not.
+Reading and publishing are separate arguments, because they are separate
+questions:
+
+| Argument | Means |
+| --- | --- |
+| `--artifact-dir` | the store to read the artifact from, as in every other subcommand |
+| `--into DIR` | the store to publish into |
+| `--here` | publish into the store named by `--artifact-dir` |
+
+`--into` defaults to the store your server serves, which is what makes a link
+resolve. Whichever applies, the destination is printed:
+
+```
+Published into ~/.strata/artifacts (the store your server serves).
+Copied 4 artifacts across so the link resolves.
+```
+
+That line is not conditional. A caller who is never told where a grant lives
+cannot tell a working link from one their own server will never resolve, and
+the silent case used to be exactly the one where it already matched.
 
 ![The published page for a figure: the plot itself, then the artifact's id,
 provenance hash and content digest, and below them the code that produced it
