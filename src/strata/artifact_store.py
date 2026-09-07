@@ -855,6 +855,27 @@ class ArtifactStore:
             ).fetchone()
         return (row["id"], row["version"]) if row is not None else None
 
+    def _import_no_op(
+        self, conn: StoreConnection, record: ArtifactVersion
+    ) -> ImportedArtifact | None:
+        """Where this record already lives here, if it does — else ``None``.
+
+        Two ways the store can already hold it: that exact ``id@v=N``, or the
+        same computation under another id. Both mean nothing is written, and
+        both have to name where the caller's descendants should point.
+        """
+        existing = conn.execute(
+            "SELECT 1 FROM artifact_versions WHERE id = ? AND version = ?",
+            (record.id, record.version),
+        ).fetchone()
+        if existing is not None:
+            return ImportedArtifact(record.id, record.version, written=False)
+
+        duplicate = self._ready_with_provenance(conn, record)
+        if duplicate is not None:
+            return ImportedArtifact(duplicate[0], duplicate[1], written=False)
+        return None
+
     def import_artifact(self, record: ArtifactVersion, blob: bytes | None) -> ImportedArtifact:
         """Copy an artifact from another store, keeping its id *and* version.
 
@@ -896,22 +917,35 @@ class ArtifactStore:
         a served store may be published or named, and knocking it out of
         ``ready`` to make room for a copy of itself would break the page it
         serves.
+
+        Bytes before the row, and the row alone under the write lock. The row is
+        what makes a version readable, so a crash between the two has to leave
+        bytes with no row — invisible, and collectable — rather than a row with
+        no bytes, which is a ready artifact whose page cannot serve it *and*
+        which the ``(id, version)`` check then treats as a finished import
+        forever, so no retry can repair it. The unlocked pre-check is only to
+        avoid rewriting bytes for an import that turns out to be a no-op; the
+        check inside the transaction is the authoritative one.
         """
         conn = self._get_connection()
         try:
-            self._dialect.begin_write(conn, record.id)
-            existing = conn.execute(
-                "SELECT 1 FROM artifact_versions WHERE id = ? AND version = ?",
-                (record.id, record.version),
-            ).fetchone()
-            if existing is not None:
-                conn.commit()
-                return ImportedArtifact(record.id, record.version, written=False)
+            no_op = self._import_no_op(conn, record)
+        finally:
+            conn.close()
+        if no_op is not None:
+            return no_op
 
-            duplicate = self._ready_with_provenance(conn, record)
-            if duplicate is not None:
+        if blob is not None:
+            with self.open_blob_writer(record.id, record.version) as writer:
+                writer.write(blob)
+
+        conn = self._get_connection()
+        try:
+            self._dialect.begin_write(conn, record.id)
+            no_op = self._import_no_op(conn, record)
+            if no_op is not None:
                 conn.commit()
-                return ImportedArtifact(duplicate[0], duplicate[1], written=False)
+                return no_op
 
             conn.execute(
                 """
@@ -940,9 +974,6 @@ class ArtifactStore:
         finally:
             conn.close()
 
-        if blob is not None:
-            with self.open_blob_writer(record.id, record.version) as writer:
-                writer.write(blob)
         return ImportedArtifact(record.id, record.version, written=True)
 
     def finalize_artifact(

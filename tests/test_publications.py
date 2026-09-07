@@ -647,6 +647,36 @@ class TestImportAcrossStores:
         assert target.import_artifact(record, b"x").written is True
         assert target.import_artifact(other_tenant, b"x").written is True
 
+    def test_an_import_that_dies_before_the_row_leaves_nothing_readable(self, store, tmp_path):
+        """The row is what makes a version readable, so it goes last.
+
+        Committing it first left a ready artifact whose page could not serve
+        its bytes, and — worse — the ``(id, version)`` check then read that row
+        as a finished import, so no retry could ever repair it.
+        """
+        target = ArtifactStore(tmp_path / "central")
+        version = _ready_artifact(store, "fig", b"x")
+        record = store.get_artifact("fig", version)
+
+        def die(*args, **kwargs):
+            raise OSError("disk went away mid-upload")
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(target, "open_blob_writer", die)
+            with pytest.raises(OSError):
+                target.import_artifact(record, b"x")
+
+        assert target.get_artifact("fig", version) is None, (
+            "a failed import must not leave a row claiming to be ready"
+        )
+
+        # And the retry that a live store would make now succeeds.
+        assert target.import_artifact(record, b"x").written is True
+        reader = target.open_blob_reader("fig", version)
+        assert reader is not None
+        with reader as handle:
+            assert handle.read() == b"x"
+
     def test_a_shared_upstream_still_resolves_for_the_second_publisher(self, tmp_path, monkeypatch):
         """Two chains over one computation, published into one served store.
 
