@@ -3183,6 +3183,12 @@ exhaustive commit history.</p>
 <h2 id="unreleased">Unreleased<a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Publishing names where it writes.</strong> <code>--artifact-dir</code> says where to read
+  from, as in every other subcommand; <code>--into</code> says where to publish, and
+  defaults to the store your server serves. The destination is printed on every
+  publish rather than only when something is copied — previously it was
+  resolved from configuration and never mentioned, so <code>publish --artifact-dir X</code>
+  wrote somewhere the command line did not name.</li>
 <li><strong>A provenance badge for a README.</strong> <code>/p/{token}/badge.svg</code> reports the size
   of the recorded chain and links to the page. It claims nothing about the
   result and is deliberately not green, since green is the badge convention for
