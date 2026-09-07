@@ -756,6 +756,65 @@ class TestImportAcrossStores:
         ], "the second figure's edge must name the row its upstream landed on"
 
 
+class TestPublicationRetention:
+    """A sweep must never collect anything a live token depends on."""
+
+    def _chain(self, store):
+        """An upstream, a figure that names it, and a newer upstream version.
+
+        This is the ordinary notebook workflow: publish a figure, then re-run
+        the cell that produced its input. The first upstream version is now
+        neither named nor the latest of its id, which is exactly what the
+        sweep collects.
+        """
+        upstream_v1 = _ready_artifact(store, "rows", b"[1]")
+        ref = f"rows@v={upstream_v1}"
+        figure_version = store.create_artifact(
+            "figure",
+            "f" * 64,
+            input_versions={f"strata://artifact/{ref}": ref},
+        )
+        with store.open_blob_writer("figure", figure_version) as writer:
+            writer.write(b"PNG")
+        store.finalize_artifact("figure", figure_version, schema_json="", row_count=0, byte_size=3)
+
+        publication = store.publish_artifact("figure", figure_version)
+        _ready_artifact(store, "rows", b"[1, 2]")  # the re-run: v1 is no longer latest
+        return upstream_v1, figure_version, publication
+
+    def test_a_sweep_keeps_the_chain_behind_a_publication(self, store):
+        upstream_v1, figure_version, _ = self._chain(store)
+
+        store.garbage_collect(max_age_days=0)
+
+        assert store.get_artifact("figure", figure_version) is not None
+        assert store.get_artifact("rows", upstream_v1) is not None, (
+            "collecting an ancestor leaves a live token whose lineage resolves to nothing"
+        )
+
+    def test_a_withdrawn_publication_still_protects_its_chain(self, store):
+        """A withdrawal must not destroy the record of what was withdrawn.
+
+        The row is kept so the token fails closed rather than being reissued;
+        the chain behind it stays readable for audit.
+        """
+        upstream_v1, figure_version, publication = self._chain(store)
+        store.revoke_publication(publication.token)
+
+        store.garbage_collect(max_age_days=0)
+
+        assert store.get_artifact("rows", upstream_v1) is not None
+
+    def test_a_sweep_still_collects_an_unpublished_superseded_version(self, store):
+        """The protection is publications, not a blanket amnesty."""
+        orphan = _ready_artifact(store, "scratch", b"a")
+        _ready_artifact(store, "scratch", b"b")  # supersedes it
+
+        store.garbage_collect(max_age_days=0)
+
+        assert store.get_artifact("scratch", orphan) is None
+
+
 class TestEmbedding:
     """The card, and the oEmbed endpoint that unfurls a pasted link."""
 
