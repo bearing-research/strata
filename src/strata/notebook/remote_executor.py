@@ -31,6 +31,11 @@ from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
 
+# How much of a pipe to take at once. Small enough that a chatty cell surfaces
+# promptly rather than in one lump at the end, large enough that a cell
+# printing per line does not become one HTTP request per line.
+_LOG_READ_CHUNK_BYTES = 8192
+
 NOTEBOOK_EXECUTOR_PROTOCOL_VERSION = "notebook-cell-v1"
 NOTEBOOK_EXECUTOR_TRANSFORM_REF = "notebook_cell@v1"
 NOTEBOOK_EXECUTOR_MANIFEST_VERSION = "notebook-build-manifest@v1"
@@ -173,6 +178,56 @@ def _assert_url_safe(url: str, field: str) -> None:
             )
 
 
+async def _post_log_chunk(log_url: str, stream: str, text: str) -> None:
+    """Forward one console chunk, and never let doing so affect the cell.
+
+    Console is advisory: the bundle is the record. A server that is slow,
+    unreachable, or has already given up on this build must not slow the cell
+    down or fail it, so this has a short timeout and swallows everything.
+    """
+    separator = "&" if "?" in log_url else "?"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(
+                f"{log_url}{separator}stream={stream}",
+                content=text.encode("utf-8"),
+            )
+    except Exception:
+        logger.debug("Could not forward %s chunk for the running cell", stream, exc_info=True)
+
+
+async def _drain(proc: Any, log_url: str | None) -> tuple[bytes, bytes]:
+    """Read both pipes to completion, forwarding as we go when asked to.
+
+    Replaces ``communicate()``, which returns only once the process has exited
+    — correct, and the reason a remote cell was silent for its whole run.
+
+    Both pipes are read concurrently for the same reason ``communicate()``
+    does: a process that fills one pipe's buffer blocks forever if the reader
+    is busy waiting on the other. Chunks for a single stream are posted in
+    order, one at a time, because the notebook appends them in arrival order
+    and has no way to reorder what it is shown.
+    """
+
+    async def _pump(reader: Any, stream: str) -> bytes:
+        collected: list[bytes] = []
+        while True:
+            chunk = await reader.read(_LOG_READ_CHUNK_BYTES)
+            if not chunk:
+                break
+            collected.append(chunk)
+            if log_url:
+                await _post_log_chunk(log_url, stream, chunk.decode("utf-8", errors="replace"))
+        return b"".join(collected)
+
+    stdout, stderr = await asyncio.gather(
+        _pump(proc.stdout, "stdout"),
+        _pump(proc.stderr, "stderr"),
+    )
+    await proc.wait()
+    return stdout, stderr
+
+
 async def _run_harness(
     harness_path: Path,
     manifest_path: Path,
@@ -180,12 +235,18 @@ async def _run_harness(
     *,
     in_flight: dict[str, Any] | None = None,
     build_id: str | None = None,
+    log_url: str | None = None,
 ) -> dict[str, Any]:
     """Run the notebook harness with one manifest file.
 
     Registers the process in *in_flight* under *build_id* for the duration, so
     the cancel route can reach it. Both are optional: a caller with no build id
     simply cannot be cancelled, which is the behaviour every caller had before.
+
+    With *log_url*, output is forwarded to the dispatching server as the cell
+    produces it, so a notebook watching a remote cell sees it happen instead of
+    waiting for the bundle. Without it, output is still collected in full and
+    the bundle is unchanged either way.
     """
     from strata.notebook.process_tree import (
         subprocess_kwargs_for_new_group,
@@ -204,7 +265,7 @@ async def _run_harness(
         in_flight[build_id] = proc
     try:
         _stdout, stderr = await asyncio.wait_for(
-            proc.communicate(),
+            _drain(proc, log_url),
             timeout=timeout_seconds,
         )
     except TimeoutError:
@@ -292,6 +353,7 @@ def create_notebook_executor_app() -> FastAPI:
         runtime_env: dict[str, str],
         write_input_bytes: Any,
         build_id: str | None = None,
+        log_url: str | None = None,
     ) -> tuple[Path, Path] | JSONResponse:
         """Execute a cell and pack outputs into a bundle file.
 
@@ -395,6 +457,7 @@ def create_notebook_executor_app() -> FastAPI:
                     timeout_seconds,
                     in_flight=in_flight,
                     build_id=build_id,
+                    log_url=log_url,
                 )
                 if result.get("success", False):
                     await mount_resolver.sync_back(resolved_mounts)
@@ -436,6 +499,7 @@ def create_notebook_executor_app() -> FastAPI:
         runtime_env: dict[str, str],
         form: Any,
         build_id: str | None = None,
+        log_url: str | None = None,
     ) -> Response:
         async def _write_uploaded_input(
             var_name: str,
@@ -458,6 +522,7 @@ def create_notebook_executor_app() -> FastAPI:
             runtime_env=runtime_env,
             write_input_bytes=_write_uploaded_input,
             build_id=build_id,
+            log_url=log_url,
         )
         if isinstance(result, JSONResponse):
             return result
@@ -701,6 +766,14 @@ def create_notebook_executor_app() -> FastAPI:
         _assert_url_safe(upload_url, "output.url")
         _assert_url_safe(finalize_url, "finalize_url")
 
+        # Optional: a manifest from a server that predates streamed console
+        # simply has no log_url, and the cell runs exactly as it did. Held to
+        # the same SSRF check as every other URL in the manifest — it is a
+        # server-supplied address this worker will POST to.
+        log_url = str(manifest.get("log_url", "")).strip() or None
+        if log_url:
+            _assert_url_safe(log_url, "log_url")
+
         async def _download_input(
             var_name: str,
             _requested_file_name: str,
@@ -767,6 +840,7 @@ def create_notebook_executor_app() -> FastAPI:
             runtime_env=runtime_env,
             write_input_bytes=_download_input,
             build_id=str(metadata.get("build_id") or "") or None,
+            log_url=log_url,
         )
         if isinstance(bundle_result, JSONResponse):
             return bundle_result

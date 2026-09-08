@@ -74,6 +74,7 @@ EXPECTED_ROUTES = [
     ("/v1/artifacts/{artifact_id}/v/{version}/tags/{key}", "DELETE", 0),
     ("/v1/builds/{build_id}", "GET", 0),
     ("/v1/builds/{build_id}/finalize", "POST", 0),
+    ("/v1/builds/{build_id}/log", "POST", 0),
     ("/v1/builds/{build_id}/manifest", "GET", 0),
     ("/v1/cache/clear", "POST", 1),
     # 1 dependency: require_scope("admin:cache") — the listing is cache-wide
