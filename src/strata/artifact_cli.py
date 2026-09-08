@@ -901,12 +901,20 @@ def cmd_archive(args: argparse.Namespace) -> int:
         ),
         encoding="utf-8",
     )
+    parquet_name = _write_parquet_companion(store, artifact, dest)
+    _name_bundle_files(dest, filename, parquet_name)
+
     (dest / "README.md").write_text(
-        _bundle_readme(publication, artifact, filename, digest), encoding="utf-8"
+        _bundle_readme(publication, artifact, filename, digest, parquet_name),
+        encoding="utf-8",
     )
 
     print(f"Wrote {dest}/")
-    for name in ("index.html", filename, "manifest.json", "ro-crate-metadata.json", "README.md"):
+    written = ["index.html", filename]
+    if parquet_name is not None:
+        written.append(parquet_name)
+    written += ["manifest.json", "ro-crate-metadata.json", "README.md"]
+    for name in written:
         print(f"  {name}")
     print()
     print("Opens with no server. index.html is the page; manifest.json is the")
@@ -914,8 +922,80 @@ def cmd_archive(args: argparse.Namespace) -> int:
     return 0
 
 
-def _bundle_readme(publication: Any, artifact: ArtifactVersion, filename: str, digest: str) -> str:
+def _write_parquet_companion(
+    store: ArtifactStore, artifact: ArtifactVersion, dest: Path
+) -> str | None:
+    """Write ``artifact.parquet`` beside the Arrow bytes, for tabular artifacts.
+
+    Arrow IPC is a transport format. It has a stability promise, but a data
+    repository indexes Parquet and a reader in a decade will reach for it with
+    whatever tool they have. The Arrow file stays: it is the archived bytes and
+    the digest in the manifest covers it. This is a second, more portable
+    rendering of the same rows.
+
+    Returns the filename, or ``None`` when the artifact is not tabular — an
+    image or a pickle has no rows to write and gets no companion.
+    """
+    from strata.notebook.serializer import write_table_export
+
+    reader_cm = store.open_blob_reader(artifact.id, artifact.version)
+    if reader_cm is None:
+        return None
+    with reader_cm as reader:
+        blob = reader.read()
+
+    parquet = write_table_export(blob, "parquet")
+    if parquet is None:
+        return None
+    (dest / "artifact.parquet").write_bytes(parquet)
+    return "artifact.parquet"
+
+
+def _name_bundle_files(dest: Path, filename: str, parquet_name: str | None) -> None:
+    """Say which file each digest covers.
+
+    ``content_sha256`` was unambiguous while a bundle held one payload: there
+    was only one thing it could describe. A second file makes it a claim about
+    an unnamed file, and a digest that does not say what it covers is worse
+    than none in a bundle meant to be read long after anyone is left to ask.
+
+    So the record names its payload, and any companion carries its own digest
+    beside it.
+    """
+    manifest_path = dest / "manifest.json"
+    record = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record["content_file"] = filename
+    if parquet_name is not None:
+        record["additional_files"] = [
+            {
+                "file": parquet_name,
+                "content_type": "application/vnd.apache.parquet",
+                "sha256": hashlib.sha256((dest / parquet_name).read_bytes()).hexdigest(),
+                "note": "The same rows as the archived bytes, in Parquet.",
+            }
+        ]
+    manifest_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+
+
+def _bundle_readme(
+    publication: Any,
+    artifact: ArtifactVersion,
+    filename: str,
+    digest: str,
+    parquet_name: str | None = None,
+) -> str:
     title = publication.title or f"{artifact.id}@v={artifact.version}"
+    parquet_line = (
+        f"\n- `{parquet_name}` — the same rows in Parquet, for tools that read it."
+        if parquet_name
+        else ""
+    )
+    parquet_note = (
+        f" `{parquet_name}` is a rendering of the same rows and has its own"
+        " digest in `manifest.json`."
+        if parquet_name
+        else ""
+    )
     return f"""# {title}
 
 A Strata artifact and the record of what produced it.
@@ -923,19 +1003,21 @@ A Strata artifact and the record of what produced it.
 - `index.html` — the result, the code that produced it, and the code and
   environment of every step behind it. Open it in a browser; it needs no
   server and makes no external requests.
-- `{filename}` — the bytes themselves.
+- `{filename}` — the bytes themselves.{parquet_line}
 - `manifest.json` — the same record, machine-readable.
 - `ro-crate-metadata.json` — the same chain as [RO-Crate](https://w3id.org/ro/crate/)
   JSON-LD, which repositories and provenance tooling read directly.
 
 ## Checking it
 
-The bytes are byte-identical to what was archived if:
+The archived bytes are byte-identical to what was archived if:
 
 ```
 sha256sum {filename}
 # {digest}
 ```
+
+`{filename}` is what that digest covers.{parquet_note}
 
 That is the whole of what this bundle can prove about the contents. It shows
 nothing about whether the result was honestly produced — no digest could — and
