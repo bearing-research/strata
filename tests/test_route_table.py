@@ -57,6 +57,7 @@ EXPECTED_ROUTES = [
     ("/v1/artifacts/explain-materialize", "POST", 0),
     ("/v1/artifacts/finalize", "POST", 0),
     ("/v1/artifacts/gc", "POST", 0),
+    ("/v1/artifacts/import", "POST", 0),
     ("/v1/artifacts/materialize", "POST", 0),
     ("/v1/artifacts/names/{name:path}/status", "GET", 0),
     ("/v1/artifacts/stats", "GET", 0),

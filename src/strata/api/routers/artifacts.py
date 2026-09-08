@@ -15,11 +15,13 @@ materialize/streams routes are separate slices and stay put.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
 import tempfile
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 import pyarrow as pa
@@ -327,6 +329,127 @@ async def get_artifact_info(
         byte_size=artifact.byte_size,
         created_at=artifact.created_at or 0,
     )
+
+
+@router.post("/v1/artifacts/import")
+async def import_artifact_route(
+    request: Request,
+    store: WriteStore,
+    principal: CurrentPrincipal,
+    remap: bool = False,
+):
+    """Copy one artifact version into this store, keeping its id and version.
+
+    The route publishing needs. A chain lives in the store its cells wrote to;
+    a link resolves from the store the server serves. Those are different
+    machines, so the chain has to travel, and it has to arrive with its
+    versions intact — lineage edges are recorded as ``id@v=N``, so a copy that
+    let this store assign fresh versions would land ancestors under numbers the
+    descendants' edges do not name.
+
+    Ancestors first is the caller's job. This route answers where each record
+    landed, which is not always where the caller asked:
+
+    * the same computation may already be here under another id, in which case
+      it resolves onto that row (one ready row per tenant and provenance hash
+      is what the store's uniqueness index permits);
+    * with ``remap``, a version already taken by *another tenant* is minted
+      under a fresh id here.
+
+    Either way the caller rewrites the edges of everything it imports next from
+    the ref this returns, or the chain resolves to nothing.
+
+    Idempotency is by completeness rather than existence: a record that is
+    already here but missing its bytes, or missing the lineage this caller
+    knows, is completed rather than skipped.
+
+    The caller's tenant is stamped on the row whatever the record says, so an
+    import cannot place an artifact in someone else's namespace.
+    """
+    import json as json_module
+
+    from strata.artifact_store import ArtifactVersion
+
+    form = await request.form()
+    metadata_file = form.get("metadata")
+    data_file = form.get("data")
+    if metadata_file is None or isinstance(metadata_file, str):
+        raise HTTPException(status_code=400, detail="Missing 'metadata' file field")
+
+    try:
+        metadata = json_module.loads(await metadata_file.read())
+    except json_module.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {exc}")
+    if not isinstance(metadata, dict):
+        raise HTTPException(status_code=400, detail="Metadata must be a JSON object")
+
+    artifact_id = str(metadata.get("id") or "").strip()
+    if not artifact_id:
+        raise HTTPException(status_code=400, detail="Metadata is missing 'id'")
+    try:
+        version = int(metadata.get("version"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Metadata 'version' must be an integer")
+    provenance_hash = str(metadata.get("provenance_hash") or "").strip()
+    if not provenance_hash:
+        raise HTTPException(status_code=400, detail="Metadata is missing 'provenance_hash'")
+
+    blob: bytes | None = None
+    if data_file is not None and not isinstance(data_file, str):
+        blob = await data_file.read()
+
+    declared_digest = str(metadata.get("content_sha256") or "").strip()
+    if declared_digest and blob is not None:
+        # Verified before anything is written. The digest is the caller's claim
+        # about its own bytes, and an import that stored bytes contradicting it
+        # would publish a page whose verify step fails against a record this
+        # store vouched for.
+        actual = hashlib.sha256(blob).hexdigest()
+        if actual != declared_digest:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Uploaded bytes do not match the declared digest "
+                    f"(declared {declared_digest[:12]}…, received {actual[:12]}…)"
+                ),
+            )
+
+    tenant_id = principal.tenant if principal else None
+    record = ArtifactVersion(
+        id=artifact_id,
+        version=version,
+        state=str(metadata.get("state") or "ready"),
+        provenance_hash=provenance_hash,
+        schema_json=metadata.get("schema_json"),
+        row_count=metadata.get("row_count"),
+        byte_size=metadata.get("byte_size"),
+        created_at=metadata.get("created_at"),
+        transform_spec=metadata.get("transform_spec"),
+        input_versions=metadata.get("input_versions"),
+        tenant=tenant_id,
+        principal=metadata.get("principal"),
+    )
+
+    existing = store.get_artifact(artifact_id, version)
+    if existing is not None and (existing.tenant or "") != (tenant_id or ""):
+        if not remap:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{artifact_id}@v={version} already exists under another tenant. "
+                    f"Retry with remap=true to import it under a fresh id."
+                ),
+            )
+        record = replace(record, id=f"{artifact_id}@import={uuid.uuid4().hex[:8]}")
+
+    landed = store.import_artifact(record, blob)
+    return {
+        "artifact_uri": f"strata://artifact/{landed.ref}",
+        "id": landed.id,
+        "version": landed.version,
+        "written": landed.written,
+        "remapped": landed.ref != f"{artifact_id}@v={version}",
+    }
 
 
 @router.put(

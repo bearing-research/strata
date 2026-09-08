@@ -15,15 +15,26 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import sys
 import time
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from strata.artifact_store import ArtifactStore, ArtifactVersion
+from strata.artifact_store import (
+    ArtifactStore,
+    ArtifactVersion,
+    ImportedArtifact,
+    Publication,
+)
+
+# One record and its bytes. Generous, because an artifact can be large and the
+# alternative to waiting is a half-copied chain.
+_REMOTE_TIMEOUT_SECONDS = 300.0
 
 
 def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
@@ -349,7 +360,7 @@ def _server_store() -> ArtifactStore | None:
 
 def _publication_target(
     args: argparse.Namespace, source: ArtifactStore
-) -> tuple[ArtifactStore, str]:
+) -> tuple[PublicationTarget, str]:
     """Where the grant is minted, and how to describe that to the caller.
 
     ``--artifact-dir`` says where to *read* from, consistently with every other
@@ -363,6 +374,14 @@ def _publication_target(
     ``~/.strata/artifacts``. It is a named argument now, and the caller is told
     the destination whether or not it differs from the source.
     """
+    to_url = getattr(args, "to_url", None)
+    if to_url:
+        # A store on another machine. The chain travels over HTTP and the grant
+        # is minted there, because a link only resolves from the store that
+        # serves it — which for a hosted deployment is never the laptop that
+        # ran the cells.
+        return _RemoteStore(str(to_url), _remote_headers(args)), str(to_url)
+
     into = getattr(args, "into", None)
     if into:
         return ArtifactStore(Path(into)), str(into)
@@ -377,6 +396,147 @@ def _publication_target(
         # nowhere.
         return source, f"{source.artifact_dir} (no server store is configured)"
     return server_store, f"{server_store.artifact_dir} (the store your server serves)"
+
+
+class PublicationTarget(Protocol):
+    """Where a chain is copied to and a grant is minted.
+
+    Two implementations: an ``ArtifactStore`` on this machine, and
+    ``_RemoteStore`` over HTTP. Declared so the copy walk is written once
+    against a contract rather than twice against two transports.
+    """
+
+    db_path: Path
+
+    def import_artifact(self, record: ArtifactVersion, blob: bytes | None) -> ImportedArtifact: ...
+
+    def publish_artifact(
+        self,
+        artifact_id: str,
+        version: int,
+        *,
+        tenant: str | None = None,
+        published_by: str | None = None,
+        title: str | None = None,
+    ) -> Publication: ...
+
+
+class _RemoteStore:
+    """A store on another machine, reached over HTTP.
+
+    Duck-types the two methods ``_copy_for_publication`` uses, so copying a
+    chain to a served store on a different host is the same walk with a
+    different transport rather than a second implementation of the same
+    ancestors-first, rewrite-the-edges logic.
+    """
+
+    def __init__(self, base_url: str, headers: dict[str, str] | None = None) -> None:
+        self.base_url = base_url.rstrip("/")
+        self._headers = dict(headers or {})
+        # Distinct from any local store's, so the caller's "are these the same
+        # store" check never accidentally matches.
+        self.db_path = Path(f"<remote:{self.base_url}>")
+
+    def import_artifact(self, record: ArtifactVersion, blob: bytes | None):
+        """POST one record and its bytes; return where the far side put them."""
+        import httpx
+
+        from strata.artifact_store import ImportedArtifact
+
+        metadata = {
+            key: getattr(record, key)
+            for key in (
+                "id",
+                "version",
+                "state",
+                "provenance_hash",
+                "schema_json",
+                "row_count",
+                "byte_size",
+                "created_at",
+                "transform_spec",
+                "input_versions",
+                "principal",
+            )
+        }
+        if blob is not None:
+            metadata["content_sha256"] = hashlib.sha256(blob).hexdigest()
+
+        files: dict[str, tuple[str, Any, str]] = {
+            "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
+        }
+        if blob is not None:
+            files["data"] = ("data.bin", blob, "application/octet-stream")
+
+        response = httpx.post(
+            f"{self.base_url}/v1/artifacts/import",
+            files=files,
+            headers=self._headers,
+            timeout=_REMOTE_TIMEOUT_SECONDS,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Import of {record.id}@v={record.version} was refused with "
+                f"HTTP {response.status_code}: {_detail_of(response)}"
+            )
+        body = response.json()
+        return ImportedArtifact(
+            id=str(body["id"]),
+            version=int(body["version"]),
+            written=bool(body.get("written")),
+        )
+
+    def publish_artifact(
+        self,
+        artifact_id: str,
+        version: int,
+        *,
+        tenant: str | None = None,
+        published_by: str | None = None,
+        title: str | None = None,
+    ) -> Publication:
+        """Mint the grant on the far side, where the link will resolve from.
+
+        ``tenant`` and ``published_by`` are deliberately not sent: the far side
+        takes both from the authenticated caller, so a client that could name
+        them would be claiming an identity rather than presenting one.
+        """
+        import httpx
+
+        payload = {"title": title}
+        response = httpx.post(
+            f"{self.base_url}/v1/artifacts/{artifact_id}/v/{version}/publish",
+            json=payload,
+            headers=self._headers,
+            timeout=_REMOTE_TIMEOUT_SECONDS,
+        )
+        if response.status_code >= 400:
+            raise ValueError(
+                f"the store refused to publish with HTTP {response.status_code}: "
+                f"{_detail_of(response)}"
+            )
+        body = response.json()
+        return Publication(
+            token=str(body["token"]),
+            artifact_id=str(body["artifact_id"]),
+            version=int(body["version"]),
+            title=body.get("title"),
+            published_at=float(body.get("published_at") or time.time()),
+            published_by=body.get("published_by"),
+            content_sha256=body.get("content_sha256"),
+            revoked_at=body.get("revoked_at"),
+        )
+
+
+def _detail_of(response) -> str:
+    """The server's own explanation, when it gave one."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return response.text.strip()[:200]
+    if isinstance(payload, dict):
+        return str(payload.get("detail") or payload.get("error") or payload)
+    return str(payload)
 
 
 def _remap_input_versions(record: ArtifactVersion, remap: dict[str, str]) -> ArtifactVersion:
@@ -402,8 +562,26 @@ def _remap_input_versions(record: ArtifactVersion, remap: dict[str, str]) -> Art
     return replace(record, input_versions=json.dumps(moved))
 
 
+def _remote_headers(args: argparse.Namespace) -> dict[str, str]:
+    """Auth for the remote store, from ``--header`` or the environment.
+
+    Env by default so a token is not in shell history or a process list;
+    ``--header`` for anything else the deployment's proxy wants.
+    """
+    headers: dict[str, str] = {}
+    token = os.environ.get("STRATA_STORE_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    for raw in getattr(args, "header", None) or []:
+        name, _, value = str(raw).partition(":")
+        if not value.strip():
+            raise ValueError(f"--header expects 'Name: value', got {raw!r}")
+        headers[name.strip()] = value.strip()
+    return headers
+
+
 def _copy_for_publication(
-    source: ArtifactStore, target: ArtifactStore, artifact: ArtifactVersion, max_depth: int
+    source: ArtifactStore, target: PublicationTarget, artifact: ArtifactVersion, max_depth: int
 ) -> tuple[int, str]:
     """Copy an artifact and everything behind it into the served store.
 

@@ -1004,6 +1004,61 @@ class ArtifactStore:
             (version, time.time()),
         )
 
+    def _complete_imported(
+        self,
+        landed: ImportedArtifact,
+        record: ArtifactVersion,
+        blob: bytes | None,
+    ) -> None:
+        """Fill in what an earlier, less complete write of this row left out.
+
+        Idempotency for an import is by *completeness*, not by existence. Two
+        ways a row can be here and still be missing something:
+
+        Bytes. An import interrupted between the blob and the row leaves
+        neither, but a row written by some other path may have lost its blob to
+        a failed backend. Rewriting bytes we were handed anyway is free and
+        makes the retry that repairs it actually repair it.
+
+        Lineage. The team cache writes results through the by-provenance route,
+        which records ``inputs=[]`` — a value keyed by a hash, not a node in a
+        graph. Promoting the same computation later deduplicates onto that row
+        and would otherwise leave the promoted chain resolving exactly one
+        level before reaching an artifact that names no inputs. Since the cache
+        fires on every successful cell and promotion is a deliberate act, the
+        cache almost always gets there first, so "first writer wins" would mean
+        "the least informative writer wins".
+
+        This is not a mutation of an immutable artifact. The bytes, the id, the
+        version and the provenance hash are untouched; what changes is a record
+        completed by a path that had information the first writer never had.
+        """
+        if blob is not None and not self.blob_exists(landed.id, landed.version):
+            with self.open_blob_writer(landed.id, landed.version) as writer:
+                writer.write(blob)
+
+        if not record.input_versions:
+            return
+
+        conn = self._get_connection()
+        try:
+            self._dialect.begin_write(conn, landed.id)
+            row = conn.execute(
+                "SELECT input_versions FROM artifact_versions WHERE id = ? AND version = ?",
+                (landed.id, landed.version),
+            ).fetchone()
+            # Only ever fills an absent value. A row that already names its
+            # inputs is left exactly as it is, so an import can add history and
+            # never rewrite it.
+            if row is not None and not row["input_versions"]:
+                conn.execute(
+                    "UPDATE artifact_versions SET input_versions = ? WHERE id = ? AND version = ?",
+                    (record.input_versions, landed.id, landed.version),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
     def import_artifact(self, record: ArtifactVersion, blob: bytes | None) -> ImportedArtifact:
         """Copy an artifact from another store, keeping its id *and* version.
 
@@ -1061,6 +1116,7 @@ class ArtifactStore:
         finally:
             conn.close()
         if no_op is not None:
+            self._complete_imported(no_op, record, blob)
             return no_op
 
         if blob is not None:

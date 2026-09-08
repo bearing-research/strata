@@ -313,6 +313,28 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     publish_target.add_argument(
+        "--to",
+        dest="to_url",
+        default=None,
+        metavar="URL",
+        help=(
+            "Strata server to publish to, e.g. https://store.example. The "
+            "chain is copied over HTTP and the link is minted there -- for a "
+            "hosted deployment, the store that serves the link is never the "
+            "machine that ran the cells. Auth from STRATA_STORE_TOKEN, or "
+            "--header."
+        ),
+    )
+    publish_parser.add_argument(
+        "--header",
+        action="append",
+        metavar="'Name: value'",
+        help=(
+            "Extra header for --to, repeatable. STRATA_STORE_TOKEN covers the "
+            "usual bearer token; this is for whatever else a proxy wants."
+        ),
+    )
+    publish_target.add_argument(
         "--here",
         action="store_true",
         help=(
