@@ -290,6 +290,16 @@ class SqlDialect(Protocol):
         """
         ...
 
+    def column_exists(self, conn: StoreConnection, table: str, column: str) -> bool:
+        """Whether ``table`` has ``column``.
+
+        The primitive schema migrations are built from. Neither dialect can
+        express ``ADD COLUMN IF NOT EXISTS`` portably — Postgres has it, SQLite
+        does not — so a migration asks first, and asking needs each backend's
+        own catalog.
+        """
+        ...
+
     def schema_exists(self, conn: StoreConnection, table: str = "artifact_versions") -> bool:
         """Whether ``table`` is already present.
 
@@ -385,6 +395,12 @@ class SqliteDialect:
     @property
     def supports_legacy_migration(self) -> bool:
         return True
+
+    def column_exists(self, conn: StoreConnection, table: str, column: str) -> bool:
+        # PRAGMA takes no bind parameters, so the table name is interpolated.
+        # Every caller is a migration in this module naming a literal.
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        return any(row["name"] == column for row in rows)
 
     def schema_exists(self, conn: StoreConnection, table: str = "artifact_versions") -> bool:
         row = conn.execute(
@@ -636,6 +652,13 @@ class PostgresDialect:
             if self._pool is not None:
                 self._pool.close()
                 self._pool = None
+
+    def column_exists(self, conn: StoreConnection, table: str, column: str) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM information_schema.columns WHERE table_name = ? AND column_name = ?",
+            (table, column),
+        ).fetchone()
+        return row is not None
 
     def schema_exists(self, conn: StoreConnection, table: str = "artifact_versions") -> bool:
         row = conn.execute("SELECT to_regclass(?)", (table,)).fetchone()

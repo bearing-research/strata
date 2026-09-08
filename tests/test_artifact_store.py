@@ -1532,7 +1532,18 @@ class TestTenantNormalization:
                 created_at REAL NOT NULL, transform_spec TEXT, input_versions TEXT,
                 tenant TEXT, principal TEXT, PRIMARY KEY (id, version)
             );
-            INSERT INTO artifact_versions SELECT * FROM _av_old;
+            -- Columns named, not ``SELECT *``: this table is deliberately the
+            -- legacy shape, so every column added to the current schema would
+            -- otherwise break the copy and this test would fail on each new
+            -- migration for a reason that has nothing to do with tenants.
+            INSERT INTO artifact_versions
+                (id, version, state, provenance_hash, schema_json, row_count,
+                 byte_size, created_at, transform_spec, input_versions,
+                 tenant, principal)
+            SELECT id, version, state, provenance_hash, schema_json, row_count,
+                   byte_size, created_at, transform_spec, input_versions,
+                   tenant, principal
+            FROM _av_old;
             DROP TABLE _av_old;
             """
         )

@@ -59,7 +59,8 @@ def store(postgres_dsn, tmp_path):
     try:
         conn.executescript(
             "DROP TABLE IF EXISTS artifact_versions, artifact_names, artifact_aliases, "
-            "artifact_tags, registry_audit, registry_pending CASCADE;"
+            "artifact_tags, registry_audit, registry_pending, artifact_publications, "
+            "schema_version CASCADE;"
         )
         conn.commit()
     finally:
@@ -643,3 +644,75 @@ class TestWriterSerialization:
         assert result is not None
         found = store.find_by_provenance("same-prov")
         assert found is not None
+
+
+class TestSchemaMigrations:
+    """Evolving a Postgres store that already holds data.
+
+    This is the case that had no mechanism at all: ``_init_schema`` returned as
+    soon as the schema existed, so a column added to the constants reached
+    fresh databases and never reached a deployed one.
+    """
+
+    def test_a_fresh_database_is_stamped_and_complete(self, store):
+        from strata.artifact_store import _LATEST_SCHEMA_VERSION
+
+        conn = store._get_connection()
+        try:
+            version = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()["v"]
+            has_column = conn.execute(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'artifact_versions' AND column_name = 'content_sha256'"
+            ).fetchone()
+        finally:
+            conn.close()
+
+        assert version == _LATEST_SCHEMA_VERSION
+        assert has_column is not None
+
+    def test_an_existing_database_is_carried_forward(self, postgres_dsn, tmp_path, store):
+        """The whole point: a column reaches a store that already has rows."""
+        from strata.artifact_store import _LATEST_SCHEMA_VERSION
+        from strata.sql_backend import PostgresDialect
+
+        version = store.create_artifact("keeper", "prov-keep", _spec())
+        store.finalize_artifact("keeper", version, schema_json="", row_count=1, byte_size=1)
+
+        # Rewind to a pre-migration database that still holds its rows.
+        conn = store._get_connection()
+        try:
+            conn.execute("DROP TABLE schema_version")
+            conn.execute("ALTER TABLE artifact_versions DROP COLUMN content_sha256")
+            conn.commit()
+        finally:
+            conn.close()
+
+        dialect = PostgresDialect(postgres_dsn)
+        try:
+            reopened = ArtifactStore(tmp_path / "artifacts", dialect=dialect)
+
+            conn = reopened._get_connection()
+            try:
+                stamped = conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()[
+                    "v"
+                ]
+                has_column = conn.execute(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name = 'artifact_versions' AND column_name = 'content_sha256'"
+                ).fetchone()
+            finally:
+                conn.close()
+
+            assert has_column is not None, "the migration never reached an existing database"
+            assert stamped == _LATEST_SCHEMA_VERSION
+            assert reopened.get_artifact("keeper", version) is not None, "rows must survive"
+        finally:
+            dialect.close()
+
+    def test_column_exists_reports_truthfully(self, store):
+        conn = store._get_connection()
+        try:
+            assert store._dialect.column_exists(conn, "artifact_versions", "content_sha256")
+            assert not store._dialect.column_exists(conn, "artifact_versions", "nope")
+        finally:
+            conn.close()

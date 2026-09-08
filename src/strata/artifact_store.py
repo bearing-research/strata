@@ -32,6 +32,7 @@ import json
 import logging
 import secrets
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -319,6 +320,67 @@ def compute_provenance_hash(input_hashes: list[str], transform_spec: TransformSp
 # Artifact Store
 # ---------------------------------------------------------------------------
 
+# Schema evolution.
+#
+# The ad-hoc migrations further down are SQLite-only by construction: they
+# speak PRAGMA and sqlite_master, and they are guarded by
+# ``supports_legacy_migration`` because only SQLite had deployed databases when
+# they were written. Postgres, meanwhile, returns as soon as the schema exists
+# — so there was no way at all to add a column to a Postgres store that already
+# held data. That was fine while Postgres was new. It stops being fine the
+# moment one holds something worth keeping.
+#
+# So: an ordered list, a recorded version, and one rule — the schema constants
+# above always describe the *latest* shape, and the migrations describe the
+# path to it from the baseline. A fresh database is created from the constants
+# and stamped at the latest version, so it never runs a migration; an existing
+# one is stamped at the baseline and walks forward. The two must agree, which
+# is what ``test_a_migrated_database_matches_a_fresh_one`` checks, because
+# nothing else would notice them drifting.
+
+_SCHEMA_VERSION_SQL = """
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at REAL NOT NULL
+);
+"""
+
+# The shape every database had before this mechanism existed.
+_BASELINE_SCHEMA_VERSION = 0
+
+
+@dataclass(frozen=True)
+class _Migration:
+    """One forward step, applied at most once per database.
+
+    No down-migration. Reversing a schema change on a store whose whole promise
+    is that written artifacts stay readable is not a thing anyone should reach
+    for under pressure; restoring a copy is.
+    """
+
+    version: int
+    description: str
+    apply: Callable[[StoreConnection, SqlDialect], None]
+
+
+def _add_content_sha256(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Give every artifact version somewhere to record its content digest.
+
+    Nullable, and nothing writes it yet: the column is the half that needs a
+    migration, and filling it — on write for new artifacts, lazily for old — is
+    the half that does not.
+    """
+    if not dialect.column_exists(conn, "artifact_versions", "content_sha256"):
+        conn.execute("ALTER TABLE artifact_versions ADD COLUMN content_sha256 TEXT")
+
+
+_MIGRATIONS: list[_Migration] = [
+    _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
+]
+
+_LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
+
+
 # SQL schema for artifact metadata
 _SCHEMA_SQL = """
 -- Artifact versions: immutable once state="ready"
@@ -335,6 +397,7 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
     input_versions TEXT,  -- JSON: {"uri": "version_string", ...} for staleness detection
     tenant TEXT NOT NULL DEFAULT '',  -- Tenant ID ('' = tenantless, matches names/aliases/tags)
     principal TEXT,  -- Principal ID that created this artifact
+    content_sha256 TEXT,  -- Digest of the stored bytes (see migration 1)
     PRIMARY KEY (id, version)
 );
 
@@ -608,6 +671,11 @@ class ArtifactStore:
                 # the cluster through one mutex. Once the schema exists there
                 # is nothing to serialize.
                 if self._dialect.schema_exists(conn):
+                    # Existing database: it may still be behind. Under the same
+                    # global lock the creation path takes, since two replicas
+                    # starting together would otherwise both apply migration N.
+                    self._dialect.begin_write(conn, "__schema__")
+                    self._apply_schema_migrations(conn)
                     return
 
                 # CREATE TABLE IF NOT EXISTS is not concurrency-safe in
@@ -621,6 +689,11 @@ class ArtifactStore:
                 conn.executescript(self._dialect.adapt_ddl(_SCHEMA_SQL))
                 conn.executescript(self._dialect.adapt_ddl(_REGISTRY_SCHEMA_SQL))
                 conn.executescript(self._dialect.adapt_ddl(_PUBLICATION_SCHEMA_SQL))
+                # Created from the constants, which are the latest shape, so it
+                # is already current and must not replay migrations that would
+                # add what it was born with.
+                conn.executescript(self._dialect.adapt_ddl(_SCHEMA_VERSION_SQL))
+                self._stamp_schema_version(conn, _LATEST_SCHEMA_VERSION)
                 conn.commit()
                 return
 
@@ -727,6 +800,10 @@ class ArtifactStore:
             else:
                 # Fresh database: create schema
                 conn.executescript(_SCHEMA_SQL)
+                conn.executescript(_SCHEMA_VERSION_SQL)
+                # Born at the latest shape, so it must not replay migrations
+                # that would add what the constants already gave it.
+                self._stamp_schema_version(conn, _LATEST_SCHEMA_VERSION)
                 conn.commit()
 
             # Registry tables (aliases/tags/audit) — idempotent, applies to
@@ -738,6 +815,11 @@ class ArtifactStore:
             if "from_artifact_id" not in audit_columns:
                 conn.execute("ALTER TABLE registry_audit ADD COLUMN from_artifact_id TEXT")
             conn.commit()
+
+            # After the SQLite-only steps above, which brought a legacy
+            # database up to the baseline. Everything from here is portable and
+            # runs on both backends.
+            self._apply_schema_migrations(conn)
         finally:
             conn.close()
 
@@ -875,6 +957,52 @@ class ArtifactStore:
         if duplicate is not None:
             return ImportedArtifact(duplicate[0], duplicate[1], written=False)
         return None
+
+    def _apply_schema_migrations(self, conn: StoreConnection) -> None:
+        """Bring one database up to ``_LATEST_SCHEMA_VERSION``.
+
+        Runs on every construction, and is a no-op on all but the first after
+        an upgrade: reading one row from a tiny table is cheaper than deciding
+        whether to bother.
+        """
+        conn.executescript(self._dialect.adapt_ddl(_SCHEMA_VERSION_SQL))
+        row = conn.execute("SELECT MAX(version) AS version FROM schema_version").fetchone()
+        current = row["version"] if row is not None and row["version"] is not None else None
+
+        if current is None:
+            # A database that predates this table. It is at the baseline by
+            # definition — that is what the baseline means — so stamp it and
+            # let the migrations below carry it forward.
+            current = _BASELINE_SCHEMA_VERSION
+            self._stamp_schema_version(conn, current)
+
+        for migration in _MIGRATIONS:
+            if migration.version <= current:
+                continue
+            logger.info(
+                "Applying schema migration %d (%s)", migration.version, migration.description
+            )
+            migration.apply(conn, self._dialect)
+            self._stamp_schema_version(conn, migration.version)
+        conn.commit()
+
+    def _stamp_schema_version(self, conn: StoreConnection, version: int) -> None:
+        """Record a version, at most once.
+
+        Checked rather than upserted because the two dialects spell that
+        differently (``INSERT OR IGNORE`` against ``ON CONFLICT DO NOTHING``),
+        and this runs inside a lock held for exactly this purpose, so the race
+        the upsert would guard against cannot happen here.
+        """
+        existing = conn.execute(
+            "SELECT 1 FROM schema_version WHERE version = ?", (version,)
+        ).fetchone()
+        if existing is not None:
+            return
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (version, time.time()),
+        )
 
     def import_artifact(self, record: ArtifactVersion, blob: bytes | None) -> ImportedArtifact:
         """Copy an artifact from another store, keeping its id *and* version.
