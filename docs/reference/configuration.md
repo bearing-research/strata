@@ -179,6 +179,7 @@ credential.
 | `STRATA_ARTIFACT_AZURE_CONTAINER` | `None`      | Azure container                  |
 | `STRATA_ARTIFACT_AZURE_PREFIX`    | `artifacts` | Azure prefix                     |
 | `STRATA_ARTIFACT_METADATA_DSN`    | `None`      | `postgresql://` URL for the artifact store's metadata. Unset keeps SQLite under `STRATA_ARTIFACT_DIR` |
+| `STRATA_STORE_TOKEN`              | `None`      | Bearer token `strata artifact publish --to <url>` presents to the remote store. Read from the environment so it stays out of shell history; `--header` covers anything else a proxy wants |
 | `STRATA_NODE_ADVERTISED_URL`      | `None`      | URL that reaches this node. Set only in multi-node deployments; enables stream redirects instead of 404s |
 
 ### Sharing one artifact store across nodes
