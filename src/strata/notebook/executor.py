@@ -67,6 +67,7 @@ import httpx
 from strata.artifact_store import ArtifactVersion, get_artifact_store
 from strata.artifact_store import TransformSpec as ArtifactTransformSpec
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.notebook import console_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
 from strata.notebook.dag import SweepProducer
@@ -2133,6 +2134,7 @@ class CellExecutor:
                 runtime_env,
                 timeout_seconds,
                 remote_build_id=remote_build_id,
+                cell_id=cell_id,
             )
 
         raise RuntimeError(f"Unsupported worker backend: {worker_spec.backend.value}")
@@ -2235,6 +2237,7 @@ class CellExecutor:
         runtime_env: dict[str, str],
         timeout_seconds: float,
         remote_build_id: str | None = None,
+        cell_id: str | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through an external notebook executor over HTTP."""
         for mount in mount_specs:
@@ -2259,6 +2262,7 @@ class CellExecutor:
                 runtime_env,
                 timeout_seconds,
                 build_id=remote_build_id,
+                cell_id=cell_id,
             )
 
         metadata_inputs: list[dict[str, Any]] = []
@@ -2419,6 +2423,7 @@ class CellExecutor:
         runtime_env: dict[str, str],
         timeout_seconds: float,
         build_id: str | None = None,
+        cell_id: str | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through the core build + signed-URL transport path."""
         from strata.auth import get_principal
@@ -2574,8 +2579,19 @@ class CellExecutor:
             manifest_execute_url = self._manifest_execute_url(executor_url)
             worker_token = _resolve_worker_token(worker_spec)
             headers = {"Authorization": f"Bearer {worker_token}"} if worker_token else None
-            async with httpx.AsyncClient(timeout=max(timeout_seconds + 10.0, 30.0)) as client:
-                response = await client.post(manifest_execute_url, json=manifest, headers=headers)
+            # Say where this build's console chunks should be delivered before
+            # the worker can send any. Registered around the request rather
+            # than for the session, so a chunk arriving late for a finished
+            # build has nowhere to go and is dropped.
+            if cell_id:
+                console_relay.register(build_id, self.session.notebook_state.id, cell_id)
+            try:
+                async with httpx.AsyncClient(timeout=max(timeout_seconds + 10.0, 30.0)) as client:
+                    response = await client.post(
+                        manifest_execute_url, json=manifest, headers=headers
+                    )
+            finally:
+                console_relay.unregister(build_id)
         except asyncio.CancelledError:
             _mark_failed("Notebook manifest execution cancelled", "CANCELLED")
             # Shielded: this runs inside a cancellation, so an unshielded await

@@ -24,7 +24,7 @@ from hmac import compare_digest
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from strata.api.dependencies import (
     BuildTransportStore,
@@ -34,6 +34,10 @@ from strata.api.dependencies import (
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.services.build import build_service
 from strata.transforms.signed_urls import lease_token
+
+# One console chunk. Generous for a line-oriented stream and small enough that
+# a runaway cell cannot move the server's memory through a display-only route.
+_MAX_LOG_CHUNK_BYTES = 256 * 1024
 from strata.types import BuildStatusResponse
 
 router = APIRouter(tags=["builds"])
@@ -465,6 +469,50 @@ async def upload_artifact_signed(
         staged.unlink(missing_ok=True)
 
     return {"status": "uploaded", "build_id": build_id, "byte_size": byte_size}
+
+
+@router.post("/v1/builds/{build_id}/log")
+async def append_build_log(
+    build_id: str,
+    expires_at: str,
+    signature: str,
+    request: Request,
+    stream: str = "stdout",
+):
+    """Append console output from a build that is still running.
+
+    Called by an executor as the cell produces output, so a notebook watching a
+    remote cell sees it happen rather than waiting for the bundle. The bundle
+    remains the record; this is a view of it in progress.
+
+    Advisory by design, and the response says so with 202 rather than 201:
+    nothing is persisted here and nothing downstream depends on it. A chunk for
+    a build this process is not running — a stale worker, or a replica that did
+    not dispatch it — is accepted and dropped, because the worker has no useful
+    response to a rejection and failing its cell over a console chunk would be
+    a far worse outcome than a missing line.
+    """
+    from strata.notebook import console_relay
+    from strata.server import get_state
+
+    try:
+        expires_float = float(expires_at)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid parameter format")
+
+    if not get_state().url_signer.verify_log_signature(build_id, expires_float, signature):
+        raise HTTPException(status_code=403, detail="Invalid or expired signature")
+
+    body = await request.body()
+    if len(body) > _MAX_LOG_CHUNK_BYTES:
+        # Bounded so a runaway cell cannot push the server's memory around
+        # through a route that exists only to display text.
+        body = body[-_MAX_LOG_CHUNK_BYTES:]
+
+    delivered = await console_relay.deliver(
+        build_id, stream, body.decode("utf-8", errors="replace")
+    )
+    return JSONResponse(status_code=202, content={"delivered": delivered})
 
 
 @router.post("/v1/builds/{build_id}/finalize")

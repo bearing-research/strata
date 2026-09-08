@@ -1397,8 +1397,9 @@ class Person:
             *,
             in_flight: dict | None = None,
             build_id: str | None = None,
+            log_url: str | None = None,
         ) -> dict[str, object]:
-            del harness_path, manifest_path, timeout_seconds, in_flight, build_id
+            del harness_path, manifest_path, timeout_seconds, in_flight, build_id, log_url
             started.set()
             await asyncio.sleep(0.5)
             return {

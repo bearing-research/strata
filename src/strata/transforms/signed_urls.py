@@ -127,6 +127,10 @@ class BuildManifest:
         Signed URL the executor uploads its output to.
     finalize_url : str
         URL the executor calls once the upload is complete.
+    log_url : str
+        URL the executor appends console output to while the build runs.
+        Optional for the executor to use; a worker that ignores it behaves
+        exactly as one that predates the field.
     """
 
     build_id: str
@@ -134,6 +138,7 @@ class BuildManifest:
     input_urls: list[SignedDownloadURL]
     output_url: SignedUploadURL
     finalize_url: str
+    log_url: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to the JSON wire shape sent to the executor.
@@ -146,7 +151,7 @@ class BuildManifest:
         Returns
         -------
         dict
-            ``{build_id, metadata, inputs, output, finalize_url}``.
+            ``{build_id, metadata, inputs, output, finalize_url, log_url}``.
         """
         output = asdict(self.output_url)
         del output["build_id"]
@@ -156,6 +161,7 @@ class BuildManifest:
             "inputs": [asdict(url) for url in self.input_urls],
             "output": output,
             "finalize_url": self.finalize_url,
+            "log_url": self.log_url,
         }
 
 
@@ -393,6 +399,27 @@ class URLSigner:
         }
         return self._verify(data, signature)
 
+    def generate_log_url(
+        self,
+        base_url: str,
+        build_id: str,
+        expiry_seconds: float = 600.0,
+    ) -> str:
+        """Sign a URL an executor appends console output to while it runs.
+
+        Its own ``op``, so a capability handed out for one purpose cannot be
+        replayed as another: a leaked log URL appends text nobody will act on,
+        and must not become a way to finalize or upload.
+
+        No lease. Console is advisory — the bundle remains the record — and a
+        chunk arriving from a worker whose claim has since been reclaimed is
+        worth showing, not worth a 409 the worker cannot act on either.
+        """
+        expires_at = time.time() + expiry_seconds
+        data = {"op": "log", "build_id": build_id, "expires_at": expires_at}
+        params = {"expires_at": str(expires_at), "signature": self._sign(data)}
+        return f"{base_url}/v1/builds/{build_id}/log?{urlencode(params)}"
+
     def generate_finalize_url(
         self,
         base_url: str,
@@ -444,6 +471,18 @@ class URLSigner:
             build_id=build_id,
             expires_at=expires_at,
         )
+
+    def verify_log_signature(
+        self,
+        build_id: str,
+        expires_at: float,
+        signature: str,
+    ) -> bool:
+        """Verify a log URL's signature and expiry."""
+        if time.time() > expires_at:
+            return False
+        data = {"op": "log", "build_id": build_id, "expires_at": expires_at}
+        return self._verify(data, signature)
 
     def verify_finalize_signature(
         self,
@@ -543,4 +582,9 @@ class URLSigner:
             input_urls=input_urls,
             output_url=output_url,
             finalize_url=finalize_url,
+            log_url=self.generate_log_url(
+                base_url=base_url,
+                build_id=build_id,
+                expiry_seconds=url_expiry_seconds,
+            ),
         )

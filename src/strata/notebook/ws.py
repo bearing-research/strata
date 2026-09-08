@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from strata.notebook import console_relay
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.cascade import CascadePlanner
 from strata.notebook.causality import skip_none
@@ -3243,6 +3244,15 @@ async def _broadcast_execution_result(
     """
     ts = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
 
+    # A remote cell whose console was streamed while it ran has already shown
+    # all of this. The frontend appends console text, so re-sending the
+    # complete stdout and stderr here would print the whole run a second time
+    # underneath itself.
+    if console_relay.streamed(notebook_id, cell_id):
+        console_relay.clear_streamed(notebook_id, cell_id)
+        await _broadcast_output_or_error(notebook_id, seq, cell_id, result, ts)
+        return
+
     if result.stdout:
         await _broadcast_message(
             notebook_id,
@@ -3269,6 +3279,17 @@ async def _broadcast_execution_result(
             ),
         )
 
+    await _broadcast_output_or_error(notebook_id, seq, cell_id, result, ts)
+
+
+async def _broadcast_output_or_error(
+    notebook_id: str,
+    seq: int,
+    cell_id: str,
+    result: CellExecutionResult,
+    ts: str,
+) -> None:
+    """Emit the terminal ``cell_output`` / ``cell_error`` for one execution."""
     await _broadcast_message(
         notebook_id,
         _make_message(
