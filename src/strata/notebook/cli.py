@@ -641,6 +641,15 @@ def add_new_arguments(parser: argparse.ArgumentParser) -> None:
         help="Skip creating the uv venv now; `strata run` will sync it later",
     )
     parser.add_argument(
+        "--no-git",
+        action="store_true",
+        help=(
+            "Skip writing .gitignore. The default one keeps .strata/, .venv/ "
+            "and renv/library/ out of version control; an existing .gitignore "
+            "is never replaced either way"
+        ),
+    )
+    parser.add_argument(
         "--project-mount",
         dest="project_mount",
         nargs="?",
@@ -678,6 +687,7 @@ def new_main(args: argparse.Namespace) -> int:
             args.name,
             args.python_version,
             initialize_environment=not args.no_env,
+            write_gitignore_file=not getattr(args, "no_git", False),
             project_mount=getattr(args, "project_mount", None),
         )
     except ValueError as exc:
