@@ -221,21 +221,30 @@ A tenant registry tracks active tenants (LRU-bounded). [Implementation details a
 
 ```toml
 [tool.strata.acl_config]
-# deny rules evaluate first; explicit denies cannot be bypassed.
+# Action when no rule matches. Defaults to "allow" -- set it to "deny"
+# if you want an allowlist, or every table not named below stays readable.
+default = "deny"
+
+# Deny rules evaluate first; explicit denies cannot be bypassed.
 [[tool.strata.acl_config.deny]]
 principal = "guest@example.com"
-resource = "tables/internal/*"
+tables = ["file:internal.*"]
 
 [[tool.strata.acl_config.allow]]
 principal = "analyst@example.com"
-resource = "tables/marketing/*"
-scope = "notebook:write"
-
-# default action when no rule matches (default: "deny")
-default = "deny"
+tenant = "marketing"          # optional; omit to match any tenant
+tables = ["file:marketing.*", "file:public.*"]
 ```
 
-Evaluation: deny rules → allow rules → default. [Wildcard, principal, and scope matching semantics are documented in source](https://github.com/bearing-research/strata/tree/main/src/strata) for anyone extending the ACL engine.
+A rule matches when the principal matches (`*` matches any, and is the
+default), the tenant matches if the rule names one, and **at least one** table
+pattern matches. `tables` is required: a rule with no patterns can never match
+anything, so the server refuses to start rather than loading a rule that does
+nothing.
+
+Evaluation: deny rules → allow rules → default. [Wildcard and principal
+matching semantics are documented in source](https://github.com/bearing-research/strata/tree/main/src/strata)
+for anyone extending the ACL engine.
 
 ### Scope-gated endpoints
 

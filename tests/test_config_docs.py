@@ -90,3 +90,53 @@ def test_the_scan_finds_the_variables_it_claims_to():
     assert "STRATA_HOST" in _from_config()
     assert "STRATA_LOG_LEVEL" in _from_environ_lookups()
     assert "STRATA_HOST" in _documented()
+
+
+def _service_mode_doc() -> str:
+    """The service-mode page, with newlines normalized to LF."""
+    path = Path(__file__).parent.parent / "docs/deployment/service-mode.md"
+    return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
+def test_the_documented_acl_example_actually_loads():
+    """The ACL block in service-mode.md must be a config, not a plausible one.
+
+    It was neither: it used ``resource`` and ``scope``, which are not fields,
+    while the real rule is ``principal`` / ``tenant`` / ``tables`` — so the
+    documented example failed validation at startup. And it announced the
+    default for an unmatched request as ``deny`` when the code's default is
+    ``allow``, which is wrong in the direction an operator pays for: they read
+    it, believe unmatched tables are refused, and ship a store that serves
+    them.
+
+    Nothing checked it, which is why it stayed wrong. This checks it.
+    """
+    import tomllib
+
+    from strata.config import AclConfig
+
+    # Newlines normalized: a Windows checkout has CRLF, and a regex anchored
+    # on "\n" then matches nothing and the test passes by finding no block.
+    doc = _service_mode_doc()
+    block = re.search(r"```toml\n(\[tool\.strata\.acl_config\].*?)```", doc, re.DOTALL)
+    assert block is not None, "the ACL example block is gone or no longer TOML"
+
+    # The doc shows the pyproject-nested form; load it as the config sees it.
+    parsed = tomllib.loads(block.group(1))["tool"]["strata"]["acl_config"]
+    config = AclConfig(**parsed)
+
+    assert config.default in ("allow", "deny")
+    assert config.deny_rules and config.allow_rules, "the example should show both directions"
+    for rule in [*config.deny_rules, *config.allow_rules]:
+        assert rule.tables, "a rule with no table patterns can never match"
+
+
+def test_the_documented_acl_default_matches_the_code():
+    """Whatever the example sets, the prose about the *default* must be true."""
+    from strata.config import AclConfig
+
+    doc = _service_mode_doc()
+
+    assert f'Defaults to "{AclConfig().default}"' in doc, (
+        "service-mode.md states a default for unmatched ACL requests that the code disagrees with"
+    )
