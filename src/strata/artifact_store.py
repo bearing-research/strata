@@ -3368,6 +3368,50 @@ class ArtifactStore:
                 (artifact_id, version),
             )
 
+    def _publication_reachable(self, conn: StoreConnection) -> set[tuple[str, int]]:
+        """Every artifact version a publication depends on, roots included.
+
+        A published page shows the code and environment of every step behind
+        the result, so the chain is part of what was published: collecting an
+        ancestor would leave a live token whose lineage resolves to nothing.
+
+        Revoked publications count too. Their rows are kept so the token fails
+        closed rather than being reissued, and the chain stays readable for
+        audit; deleting it would make a withdrawal destroy the record of what
+        was withdrawn.
+
+        Not tenant-scoped, deliberately. Protecting more than a sweep would
+        have collected is free, and the alternative — reasoning about whether a
+        chain can cross tenants — is the kind of proof this store's pruning
+        rules refuse to rely on elsewhere.
+        """
+        roots = conn.execute("SELECT artifact_id, version FROM artifact_publications").fetchall()
+
+        reachable: set[tuple[str, int]] = set()
+        pending = [(row["artifact_id"], row["version"]) for row in roots]
+        while pending:
+            node = pending.pop()
+            if node in reachable:
+                continue
+            reachable.add(node)
+            row = conn.execute(
+                "SELECT input_versions FROM artifact_versions WHERE id = ? AND version = ?",
+                node,
+            ).fetchone()
+            if row is None or not row["input_versions"]:
+                continue
+            for uri in json.loads(row["input_versions"]):
+                # Parsed exactly as ``_walk_lineage`` parses it, so that what
+                # GC protects and what the lineage walk will follow cannot
+                # drift apart. Anything else is a table or an external leaf.
+                if not uri.startswith("strata://artifact/"):
+                    continue
+                artifact_id, _, version = uri[len("strata://artifact/") :].partition("@v=")
+                if not version.isdigit():
+                    continue
+                pending.append((artifact_id, int(version)))
+        return reachable
+
     def garbage_collect(
         self,
         max_age_days: float = 7.0,
@@ -3417,11 +3461,20 @@ class ArtifactStore:
             #   upstream missing. Collecting superseded versions is still fine —
             #   that is what makes GC useful — but never the current one.
             #
-            # Deliberately NOT covered here: artifacts reachable only through
-            # another artifact's ``input_versions`` lineage. Those are protected
-            # in practice by the latest-version rule (a pipeline's inputs are
-            # the latest versions of their own ids); a full lineage walk is
-            # tracked separately.
+            # Publications and everything behind them are excluded below,
+            # after the SELECT, by a lineage walk rather than by a clause here.
+            # ``input_versions`` is JSON in a TEXT column, so expressing the
+            # walk in SQL means ``json_each`` on one dialect and ``jsonb_each``
+            # on the other plus splitting ids on ``@v=``; the walk is bounded
+            # by publications times chain depth and runs at most hourly, so it
+            # is cheaper to keep it in one place in Python.
+            #
+            # Still NOT covered: artifacts reachable only through the lineage
+            # of an *unpublished* artifact. Those keep the older justification
+            # — the latest-version rule protects a pipeline's inputs, which are
+            # the latest versions of their own ids. That argument never held
+            # for a published chain, which is exactly a chain whose ancestors
+            # are expected to be superseded while the published version stays.
             query = """
                 SELECT av.id, av.version, av.byte_size
                 FROM artifact_versions av
@@ -3448,6 +3501,8 @@ class ArtifactStore:
             cursor = conn.execute(query, params)
             rows = cursor.fetchall()
 
+            protected = self._publication_reachable(conn)
+
             deleted_count = 0
             deleted_bytes = 0
 
@@ -3462,6 +3517,9 @@ class ArtifactStore:
             collected: list[tuple[str, int]] = []
             for row in rows:
                 artifact_id, version, byte_size = row["id"], row["version"], row["byte_size"] or 0
+
+                if (artifact_id, version) in protected:
+                    continue
 
                 self._delete_version_children(conn, artifact_id, version)
                 try:
