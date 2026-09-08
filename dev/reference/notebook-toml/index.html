@@ -1718,6 +1718,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="What lives elsewhere">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-to-commit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to commit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2233,6 +2250,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="What lives elsewhere">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-to-commit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What to commit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2654,6 +2688,21 @@
 </tbody>
 </table>
 <p>Runtime writers never touch <code>notebook.toml</code>; structural-edit writers never touch <code>.strata/</code>. The invariant is enforced at the writer layer.</p>
+<h3 id="what-to-commit">What to commit<a class="headerlink" href="#what-to-commit" title="Permanent link">&para;</a></h3>
+<p><code>strata new</code> writes a <code>.gitignore</code> covering the runtime side, so <code>git add -A</code>
+in a notebook directory stages the right things. It never replaces an existing
+one; <code>strata new --no-git</code> skips it.</p>
+<p>The committed set is:</p>
+<ul>
+<li><code>notebook.toml</code></li>
+<li><code>pyproject.toml</code> and <code>uv.lock</code> (plus <code>renv.lock</code> for R notebooks)</li>
+<li>everything under <code>cells/</code>, including cell tests</li>
+<li>the <code>.gitignore</code> itself</li>
+</ul>
+<p>The rules live in <code>strata.notebook.layout</code> — <code>committed_paths()</code> returns the
+set for a given directory and <code>IGNORED_PATTERNS</code> is what the <code>.gitignore</code>
+contains — so this list is a rendering of the code rather than a second source
+that drifts from it.</p>
 <h2 id="round-trip-safety">Round-trip safety<a class="headerlink" href="#round-trip-safety" title="Permanent link">&para;</a></h2>
 <p>The writer preserves unknown top-level keys verbatim. If you hand-edit the file with a key the parser doesn't know about, it survives saves - useful for experimental settings or external tooling. A malformed <code>[connections.&lt;name&gt;]</code> block (no <code>driver</code>, etc.) is likewise written back verbatim under its own <code>[connections.&lt;name&gt;]</code> table so you don't lose the data while you debug.</p>
 
