@@ -2379,6 +2379,18 @@ class CellExecutor:
                         with open(bundle_path, "wb") as f:
                             async for chunk in response.aiter_bytes():
                                 f.write(chunk)
+            except asyncio.CancelledError:
+                # There is no build row on this path to mark failed, so the
+                # only thing cancelling reclaims is the machine — which would
+                # otherwise run the cell to completion for a caller that has
+                # already gone. Shielded, because this runs inside the
+                # cancellation that is propagating.
+                await asyncio.shield(
+                    self._cancel_remote_execution(
+                        executor_url, str(metadata["build_id"]), worker_token
+                    )
+                )
+                raise
             except httpx.TimeoutException as exc:
                 raise RemoteExecutionError(
                     cell_timeout_message(timeout_seconds),
@@ -2566,6 +2578,11 @@ class CellExecutor:
                 response = await client.post(manifest_execute_url, json=manifest, headers=headers)
         except asyncio.CancelledError:
             _mark_failed("Notebook manifest execution cancelled", "CANCELLED")
+            # Shielded: this runs inside a cancellation, so an unshielded await
+            # would be cancelled immediately and the worker would never hear.
+            await asyncio.shield(
+                self._cancel_remote_execution(executor_url, build_id, worker_token)
+            )
             raise
         except httpx.TimeoutException as exc:
             _mark_failed("Notebook manifest execution timed out", "TIMEOUT")
@@ -2695,6 +2712,54 @@ class CellExecutor:
                 remote_build_state="failed",
                 remote_error_code="EXECUTOR_ERROR",
             ) from exc
+
+    def _cancel_url(self, executor_url: str, build_id: str) -> str:
+        """Map an executor base URL to the cancel endpoint for one execution."""
+        parsed = urlparse(executor_url)
+        path = parsed.path or ""
+        for suffix in ("/v1/execute-manifest", "/v1/notebook-execute", "/v1/execute"):
+            if path.endswith(suffix):
+                path = path[: -len(suffix)]
+                break
+        base = path.rstrip("/")
+        return urlunparse(
+            parsed._replace(
+                path=f"{base}/v1/executions/{build_id}/cancel",
+                params="",
+                query="",
+                fragment="",
+            )
+        )
+
+    async def _cancel_remote_execution(
+        self, executor_url: str, build_id: str, worker_token: str | None
+    ) -> None:
+        """Ask a worker to stop an execution we have stopped waiting for.
+
+        Best effort by construction. The build is already marked failed and
+        both finalize and upload refuse anything outside the active states, so
+        the result could never land either way — what this reclaims is the
+        machine, which would otherwise spend its remaining minutes, or GPU
+        hours, computing an answer with nowhere to go.
+
+        Every failure is swallowed and logged. This runs while a cancellation
+        is propagating, and raising here would replace the reason the cell
+        stopped with a worker that could not be reached.
+        """
+        headers = {"Authorization": f"Bearer {worker_token}"} if worker_token else None
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    self._cancel_url(executor_url, build_id), headers=headers
+                )
+            if response.status_code >= 400:
+                logger.info(
+                    "Worker refused cancel for build %s: HTTP %d",
+                    build_id,
+                    response.status_code,
+                )
+        except Exception as exc:
+            logger.info("Could not cancel build %s on the worker: %s", build_id, exc)
 
     def _manifest_execute_url(self, executor_url: str) -> str:
         """Map an executor base URL to the notebook manifest execution endpoint."""

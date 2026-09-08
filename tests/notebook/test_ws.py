@@ -1102,8 +1102,11 @@ async def test_ws_cancelled_signed_http_executor_marks_build_failed(
         harness_path: Path,
         manifest_path: Path,
         timeout_seconds: float,
+        *,
+        in_flight: dict | None = None,
+        build_id: str | None = None,
     ) -> dict[str, object]:
-        del harness_path, manifest_path, timeout_seconds
+        del harness_path, manifest_path, timeout_seconds, in_flight, build_id
         started.set()
         await asyncio.sleep(60)
         return {

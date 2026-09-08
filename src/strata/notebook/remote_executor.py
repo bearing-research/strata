@@ -177,8 +177,16 @@ async def _run_harness(
     harness_path: Path,
     manifest_path: Path,
     timeout_seconds: float,
+    *,
+    in_flight: dict[str, Any] | None = None,
+    build_id: str | None = None,
 ) -> dict[str, Any]:
-    """Run the notebook harness with one manifest file."""
+    """Run the notebook harness with one manifest file.
+
+    Registers the process in *in_flight* under *build_id* for the duration, so
+    the cancel route can reach it. Both are optional: a caller with no build id
+    simply cannot be cancelled, which is the behaviour every caller had before.
+    """
     from strata.notebook.process_tree import (
         subprocess_kwargs_for_new_group,
         terminate_subprocess_tree,
@@ -192,6 +200,8 @@ async def _run_harness(
         stderr=asyncio.subprocess.PIPE,
         **subprocess_kwargs_for_new_group(),
     )
+    if in_flight is not None and build_id:
+        in_flight[build_id] = proc
     try:
         _stdout, stderr = await asyncio.wait_for(
             proc.communicate(),
@@ -200,6 +210,9 @@ async def _run_harness(
     except TimeoutError:
         await terminate_subprocess_tree(proc)
         raise TimeoutError()
+    finally:
+        if in_flight is not None and build_id:
+            in_flight.pop(build_id, None)
 
     result_path = manifest_path.parent / "harness-result.json"
     if not result_path.exists():
@@ -220,6 +233,11 @@ def create_notebook_executor_app() -> FastAPI:
     """
     started_at = time.time()
     active_executions = 0
+
+    # build_id -> the harness process running it, for cancel. Per app rather
+    # than module-level so two workers in one test process cannot cancel each
+    # other's executions.
+    in_flight: dict[str, Any] = {}
 
     # ---- Bearer-token gate ----
     expected_token = os.environ.get("STRATA_WORKER_TOKEN", "").strip() or None
@@ -273,6 +291,7 @@ def create_notebook_executor_app() -> FastAPI:
         raw_mounts: list[dict[str, Any]],
         runtime_env: dict[str, str],
         write_input_bytes: Any,
+        build_id: str | None = None,
     ) -> tuple[Path, Path] | JSONResponse:
         """Execute a cell and pack outputs into a bundle file.
 
@@ -374,6 +393,8 @@ def create_notebook_executor_app() -> FastAPI:
                     harness_path,
                     manifest_path,
                     timeout_seconds,
+                    in_flight=in_flight,
+                    build_id=build_id,
                 )
                 if result.get("success", False):
                     await mount_resolver.sync_back(resolved_mounts)
@@ -414,6 +435,7 @@ def create_notebook_executor_app() -> FastAPI:
         raw_mounts: list[dict[str, Any]],
         runtime_env: dict[str, str],
         form: Any,
+        build_id: str | None = None,
     ) -> Response:
         async def _write_uploaded_input(
             var_name: str,
@@ -435,6 +457,7 @@ def create_notebook_executor_app() -> FastAPI:
             raw_mounts=raw_mounts,
             runtime_env=runtime_env,
             write_input_bytes=_write_uploaded_input,
+            build_id=build_id,
         )
         if isinstance(result, JSONResponse):
             return result
@@ -454,6 +477,9 @@ def create_notebook_executor_app() -> FastAPI:
         description="Reference notebook executor for remote notebook workers",
         version="1.0.0",
     )
+    # Also on app.state so the cancel route can be exercised end to end, and so
+    # an operator can see what a worker believes it is running.
+    app.state.in_flight = in_flight
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -466,12 +492,38 @@ def create_notebook_executor_app() -> FastAPI:
                     "notebook_protocol_version": NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
                     "output_format": "notebook-output-bundle@v1",
                     "pull_model": True,
+                    "cancel": True,
                 },
             },
             "version": "1.0.0",
             "uptime_seconds": max(0.0, time.time() - started_at),
             "active_executions": active_executions,
         }
+
+    @app.post("/v1/executions/{build_id}/cancel", dependencies=[Depends(require_worker_token)])
+    async def cancel_execution(build_id: str) -> dict[str, Any]:
+        """Stop the harness running *build_id*, if it is still running.
+
+        A cancelled cell used to leave the worker computing a result nothing
+        would accept: the server marks the build failed, and both finalize and
+        upload refuse anything outside the active states, so the machine spent
+        its remaining minutes — or GPU-hours — on an answer with nowhere to go.
+
+        ``cancelled: false`` is a normal answer, not an error. The execution
+        may have finished between the server deciding to cancel and this
+        request landing, and a caller that treats "already gone" as a failure
+        would retire a machine that is in fact healthy and idle.
+        """
+        proc = in_flight.get(build_id)
+        if proc is None:
+            return {"build_id": build_id, "cancelled": False}
+
+        from strata.notebook.process_tree import terminate_subprocess_tree
+
+        # The tree, not the process: a cell that spawned DataLoader workers or
+        # a multiprocessing pool would otherwise leave them holding the GPU.
+        await terminate_subprocess_tree(proc)
+        return {"build_id": build_id, "cancelled": True}
 
     @app.post("/v1/notebook-execute", dependencies=[Depends(require_worker_token)])
     async def execute(http_request: Request) -> Response:
@@ -508,6 +560,7 @@ def create_notebook_executor_app() -> FastAPI:
             raw_mounts=raw_mounts,
             runtime_env=runtime_env,
             form=form,
+            build_id=str(metadata.get("build_id") or "") or None,
         )
 
     @app.post("/v1/execute", dependencies=[Depends(require_worker_token)])
@@ -581,6 +634,7 @@ def create_notebook_executor_app() -> FastAPI:
             raw_mounts=raw_mounts,
             runtime_env=runtime_env,
             form=form,
+            build_id=str(metadata.get("build_id") or "") or None,
         )
 
     @app.post("/v1/execute-manifest", dependencies=[Depends(require_worker_token)])
@@ -712,6 +766,7 @@ def create_notebook_executor_app() -> FastAPI:
             raw_mounts=raw_mounts,
             runtime_env=runtime_env,
             write_input_bytes=_download_input,
+            build_id=str(metadata.get("build_id") or "") or None,
         )
         if isinstance(bundle_result, JSONResponse):
             return bundle_result
