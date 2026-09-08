@@ -607,3 +607,50 @@ class TestHarnessRdsInput:
         # The cell body itself never ran, so the NameError leak we
         # were guarding against can't happen.
         assert "NameError" not in result["error"]
+
+
+class TestEnvAppliedBeforeDeserialization:
+    """The notebook's ``[env]`` must be live before any input is decoded.
+
+    Deserializing imports whatever library produced a value, and a library
+    that reads its configuration once at import — jax and ``JAX_ENABLE_X64``
+    above all — is configured for the rest of the process at that moment.
+    Applying the env only around the cell body left jax configured from the
+    *server's* environment, which silently downcast float64 inputs to float32.
+    """
+
+    def test_manifest_env_is_visible_while_inputs_are_deserialized(self, tmp_path, monkeypatch):
+        import json as _json
+        import os
+        import sys as _sys
+
+        from strata.notebook import harness
+
+        seen: dict[str, str | None] = {}
+
+        def _record(manifest):
+            seen["value"] = os.environ.get("STRATA_ORDER_PROBE")
+            return {}
+
+        monkeypatch.setattr(harness, "deserialize_inputs", _record)
+
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text(
+            _json.dumps(
+                {
+                    "source": "x = 1",
+                    "inputs": {},
+                    "env": {"STRATA_ORDER_PROBE": "1"},
+                    "output_dir": str(tmp_path),
+                }
+            )
+        )
+        monkeypatch.setattr(_sys, "argv", ["harness.py", str(manifest_path)])
+        monkeypatch.delenv("STRATA_ORDER_PROBE", raising=False)
+
+        harness.main()
+
+        assert seen["value"] == "1", (
+            "inputs were deserialized before the notebook's [env] was applied"
+        )
+        assert os.environ.get("STRATA_ORDER_PROBE") is None, "the override must not leak"

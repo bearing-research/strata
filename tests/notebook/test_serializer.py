@@ -1155,6 +1155,12 @@ def fake_jax(monkeypatch):
         def __init__(self, arr):
             self._arr = np.asarray(arr)
 
+        @property
+        def dtype(self):
+            # Real jax.Arrays expose dtype, and the read path compares it
+            # against the stored one to catch a silent narrowing.
+            return self._arr.dtype
+
         def __array__(self, dtype=None):
             return self._arr if dtype is None else self._arr.astype(dtype)
 
@@ -1171,6 +1177,163 @@ def fake_jax(monkeypatch):
     monkeypatch.setitem(sys.modules, "jax", jax_mod)
     monkeypatch.setitem(sys.modules, "jax.numpy", jnp_mod)
     return jax_mod
+
+
+@pytest.fixture
+def fake_jax_x64(monkeypatch):
+    """A jax whose ``asarray`` narrows 64-bit dtypes when x64 is off.
+
+    ``jax_enable_x64`` is off by default and is read once, when jax is first
+    imported, so within one process it is simply on or off. With it off,
+    ``jnp.asarray`` silently returns float32 for a float64 input — no warning,
+    no error, plausible-looking values. ``mod.x64`` flips it so one test can
+    write where it was on and read where it is off, which is the real shape of
+    the bug: a producing cell configured for x64 and a reading process that
+    imported jax before the notebook's ``[env]`` was applied.
+    """
+    import sys
+    import types
+
+    import numpy as np
+
+    _NARROWED = {
+        np.dtype("float64"): np.dtype("float32"),
+        np.dtype("complex128"): np.dtype("complex64"),
+        np.dtype("int64"): np.dtype("int32"),
+    }
+
+    jax_mod = types.ModuleType("jax")
+    jnp_mod = types.ModuleType("jax.numpy")
+    jax_mod.x64 = True
+
+    class Array:
+        def __init__(self, arr):
+            arr = np.asarray(arr)
+            if not jax_mod.x64 and arr.dtype in _NARROWED:
+                arr = arr.astype(_NARROWED[arr.dtype])
+            self._arr = arr
+
+        @property
+        def dtype(self):
+            return self._arr.dtype
+
+        def __array__(self, dtype=None):
+            return self._arr if dtype is None else self._arr.astype(dtype)
+
+        def __dlpack__(self, *args, **kwargs):
+            return self._arr.__dlpack__(*args, **kwargs)
+
+        def __dlpack_device__(self):
+            return self._arr.__dlpack_device__()
+
+    class _Config:
+        """Real jax lets x64 be switched on after import; so does this."""
+
+        def update(self, name, value):
+            if name == "jax_enable_x64":
+                jax_mod.x64 = bool(value)
+
+    jax_mod.config = _Config()
+    jax_mod.Array = Array
+    jnp_mod.asarray = Array
+    monkeypatch.setitem(sys.modules, "jax", jax_mod)
+    monkeypatch.setitem(sys.modules, "jax.numpy", jnp_mod)
+    return jax_mod
+
+
+class TestJaxPrecisionGuard:
+    """What a cell stores is what the next cell receives.
+
+    A 64-bit jax.Array can only be created where x64 was enabled, so reading
+    one back somewhere it is off would hand the consumer a different value
+    than the producer stored. x64 is settable after import, so the reader
+    turns it on rather than narrowing the value or refusing it.
+
+    Complex arrays are included because they are on this path now: Arrow has
+    no complex type, so they used to pickle, which records no dtype and left
+    the reader nothing to check or repair.
+    """
+
+    @pytest.mark.parametrize("dtype", ["float64", "int64", "complex128"])
+    def test_a_64_bit_array_survives_a_reader_that_started_without_x64(
+        self, fake_jax_x64, tmp_path, dtype
+    ):
+        import numpy as np
+
+        from strata.notebook import serializer
+
+        original = fake_jax_x64.Array(np.arange(4, dtype=np.dtype(dtype)))
+        assert original.dtype == np.dtype(dtype), "written where x64 was on"
+        payload = serializer.serialize_value(original, tmp_path, "arr")
+
+        fake_jax_x64.x64 = False  # the reading process imported jax too early
+        loaded = serializer.deserialize_value(payload["content_type"], tmp_path / payload["file"])
+
+        assert loaded.dtype == np.dtype(dtype), "the consumer must get what the producer stored"
+        assert isinstance(loaded, fake_jax_x64.Array)
+
+    def test_a_dtype_jax_cannot_represent_raises_rather_than_narrowing(
+        self, fake_jax_x64, tmp_path
+    ):
+        """The backstop: if enabling x64 does not repair it, do not hand back
+        a quietly narrowed value."""
+        import numpy as np
+
+        from strata.notebook import serializer
+
+        original = fake_jax_x64.Array(np.arange(4, dtype=np.float64))
+        payload = serializer.serialize_value(original, tmp_path, "arr")
+
+        fake_jax_x64.x64 = False
+        fake_jax_x64.config.update = lambda *a, **k: None  # the switch does not help
+
+        with pytest.raises(serializer.StrataPrecisionError) as excinfo:
+            serializer.deserialize_value(payload["content_type"], tmp_path / payload["file"])
+
+        assert excinfo.value.stored_dtype == "float64"
+        assert excinfo.value.reconstructed_dtype == "float32"
+
+    def test_a_dtype_that_survives_is_returned_unchanged(self, fake_jax_x64, tmp_path):
+        """The guard is about narrowing, not about jax reconstruction."""
+        import numpy as np
+
+        from strata.notebook import serializer
+
+        original = fake_jax_x64.Array(np.arange(4, dtype=np.float32))
+        payload = serializer.serialize_value(original, tmp_path, "arr")
+
+        fake_jax_x64.x64 = False
+        loaded = serializer.deserialize_value(payload["content_type"], tmp_path / payload["file"])
+
+        assert isinstance(loaded, fake_jax_x64.Array)
+        assert loaded.dtype == np.dtype("float32")
+
+
+class TestComplexArrayEncoding:
+    """Complex arrays travel as interleaved real/imag on the tensor path.
+
+    Arrow has no complex type, so they used to fall back to ``pickle/object``.
+    That round-trips a dtype correctly only as long as the reading process
+    agrees, and it records nothing the reader could check — so a complex128
+    read back under a jax without x64 became complex64 with no evidence left
+    that anything had changed.
+    """
+
+    @pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+    def test_complex_arrays_round_trip_through_arrow(self, tmp_path, dtype):
+        import numpy as np
+
+        from strata.notebook import serializer
+
+        original = (np.arange(6) + 1j * np.arange(6)).astype(dtype).reshape(2, 3)
+        payload = serializer.serialize_value(original, tmp_path, "arr")
+
+        assert payload["content_type"] == "arrow/ipc", "must not fall back to pickle"
+
+        loaded = serializer.deserialize_value(payload["content_type"], tmp_path / payload["file"])
+        assert loaded.dtype == np.dtype(dtype)
+        assert loaded.shape == original.shape
+        np.testing.assert_array_equal(loaded, original)
 
 
 class TestTensorLibrarySerialization:

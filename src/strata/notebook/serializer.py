@@ -124,6 +124,47 @@ class StrataRArtifactError(RuntimeError):
         super().__init__(message)
 
 
+class StrataPrecisionError(RuntimeError):
+    """Raised when a stored array cannot be reconstructed at its own dtype.
+
+    A backstop, not the ordinary path. What a cell stores is what the next
+    cell must receive, so the reader enables ``jax_enable_x64`` and converts
+    again when a reconstruction comes back narrowed. This is raised only if
+    that fails too — the dtype is one this JAX cannot represent at all — and
+    it exists because silently handing back a 32-bit value in place of a
+    64-bit one is the outcome to rule out. That failure is quiet: the numbers
+    still look plausible, and it surfaces, if at all, somewhere far away, as a
+    ``lax.while_loop`` refusing a carry whose dtype no longer matches.
+
+    ``code``          — stable identifier ``PRECISION_NARROWED``
+    ``stored_dtype``  — dtype recorded with the artifact
+    ``reconstructed`` — dtype the reading process produced
+    ``variable_name`` — upstream variable, when known. Populated by the
+                        harness and the pool worker during input
+                        deserialization.
+    """
+
+    code = "PRECISION_NARROWED"
+
+    def __init__(
+        self,
+        stored_dtype: str,
+        reconstructed_dtype: str,
+        *,
+        variable_name: str | None = None,
+    ) -> None:
+        self.stored_dtype = stored_dtype
+        self.reconstructed_dtype = reconstructed_dtype
+        self.variable_name = variable_name
+        target = f"variable '{variable_name}'" if variable_name else "a stored array"
+        super().__init__(
+            f"Reading {target} as a JAX array narrows {stored_dtype} to "
+            f"{reconstructed_dtype}, even with jax_enable_x64 on, so the value "
+            f"the upstream cell stored cannot be handed over unchanged. This "
+            f"JAX build appears unable to represent {stored_dtype}."
+        )
+
+
 class SerializedPayload(TypedDict):
     """Metadata dict returned by ``serialize_value`` and every ``_serialize_*`` helper.
 
@@ -606,6 +647,12 @@ _SOURCE_ARROW_CAPSULE = b"arrow.capsule"
 _SCALAR_TYPE_UUID = b"uuid"
 _SCALAR_TYPE_COMPLEX = b"complex"
 
+# Complex dtypes Arrow can carry as interleaved real/imag, and the real dtype
+# to view them as. Only the two JAX and torch actually produce; anything wider
+# (clongdouble) keeps the pickle fallback rather than gaining a representation
+# the read side could not reconstruct.
+_REAL_VIEW_OF_COMPLEX = {"complex64": "float32", "complex128": "float64"}
+
 
 def _serialize_arrow(value: Any, output_dir: Path, variable_name: str) -> SerializedPayload:
     """Unified writer for the arrow/ipc codec.
@@ -988,6 +1035,13 @@ def _ndarray_to_table(arr: Any, source: bytes | None = None) -> Any:
 
     contiguous = np.ascontiguousarray(arr)
     flat = contiguous.reshape(-1)
+    if str(flat.dtype) in _REAL_VIEW_OF_COMPLEX:
+        # Arrow has no complex type, so a complex array used to fall back to
+        # pickle — which records no dtype, leaving the reader nothing to check
+        # and nothing to repair. Interleaved real/imag keeps it on the tensor
+        # path, where _META_TENSOR_DTYPE names the true dtype and the reader
+        # restores it with a view.
+        flat = flat.view(_REAL_VIEW_OF_COMPLEX[str(flat.dtype)])
     pa_arr = pa.array(flat)
     table = pa.table({"values": pa_arr})
     meta = {
@@ -1836,7 +1890,11 @@ def _tensor_from_table(table: Any) -> Any:
 
     flat = table.column(0).to_numpy(zero_copy_only=False)
     if dtype_str:
-        flat = flat.astype(np.dtype(dtype_str), copy=False)
+        target = np.dtype(dtype_str)
+        if str(target) in _REAL_VIEW_OF_COMPLEX:
+            flat = flat.astype(_REAL_VIEW_OF_COMPLEX[str(target)], copy=False).view(target)
+        else:
+            flat = flat.astype(target, copy=False)
     arr = np.ascontiguousarray(flat).reshape(shape)
 
     source = meta.get(_META_SOURCE, b"")
@@ -1851,7 +1909,30 @@ def _tensor_from_table(table: Any) -> Any:
             import jax.numpy as jnp
         except ImportError:
             return arr
-        return jnp.asarray(arr)
+        converted = jnp.asarray(arr)
+        if converted.dtype != arr.dtype:
+            # A 64-bit jax.Array cannot exist unless x64 was on where it was
+            # made, so this process has to match, or the value the downstream
+            # cell receives is not the value the upstream cell stored. x64 is
+            # settable after import, and it repairs the reconstruction, so
+            # enable it and convert again rather than handing back a narrowed
+            # array or refusing a value that is perfectly readable.
+            #
+            # Only ever widened, and only on evidence: a stored 64-bit array is
+            # proof that the notebook wants x64. A notebook that never moves
+            # one is untouched, so this cannot quietly change the arithmetic of
+            # a cell that chose float32.
+            import jax
+
+            jax.config.update("jax_enable_x64", True)
+            converted = jnp.asarray(arr)
+        if converted.dtype != arr.dtype:
+            # Enabling x64 did not repair it, so the dtype is one this JAX
+            # cannot represent at all. Narrowing silently is the one thing not
+            # to do. Checked on the outcome rather than by predicting JAX's
+            # promotion rules, so it holds across versions.
+            raise StrataPrecisionError(str(arr.dtype), str(converted.dtype))
+        return converted
     return arr
 
 

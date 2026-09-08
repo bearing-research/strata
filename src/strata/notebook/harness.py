@@ -92,6 +92,13 @@ def _deserialize_one(var_name: str, spec: dict, output_dir: Path) -> Any:
                     injected[inj_name] = value
             return _ser.deserialize_cell_module_with_injection(full_path, injected)
         return _ser.deserialize_value(spec.get("content_type", ""), full_path)
+    except _ser.StrataPrecisionError as e:
+        # Same reasoning as the R-only case below: without the variable name
+        # attached this fails as a bare NameError in the cell body, which says
+        # nothing about precision.
+        raise _ser.StrataPrecisionError(
+            e.stored_dtype, e.reconstructed_dtype, variable_name=var_name
+        ) from e
     except _ser.StrataRArtifactError as e:
         # R-only payload from an upstream R cell. Re-raise with the variable
         # name attached so the cell fails loudly instead of leaving the name
@@ -628,6 +635,44 @@ def _run_one_batched_cell(
                 namespace[name] = previous
 
 
+def _seed_upstream_namespace(
+    upstream_inputs: dict,
+    output_dir: Path,
+    namespace: dict[str, Any],
+    tainted_inputs: dict[str, Exception],
+) -> None:
+    """Load a batch's non-batched upstream artifacts into the shared namespace.
+
+    Done inline (rather than via ``deserialize_inputs``) so a single R-only
+    artifact doesn't abort the whole subprocess pre-``cell_start`` — the parent
+    would then see ``subprocess_died`` instead of the actionable
+    ``StrataRArtifactError``. Per-variable failures are stashed and surfaced as
+    a ``cell_error`` on the first cell that references the tainted variable.
+    """
+    for var_name, spec in (upstream_inputs or {}).items():
+        content_type = spec.get("content_type", "")
+        file_name = spec.get("file", "")
+        if not file_name:
+            print(f"Warning: no file path for input {var_name}", file=sys.stderr)
+            continue
+        full_path = output_dir / file_name
+        if not full_path.exists():
+            print(f"Warning: input file not found: {full_path}", file=sys.stderr)
+            continue
+        try:
+            namespace[var_name] = _ser.deserialize_value(content_type, full_path)
+        except _ser.StrataPrecisionError as exc:
+            tainted_inputs[var_name] = _ser.StrataPrecisionError(
+                exc.stored_dtype, exc.reconstructed_dtype, variable_name=var_name
+            )
+        except _ser.StrataRArtifactError as exc:
+            tainted_inputs[var_name] = _ser.StrataRArtifactError(
+                exc.file_path, variable_name=var_name
+            )
+        except Exception as exc:
+            print(f"Error deserializing {var_name}: {exc}", file=sys.stderr)
+
+
 def execute_batch(
     cells: list[dict],
     upstream_inputs: dict,
@@ -650,33 +695,27 @@ def execute_batch(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Seed namespace from upstream artifacts. Done inline (rather than
-    # via deserialize_inputs) so a single R-only artifact doesn't
-    # abort the whole subprocess pre-``cell_start`` — the parent would
-    # then see ``subprocess_died`` instead of the actionable
-    # StrataRArtifactError. Per-variable failures are stashed and
-    # surfaced as a ``cell_error`` on the first cell that references
-    # the tainted variable.
     namespace: dict[str, Any] = {}
-    tainted_inputs: dict[str, _ser.StrataRArtifactError] = {}
-    for var_name, spec in (upstream_inputs or {}).items():
-        content_type = spec.get("content_type", "")
-        file_name = spec.get("file", "")
-        if not file_name:
-            print(f"Warning: no file path for input {var_name}", file=sys.stderr)
-            continue
-        full_path = output_dir / file_name
-        if not full_path.exists():
-            print(f"Warning: input file not found: {full_path}", file=sys.stderr)
-            continue
-        try:
-            namespace[var_name] = _ser.deserialize_value(content_type, full_path)
-        except _ser.StrataRArtifactError as exc:
-            tainted_inputs[var_name] = _ser.StrataRArtifactError(
-                exc.file_path, variable_name=var_name
-            )
-        except Exception as exc:
-            print(f"Error deserializing {var_name}: {exc}", file=sys.stderr)
+    tainted_inputs: dict[str, Exception] = {}
+
+    # Seeding happens under the env every cell in this batch agrees on.
+    # Deserializing imports whatever library produced a value, and a library
+    # that reads its configuration once at import — jax and JAX_ENABLE_X64
+    # above all — is then configured for the whole batch, since a batch is one
+    # process. Only the entries common to every cell can be applied here: a
+    # value one cell sets and another does not is genuinely ambiguous for a
+    # shared namespace, and guessing would configure the batch for whichever
+    # cell happened to be first. The notebook-level ``[env]`` is common to all
+    # of them, which is the case that matters.
+    batch_envs = [dict(cell.get("env") or {}) for cell in cells]
+    shared_env = {
+        key: value
+        for key, value in (batch_envs[0] if batch_envs else {}).items()
+        if all(env.get(key) == value for env in batch_envs)
+    }
+
+    with apply_env_overrides({"env": shared_env}):
+        _seed_upstream_namespace(upstream_inputs, output_dir, namespace, tainted_inputs)
 
     for cell in cells:
         blocker = _first_tainted_reference(cell["source"], tainted_inputs)
@@ -703,9 +742,12 @@ def execute_batch(
 
 def _first_tainted_reference(
     source: str,
-    tainted_inputs: dict[str, _ser.StrataRArtifactError],
-) -> _ser.StrataRArtifactError | None:
+    tainted_inputs: dict[str, Exception],
+) -> Exception | None:
     """Return the first tainted-upstream error that a cell's source references.
+
+    The error is whatever made the variable unusable — an R-only artifact, or a
+    dtype the reading process would narrow.
 
     Word-boundary match — keeps ``fit`` from spuriously triggering on
     ``unfit_data`` or string literals like ``"fit_score"``. AST-walk
@@ -816,13 +858,21 @@ def main():
         source = manifest.get("source", "")
         output_dir = Path(manifest.get("output_dir", "/tmp/strata_output"))
 
-        inputs = deserialize_inputs(manifest)
-        inject_mounts(manifest, inputs)
-        inject_tables(manifest, inputs)
-        ambient_client = inject_client(manifest, inputs)
-        loop_config = manifest.get("loop") or {}
-        loop_until_expr = loop_config.get("until_expr") if isinstance(loop_config, dict) else None
+        # The env goes on before anything is deserialized, not just around the
+        # cell body. Deserializing imports whatever library produced a value,
+        # and a library that reads its configuration once at import — jax and
+        # JAX_ENABLE_X64 above all — would otherwise be configured from the
+        # *server's* environment and then handed the notebook's too late to
+        # matter. That silently downcast float64 inputs to float32.
         with apply_env_overrides(manifest):
+            inputs = deserialize_inputs(manifest)
+            inject_mounts(manifest, inputs)
+            inject_tables(manifest, inputs)
+            ambient_client = inject_client(manifest, inputs)
+            loop_config = manifest.get("loop") or {}
+            loop_until_expr = (
+                loop_config.get("until_expr") if isinstance(loop_config, dict) else None
+            )
             (
                 outputs,
                 display_values,

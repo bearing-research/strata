@@ -800,3 +800,68 @@ def test_batch_warns_on_inplace_mutation_of_input(batch_pipes):
     warnings = persist_mutate["mutation_warnings"]
     assert len(warnings) == 1
     assert warnings[0]["var_name"] == "df"
+
+
+def test_batch_seeds_upstream_inputs_under_the_shared_env(batch_pipes, monkeypatch):
+    """A batch is one process, so a library configured at import is configured once.
+
+    Upstream artifacts were seeded before any ``[env]`` was applied, so a
+    library that reads its configuration at import — jax and JAX_ENABLE_X64
+    above all — was configured from the *server's* environment for the whole
+    batch. That silently downcast float64 inputs to float32.
+
+    Only entries every cell agrees on can be applied: one cell's private value
+    would otherwise configure the batch for whichever cell ran first. The
+    notebook-level ``[env]`` is common to all of them, which is the case that
+    matters.
+    """
+    import os
+
+    from strata.notebook import harness
+
+    frame_r, frame_w, resp_r, resp_w, output_dir = batch_pipes
+
+    seen: dict[str, str | None] = {}
+    real_seed = harness._seed_upstream_namespace
+
+    def _record(upstream_inputs, out_dir, namespace, tainted):
+        seen["shared"] = os.environ.get("STRATA_BATCH_PROBE")
+        seen["private"] = os.environ.get("STRATA_CELL_PRIVATE")
+        return real_seed(upstream_inputs, out_dir, namespace, tainted)
+
+    monkeypatch.setattr(harness, "_seed_upstream_namespace", _record)
+    monkeypatch.delenv("STRATA_BATCH_PROBE", raising=False)
+    monkeypatch.delenv("STRATA_CELL_PRIVATE", raising=False)
+
+    cells = [
+        {
+            "cell_id": "c1",
+            "source": "x = 1",
+            "consumed_vars": ["x"],
+            "env": {"STRATA_BATCH_PROBE": "1", "STRATA_CELL_PRIVATE": "only-c1"},
+            "mount_manifest": {},
+        },
+        {
+            "cell_id": "c2",
+            "source": "y = 2",
+            "consumed_vars": ["y"],
+            "env": {"STRATA_BATCH_PROBE": "1"},
+            "mount_manifest": {},
+        },
+    ]
+
+    thread, errors = _run_in_thread(cells, {}, output_dir, frame_w, resp_r)
+    while True:
+        frame = _read_frame(frame_r)
+        if frame is None:
+            break
+        if frame["type"] == "cache_check":
+            _send_response(resp_w, {"cache_hit": False, "provenance_hash": "abc"})
+        elif frame["type"] == "persist":
+            _send_response(resp_w, {"ok": True})
+    thread.join(timeout=10)
+
+    assert not errors, f"execute_batch raised: {errors}"
+    assert seen["shared"] == "1", "inputs were seeded before the batch's shared [env] applied"
+    assert seen["private"] is None, "a value only one cell sets must not configure the batch"
+    assert os.environ.get("STRATA_BATCH_PROBE") is None, "the override must not leak"
