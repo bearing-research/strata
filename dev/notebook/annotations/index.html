@@ -3183,7 +3183,11 @@ has no anchor when the cell mutates state.</p>
 </code></pre></div>
 <p><code># @cache snapshot</code> requires <code>AdapterCapabilities.supports_snapshot = True</code>
 on the driver; otherwise the resolver fails fast before any connection is
-opened. Per-driver freshness probe details are in
+opened. <strong>No shipped driver sets it today</strong> -- DuckDB, SQLite, PostgreSQL,
+Snowflake and BigQuery all report <code>supports_snapshot = False</code> -- so
+<code># @cache snapshot</code> is currently refused on every SQL cell. Snowflake and
+BigQuery both have time travel underneath and are where support would come
+from first. Per-driver freshness probe details are in
 <a href="../cells/#per-driver-freshness">SQL Cells</a>.</p>
 <h3 id="name_1"><code>@name</code><a class="headerlink" href="#name_1" title="Permanent link">&para;</a></h3>
 <p>For SQL cells, <code>@name</code> sets the output variable name (default <code>result</code>),

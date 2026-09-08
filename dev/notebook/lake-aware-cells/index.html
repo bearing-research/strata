@@ -2349,9 +2349,9 @@ inputs change; <code>@table</code> adds the lake snapshot to the mix.</p>
   reached when provenance is computed (which also happens on notebook open),
   the cell is treated as stale rather than crashing; if it's still unreachable
   at execution time, the run fails with a clear error.</li>
-<li><strong>Personal mode for the embedded scan.</strong> <code>scan@v1</code> runs as a built-in
-  transform in personal mode. In service mode, scanning goes through a
-  registered executor.</li>
+<li><strong>The embedded scan runs in-process.</strong> <code>scan@v1</code> is handled by the server
+  itself in both modes -- it is resolved before any executor dispatch, so
+  scanning a table needs no registered executor and none is consulted.</li>
 <li><strong>Merge-on-read tables are refused.</strong> A table whose snapshot carries
   positional or equality delete files - what Spark or Flink <code>MERGE</code> / <code>DELETE</code>
   writes - raises <code>UnsupportedTableFormatError</code> rather than scanning. Strata

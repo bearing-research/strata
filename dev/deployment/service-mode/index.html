@@ -2542,20 +2542,28 @@ alphanumeric / <code>_</code> / <code>-</code> characters and hashed into:</p>
 <h2 id="acls">ACLs<a class="headerlink" href="#acls" title="Permanent link">&para;</a></h2>
 <p><code>acl_config</code> is a <code>pyproject.toml</code> block:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[tool.strata.acl_config]</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># deny rules evaluate first; explicit denies cannot be bypassed.</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">[[tool.strata.acl_config.deny]]</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;guest@example.com&quot;</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">resource</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;tables/internal/*&quot;</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="k">[[tool.strata.acl_config.allow]]</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;analyst@example.com&quot;</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">resource</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;tables/marketing/*&quot;</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">scope</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;notebook:write&quot;</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>
-<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="c1"># default action when no rule matches (default: &quot;deny&quot;)</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deny&quot;</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># Action when no rule matches. Defaults to &quot;allow&quot; -- set it to &quot;deny&quot;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># if you want an allowlist, or every table not named below stays readable.</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deny&quot;</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># Deny rules evaluate first; explicit denies cannot be bypassed.</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="k">[[tool.strata.acl_config.deny]]</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;guest@example.com&quot;</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:internal.*&quot;</span><span class="p">]</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="k">[[tool.strata.acl_config.allow]]</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="n">principal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;analyst@example.com&quot;</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="n">tenant</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;marketing&quot;</span><span class="w">          </span><span class="c1"># optional; omit to match any tenant</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="n">tables</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;file:marketing.*&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;file:public.*&quot;</span><span class="p">]</span>
 </code></pre></div>
-<p>Evaluation: deny rules → allow rules → default. <a href="https://github.com/bearing-research/strata/tree/main/src/strata">Wildcard, principal, and scope matching semantics are documented in source</a> for anyone extending the ACL engine.</p>
+<p>A rule matches when the principal matches (<code>*</code> matches any, and is the
+default), the tenant matches if the rule names one, and <strong>at least one</strong> table
+pattern matches. <code>tables</code> is required: a rule with no patterns can never match
+anything, so the server refuses to start rather than loading a rule that does
+nothing.</p>
+<p>Evaluation: deny rules → allow rules → default. <a href="https://github.com/bearing-research/strata/tree/main/src/strata">Wildcard and principal
+matching semantics are documented in source</a>
+for anyone extending the ACL engine.</p>
 <h3 id="scope-gated-endpoints">Scope-gated endpoints<a class="headerlink" href="#scope-gated-endpoints" title="Permanent link">&para;</a></h3>
 <p>A few operations require a specific scope under trusted-proxy auth
 (<code>admin:*</code> satisfies any of them):</p>
