@@ -22,7 +22,6 @@ import filelock
 import tomli_w
 from packaging.requirements import Requirement
 
-from strata.notebook.layout import write_gitignore
 from strata.notebook.models import (
     CellMeta,
     ConnectionSpec,
@@ -496,7 +495,6 @@ def create_notebook(
     python_version: str | None = None,
     *,
     initialize_environment: bool = True,
-    write_gitignore_file: bool = True,
     owner: str | None = None,
     project_mount: str | None = None,
 ) -> Path:
@@ -507,8 +505,6 @@ def create_notebook(
         name: Notebook name (used for folder and notebook name)
         python_version: Requested notebook Python major.minor version
         initialize_environment: Whether to create the notebook venv immediately
-        write_gitignore_file: Write a .gitignore covering runtime state. An
-            existing one is never replaced.
         owner: Opaque identity string stamped into notebook.toml. None means
             unowned (the default for non-shared deployments). Set by callers
             that have resolved a caller identity from a request header.
@@ -627,12 +623,6 @@ def create_notebook(
 
     with open(notebook_dir / "pyproject.toml", "wb") as f:
         tomli_w.dump(pyproject_data, f)
-
-    # Before any sync: the sync creates .venv, and a directory that gains a
-    # virtualenv before it gains the rule to ignore one is a directory someone
-    # can `git add -A` at exactly the wrong moment.
-    if write_gitignore_file:
-        write_gitignore(notebook_dir)
 
     if initialize_environment:
         # Run uv sync to create venv + uv.lock (best-effort)

@@ -222,24 +222,6 @@ Annotations are the canonical per-cell configuration surface; there's no UI edit
 
 Runtime writers never touch `notebook.toml`; structural-edit writers never touch `.strata/`. The invariant is enforced at the writer layer.
 
-### What to commit
-
-`strata new` writes a `.gitignore` covering the runtime side, so `git add -A`
-in a notebook directory stages the right things. It never replaces an existing
-one; `strata new --no-git` skips it.
-
-The committed set is:
-
-- `notebook.toml`
-- `pyproject.toml` and `uv.lock` (plus `renv.lock` for R notebooks)
-- everything under `cells/`, including cell tests
-- the `.gitignore` itself
-
-The rules live in `strata.notebook.layout` — `committed_paths()` returns the
-set for a given directory and `IGNORED_PATTERNS` is what the `.gitignore`
-contains — so this list is a rendering of the code rather than a second source
-that drifts from it.
-
 ## Round-trip safety
 
 The writer preserves unknown top-level keys verbatim. If you hand-edit the file with a key the parser doesn't know about, it survives saves - useful for experimental settings or external tooling. A malformed `[connections.<name>]` block (no `driver`, etc.) is likewise written back verbatim under its own `[connections.<name>]` table so you don't lose the data while you debug.
