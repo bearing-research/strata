@@ -34,13 +34,13 @@ from strata.api.dependencies import (
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.services.build import build_service
 from strata.transforms.signed_urls import lease_token
+from strata.types import BuildStatusResponse
+
+router = APIRouter(tags=["builds"])
 
 # One console chunk. Generous for a line-oriented stream and small enough that
 # a runaway cell cannot move the server's memory through a display-only route.
 _MAX_LOG_CHUNK_BYTES = 256 * 1024
-from strata.types import BuildStatusResponse
-
-router = APIRouter(tags=["builds"])
 
 # Lease owner recorded when a build is handed to an external (pull-model)
 # executor, so BuildRunner's poll loop does not also claim and run it.
