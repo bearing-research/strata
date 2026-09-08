@@ -3145,6 +3145,11 @@ credential.</p>
 <td><code>postgresql://</code> URL for the artifact store's metadata. Unset keeps SQLite under <code>STRATA_ARTIFACT_DIR</code></td>
 </tr>
 <tr>
+<td><code>STRATA_STORE_TOKEN</code></td>
+<td><code>None</code></td>
+<td>Bearer token <code>strata artifact publish --to &lt;url&gt;</code> presents to the remote store. Read from the environment so it stays out of shell history; <code>--header</code> covers anything else a proxy wants</td>
+</tr>
+<tr>
 <td><code>STRATA_NODE_ADVERTISED_URL</code></td>
 <td><code>None</code></td>
 <td>URL that reaches this node. Set only in multi-node deployments; enables stream redirects instead of 404s</td>
