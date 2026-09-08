@@ -92,6 +92,12 @@ def test_the_scan_finds_the_variables_it_claims_to():
     assert "STRATA_HOST" in _documented()
 
 
+def _service_mode_doc() -> str:
+    """The service-mode page, with newlines normalized to LF."""
+    path = Path(__file__).parent.parent / "docs/deployment/service-mode.md"
+    return path.read_text(encoding="utf-8").replace("\r\n", "\n")
+
+
 def test_the_documented_acl_example_actually_loads():
     """The ACL block in service-mode.md must be a config, not a plausible one.
 
@@ -109,7 +115,9 @@ def test_the_documented_acl_example_actually_loads():
 
     from strata.config import AclConfig
 
-    doc = (Path(__file__).parent.parent / "docs/deployment/service-mode.md").read_text()
+    # Newlines normalized: a Windows checkout has CRLF, and a regex anchored
+    # on "\n" then matches nothing and the test passes by finding no block.
+    doc = _service_mode_doc()
     block = re.search(r"```toml\n(\[tool\.strata\.acl_config\].*?)```", doc, re.DOTALL)
     assert block is not None, "the ACL example block is gone or no longer TOML"
 
@@ -127,7 +135,7 @@ def test_the_documented_acl_default_matches_the_code():
     """Whatever the example sets, the prose about the *default* must be true."""
     from strata.config import AclConfig
 
-    doc = (Path(__file__).parent.parent / "docs/deployment/service-mode.md").read_text()
+    doc = _service_mode_doc()
 
     assert f'Defaults to "{AclConfig().default}"' in doc, (
         "service-mode.md states a default for unmatched ACL requests that the code disagrees with"
