@@ -110,9 +110,7 @@ def test_the_documented_acl_example_actually_loads():
     from strata.config import AclConfig
 
     doc = (Path(__file__).parent.parent / "docs/deployment/service-mode.md").read_text()
-    block = re.search(
-        r"```toml\n(\[tool\.strata\.acl_config\].*?)```", doc, re.DOTALL
-    )
+    block = re.search(r"```toml\n(\[tool\.strata\.acl_config\].*?)```", doc, re.DOTALL)
     assert block is not None, "the ACL example block is gone or no longer TOML"
 
     # The doc shows the pyproject-nested form; load it as the config sees it.
