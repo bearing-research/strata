@@ -453,7 +453,11 @@ SELECT * FROM dim_country
 
 `# @cache snapshot` requires `AdapterCapabilities.supports_snapshot = True`
 on the driver; otherwise the resolver fails fast before any connection is
-opened. Per-driver freshness probe details are in
+opened. **No shipped driver sets it today** -- DuckDB, SQLite, PostgreSQL,
+Snowflake and BigQuery all report `supports_snapshot = False` -- so
+`# @cache snapshot` is currently refused on every SQL cell. Snowflake and
+BigQuery both have time travel underneath and are where support would come
+from first. Per-driver freshness probe details are in
 [SQL Cells](cells.md#per-driver-freshness).
 
 ### `@name`
