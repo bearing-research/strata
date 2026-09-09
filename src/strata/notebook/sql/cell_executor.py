@@ -882,6 +882,23 @@ def _safely_close(handle: Any) -> None:
         handle.close()
     except Exception:  # noqa: BLE001
         logger.exception("error closing handle")
+        # And mark it closed, or it will be closed again at collection.
+        #
+        # adbc's Cursor.close() sets ``_closed = True`` only *after*
+        # ``_stmt.close()`` returns, so a statement whose close raises stays
+        # marked open. That is not a rare path: ADBC reports a write to a
+        # read-only connection at statement close, which is exactly what a
+        # user's SQL cell hits when it tries to write to a read-only
+        # connection. Its ``__del__`` then closes it a second time,
+        # underflowing the driver's child count and surfacing as an
+        # unraisable exception at whatever unrelated moment the collector
+        # runs — an error attached to the wrong cell, or to no cell at all.
+        #
+        # Only corrects a flag the object itself failed to update: an object
+        # with no such attribute, or one that already says it is closed, is
+        # left alone.
+        if getattr(handle, "_closed", None) is False:
+            handle._closed = True
 
 
 def _serialize_arrow_ipc(table: Any) -> bytes:
