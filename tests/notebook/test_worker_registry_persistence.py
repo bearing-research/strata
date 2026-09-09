@@ -99,6 +99,37 @@ class TestPersistence:
         assert [r.worker.name for r in get_server_managed_worker_records()] == ["from-config"]
 
 
+class TestAfterARestart:
+    """What dispatch sees, not just what the admin routes report.
+
+    Every other test here runs in one process, where the mutation sets both
+    the file and the in-memory config table — so they agree for the wrong
+    reason. A restart is the case that matters: the file holds the admin's
+    registry and the config table holds whatever was configured. If those two
+    are read by different code paths, the admin UI shows one catalogue while
+    cells dispatch to another.
+    """
+
+    def test_the_catalogue_reflects_the_persisted_registry(self, server, tmp_path):
+        from strata.notebook.models import NotebookState
+        from strata.notebook.workers import build_worker_catalog
+        from strata.server import get_state
+
+        replace_server_managed_worker_records([ManagedWorkerRecord(_worker("gpu-a100"), True)])
+
+        # The restart: the process comes back with the configured table, and
+        # the registry is whatever is on disk.
+        get_state().config.transforms_config["notebook_workers"] = [
+            {"name": "from-config", "backend": "executor", "config": {"url": "http://x:1"}}
+        ]
+        get_state().config.deployment_mode = "service"
+
+        names = {entry["name"] for entry in build_worker_catalog(NotebookState(id="nb", name="nb"))}
+
+        assert "gpu-a100" in names, "dispatch must see what the admin routes persisted"
+        assert "from-config" not in names
+
+
 class TestDurability:
     def test_a_corrupt_file_does_not_stop_the_server_reading_a_registry(self, server):
         """A bad file must not be fatal, and must not be silent either."""

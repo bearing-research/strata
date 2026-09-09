@@ -120,11 +120,14 @@ def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
         state = get_state()
         config = state.config
         service_mode = config.deployment_mode == "service"
+        # Through the same accessor the admin routes use, so the catalogue and
+        # what a cell dispatches to cannot disagree. Reading transforms_config
+        # here instead would agree only until a restart, after which the admin
+        # routes would show the persisted registry while dispatch used the
+        # configured table — a server saying one thing and doing another,
+        # which is worse than not persisting at all.
         server_workers = {
-            record.worker.name: record
-            for record in _parse_managed_worker_records(
-                config.transforms_config.get("notebook_workers", [])
-            )
+            record.worker.name: record for record in get_server_managed_worker_records()
         }
     except Exception:
         service_mode = False
