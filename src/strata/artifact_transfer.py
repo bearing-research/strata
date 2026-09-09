@@ -321,7 +321,6 @@ class Promotion:
     # the point of protecting it. The caller has to say so: a promotion that
     # reported plain success would leave someone believing the champion moved.
     alias_pending: bool = False
-    tags: tuple[str, ...] = ()
 
 
 def promote_artifact(
@@ -374,5 +373,4 @@ def promote_artifact(
         copied=copied,
         alias=alias,
         alias_pending=alias_pending,
-        tags=tuple(sorted(tags or {})),
     )

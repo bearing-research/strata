@@ -139,6 +139,8 @@ class StrataClient:
         timeout: float = _DEFAULT_TIMEOUT,
         cell_id: str | None = None,
         headers: dict[str, str] | None = None,
+        promote_url: str | None = None,
+        inputs: dict[str, str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -147,6 +149,17 @@ class StrataClient:
         # store (trusted-proxy identity/token). Empty when targeting the local
         # server.
         self._headers = dict(headers or {})
+        # Where ``promote`` posts. Not ``base_url``: when a team store is
+        # configured the ambient client points *at* that store, and the route
+        # that copies a chain into it runs on the notebook server, which is the
+        # only process that can read the notebook's own artifacts. Absent when
+        # no team store is configured, which is also when promoting is
+        # meaningless.
+        self._promote_url = (promote_url or "").rstrip("/") or None
+        # Variable name -> ``strata://artifact/<id>@v=<n>`` for this cell's
+        # inputs, so a cell can promote an upstream result by the name it reads
+        # it under rather than by an id it never sees.
+        self._inputs = dict(inputs or {})
 
     def _stamp_cell(self, artifact: Artifact, name: str | None) -> None:
         """Tag a *named* artifact with the originating notebook cell so the
@@ -330,6 +343,47 @@ class StrataClient:
     def set_name(self, name: str, artifact_id: str, version: int) -> dict:
         return self._request(
             "POST", "/v1/names", {"name": name, "artifact_id": artifact_id, "version": version}
+        )
+
+    def promote(
+        self,
+        ref: str,
+        *,
+        name: str,
+        alias: str | None = None,
+        tags: dict[str, str] | None = None,
+    ) -> dict:
+        """Send an upstream result, and the chain behind it, to the team store.
+
+        ``ref`` is one of this cell's input variables, or an explicit
+        ``<id>@v=<n>``. A variable is the useful form: the cell reads ``rows``,
+        so it promotes ``rows``, and never has to learn the artifact id the
+        notebook minted for it.
+
+        Only *upstream* results can be promoted from inside a cell. This cell's
+        own outputs do not exist yet — they are stored after it returns — so
+        promoting one is a job for the strip or the CLI, once it has run.
+        """
+        if self._promote_url is None:
+            raise RuntimeError(
+                "No team store is configured, so there is nowhere to promote to "
+                "(set notebook_remote_store_url on the notebook server)."
+            )
+        uri = self._inputs.get(ref, ref)
+        if "@v=" not in uri:
+            known = ", ".join(sorted(self._inputs)) or "none"
+            raise RuntimeError(
+                f"{ref!r} is not one of this cell's inputs and is not an "
+                f"'<id>@v=<n>' reference (inputs: {known})."
+            )
+        artifact_id, version = _parse_artifact_uri(uri)
+        body: dict[str, Any] = {"name": name, "tags": {k: str(v) for k, v in (tags or {}).items()}}
+        if alias:
+            body["alias"] = alias
+        return self._request(
+            "POST",
+            f"{self._promote_url}/artifacts/{artifact_id}/v/{version}/promote",
+            body,
         )
 
     def get_registry_audit(self, name: str | None = None, limit: int = 100) -> list[dict]:

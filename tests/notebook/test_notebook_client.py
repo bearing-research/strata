@@ -54,6 +54,7 @@ def test_client_surface(shim):
         "resolve_name",
         "set_name",
         "get_registry_audit",
+        "promote",
         "close",
     ):
         assert callable(getattr(c, method))
@@ -220,3 +221,69 @@ def test_no_headers_by_default(shim, monkeypatch):
     c = shim.StrataClient(base_url="http://local")
     c._request("GET", "/v1/names/x")
     assert captured[0].get_header("X-strata-principal") is None
+
+
+class TestPromote:
+    """``strata.promote("rows", name=...)`` from inside a cell.
+
+    A cell reads its upstreams by variable name; the artifact ids the notebook
+    minted for them are not something a researcher ever sees, so the variable
+    is the reference the API takes.
+    """
+
+    def _client(self, shim, **overrides):
+        kwargs = {
+            "base_url": "http://store.example",
+            "promote_url": "http://127.0.0.1:8765/v1/notebooks/sess-1",
+            "inputs": {"rows": "strata://artifact/nb_rows@v=3"},
+        }
+        kwargs.update(overrides)
+        return shim.StrataClient(**kwargs)
+
+    def _captured(self, client, monkeypatch):
+        seen = {}
+
+        def _fake(method, path, body=None):
+            seen.update(method=method, path=path, body=body)
+            return {"name": body["name"]}
+
+        monkeypatch.setattr(client, "_request", _fake)
+        return seen
+
+    def test_a_variable_resolves_to_the_artifact_behind_it(self, shim, monkeypatch):
+        client = self._client(shim)
+        seen = self._captured(client, monkeypatch)
+
+        client.promote("rows", name="taxi/rows", alias="champion", tags={"stage": "candidate"})
+
+        assert seen["method"] == "POST"
+        assert seen["path"] == (
+            "http://127.0.0.1:8765/v1/notebooks/sess-1/artifacts/nb_rows/v/3/promote"
+        )
+        assert seen["body"] == {
+            "name": "taxi/rows",
+            "tags": {"stage": "candidate"},
+            "alias": "champion",
+        }
+
+    def test_an_explicit_reference_still_works(self, shim, monkeypatch):
+        client = self._client(shim)
+        seen = self._captured(client, monkeypatch)
+
+        client.promote("other@v=7", name="taxi/other")
+
+        assert seen["path"].endswith("/artifacts/other/v/7/promote")
+
+    def test_no_team_store_is_answered_here_not_by_a_round_trip(self, shim):
+        """The notebook server would 409; saying so locally is the same answer
+        without the wait, and names the setting to change."""
+        client = self._client(shim, promote_url=None)
+
+        with pytest.raises(RuntimeError, match="notebook_remote_store_url"):
+            client.promote("rows", name="taxi/rows")
+
+    def test_a_name_that_is_not_an_input_says_what_is(self, shim):
+        client = self._client(shim)
+
+        with pytest.raises(RuntimeError, match="rows"):
+            client.promote("typo", name="taxi/rows")

@@ -210,7 +210,20 @@ def _inject_client(manifest: dict, namespace: dict[str, Any]) -> Any:
     # The warm pool is the default WS path, so dropping these broke auth / tenant
     # scoping for shared-store cells. Mirror harness.inject_client.
     headers = manifest.get("strata_headers") or None
-    client = _client_mod.StrataClient(base_url=url, cell_id=cell_id, headers=headers)
+    # Variable -> artifact URI, so ``strata.promote("rows")`` names an input the
+    # way the cell reads it. Mirror harness.inject_client.
+    input_uris = {
+        name: spec.get("uri", "")
+        for name, spec in (manifest.get("inputs") or {}).items()
+        if isinstance(spec, dict) and spec.get("uri")
+    }
+    client = _client_mod.StrataClient(
+        base_url=url,
+        cell_id=cell_id,
+        headers=headers,
+        promote_url=manifest.get("strata_promote_url") or None,
+        inputs=input_uris,
+    )
     namespace["strata"] = client
     return client
 

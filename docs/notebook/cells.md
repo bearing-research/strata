@@ -71,6 +71,23 @@ It's a lightweight client with the same API surface for the common operations (`
 
 Cells routed to a **remote executor worker** (not local execution) don't get the ambient `strata` - import a client explicitly there.
 
+`strata.promote()` sends an upstream result, and the whole chain behind it, to
+the team store - by the variable name the cell reads it under, not by an
+artifact id you never see:
+
+```python
+# `rows` is an upstream cell's variable, so it is one of this cell's inputs.
+strata.promote("rows", name="taxi/rows", alias="champion")
+```
+
+This is the deliberate half of
+[`STRATA_NOTEBOOK_TEAM_CACHE_PUBLISH`](../deployment/service-mode.md#sharing-on-purpose-promoted-and-strata-artifact-promote):
+under `promoted`, nothing reaches the team on its own and this is how something
+does. It needs a team store configured (`STRATA_NOTEBOOK_REMOTE_STORE_URL`) and
+raises if there is none. Only *upstream* results can be promoted from inside a
+cell - a cell's own outputs are stored after it returns, so promoting one is a
+job for the strip or `strata artifact promote` once it has run.
+
 When a cell publishes with a name - `strata.put(inputs=[], transform=…, data=…, name="taxi/tip-model")` - the artifact appears in the [registry dashboard](../core/registry.md#in-the-notebook-the-registry-dashboard): a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).
 
 > Calls through `strata` are **side effects**. On a cache hit the cell body doesn't re-run, so a `strata.set_alias(...)` won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.

@@ -450,6 +450,13 @@ same thing - promoting the result alone would share the answer and none of the
 work. A protected alias (`registry_protected_aliases`) queues for approval
 rather than moving, and the command says so.
 
+A cell can promote one of its own upstream results without leaving the
+notebook, naming it the way the cell reads it:
+
+```python
+strata.promote("rows", name="taxi/rows", alias="champion")
+```
+
 `off` is the whole feature off without unsetting
 `STRATA_NOTEBOOK_REMOTE_STORE_URL`, which a cell's ambient `strata` client
 still needs.
