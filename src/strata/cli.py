@@ -358,6 +358,54 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_tenant_arg(publish_parser)
     publish_parser.set_defaults(func=_dispatch_artifact("cmd_publish"))
 
+    promote_parser = artifact_sub.add_parser(
+        "promote",
+        help="Copy an artifact and its chain to the team store, and name it there",
+        description=(
+            "Share a result with your team. Unlike `publish`, this mints no "
+            "public link -- it puts the artifact where colleagues' cells "
+            "already read from, under a name they can ask for. Everything "
+            "behind it travels too: the team cache is keyed by provenance, so "
+            "each ancestor that arrives is a cache hit for the next person "
+            "whose cell computes the same thing."
+        ),
+    )
+    promote_parser.add_argument("ref", help="Name, id@v=N, or artifact id")
+    _add_store_args(promote_parser)
+    promote_parser.add_argument(
+        "--to",
+        dest="to_url",
+        required=True,
+        metavar="URL",
+        help="Team store to promote into, e.g. https://store.example",
+    )
+    promote_parser.add_argument("--name", required=True, help="Name colleagues will ask for it by")
+    promote_parser.add_argument(
+        "--alias",
+        default=None,
+        help=(
+            "Also move this alias (e.g. champion) to the promoted version. A "
+            "protected alias queues for approval instead of applying"
+        ),
+    )
+    promote_parser.add_argument(
+        "--tag",
+        action="append",
+        metavar="KEY=VALUE",
+        help="Tag to set on the promoted version, repeatable",
+    )
+    promote_parser.add_argument(
+        "--header",
+        action="append",
+        metavar="'Name: value'",
+        help="Extra header for --to, repeatable. STRATA_STORE_TOKEN covers the bearer token",
+    )
+    promote_parser.add_argument(
+        "--max-depth", type=int, default=10, help="Recursion limit when walking the chain"
+    )
+    _add_tenant_arg(promote_parser)
+    promote_parser.set_defaults(func=_dispatch_artifact("cmd_promote"))
+
     unpublish_parser = artifact_sub.add_parser(
         "unpublish",
         help="Withdraw a published link",

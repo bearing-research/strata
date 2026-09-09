@@ -1044,3 +1044,64 @@ async def test_a_disputed_env_hash_on_any_variable_is_caught(
         )
         params = json_module.loads(stored.transform_spec)["params"]
         assert params["env_hash"] == "1" * 64
+
+
+async def test_under_the_promoted_policy_a_cell_run_offers_nothing(
+    tmp_path, team_store_server, monkeypatch
+):
+    """The same loop as above, with the policy set to `promoted`.
+
+    That test's whole point is that Alice's result reaches Bob without her
+    doing anything. This is the setting that makes it not: on a personal
+    server, offering every intermediate means everything a researcher computes
+    lands in the team's store whether or not they meant to share it.
+
+    Pulls are deliberately unchanged, which is why Bob is checked for a miss
+    rather than the store being checked for silence — a store that never
+    received her result is exactly a store Bob misses against.
+    """
+    from strata.artifact_store import ArtifactStore
+    from strata.config import StrataConfig
+    from strata.notebook.executor import CellExecutor
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    upstream_source = "value = sum(range(4321))"
+
+    def build(name: str):
+        notebook_dir = create_notebook(tmp_path / name, name)
+        add_cell_to_notebook(notebook_dir, "up", None)
+        write_cell(notebook_dir, "up", upstream_source)
+        # A downstream cell, because only *consumed* variables are offered:
+        # without one there is nothing to push and the test would pass with
+        # the policy gate removed entirely.
+        add_cell_to_notebook(notebook_dir, "down", "up")
+        write_cell(notebook_dir, "down", "doubled = value * 2")
+        session = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+        session.ensure_venv_synced()
+        return session
+
+    team_config = StrataConfig(
+        cache_dir=tmp_path / "promoted-cache",
+        notebook_remote_store_url=team_store_server["base_url"],
+        notebook_team_cache_enabled=True,
+        notebook_team_cache_publish="promoted",
+    )
+    monkeypatch.setattr(CellExecutor, "_lake_config", lambda self: team_config)
+
+    alice = build("alice")
+    alice_result = await CellExecutor(alice).execute_cell("up", upstream_source)
+    assert alice_result.success, alice_result.error
+
+    # Nothing of hers is in the shared store.
+    shared = ArtifactStore(team_store_server["artifact_dir"])
+    assert shared.stats()["total_versions"] == 0
+
+    # So Bob runs it himself.
+    bob = build("bob")
+    bob_result = await CellExecutor(bob).execute_cell("up", upstream_source)
+
+    assert bob_result.success, bob_result.error
+    assert bob_result.cache_hit is False
+    assert bob_result.team_cache_principal is None

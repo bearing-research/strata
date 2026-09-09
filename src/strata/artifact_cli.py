@@ -486,6 +486,53 @@ class _RemoteStore:
             written=bool(body.get("written")),
         )
 
+    def set_name(self, name: str, artifact_id: str, version: int) -> None:
+        """Point a team name at what landed here."""
+        self._post(
+            "/v1/names",
+            {"name": name, "artifact_id": artifact_id, "version": version},
+            what=f"name {name!r}",
+        )
+
+    def set_alias(self, name: str, alias: str, artifact_id: str, version: int) -> bool:
+        """Move ``name@alias``. Returns whether it applied rather than queued.
+
+        A protected alias answers 202 and lands in the pending queue for
+        someone else to approve, which is the point of protecting it — so that
+        is a normal outcome to report, not a failure to raise.
+        """
+        response = self._post(
+            f"/v1/names/{name}/aliases/{alias}",
+            {"artifact_id": artifact_id, "version": version},
+            what=f"alias {name}@{alias}",
+            method="put",
+        )
+        return response.status_code != 202
+
+    def set_tag(self, artifact_id: str, version: int, key: str, value: str) -> None:
+        self._post(
+            f"/v1/artifacts/{artifact_id}/v/{version}/tags",
+            {"key": key, "value": value},
+            what=f"tag {key}",
+            method="put",
+        )
+
+    def _post(self, path: str, payload: dict, *, what: str, method: str = "post"):
+        import httpx
+
+        response = getattr(httpx, method)(
+            f"{self.base_url}{path}",
+            json=payload,
+            headers=self._headers,
+            timeout=_REMOTE_TIMEOUT_SECONDS,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"The store refused to set the {what}: "
+                f"HTTP {response.status_code}: {_detail_of(response)}"
+            )
+        return response
+
     def publish_artifact(
         self,
         artifact_id: str,
@@ -644,6 +691,87 @@ def _copy_for_publication(
             if source_ref == published_ref:
                 landed_ref = imported.ref
     return copied, landed_ref
+
+
+def cmd_promote(args: argparse.Namespace) -> int:
+    """Copy an artifact and its chain to the team store, and name it there.
+
+    Publishing mints a public link. Promoting does not: it puts a result where
+    colleagues can find it by name, inside the store their own cells already
+    read from.
+
+    The chain travels for the same reason it does when publishing, and for one
+    more: the team cache is keyed by provenance, so an ancestor that arrives
+    is a cache hit for the next person whose cell computes the same thing.
+    Sending the artifact alone would share the answer and none of the work.
+    """
+    store = _open_store(args.artifact_dir)
+    if store is None:
+        return 2
+    artifact = _resolve_for_cmd(store, args)
+    if artifact is None:
+        return 1
+
+    if artifact.state not in ("ready", "superseded"):
+        print(
+            f"Cannot promote: {artifact.id}@v={artifact.version} is not "
+            f"readable (state={artifact.state})"
+        )
+        return 1
+
+    target = _RemoteStore(str(args.to_url), _remote_headers(args))
+    copied, landed_ref = _copy_for_publication(
+        store, target, artifact, getattr(args, "max_depth", 10)
+    )
+    landed_id, _, landed_version = landed_ref.partition("@v=")
+    landed_version_number = int(landed_version)
+
+    try:
+        target.set_name(args.name, landed_id, landed_version_number)
+        pending_alias = False
+        if getattr(args, "alias", None):
+            applied = target.set_alias(args.name, args.alias, landed_id, landed_version_number)
+            pending_alias = not applied
+        for raw in getattr(args, "tag", None) or []:
+            key, _, value = str(raw).partition("=")
+            if not value:
+                print(f"Ignoring malformed tag {raw!r}; expected key=value")
+                continue
+            target.set_tag(landed_id, landed_version_number, key.strip(), value.strip())
+    except RuntimeError as exc:
+        # The chain is already there, which is harmless and reusable — it is
+        # keyed by provenance, so it is a cache entry whether or not it ever
+        # got a name. Saying so beats implying nothing happened.
+        print(f"Copied {copied} artifact(s), but naming failed: {exc}")
+        return 1
+
+    if args.format == "json":
+        print(
+            json.dumps(
+                {
+                    "name": args.name,
+                    "artifact_uri": f"strata://artifact/{landed_ref}",
+                    "copied": copied,
+                    "alias_pending": pending_alias,
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    print(f"Promoted {artifact.id}@v={artifact.version} to {args.to_url}")
+    if landed_ref != f"{artifact.id}@v={artifact.version}":
+        # It deduplicated onto a row the store already had: the same
+        # computation, promoted by someone else or offered by the cache.
+        print(f"  the store already held this computation as {landed_ref}")
+    print(f"  name:  {args.name} -> {landed_ref}")
+    if getattr(args, "alias", None):
+        print(
+            f"  alias: {args.name}@{args.alias}"
+            + (" (queued for approval)" if pending_alias else "")
+        )
+    print(f"  {copied} artifact(s) copied, including everything behind it")
+    return 0
 
 
 def cmd_publish(args: argparse.Namespace) -> int:

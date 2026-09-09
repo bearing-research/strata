@@ -485,6 +485,16 @@ class RemoteExecutionError(RuntimeError):
         self.remote_error_code = remote_error_code
 
 
+def _team_cache_publish_policy(config: Any) -> str:
+    """What the team cache offers outward: ``all``, ``promoted`` or ``off``.
+
+    Read defensively because ``_lake_config`` may hand back a config object
+    from an older deployment, and a missing setting means the behaviour that
+    existed before it did.
+    """
+    return str(getattr(config, "notebook_team_cache_publish", "all") or "all")
+
+
 class CellExecutor:
     """Materialize notebook cells (cache-or-build per cell).
 
@@ -3042,6 +3052,10 @@ class CellExecutor:
         config = self._lake_config()
         if not getattr(config, "notebook_team_cache_enabled", False):
             return None
+        if _team_cache_publish_policy(config) == "off":
+            # "off" is the whole feature off, which is why it exists: unsetting
+            # the URL would also take away the ambient client a cell uses.
+            return None
         base_url = getattr(config, "notebook_remote_store_url", None)
         if not base_url:
             return None
@@ -3082,6 +3096,11 @@ class CellExecutor:
         """
         config = self._lake_config()
         if not getattr(config, "notebook_team_cache_enabled", False):
+            return
+        if _team_cache_publish_policy(config) != "all":
+            # Under "promoted", reaching the team is a deliberate act. Pulls
+            # still happen: someone who shares only on purpose still benefits
+            # from work the team already did.
             return
         base_url = getattr(config, "notebook_remote_store_url", None)
         if not base_url:
