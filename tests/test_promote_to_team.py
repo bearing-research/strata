@@ -9,6 +9,7 @@ whether or not they meant to share it. Item 21.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 
 import httpx
@@ -208,17 +209,60 @@ class TestRefusals:
 class TestPublishPolicy:
     """What the cache offers outward, between "everything" and "nothing"."""
 
-    def _executor(self, monkeypatch, policy: str, enabled: bool = True):
-        from types import SimpleNamespace
+    class _Reached(Exception):
+        """Raised in place of building a TeamStore, to say the gate let us by."""
 
-        from strata.notebook.executor import _team_cache_publish_policy
+    def _executor(self, policy: str | None, *, enabled: bool = True):
+        """A stand-in with just the state the two gates read.
+
+        The gates run before either method touches the session, so the parts
+        of a real executor they never reach are not built here — but the
+        methods themselves are the real ones, called unbound. Asserting on
+        `_team_cache_publish_policy` alone would pass with both gates deleted.
+        """
+        from types import SimpleNamespace
 
         config = SimpleNamespace(
             notebook_team_cache_enabled=enabled,
-            notebook_team_cache_publish=policy,
             notebook_remote_store_url="http://store.example",
         )
-        return config, _team_cache_publish_policy
+        if policy is not None:
+            config.notebook_team_cache_publish = policy
+        return SimpleNamespace(
+            _lake_config=lambda: config,
+            _ambient_strata_headers=lambda: {},
+            session=SimpleNamespace(
+                dag=SimpleNamespace(consumed_variables={"c1": {"x"}}),
+                environment_attestation_error=lambda: None,
+            ),
+        )
+
+    def _talks_to_the_store(self, monkeypatch, executor, direction: str) -> bool:
+        """Run one gate; report whether it reached the shared store."""
+        from strata.notebook import executor as executor_module
+
+        def _sentinel(*_args, **_kwargs):
+            raise self._Reached()
+
+        monkeypatch.setattr(executor_module, "TeamStore", _sentinel)
+        if direction == "pull":
+            call = executor_module.CellExecutor._pull_from_team_store(
+                executor,
+                cell_id="c1",
+                provenance_hash="a" * 64,
+                consumed_vars={"x"},
+                source_hash="s",
+                source="x = 1",
+                env_hash="e",
+                input_versions={},
+            )
+        else:
+            call = executor_module.CellExecutor._push_to_team_store(executor, cell_id="c1")
+        try:
+            asyncio.run(call)
+        except self._Reached:
+            return True
+        return False
 
     @pytest.mark.parametrize(
         "policy,offers,pulls",
@@ -228,27 +272,24 @@ class TestPublishPolicy:
             ("off", False, False),
         ],
     )
-    def test_the_policy_decides_each_direction(self, policy, offers, pulls):
+    def test_the_policy_decides_each_direction(self, monkeypatch, policy, offers, pulls):
         """`promoted` still pulls: someone who shares only on purpose still
         benefits from work the team already did."""
-        from types import SimpleNamespace
+        assert self._talks_to_the_store(monkeypatch, self._executor(policy), "push") is offers
+        assert self._talks_to_the_store(monkeypatch, self._executor(policy), "pull") is pulls
 
-        from strata.notebook.executor import _team_cache_publish_policy
-
-        config = SimpleNamespace(notebook_team_cache_publish=policy)
-        resolved = _team_cache_publish_policy(config)
-
-        assert (resolved == "all") is offers
-        assert (resolved != "off") is pulls
-
-    def test_a_config_without_the_setting_behaves_as_before(self):
+    def test_a_config_without_the_setting_behaves_as_before(self, monkeypatch):
         """An older deployment's config object has no such attribute, and the
         absence must mean the behaviour that existed before the setting did."""
-        from types import SimpleNamespace
+        assert self._talks_to_the_store(monkeypatch, self._executor(None), "push") is True
+        assert self._talks_to_the_store(monkeypatch, self._executor(None), "pull") is True
 
-        from strata.notebook.executor import _team_cache_publish_policy
+    def test_the_switch_still_wins_over_the_policy(self, monkeypatch):
+        """`all` describes what would be offered if the cache were on at all."""
+        executor = self._executor("all", enabled=False)
 
-        assert _team_cache_publish_policy(SimpleNamespace()) == "all"
+        assert self._talks_to_the_store(monkeypatch, executor, "push") is False
+        assert self._talks_to_the_store(monkeypatch, executor, "pull") is False
 
     def test_the_default_is_todays_behaviour(self):
         from strata.config import StrataConfig
