@@ -555,13 +555,18 @@ class Pool:
         loses a race against a long-running cell must not retire the machine
         running it.
         """
-        candidates = [
-            (spec, candidate)
-            for name, spec in self.machine_types.items()
-            if spec.health_check_failures > 0
-            for candidate in self.store.list_workers(name, [WorkerState.WARM])
-            if candidate.endpoint is not None
-        ]
+        # The endpoint is carried rather than re-read, so it is a str by
+        # construction: a filter in a comprehension does not narrow the
+        # attribute for the use below it.
+        candidates: list[tuple[MachineType, Worker, str]] = []
+        for name, spec in self.machine_types.items():
+            if spec.health_check_failures <= 0:
+                continue
+            for candidate in self.store.list_workers(name, [WorkerState.WARM]):
+                endpoint = candidate.endpoint
+                if endpoint is None:
+                    continue
+                candidates.append((spec, candidate, endpoint))
         if not candidates:
             return 0
 
@@ -572,7 +577,7 @@ class Pool:
         # is reaped, and reaping is the only thing that stops a machine
         # billing. The stall would be worst exactly when it costs most.
         results = await asyncio.gather(
-            *(self._health_or_false(candidate.endpoint) for _, candidate in candidates)
+            *(self._health_or_false(endpoint) for _, _, endpoint in candidates)
         )
 
         if len(candidates) > 1 and not any(results):
@@ -596,7 +601,7 @@ class Pool:
             return 0
 
         stopped = 0
-        for (spec, candidate), healthy in zip(candidates, results, strict=True):
+        for (spec, candidate, _endpoint), healthy in zip(candidates, results, strict=True):
             # Re-read after the await, exactly as reap_idle_workers does:
             # the machine may have taken a job while the probe was in
             # flight, and stopping a busy machine kills the job on it. A

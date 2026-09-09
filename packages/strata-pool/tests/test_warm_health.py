@@ -127,11 +127,10 @@ class TestPoolSideFaults:
     async def test_a_whole_fleet_failing_at_once_is_not_acted_on(self, make_pool):
         backend = FakeBackend()
         pool = make_pool(backend, machine_types=[_spec(health_check_failures=1)])
-        first = await _warm_worker(pool, backend)
+        await _warm_worker(pool, backend)
         second_job = await pool.submit(tenant_id="u", machine_type="cpu", payload=b"w")
         await pool.wait(second_job.id)
-        warm = pool.store.list_workers("cpu", [WorkerState.WARM])
-        assert len(warm) == 2
+        assert len(pool.store.list_workers("cpu", [WorkerState.WARM])) == 2
 
         backend.never_healthy = True  # the pool's own network, in effect
 
