@@ -15,7 +15,7 @@
 # The pool does not pull images, so build it on the host that will run it (or
 # push it to a registry the host has already pulled from).
 
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Installed with plain pip, not into a uv venv. ``strata-notebook`` refuses to
 # start outside one (src/strata/_uv_runtime.py), but the *worker* entry point
