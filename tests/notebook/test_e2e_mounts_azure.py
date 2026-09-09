@@ -29,7 +29,7 @@ from pathlib import Path
 import docker
 import pytest
 from azure.storage.blob import BlobServiceClient
-from testcontainers.azurite import AzuriteContainer
+from testcontainers.community.azurite import AzuriteContainer
 
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import MountMode, MountSpec

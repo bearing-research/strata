@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import docker
 import pytest
-from testcontainers.postgres import PostgresContainer
+from testcontainers.community.postgres import PostgresContainer
 
 from strata.artifact_store import ArtifactStore, TransformSpec
 from strata.migrate import MIGRATED_TABLES, migrate, plan_migration
