@@ -8,7 +8,6 @@ import {
   highlightActiveLineGutter,
 } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
-import { markdown } from '@codemirror/lang-markdown'
 import { python } from '@codemirror/lang-python'
 import { oneDark } from '@codemirror/theme-one-dark'
 import {
@@ -73,6 +72,15 @@ export function useCodemirror(
   // theme with view.dispatch({ effects: themeCompartment.reconfigure(...) })
   // instead of rebuilding the EditorState.
   const themeCompartment = new Compartment()
+  // Markdown's grammar is 490 kB of the editor's 563 kB — an order of
+  // magnitude more than Python's 44 kB, because lang-markdown carries the
+  // nested grammars for fenced code blocks. Loading it for every notebook,
+  // including the many with no markdown cell at all, is most of the editor's
+  // download for a minority of cells. It is fetched when a markdown cell is
+  // actually mounted and swapped in through this compartment, the same way
+  // the theme is; until it lands the cell renders as plain text, which for
+  // prose is a much smaller cost than the bytes.
+  const langCompartment = new Compartment()
   const { resolved } = useTheme()
 
   function themeFor(mode: 'light' | 'dark') {
@@ -91,7 +99,7 @@ export function useCodemirror(
     // which is the closest visual fit.
     const langExt =
       opts.language === 'markdown'
-        ? markdown()
+        ? []
         : opts.language === 'prompt'
           ? []
           : opts.language === 'r'
@@ -131,7 +139,7 @@ export function useCodemirror(
         bracketMatching(),
         closeBrackets(),
         syntaxHighlighting(defaultHighlightStyle),
-        langExt,
+        langCompartment.of(langExt),
         themeCompartment.of(themeFor(resolved.value)),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         runKeymap,
@@ -148,6 +156,25 @@ export function useCodemirror(
     })
 
     view.value = new EditorView({ state, parent: container.value })
+
+    if (opts.language === 'markdown') {
+      // Fetched after the editor is on screen, so a markdown cell is
+      // immediately usable and gains highlighting a moment later. The guard
+      // covers a cell unmounted before the grammar arrives — dispatching into
+      // a destroyed view throws.
+      void import('@codemirror/lang-markdown')
+        .then(({ markdown }) => {
+          const v = view.value
+          if (!v) return
+          v.dispatch({ effects: langCompartment.reconfigure(markdown()) })
+        })
+        .catch((error) => {
+          // The cell is still fully editable without it, so this is not worth
+          // failing over — but silence would leave a markdown cell showing as
+          // plain text with nothing to explain why.
+          console.warn('Markdown syntax highlighting could not be loaded', error)
+        })
+    }
   })
 
   // Swap theme live when the user flips the toggle — no editor rebuild.

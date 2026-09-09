@@ -1069,3 +1069,67 @@ async def test_duckdb_cell_read_only_blocks_writes(tmp_path):
         assert count == 3
     finally:
         conn.close()
+
+
+class TestSafelyClose:
+    """A handle whose close fails must not be closed again at collection.
+
+    adbc's ``Cursor.close()`` sets ``_closed = True`` only after
+    ``_stmt.close()`` returns, and a write to a read-only connection is
+    reported *by* that close — so the cursor stayed marked open and its
+    finalizer closed it a second time, underflowing the driver's child count.
+    The result was an unraisable exception surfacing at whatever unrelated
+    moment the collector happened to run.
+    """
+
+    def test_a_handle_whose_close_raises_is_marked_closed(self):
+        from strata.notebook.sql.cell_executor import _safely_close
+
+        class Handle:
+            def __init__(self):
+                self._closed = False
+
+            def close(self):
+                raise RuntimeError("close failed at the driver")
+
+        handle = Handle()
+        _safely_close(handle)
+
+        assert handle._closed is True, "its finalizer will try again"
+
+    def test_a_handle_without_the_flag_is_not_given_one(self):
+        """Only a flag the object already keeps is corrected. Inventing one on
+        an unrelated library's object would be lying to code we do not own."""
+        from strata.notebook.sql.cell_executor import _safely_close
+
+        class Handle:
+            def close(self):
+                raise RuntimeError("close failed")
+
+        handle = Handle()
+        _safely_close(handle)
+
+        assert not hasattr(handle, "_closed")
+
+    def test_a_handle_that_closed_cleanly_is_left_alone(self):
+        from strata.notebook.sql.cell_executor import _safely_close
+
+        class Handle:
+            def __init__(self):
+                self._closed = False
+                self.closed_times = 0
+
+            def close(self):
+                self.closed_times += 1
+                self._closed = True
+
+        handle = Handle()
+        _safely_close(handle)
+
+        assert handle.closed_times == 1
+        assert handle._closed is True
+
+    def test_none_is_accepted(self):
+        from strata.notebook.sql.cell_executor import _safely_close
+
+        _safely_close(None)

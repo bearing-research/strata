@@ -65,6 +65,30 @@ class _FakeConn:
 # --- capability flags -------------------------------------------------------
 
 
+@contextmanager
+def cursor_expected_to_fail_on_close(conn):
+    """A cursor for a statement ADBC will reject when the statement closes.
+
+    That is how a write to a read-only connection is reported, and
+    ``Cursor.close()`` sets ``_closed = True`` only *after* ``_stmt.close()``
+    returns — so a close that raises leaves the cursor marked open and its
+    ``__del__`` closes it a second time, underflowing the driver's child count
+    and surfacing as an unraisable exception attached to whatever ran next.
+
+    Production code corrects the same flag in ``cell_executor._safely_close``.
+    A test that drives a cursor itself has to do it itself.
+    """
+    cursor = conn.cursor()
+    try:
+        yield cursor
+    finally:
+        try:
+            cursor.close()
+        finally:
+            if getattr(cursor, "_closed", None) is False:
+                cursor._closed = True
+
+
 def test_capabilities_match_design_doc():
     a = SqliteAdapter()
     assert a.name == "sqlite"
@@ -557,7 +581,7 @@ def test_real_open_read_only_rejects_write(tmp_path):
         # SQLite surfaces the read-only failure during statement
         # finalize/close, not at execute time.
         with pytest.raises(Exception, match="readonly|read.only"):
-            with conn.cursor() as cursor:
+            with cursor_expected_to_fail_on_close(conn) as cursor:
                 cursor.execute("INSERT INTO t VALUES (2)")
     finally:
         conn.close()
@@ -584,7 +608,7 @@ def test_real_read_only_rejects_write_for_mode_rwc_uri(tmp_path):
     conn = a.open(spec, read_only=True)
     try:
         with pytest.raises(Exception, match="readonly|read.only"):
-            with conn.cursor() as cursor:
+            with cursor_expected_to_fail_on_close(conn) as cursor:
                 cursor.execute("INSERT INTO t VALUES (1)")
     finally:
         conn.close()
@@ -615,7 +639,7 @@ def test_real_query_only_pragma_alone_rejects_writes(tmp_path):
         with conn.cursor() as cursor:
             cursor.execute("PRAGMA query_only = ON")
         with pytest.raises(Exception, match="query_only|readonly|read.only"):
-            with conn.cursor() as cursor:
+            with cursor_expected_to_fail_on_close(conn) as cursor:
                 cursor.execute("INSERT INTO t VALUES (1)")
     finally:
         conn.close()
