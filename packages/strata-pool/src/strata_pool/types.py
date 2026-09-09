@@ -103,6 +103,18 @@ class MachineType:
     outlives a forgotten notebook by a weekend is the costliest bug this
     system can produce.
     """
+    health_check_failures: int = 3
+    """Consecutive failed probes before a warm machine is retired.
+
+    Not one: a single missed probe is a slow machine, a restarting agent, or a
+    dropped packet, and retiring on that would trade a cold start for every
+    hiccup. Three consecutive misses is a machine that is gone.
+
+    Zero disables probing for this type — for a backend whose health check
+    costs something, or one whose machines are known to be slow to answer
+    while busy.
+    """
+
     env: dict[str, str] = field(default_factory=dict)
 
     cpus: float | None = None

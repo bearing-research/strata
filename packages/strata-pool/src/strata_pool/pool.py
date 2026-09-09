@@ -95,6 +95,12 @@ class Pool:
         self._health_poll_seconds = health_poll_seconds
         self.max_workers_total = max_workers_total
         self._tasks: set[asyncio.Task] = set()
+        # worker id -> consecutive failed probes. In memory rather than in the
+        # store: it is a judgement about right now, and a pool that restarts
+        # health-checks everything in recover() anyway, so carrying a stale
+        # count across a restart would only let one bad reading survive the
+        # thing that would have corrected it.
+        self._probe_failures: dict[str, int] = {}
 
     async def aclose(self) -> None:
         """Cancel in-flight work and release resources.
@@ -527,6 +533,76 @@ class Pool:
             )
             return False
 
+    async def probe_warm_workers(self) -> int:
+        """Health-check idle machines and retire the ones that are gone.
+
+        Returns how many were stopped.
+
+        Without this, a machine that dies while warm is discovered by the next
+        job being sent to it — and that job fails. The machine was already
+        unusable; the only thing the delay bought was a user watching a cell
+        fail for reasons that have nothing to do with their code.
+
+        Only warm machines. A busy one is answering a job, and a probe that
+        loses a race against a long-running cell must not retire the machine
+        running it.
+        """
+        stopped = 0
+        for name, spec in self.machine_types.items():
+            if spec.health_check_failures <= 0:
+                continue
+
+            for candidate in self.store.list_workers(name, [WorkerState.WARM]):
+                if candidate.endpoint is None:
+                    continue
+
+                healthy = await self._health_or_false(candidate.endpoint)
+
+                # Re-read after the await, exactly as reap_idle_workers does:
+                # the machine may have taken a job while the probe was in
+                # flight, and stopping a busy machine kills the job on it. A
+                # machine that just started work is also evidence it is alive.
+                worker = self.store.get_worker(candidate.id)
+                if worker is None or worker.state is not WorkerState.WARM:
+                    self._probe_failures.pop(candidate.id, None)
+                    continue
+
+                if healthy:
+                    self._probe_failures.pop(worker.id, None)
+                    continue
+
+                failures = self._probe_failures.get(worker.id, 0) + 1
+                self._probe_failures[worker.id] = failures
+                if failures < spec.health_check_failures:
+                    logger.info(
+                        "a warm machine missed a health probe",
+                        extra={
+                            "worker_id": worker.id,
+                            "machine_type": name,
+                            "consecutive_failures": failures,
+                            "retire_at": spec.health_check_failures,
+                        },
+                    )
+                    continue
+
+                logger.warning(
+                    "retiring a warm machine that stopped answering",
+                    extra={
+                        "worker_id": worker.id,
+                        "machine_type": name,
+                        "consecutive_failures": failures,
+                    },
+                )
+                self._probe_failures.pop(worker.id, None)
+                await self._stop_worker(worker)
+                stopped += 1
+
+        if stopped:
+            # The slot this freed belongs to whoever is waiting, not only to
+            # the tenant whose machine died.
+            await self._offer_freed_capacity()
+        return stopped
+
     # --- scaling down ---
 
     async def reap_idle_workers(self) -> int:
@@ -597,6 +673,7 @@ class Pool:
             await asyncio.sleep(interval_seconds)
             try:
                 await self.reap_idle_workers()
+                await self.probe_warm_workers()
             except Exception:
                 # A pass that raises must not take the loop down with it:
                 # the loop dying is indistinguishable from having no scaler,
