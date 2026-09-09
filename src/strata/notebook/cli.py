@@ -398,6 +398,13 @@ async def _run_async(args: argparse.Namespace) -> int:
         if not result.success:
             entry["error"] = result.error or "cell failed"
             failed_cells.add(cell_id)
+        else:
+            # What makes two run reports comparable. Without these a report
+            # says "both green" and stops: two machines that computed
+            # different numbers produce identical JSON. Read back from the
+            # store rather than from the result, because a cache hit carries
+            # no outputs and is exactly the run worth comparing.
+            entry.update(_cell_identity(session, cell, cell_id))
         results.append(entry)
         if args.format == "human" and not args.quiet:
             _print_cell_line(entry)
@@ -421,6 +428,33 @@ async def _run_async(args: argparse.Namespace) -> int:
 
     await _drain_warm_pool(session)
     return 1 if any_failed else 0
+
+
+def _cell_identity(session, cell, cell_id: str) -> dict[str, Any]:
+    """The cell's provenance hash and its outputs' digests, for the report.
+
+    Both are best-effort: a notebook whose store predates content digests, or
+    a cell that produced nothing a downstream cell reads, contributes what it
+    has. An absent digest is reported as ``null`` rather than omitted, so a
+    diff of two reports shows a missing digest instead of a missing output.
+    """
+    identity: dict[str, Any] = {}
+    if cell.last_provenance_hash:
+        identity["provenance_hash"] = cell.last_provenance_hash
+
+    manager = session.get_artifact_manager()
+    outputs = [
+        {
+            "name": name,
+            "artifact_id": artifact.id,
+            "version": artifact.version,
+            "content_sha256": artifact.content_sha256,
+        }
+        for name, artifact in sorted(manager.list_cell_artifacts(cell_id))
+    ]
+    if outputs:
+        identity["outputs"] = outputs
+    return identity
 
 
 def add_run_arguments(parser: argparse.ArgumentParser) -> None:

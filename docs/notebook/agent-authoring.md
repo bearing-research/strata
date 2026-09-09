@@ -189,6 +189,27 @@ leaf cell that only `print`s is the exception: its console is cached by
 provenance and replayed on a warm hit.) Don't read `.strata/` directly - it's
 machine-managed runtime state with no stability guarantees.
 
+## Comparing two runs
+
+A successful cell also reports its `provenance_hash` and its `outputs` - one
+entry per variable a downstream cell reads, each with `artifact_id`, `version`
+and `content_sha256`:
+
+```bash
+strata run my_analysis --format json | jq '.cells[] | {id, provenance_hash, outputs}'
+```
+
+The digest is what makes two reports comparable. `status` and `duration_ms`
+agree between a run that computed the right numbers and one that did not; the
+digest of the bytes does not. Run the notebook on two machines, diff the
+reports, and a cell whose output moved is named.
+
+Both are read back from the artifact store rather than from the run, so a cache
+hit reports them too - which is the run most worth comparing. `content_sha256`
+is `null` for artifacts written before digests were recorded; a cell whose
+variables nothing downstream reads has no `outputs` key, because nothing was
+stored.
+
 ## Don'ts
 
 - **Don't create or edit `.strata/`** - runtime state, machine-managed.

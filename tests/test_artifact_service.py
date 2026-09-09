@@ -22,6 +22,7 @@ def _art(
     created_at=100.0,
     principal=None,
     transform_spec=None,
+    content_sha256=None,
 ):
     return SimpleNamespace(
         id=art_id,
@@ -32,6 +33,7 @@ def _art(
         input_versions=json.dumps(inputs) if inputs else None,
         created_at=created_at,
         principal=principal,
+        content_sha256=content_sha256,
     )
 
 

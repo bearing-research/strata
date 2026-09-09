@@ -816,6 +816,9 @@ class ArtifactInfoResponse(BaseModel):
         row_count: Number of rows (if ready)
         byte_size: Size in bytes (if ready)
         created_at: Creation timestamp
+        content_sha256: SHA-256 of the stored bytes, so a caller can compare
+            two machines' outputs without downloading either. ``None`` on rows
+            written before the digest was recorded.
     """
 
     artifact_id: str
@@ -825,6 +828,7 @@ class ArtifactInfoResponse(BaseModel):
     row_count: int | None = None
     byte_size: int | None = None
     created_at: float
+    content_sha256: str | None = None
 
 
 #: Marks a by-provenance 404 as a genuine "nobody has computed this", as
@@ -885,6 +889,10 @@ class ArtifactProvenanceMatchResponse(BaseModel):
             got a hit and I did not" is answered by comparing these two values
             and by nothing else. Empty for artifacts that record no
             environment.
+        content_sha256: SHA-256 of the stored bytes. What lets a rerun be
+            compared with a snapshot output by output — two machines can diff
+            digests without either downloading the other's bytes. ``None`` on
+            rows written before it was recorded.
     """
 
     artifact_id: str
@@ -900,6 +908,7 @@ class ArtifactProvenanceMatchResponse(BaseModel):
     build_env: str = ""
     build_duration_ms: int = 0
     env_hash: str = ""
+    content_sha256: str | None = None
 
 
 class InputChangeInfo(BaseModel):
@@ -1068,6 +1077,9 @@ class LineageNode(BaseModel):
             reader outside the notebook has no ``cells/{id}.py`` to check a
             hash against, so this is the only form in which a step's
             computation can be shown to them at all.
+        content_sha256: SHA-256 of the step's stored bytes, so two graphs of
+            the same computation can be compared step by step rather than only
+            at the result.
 
     These carried no information before results could be shared: every step in
     a graph had the same author (you) and the same environment (this machine).
@@ -1096,6 +1108,7 @@ class LineageNode(BaseModel):
     build_duration_ms: int = 0
     env_hash: str = ""
     source: str = ""
+    content_sha256: str | None = None
 
 
 class LineageEdge(BaseModel):

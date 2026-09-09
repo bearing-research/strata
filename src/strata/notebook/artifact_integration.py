@@ -15,6 +15,7 @@ iteration by name.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -299,6 +300,7 @@ class NotebookArtifactManager:
             schema_json=schema_str,
             row_count=row_count or 0,
             byte_size=byte_size,
+            content_sha256=hashlib.sha256(blob_data).hexdigest(),
         )
 
         if artifact_version is None:

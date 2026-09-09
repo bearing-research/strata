@@ -472,6 +472,7 @@ async def execute_prompt_cell(
             schema_json="{}",
             row_count=1,
             byte_size=len(blob),
+            content_sha256=hashlib.sha256(blob).hexdigest(),
         )
         artifact_uri = f"strata://artifact/{canonical_id}@v={version}"
     except Exception as e:

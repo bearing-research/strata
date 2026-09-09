@@ -268,6 +268,7 @@ async def put_artifact(request: Request, store: WriteStore, principal: CurrentPr
         schema_json=schema_json,
         row_count=table.num_rows,
         byte_size=len(arrow_bytes),
+        content_sha256=hashlib.sha256(arrow_bytes).hexdigest(),
     )
     if finalized_artifact is None:
         raise HTTPException(status_code=500, detail="Failed to finalize artifact")
@@ -328,6 +329,7 @@ async def get_artifact_info(
         row_count=artifact.row_count,
         byte_size=artifact.byte_size,
         created_at=artifact.created_at or 0,
+        content_sha256=artifact.content_sha256,
     )
 
 
@@ -428,6 +430,7 @@ async def import_artifact_route(
         input_versions=metadata.get("input_versions"),
         tenant=tenant_id,
         principal=metadata.get("principal"),
+        content_sha256=declared_digest or None,
     )
 
     existing = store.get_artifact(artifact_id, version)
@@ -559,6 +562,7 @@ async def put_artifact_by_provenance(
         schema_json=str(metadata.get("schema_json") or ""),
         row_count=int(metadata.get("row_count") or 0),
         byte_size=len(blob),
+        content_sha256=hashlib.sha256(blob).hexdigest(),
     )
     if finalized is None:
         raise HTTPException(status_code=500, detail="Failed to finalize artifact")
@@ -648,6 +652,7 @@ async def find_artifact_by_provenance(
         byte_size=artifact.byte_size,
         created_at=artifact.created_at or 0.0,
         principal=artifact.principal,
+        content_sha256=artifact.content_sha256,
     )
 
 
