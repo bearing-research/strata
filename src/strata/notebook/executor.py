@@ -2862,6 +2862,7 @@ class CellExecutor:
                 schema_json=json.dumps({"content_type": content_type}),
                 row_count=0,
                 byte_size=len(blob_data),
+                content_sha256=hashlib.sha256(blob_data).hexdigest(),
             )
             if finalized is None:
                 raise RuntimeError(

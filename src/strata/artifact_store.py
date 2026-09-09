@@ -69,6 +69,9 @@ class ArtifactVersion:
             For artifact URIs, version is "artifact_id@v=N".
         tenant: Tenant ID that owns this artifact (for multi-tenant isolation)
         principal: Principal ID that created this artifact
+        content_sha256: SHA-256 of the stored bytes. What makes two runs of the
+            same notebook on two machines comparable output by output, without
+            publishing anything and without a second read of every blob.
     """
 
     id: str
@@ -83,6 +86,9 @@ class ArtifactVersion:
     input_versions: str | None = None  # JSON: {"uri": "version_string", ...}
     tenant: str | None = None  # Tenant ID for multi-tenant isolation
     principal: str | None = None  # Principal ID that created this artifact
+    # SHA-256 of the stored bytes, recorded at finalize. None on rows written
+    # before the column existed, until something asks (``content_digest``).
+    content_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -366,9 +372,10 @@ class _Migration:
 def _add_content_sha256(conn: StoreConnection, dialect: SqlDialect) -> None:
     """Give every artifact version somewhere to record its content digest.
 
-    Nullable, and nothing writes it yet: the column is the half that needs a
-    migration, and filling it — on write for new artifacts, lazily for old — is
-    the half that does not.
+    Nullable: ``finalize_artifact`` fills it for anything written since, and
+    ``content_digest`` fills it on demand for rows that predate it. A column
+    that were NOT NULL would have had to be backfilled by reading every blob in
+    the store before the migration could finish.
     """
     if not dialect.column_exists(conn, "artifact_versions", "content_sha256"):
         conn.execute("ALTER TABLE artifact_versions ADD COLUMN content_sha256 TEXT")
@@ -1136,8 +1143,8 @@ class ArtifactStore:
                 INSERT INTO artifact_versions
                     (id, version, state, provenance_hash, schema_json, row_count,
                      byte_size, created_at, transform_spec, input_versions,
-                     tenant, principal)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     tenant, principal, content_sha256)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.id,
@@ -1152,6 +1159,12 @@ class ArtifactStore:
                     record.input_versions,
                     record.tenant if record.tenant is not None else "",
                     record.principal,
+                    # The source's digest travels with the row, and the bytes
+                    # were checked against it before anything was written. A
+                    # copy that recomputed it locally would agree by
+                    # construction and prove nothing.
+                    record.content_sha256
+                    or (hashlib.sha256(blob).hexdigest() if blob is not None else None),
                 ),
             )
             conn.commit()
@@ -1167,6 +1180,7 @@ class ArtifactStore:
         schema_json: str,
         row_count: int,
         byte_size: int,
+        content_sha256: str | None = None,
     ) -> ArtifactVersion | None:
         """Mark artifact as ready after blob is written.
 
@@ -1180,6 +1194,11 @@ class ArtifactStore:
             schema_json: Arrow schema as JSON
             row_count: Number of rows
             byte_size: Size of blob in bytes
+            content_sha256: Digest of the bytes, when the caller already has
+                them. Omitted, the blob is streamed and hashed here — correct
+                either way, but a caller that just wrote the bytes has the
+                digest for free and a remote blob store would otherwise be
+                read a second time.
 
         Returns:
             The finalized ArtifactVersion, or the existing artifact if duplicate
@@ -1248,15 +1267,23 @@ class ArtifactStore:
                     (existing.id, existing.version),
                 )
 
+            # Recorded here rather than at write time because every write
+            # path arrives here — bytes in hand, a streamed writer, a file
+            # published from disk, an import — and this is the moment the
+            # artifact becomes readable, so it is the moment its bytes are
+            # final.
+            digest = content_sha256 or self.blob_digest(artifact_id, version)
+
             # Proceed with finalization
             try:
                 cursor = conn.execute(
                     """
                     UPDATE artifact_versions
-                    SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?
+                    SET state = 'ready', schema_json = ?, row_count = ?, byte_size = ?,
+                        content_sha256 = ?
                     WHERE id = ? AND version = ? AND state = 'building'
                     """,
-                    (schema_json, row_count, byte_size, artifact_id, version),
+                    (schema_json, row_count, byte_size, digest, artifact_id, version),
                 )
                 if cursor.rowcount == 0:
                     # Race condition: another process may have finalized
@@ -1308,7 +1335,7 @@ class ArtifactStore:
                 """
                 SELECT id, version, state, provenance_hash, schema_json,
                        row_count, byte_size, created_at, transform_spec,
-                       input_versions, tenant, principal
+                       input_versions, tenant, principal, content_sha256
                 FROM artifact_versions
                 WHERE id = ? AND provenance_hash = ? AND tenant = ?
                   AND state IN ('ready', 'superseded')
@@ -1333,6 +1360,7 @@ class ArtifactStore:
                 input_versions=row["input_versions"],
                 tenant=row["tenant"],
                 principal=row["principal"],
+                content_sha256=row["content_sha256"],
             )
         finally:
             conn.close()
@@ -1411,8 +1439,13 @@ class ArtifactStore:
             reader_cm as reader,
             self.blob_store.open_blob_writer(artifact_id, new_version) as writer,
         ):
+            # Hashed as it goes by: the bytes are passing through anyway, and
+            # a copy is exactly the operation where reading them a second time
+            # to find their digest would be silly.
+            hasher = hashlib.sha256()
             while chunk := reader.read(BLOB_STREAM_CHUNK_BYTES):
                 writer.write(chunk)
+                hasher.update(chunk)
                 copied += len(chunk)
 
         schema_json = source.schema_json or ""
@@ -1424,6 +1457,7 @@ class ArtifactStore:
             schema_json=schema_json,
             row_count=row_count,
             byte_size=byte_size,
+            content_sha256=hasher.hexdigest(),
         )
         if finalized is not None and finalized.id != artifact_id:
             # Dedup sent us to another artifact holding the same provenance —
@@ -1820,7 +1854,7 @@ class ArtifactStore:
                 """
                 SELECT id, version, state, provenance_hash, schema_json,
                        row_count, byte_size, created_at, transform_spec,
-                       input_versions, tenant, principal
+                       input_versions, tenant, principal, content_sha256
                 FROM artifact_versions
                 WHERE id = ? AND version = ?
                 """,
@@ -1842,6 +1876,7 @@ class ArtifactStore:
                 input_versions=row["input_versions"],
                 tenant=row["tenant"],
                 principal=row["principal"],
+                content_sha256=row["content_sha256"],
             )
         finally:
             conn.close()
@@ -1861,7 +1896,7 @@ class ArtifactStore:
                 """
                 SELECT id, version, state, provenance_hash, schema_json,
                        row_count, byte_size, created_at, transform_spec,
-                       input_versions, tenant, principal
+                       input_versions, tenant, principal, content_sha256
                 FROM artifact_versions
                 WHERE id = ? AND state = 'ready'
                 ORDER BY version DESC
@@ -1885,6 +1920,7 @@ class ArtifactStore:
                 input_versions=row["input_versions"],
                 tenant=row["tenant"],
                 principal=row["principal"],
+                content_sha256=row["content_sha256"],
             )
         finally:
             conn.close()
@@ -1950,7 +1986,7 @@ class ArtifactStore:
                     """
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
-                           input_versions, tenant, principal
+                           input_versions, tenant, principal, content_sha256
                     FROM artifact_versions
                     WHERE provenance_hash = ? AND state = 'ready' AND tenant = ?
                     ORDER BY created_at DESC
@@ -1963,7 +1999,7 @@ class ArtifactStore:
                     """
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
-                           input_versions, tenant, principal
+                           input_versions, tenant, principal, content_sha256
                     FROM artifact_versions
                     WHERE provenance_hash = ? AND state = 'ready'
                       AND (tenant = '' OR tenant IS NULL)
@@ -1988,6 +2024,7 @@ class ArtifactStore:
                 input_versions=row["input_versions"],
                 tenant=row["tenant"],
                 principal=row["principal"],
+                content_sha256=row["content_sha256"],
             )
         finally:
             conn.close()
@@ -2328,6 +2365,38 @@ class ArtifactStore:
             revoked_at=row["revoked_at"],
         )
 
+    def content_digest(self, artifact_id: str, version: int) -> str | None:
+        """The artifact's recorded digest, computing and recording it if absent.
+
+        Rows written before the column existed have none. Reading every blob in
+        the store to backfill them would have made the migration proportional
+        to the store's size; filling one when something actually asks makes it
+        proportional to what is asked for, and the answer is the same.
+
+        ``None`` when there is no blob to hash, which stays ``None``: there is
+        nothing to record and asking again is cheap.
+        """
+        artifact = self.get_artifact(artifact_id, version)
+        if artifact is None:
+            return None
+        if artifact.content_sha256:
+            return artifact.content_sha256
+
+        digest = self.blob_digest(artifact_id, version)
+        if digest is None:
+            return None
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "UPDATE artifact_versions SET content_sha256 = ? "
+                "WHERE id = ? AND version = ? AND content_sha256 IS NULL",
+                (digest, artifact_id, version),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return digest
+
     def blob_digest(self, artifact_id: str, version: int) -> str | None:
         """SHA-256 of an artifact's bytes, streamed. ``None`` if there is no blob.
 
@@ -2367,7 +2436,8 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             row = conn.execute(
-                "SELECT state, tenant FROM artifact_versions WHERE id = ? AND version = ?",
+                "SELECT state, tenant, content_sha256 FROM artifact_versions "
+                "WHERE id = ? AND version = ?",
                 (artifact_id, version),
             ).fetchone()
             if row is None:
@@ -2392,7 +2462,13 @@ class ArtifactStore:
                 return self._publication_from_row(existing)
 
             publication = Publication(
-                content_sha256=self.blob_digest(artifact_id, version),
+                # The version's own digest, not a second computation of the
+                # same bytes: a publication that disagreed with the artifact it
+                # names would be the more alarming of the two answers. Read
+                # from the row already in hand rather than through
+                # ``content_digest``, which would open a second connection and
+                # write through it while this one holds the publication.
+                content_sha256=row["content_sha256"] or self.blob_digest(artifact_id, version),
                 token=secrets.token_urlsafe(32),
                 artifact_id=artifact_id,
                 version=version,
@@ -3262,7 +3338,7 @@ class ArtifactStore:
                     """
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
-                           input_versions, tenant, principal
+                           input_versions, tenant, principal, content_sha256
                     FROM artifact_versions
                     WHERE state = 'ready'
                       AND tenant = ?
@@ -3276,7 +3352,7 @@ class ArtifactStore:
                     """
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
-                           input_versions, tenant, principal
+                           input_versions, tenant, principal, content_sha256
                     FROM artifact_versions
                     WHERE state = 'ready'
                       AND (input_versions LIKE ? OR input_versions LIKE ?)
@@ -3300,6 +3376,7 @@ class ArtifactStore:
                     input_versions=row["input_versions"],
                     tenant=row["tenant"],
                     principal=row["principal"],
+                    content_sha256=row["content_sha256"],
                 )
 
                 # Parse input_versions to find the exact version string used
@@ -3399,7 +3476,8 @@ class ArtifactStore:
                 query = """
                     SELECT DISTINCT av.id, av.version, av.state, av.provenance_hash,
                            av.schema_json, av.row_count, av.byte_size, av.created_at,
-                           av.transform_spec, av.input_versions, av.tenant, av.principal
+                           av.transform_spec, av.input_versions, av.tenant, av.principal,
+                           av.content_sha256
                     FROM artifact_versions av
                     INNER JOIN artifact_names an
                         ON av.id = an.artifact_id AND av.version = an.version
@@ -3427,7 +3505,7 @@ class ArtifactStore:
                 query = """
                     SELECT id, version, state, provenance_hash, schema_json,
                            row_count, byte_size, created_at, transform_spec,
-                           input_versions, tenant, principal
+                           input_versions, tenant, principal, content_sha256
                     FROM artifact_versions
                 """
                 params = []
@@ -3464,6 +3542,7 @@ class ArtifactStore:
                     input_versions=row["input_versions"],
                     tenant=row["tenant"],
                     principal=row["principal"],
+                    content_sha256=row["content_sha256"],
                 )
                 for row in cursor.fetchall()
             ]
@@ -3916,7 +3995,7 @@ class ArtifactStore:
         conn = self._get_connection()
         try:
             query = """
-                SELECT id, version, state, row_count
+                SELECT id, version, state, row_count, content_sha256
                 FROM artifact_versions
                 WHERE state IN ('ready', 'superseded')
             """
@@ -3968,6 +4047,26 @@ class ArtifactStore:
                         "detail": f"metadata says {row['row_count']}, blob yields {readable_rows}",
                     }
                 )
+
+            # The checks above catch bytes that stopped being valid Arrow or
+            # stopped holding the rows they claim. A digest catches the edit
+            # that kept both true — a value changed in place, which is the
+            # alteration a reader would never otherwise notice. Rows with no
+            # digest are silent here: they predate the column, and verify is
+            # not the place to decide the store's history was wrong.
+            recorded = row["content_sha256"]
+            if recorded:
+                actual = hashlib.sha256(data).hexdigest()
+                if actual != recorded:
+                    findings.append(
+                        {
+                            "artifact_id": artifact_id,
+                            "version": version,
+                            "state": row["state"],
+                            "problem": "digest_mismatch",
+                            "detail": f"recorded {recorded[:12]}…, blob hashes to {actual[:12]}…",
+                        }
+                    )
         return findings
 
     def cleanup_failed(self, max_age_seconds: float = 3600) -> int:

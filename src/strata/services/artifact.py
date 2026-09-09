@@ -144,6 +144,7 @@ class ArtifactService:
             build_duration_ms=root_meta.build_duration_ms,
             env_hash=root_meta.env_hash,
             source=root_meta.source,
+            content_sha256=artifact.content_sha256,
         )
         visited.add(artifact_uri)
 
@@ -216,6 +217,7 @@ class ArtifactService:
                 build_duration_ms=input_meta.build_duration_ms,
                 env_hash=input_meta.env_hash,
                 source=input_meta.source,
+                content_sha256=input_artifact.content_sha256,
             )
 
             # Add this artifact's inputs to queue
