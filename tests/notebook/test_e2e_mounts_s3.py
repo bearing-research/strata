@@ -25,7 +25,7 @@ from pathlib import Path
 
 import docker
 import pytest
-from testcontainers.minio import MinioContainer
+from testcontainers.community.minio import MinioContainer
 
 from strata.notebook.executor import CellExecutor
 from strata.notebook.models import MountMode, MountSpec

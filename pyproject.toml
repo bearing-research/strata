@@ -152,7 +152,9 @@ dev = [
     "moto[s3]>=5.0.0",
     "boto3>=1.35.0",
     "psutil>=5.9.0",
-    "testcontainers[minio]>=4.0.0",
+    # 4.15 is where testcontainers.community lives; the old top-level module
+    # paths still import from there and warn.
+    "testcontainers[minio]>=4.15.0",
     "polars>=1.36.1",
     "pandas>=2.3.3",
     "datafusion>=50.1.0",

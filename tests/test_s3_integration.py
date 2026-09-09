@@ -25,7 +25,7 @@ import pytest
 from pyiceberg.catalog.sql import SqlCatalog
 from pyiceberg.schema import Schema
 from pyiceberg.types import DoubleType, IntegerType, LongType, NestedField, StringType
-from testcontainers.minio import MinioContainer
+from testcontainers.community.minio import MinioContainer
 
 from strata.config import StrataConfig
 from strata.fetcher import PyArrowFetcher

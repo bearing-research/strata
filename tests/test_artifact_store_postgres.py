@@ -16,7 +16,7 @@ import time
 
 import docker
 import pytest
-from testcontainers.postgres import PostgresContainer
+from testcontainers.community.postgres import PostgresContainer
 
 from strata.artifact_store import ArtifactStore, TransformSpec
 from strata.sql_backend import PostgresDialect, advisory_lock_id
