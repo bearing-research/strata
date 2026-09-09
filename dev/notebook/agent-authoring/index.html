@@ -1263,6 +1263,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#comparing-two-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing two runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#donts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2186,6 +2197,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#comparing-two-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Comparing two runs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#donts" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2404,6 +2426,21 @@ absent on warm runs. Pass <code>--force</code> when you need fresh console outpu
 leaf cell that only <code>print</code>s is the exception: its console is cached by
 provenance and replayed on a warm hit.) Don't read <code>.strata/</code> directly - it's
 machine-managed runtime state with no stability guarantees.</p>
+<h2 id="comparing-two-runs">Comparing two runs<a class="headerlink" href="#comparing-two-runs" title="Permanent link">&para;</a></h2>
+<p>A successful cell also reports its <code>provenance_hash</code> and its <code>outputs</code> - one
+entry per variable a downstream cell reads, each with <code>artifact_id</code>, <code>version</code>
+and <code>content_sha256</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>strata<span class="w"> </span>run<span class="w"> </span>my_analysis<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.cells[] | {id, provenance_hash, outputs}&#39;</span>
+</code></pre></div>
+<p>The digest is what makes two reports comparable. <code>status</code> and <code>duration_ms</code>
+agree between a run that computed the right numbers and one that did not; the
+digest of the bytes does not. Run the notebook on two machines, diff the
+reports, and a cell whose output moved is named.</p>
+<p>Both are read back from the artifact store rather than from the run, so a cache
+hit reports them too - which is the run most worth comparing. <code>content_sha256</code>
+is <code>null</code> for artifacts written before digests were recorded; a cell whose
+variables nothing downstream reads has no <code>outputs</code> key, because nothing was
+stored.</p>
 <h2 id="donts">Don'ts<a class="headerlink" href="#donts" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Don't create or edit <code>.strata/</code></strong> - runtime state, machine-managed.</li>
@@ -2423,26 +2460,26 @@ machine-managed runtime state with no stability guarantees.</p>
 <p>This exact notebook is pinned by Strata's test suite
 (<code>TestHandWrittenNotebookContract</code>) - if it ever stops working, CI fails:</p>
 <p><code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;agent-handwritten-001&quot;</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;Hand-written by an agent&quot;</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">cells</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;load&quot;</span><span class="p">,</span><span class="w">  </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;load.py&quot;</span><span class="p">,</span><span class="w">  </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;doc&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;doc.md&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;markdown&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">},</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;stats&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;stats.py&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="p">},</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;agent-handwritten-001&quot;</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;Hand-written by an agent&quot;</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">cells</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;load&quot;</span><span class="p">,</span><span class="w">  </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;load.py&quot;</span><span class="p">,</span><span class="w">  </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;doc&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;doc.md&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;markdown&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;stats&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;stats.py&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">language</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="s2">&quot;python&quot;</span><span class="p">,</span><span class="w">   </span><span class="n">order</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="p">]</span>
 </code></pre></div>
 <p><code>cells/load.py</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># @name load</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">numbers</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># @name load</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">numbers</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span>
 </code></pre></div>
 <p><code>cells/stats.py</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">mean</span> <span class="o">=</span> <span class="n">total</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">mean</span> <span class="o">=</span> <span class="n">total</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">numbers</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>$<span class="w"> </span>strata<span class="w"> </span>validate<span class="w"> </span>./handwritten<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>strata<span class="w"> </span>run<span class="w"> </span>./handwritten
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>✓<span class="w"> </span>valid<span class="w"> </span>-<span class="w"> </span><span class="m">3</span><span class="w"> </span>cell<span class="o">(</span>s<span class="o">)</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>...
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="m">3</span><span class="w"> </span>ran<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span>.2s
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>$<span class="w"> </span>strata<span class="w"> </span>validate<span class="w"> </span>./handwritten<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>strata<span class="w"> </span>run<span class="w"> </span>./handwritten
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>✓<span class="w"> </span>valid<span class="w"> </span>-<span class="w"> </span><span class="m">3</span><span class="w"> </span>cell<span class="o">(</span>s<span class="o">)</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>...
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="m">3</span><span class="w"> </span>ran<span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="m">1</span>.2s
 </code></pre></div>
 
 
