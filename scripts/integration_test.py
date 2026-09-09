@@ -262,22 +262,28 @@ def test_concurrent_scans(client: httpx.Client, table_uri: str) -> bool:
 
     print(f"Testing concurrent scans on {table_uri}...")
 
-    def run_scan(scan_num: int) -> tuple[int, bool]:
+    def run_scan(scan_num: int) -> tuple[int, bool, str]:
         try:
-            ok, _, _ = _materialize_and_stream(client, table_uri, ["id", "data"])
-            return scan_num, ok
+            ok, message, _ = _materialize_and_stream(client, table_uri, ["id", "data"])
+            return scan_num, ok, message
         except Exception as e:
-            print(f"    scan {scan_num} error: {e}")
-            return scan_num, False
+            return scan_num, False, f"{type(e).__name__}: {e}"
 
     num_scans = 10
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(run_scan, i) for i in range(num_scans)]
         results = [f.result() for f in concurrent.futures.as_completed(futures)]
 
-    successes = sum(1 for _, success in results if success)
+    successes = sum(1 for _, success, _ in results if success)
     if successes != num_scans:
         print(f"  FAIL: {successes}/{num_scans} scans succeeded")
+        # The helper already says whether it was the materialize or the stream
+        # that failed, and with what status. Discarding it left a CI log that
+        # reported the count and nothing else, which is not enough to tell a
+        # QoS rejection from an expired stream from a real regression.
+        for scan_num, ok, message in sorted(results):
+            if not ok:
+                print(f"    scan {scan_num}: {message}")
         return False
 
     print(f"  PASS: {successes}/{num_scans} concurrent scans succeeded")
