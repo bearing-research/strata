@@ -441,7 +441,8 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | --------------------------------- | -------------------- | -------------------------------------------------------------------------------------------- |
 | `STRATA_WORKER_TOKEN`             | `None`               | Optional bearer token. When set, the worker's `/v1/*` execution endpoints require `Authorization: Bearer <token>`. `/health` stays open. See [Workers § Authentication](../notebook/workers.md#authentication). |
 | `STRATA_WORKER_MAX_INPUT_BYTES`   | `2147483648` (2 GiB) | Per-input download cap for the pull-model (`/v1/execute-manifest`). Reject inputs larger than this with 413. |
-| `STRATA_WORKER_ALLOW_LOCAL_HOSTS` | `false`              | Bypass the SSRF defense that rejects manifest URLs resolving to private / loopback IPs. Only set for tests or local dev with 127.0.0.1 build servers; production deployments leave it unset. |
+| `STRATA_WORKER_ALLOWED_HOSTS`     | _(empty)_            | Comma-separated hosts whose manifest URLs skip the private-address check, e.g. `build.internal,.svc.cluster.local`. A leading dot is a suffix (anchored on the dot, so `.example.com` does not match `evil-example.com`); anything else must match exactly. Matched on the name, so listing a host is trust in whoever controls its DNS. Prefer this over `STRATA_WORKER_ALLOW_LOCAL_HOSTS` in production. |
+| `STRATA_WORKER_ALLOW_LOCAL_HOSTS` | `false`              | Bypass the private-address check for **every** host. For tests and local dev with 127.0.0.1 build servers; in production name the hosts with `STRATA_WORKER_ALLOWED_HOSTS` instead. Setting both gives the wholesale bypass. |
 
 ## Rate Limiting
 
