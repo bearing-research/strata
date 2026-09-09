@@ -430,6 +430,17 @@ API does not fall back.
 manager writing it underneath a running server. A restart would work too, but
 it interrupts every cell currently executing.
 
+**Personal-mode servers get the registry too.** A personal server started with
+a registry offers those machine types to every notebook it opens, with no
+`[[workers]]` block in `notebook.toml` — which is the point, since writing one
+into every notebook puts the catalogue in git diffs and drifts as soon as it
+changes. They appear in the Workers panel with `source: server`.
+
+A notebook's own `[[workers]]` still win: define `gpu-a100` in your
+`notebook.toml` and that is what `@worker gpu-a100` resolves to, the same
+precedence annotations have over persisted config. Your notebook's worker
+definitions stay editable either way.
+
 ## Authentication
 
 By default the worker accepts any caller that can reach its URL. For any worker deployed to a public endpoint, set a bearer token so only your notebook server can dispatch cells.
