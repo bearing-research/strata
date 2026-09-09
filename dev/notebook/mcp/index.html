@@ -2257,8 +2257,31 @@ The typical loop:</p>
 <td><code>disconnect_ssh_worker(session_id, name, stop_remote?)</code></td>
 <td>Close an SSH worker's tunnel and unregister it.</td>
 </tr>
+<tr>
+<td><code>lineage(session_id, cell_id, variable, max_depth?)</code></td>
+<td>The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes.</td>
+</tr>
+<tr>
+<td><code>promote(session_id, cell_id, variable, name, alias?, tags?)</code></td>
+<td>Copy the output <strong>and everything behind it</strong> into the team's store, under a name colleagues can ask for. Mints no public link. A protected alias comes back <code>pending</code>. Needs <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>.</td>
+</tr>
+<tr>
+<td><code>publish_preflight(session_id, cell_id, variable)</code></td>
+<td>What publishing would expose - the whole chain, step by step. Read this to the user before <code>publish</code>.</td>
+</tr>
+<tr>
+<td><code>publish(session_id, cell_id, variable, title?)</code></td>
+<td>Mint a URL that needs no credentials. Copies the chain into the store the link resolves from first.</td>
+</tr>
 </tbody>
 </table>
+<p><code>promote</code> and <code>publish</code> are different acts. Promoting puts a result where
+colleagues' cells already read from, inside a store that still needs
+credentials; publishing mints a link that needs none and exposes every upstream
+step's code and environment along with the result. <code>publish_preflight</code> returns
+that exposure list, and an agent should put it in front of the user and get
+their agreement before calling <code>publish</code>. Withdrawing is
+<code>strata artifact unpublish &lt;token&gt;</code>.</p>
 <p><code>run_cell</code> modes match the UI and CLI: <code>normal</code> uses the cache and re-runs stale
 upstreams first; <code>rerun</code> bypasses the target's cache but still refreshes
 upstreams; <code>force</code> ("run this only") runs against whatever upstream artifacts
