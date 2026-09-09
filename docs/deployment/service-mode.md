@@ -467,6 +467,38 @@ strata.promote("rows", name="taxi/rows", alias="champion")
 `STRATA_NOTEBOOK_REMOTE_STORE_URL`, which a cell's ambient `strata` client
 still needs.
 
+## What a cell can read
+
+A cell is arbitrary Python, spawned by default with the server's whole
+environment. On a laptop that is right and there is nothing to protect. On a
+shared server it means every member who can run a cell can read
+`STRATA_NOTEBOOK_REMOTE_STORE_HEADERS`, `STRATA_PROXY_TOKEN`, worker tokens and
+every data-source credential the server holds - from `os.environ`, from
+`/proc/<pid>/environ`, or from any file the server process can open.
+
+`STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the first two:
+
+```bash
+# Only what cells actually need; everything else stays with the server.
+STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST=AWS_*,HF_TOKEN
+```
+
+Entries are exact names or a prefix with a trailing `*`. The essentials a
+subprocess cannot start without are always included, and `STRATA_*` is dropped
+unless named exactly - a prefix rule broad enough to catch a credential by
+accident is the failure the setting exists to prevent. It applies to all four
+spawns that run cell code: the cold harness, the R harness, the batch harness
+and the warm pool worker.
+
+The list stays short because a cell's own configuration does not come through
+the process environment. `[env]` in `notebook.toml` and mount credentials
+travel in the cell manifest and are applied inside the harness.
+
+What this does **not** do is stop a cell reading the server's files, or its
+memory through `/proc`. That needs the harness to run as a different OS user,
+which is not implemented yet - until it is, "a member who runs a cell can read
+what the server process can read on disk" remains true of shared servers.
+
 ## Migrating from personal mode
 
 If you've been running personal mode and want to grow into service:

@@ -443,6 +443,20 @@ class StrataConfig(BaseSettings):
     #                a cell's ambient client still needs.
     notebook_team_cache_publish: Literal["all", "promoted", "off"] = "all"
 
+    # Which of the server's environment variables a cell subprocess is given.
+    # Empty (the default) hands over the whole environment, which is right on a
+    # laptop and is the entire threat model on a shared server: a cell is
+    # arbitrary Python, so every member who can run one can read the remote-store
+    # headers, the proxy token, worker tokens and every data-source credential
+    # the server holds.
+    #
+    # Entries are exact names, or a prefix written with a trailing ``*``. The
+    # essentials a subprocess cannot start without are always included, and
+    # STRATA_* is dropped unless named exactly. A cell's own configuration —
+    # ``[env]`` and mount credentials — travels in the manifest rather than the
+    # process environment, so the list stays short.
+    notebook_harness_env_allowlist: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
     # AI/LLM assistant settings (OpenAI-compatible API)
     ai_base_url: str | None = None
     ai_model: str | None = None
@@ -590,6 +604,29 @@ class StrataConfig(BaseSettings):
                 v = [part.strip() for part in stripped.split(",") if part.strip()]
         if not isinstance(v, list):
             raise ValueError("registry_protected_aliases must be a list")
+        return [str(item) for item in v]
+
+    @field_validator("notebook_harness_env_allowlist", mode="before")
+    @classmethod
+    def normalize_harness_env_allowlist(cls, v: Any) -> list[str]:
+        """Accept list, JSON array, or comma-separated variable names."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                import json
+
+                parsed = json.loads(stripped)
+                if not isinstance(parsed, list):
+                    raise ValueError("notebook_harness_env_allowlist must be a list")
+                v = parsed
+            else:
+                v = [part.strip() for part in stripped.split(",") if part.strip()]
+        if not isinstance(v, list):
+            raise ValueError("notebook_harness_env_allowlist must be a list")
         return [str(item) for item in v]
 
     @field_validator("embed_frame_ancestors", mode="before")

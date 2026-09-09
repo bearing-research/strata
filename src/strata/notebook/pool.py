@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from strata.notebook.harness_env import configured_allowlist, harness_env
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
     kill_subprocess_tree_nowait,
@@ -138,6 +139,11 @@ class WarmProcessPool:
             # cell's full captured stdout, and readline() raises on any
             # longer line — which used to silently fall back to a cold
             # re-execution (running the cell body twice).
+            # A warm worker runs cell code like any harness, and it is the
+            # default WebSocket path — filtering the cold spawn and not this
+            # one would leave the server's secrets readable from almost every
+            # cell anyone actually runs.
+            allowlist = configured_allowlist()
             process = await asyncio.create_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,
@@ -145,6 +151,7 @@ class WarmProcessPool:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.notebook_dir),
                 limit=SUBPROCESS_LINE_LIMIT,
+                env=harness_env(allowlist) if allowlist else None,
                 **subprocess_kwargs_for_new_group(),
             )
 

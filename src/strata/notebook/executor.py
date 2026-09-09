@@ -3018,6 +3018,20 @@ class CellExecutor:
             return str(remote)
         return str(getattr(config, "server_url", "") or "")
 
+    def _harness_env(self, extra: dict[str, str] | None = None) -> dict[str, str] | None:
+        """The environment to spawn a cell subprocess with.
+
+        ``None`` when nothing is filtered and there is nothing extra to add —
+        which lets the spawn omit ``env=`` entirely and inherit, exactly as it
+        did before this setting existed.
+        """
+        from strata.notebook.harness_env import harness_env
+
+        allowlist = list(getattr(self._lake_config(), "notebook_harness_env_allowlist", []) or [])
+        if not allowlist and not extra:
+            return None
+        return harness_env(allowlist, extra)
+
     def _ambient_promote_url(self) -> str:
         """Where a cell's ``strata.promote`` posts, or ``""`` when it cannot.
 
@@ -4202,6 +4216,7 @@ class CellExecutor:
             cwd=str(self.session.path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=self._harness_env(),
             **subprocess_kwargs_for_new_group(),
         )
 
@@ -4288,6 +4303,7 @@ class CellExecutor:
             cwd=str(self.session.path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=self._harness_env(),
             **subprocess_kwargs_for_new_group(),
         )
 
@@ -4901,12 +4917,13 @@ class CellExecutor:
             }
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-            env = {
-                **os.environ,
-                "STRATA_BATCH_FRAME_FD": str(frame_w),
-                "STRATA_BATCH_RESP_FD": str(resp_r),
-                "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
-            }
+            env = self._harness_env(
+                {
+                    "STRATA_BATCH_FRAME_FD": str(frame_w),
+                    "STRATA_BATCH_RESP_FD": str(resp_r),
+                    "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
+                }
+            )
 
             # Spawn the batch harness as the leader of a new process
             # group so a SIGKILL on timeout reaches every descendant
