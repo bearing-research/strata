@@ -491,11 +491,13 @@ def _serialize_notebook_runtime_config(request: Request | None = None) -> dict:
         "available_python_versions": available_python_versions,
         "default_python_version": available_python_versions[0],
         "python_selection_fixed": len(available_python_versions) <= 1,
-        # Registry UI gate: the registry routes go through
-        # ``_get_artifact_store()``, which only serves personal mode today.
-        # The frontend hides the Registry tab/strip when this is false so
-        # service mode shows no dead registry affordances.
-        "registry_enabled": deployment_mode == "personal",
+        # Registry UI gate: is there a registry to show. It used to mean
+        # "personal mode", because the registry routes went through the bare
+        # ``_get_artifact_store()`` gate and 403'd anywhere else. They read
+        # through the tenant-scoped read gate now, and with a team store
+        # configured they answer from that store — so a shared server showing
+        # its organization's registry is the case this used to hide.
+        "registry_enabled": True,
     }
 
 
@@ -2733,40 +2735,40 @@ async def list_notebook_published_artifacts(notebook_id: str, session: SessionDe
     ``strata`` client (``put``/``materialize`` with ``name=``, stamped
     ``nb_cell=<id>``). Powers the per-cell registry strip.
 
-    Personal mode only: the published-tier store is unreachable in service mode
-    today (``_get_artifact_store`` 403s), so we return an empty map rather than
-    erroring — the strip simply shows nothing until the service-mode registry
-    refactor lands.
+    Answered by whichever store the cells write to. With
+    ``notebook_remote_store_url`` set that is the team's store, and reading the
+    local one here would report an empty strip on exactly the deployment where
+    a cell's ``put(name=...)`` is most likely to have gone somewhere worth
+    showing.
     """
-    from fastapi import HTTPException
+    from strata.api.remote_registry import forward, remote_registry
+    from strata.services.registry import registry_service
 
-    try:
+    # One lookup for the whole notebook, keyed back to cells below. Per cell
+    # would be a round trip per cell once the store is somewhere else.
+    target = remote_registry()
+    if target is not None:
+        body = await forward(target, "GET", "/v1/registry/artifacts", params={"tag_key": "nb_cell"})
+        published = body.get("artifacts", [])
+    else:
         from strata.server import _get_artifact_store
 
-        store = _get_artifact_store()
-    except HTTPException:
-        return {"cells": {}}
+        try:
+            # allow_read: the strip is a tenant-scoped read, so it is available
+            # in service mode too — it used to 403 there and show nothing.
+            store = _get_artifact_store(allow_read=True)
+        except HTTPException:
+            return {"cells": {}}
+        published = registry_service.artifacts_by_tag(store, "nb_cell", tenant=None)
 
-    cells: dict[str, list[dict]] = {}
-    for cell in session.notebook_state.cells:
-        items: list[dict] = []
-        for artifact_id, version in store.list_artifacts_by_tag("nb_cell", cell.id):
-            artifact = store.get_artifact(artifact_id, version)
-            if artifact is None or artifact.state != "ready":
-                continue
-            tags = {k: v for k, v in store.get_tags(artifact_id, version).items() if k != "nb_cell"}
-            items.append(
-                {
-                    "artifact_id": artifact_id,
-                    "version": version,
-                    "uri": f"strata://artifact/{artifact_id}@v={version}",
-                    "names": store.names_for_artifact(artifact_id, version),
-                    "tags": tags,
-                }
-            )
-        if items:
-            cells[cell.id] = items
-    return {"cells": cells}
+    by_cell: dict[str, list[dict]] = {}
+    for item in published:
+        by_cell.setdefault(str(item.pop("tag_value", "")), []).append(item)
+
+    known = {cell.id for cell in session.notebook_state.cells}
+    # A stamp from a cell this notebook no longer has is not this notebook's
+    # strip; the store keeps the artifact, the panel just has nowhere to put it.
+    return {"cells": {cell_id: items for cell_id, items in by_cell.items() if cell_id in known}}
 
 
 @router.post("/{notebook_id}/artifacts/{artifact_id}/v/{version}/promote")

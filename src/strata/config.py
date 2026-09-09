@@ -747,6 +747,25 @@ class StrataConfig(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def reject_a_remote_store_that_is_this_server(self) -> StrataConfig:
+        """A store that is this one is not a remote store.
+
+        The registry routes answer from ``notebook_remote_store_url`` when it
+        is set, so a URL naming this server's own host and port makes every
+        registry read forward to itself and recurse until it times out. It
+        reads like a working configuration right up to the first time someone
+        opens the Registry tab, which is the worst moment to find out.
+        """
+        url = (self.notebook_remote_store_url or "").strip().rstrip("/")
+        if url and url == self.server_url:
+            raise ValueError(
+                f"notebook_remote_store_url is this server ({url}); a remote "
+                "store has to be a different one, or the registry routes "
+                "forward to themselves. Unset it for a single-machine setup."
+            )
+        return self
+
+    @model_validator(mode="after")
     def warn_on_gcs_project_id(self) -> StrataConfig:
         """Say what STRATA_GCS_PROJECT_ID actually controls.
 

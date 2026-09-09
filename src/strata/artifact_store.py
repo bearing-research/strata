@@ -2770,6 +2770,30 @@ class ArtifactStore:
         finally:
             conn.close()
 
+    def list_artifacts_with_tag_key(
+        self,
+        key: str,
+        tenant: str | None = None,
+    ) -> list[tuple[str, int, str]]:
+        """Return ``(artifact_id, version, value)`` for every artifact carrying
+        the given tag key, whatever its value.
+
+        The sibling above answers "which artifacts did cell c1 publish". This
+        answers "which artifacts did any cell publish, and which cell" — one
+        query for a whole notebook's strip instead of one per cell, which over
+        a remote store is the difference between one round trip and fifty."""
+        conn = self._get_connection()
+        try:
+            effective_tenant = tenant if tenant is not None else ""
+            cursor = conn.execute(
+                "SELECT artifact_id, version, value FROM artifact_tags "
+                "WHERE key = ? AND tenant = ? ORDER BY artifact_id, version",
+                (key, effective_tenant),
+            )
+            return [(r["artifact_id"], r["version"], r["value"]) for r in cursor.fetchall()]
+        finally:
+            conn.close()
+
     def delete_tag(
         self,
         artifact_id: str,
