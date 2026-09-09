@@ -14,6 +14,11 @@
 #
 # The pool does not pull images, so build it on the host that will run it (or
 # push it to a registry the host has already pulled from).
+#
+# CI builds this and checks the claims below: that it refuses to start without
+# a token, does not run as root, serves /health on 8080, and requires the token
+# on /execute. Until that job existed this file merged on a green check that
+# built the *root* Dockerfile, which is a different file.
 
 FROM python:3.14-slim
 
