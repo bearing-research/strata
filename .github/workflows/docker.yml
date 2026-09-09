@@ -71,3 +71,90 @@ jobs:
         run: |
           docker stop strata-test || true
           docker rm strata-test || true
+
+  worker:
+    name: Build and test worker image
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+
+      # Built as written, from PyPI, because that is what a pool actually
+      # runs -- the file says so and uses nothing from the build context.
+      # The consequence is that this proves the published worker builds and
+      # behaves, not the worker on this branch; unreleased worker code is
+      # tested by the Python suite, not here.
+      - name: Build worker image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: .
+          file: worker.Dockerfile
+          push: false
+          load: true
+          tags: strata-worker:test
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
+
+      # The image's own claims, in the order it makes them.
+
+      - name: It refuses to start without a token
+        run: |
+          # "an unauthenticated /execute is remote code execution" -- the
+          # image binds 0.0.0.0, so inheriting the library's auth-disabled
+          # default would stand one up. This is the assertion that matters
+          # most, and the one nothing else covers.
+          if docker run --rm strata-worker:test 2>stderr.txt; then
+            echo "FAIL: the worker started with no STRATA_WORKER_TOKEN"
+            exit 1
+          fi
+          grep -q "refusing to start" stderr.txt || {
+            echo "FAIL: exited without saying why"; cat stderr.txt; exit 1;
+          }
+
+      - name: It does not run as root
+        run: |
+          # Cells execute arbitrary user code.
+          uid=$(docker run --rm strata-worker:test id -u)
+          test "$uid" != "0" || { echo "FAIL: worker runs as root"; exit 1; }
+
+      - name: It serves /health on 8080 with a token set
+        run: |
+          # 8080 because that is DockerBackend's default worker_port; the
+          # worker's own default is 9000, so a drift here breaks dispatch.
+          docker run -d --name strata-worker-test -p 8080:8080 \
+            -e STRATA_WORKER_TOKEN=ci-test-token strata-worker:test
+          curl -fsS --retry 30 --retry-delay 1 --retry-connrefused \
+            --retry-all-errors http://localhost:8080/health
+
+      - name: Worker logs on failure
+        if: failure()
+        run: docker logs strata-worker-test || true
+
+      - name: Its execution endpoint requires the token
+        run: |
+          # /health is unauthenticated by design; /execute must not be.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            http://localhost:8080/execute -d '{}')
+          test "$code" = "401" || {
+            echo "FAIL: /execute answered $code without a token, expected 401"
+            exit 1
+          }
+          # And with the token it gets past auth -- 400 on a junk manifest.
+          # Without this the check above would pass on an endpoint that
+          # answered 401 for some other reason, or one that did not exist.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Authorization: Bearer ci-test-token' \
+            http://localhost:8080/execute -d '{}')
+          test "$code" = "400" || {
+            echo "FAIL: /execute answered $code with a valid token, expected 400"
+            exit 1
+          }
+
+      - name: Stop worker
+        if: always()
+        run: |
+          docker stop strata-worker-test || true
+          docker rm strata-worker-test || true
