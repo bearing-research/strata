@@ -1070,6 +1070,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Registering workers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-managed-workers-service-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-managed workers (service mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2267,6 +2284,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Registering workers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-managed-workers-service-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server-managed workers (service mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2760,6 +2794,22 @@ service, and the isolation model.</p>
 <a id="__codelineno-25-16" name="__codelineno-25-16" href="#__codelineno-25-16"></a><span class="n">transport</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;direct&quot;</span>
 <a id="__codelineno-25-17" name="__codelineno-25-17" href="#__codelineno-25-17"></a><span class="n">token_env</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;STRATA_MODAL_WORKER_TOKEN&quot;</span>
 </code></pre></div>
+<h3 id="server-managed-workers-service-mode">Server-managed workers (service mode)<a class="headerlink" href="#server-managed-workers-service-mode" title="Permanent link">&para;</a></h3>
+<p>A service-mode server keeps its own registry, managed through
+<code>/v1/admin/notebook-workers*</code> rather than any notebook's <code>[[workers]]</code>. Two
+things are worth knowing about where it lives:</p>
+<p><strong>It is persisted.</strong> Changes made through the admin routes are written to
+<code>notebook_workers.json</code> in the server's artifact directory and survive a
+restart. Before, they lived only in memory and the next restart reverted them.</p>
+<p><strong>The file wins over <code>[tool.strata.transforms] notebook_workers</code>.</strong> The
+configured table is the bootstrap; once anything has been changed through the
+admin routes, that file is the registry and editing the config table has no
+effect. Delete the file to go back to the configured table — an <em>empty</em>
+registry is a decision, not an absence, so removing every worker through the
+API does not fall back.</p>
+<p><code>POST /v1/admin/notebook-workers/reload</code> re-reads the file, for a fleet
+manager writing it underneath a running server. A restart would work too, but
+it interrupts every cell currently executing.</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <p>By default the worker accepts any caller that can reach its URL. For any worker deployed to a public endpoint, set a bearer token so only your notebook server can dispatch cells.</p>
 <p><strong>1. Generate a token</strong> (any opaque string; 32+ random bytes is plenty):</p>
