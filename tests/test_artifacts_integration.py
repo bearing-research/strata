@@ -80,7 +80,15 @@ def wait_for_build(base_url: str, artifact_uri: str, timeout: float = 30.0) -> N
     artifact_id, version = match.group(1), match.group(2)
     deadline = time.time() + timeout
     while time.time() < deadline:
-        resp = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}")
+        try:
+            resp = httpx.get(f"{base_url}/v1/artifacts/{artifact_id}/v/{version}")
+        except httpx.TimeoutException:
+            # One slow poll is not an answer. httpx's default read timeout is
+            # shorter than the deadline we were given, so a loaded runner
+            # could otherwise fail the whole wait with seconds still on the
+            # clock — keep asking until the deadline is actually spent.
+            time.sleep(0.2)
+            continue
         state = resp.json().get("state")
         if state == "ready":
             return
