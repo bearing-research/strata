@@ -3586,9 +3586,14 @@ flag, and the flag wins.</p>
 <td>Per-input download cap for the pull-model (<code>/v1/execute-manifest</code>). Reject inputs larger than this with 413.</td>
 </tr>
 <tr>
+<td><code>STRATA_WORKER_ALLOWED_HOSTS</code></td>
+<td><em>(empty)</em></td>
+<td>Comma-separated hosts whose manifest URLs skip the private-address check, e.g. <code>build.internal,.svc.cluster.local</code>. A leading dot is a suffix (anchored on the dot, so <code>.example.com</code> does not match <code>evil-example.com</code>); anything else must match exactly. Matched on the name, so listing a host is trust in whoever controls its DNS. Prefer this over <code>STRATA_WORKER_ALLOW_LOCAL_HOSTS</code> in production.</td>
+</tr>
+<tr>
 <td><code>STRATA_WORKER_ALLOW_LOCAL_HOSTS</code></td>
 <td><code>false</code></td>
-<td>Bypass the SSRF defense that rejects manifest URLs resolving to private / loopback IPs. Only set for tests or local dev with 127.0.0.1 build servers; production deployments leave it unset.</td>
+<td>Bypass the private-address check for <strong>every</strong> host. For tests and local dev with 127.0.0.1 build servers; in production name the hosts with <code>STRATA_WORKER_ALLOWED_HOSTS</code> instead. Setting both gives the wholesale bypass.</td>
 </tr>
 </tbody>
 </table>
