@@ -193,6 +193,10 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
             cwd=str(self.session.path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            # This stub exists to skip `uv run`, not to change what a cell can
+            # see. Inheriting here where production filters would make every
+            # notebook test agree with a spawn that is not the one shipping.
+            env=self._harness_env(),
         )
 
         try:
