@@ -3516,7 +3516,7 @@ deployment, not only in one that opted in to something.</p>
 <tr>
 <td><code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code></td>
 <td><code>None</code></td>
-<td>Point the ambient <code>strata</code> client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Unset → the ambient client targets the local server. See <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode → shared research store</a>.</td>
+<td>Point the ambient <code>strata</code> client injected into cells at a remote shared store instead of this local notebook server, so a team publishes/consumes against one central deployment. Also what the Registry tab and the per-cell strip describe: with this set they forward there, so the dashboard shows the store the notebook actually names things in. Unset → both target the local server. Naming this server's own host and port is rejected at startup — the registry routes would forward to themselves. See <a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode → shared research store</a>.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</code></td>

@@ -2277,8 +2277,10 @@ challenger → a human approves → and the whole history is reconstructible:</p
 </code></pre></div>
 <h2 id="in-the-notebook-the-registry-dashboard">In the notebook (the registry dashboard)<a class="headerlink" href="#in-the-notebook-the-registry-dashboard" title="Permanent link">&para;</a></h2>
 <p>Everything above also has a UI - the registry is a first-class surface in the
-notebook, so promotion and approvals don't have to be code. Registry routes are
-<strong>personal-mode only</strong> today, so the dashboard hides itself in service mode.</p>
+notebook, so promotion and approvals don't have to be code. The dashboard shows
+in both deployment modes, and describes whichever store the cells write to: with
+<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> set, that is the team's store rather than the
+local one.</p>
 <div class="admonition tip">
 <p class="admonition-title">New to it? Start with the walkthrough</p>
 <p>For a click-by-click guide - publish from a cell → promote → approve →

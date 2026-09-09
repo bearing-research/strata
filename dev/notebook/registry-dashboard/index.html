@@ -2233,14 +2233,18 @@ right inside the notebook - so promotion doesn't have to be code. It surfaces
 the same names / aliases / tags / audit / lineage that the
 <a href="../../core/registry/">SDK and CLI</a> drive, backed by the identical audited routes.</p>
 <div class="admonition note">
-<p class="admonition-title">Dashboard UI is personal-mode only</p>
-<p>The dashboard <strong>shows up automatically in personal mode</strong> (the default
-<code>python -m strata</code>) and <strong>hides itself in service mode</strong>. If you don't see it,
-check your deployment mode. The registry itself is <em>not</em> personal-only - in
-service mode the same names/aliases/tags resolve via SDK and REST (tenant-
-scoped reads), and publishing them works with <code>service_writes_enabled</code> + the
-<code>artifacts:write</code> scope (see
-<a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode → shared research store</a>).</p>
+<p class="admonition-title">It describes the store your cells write to</p>
+<p>The dashboard is available in both deployment modes. With
+<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code> set it describes <strong>that</strong> store rather
+than the local one - which is the point: a cell's <code>strata.put(name=...)</code>
+and every promotion land there, so reading the local store would show an
+empty registry on exactly the deployment where the registry matters.
+Approvals go to the same place, so a protected alias filed from one
+person's server can be approved from another's.</p>
+<p>The forwarding happens on the server, not in the page, because the
+credentials do: <code>notebook_remote_store_headers</code> is the trusted-proxy
+identity the server holds. See
+<a href="../../deployment/service-mode/#authenticated-write-back-the-shared-research-store">Service Mode → shared research store</a>.</p>
 </div>
 <p>This page is a step-by-step walkthrough. For the concepts (what a name, alias,
 tag, or approval gate <em>is</em>), see <a href="../../core/registry/">Artifacts &amp; Model Registry</a>.</p>
@@ -2354,8 +2358,12 @@ root." src="../../assets/registry-lineage-dark.png#only-dark" /></p>
 </thead>
 <tbody>
 <tr>
-<td><strong>No Registry tab / no strip at all</strong></td>
-<td>You're in <strong>service mode</strong>. The dashboard is personal-mode only today.</td>
+<td><strong>The registry looks empty on a machine that has published things</strong></td>
+<td>Check <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>. The dashboard describes the store the cells write to, so an unset URL on a server whose cells publish elsewhere - or a set one pointing at a store nobody publishes to - shows an empty registry rather than an error.</td>
+</tr>
+<tr>
+<td><strong>The tab reports a 502</strong></td>
+<td>The team store could not be reached. That is deliberately not an empty registry: "nobody has published anything" and "I could not ask" are different facts.</td>
 </tr>
 <tr>
 <td><strong>Registry tab is empty</strong></td>
