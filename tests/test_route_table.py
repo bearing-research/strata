@@ -130,6 +130,7 @@ EXPECTED_ROUTES = [
     ("/v1/notebooks/{notebook_id}/ai/status", "GET", 0),
     ("/v1/notebooks/{notebook_id}/ai/stream", "POST", 0),
     ("/v1/notebooks/{notebook_id}/artifacts", "GET", 0),
+    ("/v1/notebooks/{notebook_id}/artifacts/{artifact_id}/v/{version}/promote", "POST", 0),
     ("/v1/notebooks/{notebook_id}/cells", "GET", 0),
     ("/v1/notebooks/{notebook_id}/cells", "POST", 0),
     ("/v1/notebooks/{notebook_id}/cells/reorder", "PUT", 0),

@@ -3017,6 +3017,24 @@ class CellExecutor:
             return str(remote)
         return str(getattr(config, "server_url", "") or "")
 
+    def _ambient_promote_url(self) -> str:
+        """Where a cell's ``strata.promote`` posts, or ``""`` when it cannot.
+
+        Not the ambient client's own base URL. With a team store configured
+        that URL points at the team store, and the route that copies a chain
+        into it runs here — this notebook server is the only process that can
+        read the notebook's own artifacts. Empty without a team store, which is
+        also the case where promoting means nothing, so the cell gets a
+        straight answer instead of a round trip that 409s.
+        """
+        config = self._lake_config()
+        if not getattr(config, "notebook_remote_store_url", None):
+            return ""
+        server_url = str(getattr(config, "server_url", "") or "").rstrip("/")
+        if not server_url:
+            return ""
+        return f"{server_url}/v1/notebooks/{self.session.id}"
+
     def _ambient_strata_headers(self) -> dict[str, str]:
         """Auth headers the ambient client attaches when pointed at a remote
         store (e.g. trusted-proxy identity/token). Empty for the local server."""
@@ -3215,6 +3233,7 @@ class CellExecutor:
             "strata_url": self._ambient_strata_url(),
             "strata_headers": self._ambient_strata_headers(),
             "strata_cell_id": cell_id,
+            "strata_promote_url": self._ambient_promote_url(),
         }
         if loop_config is not None:
             manifest["loop"] = loop_config

@@ -220,7 +220,20 @@ def inject_client(manifest: dict, namespace: dict) -> Any:
     cell_id = manifest.get("strata_cell_id") or manifest.get("cell_id")
     # Auth headers when the client targets a remote shared store (empty locally).
     headers = manifest.get("strata_headers") or None
-    client = _client_mod.StrataClient(base_url=url, cell_id=cell_id, headers=headers)
+    # Variable -> artifact URI, so ``strata.promote("rows")`` names an input
+    # the way the cell reads it rather than by an id the cell never sees.
+    input_uris = {
+        name: spec.get("uri", "")
+        for name, spec in (manifest.get("inputs") or {}).items()
+        if isinstance(spec, dict) and spec.get("uri")
+    }
+    client = _client_mod.StrataClient(
+        base_url=url,
+        cell_id=cell_id,
+        headers=headers,
+        promote_url=manifest.get("strata_promote_url") or None,
+        inputs=input_uris,
+    )
     namespace["strata"] = client
     return client
 

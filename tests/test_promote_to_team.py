@@ -295,3 +295,180 @@ class TestPublishPolicy:
         from strata.config import StrataConfig
 
         assert StrataConfig().notebook_team_cache_publish == "all"
+
+
+class TestPromoteRoute:
+    """``POST /v1/notebooks/{id}/artifacts/{id}/v/{n}/promote`` — the same
+    promotion the CLI does, from the button the strip will grow.
+
+    The team store here is the server the fixture runs, and the notebook's own
+    store is a directory on disk, which is the real shape: cells write locally
+    and promotion is what crosses the gap. The route is called directly rather
+    than over HTTP so the running server stays the *target*, not the caller.
+    """
+
+    def _session(self, chain):
+        from types import SimpleNamespace
+
+        manager = NotebookArtifactManager("nb", artifact_dir=chain["dir"])
+        return SimpleNamespace(get_artifact_manager=lambda: manager)
+
+    def _call(self, chain, url, monkeypatch, **body):
+        from strata.notebook.routes import PromoteArtifactRequest, promote_notebook_artifact
+        from strata.server import get_state
+
+        monkeypatch.setattr(get_state().config, "notebook_remote_store_url", url)
+        artifact_id = body.pop("artifact_id", chain["figure"].id)
+        version = body.pop("version", chain["figure"].version)
+        payload = {"name": "taxi/model"}
+        payload.update(body)
+        return asyncio.run(
+            promote_notebook_artifact(
+                "nb",
+                self._session(chain),
+                artifact_id,
+                version,
+                PromoteArtifactRequest(**payload),
+            )
+        )
+
+    def test_it_promotes_the_chain_and_reports_where_it_landed(
+        self, team_store, team_dir, chain, monkeypatch
+    ):
+        result = self._call(chain, team_store, monkeypatch)
+
+        assert result["name"] == "taxi/model"
+        assert result["copied"] == 2
+        store = ArtifactStore(team_dir)
+        assert store.get_artifact(chain["upstream"].id, chain["upstream"].version) is not None
+        assert httpx.get(f"{team_store}/v1/names/taxi/model", timeout=10).status_code == 200
+
+    def test_tags_travel(self, team_store, team_dir, chain, monkeypatch):
+        self._call(chain, team_store, monkeypatch, tags={"stage": "candidate"})
+
+        tags = ArtifactStore(team_dir).get_tags(chain["figure"].id, chain["figure"].version)
+        assert tags.get("stage") == "candidate"
+
+    def test_no_team_store_says_which_setting_is_missing(self, team_store, chain, monkeypatch):
+        """A 409 naming the config beats a 500 the UI cannot explain."""
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as caught:
+            self._call(chain, None, monkeypatch)
+
+        assert caught.value.status_code == 409
+        assert "notebook_remote_store_url" in caught.value.detail
+
+    def test_an_artifact_this_notebook_does_not_hold_is_a_404(self, team_store, chain, monkeypatch):
+        """The route reads this notebook's store, and only that one.
+
+        The id arrives in the URL, so this is what keeps one open notebook
+        from pushing an id it does not own to the team.
+        """
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as caught:
+            self._call(chain, team_store, monkeypatch, artifact_id="someone-elses", version=1)
+
+        assert caught.value.status_code == 404
+
+    def test_an_unreachable_store_is_a_bad_gateway(self, team_store, chain, monkeypatch):
+        """Not a 500: the notebook server is fine, the team's store is not."""
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as caught:
+            self._call(chain, "http://127.0.0.1:1", monkeypatch)
+
+        assert caught.value.status_code == 502
+
+
+class TestAmbientPromoteWiring:
+    """What reaches a cell so ``strata.promote`` can work.
+
+    Three pieces have to agree: the manifest carries the callback URL and the
+    input URIs, and both execution paths — the cold harness and the warm pool
+    worker — hand them to the client. A cell that runs on the pool is the
+    default path, so a mismatch there is the failure nobody would see in a
+    local test.
+    """
+
+    def _executor(self, *, remote_store: str | None, server_url: str = "http://nb.local"):
+        from types import SimpleNamespace
+
+        config = SimpleNamespace(
+            notebook_remote_store_url=remote_store,
+            notebook_remote_store_headers={},
+            server_url=server_url,
+        )
+        return SimpleNamespace(
+            _lake_config=lambda: config,
+            session=SimpleNamespace(id="sess-1"),
+        )
+
+    def test_the_url_points_at_this_server_not_the_team_store(self):
+        """The team store cannot read the notebook's artifacts; this server is
+        the only process that can, so it is the one that does the copying."""
+        from strata.notebook.executor import CellExecutor
+
+        url = CellExecutor._ambient_promote_url(self._executor(remote_store="http://store.example"))
+
+        assert url == "http://nb.local/v1/notebooks/sess-1"
+
+    def test_without_a_team_store_there_is_no_callback_at_all(self):
+        from strata.notebook.executor import CellExecutor
+
+        assert CellExecutor._ambient_promote_url(self._executor(remote_store=None)) == ""
+
+    def test_the_manifest_carries_it(self, tmp_path):
+        """The link between the two tests above. Both consumers read
+        ``strata_promote_url``; this is what puts it there."""
+        from strata.notebook.executor import CellExecutor
+
+        executor = self._executor(remote_store="http://store.example")
+        executor._ambient_strata_url = lambda: "http://store.example"
+        executor._ambient_strata_headers = lambda: {}
+        executor._ambient_promote_url = lambda: CellExecutor._ambient_promote_url(executor)
+
+        manifest_path = CellExecutor._write_manifest(
+            executor,
+            "x = 1",
+            {"rows": {"uri": "strata://artifact/nb_rows@v=3", "file": "rows.json"}},
+            tmp_path,
+            {},
+            {},
+            cell_id="c2",
+        )
+        manifest = json.loads(manifest_path.read_text())
+
+        assert manifest["strata_promote_url"] == "http://nb.local/v1/notebooks/sess-1"
+
+    @pytest.mark.parametrize("path", ["harness", "pool_worker"])
+    def test_both_execution_paths_hand_it_to_the_client(self, path, monkeypatch):
+        import importlib
+
+        module = importlib.import_module(f"strata.notebook.{path}")
+        captured: dict = {}
+
+        class _Client:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        monkeypatch.setattr(module._client_mod, "StrataClient", _Client)
+        inject = module.inject_client if path == "harness" else module._inject_client
+        inject(
+            {
+                "strata_url": "http://store.example",
+                "strata_cell_id": "c2",
+                "strata_promote_url": "http://nb.local/v1/notebooks/sess-1",
+                "inputs": {
+                    "rows": {"uri": "strata://artifact/nb_rows@v=3", "file": "rows.json"},
+                    "unstored": {"file": "x.pickle"},
+                },
+            },
+            {},
+        )
+
+        assert captured["promote_url"] == "http://nb.local/v1/notebooks/sess-1"
+        # An input with no artifact behind it (a mount, say) is not promotable
+        # and must not appear as though it were.
+        assert captured["inputs"] == {"rows": "strata://artifact/nb_rows@v=3"}
