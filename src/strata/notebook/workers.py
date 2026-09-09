@@ -140,8 +140,18 @@ def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
             **{name: record.worker for name, record in server_workers.items() if record.enabled},
         }
     else:
+        # Personal mode gets the server registry too, beneath the notebook's
+        # own entries. A platform that manages a catalogue of machine types
+        # otherwise has to write the same [[workers]] block into every
+        # notebook.toml, where it shows up in git diffs and drifts the moment
+        # the catalogue changes.
+        #
+        # Notebook entries last, so a name defined in the notebook wins: the
+        # file in front of you beats a server default, which is the same
+        # precedence annotations have over persisted config.
         effective_workers = {
             "local": builtin,
+            **{name: record.worker for name, record in server_workers.items() if record.enabled},
             **{worker.name: worker for worker in notebook_state.workers},
         }
 
@@ -597,6 +607,25 @@ def build_worker_catalog(notebook_state: NotebookState) -> list[dict[str, Any]]:
                 health=health,
                 allowed=True,
                 enabled=True,
+            )
+
+        # After the notebook's own, because add_worker is first-writer-wins:
+        # a name the notebook defines must win here exactly as it wins in
+        # effective_workers, or the panel would show a server entry while the
+        # cell dispatched to the notebook's.
+        for record in policy.server_workers.values():
+            worker = record.worker
+            health = (
+                "healthy"
+                if worker.backend == WorkerBackendType.LOCAL or is_embedded_executor_worker(worker)
+                else "unknown"
+            )
+            add_worker(
+                worker,
+                source="server",
+                health=health,
+                allowed=record.enabled,
+                enabled=record.enabled,
             )
 
     referenced = set()
