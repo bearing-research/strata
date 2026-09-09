@@ -427,6 +427,22 @@ class StrataConfig(BaseSettings):
     # wanting one to silently source results from.
     notebook_team_cache_enabled: bool = False
 
+    # What the cache offers *outward*. There was no setting between "every
+    # downstream-consumed variable of every successful cell" and "nothing",
+    # and that gap is the whole difference between a laptop and a shared
+    # server: on a personal server, offering everything means every
+    # intermediate a researcher ever computed lands in the team's store,
+    # whether or not they meant to share it.
+    #
+    #   all       -- today's behaviour, and right for a server whose whole
+    #                purpose is a shared cache.
+    #   promoted  -- offer nothing automatically; `strata artifact promote`
+    #                is how a result reaches the team. Pulls are unchanged,
+    #                so the cache still saves you work it already holds.
+    #   off       -- no offers and no pulls, without unsetting the URL that
+    #                a cell's ambient client still needs.
+    notebook_team_cache_publish: Literal["all", "promoted", "off"] = "all"
+
     # AI/LLM assistant settings (OpenAI-compatible API)
     ai_base_url: str | None = None
     ai_model: str | None = None
