@@ -83,6 +83,37 @@ def _allow_local_hosts() -> bool:
     )
 
 
+def _allowed_hosts() -> tuple[str, ...]:
+    """Hostnames and suffixes that pass regardless of the address they resolve to.
+
+    ``STRATA_WORKER_ALLOWED_HOSTS``, comma-separated. A leading dot is a suffix
+    (``.internal`` matches ``build.internal``); anything else must match the
+    host exactly.
+    """
+    raw = os.environ.get("STRATA_WORKER_ALLOWED_HOSTS", "")
+    return tuple(entry.strip().lower() for entry in raw.split(",") if entry.strip())
+
+
+def _host_is_allowlisted(host: str) -> bool:
+    """Whether *host* is named in the allowlist.
+
+    Matched on the name, never on the resolved address — that is the whole
+    point, since these hosts are trusted *because* an operator named them.
+
+    Suffixes are anchored on a dot, so ``.example.com`` matches
+    ``build.example.com`` and not ``evil-example.com``. Getting that wrong is
+    silent: the wrong host passes and nothing says so.
+    """
+    candidate = host.lower().rstrip(".")
+    for entry in _allowed_hosts():
+        if entry.startswith("."):
+            if candidate.endswith(entry) or candidate == entry[1:]:
+                return True
+        elif candidate == entry:
+            return True
+    return False
+
+
 def _assert_url_safe(url: str, field: str) -> None:
     """Reject manifest URLs that are scheme- or host-unsafe.
 
@@ -110,12 +141,26 @@ def _assert_url_safe(url: str, field: str) -> None:
     buckets resolve to public IPs across many regions. Blocklist
     on internal ranges is the right tradeoff.
 
+    ``STRATA_WORKER_ALLOWED_HOSTS`` names specific hosts that pass
+    the address rule anyway -- for a server on a private address,
+    which is the ordinary shape of a managed worker talking to the
+    server that dispatched it. It supersedes
+    ``STRATA_WORKER_ALLOW_LOCAL_HOSTS``, which relaxes the same rule
+    for *every* host and remains for tests and local development
+    where 127.0.0.1 really is the target. A deployment that sets
+    both gets the wholesale bypass, because that is what it asked
+    for; prefer the allowlist in production.
+
     Caveats:
     * DNS rebinding race: the IP we resolved here may differ from
       the IP httpx resolves at fetch time. Honest mitigation
       requires resolving once and passing the IP to httpx; left as
       a follow-up because the practical attacker who controls DNS
-      already has stronger primitives.
+      already has stronger primitives. An allowlisted host does not
+      resolve at all here, so the race does not apply to it -- but
+      that is not a stronger position: it means an allowlist entry
+      is trust in whoever controls that name's resolution, which is
+      what listing it says.
     * IPv4-mapped IPv6 (``::ffff:127.0.0.1``) is caught — we
       ``unmap()`` before checking.
     """
@@ -130,15 +175,27 @@ def _assert_url_safe(url: str, field: str) -> None:
             ),
         )
 
-    if _allow_local_hosts():
-        return
-
     host = parsed.hostname
     if not host:
         raise HTTPException(
             status_code=400,
             detail=f"Manifest {field} URL is missing a host: {url!r}",
         )
+
+    # After the host check, not before it. The bypass used to return here and
+    # skipped both, so a URL with no host at all was accepted whenever it was
+    # set — which is on every managed worker, since that is the documented way
+    # to reach a server on a private address. Only the address rule is meant
+    # to be relaxed.
+    if _allow_local_hosts():
+        return
+
+    if _host_is_allowlisted(host):
+        # Named, therefore trusted. This is a statement about names the
+        # operator controls, not a general relaxation: the resolve-then-fetch
+        # race below stops mattering for these hosts, because whoever controls
+        # their resolution was already trusted by being listed.
+        return
 
     try:
         addrinfo = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
