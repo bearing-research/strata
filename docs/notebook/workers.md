@@ -409,6 +409,27 @@ transport = "direct"
 token_env = "STRATA_MODAL_WORKER_TOKEN"
 ```
 
+### Server-managed workers (service mode)
+
+A service-mode server keeps its own registry, managed through
+`/v1/admin/notebook-workers*` rather than any notebook's `[[workers]]`. Two
+things are worth knowing about where it lives:
+
+**It is persisted.** Changes made through the admin routes are written to
+`notebook_workers.json` in the server's artifact directory and survive a
+restart. Before, they lived only in memory and the next restart reverted them.
+
+**The file wins over `[tool.strata.transforms] notebook_workers`.** The
+configured table is the bootstrap; once anything has been changed through the
+admin routes, that file is the registry and editing the config table has no
+effect. Delete the file to go back to the configured table — an *empty*
+registry is a decision, not an absence, so removing every worker through the
+API does not fall back.
+
+`POST /v1/admin/notebook-workers/reload` re-reads the file, for a fleet
+manager writing it underneath a running server. A restart would work too, but
+it interrupts every cell currently executing.
+
 ## Authentication
 
 By default the worker accepts any caller that can reach its URL. For any worker deployed to a public endpoint, set a bearer token so only your notebook server can dispatch cells.

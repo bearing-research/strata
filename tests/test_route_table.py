@@ -42,6 +42,7 @@ EXPECTED_ROUTES = [
     ("/v1/admin/notebook-workers", "GET", 1),
     ("/v1/admin/notebook-workers", "POST", 1),
     ("/v1/admin/notebook-workers", "PUT", 1),
+    ("/v1/admin/notebook-workers/reload", "POST", 1),
     ("/v1/admin/notebook-workers/{worker_name}", "DELETE", 1),
     ("/v1/admin/notebook-workers/{worker_name}", "PATCH", 1),
     ("/v1/admin/notebook-workers/{worker_name}", "PUT", 1),
