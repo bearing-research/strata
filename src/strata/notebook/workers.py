@@ -5,8 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
+import os
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -14,6 +18,8 @@ import httpx
 
 from strata.notebook.models import NotebookState, WorkerBackendType, WorkerSpec
 from strata.notebook.remote_executor import NOTEBOOK_EXECUTOR_TRANSFORM_REF
+
+logger = logging.getLogger(__name__)
 
 _HEALTH_CACHE_TTL_SECONDS = 5.0
 _HEALTH_HISTORY_LIMIT = 6
@@ -114,11 +120,14 @@ def _load_worker_policy(notebook_state: NotebookState) -> WorkerPolicy:
         state = get_state()
         config = state.config
         service_mode = config.deployment_mode == "service"
+        # Through the same accessor the admin routes use, so the catalogue and
+        # what a cell dispatches to cannot disagree. Reading transforms_config
+        # here instead would agree only until a restart, after which the admin
+        # routes would show the persisted registry while dispatch used the
+        # configured table — a server saying one thing and doing another,
+        # which is worse than not persisting at all.
         server_workers = {
-            record.worker.name: record
-            for record in _parse_managed_worker_records(
-                config.transforms_config.get("notebook_workers", [])
-            )
+            record.worker.name: record for record in get_server_managed_worker_records()
         }
     except Exception:
         service_mode = False
@@ -154,8 +163,37 @@ def get_server_managed_workers() -> list[WorkerSpec]:
     return [record.worker for record in get_server_managed_worker_records()]
 
 
+def prune_worker_health_cache() -> int:
+    """Drop cached health for workers the registry no longer lists.
+
+    Entries are keyed by health URL, so a worker whose URL changed already
+    misses rather than inheriting a verdict about a machine that moved. What
+    lingers is the entry for a URL nobody asks about any more — harmless to
+    correctness and unbounded over a long-lived server whose catalogue turns
+    over. Returns how many were dropped.
+    """
+    live = {_health_url_for_worker(record.worker) for record in get_server_managed_worker_records()}
+    stale = [url for url in _worker_health_cache if url not in live]
+    for url in stale:
+        del _worker_health_cache[url]
+    return len(stale)
+
+
 def get_server_managed_worker_records() -> list[ManagedWorkerRecord]:
-    """Return the configured service-mode notebook worker registry."""
+    """Return the server-managed notebook worker registry.
+
+    The persisted file wins over the configured ``[tool.strata.transforms]``
+    table, because it is the later statement: an admin who added a machine
+    type through the API said so after whoever wrote the config. The
+    consequence is worth stating plainly — once anything has been changed
+    through the admin routes, editing the config table and restarting has no
+    effect. ``strata_notebook_workers_source`` on the state says which one is
+    in force.
+    """
+    persisted = load_persisted_managed_worker_records()
+    if persisted is not None:
+        return persisted
+
     try:
         from strata.server import get_state
 
@@ -225,6 +263,83 @@ def update_server_managed_worker_record(
     return replace_server_managed_worker_records(next_records)
 
 
+def managed_worker_registry_path() -> Path | None:
+    """Where the server-managed worker registry is persisted.
+
+    Beside the artifact store, because that is the directory a deployment
+    already treats as the server's own state and already backs up. ``None``
+    when no artifact directory is configured — there is nowhere durable to put
+    it, and inventing a location would hide the registry somewhere nobody
+    looks.
+    """
+    try:
+        from strata.server import get_state
+
+        artifact_dir = get_state().config.artifact_dir
+    except Exception:
+        return None
+    return Path(artifact_dir) / "notebook_workers.json" if artifact_dir else None
+
+
+def _persist_managed_worker_records(records: list[ManagedWorkerRecord]) -> None:
+    """Write the registry so an admin change survives a restart.
+
+    Every admin mutation funnels through ``replace_server_managed_worker_records``,
+    so this is the one place it has to happen. Before this, the routes edited an
+    in-memory dict and the next restart silently reverted every change.
+
+    Written to a sibling and renamed: this file is rewritten on each mutation,
+    and a half-written one at boot means a server that starts with no workers
+    at all and no obvious reason why.
+    """
+    path = managed_worker_registry_path()
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(_serialize_managed_worker_records(records), handle, indent=2)
+        os.replace(tmp_name, path)
+    except OSError as exc:
+        # The mutation already applied in memory and the caller is mid-request;
+        # failing it now would leave the server and its answer disagreeing.
+        # Loud in the log, because the change is live and will not survive.
+        logger.error(
+            "Could not persist the notebook worker registry to %s (%s). "
+            "The change is live but will be lost on restart.",
+            path,
+            exc,
+        )
+
+
+def load_persisted_managed_worker_records() -> list[ManagedWorkerRecord] | None:
+    """The registry as last persisted, or ``None`` if there is no file.
+
+    ``None`` and "an empty registry" are different answers: the first means
+    fall back to the configured table, the second means an operator deleted
+    every worker and that is what they meant.
+    """
+    path = managed_worker_registry_path()
+    if path is None or not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        # Deliberately not silent, and deliberately not fatal: a corrupt file
+        # must not stop a server from booting, but falling back to the config
+        # table without saying so would look like the admin changes were never
+        # made.
+        logger.error(
+            "Could not read the notebook worker registry at %s (%s); "
+            "falling back to the configured table.",
+            path,
+            exc,
+        )
+        return None
+    return _parse_managed_worker_records(raw)
+
+
 def replace_server_managed_worker_records(
     records: list[ManagedWorkerRecord],
 ) -> list[ManagedWorkerRecord]:
@@ -233,6 +348,7 @@ def replace_server_managed_worker_records(
 
     state = get_state()
     state.config.transforms_config["notebook_workers"] = _serialize_managed_worker_records(records)
+    _persist_managed_worker_records(records)
     return get_server_managed_worker_records()
 
 

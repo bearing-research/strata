@@ -218,6 +218,29 @@ async def refresh_admin_notebook_worker(worker_name: str):
     return await _serialize_admin_notebook_workers(force_refresh=True)
 
 
+@router.post(
+    "/v1/admin/notebook-workers/reload",
+    dependencies=[Depends(require_notebook_worker_admin)],
+)
+async def reload_admin_notebook_workers():
+    """Re-read the persisted registry from disk.
+
+    For the catalogue changing underneath a running server — a fleet manager
+    writing the file, or an operator editing it — without a restart, which
+    would interrupt every cell currently executing.
+
+    Health is refreshed at the same time, and cached entries for workers the
+    reloaded registry no longer lists are dropped — the cache is keyed by
+    health URL, so a worker that moved already misses, but the entry for a URL
+    nobody asks about again would otherwise accumulate for the life of the
+    process.
+    """
+    from strata.notebook.workers import prune_worker_health_cache
+
+    prune_worker_health_cache()
+    return await _serialize_admin_notebook_workers(force_refresh=True)
+
+
 @router.get("/v1/admin/tenants", dependencies=[require_scope("admin:tenants")])
 async def list_tenants():
     """List all tracked tenants with their metrics.
