@@ -28,11 +28,12 @@ from __future__ import annotations
 
 import json
 from html import escape
+from typing import Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from strata.api.badge import badge_for
 from strata.api.dependencies import (
@@ -53,8 +54,42 @@ from strata.services.artifact import ArtifactService
 router = APIRouter(tags=["publications"])
 
 
+# Schemes a reader can be expected to resolve. Anything else is better refused
+# than stored: a record that accepts arbitrary scheme names produces citation
+# lines nobody can follow, and the caller finds out from a reader rather than
+# from the API.
+EXTERNAL_ID_SCHEMES = ("doi", "zenodo", "arxiv", "url")
+
+
+class Author(BaseModel):
+    """Who wrote the work, as distinct from who made the grant."""
+
+    name: str = Field(..., min_length=1, max_length=256)
+    orcid: str | None = Field(default=None, max_length=64)
+    affiliation: str | None = Field(default=None, max_length=512)
+
+
+class ExternalId(BaseModel):
+    scheme: Literal["doi", "zenodo", "arxiv", "url"]
+    value: str = Field(..., min_length=1, max_length=512)
+
+
 class PublishRequest(BaseModel):
     title: str | None = None
+    authors: list[Author] | None = None
+    external_ids: list[ExternalId] | None = None
+
+
+class PublicationCreditsRequest(BaseModel):
+    """What a publication can be told after it exists.
+
+    Deliberately no ``artifact_id`` or ``version``: the binding is permanent,
+    and a request shape that cannot name them cannot be talked into changing
+    them. A field left ``None`` is untouched; an empty list clears it.
+    """
+
+    authors: list[Author] | None = None
+    external_ids: list[ExternalId] | None = None
 
 
 class PublicationResponse(BaseModel):
@@ -66,6 +101,8 @@ class PublicationResponse(BaseModel):
     published_at: float
     published_by: str | None = None
     revoked_at: float | None = None
+    authors: list[dict[str, str]] = []
+    external_ids: list[dict[str, str]] = []
 
 
 def _to_response(publication) -> PublicationResponse:
@@ -78,6 +115,8 @@ def _to_response(publication) -> PublicationResponse:
         published_at=publication.published_at,
         published_by=publication.published_by,
         revoked_at=publication.revoked_at,
+        authors=[dict(a) for a in publication.authors],
+        external_ids=[dict(e) for e in publication.external_ids],
     )
 
 
@@ -107,6 +146,12 @@ async def publish_artifact(
             tenant=tenant_filter,
             published_by=principal.id if principal is not None else None,
             title=request.title if request is not None else None,
+            authors=[a.model_dump(exclude_none=True) for a in (request.authors or [])]
+            if request is not None
+            else None,
+            external_ids=[e.model_dump() for e in (request.external_ids or [])]
+            if request is not None
+            else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -124,6 +169,47 @@ async def list_publications(
         _to_response(p)
         for p in store.list_publications(tenant=tenant_filter, include_revoked=include_revoked)
     ]
+
+
+@router.patch(
+    "/v1/publications/{token}",
+    response_model=PublicationResponse,
+    dependencies=[require_scope("artifacts:publish")],
+)
+async def update_publication_credits(
+    token: str,
+    request: PublicationCreditsRequest,
+    store: ReadStore,
+    tenant_filter: CurrentTenant,
+):
+    """Record who wrote a publication and what identifies it.
+
+    Separate from publishing because a DOI is registered against a deposit
+    that already has to be reachable, so the identifier almost always arrives
+    after the token does.
+
+    It cannot repoint the token. ``artifact_id`` and ``version`` are not fields
+    of the request and not columns this write names — a citation whose target
+    could change under the reader would be worthless, and the request shape is
+    where that is easiest to guarantee.
+    """
+    publication = store.update_publication_credits(
+        token,
+        tenant=tenant_filter,
+        authors=(
+            [a.model_dump(exclude_none=True) for a in request.authors]
+            if request.authors is not None
+            else None
+        ),
+        external_ids=(
+            [e.model_dump() for e in request.external_ids]
+            if request.external_ids is not None
+            else None
+        ),
+    )
+    if publication is None:
+        raise HTTPException(status_code=404, detail="No publication with that token")
+    return _to_response(publication)
 
 
 @router.delete(

@@ -35,7 +35,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from strata.sql_backend import SqlDialect, SqliteDialect, StoreConnection
 
@@ -140,6 +140,16 @@ class Publication:
             about whether they were honestly produced, and the page says so.
         revoked_at: When the grant was withdrawn, else ``None``. The row
             survives revocation so the token is never reissued.
+        authors: Ordered ``{"name", "orcid", "affiliation"}`` entries. Beside
+            ``published_by`` rather than replacing it: who *made* the grant and
+            who *wrote the work* are different questions, and the second one
+            has an order, an affiliation and an identifier the first never did.
+            Empty leaves ``published_by`` as the byline, so nothing already
+            published changes meaning.
+        external_ids: ``{"scheme", "value"}`` entries — ``doi``, ``zenodo``,
+            ``arxiv``, ``url``. Usually set after the token exists, because a
+            DOI is registered against a deposit that already has to be
+            reachable.
     """
 
     token: str
@@ -151,6 +161,8 @@ class Publication:
     published_by: str | None = None
     content_sha256: str | None = None
     revoked_at: float | None = None
+    authors: tuple[dict[str, str], ...] = ()
+    external_ids: tuple[dict[str, str], ...] = ()
 
     @property
     def is_active(self) -> bool:
@@ -381,8 +393,64 @@ def _add_content_sha256(conn: StoreConnection, dialect: SqlDialect) -> None:
         conn.execute("ALTER TABLE artifact_versions ADD COLUMN content_sha256 TEXT")
 
 
+def _json_entries(raw: str | None) -> tuple[dict[str, str], ...]:
+    """A stored JSON list back into entries, or empty for anything else.
+
+    Rows predating the columns hold NULL, and a store this one wrote is
+    trusted for shape — but a column that has been through a migration and an
+    older writer is worth reading defensively once, here, rather than at every
+    place the page and the crate consume it.
+    """
+    if not raw:
+        return ()
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return ()
+    if not isinstance(parsed, list):
+        return ()
+    return tuple(
+        {str(k): str(v) for k, v in entry.items()} for entry in parsed if isinstance(entry, dict)
+    )
+
+
+def _clean_entries(
+    entries: list[dict[str, str]] | None, fields: tuple[str, ...]
+) -> tuple[dict[str, str], ...]:
+    """Keep the known fields of each entry, in order, dropping empty values.
+
+    An author with only a name is the common case, so a missing ORCID must not
+    become the string ``"None"`` on the page.
+    """
+    cleaned: list[dict[str, str]] = []
+    for entry in entries or []:
+        kept = {field: str(entry[field]).strip() for field in fields if entry.get(field)}
+        if kept:
+            cleaned.append(kept)
+    return tuple(cleaned)
+
+
+def _json_or_none(entries: tuple[dict[str, str], ...]) -> str | None:
+    """Store nothing rather than ``[]`` — an empty list and never-set are the
+    same fact, and one of them reads as a deliberate erasure."""
+    return json.dumps([dict(entry) for entry in entries]) if entries else None
+
+
+def _add_publication_credits(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Give a publication somewhere to record who wrote it and what names it.
+
+    Both nullable, and nothing is backfilled: ``published_by`` stays the byline
+    for every publication made before this, which is what keeps a link printed
+    in a paper saying the same thing it said yesterday.
+    """
+    for column in ("authors", "external_ids"):
+        if not dialect.column_exists(conn, "artifact_publications", column):
+            conn.execute(f"ALTER TABLE artifact_publications ADD COLUMN {column} TEXT")
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
+    _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
@@ -524,7 +592,9 @@ CREATE TABLE IF NOT EXISTS artifact_publications (
     published_at REAL NOT NULL,
     published_by TEXT,
     content_sha256 TEXT,
-    revoked_at REAL
+    revoked_at REAL,
+    authors TEXT,        -- JSON list of {name, orcid, affiliation} (migration 2)
+    external_ids TEXT    -- JSON list of {scheme, value} (migration 2)
 );
 CREATE INDEX IF NOT EXISTS idx_publications_artifact
 ON artifact_publications(artifact_id, version);
@@ -2363,6 +2433,8 @@ class ArtifactStore:
             published_by=row["published_by"],
             content_sha256=row["content_sha256"],
             revoked_at=row["revoked_at"],
+            authors=_json_entries(row["authors"]),
+            external_ids=_json_entries(row["external_ids"]),
         )
 
     def content_digest(self, artifact_id: str, version: int) -> str | None:
@@ -2421,6 +2493,8 @@ class ArtifactStore:
         tenant: str | None = None,
         published_by: str | None = None,
         title: str | None = None,
+        authors: list[dict[str, str]] | None = None,
+        external_ids: list[dict[str, str]] | None = None,
     ) -> Publication:
         """Grant unauthenticated read access to one artifact version.
 
@@ -2476,12 +2550,14 @@ class ArtifactStore:
                 title=title,
                 published_at=time.time(),
                 published_by=published_by,
+                authors=_clean_entries(authors, ("name", "orcid", "affiliation")),
+                external_ids=_clean_entries(external_ids, ("scheme", "value")),
             )
             conn.execute(
                 "INSERT INTO artifact_publications "
                 "(token, artifact_id, version, tenant, title, published_at, "
-                "published_by, content_sha256) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "published_by, content_sha256, authors, external_ids) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     publication.token,
                     publication.artifact_id,
@@ -2491,6 +2567,8 @@ class ArtifactStore:
                     publication.published_at,
                     publication.published_by,
                     publication.content_sha256,
+                    _json_or_none(publication.authors),
+                    _json_or_none(publication.external_ids),
                 ),
             )
             conn.commit()
@@ -2509,6 +2587,56 @@ class ArtifactStore:
         try:
             row = conn.execute(
                 "SELECT * FROM artifact_publications WHERE token = ?", (token,)
+            ).fetchone()
+            return self._publication_from_row(row) if row is not None else None
+        finally:
+            conn.close()
+
+    def update_publication_credits(
+        self,
+        token: str,
+        *,
+        tenant: str | None = None,
+        authors: list[dict[str, str]] | None = None,
+        external_ids: list[dict[str, str]] | None = None,
+    ) -> Publication | None:
+        """Set who wrote a publication and what identifies it, after the fact.
+
+        A DOI is registered against a deposit that already has to be
+        reachable, so the identifier almost always arrives after the token
+        does. What this cannot touch is the binding: ``artifact_id`` and
+        ``version`` are not parameters here, and no SQL below names them — a
+        citation whose target could be repointed would be worthless, and that
+        has to stay true of every write path and not only the obvious one.
+
+        ``None`` for either argument leaves that column alone; an empty list
+        clears it. Returns the updated publication, or ``None`` if the token is
+        unknown in this tenant.
+        """
+        effective_tenant = tenant if tenant is not None else ""
+        assignments: list[str] = []
+        params: list[Any] = []
+        if authors is not None:
+            assignments.append("authors = ?")
+            params.append(_json_or_none(_clean_entries(authors, ("name", "orcid", "affiliation"))))
+        if external_ids is not None:
+            assignments.append("external_ids = ?")
+            params.append(_json_or_none(_clean_entries(external_ids, ("scheme", "value"))))
+
+        conn = self._get_connection()
+        try:
+            if assignments:
+                cursor = conn.execute(
+                    f"UPDATE artifact_publications SET {', '.join(assignments)} "
+                    "WHERE token = ? AND tenant = ?",
+                    (*params, token, effective_tenant),
+                )
+                conn.commit()
+                if cursor.rowcount == 0:
+                    return None
+            row = conn.execute(
+                "SELECT * FROM artifact_publications WHERE token = ? AND tenant = ?",
+                (token, effective_tenant),
             ).fetchone()
             return self._publication_from_row(row) if row is not None else None
         finally:

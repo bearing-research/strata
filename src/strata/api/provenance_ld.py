@@ -130,11 +130,13 @@ def build_crate(
                     "environment recorded when it was produced."
                 ),
                 "datePublished": _iso(publication.published_at),
-                "author": (
-                    {"@id": _agent_id(publication.published_by)}
-                    if publication.published_by
-                    else None
-                ),
+                # A DOI is what a repository indexes on, so it goes on the root
+                # as the resolvable URL rather than the bare identifier string.
+                "identifier": _identifier_of(publication),
+                # Declared authors, in the order given, because author order
+                # carries meaning. Falling back to ``published_by`` keeps every
+                # publication made before authors existed saying what it said.
+                "author": _authors_of(publication),
                 "hasPart": [{"@id": payload_id}],
                 "mainEntity": {"@id": payload_id},
                 "mentions": [{"@id": _action_id(node)} for node in steps],
@@ -231,7 +233,27 @@ def build_crate(
             )
         )
 
-    if publication.published_by:
+    for author in publication.authors:
+        # An ORCID is a persistent identifier for a person, which is exactly
+        # what an ``@id`` is for — with one, two crates naming the same
+        # researcher say so; without, the name is all there is to go on.
+        node_id = (
+            f"https://orcid.org/{author['orcid']}"
+            if author.get("orcid")
+            else _agent_id(author["name"])
+        )
+        agents.setdefault(
+            node_id,
+            _prune(
+                {
+                    "@id": node_id,
+                    "@type": "Person",
+                    "name": author["name"],
+                    "affiliation": author.get("affiliation"),
+                }
+            ),
+        )
+    if publication.published_by and not publication.authors:
         agents.setdefault(
             publication.published_by,
             {
@@ -243,6 +265,44 @@ def build_crate(
     graph.extend(agents.values())
 
     return {"@context": _CONTEXT, "@graph": graph}
+
+
+def _identifier_of(publication) -> str | None:
+    """The publication's resolvable identifier, preferring a DOI.
+
+    ``None`` when it has none, which ``_prune`` then drops — an empty
+    ``identifier`` on the root would read as "this has no persistent id and we
+    checked", which is a different claim from not making one.
+    """
+    by_scheme = {entry["scheme"]: entry["value"] for entry in publication.external_ids}
+    for scheme, template in (
+        ("doi", "https://doi.org/{}"),
+        ("arxiv", "https://arxiv.org/abs/{}"),
+        ("zenodo", "https://zenodo.org/record/{}"),
+        ("url", "{}"),
+    ):
+        value = by_scheme.get(scheme)
+        if value:
+            return value if value.startswith("http") else template.format(value)
+    return None
+
+
+def _authors_of(publication):
+    """Root-dataset authors: the declared ones, else whoever made the grant."""
+    if publication.authors:
+        return [
+            {
+                "@id": (
+                    f"https://orcid.org/{author['orcid']}"
+                    if author.get("orcid")
+                    else _agent_id(author["name"])
+                )
+            }
+            for author in publication.authors
+        ]
+    if publication.published_by:
+        return {"@id": _agent_id(publication.published_by)}
+    return None
 
 
 def _inputs_for(node, lineage, artifact, payload_id: str) -> list[str]:
