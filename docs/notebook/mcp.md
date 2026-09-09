@@ -78,6 +78,18 @@ The typical loop:
 | `remove_worker(session_id, name)` | Remove a notebook-scoped worker. |
 | `connect_ssh_worker(session_id, ssh_target, name?, set_default?, install?)` | Provision + tunnel + register a worker on a machine you reach over SSH (see [Distributed Workers](workers.md#run-cells-on-a-machine-you-can-ssh-to)). |
 | `disconnect_ssh_worker(session_id, name, stop_remote?)` | Close an SSH worker's tunnel and unregister it. |
+| `lineage(session_id, cell_id, variable, max_depth?)` | The chain behind one of a cell's outputs: every step with the code it ran, the environment it ran in, who computed it and the digest of its bytes. |
+| `promote(session_id, cell_id, variable, name, alias?, tags?)` | Copy the output **and everything behind it** into the team's store, under a name colleagues can ask for. Mints no public link. A protected alias comes back `pending`. Needs `STRATA_NOTEBOOK_REMOTE_STORE_URL`. |
+| `publish_preflight(session_id, cell_id, variable)` | What publishing would expose - the whole chain, step by step. Read this to the user before `publish`. |
+| `publish(session_id, cell_id, variable, title?)` | Mint a URL that needs no credentials. Copies the chain into the store the link resolves from first. |
+
+`promote` and `publish` are different acts. Promoting puts a result where
+colleagues' cells already read from, inside a store that still needs
+credentials; publishing mints a link that needs none and exposes every upstream
+step's code and environment along with the result. `publish_preflight` returns
+that exposure list, and an agent should put it in front of the user and get
+their agreement before calling `publish`. Withdrawing is
+`strata artifact unpublish <token>`.
 
 `run_cell` modes match the UI and CLI: `normal` uses the cache and re-runs stale
 upstreams first; `rerun` bypasses the target's cache but still refreshes

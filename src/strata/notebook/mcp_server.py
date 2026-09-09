@@ -433,6 +433,184 @@ async def _disconnect_ssh_worker(
     return {"torn_down": existed, **_list_workers(session_manager, session_id)}
 
 
+def _cell_output(session_manager: SessionManager, session_id: str, cell_id: str, variable: str):
+    """The artifact a cell stored for one of its variables.
+
+    Only variables a downstream cell reads become artifacts, so "there is no
+    such output" and "nothing downstream uses it" are the same situation from
+    here; the error says both, because the second is the one an agent can act
+    on.
+    """
+    session = _live_session(session_manager, session_id)
+    manager = session.get_artifact_manager()
+    for name, artifact in manager.list_cell_artifacts(cell_id):
+        if name == variable:
+            return manager.artifact_store, artifact
+    stored = sorted(name for name, _ in manager.list_cell_artifacts(cell_id))
+    raise ValueError(
+        f"Cell {cell_id} has no stored output named {variable!r}. "
+        f"Stored: {', '.join(stored) or 'none'} — only variables a downstream "
+        f"cell reads are kept as artifacts."
+    )
+
+
+def _chain(store, artifact, max_depth: int = 10) -> list[dict[str, Any]]:
+    """Every step behind an artifact, newest first, as the page would show it."""
+    from strata.services.artifact import ArtifactService
+
+    lineage = ArtifactService().build_lineage(
+        store,
+        artifact=artifact,
+        artifact_id=artifact.id,
+        version=artifact.version,
+        tenant_filter=None,
+        max_depth=max_depth,
+    )
+    return [
+        {
+            "uri": node.uri,
+            "type": node.type,
+            "artifact_id": node.artifact_id,
+            "version": node.version,
+            "transform": node.transform_ref,
+            "source": node.source,
+            "build_env": node.build_env,
+            "principal": node.principal,
+            "content_sha256": node.content_sha256,
+        }
+        for node in lineage.nodes
+    ]
+
+
+def _lineage(
+    session_manager: SessionManager,
+    session_id: str,
+    cell_id: str,
+    variable: str,
+    max_depth: int = 10,
+) -> dict[str, Any]:
+    """The chain behind one of a cell's outputs."""
+    store, artifact = _cell_output(session_manager, session_id, cell_id, variable)
+    return {
+        "artifact_id": artifact.id,
+        "version": artifact.version,
+        "provenance_hash": artifact.provenance_hash,
+        "content_sha256": artifact.content_sha256,
+        "steps": _chain(store, artifact, max_depth),
+    }
+
+
+def _promote(
+    session_manager: SessionManager,
+    session_id: str,
+    cell_id: str,
+    variable: str,
+    name: str,
+    alias: str | None = None,
+    tags: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Copy a cell's output and its chain to the team store, and name it there."""
+    from strata.artifact_transfer import RemoteStore, promote_artifact
+
+    config = _server_config()
+    base_url = getattr(config, "notebook_remote_store_url", None)
+    if not base_url:
+        raise ValueError(
+            "No team store is configured, so there is nowhere to promote to. "
+            "Set notebook_remote_store_url on the server."
+        )
+
+    store, artifact = _cell_output(session_manager, session_id, cell_id, variable)
+    target = RemoteStore(
+        str(base_url), dict(getattr(config, "notebook_remote_store_headers", {}) or {})
+    )
+    promotion = promote_artifact(
+        store, target, artifact, name=name, alias=alias, tags=dict(tags or {})
+    )
+    return {
+        "status": "pending" if promotion.alias_pending else "applied",
+        "name": promotion.name,
+        "artifact_uri": f"strata://artifact/{promotion.ref}",
+        "copied": promotion.copied,
+        "alias": promotion.alias,
+        "store": str(base_url),
+    }
+
+
+def _publish_preflight(
+    session_manager: SessionManager, session_id: str, cell_id: str, variable: str
+) -> dict[str, Any]:
+    """What publishing this output would put behind a link anyone can open.
+
+    The whole chain travels, which is the point of a publication and is the
+    part worth reading before minting one: every upstream step's code and
+    environment become readable by anyone with the URL.
+    """
+    store, artifact = _cell_output(session_manager, session_id, cell_id, variable)
+    steps = _chain(store, artifact)
+    return {
+        "artifact_id": artifact.id,
+        "version": artifact.version,
+        "exposes": steps,
+        "step_count": len(steps),
+        "reads_source_of": [s["artifact_id"] for s in steps if s.get("source")],
+        "note": (
+            "Publishing mints a URL that needs no credentials. Every step "
+            "listed here becomes readable through it, including the code each "
+            "one ran."
+        ),
+    }
+
+
+def _publish(
+    session_manager: SessionManager,
+    session_id: str,
+    cell_id: str,
+    variable: str,
+    title: str | None = None,
+) -> dict[str, Any]:
+    """Mint the public link, after copying the chain to the store that serves it."""
+    from strata.artifact_transfer import copy_chain
+
+    store, artifact = _cell_output(session_manager, session_id, cell_id, variable)
+    served = _served_store()
+    published_id, published_version = artifact.id, artifact.version
+    copied = 0
+    if served is not None and served.db_path != store.db_path:
+        # A notebook writes to its own .strata/artifacts; the link resolves
+        # from whatever store the server serves. Publishing without the copy
+        # mints a token into a store the page route never reads.
+        copied, landed = copy_chain(store, served, artifact, 10)
+        published_id, _, landed_version = landed.partition("@v=")
+        published_version = int(landed_version)
+    else:
+        served = store
+
+    publication = served.publish_artifact(published_id, published_version, title=title)
+    return {
+        "token": publication.token,
+        "artifact_uri": f"strata://artifact/{published_id}@v={published_version}",
+        "title": publication.title,
+        "content_sha256": publication.content_sha256,
+        "copied": copied,
+    }
+
+
+def _server_config():
+    """The running server's config."""
+    from strata.server import get_state
+
+    return get_state().config
+
+
+def _served_store():
+    """The store a published link resolves from, or ``None`` if none is set."""
+    from strata.artifact_store import ArtifactStore
+
+    artifact_dir = getattr(_server_config(), "artifact_dir", None)
+    return ArtifactStore(artifact_dir) if artifact_dir else None
+
+
 def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
     """Build the streamable-HTTP MCP ASGI app, or ``None`` if ``[mcp]`` is absent.
 
@@ -705,5 +883,64 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         default it's left running so a later reconnect is fast.
         """
         return await _disconnect_ssh_worker(session_manager, session_id, name, stop_remote)
+
+    @mcp.tool()
+    def lineage(
+        session_id: str, cell_id: str, variable: str, max_depth: int = 10
+    ) -> dict[str, Any]:
+        """Read the chain behind one of a cell's outputs.
+
+        Every step that produced it, newest first, each with the code it ran,
+        the environment it ran in, who computed it and the digest of its bytes.
+        ``variable`` is the name the cell assigned; only variables a downstream
+        cell reads are stored, and the error lists what is.
+        """
+        return _lineage(session_manager, session_id, cell_id, variable, max_depth)
+
+    @mcp.tool()
+    def promote(
+        session_id: str,
+        cell_id: str,
+        variable: str,
+        name: str,
+        alias: str | None = None,
+        tags: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Share a cell's output with the team, under a name they can ask for.
+
+        Copies the artifact and everything behind it into the team's store.
+        The chain travels because that store's cache is keyed by provenance, so
+        each ancestor that arrives saves the next person the same computation.
+        This mints no public link — use ``publish`` for that.
+
+        ``alias`` (e.g. champion) is moved to this version; a protected alias
+        comes back as ``pending`` for someone else to approve. Needs a team
+        store configured on the server.
+        """
+        return _promote(session_manager, session_id, cell_id, variable, name, alias, tags)
+
+    @mcp.tool()
+    def publish_preflight(session_id: str, cell_id: str, variable: str) -> dict[str, Any]:
+        """See what publishing an output would expose, before publishing it.
+
+        Publishing mints a URL that needs no credentials, and the whole chain
+        goes with it: every upstream step's code and environment become
+        readable by anyone with the link. Show this list to the user and get
+        their agreement before calling ``publish``.
+        """
+        return _publish_preflight(session_manager, session_id, cell_id, variable)
+
+    @mcp.tool()
+    def publish(
+        session_id: str, cell_id: str, variable: str, title: str | None = None
+    ) -> dict[str, Any]:
+        """Mint a public link to a cell's output. Ask the user first.
+
+        This is not undoable by you: the URL needs no credentials and exposes
+        the whole chain behind the artifact. Call ``publish_preflight`` and put
+        what it returns in front of the user before calling this. Withdrawing
+        is ``strata artifact unpublish <token>``.
+        """
+        return _publish(session_manager, session_id, cell_id, variable, title)
 
     return mcp.streamable_http_app()

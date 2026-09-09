@@ -489,3 +489,173 @@ def test_build_mcp_app_returns_mountable_app(sm_with_session):
     # Mountable ASGI app with a lifespan the host can enter.
     assert hasattr(mcp_app, "router")
     assert hasattr(mcp_app.router, "lifespan_context")
+
+
+# ---------------------------------------------------------------------------
+# Registry / publication tools (item 32)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sm_with_a_stored_output(sm_with_session):
+    """The session above, with cell ``a``'s ``x`` actually stored.
+
+    The tools resolve a variable to the artifact behind it, so a session whose
+    cells have never run has nothing for them to find.
+    """
+    sm, session_id, nb_dir = sm_with_session
+    manager = sm._sessions[session_id].get_artifact_manager()
+    manager.store_cell_output(
+        cell_id="a",
+        variable_name="x",
+        blob_data=b"1",
+        content_type="json/object",
+        provenance_hash="a1" * 32,
+        input_versions={},
+        source="x = 1",
+    )
+    return sm, session_id, nb_dir
+
+
+class TestResolvingAnOutput:
+    def test_an_unknown_variable_says_what_is_stored(self, sm_with_a_stored_output):
+        """Only variables a downstream cell reads become artifacts, so the
+        useful error names the ones that did rather than just saying no."""
+        from strata.notebook.mcp_server import _cell_output
+
+        sm, session_id, _ = sm_with_a_stored_output
+
+        with pytest.raises(ValueError, match="Stored: x"):
+            _cell_output(sm, session_id, "a", "not_a_variable")
+
+
+class TestLineage:
+    def test_it_reports_the_chain_with_the_code_each_step_ran(self, sm_with_a_stored_output):
+        from strata.notebook.mcp_server import _lineage
+
+        sm, session_id, _ = sm_with_a_stored_output
+
+        result = _lineage(sm, session_id, "a", "x")
+
+        assert result["provenance_hash"] == "a1" * 32
+        assert result["content_sha256"]
+        assert [s["source"] for s in result["steps"]] == ["x = 1"]
+
+
+class TestPromote:
+    def test_without_a_team_store_it_says_which_setting_is_missing(
+        self, sm_with_a_stored_output, monkeypatch
+    ):
+        """An agent can act on "set this", and cannot act on a traceback."""
+        from types import SimpleNamespace
+
+        import strata.server as server_module
+        from strata.notebook.mcp_server import _promote
+
+        sm, session_id, _ = sm_with_a_stored_output
+        monkeypatch.setattr(
+            server_module,
+            "_state",
+            SimpleNamespace(config=SimpleNamespace(notebook_remote_store_url=None)),
+        )
+
+        with pytest.raises(ValueError, match="notebook_remote_store_url"):
+            _promote(sm, session_id, "a", "x", "team/x")
+
+
+class TestPublishPreflight:
+    def test_it_lists_what_the_link_would_expose(self, sm_with_a_stored_output):
+        """The chain travels with a publication, which is the point of one and
+        the part worth reading before minting it."""
+        from strata.notebook.mcp_server import _publish_preflight
+
+        sm, session_id, _ = sm_with_a_stored_output
+
+        result = _publish_preflight(sm, session_id, "a", "x")
+
+        assert result["step_count"] == 1
+        assert result["reads_source_of"] == [result["artifact_id"]]
+        assert "no credentials" in result["note"]
+
+    def test_it_mints_nothing(self, sm_with_a_stored_output):
+        """A preflight that published would be the opposite of a preflight."""
+        from strata.notebook.mcp_server import _publish_preflight
+
+        sm, session_id, _ = sm_with_a_stored_output
+        manager = sm._sessions[session_id].get_artifact_manager()
+
+        _publish_preflight(sm, session_id, "a", "x")
+
+        assert manager.artifact_store.list_publications() == []
+
+
+class TestPromoteReaches:
+    """Driven against a real store on the other end."""
+
+    @pytest.fixture
+    def team(self, tmp_path):
+        from tests.conftest import run_server_with_context
+
+        team_dir = tmp_path / "team"
+        with run_server_with_context(tmp_path / "cache", team_dir, "personal") as ctx:
+            yield ctx.base_url, team_dir
+
+    def test_the_artifact_arrives_under_its_name(self, sm_with_a_stored_output, team, monkeypatch):
+        from types import SimpleNamespace
+
+        import httpx
+
+        import strata.notebook.mcp_server as mcp_module
+        from strata.artifact_store import ArtifactStore
+        from strata.notebook.mcp_server import _promote
+
+        sm, session_id, _ = sm_with_a_stored_output
+        base_url, team_dir = team
+        # The team store here is a real server in this process, so its own
+        # ``_state`` has to stay intact — patch what this module reads, not
+        # the state the server is running on.
+        monkeypatch.setattr(
+            mcp_module,
+            "_server_config",
+            lambda: SimpleNamespace(
+                notebook_remote_store_url=base_url,
+                notebook_remote_store_headers={},
+            ),
+        )
+
+        result = _promote(sm, session_id, "a", "x", "team/x", tags={"stage": "candidate"})
+
+        assert result["status"] == "applied"
+        assert httpx.get(f"{base_url}/v1/names/team/x", timeout=10).status_code == 200
+        landed = result["artifact_uri"].removeprefix("strata://artifact/")
+        artifact_id, _, version = landed.partition("@v=")
+        assert ArtifactStore(team_dir).get_tags(artifact_id, int(version))["stage"] == "candidate"
+
+
+class TestPublish:
+    def test_it_copies_the_chain_into_the_store_the_link_resolves_from(
+        self, sm_with_a_stored_output, tmp_path, monkeypatch
+    ):
+        """A notebook writes to its own .strata/artifacts; the server serves
+        whatever artifact_dir it was configured with. Minting into the
+        notebook's store gives a link the page route never reads."""
+        from types import SimpleNamespace
+
+        import strata.server as server_module
+        from strata.artifact_store import ArtifactStore
+        from strata.notebook.mcp_server import _publish
+
+        sm, session_id, _ = sm_with_a_stored_output
+        served_dir = tmp_path / "served"
+        monkeypatch.setattr(
+            server_module,
+            "_state",
+            SimpleNamespace(config=SimpleNamespace(artifact_dir=served_dir)),
+        )
+
+        result = _publish(sm, session_id, "a", "x", title="Figure 1")
+
+        served = ArtifactStore(served_dir)
+        assert result["token"]
+        assert result["copied"] == 1
+        assert [p.token for p in served.list_publications()] == [result["token"]]
