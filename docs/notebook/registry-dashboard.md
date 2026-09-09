@@ -5,14 +5,19 @@ right inside the notebook - so promotion doesn't have to be code. It surfaces
 the same names / aliases / tags / audit / lineage that the
 [SDK and CLI](../core/registry.md) drive, backed by the identical audited routes.
 
-!!! note "Dashboard UI is personal-mode only"
-    The dashboard **shows up automatically in personal mode** (the default
-    `python -m strata`) and **hides itself in service mode**. If you don't see it,
-    check your deployment mode. The registry itself is *not* personal-only - in
-    service mode the same names/aliases/tags resolve via SDK and REST (tenant-
-    scoped reads), and publishing them works with `service_writes_enabled` + the
-    `artifacts:write` scope (see
-    [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store)).
+!!! note "It describes the store your cells write to"
+    The dashboard is available in both deployment modes. With
+    `STRATA_NOTEBOOK_REMOTE_STORE_URL` set it describes **that** store rather
+    than the local one - which is the point: a cell's `strata.put(name=...)`
+    and every promotion land there, so reading the local store would show an
+    empty registry on exactly the deployment where the registry matters.
+    Approvals go to the same place, so a protected alias filed from one
+    person's server can be approved from another's.
+
+    The forwarding happens on the server, not in the page, because the
+    credentials do: `notebook_remote_store_headers` is the trusted-proxy
+    identity the server holds. See
+    [Service Mode → shared research store](../deployment/service-mode.md#authenticated-write-back-the-shared-research-store).
 
 This page is a step-by-step walkthrough. For the concepts (what a name, alias,
 tag, or approval gate *is*), see [Artifacts & Model Registry](../core/registry.md).
@@ -155,7 +160,8 @@ root.](../assets/registry-lineage-dark.png#only-dark)
 
 | Symptom | Why |
 | --- | --- |
-| **No Registry tab / no strip at all** | You're in **service mode**. The dashboard is personal-mode only today. |
+| **The registry looks empty on a machine that has published things** | Check `STRATA_NOTEBOOK_REMOTE_STORE_URL`. The dashboard describes the store the cells write to, so an unset URL on a server whose cells publish elsewhere - or a set one pointing at a store nobody publishes to - shows an empty registry rather than an error. |
+| **The tab reports a 502** | The team store could not be reached. That is deliberately not an empty registry: "nobody has published anything" and "I could not ask" are different facts. |
 | **Registry tab is empty** | Nothing's been published with a name yet. Run a cell with `strata.put(inputs=[], transform=…, data=…, name="…")`. |
 | **A cell ran but no per-cell strip** | The strip only shows artifacts a cell published via the ambient `strata` client (a *named* `put` / `materialize`). Artifacts created another way still appear in the **names table**, just not as a per-cell strip. |
 | **Promote said "pending" unexpectedly** | That alias is in `STRATA_REGISTRY_PROTECTED_ALIASES` - approve it from the pending banner. |

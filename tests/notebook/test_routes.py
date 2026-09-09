@@ -2508,30 +2508,25 @@ def test_python_version_update_rejects_malformed_version(client, monkeypatch, tm
 
 
 class TestRuntimeConfigRegistryFlag:
-    """``registry_enabled`` gates the registry UI: true in personal mode
-    (where the registry routes are reachable), false in service mode."""
+    """``registry_enabled`` says whether there is a registry to show.
 
-    def test_registry_enabled_in_personal_mode(self, monkeypatch):
+    It used to mean "personal mode", because the registry routes went through
+    the bare store gate and 403'd anywhere else. They read through the
+    tenant-scoped read gate now, so a service-mode server has a registry — and
+    hiding the tab there hid the deployment the feature is for.
+    """
+
+    @pytest.mark.parametrize("mode", ["personal", "service"])
+    def test_the_registry_is_offered_in_both_modes(self, mode, monkeypatch):
         from strata.notebook.routes import _serialize_notebook_runtime_config
 
         monkeypatch.setattr(
             "strata.server._state",
-            SimpleNamespace(config=SimpleNamespace(deployment_mode="personal")),
+            SimpleNamespace(config=SimpleNamespace(deployment_mode=mode)),
         )
         cfg = _serialize_notebook_runtime_config()
-        assert cfg["deployment_mode"] == "personal"
+        assert cfg["deployment_mode"] == mode
         assert cfg["registry_enabled"] is True
-
-    def test_registry_disabled_in_service_mode(self, monkeypatch):
-        from strata.notebook.routes import _serialize_notebook_runtime_config
-
-        monkeypatch.setattr(
-            "strata.server._state",
-            SimpleNamespace(config=SimpleNamespace(deployment_mode="service")),
-        )
-        cfg = _serialize_notebook_runtime_config()
-        assert cfg["deployment_mode"] == "service"
-        assert cfg["registry_enabled"] is False
 
 
 # ---------------------------------------------------------------------------

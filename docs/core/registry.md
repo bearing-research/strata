@@ -140,8 +140,10 @@ strata artifact verify    # store-wide blob/metadata consistency check
 ## In the notebook (the registry dashboard)
 
 Everything above also has a UI - the registry is a first-class surface in the
-notebook, so promotion and approvals don't have to be code. Registry routes are
-**personal-mode only** today, so the dashboard hides itself in service mode.
+notebook, so promotion and approvals don't have to be code. The dashboard shows
+in both deployment modes, and describes whichever store the cells write to: with
+`STRATA_NOTEBOOK_REMOTE_STORE_URL` set, that is the team's store rather than the
+local one.
 
 !!! tip "New to it? Start with the walkthrough"
     For a click-by-click guide - publish from a cell → promote → approve →
