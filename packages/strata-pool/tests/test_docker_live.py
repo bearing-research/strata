@@ -19,6 +19,8 @@ from strata_pool import DockerBackend, JobState, MachineType, Pool, PoolStore
 from strata_pool.backends.docker import DEFAULT_SOCKET
 
 IMAGE = "python:3.12-slim"
+_PULL_ATTEMPTS = 3
+_PULL_RETRY_SECONDS = 5.0
 
 # A worker: 200 on any GET (the health check), and POST /execute echoes its
 # body back so the test can prove the payload made the round trip. It enforces
@@ -98,6 +100,25 @@ def _daemon_client() -> httpx.AsyncClient:
     )
 
 
+async def _pull_image(daemon: httpx.AsyncClient) -> None:
+    """Pull the worker image, tolerating a bad minute at the registry.
+
+    The pull is unauthenticated Docker Hub, which answers 5xx often enough
+    that a single blip would otherwise fail the build. Retrying only widens
+    the window; a registry that is genuinely down still fails the assert, so
+    this does not turn a broken environment into a green run.
+    """
+    for attempt in range(_PULL_ATTEMPTS):
+        pull = await daemon.post(
+            "/images/create", params={"fromImage": "python", "tag": "3.12-slim"}
+        )
+        if pull.status_code == 200:
+            return
+        if attempt + 1 < _PULL_ATTEMPTS:
+            await asyncio.sleep(_PULL_RETRY_SECONDS * (attempt + 1))
+    assert pull.status_code == 200, pull.text[:300]
+
+
 @pytest.fixture
 async def docker_pool(tmp_path):
     """A pool wired to a real daemon, with every container it started removed.
@@ -108,10 +129,7 @@ async def docker_pool(tmp_path):
     """
     async with _daemon_client() as daemon:
         # /containers/create does not pull, and the pool does not either yet.
-        pull = await daemon.post(
-            "/images/create", params={"fromImage": "python", "tag": "3.12-slim"}
-        )
-        assert pull.status_code == 200, pull.text[:300]
+        await _pull_image(daemon)
 
         backend = DockerBackend(
             socket_path=_socket(),

@@ -185,15 +185,26 @@ def find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def wait_for_server(port: int, timeout: float = 20.0) -> bool:
+def wait_for_server(
+    port: int, timeout: float = 60.0, thread: threading.Thread | None = None
+) -> bool:
     """Wait for server to be ready by polling /health endpoint.
+
+    The timeout is a hang guard, not a statement about how fast startup ought
+    to be, so it is generous: a Windows runner under xdist can stall long
+    enough to blow a tighter budget while the server is perfectly fine. Pass
+    `thread` to keep that generosity from costing anything when the server is
+    genuinely broken — a serving thread that has exited (a failed bind being
+    the usual reason) will never answer, so we stop immediately instead of
+    waiting out the clock and then reporting a timeout that explains nothing.
 
     Args:
         port: Port the server is running on
         timeout: Maximum time to wait in seconds
+        thread: Optional uvicorn serving thread, to fail fast when it dies
 
     Returns:
-        True if server is ready, False if timeout
+        True if server is ready, False if it died or timed out
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -203,6 +214,8 @@ def wait_for_server(port: int, timeout: float = 20.0) -> bool:
                 return True
         except Exception:
             pass
+        if thread is not None and not thread.is_alive():
+            return False
         time.sleep(0.1)
     return False
 
@@ -412,8 +425,11 @@ def run_server_with_context(
     thread = threading.Thread(target=server_instance.run, daemon=True)
     thread.start()
 
-    if not wait_for_server(port, timeout=20.0):
-        raise RuntimeError(f"Server failed to start on port {port}")
+    if not wait_for_server(port, thread=thread):
+        raise RuntimeError(
+            f"Server failed to start on port {port} "
+            f"(serving thread {'still running' if thread.is_alive() else 'exited'})"
+        )
 
     try:
         yield ServerContext(
@@ -561,8 +577,11 @@ def server_with_client(temp_warehouse, tmp_path):
     server_thread.start()
 
     # Wait for server to start
-    if not wait_for_server(port):
-        raise RuntimeError("Server failed to start")
+    if not wait_for_server(port, thread=server_thread):
+        raise RuntimeError(
+            f"Server failed to start on port {port} "
+            f"(serving thread {'still running' if server_thread.is_alive() else 'exited'})"
+        )
 
     client = StrataClient(base_url=f"http://127.0.0.1:{port}")
 
