@@ -95,6 +95,12 @@ class Pool:
         self._health_poll_seconds = health_poll_seconds
         self.max_workers_total = max_workers_total
         self._tasks: set[asyncio.Task] = set()
+        # worker id -> consecutive failed probes. In memory rather than in the
+        # store: it is a judgement about right now, and a pool that restarts
+        # health-checks everything in recover() anyway, so carrying a stale
+        # count across a restart would only let one bad reading survive the
+        # thing that would have corrected it.
+        self._probe_failures: dict[str, int] = {}
 
     async def aclose(self) -> None:
         """Cancel in-flight work and release resources.
@@ -451,6 +457,14 @@ class Pool:
         awaits, and in that window the dispatcher could otherwise find this
         machine warm and hand it a job we are about to kill.
         """
+        # Every path that ends a machine comes through here, so this is the
+        # one place the probe counter can be dropped without leaking. A
+        # machine that missed one probe and was then reaped for idleness, or
+        # stopped after a failed job, is never listed WARM again — so the
+        # probe loop that would have popped it never sees it, and the entry
+        # would outlive the machine for the life of the process.
+        self._probe_failures.pop(worker.id, None)
+
         if worker.state is not WorkerState.STOPPING:
             worker.state = WorkerState.STOPPING
             worker.current_job_id = None
@@ -527,6 +541,112 @@ class Pool:
             )
             return False
 
+    async def probe_warm_workers(self) -> int:
+        """Health-check idle machines and retire the ones that are gone.
+
+        Returns how many were stopped.
+
+        Without this, a machine that dies while warm is discovered by the next
+        job being sent to it — and that job fails. The machine was already
+        unusable; the only thing the delay bought was a user watching a cell
+        fail for reasons that have nothing to do with their code.
+
+        Only warm machines. A busy one is answering a job, and a probe that
+        loses a race against a long-running cell must not retire the machine
+        running it.
+        """
+        # The endpoint is carried rather than re-read, so it is a str by
+        # construction: a filter in a comprehension does not narrow the
+        # attribute for the use below it.
+        candidates: list[tuple[MachineType, Worker, str]] = []
+        for name, spec in self.machine_types.items():
+            if spec.health_check_failures <= 0:
+                continue
+            for candidate in self.store.list_workers(name, [WorkerState.WARM]):
+                endpoint = candidate.endpoint
+                if endpoint is None:
+                    continue
+                candidates.append((spec, candidate, endpoint))
+        if not candidates:
+            return 0
+
+        # Concurrently, because this shares the scaler pass with
+        # reap_idle_workers. A backend's health check has its own timeout (10s
+        # for RunPod), and a provider black-holing packets would make a serial
+        # pass take that times the fleet size -- minutes during which nothing
+        # is reaped, and reaping is the only thing that stops a machine
+        # billing. The stall would be worst exactly when it costs most.
+        results = await asyncio.gather(
+            *(self._health_or_false(endpoint) for _, _, endpoint in candidates)
+        )
+
+        if len(candidates) > 1 and not any(results):
+            # Every machine in the fleet failed at once. That is far more
+            # likely to be this process's own network -- DNS, a proxy, an
+            # exhausted connection pool -- than every machine dying
+            # simultaneously, and acting on it would retire the entire warm
+            # fleet for a fault that was never on the machines.
+            #
+            # Counts are left untouched rather than cleared, so a genuine
+            # fleet-wide outage is still caught by the first pass that sees
+            # anything healthy. And a machine that really is gone is still
+            # stopped the way it always was: by the job dispatched to it
+            # failing. With a single candidate there is no evidence either
+            # way, so it is acted on -- one cold start beats never noticing.
+            logger.warning(
+                "every warm machine failed its probe; treating it as a "
+                "pool-side fault rather than retiring the fleet",
+                extra={"candidates": len(candidates)},
+            )
+            return 0
+
+        stopped = 0
+        for (spec, candidate, _endpoint), healthy in zip(candidates, results, strict=True):
+            # Re-read after the await, exactly as reap_idle_workers does:
+            # the machine may have taken a job while the probe was in
+            # flight, and stopping a busy machine kills the job on it. A
+            # machine that just started work is also evidence it is alive.
+            worker = self.store.get_worker(candidate.id)
+            if worker is None or worker.state is not WorkerState.WARM:
+                self._probe_failures.pop(candidate.id, None)
+                continue
+
+            if healthy:
+                self._probe_failures.pop(worker.id, None)
+                continue
+
+            failures = self._probe_failures.get(worker.id, 0) + 1
+            self._probe_failures[worker.id] = failures
+            if failures < spec.health_check_failures:
+                logger.info(
+                    "a warm machine missed a health probe",
+                    extra={
+                        "worker_id": worker.id,
+                        "machine_type": spec.name,
+                        "consecutive_failures": failures,
+                        "retire_at": spec.health_check_failures,
+                    },
+                )
+                continue
+
+            logger.warning(
+                "retiring a warm machine that stopped answering",
+                extra={
+                    "worker_id": worker.id,
+                    "machine_type": spec.name,
+                    "consecutive_failures": failures,
+                },
+            )
+            self._probe_failures.pop(worker.id, None)
+            await self._stop_worker(worker)
+            stopped += 1
+
+        if stopped:
+            # The slot this freed belongs to whoever is waiting, not only to
+            # the tenant whose machine died.
+            await self._offer_freed_capacity()
+        return stopped
+
     # --- scaling down ---
 
     async def reap_idle_workers(self) -> int:
@@ -572,7 +692,7 @@ class Pool:
                     "stopping an idle machine",
                     extra={
                         "worker_id": worker.id,
-                        "machine_type": name,
+                        "machine_type": spec.name,
                         "tenant_id": worker.tenant_id,
                         "idle_seconds": round(idle_for, 1),
                     },
@@ -597,6 +717,7 @@ class Pool:
             await asyncio.sleep(interval_seconds)
             try:
                 await self.reap_idle_workers()
+                await self.probe_warm_workers()
             except Exception:
                 # A pass that raises must not take the loop down with it:
                 # the loop dying is indistinguishable from having no scaler,
