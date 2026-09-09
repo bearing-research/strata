@@ -84,7 +84,11 @@ The same scaler pass health-checks warm machines and retires ones that stopped
 answering, after `health_check_failures` consecutive misses (default 3; `0`
 turns probing off for a type). One miss is a slow machine or a dropped packet,
 and retiring on that trades a cold start for every hiccup; three is a machine
-that is gone. Without this a dead warm machine is discovered by the next job
+that is gone. Probes run concurrently, so a provider black-holing packets
+cannot stall the reaper behind one timeout per machine. And a pass in which
+*every* machine fails is treated as this process's own network rather than as
+the fleet dying at once — retiring everything for a local DNS blip would hand
+every user a cold start for a fault that was never on the machines. Without this a dead warm machine is discovered by the next job
 being sent to it, and that job fails — for reasons that have nothing to do
 with the code in the cell.
 
