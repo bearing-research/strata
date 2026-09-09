@@ -3529,6 +3529,11 @@ deployment, not only in one that opted in to something.</p>
 <td>Consult the remote store on a <strong>local cache miss</strong>, so a colleague's expensive cell becomes your instant result. Distinct from the URL above, which only redirects a cell's ambient client (explicit publish). Opt-in because it is a behaviour change, not only a performance one: it puts bytes another machine produced into your local store. Requires <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>; enabling it without one is rejected at startup rather than left silently inert.</td>
 </tr>
 <tr>
+<td><code>STRATA_NOTEBOOK_TEAM_CACHE_PUBLISH</code></td>
+<td><code>all</code></td>
+<td>What the cache offers <em>outward</em>: <code>all</code> (every downstream-consumed variable of every successful cell), <code>promoted</code> (nothing automatically — <code>strata artifact promote</code> is how a result reaches the team; pulls are unchanged), or <code>off</code> (no offers and no pulls, without unsetting the URL a cell's ambient client still needs). Use <code>promoted</code> on a personal server, where offering everything means every intermediate a researcher computes lands in the team's store whether or not they meant to share it.</td>
+</tr>
+<tr>
 <td><code>STRATA_NOTEBOOK_MAX_BUNDLE_MEMBER_BYTES</code></td>
 <td><code>2147483648</code> (2 GiB)</td>
 <td>Per-file cap when packing a notebook bundle for a remote worker. Values that don't parse, or are <code>&lt;= 0</code>, fall back to the default.</td>
