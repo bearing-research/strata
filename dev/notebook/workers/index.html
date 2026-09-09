@@ -2810,6 +2810,15 @@ API does not fall back.</p>
 <p><code>POST /v1/admin/notebook-workers/reload</code> re-reads the file, for a fleet
 manager writing it underneath a running server. A restart would work too, but
 it interrupts every cell currently executing.</p>
+<p><strong>Personal-mode servers get the registry too.</strong> A personal server started with
+a registry offers those machine types to every notebook it opens, with no
+<code>[[workers]]</code> block in <code>notebook.toml</code> — which is the point, since writing one
+into every notebook puts the catalogue in git diffs and drifts as soon as it
+changes. They appear in the Workers panel with <code>source: server</code>.</p>
+<p>A notebook's own <code>[[workers]]</code> still win: define <code>gpu-a100</code> in your
+<code>notebook.toml</code> and that is what <code>@worker gpu-a100</code> resolves to, the same
+precedence annotations have over persisted config. Your notebook's worker
+definitions stay editable either way.</p>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <p>By default the worker accepts any caller that can reach its URL. For any worker deployed to a public endpoint, set a bearer token so only your notebook server can dispatch cells.</p>
 <p><strong>1. Generate a token</strong> (any opaque string; 32+ random bytes is plenty):</p>
