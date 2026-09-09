@@ -1928,6 +1928,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-a-cell-can-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a cell can read
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#migrating-from-personal-mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2300,6 +2311,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-cell-can-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a cell can read
+      
+    </span>
+  </a>
   
 </li>
       
@@ -2807,6 +2829,30 @@ notebook, naming it the way the cell reads it:</p>
 <p><code>off</code> is the whole feature off without unsetting
 <code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>, which a cell's ambient <code>strata</code> client
 still needs.</p>
+<h2 id="what-a-cell-can-read">What a cell can read<a class="headerlink" href="#what-a-cell-can-read" title="Permanent link">&para;</a></h2>
+<p>A cell is arbitrary Python, spawned by default with the server's whole
+environment. On a laptop that is right and there is nothing to protect. On a
+shared server it means every member who can run a cell can read
+<code>STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</code>, <code>STRATA_PROXY_TOKEN</code>, worker tokens and
+every data-source credential the server holds - from <code>os.environ</code>, from
+<code>/proc/&lt;pid&gt;/environ</code>, or from any file the server process can open.</p>
+<p><code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code> narrows the first two:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Only what cells actually need; everything else stays with the server.</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nv">STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</span><span class="o">=</span>AWS_*,HF_TOKEN
+</code></pre></div>
+<p>Entries are exact names or a prefix with a trailing <code>*</code>. The essentials a
+subprocess cannot start without are always included, and <code>STRATA_*</code> is dropped
+unless named exactly - a prefix rule broad enough to catch a credential by
+accident is the failure the setting exists to prevent. It applies to all four
+spawns that run cell code: the cold harness, the R harness, the batch harness
+and the warm pool worker.</p>
+<p>The list stays short because a cell's own configuration does not come through
+the process environment. <code>[env]</code> in <code>notebook.toml</code> and mount credentials
+travel in the cell manifest and are applied inside the harness.</p>
+<p>What this does <strong>not</strong> do is stop a cell reading the server's files, or its
+memory through <code>/proc</code>. That needs the harness to run as a different OS user,
+which is not implemented yet - until it is, "a member who runs a cell can read
+what the server process can read on disk" remains true of shared servers.</p>
 <h2 id="migrating-from-personal-mode">Migrating from personal mode<a class="headerlink" href="#migrating-from-personal-mode" title="Permanent link">&para;</a></h2>
 <p>If you've been running personal mode and want to grow into service:</p>
 <ol>
@@ -2825,9 +2871,9 @@ still needs.</p>
 </li>
 <li>
 <p><strong>Flip the mode</strong> in env or <code>pyproject.toml</code>:
-   <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;your-shared-secret&gt;
+   <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nv">STRATA_DEPLOYMENT_MODE</span><span class="o">=</span>service
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nv">STRATA_AUTH_MODE</span><span class="o">=</span>trusted_proxy
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="nv">STRATA_PROXY_TOKEN</span><span class="o">=</span>&lt;your-shared-secret&gt;
 </code></pre></div>
    Boot will fail with a clear error if anything's missing, that's
    the fail-closed property at work.</p>
