@@ -299,6 +299,62 @@ async def publication_data(token: str, store: ReadStore):
     )
 
 
+@router.get("/p/{token}/archive.zip")
+async def publication_archive(token: str, store: ReadStore):
+    """The self-contained bundle, as a zip. Unauthenticated, like the page.
+
+    Same files ``strata artifact archive`` writes, from the same code — a
+    service that holds only HTTP access to the store can build the deposit
+    copy without the store's credentials, which is the whole reason this is a
+    route and not only a command.
+
+    It contains nothing the page does not already show: the artifact's own
+    bytes, the record, the RO-Crate, and the chain as rendered. Upstream bytes
+    stay where they are, exactly as on ``/p/{token}/data``.
+
+    A withdrawn publication refuses here as it does for bytes and verify. The
+    page still resolves and says "withdrawn", because a reader chasing a
+    footnote deserves that answer; handing them the archive anyway would
+    undo the withdrawal.
+    """
+    import io
+    import tempfile
+    import zipfile
+    from base64 import b64encode
+    from hashlib import sha256
+    from pathlib import Path
+
+    from strata.api.publication_bundle import write_bundle
+
+    publication, artifact = _load_published(store, token, require_active=True)
+
+    with tempfile.TemporaryDirectory() as workdir:
+        dest = Path(workdir)
+        try:
+            written = write_bundle(store, artifact, dest, publication=publication)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+
+        buffer = io.BytesIO()
+        # Deterministic member order, so two archives of one publication differ
+        # only where their contents do. Reading order rather than alphabetical:
+        # a person who unzips this should meet index.html first.
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as bundle:
+            for name in written:
+                bundle.write(dest / name, arcname=name)
+
+    payload = buffer.getvalue()
+    digest = b64encode(sha256(payload).digest()).decode()
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={
+            "Content-Digest": f"sha-256=:{digest}:",
+            "Content-Disposition": f'attachment; filename="{token}.zip"',
+        },
+    )
+
+
 @router.get("/p/{token}/verify")
 async def verify_publication(token: str, store: ReadStore):
     """Re-read the bytes and compare against the digest recorded at publication.

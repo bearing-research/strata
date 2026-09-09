@@ -212,6 +212,24 @@ figure3-bundle/
 Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.
 
+A published artifact serves the same bundle as a zip:
+
+```bash
+curl -O -J https://your-server/p/<token>/archive.zip
+```
+
+Same files, same code — the route and the command build the bundle from one
+implementation, because two implementations of a set of files that describe
+each other would drift and neither would stop producing a bundle. The response
+carries a `Content-Digest` of the zip. A withdrawn publication refuses here as
+it does for the bytes: the page still resolves and says "withdrawn", since a
+reader chasing a footnote deserves that answer, but handing over the archive
+anyway would undo the withdrawal.
+
+It needs no credentials, like the page, and contains nothing the page does not
+already show — the artifact's own bytes and the chain as rendered. Upstream
+bytes stay where they are.
+
 The page is the same document as the hosted one, with one difference: it points
 at the file beside it rather than at routes, and it tells the reader how to
 check the bytes themselves:

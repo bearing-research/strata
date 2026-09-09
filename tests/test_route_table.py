@@ -34,6 +34,7 @@ EXPECTED_ROUTES = [
     ("/metrics/tables/{table_id:path}", "GET", 0),
     ("/oembed", "GET", 0),
     ("/p/{token}", "GET", 0),
+    ("/p/{token}/archive.zip", "GET", 0),
     ("/p/{token}/badge.svg", "GET", 0),
     ("/p/{token}/data", "GET", 0),
     ("/p/{token}/embed", "GET", 0),
