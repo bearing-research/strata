@@ -421,6 +421,39 @@ What to know before switching it on:
   whole team one number is the more reproducible outcome, but if your work
   depends on hardware-identical results, leave the team cache off for now.
 
+### Sharing on purpose: `promoted` and `strata artifact promote`
+
+Offering every downstream-consumed variable of every successful cell is right
+for a server whose whole purpose is a shared cache. It is wrong for a personal
+server: there, it means every intermediate a researcher ever computed lands in
+the team's store, whether or not they meant to share it.
+
+`STRATA_NOTEBOOK_TEAM_CACHE_PUBLISH` is the setting between "everything" and
+"nothing":
+
+| Value | Offers outward | Pulls |
+| --- | --- | --- |
+| `all` (default) | every consumed variable of every successful cell | yes |
+| `promoted` | nothing automatically | yes |
+| `off` | nothing | no |
+
+Under `promoted`, a result reaches the team when someone says so:
+
+```bash
+strata artifact promote nb_taxi_cell_c2_var_model \
+  --to https://store.example --name taxi/model --alias champion
+```
+
+The chain travels with it, and has to. The cache is keyed by provenance, so
+each ancestor that arrives is a hit for the next person whose cell computes the
+same thing - promoting the result alone would share the answer and none of the
+work. A protected alias (`registry_protected_aliases`) queues for approval
+rather than moving, and the command says so.
+
+`off` is the whole feature off without unsetting
+`STRATA_NOTEBOOK_REMOTE_STORE_URL`, which a cell's ambient `strata` client
+still needs.
+
 ## Migrating from personal mode
 
 If you've been running personal mode and want to grow into service:

@@ -827,6 +827,14 @@ class PreviewEnvironmentYamlRequest(BaseModel):
     environment_yaml: str = Field(..., max_length=500_000)
 
 
+class PromoteArtifactRequest(BaseModel):
+    """Send a cell's result to the team store, under a name."""
+
+    name: str = Field(..., min_length=1, max_length=512)
+    alias: str | None = Field(default=None, max_length=128)
+    tags: dict[str, str] = Field(default_factory=dict)
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
@@ -2759,6 +2767,86 @@ async def list_notebook_published_artifacts(notebook_id: str, session: SessionDe
         if items:
             cells[cell.id] = items
     return {"cells": cells}
+
+
+@router.post("/{notebook_id}/artifacts/{artifact_id}/v/{version}/promote")
+async def promote_notebook_artifact(
+    notebook_id: str,
+    session: SessionDep,
+    artifact_id: str,
+    version: int,
+    request: PromoteArtifactRequest,
+) -> dict:
+    """Send one of this notebook's results to the team store, under a name.
+
+    A cell's outputs live in the notebook's own ``.strata/artifacts``, which
+    nobody else can read. Promoting copies the artifact and everything behind
+    it into the store the team shares, and names it there — so a colleague can
+    ask for it by name, and so their cells get a team-cache hit on every step
+    behind it rather than recomputing the chain.
+
+    This is the deliberate half of ``notebook_team_cache_publish``: under
+    ``promoted`` nothing reaches the team on its own, and this route is how
+    something does.
+    """
+    from strata.artifact_transfer import RemoteStore, promote_artifact
+    from strata.server import get_state
+
+    config = get_state().config
+    base_url = getattr(config, "notebook_remote_store_url", None)
+    if not base_url:
+        # There is nowhere to promote to, which is a configuration answer and
+        # not a failure of this request — say which setting is missing rather
+        # than let the UI show a bare 500.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "No team store is configured; set notebook_remote_store_url "
+                "to the store colleagues read from."
+            ),
+        )
+
+    manager = session.get_artifact_manager()
+    store = manager.artifact_store
+    artifact = store.get_artifact(artifact_id, version)
+    if artifact is None:
+        raise HTTPException(
+            status_code=404, detail=f"{artifact_id}@v={version} is not in this notebook's store"
+        )
+
+    target = RemoteStore(
+        str(base_url), dict(getattr(config, "notebook_remote_store_headers", {}) or {})
+    )
+    try:
+        # The copy is a chain of blocking HTTP calls against another machine,
+        # so it goes off the event loop: the notebook's WebSocket has to keep
+        # broadcasting while a large chain moves.
+        promotion = await asyncio.to_thread(
+            promote_artifact,
+            store,
+            target,
+            artifact,
+            name=request.name,
+            alias=request.alias,
+            tags=dict(request.tags),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except (RuntimeError, httpx.HTTPError) as exc:
+        # 502 rather than 500: this server is fine, the team's store refused or
+        # could not be reached. Whatever copied before that stays — it is keyed
+        # by provenance, so it is a usable cache entry whether or not it ever
+        # got a name.
+        raise HTTPException(status_code=502, detail=f"The team store at {base_url}: {exc}")
+
+    return {
+        "name": promotion.name,
+        "artifact_uri": f"strata://artifact/{promotion.ref}",
+        "copied": promotion.copied,
+        "alias": promotion.alias,
+        "alias_pending": promotion.alias_pending,
+        "store": str(base_url),
+    }
 
 
 @router.get("/{notebook_id}/cells/{cell_id}/iterations")

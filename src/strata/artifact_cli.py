@@ -20,21 +20,18 @@ import json
 import os
 import sys
 import time
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
-from strata.artifact_store import (
-    ArtifactStore,
-    ArtifactVersion,
-    ImportedArtifact,
-    Publication,
+from strata.artifact_store import ArtifactStore, ArtifactVersion
+from strata.artifact_transfer import (
+    PublicationTarget,
+    RemoteStore,
+    copy_chain,
+    promote_artifact,
 )
-
-# One record and its bytes. Generous, because an artifact can be large and the
-# alternative to waiting is a half-copied chain.
-_REMOTE_TIMEOUT_SECONDS = 300.0
 
 
 def _open_store(artifact_dir_arg: str | None) -> ArtifactStore | None:
@@ -380,7 +377,7 @@ def _publication_target(
         # is minted there, because a link only resolves from the store that
         # serves it — which for a hosted deployment is never the laptop that
         # ran the cells.
-        return _RemoteStore(str(to_url), _remote_headers(args)), str(to_url)
+        return RemoteStore(str(to_url), _remote_headers(args)), str(to_url)
 
     into = getattr(args, "into", None)
     if into:
@@ -396,217 +393,6 @@ def _publication_target(
         # nowhere.
         return source, f"{source.artifact_dir} (no server store is configured)"
     return server_store, f"{server_store.artifact_dir} (the store your server serves)"
-
-
-class PublicationTarget(Protocol):
-    """Where a chain is copied to and a grant is minted.
-
-    Two implementations: an ``ArtifactStore`` on this machine, and
-    ``_RemoteStore`` over HTTP. Declared so the copy walk is written once
-    against a contract rather than twice against two transports.
-    """
-
-    db_path: Path
-
-    def import_artifact(self, record: ArtifactVersion, blob: bytes | None) -> ImportedArtifact: ...
-
-    def publish_artifact(
-        self,
-        artifact_id: str,
-        version: int,
-        *,
-        tenant: str | None = None,
-        published_by: str | None = None,
-        title: str | None = None,
-    ) -> Publication: ...
-
-
-class _RemoteStore:
-    """A store on another machine, reached over HTTP.
-
-    Duck-types the two methods ``_copy_for_publication`` uses, so copying a
-    chain to a served store on a different host is the same walk with a
-    different transport rather than a second implementation of the same
-    ancestors-first, rewrite-the-edges logic.
-    """
-
-    def __init__(self, base_url: str, headers: dict[str, str] | None = None) -> None:
-        self.base_url = base_url.rstrip("/")
-        self._headers = dict(headers or {})
-        # Distinct from any local store's, so the caller's "are these the same
-        # store" check never accidentally matches.
-        self.db_path = Path(f"<remote:{self.base_url}>")
-
-    def import_artifact(self, record: ArtifactVersion, blob: bytes | None):
-        """POST one record and its bytes; return where the far side put them."""
-        import httpx
-
-        from strata.artifact_store import ImportedArtifact
-
-        metadata = {
-            key: getattr(record, key)
-            for key in (
-                "id",
-                "version",
-                "state",
-                "provenance_hash",
-                "schema_json",
-                "row_count",
-                "byte_size",
-                "created_at",
-                "transform_spec",
-                "input_versions",
-                "principal",
-            )
-        }
-        if blob is not None:
-            metadata["content_sha256"] = hashlib.sha256(blob).hexdigest()
-
-        files: dict[str, tuple[str, Any, str]] = {
-            "metadata": ("metadata.json", json.dumps(metadata), "application/json"),
-        }
-        if blob is not None:
-            files["data"] = ("data.bin", blob, "application/octet-stream")
-
-        response = httpx.post(
-            f"{self.base_url}/v1/artifacts/import",
-            files=files,
-            headers=self._headers,
-            timeout=_REMOTE_TIMEOUT_SECONDS,
-        )
-        if response.status_code >= 400:
-            raise RuntimeError(
-                f"Import of {record.id}@v={record.version} was refused with "
-                f"HTTP {response.status_code}: {_detail_of(response)}"
-            )
-        body = response.json()
-        return ImportedArtifact(
-            id=str(body["id"]),
-            version=int(body["version"]),
-            written=bool(body.get("written")),
-        )
-
-    def set_name(self, name: str, artifact_id: str, version: int) -> None:
-        """Point a team name at what landed here."""
-        self._post(
-            "/v1/names",
-            {"name": name, "artifact_id": artifact_id, "version": version},
-            what=f"name {name!r}",
-        )
-
-    def set_alias(self, name: str, alias: str, artifact_id: str, version: int) -> bool:
-        """Move ``name@alias``. Returns whether it applied rather than queued.
-
-        A protected alias answers 202 and lands in the pending queue for
-        someone else to approve, which is the point of protecting it — so that
-        is a normal outcome to report, not a failure to raise.
-        """
-        response = self._post(
-            f"/v1/names/{name}/aliases/{alias}",
-            {"artifact_id": artifact_id, "version": version},
-            what=f"alias {name}@{alias}",
-            method="put",
-        )
-        return response.status_code != 202
-
-    def set_tag(self, artifact_id: str, version: int, key: str, value: str) -> None:
-        self._post(
-            f"/v1/artifacts/{artifact_id}/v/{version}/tags",
-            {"key": key, "value": value},
-            what=f"tag {key}",
-            method="put",
-        )
-
-    def _post(self, path: str, payload: dict, *, what: str, method: str = "post"):
-        import httpx
-
-        response = getattr(httpx, method)(
-            f"{self.base_url}{path}",
-            json=payload,
-            headers=self._headers,
-            timeout=_REMOTE_TIMEOUT_SECONDS,
-        )
-        if response.status_code >= 400:
-            raise RuntimeError(
-                f"The store refused to set the {what}: "
-                f"HTTP {response.status_code}: {_detail_of(response)}"
-            )
-        return response
-
-    def publish_artifact(
-        self,
-        artifact_id: str,
-        version: int,
-        *,
-        tenant: str | None = None,
-        published_by: str | None = None,
-        title: str | None = None,
-    ) -> Publication:
-        """Mint the grant on the far side, where the link will resolve from.
-
-        ``tenant`` and ``published_by`` are deliberately not sent: the far side
-        takes both from the authenticated caller, so a client that could name
-        them would be claiming an identity rather than presenting one.
-        """
-        import httpx
-
-        payload = {"title": title}
-        response = httpx.post(
-            f"{self.base_url}/v1/artifacts/{artifact_id}/v/{version}/publish",
-            json=payload,
-            headers=self._headers,
-            timeout=_REMOTE_TIMEOUT_SECONDS,
-        )
-        if response.status_code >= 400:
-            raise ValueError(
-                f"the store refused to publish with HTTP {response.status_code}: "
-                f"{_detail_of(response)}"
-            )
-        body = response.json()
-        return Publication(
-            token=str(body["token"]),
-            artifact_id=str(body["artifact_id"]),
-            version=int(body["version"]),
-            title=body.get("title"),
-            published_at=float(body.get("published_at") or time.time()),
-            published_by=body.get("published_by"),
-            content_sha256=body.get("content_sha256"),
-            revoked_at=body.get("revoked_at"),
-        )
-
-
-def _detail_of(response) -> str:
-    """The server's own explanation, when it gave one."""
-    try:
-        payload = response.json()
-    except ValueError:
-        return response.text.strip()[:200]
-    if isinstance(payload, dict):
-        return str(payload.get("detail") or payload.get("error") or payload)
-    return str(payload)
-
-
-def _remap_input_versions(record: ArtifactVersion, remap: dict[str, str]) -> ArtifactVersion:
-    """Point a record's lineage edges at the rows its ancestors landed on.
-
-    Edges are recorded twice over, as the key ``strata://artifact/<id>@v=<n>``
-    and again as the value ``<id>@v=<n>``; the walk reads the key
-    (``_walk_lineage``) and staleness reads the value, so both have to move or
-    the two disagree about the same edge.
-    """
-    if not record.input_versions:
-        return record
-    edges = json.loads(record.input_versions)
-    prefix = "strata://artifact/"
-    moved = {}
-    for uri, version in edges.items():
-        ref = uri[len(prefix) :] if uri.startswith(prefix) else None
-        landed = remap.get(ref) if ref else None
-        if landed is None:
-            moved[uri] = version
-        else:
-            moved[f"{prefix}{landed}"] = landed
-    return replace(record, input_versions=json.dumps(moved))
 
 
 def _remote_headers(args: argparse.Namespace) -> dict[str, str]:
@@ -627,83 +413,23 @@ def _remote_headers(args: argparse.Namespace) -> dict[str, str]:
     return headers
 
 
-def _copy_for_publication(
-    source: ArtifactStore, target: PublicationTarget, artifact: ArtifactVersion, max_depth: int
-) -> tuple[int, str]:
-    """Copy an artifact and everything behind it into the served store.
-
-    Notebook cells write to the notebook's own ``.strata/artifacts``; the server
-    serves whatever ``artifact_dir`` it was configured with, which by default is
-    ``~/.strata/artifacts``. Publishing a figure therefore minted a token in a
-    store the page route never reads, and the link 404'd — the primary case the
-    feature exists for, working only when the two happened to be the same
-    directory.
-
-    The ancestry goes too, and has to: the page shows the code and environment
-    of every upstream step, so copying the artifact alone would publish a
-    result whose chain resolves to nothing.
-
-    Ancestors first, so a descendant is never briefly readable with edges
-    pointing at rows that have not landed, and so each descendant can be
-    rewritten to name where its ancestors actually landed: an ancestor whose
-    computation the target already holds under another id resolves to that row,
-    and an edge still naming the source's id would resolve to nothing here.
-
-    Returns how many artifacts were newly written, and the ref the published
-    artifact itself landed on, which is not the caller's when it deduplicated.
-    """
-    from strata.services.artifact import ArtifactService
-
-    lineage = ArtifactService().build_lineage(
-        source,
-        artifact=artifact,
-        artifact_id=artifact.id,
-        version=artifact.version,
-        tenant_filter=None,
-        max_depth=max_depth,
-    )
-    copied = 0
-    remap: dict[str, str] = {}
-    published_ref = f"{artifact.id}@v={artifact.version}"
-    landed_ref = published_ref
-    for node in reversed(lineage.nodes):
-        # Table nodes are leaves naming an external source, not artifacts this
-        # store holds; there is nothing to copy and nothing to serve.
-        if node.type != "artifact" or node.artifact_id is None or node.version is None:
+def _parse_tags(raw_tags: list[str] | None) -> dict[str, str]:
+    """``key=value`` strings into a dict, saying which ones were not."""
+    tags: dict[str, str] = {}
+    for raw in raw_tags or []:
+        key, _, value = str(raw).partition("=")
+        if not value:
+            print(f"Ignoring malformed tag {raw!r}; expected key=value")
             continue
-
-        record = source.get_artifact(node.artifact_id, node.version)
-        if record is None:
-            continue
-        record = _remap_input_versions(record, remap)
-        reader_cm = source.open_blob_reader(node.artifact_id, node.version)
-        blob = None
-        if reader_cm is not None:
-            with reader_cm as reader:
-                blob = reader.read()
-        imported = target.import_artifact(record, blob)
-        if imported.written:
-            copied += 1
-
-        source_ref = f"{node.artifact_id}@v={node.version}"
-        if imported.ref != source_ref:
-            remap[source_ref] = imported.ref
-            if source_ref == published_ref:
-                landed_ref = imported.ref
-    return copied, landed_ref
+        tags[key.strip()] = value.strip()
+    return tags
 
 
 def cmd_promote(args: argparse.Namespace) -> int:
-    """Copy an artifact and its chain to the team store, and name it there.
+    """``strata artifact promote``: share a result with the team, on purpose.
 
-    Publishing mints a public link. Promoting does not: it puts a result where
-    colleagues can find it by name, inside the store their own cells already
-    read from.
-
-    The chain travels for the same reason it does when publishing, and for one
-    more: the team cache is keyed by provenance, so an ancestor that arrives
-    is a cache hit for the next person whose cell computes the same thing.
-    Sending the artifact alone would share the answer and none of the work.
+    The walk and the registry writes are :func:`promote_artifact`; this is the
+    argparse end of it — resolve the ref, render the outcome, pick an exit code.
     """
     store = _open_store(args.artifact_dir)
     if store is None:
@@ -712,47 +438,35 @@ def cmd_promote(args: argparse.Namespace) -> int:
     if artifact is None:
         return 1
 
-    if artifact.state not in ("ready", "superseded"):
-        print(
-            f"Cannot promote: {artifact.id}@v={artifact.version} is not "
-            f"readable (state={artifact.state})"
-        )
-        return 1
-
-    target = _RemoteStore(str(args.to_url), _remote_headers(args))
-    copied, landed_ref = _copy_for_publication(
-        store, target, artifact, getattr(args, "max_depth", 10)
-    )
-    landed_id, _, landed_version = landed_ref.partition("@v=")
-    landed_version_number = int(landed_version)
-
+    target = RemoteStore(str(args.to_url), _remote_headers(args))
     try:
-        target.set_name(args.name, landed_id, landed_version_number)
-        pending_alias = False
-        if getattr(args, "alias", None):
-            applied = target.set_alias(args.name, args.alias, landed_id, landed_version_number)
-            pending_alias = not applied
-        for raw in getattr(args, "tag", None) or []:
-            key, _, value = str(raw).partition("=")
-            if not value:
-                print(f"Ignoring malformed tag {raw!r}; expected key=value")
-                continue
-            target.set_tag(landed_id, landed_version_number, key.strip(), value.strip())
+        promotion = promote_artifact(
+            store,
+            target,
+            artifact,
+            name=args.name,
+            alias=getattr(args, "alias", None),
+            tags=_parse_tags(getattr(args, "tag", None)),
+            max_depth=getattr(args, "max_depth", 10),
+        )
+    except ValueError as exc:
+        print(f"Cannot promote: {exc}")
+        return 1
     except RuntimeError as exc:
-        # The chain is already there, which is harmless and reusable — it is
-        # keyed by provenance, so it is a cache entry whether or not it ever
+        # Whatever copied is already there, which is harmless and reusable: it
+        # is keyed by provenance, so it is a cache entry whether or not it ever
         # got a name. Saying so beats implying nothing happened.
-        print(f"Copied {copied} artifact(s), but naming failed: {exc}")
+        print(f"Promotion failed partway: {exc}")
         return 1
 
     if args.format == "json":
         print(
             json.dumps(
                 {
-                    "name": args.name,
-                    "artifact_uri": f"strata://artifact/{landed_ref}",
-                    "copied": copied,
-                    "alias_pending": pending_alias,
+                    "name": promotion.name,
+                    "artifact_uri": f"strata://artifact/{promotion.ref}",
+                    "copied": promotion.copied,
+                    "alias_pending": promotion.alias_pending,
                 },
                 indent=2,
             )
@@ -760,17 +474,17 @@ def cmd_promote(args: argparse.Namespace) -> int:
         return 0
 
     print(f"Promoted {artifact.id}@v={artifact.version} to {args.to_url}")
-    if landed_ref != f"{artifact.id}@v={artifact.version}":
+    if promotion.ref != f"{artifact.id}@v={artifact.version}":
         # It deduplicated onto a row the store already had: the same
         # computation, promoted by someone else or offered by the cache.
-        print(f"  the store already held this computation as {landed_ref}")
-    print(f"  name:  {args.name} -> {landed_ref}")
-    if getattr(args, "alias", None):
+        print(f"  the store already held this computation as {promotion.ref}")
+    print(f"  name:  {promotion.name} -> {promotion.ref}")
+    if promotion.alias:
         print(
-            f"  alias: {args.name}@{args.alias}"
-            + (" (queued for approval)" if pending_alias else "")
+            f"  alias: {promotion.name}@{promotion.alias}"
+            + (" (queued for approval)" if promotion.alias_pending else "")
         )
-    print(f"  {copied} artifact(s) copied, including everything behind it")
+    print(f"  {promotion.copied} artifact(s) copied, including everything behind it")
     return 0
 
 
@@ -786,9 +500,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
     copied = 0
     published_id, published_version = artifact.id, artifact.version
     if target.db_path != store.db_path:
-        copied, landed_ref = _copy_for_publication(
-            store, target, artifact, getattr(args, "max_depth", 10)
-        )
+        copied, landed_ref = copy_chain(store, target, artifact, getattr(args, "max_depth", 10))
         # The copy deduplicates against the target, so the grant has to be
         # minted on the row that is actually there. Minting on the source's id
         # would fail on a store that already held the same computation.

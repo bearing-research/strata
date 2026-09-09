@@ -295,3 +295,88 @@ class TestPublishPolicy:
         from strata.config import StrataConfig
 
         assert StrataConfig().notebook_team_cache_publish == "all"
+
+
+class TestPromoteRoute:
+    """``POST /v1/notebooks/{id}/artifacts/{id}/v/{n}/promote`` — the same
+    promotion the CLI does, from the button the strip will grow.
+
+    The team store here is the server the fixture runs, and the notebook's own
+    store is a directory on disk, which is the real shape: cells write locally
+    and promotion is what crosses the gap. The route is called directly rather
+    than over HTTP so the running server stays the *target*, not the caller.
+    """
+
+    def _session(self, chain):
+        from types import SimpleNamespace
+
+        manager = NotebookArtifactManager("nb", artifact_dir=chain["dir"])
+        return SimpleNamespace(get_artifact_manager=lambda: manager)
+
+    def _call(self, chain, url, monkeypatch, **body):
+        from strata.notebook.routes import PromoteArtifactRequest, promote_notebook_artifact
+        from strata.server import get_state
+
+        monkeypatch.setattr(get_state().config, "notebook_remote_store_url", url)
+        artifact_id = body.pop("artifact_id", chain["figure"].id)
+        version = body.pop("version", chain["figure"].version)
+        payload = {"name": "taxi/model"}
+        payload.update(body)
+        return asyncio.run(
+            promote_notebook_artifact(
+                "nb",
+                self._session(chain),
+                artifact_id,
+                version,
+                PromoteArtifactRequest(**payload),
+            )
+        )
+
+    def test_it_promotes_the_chain_and_reports_where_it_landed(
+        self, team_store, team_dir, chain, monkeypatch
+    ):
+        result = self._call(chain, team_store, monkeypatch)
+
+        assert result["name"] == "taxi/model"
+        assert result["copied"] == 2
+        store = ArtifactStore(team_dir)
+        assert store.get_artifact(chain["upstream"].id, chain["upstream"].version) is not None
+        assert httpx.get(f"{team_store}/v1/names/taxi/model", timeout=10).status_code == 200
+
+    def test_tags_travel(self, team_store, team_dir, chain, monkeypatch):
+        self._call(chain, team_store, monkeypatch, tags={"stage": "candidate"})
+
+        tags = ArtifactStore(team_dir).get_tags(chain["figure"].id, chain["figure"].version)
+        assert tags.get("stage") == "candidate"
+
+    def test_no_team_store_says_which_setting_is_missing(self, team_store, chain, monkeypatch):
+        """A 409 naming the config beats a 500 the UI cannot explain."""
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as caught:
+            self._call(chain, None, monkeypatch)
+
+        assert caught.value.status_code == 409
+        assert "notebook_remote_store_url" in caught.value.detail
+
+    def test_an_artifact_this_notebook_does_not_hold_is_a_404(self, team_store, chain, monkeypatch):
+        """The route reads this notebook's store, and only that one.
+
+        The id arrives in the URL, so this is what keeps one open notebook
+        from pushing an id it does not own to the team.
+        """
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as caught:
+            self._call(chain, team_store, monkeypatch, artifact_id="someone-elses", version=1)
+
+        assert caught.value.status_code == 404
+
+    def test_an_unreachable_store_is_a_bad_gateway(self, team_store, chain, monkeypatch):
+        """Not a 500: the notebook server is fine, the team's store is not."""
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as caught:
+            self._call(chain, "http://127.0.0.1:1", monkeypatch)
+
+        assert caught.value.status_code == 502
