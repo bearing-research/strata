@@ -528,18 +528,46 @@ to the UI.
 ### Export Notebook
 
 ```
-GET /v1/notebooks/{session_id}/export?fmt={zip,markdown,html}
+GET /v1/notebooks/{session_id}/export?fmt={zip,snapshot,markdown,html}
 ```
 
-One endpoint, three output formats:
+One endpoint, four output formats:
 
 | `fmt`        | Returns                                                                                                  |
 | ------------ | -------------------------------------------------------------------------------------------------------- |
 | `zip` *(default)* | Reproducible bundle, `notebook.toml`, `pyproject.toml`, `uv.lock`, cells, `provenance.json`.        |
+| `snapshot`   | The `zip`'s members **plus** outputs, per-cell provenance and timings, an artifact index, and bytes.      |
 | `markdown`   | Single-file rendering for sharing / docs ingestion. Same engine as `strata export`.                      |
 | `html`       | Standalone HTML with embedded CSS + Pygments syntax highlighting.                                        |
 
 Markdown and HTML renderings additionally accept `include_inactive_variants=true` to stack all variants of every group. Prompt-cell responses are intentionally excluded from rendered formats (see [Export](../notebook/export.md)).
+
+#### Snapshots
+
+A snapshot is the ZIP plus what a reader and a machine each need:
+
+```
+outputs/<cell id>/0.png          each display output as a file
+outputs/<cell id>/console.json   stdout / stderr
+artifacts.json                   per-cell provenance, timings, and every ready
+                                 cell's artifacts with their content digests
+artifacts/<id>@v=<n>             the bytes, for whichever were included
+```
+
+`include` chooses how much travels:
+
+| `include`  | Carries |
+| ---------- | ------- |
+| `all`      | Every artifact's bytes — the form for moving a project between servers. |
+| `selected` *(default)* | Only the cells named in `cells=a,b`; the rest are described in `artifacts.json` by id, version and digest. The form a review snapshot uses. |
+| `none`     | Description only. |
+
+`artifacts.json` names everything either way, and `carried` lists what is
+actually in the file — so an importer marks the cells whose artifacts came only
+by reference as stale rather than inferring it from what it failed to find.
+
+The same bundle offline: `strata export <path> --to snapshot --out snap.zip
+--include all`.
 
 ## AI
 

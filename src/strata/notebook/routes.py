@@ -3431,6 +3431,8 @@ async def export_notebook(
     fmt: str = "zip",
     include_inactive_variants: bool = False,
     app_view: bool = False,
+    include: str = "selected",
+    cells: str | None = None,
 ):
     """Export the notebook in the requested format.
 
@@ -3440,6 +3442,15 @@ async def export_notebook(
     provenance hashes). This is the original endpoint behavior — kept
     as the default so callers and tooling that didn't specify a format
     continue to receive a ZIP.
+
+    ``fmt=snapshot``: the ZIP's members plus ``outputs/<cell id>/`` (each
+    display output as a file, and ``console.json``), the per-cell provenance
+    and timings from ``.strata/runtime.json``, an ``artifacts.json`` naming
+    every ready cell's artifacts with their digests, and ``artifacts/<id>@v=<n>``
+    for the bytes the caller includes. ``include`` chooses: ``all`` (every
+    artifact — the form a move between servers uses), ``selected`` (the cells
+    named in ``cells``, the rest by reference — the form a review snapshot
+    uses), or ``none``.
 
     ``fmt=markdown`` and ``fmt=html`` return a rendered single-file
     export of the notebook produced by
@@ -3452,10 +3463,15 @@ async def export_notebook(
         include_inactive_variants: only relevant for markdown/html
             renderings; stacks all variants of every group when true.
     """
-    if fmt not in {"zip", "markdown", "html"}:
+    if fmt not in {"zip", "markdown", "html", "snapshot"}:
         raise HTTPException(
             status_code=400,
-            detail="fmt must be one of 'zip', 'markdown', 'html'",
+            detail="fmt must be one of 'zip', 'markdown', 'html', 'snapshot'",
+        )
+    if include not in {"all", "selected", "none"}:
+        raise HTTPException(
+            status_code=400,
+            detail="include must be one of 'all', 'selected', 'none'",
         )
 
     if fmt in {"markdown", "html"}:
@@ -3467,53 +3483,46 @@ async def export_notebook(
         )
 
     # Default: ZIP bundle.
-    nb_dir = session.path
     buf = io.BytesIO()
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # notebook.toml
-        toml_path = nb_dir / "notebook.toml"
-        if toml_path.exists():
-            zf.write(toml_path, "notebook.toml")
+        # The committed files and provenance.json, from the same helper
+        # `strata export` uses — the two used to glob cells differently and
+        # disagree about whether provenance.json was part of a bundle.
+        from strata.notebook.snapshot import write_committed_files
 
-        # pyproject.toml
-        pyproject_path = nb_dir / "pyproject.toml"
-        if pyproject_path.exists():
-            zf.write(pyproject_path, "pyproject.toml")
+        write_committed_files(session, zf)
 
-        # uv.lock
-        lock_path = nb_dir / "uv.lock"
-        if lock_path.exists():
-            zf.write(lock_path, "uv.lock")
+        selected_cells: list[str] = [c for c in (cells or "").split(",") if c]
+        if fmt == "snapshot":
+            # Everything the ZIP does not already carry: outputs as files, the
+            # per-cell provenance and timings from .strata/runtime.json, the
+            # artifact index, and whichever bytes the caller asked for.
+            from strata.notebook.snapshot import (
+                IncludeMode,
+                unknown_selection,
+                write_snapshot,
+            )
 
-        # Cell source files
-        cells_dir = nb_dir / "cells"
-        if cells_dir.is_dir():
-            for cell_file in sorted(cells_dir.glob("*.py")):
-                zf.write(cell_file, f"cells/{cell_file.name}")
-
-        # provenance.json — DAG + per-cell hashes for reproducibility
-        from strata.notebook.env import compute_lockfile_hash
-        from strata.notebook.provenance import compute_source_hash
-
-        provenance: dict = {
-            "notebook_id": session.notebook_state.id,
-            "lockfile_hash": compute_lockfile_hash(nb_dir),
-            "dag": _format_dag(session),
-            "cells": {},
-        }
-        for cell in session.notebook_state.cells:
-            provenance["cells"][cell.id] = {
-                "source_hash": compute_source_hash(cell.source),
-                "defines": cell.defines,
-                "references": cell.references,
-                "status": cell.status,
-                "artifact_uri": cell.artifact_uri,
-            }
-        zf.writestr("provenance.json", json.dumps(provenance, indent=2))
+            unknown = unknown_selection(session, selected_cells)
+            if unknown:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No such cell(s) in this notebook: {', '.join(unknown)}",
+                )
+            write_snapshot(
+                session,
+                zf,
+                # Checked against the same three values above, where the
+                # refusal can say which they are; a Literal query parameter
+                # would answer 422 with pydantic's phrasing instead.
+                include=cast(IncludeMode, include),
+                selected_cells=selected_cells,
+            )
 
     buf.seek(0)
-    filename = f"{_safe_filename(session.notebook_state.name or 'notebook')}.zip"
+    suffix = "snapshot.zip" if fmt == "snapshot" else "zip"
+    filename = f"{_safe_filename(session.notebook_state.name or 'notebook')}.{suffix}"
     return StreamingResponse(
         buf,
         media_type="application/zip",
