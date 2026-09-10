@@ -1134,6 +1134,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#citing-it-dois-and-other-identifiers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Citing it: DOIs and other identifiers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#http" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2197,6 +2208,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#citing-it-dois-and-other-identifiers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Citing it: DOIs and other identifiers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#http" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2434,6 +2456,36 @@ authenticated identity to record, so that row usually reads "not recorded".
 <code>--author</code> does not change it: crediting yourself for publishing a result is
 not the same as the store attesting who produced it, and the page keeps them
 apart deliberately.</p>
+<p><strong>Who wrote the work</strong> is a third thing, and a list rather than a string:
+authors have an order, an affiliation, and an ORCID that distinguishes one
+researcher from another. Pass them when publishing over HTTP:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="err">POST</span><span class="w"> </span><span class="err">/v</span><span class="mi">1</span><span class="err">/ar</span><span class="kc">t</span><span class="err">i</span><span class="kc">fa</span><span class="err">c</span><span class="kc">ts</span><span class="err">/</span><span class="kc">f</span><span class="err">ig/v/</span><span class="mi">1</span><span class="err">/publish</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="p">{</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="nt">&quot;title&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Figure 3&quot;</span><span class="p">,</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">&quot;authors&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;F. Li&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;orcid&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0000-0002-1825-0097&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;affiliation&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Somewhere&quot;</span><span class="p">},</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">    </span><span class="p">{</span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;B. Second&quot;</span><span class="p">}</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="p">}</span>
+</code></pre></div>
+<p>The byline then lists them in the order given, each ORCID as a link. Publishing
+without authors leaves <code>published_by</code> as the byline, so nothing published
+before this changes meaning.</p>
+<h2 id="citing-it-dois-and-other-identifiers">Citing it: DOIs and other identifiers<a class="headerlink" href="#citing-it-dois-and-other-identifiers" title="Permanent link">&para;</a></h2>
+<p>A DOI is registered against a deposit that already has to be reachable, so it
+almost always arrives <em>after</em> the token does:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="err">PATCH</span><span class="w"> </span><span class="err">/v</span><span class="mi">1</span><span class="err">/publica</span><span class="kc">t</span><span class="err">io</span><span class="kc">ns</span><span class="err">/</span><span class="p">{</span><span class="kc">t</span><span class="err">oke</span><span class="kc">n</span><span class="p">}</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="p">{</span><span class="nt">&quot;external_ids&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">&quot;scheme&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;doi&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;10.5281/zenodo.1234567&quot;</span><span class="p">}]}</span>
+</code></pre></div>
+<p>Schemes are <code>doi</code>, <code>zenodo</code>, <code>arxiv</code> and <code>url</code>; anything else is refused, since
+a record that accepted arbitrary scheme names would produce citation lines
+nobody can follow. The page grows a "Cite as" line of resolvable links, the
+JSON record and the archive <code>manifest.json</code> carry the entries, and the
+RO-Crate's root dataset gets the DOI as its <code>identifier</code> — which is what an
+ingesting repository indexes on.</p>
+<p>The patch cannot repoint the token. <code>artifact_id</code> and <code>version</code> are not fields
+of the request, because a citation whose target could change under the reader
+would be worthless.</p>
 <h2 id="http">HTTP<a class="headerlink" href="#http" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2453,6 +2505,11 @@ apart deliberately.</p>
 <td><code>DELETE /v1/publications/{token}</code></td>
 <td>yes (<code>artifacts:publish</code>)</td>
 <td>Withdraw.</td>
+</tr>
+<tr>
+<td><code>PATCH /v1/publications/{token}</code></td>
+<td>yes (<code>artifacts:publish</code>)</td>
+<td>Set authors and external identifiers. Cannot change what the token points at.</td>
 </tr>
 <tr>
 <td><code>GET /v1/publications</code></td>
