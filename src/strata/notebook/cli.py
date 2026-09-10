@@ -756,9 +756,24 @@ def add_export_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--to",
         dest="output_format",
-        choices=["markdown", "html"],
+        choices=["markdown", "html", "snapshot"],
         default="markdown",
         help="Output format (default: markdown)",
+    )
+    parser.add_argument(
+        "--include",
+        choices=["all", "selected", "none"],
+        default="selected",
+        help=(
+            "snapshot only: whose artifact bytes to carry. 'all' for moving a "
+            "project between machines, 'selected' (with --cells) for a review "
+            "snapshot with the rest by reference, 'none' for description only"
+        ),
+    )
+    parser.add_argument(
+        "--cells",
+        default=None,
+        help="snapshot only: comma-separated cell ids whose artifacts to carry",
     )
     parser.add_argument(
         "--out",
@@ -879,6 +894,46 @@ def import_main(args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
+    """``strata export --to snapshot``: the same bundle the route serves.
+
+    Opened offline rather than through a session manager — the CLI's whole
+    point is working on a notebook directory with no server running — but the
+    members come from :func:`write_snapshot`, so the two cannot describe a
+    notebook differently.
+    """
+    import zipfile
+
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.snapshot import write_snapshot
+
+    out_path = args.output_path
+    if not out_path:
+        print("error: --out is required for a snapshot (it is a zip, not text)", file=sys.stderr)
+        return 2
+
+    session = NotebookSession(parse_notebook(path), path)
+    selected = [c for c in (args.cells or "").split(",") if c]
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in ("notebook.toml", "pyproject.toml", "uv.lock"):
+            member = path / name
+            if member.exists():
+                archive.write(member, name)
+        cells_dir = path / "cells"
+        if cells_dir.is_dir():
+            for cell_file in sorted(cells_dir.glob("*")):
+                if cell_file.is_file():
+                    archive.write(cell_file, f"cells/{cell_file.name}")
+        manifest = write_snapshot(session, archive, include=args.include, selected_cells=selected)
+
+    print(f"Wrote {out_path}")
+    print(f"  {len(manifest['cells'])} cells, {len(manifest['carried'])} artifact(s) carried")
+    if args.include == "selected" and not selected:
+        print("  (no --cells given, so every artifact is by reference)")
+    return 0
+
+
 def export_main(args: argparse.Namespace) -> int:
     """Entry point for ``strata export``.
 
@@ -892,6 +947,9 @@ def export_main(args: argparse.Namespace) -> int:
     if not (path / "notebook.toml").is_file():
         print(f"error: {path} is not a notebook directory (no notebook.toml)", file=sys.stderr)
         return 2
+
+    if args.output_format == "snapshot":
+        return _write_snapshot_bundle(path, args)
 
     options = ExportOptions(
         output_format=ExportFormat(args.output_format),
