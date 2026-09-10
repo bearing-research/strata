@@ -2202,15 +2202,15 @@ The typical loop:</p>
 <td>Run a cell's <code>cells/{id}.test.py</code>.</td>
 </tr>
 <tr>
-<td><code>add_cell(session_id, source, after?, language?)</code></td>
+<td><code>add_cell(session_id, source, after?, language?, author?)</code></td>
 <td>Add a cell (server mints the id).</td>
 </tr>
 <tr>
-<td><code>run_snippet(session_id, source, after?, language?)</code></td>
+<td><code>run_snippet(session_id, source, after?, language?, author?)</code></td>
 <td>Add a cell <strong>and run it</strong> in one call; returns the cell view with the run outcome nested under <code>run</code>. The scratchpad primitive.</td>
 </tr>
 <tr>
-<td><code>edit_cell(session_id, cell_id, source)</code></td>
+<td><code>edit_cell(session_id, cell_id, source, author?)</code></td>
 <td>Replace a cell's source.</td>
 </tr>
 <tr>
@@ -2275,6 +2275,12 @@ The typical loop:</p>
 </tr>
 </tbody>
 </table>
+<p>Pass the same <code>author</code> on every authoring call — your own name or id. It is
+recorded on the cell as <code>created_by</code> / <code>updated_by</code> and shown in the cell view,
+so a person opening the notebook can tell which cells an agent wrote. On a
+server that authenticates its callers the authenticated identity is used
+instead and <code>author</code> is ignored; on a personal server there is nothing to check
+it against, so it is a claim rather than a fact.</p>
 <p><code>promote</code> and <code>publish</code> are different acts. Promoting puts a result where
 colleagues' cells already read from, inside a store that still needs
 credentials; publishing mints a link that needs none and exposes every upstream
