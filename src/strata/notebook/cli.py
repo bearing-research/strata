@@ -906,7 +906,11 @@ def _write_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
 
     from strata.notebook.parser import parse_notebook
     from strata.notebook.session import NotebookSession
-    from strata.notebook.snapshot import write_snapshot
+    from strata.notebook.snapshot import (
+        unknown_selection,
+        write_committed_files,
+        write_snapshot,
+    )
 
     out_path = args.output_path
     if not out_path:
@@ -915,16 +919,12 @@ def _write_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
 
     session = NotebookSession(parse_notebook(path), path)
     selected = [c for c in (args.cells or "").split(",") if c]
+    unknown = unknown_selection(session, selected)
+    if unknown:
+        print(f"error: no such cell(s) in this notebook: {', '.join(unknown)}", file=sys.stderr)
+        return 1
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as archive:
-        for name in ("notebook.toml", "pyproject.toml", "uv.lock"):
-            member = path / name
-            if member.exists():
-                archive.write(member, name)
-        cells_dir = path / "cells"
-        if cells_dir.is_dir():
-            for cell_file in sorted(cells_dir.glob("*")):
-                if cell_file.is_file():
-                    archive.write(cell_file, f"cells/{cell_file.name}")
+        write_committed_files(session, archive)
         manifest = write_snapshot(session, archive, include=args.include, selected_cells=selected)
 
     print(f"Wrote {out_path}")

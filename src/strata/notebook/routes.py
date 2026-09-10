@@ -3483,57 +3483,33 @@ async def export_notebook(
         )
 
     # Default: ZIP bundle.
-    nb_dir = session.path
     buf = io.BytesIO()
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # notebook.toml
-        toml_path = nb_dir / "notebook.toml"
-        if toml_path.exists():
-            zf.write(toml_path, "notebook.toml")
+        # The committed files and provenance.json, from the same helper
+        # `strata export` uses — the two used to glob cells differently and
+        # disagree about whether provenance.json was part of a bundle.
+        from strata.notebook.snapshot import write_committed_files
 
-        # pyproject.toml
-        pyproject_path = nb_dir / "pyproject.toml"
-        if pyproject_path.exists():
-            zf.write(pyproject_path, "pyproject.toml")
+        write_committed_files(session, zf)
 
-        # uv.lock
-        lock_path = nb_dir / "uv.lock"
-        if lock_path.exists():
-            zf.write(lock_path, "uv.lock")
-
-        # Cell source files
-        cells_dir = nb_dir / "cells"
-        if cells_dir.is_dir():
-            for cell_file in sorted(cells_dir.glob("*.py")):
-                zf.write(cell_file, f"cells/{cell_file.name}")
-
-        # provenance.json — DAG + per-cell hashes for reproducibility
-        from strata.notebook.env import compute_lockfile_hash
-        from strata.notebook.provenance import compute_source_hash
-
-        provenance: dict = {
-            "notebook_id": session.notebook_state.id,
-            "lockfile_hash": compute_lockfile_hash(nb_dir),
-            "dag": _format_dag(session),
-            "cells": {},
-        }
-        for cell in session.notebook_state.cells:
-            provenance["cells"][cell.id] = {
-                "source_hash": compute_source_hash(cell.source),
-                "defines": cell.defines,
-                "references": cell.references,
-                "status": cell.status,
-                "artifact_uri": cell.artifact_uri,
-            }
-        zf.writestr("provenance.json", json.dumps(provenance, indent=2))
-
+        selected_cells: list[str] = [c for c in (cells or "").split(",") if c]
         if fmt == "snapshot":
             # Everything the ZIP does not already carry: outputs as files, the
             # per-cell provenance and timings from .strata/runtime.json, the
             # artifact index, and whichever bytes the caller asked for.
-            from strata.notebook.snapshot import IncludeMode, write_snapshot
+            from strata.notebook.snapshot import (
+                IncludeMode,
+                unknown_selection,
+                write_snapshot,
+            )
 
+            unknown = unknown_selection(session, selected_cells)
+            if unknown:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No such cell(s) in this notebook: {', '.join(unknown)}",
+                )
             write_snapshot(
                 session,
                 zf,
@@ -3541,7 +3517,7 @@ async def export_notebook(
                 # refusal can say which they are; a Literal query parameter
                 # would answer 422 with pydantic's phrasing instead.
                 include=cast(IncludeMode, include),
-                selected_cells=[c for c in (cells or "").split(",") if c],
+                selected_cells=selected_cells,
             )
 
     buf.seek(0)

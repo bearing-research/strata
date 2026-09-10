@@ -28,6 +28,10 @@ def session(tmp_path):
     write_cell(nb, "rows", "rows = [1, 2, 3]")
     add_cell_to_notebook(nb, "total", "rows")
     write_cell(nb, "total", "total = sum(rows)")
+    # A non-Python cell, because notebook.toml names its file and a bundle that
+    # globbed only *.py would describe a cell it does not contain.
+    add_cell_to_notebook(nb, "note", "total", language="markdown")
+    write_cell(nb, "note", "# A note")
 
     session = NotebookSession(parse_notebook(nb), nb)
     session.get_artifact_manager().store_cell_output(
@@ -239,3 +243,149 @@ class TestTheCLI:
         )
 
         assert rc == 2
+
+
+class TestEveryCellFileTravels:
+    def test_a_markdown_cell_s_file_is_in_the_bundle(self, session, tmp_path, capsys):
+        """notebook.toml names `note.md`; a bundle that globbed only `*.py`
+        described a cell it did not contain, which no sandbox can be seeded
+        from. Found by review — the original fixture was Python-only, so the
+        superset test passed while the two bundles genuinely differed."""
+        import argparse
+        import zipfile as _zipfile
+
+        from strata.notebook.cli import export_main
+
+        out = tmp_path / "snap.zip"
+        export_main(
+            argparse.Namespace(
+                path=str(session.path),
+                output_format="snapshot",
+                output_path=str(out),
+                include="all",
+                cells=None,
+                include_inactive_variants=False,
+                no_console=False,
+                app_view=False,
+                max_output_bytes=None,
+            )
+        )
+
+        with _zipfile.ZipFile(out) as bundle:
+            assert "cells/note.md" in bundle.namelist()
+
+    def test_the_route_and_the_cli_agree_on_the_members(self, session, tmp_path):
+        """One implementation, asserted rather than claimed. These diverged:
+        the route wrote provenance.json and globbed `*.py`, the CLI wrote no
+        provenance and globbed everything."""
+        import argparse
+        import asyncio
+        import zipfile as _zipfile
+
+        from strata.notebook.cli import export_main
+        from strata.notebook.routes import export_notebook
+
+        async def _collect():
+            response = await export_notebook("nb", session, fmt="snapshot", include="all")
+            chunks = [chunk async for chunk in response.body_iterator]
+            return b"".join(c if isinstance(c, bytes) else c.encode() for c in chunks)
+
+        from_route = set(_zipfile.ZipFile(io.BytesIO(asyncio.run(_collect()))).namelist())
+
+        out = tmp_path / "snap.zip"
+        export_main(
+            argparse.Namespace(
+                path=str(session.path),
+                output_format="snapshot",
+                output_path=str(out),
+                include="all",
+                cells=None,
+                include_inactive_variants=False,
+                no_console=False,
+                app_view=False,
+                max_output_bytes=None,
+            )
+        )
+        with _zipfile.ZipFile(out) as bundle:
+            from_cli = set(bundle.namelist())
+
+        assert from_route == from_cli
+        assert "provenance.json" in from_cli
+
+
+class TestDisplayOutputs:
+    def _with_image(self, session):
+        """A PNG display output as a parsed session actually holds one.
+
+        ``inline_data_url`` is stripped before persistence and the parser
+        rebuilds without it, so a session read from disk has only the
+        ``artifact_uri`` — which is every CLI export and every server restart.
+        """
+        from strata.notebook.models import CellOutput
+
+        manager = session.get_artifact_manager()
+        stored = manager.store_cell_output(
+            cell_id="note",
+            variable_name="__display__0",
+            blob_data=b"\x89PNG\r\n\x1a\nPRETEND",
+            content_type="image/png",
+            provenance_hash="b2" * 32,
+            input_versions={},
+            source="",
+        )
+        cell = session.notebook_state.get_cell("note")
+        cell.display_outputs = [
+            CellOutput(
+                content_type="image/png",
+                bytes=15,
+                artifact_uri=f"strata://artifact/{stored.id}@v={stored.version}",
+            )
+        ]
+        return session
+
+    def test_an_image_is_written_as_a_png(self, session):
+        """Not a JSON stub describing one. The documented layout says
+        `outputs/<cell id>/0.png`, and it has to actually be the bytes."""
+        bundle = _bundle(self._with_image(session))
+
+        assert "outputs/note/0.png" in bundle.namelist()
+        assert bundle.read("outputs/note/0.png").startswith(b"\x89PNG")
+
+    def test_a_table_preview_is_still_described(self, session):
+        """There is no format in which double-clicking a row preview means
+        anything, so those stay JSON."""
+        from strata.notebook.models import CellOutput
+
+        cell = session.notebook_state.get_cell("total")
+        cell.display_outputs = [CellOutput(content_type="json/object", bytes=2, preview=6)]
+
+        bundle = _bundle(session)
+
+        assert json.loads(bundle.read("outputs/total/0.json"))["preview"] == 6
+
+
+class TestASelectionThatNamesNothing:
+    def test_a_mistyped_cell_id_is_refused(self, session):
+        """It used to answer 200 with an empty `carried`, indistinguishable
+        from a selection that legitimately had nothing — and the caller found
+        out when the snapshot turned out to be missing the figure."""
+        import asyncio
+
+        from fastapi import HTTPException
+
+        from strata.notebook.routes import export_notebook
+
+        with pytest.raises(HTTPException) as caught:
+            asyncio.run(
+                export_notebook("nb", session, fmt="snapshot", include="selected", cells="figur")
+            )
+
+        assert caught.value.status_code == 400
+        assert "figur" in caught.value.detail
+
+    def test_a_real_cell_that_produced_nothing_is_still_fine(self, session):
+        """Not every cell has artifacts, and naming one that does not is a
+        legitimate request rather than a typo."""
+        bundle = _bundle(session, include="selected", selected_cells=["total"])
+
+        assert _manifest(bundle)["carried"] == []

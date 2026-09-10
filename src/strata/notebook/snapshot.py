@@ -40,6 +40,52 @@ _OUTPUT_EXTENSIONS = {
 }
 
 
+def write_committed_files(session: NotebookSession, archive: zipfile.ZipFile) -> None:
+    """The committed files and ``provenance.json`` — what every bundle carries.
+
+    Shared so the route and ``strata export`` cannot disagree about what a
+    bundle is. They did: the route wrote ``provenance.json`` and globbed
+    ``cells/*.py``, the CLI wrote no provenance and globbed everything, and a
+    test that called one of them a superset of the other passed only because
+    its fixture happened to be Python-only.
+    """
+    from strata.notebook.env import compute_lockfile_hash
+    from strata.notebook.provenance import compute_source_hash
+
+    # Imported here rather than at module scope: routes imports this module,
+    # so the dependency only points this way inside a call.
+    from strata.notebook.routes import _format_dag
+
+    nb_dir = session.path
+    for name in ("notebook.toml", "pyproject.toml", "uv.lock"):
+        member = nb_dir / name
+        if member.exists():
+            archive.write(member, name)
+
+    cells_dir = nb_dir / "cells"
+    if cells_dir.is_dir():
+        for cell_file in sorted(cells_dir.glob("*")):
+            if cell_file.is_file():
+                archive.write(cell_file, f"cells/{cell_file.name}")
+
+    provenance: dict[str, Any] = {
+        "notebook_id": session.notebook_state.id,
+        "lockfile_hash": compute_lockfile_hash(nb_dir),
+        "dag": _format_dag(session),
+        "cells": {
+            cell.id: {
+                "source_hash": compute_source_hash(cell.source),
+                "defines": cell.defines,
+                "references": cell.references,
+                "status": cell.status.value if hasattr(cell.status, "value") else str(cell.status),
+                "artifact_uri": cell.artifact_uri,
+            }
+            for cell in session.notebook_state.cells
+        },
+    }
+    archive.writestr("provenance.json", json.dumps(provenance, indent=2, default=str))
+
+
 def build_artifact_index(session: NotebookSession) -> dict[str, Any]:
     """What every ready cell produced, named so another store can find it.
 
@@ -91,6 +137,18 @@ def _artifacts_to_carry(
     return {(entry["artifact_id"], entry["version"]) for cell in wanted for entry in index[cell]}
 
 
+def unknown_selection(session: NotebookSession, selected: list[str] | None) -> list[str]:
+    """Cell ids in ``selected`` that this notebook does not have.
+
+    A mistyped id would otherwise produce a 200 and an empty ``carried``,
+    indistinguishable from a selection that legitimately had nothing to carry —
+    and the caller would find out when the snapshot turned out to be missing
+    the figure they meant to attach.
+    """
+    known = {cell.id for cell in session.notebook_state.cells}
+    return [cell_id for cell_id in (selected or []) if cell_id not in known]
+
+
 def write_snapshot(
     session: NotebookSession,
     archive: zipfile.ZipFile,
@@ -108,6 +166,7 @@ def write_snapshot(
     from strata.notebook.writer import load_cell_console_output
 
     nb_dir = session.path
+    store = session.get_artifact_manager().artifact_store
     runtime = load_runtime_state(nb_dir)
     index = build_artifact_index(session)
     carry = _artifacts_to_carry(index, include, selected_cells)
@@ -124,7 +183,7 @@ def write_snapshot(
 
         outputs = []
         for position, output in enumerate(cell.display_outputs or []):
-            name = _write_display_output(archive, cell.id, position, output)
+            name = _write_display_output(archive, store, cell.id, position, output)
             outputs.append(
                 {
                     "file": name,
@@ -143,13 +202,18 @@ def write_snapshot(
         }
 
     written = []
-    store = session.get_artifact_manager().artifact_store
     for artifact_id, version in sorted(carry):
         reader_cm = store.open_blob_reader(artifact_id, version)
         if reader_cm is None:
             continue
-        with reader_cm as reader:
-            archive.writestr(f"artifacts/{artifact_id}@v={version}", reader.read())
+        # Streamed into the member rather than read whole. ``include=all``
+        # exists for moving a project between servers, which is exactly the
+        # case where the artifacts are large — reading each one into memory to
+        # hand to the zip would make the export cost the size of the store.
+        member = f"artifacts/{artifact_id}@v={version}"
+        with reader_cm as reader, archive.open(member, "w") as out:
+            while chunk := reader.read(_BLOB_CHUNK_BYTES):
+                out.write(chunk)
         written.append(f"{artifact_id}@v={version}")
 
     manifest = {
@@ -167,25 +231,76 @@ def write_snapshot(
     return manifest
 
 
-def _write_display_output(archive: zipfile.ZipFile, cell_id: str, position: int, output) -> str:
-    """Write one display output as a file and return its name in the bundle."""
-    extension = _OUTPUT_EXTENSIONS.get(output.content_type, ".json")
-    name = f"outputs/{cell_id}/{position}{extension}"
+# One MiB, matching every other streamed read in the store.
+_BLOB_CHUNK_BYTES = 1024 * 1024
 
+
+def _artifact_ref(uri: str | None) -> tuple[str, int] | None:
+    """``strata://artifact/<id>@v=<n>`` into its parts, or ``None``."""
+    if not uri:
+        return None
+    ref = uri.removeprefix("strata://artifact/")
+    artifact_id, _, version = ref.partition("@v=")
+    if not artifact_id or not version.isdigit():
+        return None
+    return artifact_id, int(version)
+
+
+def _display_bytes(store, output) -> bytes | str | None:
+    """The output's own bytes, from the live value or from the store.
+
+    ``None`` for anything that is not a file in its own right — a table
+    preview or a scalar gets described instead, since there is no format in
+    which double-clicking it would mean anything.
+    """
     if output.inline_data_url and "," in output.inline_data_url:
         from base64 import b64decode
 
-        payload = output.inline_data_url.split(",", 1)[1]
         try:
-            archive.writestr(name, b64decode(payload))
-            return name
+            return b64decode(output.inline_data_url.split(",", 1)[1])
         except ValueError:
-            # A data URL we cannot decode is still worth carrying as what it
-            # is; dropping the output entirely would be the worse answer.
+            # A data URL we cannot decode is no reason to lose the output; fall
+            # through to the artifact, then to the JSON description.
             pass
 
     if output.markdown_text is not None:
-        archive.writestr(name, output.markdown_text)
+        return output.markdown_text
+
+    if output.content_type not in ("image/png", "text/markdown"):
+        return None
+
+    ref = _artifact_ref(output.artifact_uri)
+    if ref is None:
+        return None
+    reader_cm = store.open_blob_reader(*ref)
+    if reader_cm is None:
+        return None
+    with reader_cm as reader:
+        blob = reader.read()
+    if output.content_type == "text/markdown":
+        return blob.decode("utf-8", errors="replace")
+    return blob
+
+
+def _write_display_output(
+    archive: zipfile.ZipFile, store, cell_id: str, position: int, output
+) -> str:
+    """Write one display output as a file and return its name in the bundle.
+
+    An image or a markdown output is written as itself — a ``.png`` a reader
+    can open, not a JSON stub describing one. That takes the store, because
+    ``inline_data_url`` and ``markdown_text`` are transient: the writer strips
+    both before persisting to ``runtime.json`` and the parser rebuilds the
+    output without them, so any session read from disk — always the CLI, and
+    the server after a restart — holds only the ``artifact_uri`` and has to
+    fetch the bytes back.
+    """
+    extension = _OUTPUT_EXTENSIONS.get(output.content_type, ".json")
+    name = f"outputs/{cell_id}/{position}{extension}"
+
+    payload = _display_bytes(store, output)
+    if payload is not None:
+        archive.writestr(name, payload)
         return name
 
     name = f"outputs/{cell_id}/{position}.json"
