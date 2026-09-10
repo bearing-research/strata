@@ -253,6 +253,8 @@ def parse_notebook(directory: Path) -> NotebookState:
                 test_result=test_result,
                 language=cell_meta.language,
                 order=cell_meta.order,
+                created_by=cell_meta.created_by,
+                updated_by=cell_meta.updated_by,
                 worker=resolved_worker,
                 worker_override=cell_meta.worker,
                 timeout=resolved_timeout,

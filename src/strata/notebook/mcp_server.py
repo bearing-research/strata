@@ -225,10 +225,13 @@ async def _add_cell(
     source: str,
     after: str | None = None,
     language: str = "python",
+    author: str | None = None,
 ) -> dict[str, Any]:
     """Add a new cell (backend-minted id), then sync + broadcast the new state."""
     session = _live_session(session_manager, session_id)
-    view = LocalNotebookOps.from_session(session).add_cell(source, after=after, language=language)
+    view = LocalNotebookOps.from_session(session, author=author).add_cell(
+        source, after=after, language=language
+    )
     await _sync_and_broadcast(session_id, session)
     await _agent_note(session_id, "mcp", f"added {language} cell {view.id}")
     return view.model_dump(mode="json")
@@ -240,6 +243,7 @@ async def _run_snippet(
     source: str,
     after: str | None = None,
     language: str = "python",
+    author: str | None = None,
 ) -> dict[str, Any]:
     """Add a cell and immediately run it — the one-call scratchpad primitive.
 
@@ -247,7 +251,7 @@ async def _run_snippet(
     live frames a spectator sees. Returns the new cell view with the run result
     nested under ``run``.
     """
-    view = await _add_cell(session_manager, session_id, source, after, language)
+    view = await _add_cell(session_manager, session_id, source, after, language, author)
     run = await _run_cell(session_manager, session_id, view["id"], "normal")
     # Re-fetch the post-run cell so the returned view carries its rendered outputs
     # (a trailing bare expression's value), not just stdout — the view from
@@ -258,11 +262,15 @@ async def _run_snippet(
 
 
 async def _edit_cell(
-    session_manager: SessionManager, session_id: str, cell_id: str, source: str
+    session_manager: SessionManager,
+    session_id: str,
+    cell_id: str,
+    source: str,
+    author: str | None = None,
 ) -> dict[str, Any]:
     """Replace a cell's source, then sync + broadcast the new state."""
     session = _live_session(session_manager, session_id)
-    view = LocalNotebookOps.from_session(session).edit_cell(cell_id, source)
+    view = LocalNotebookOps.from_session(session, author=author).edit_cell(cell_id, source)
     await _sync_and_broadcast(session_id, session)
     await _agent_note(session_id, "mcp", f"edited cell {cell_id}")
     return view.model_dump(mode="json")
@@ -718,14 +726,20 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         source: str,
         after: str | None = None,
         language: str = "python",
+        author: str | None = None,
     ) -> dict[str, Any]:
         """Add a new cell and return it (the server mints the cell id).
 
         ``after`` inserts the cell after that cell id (omit to append at the
         end). ``language`` is one of python, markdown, sql, r, prompt. The new
         cell appears live in any attached viewer.
+
+        ``author`` names you on the cell, so a person opening the notebook can
+        tell which cells an agent wrote. Send the same value on every call —
+        your own name or id. On a server that authenticates its callers the
+        authenticated identity is used instead and this is ignored.
         """
-        return await _add_cell(session_manager, session_id, source, after, language)
+        return await _add_cell(session_manager, session_id, source, after, language, author)
 
     @mcp.tool()
     async def run_snippet(
@@ -733,6 +747,7 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         source: str,
         after: str | None = None,
         language: str = "python",
+        author: str | None = None,
     ) -> dict[str, Any]:
         """Add a cell and run it in one call — the scratchpad primitive.
 
@@ -742,17 +757,29 @@ def build_mcp_app(session_manager: SessionManager) -> Starlette | None:
         cache_hit, stdout, stderr) nested under ``run``. The run appears live in
         any attached viewer. Use ``add_cell`` without a run only when you want to
         stage a cell without executing it.
+
+        ``author`` names you on the cell, so a person opening the notebook can
+        tell which cells an agent wrote. Send the same value on every call —
+        your own name or id. On a server that authenticates its callers the
+        authenticated identity is used instead and this is ignored.
         """
-        return await _run_snippet(session_manager, session_id, source, after, language)
+        return await _run_snippet(session_manager, session_id, source, after, language, author)
 
     @mcp.tool()
-    async def edit_cell(session_id: str, cell_id: str, source: str) -> dict[str, Any]:
+    async def edit_cell(
+        session_id: str, cell_id: str, source: str, author: str | None = None
+    ) -> dict[str, Any]:
         """Replace a cell's source and return the updated cell.
 
         Downstream cells that consumed the old output become stale; use status /
         run_cell to re-materialize them.
+
+        ``author`` names you on the cell, so a person opening the notebook can
+        tell which cells an agent wrote. Send the same value on every call —
+        your own name or id. On a server that authenticates its callers the
+        authenticated identity is used instead and this is ignored.
         """
-        return await _edit_cell(session_manager, session_id, cell_id, source)
+        return await _edit_cell(session_manager, session_id, cell_id, source, author)
 
     @mcp.tool()
     async def remove_cell(session_id: str, cell_id: str) -> dict[str, Any]:

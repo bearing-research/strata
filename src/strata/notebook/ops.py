@@ -93,6 +93,10 @@ class CellView(BaseModel):
     console_stdout: str
     console_stderr: str
     test: CellTestView | None = None
+    # Who wrote it. Empty for every cell added before authorship was recorded,
+    # and on a personal server where the client declared nothing.
+    created_by: str = ""
+    updated_by: str = ""
 
 
 class DagEdgeView(BaseModel):
@@ -427,18 +431,23 @@ class LocalNotebookOps:
         Path to a notebook directory (must contain ``notebook.toml``).
     """
 
-    def __init__(self, notebook_dir: Path) -> None:
+    def __init__(self, notebook_dir: Path, author: str | None = None) -> None:
         # Lazy heavy imports so ``--help`` / path errors stay cheap.
+        from strata.notebook.authorship import resolve_author
         from strata.notebook.parser import parse_notebook
         from strata.notebook.session import NotebookSession
 
         self.notebook_dir = notebook_dir
+        # Who edits made through this handle are credited to. Resolved once:
+        # one handle is one caller, and a caller that could change identity
+        # between two edits is not a caller anyone can attribute.
+        self.author = resolve_author(author)
         state = parse_notebook(notebook_dir)
         self._session = NotebookSession(state, notebook_dir)
         self._executor: object | None = None
 
     @classmethod
-    def from_session(cls, session: NotebookSession) -> LocalNotebookOps:
+    def from_session(cls, session: NotebookSession, author: str | None = None) -> LocalNotebookOps:
         """Wrap an already-open ``NotebookSession`` instead of opening a new one.
 
         The CLI constructs one offline session per invocation; the in-process
@@ -450,9 +459,15 @@ class LocalNotebookOps:
         ----------
         session : NotebookSession
             An open session, typically from the server's ``SessionManager``.
+        author : str | None
+            Who to credit for edits made through this handle. An MCP client
+            sends its own name; the browser sends none and gets ``local``.
         """
+        from strata.notebook.authorship import resolve_author
+
         ops = cls.__new__(cls)
         ops.notebook_dir = session.path
+        ops.author = resolve_author(author)
         ops._session = session
         ops._executor = None
         return ops
@@ -596,8 +611,10 @@ class LocalNotebookOps:
         if after is not None and self._session.notebook_state.get_cell(after) is None:
             raise NotebookOpsError(f"no cell with id {after!r} to insert after")
         cell_id = str(uuid.uuid4())[:8]
-        add_cell_to_notebook(self.notebook_dir, cell_id, after, language=language)
-        write_cell(self.notebook_dir, cell_id, source)
+        add_cell_to_notebook(
+            self.notebook_dir, cell_id, after, language=language, author=self.author
+        )
+        write_cell(self.notebook_dir, cell_id, source, author=self.author)
         self._reload()
         return self.get_cell(cell_id)
 
@@ -607,7 +624,7 @@ class LocalNotebookOps:
 
         if self._session.notebook_state.get_cell(cell_id) is None:
             raise NotebookOpsError(f"no cell with id {cell_id!r}")
-        write_cell(self.notebook_dir, cell_id, source)
+        write_cell(self.notebook_dir, cell_id, source, author=self.author)
         self._reload()
         return self.get_cell(cell_id)
 
@@ -1166,6 +1183,8 @@ def _cell_view_from_wire(data: dict[str, Any]) -> CellView:
         console_stdout=data.get("console_stdout") or "",
         console_stderr=data.get("console_stderr") or "",
         test=_test_view_from_wire(test) if test else None,
+        created_by=data.get("created_by") or "",
+        updated_by=data.get("updated_by") or "",
     )
 
 

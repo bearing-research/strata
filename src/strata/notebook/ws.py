@@ -20,6 +20,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from strata.notebook import console_relay
 from strata.notebook.annotations import parse_annotations
+from strata.notebook.authorship import resolve_author
 from strata.notebook.cascade import CascadePlanner
 from strata.notebook.causality import skip_none
 from strata.notebook.executor import (
@@ -1642,6 +1643,10 @@ async def _handle_cell_source_update(
     """
     cell_id = payload.get("cell_id")
     source = payload.get("source")
+    # The browser sends none and gets ``local``; ``strata agent`` and an
+    # external MCP client send their own name, which is how an agent's edits
+    # stay distinguishable on a server that authenticates nobody.
+    author = resolve_author(payload.get("author"))
 
     if not cell_id or source is None:
         await websocket.send_text(
@@ -1700,7 +1705,7 @@ async def _handle_cell_source_update(
 
     try:
         # Write to disk
-        write_cell(session.path, cell_id, source)
+        write_cell(session.path, cell_id, source, author=author)
 
         # Update source in session (must happen before re-analysis)
         cell_in_session = session.notebook_state.get_cell(cell_id)

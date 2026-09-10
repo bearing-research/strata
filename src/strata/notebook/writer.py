@@ -284,13 +284,20 @@ def _sanitize_display_outputs_for_toml(
     return persisted_outputs
 
 
-def write_cell(notebook_dir: Path, cell_id: str, source: str) -> None:
+def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None = None) -> None:
     """Write cell source to disk.
 
     Args:
         notebook_dir: Path to notebook directory
         cell_id: Cell ID
         source: Cell source code
+        author: Who is making the edit. Recorded on the cell **only when it
+            differs from what is already there**, so a person editing their own
+            cell all afternoon writes ``notebook.toml`` exactly zero times and
+            the first edit by someone else writes it once. Source updates are
+            otherwise a runtime concern that never touches committed config,
+            and this must not turn every debounced flush into a commit-worthy
+            diff.
 
     Raises:
         ValueError: If cell not found in notebook.toml
@@ -323,6 +330,11 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str) -> None:
 
     with open(cell_file, "w", encoding="utf-8") as f:
         f.write(source)
+
+    if author and cell_meta.get("updated_by") != author:
+        cell_meta["updated_by"] = author
+        toml_data["cells"] = cells_data
+        _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
 def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None:
@@ -882,6 +894,7 @@ def add_cell_to_notebook(
     cell_id: str,
     after_cell_id: str | None = None,
     language: str = "python",
+    author: str | None = None,
 ) -> None:
     """Add a new cell to the notebook.
 
@@ -890,6 +903,9 @@ def add_cell_to_notebook(
         cell_id: New cell ID
         after_cell_id: Cell ID to add after (None = at end)
         language: Cell language ("python", "prompt", "markdown", or "sql")
+        author: Who is adding it. ``None`` records nobody, which is what every
+            cell added before this has and what a caller with no opinion should
+            leave alone.
     """
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
@@ -940,14 +956,19 @@ def add_cell_to_notebook(
         f.write(starter_source)
 
     # Add to cells list
-    cells_data.append(
-        {
-            "id": cell_id,
-            "file": cell_filename,
-            "language": language,
-            "order": order,
-        }
-    )
+    entry = {
+        "id": cell_id,
+        "file": cell_filename,
+        "language": language,
+        "order": order,
+    }
+    if author:
+        # Both, not just created_by: a cell that has been added and not yet
+        # edited was last changed by whoever added it, and leaving updated_by
+        # empty would make the view read as though nobody had touched it.
+        entry["created_by"] = author
+        entry["updated_by"] = author
+    cells_data.append(entry)
 
     # Re-sort cells by order
     cells_data.sort(key=lambda c: c.get("order", 0))

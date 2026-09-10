@@ -64,9 +64,9 @@ The typical loop:
 | `status(session_id)` | Per-cell status + staleness summary. |
 | `run_cell(session_id, cell_id, mode)` | Execute a cell (`normal` / `rerun` / `force`), broadcast live. |
 | `run_tests(session_id, cell_id)` | Run a cell's `cells/{id}.test.py`. |
-| `add_cell(session_id, source, after?, language?)` | Add a cell (server mints the id). |
-| `run_snippet(session_id, source, after?, language?)` | Add a cell **and run it** in one call; returns the cell view with the run outcome nested under `run`. The scratchpad primitive. |
-| `edit_cell(session_id, cell_id, source)` | Replace a cell's source. |
+| `add_cell(session_id, source, after?, language?, author?)` | Add a cell (server mints the id). |
+| `run_snippet(session_id, source, after?, language?, author?)` | Add a cell **and run it** in one call; returns the cell view with the run outcome nested under `run`. The scratchpad primitive. |
+| `edit_cell(session_id, cell_id, source, author?)` | Replace a cell's source. |
 | `remove_cell(session_id, cell_id)` | Delete a cell and its files. |
 | `move_cell(session_id, cell_id, index)` | Reorder a cell. |
 | `add_dependency(session_id, package)` | `uv add` a dependency. |
@@ -82,6 +82,13 @@ The typical loop:
 | `promote(session_id, cell_id, variable, name, alias?, tags?)` | Copy the output **and everything behind it** into the team's store, under a name colleagues can ask for. Mints no public link. A protected alias comes back `pending`. Needs `STRATA_NOTEBOOK_REMOTE_STORE_URL`. |
 | `publish_preflight(session_id, cell_id, variable)` | What publishing would expose - the whole chain, step by step. Read this to the user before `publish`. |
 | `publish(session_id, cell_id, variable, title?)` | Mint a URL that needs no credentials. Copies the chain into the store the link resolves from first. |
+
+Pass the same `author` on every authoring call — your own name or id. It is
+recorded on the cell as `created_by` / `updated_by` and shown in the cell view,
+so a person opening the notebook can tell which cells an agent wrote. On a
+server that authenticates its callers the authenticated identity is used
+instead and `author` is ignored; on a personal server there is nothing to check
+it against, so it is a claim rather than a fact.
 
 `promote` and `publish` are different acts. Promoting puts a result where
 colleagues' cells already read from, inside a store that still needs
