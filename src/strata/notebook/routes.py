@@ -21,6 +21,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from strata.notebook.authorship import MAX_AUTHOR_LENGTH, resolve_author
 from strata.notebook.dependencies import (
     export_requirements_text,
     list_dependencies,
@@ -624,6 +625,7 @@ class UpdateCellSourceRequest(BaseModel):
     """Request to update cell source."""
 
     source: str = Field(..., max_length=1_000_000)  # 1M characters (~1-4 MB UTF-8)
+    author: str | None = Field(default=None, max_length=MAX_AUTHOR_LENGTH)
 
 
 class UpdateCellTestsRequest(BaseModel):
@@ -637,6 +639,10 @@ class AddCellRequest(BaseModel):
 
     after_cell_id: str | None = None
     language: CellLanguage = CellLanguage.PYTHON
+    # Who to credit, when the caller is not authenticated. Ignored in service
+    # mode, where the principal is the answer and a self-declared name would be
+    # a claim rather than a presentation.
+    author: str | None = Field(default=None, max_length=MAX_AUTHOR_LENGTH)
 
 
 class MountConfigRequest(BaseModel):
@@ -1910,7 +1916,7 @@ async def update_cell_source(
 
     try:
         # Write to disk
-        write_cell(session.path, cell_id, req.source)
+        write_cell(session.path, cell_id, req.source, author=resolve_author(req.author))
 
         # Update source in session
         cell_in_session = session.notebook_state.get_cell(cell_id)
@@ -2598,6 +2604,7 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
             cell_id,
             req.after_cell_id,
             language=req.language,
+            author=resolve_author(req.author),
         )
 
         # Reload notebook state

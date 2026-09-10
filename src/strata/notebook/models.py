@@ -377,6 +377,19 @@ class CellMeta(BaseModel):
         default_factory=list,
         description="Cell-level mount overrides (supplement/override notebook-level mounts)",
     )
+    created_by: str | None = Field(
+        default=None,
+        description=(
+            "Who added this cell: a principal in service mode, else the author the client declared"
+        ),
+    )
+    updated_by: str | None = Field(
+        default=None,
+        description=(
+            "Who last changed it. Rewritten only when the author changes, so "
+            "editing your own cell never churns notebook.toml"
+        ),
+    )
 
 
 class NotebookToml(BaseModel):
@@ -558,6 +571,8 @@ class CellState(BaseModel):
     )
     language: CellLanguage = Field(default=CellLanguage.PYTHON, description="Programming language")
     order: float = Field(default=0, description="Display order in notebook")
+    created_by: str | None = Field(default=None, description="Who added this cell")
+    updated_by: str | None = Field(default=None, description="Who last changed it")
     status: CellStatus = Field(
         default=CellStatus.IDLE,
         description="Execution status",
