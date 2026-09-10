@@ -405,6 +405,10 @@ def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
                 "order": cell.order,
                 **({"worker": cell.worker} if cell.worker is not None else {}),
                 **({"timeout": cell.timeout} if cell.timeout is not None else {}),
+                # Rebuilt field by field, so anything omitted here is erased on
+                # round-trip rather than merely unwritten.
+                **({"created_by": cell.created_by} if cell.created_by else {}),
+                **({"updated_by": cell.updated_by} if cell.updated_by else {}),
                 **(
                     {"env": _serialize_env(cell.env)}
                     if cell.env and _env_has_meaningful_content(cell.env)

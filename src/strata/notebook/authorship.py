@@ -22,6 +22,11 @@ from __future__ import annotations
 # so the useful distinction there is not *which* human but human-versus-agent.
 LOCAL_AUTHOR = "local"
 
+# What the built-in assistant writes. Not a name — one server's assistant is
+# every user's assistant — but the human/agent distinction is the one a person
+# opening the notebook actually wants.
+ASSISTANT_AUTHOR = "assistant"
+
 # Bounded because it is written into committed config from an unauthenticated
 # claim. Long enough for `agent:<id>/<sub>`, short enough not to be a payload.
 MAX_AUTHOR_LENGTH = 128

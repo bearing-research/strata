@@ -1916,12 +1916,16 @@ async def update_cell_source(
 
     try:
         # Write to disk
-        write_cell(session.path, cell_id, req.source, author=resolve_author(req.author))
+        author = resolve_author(req.author)
+        write_cell(session.path, cell_id, req.source, author=author)
 
         # Update source in session
         cell_in_session = session.notebook_state.get_cell(cell_id)
         if cell_in_session:
             cell_in_session.source = req.source
+            # The disk knows who edited it; so must the session, or every read
+            # until the next reload reports the previous author.
+            cell_in_session.updated_by = author
 
         # Re-analyze just this cell and rebuild DAG
         session.re_analyze_cell(cell_id)

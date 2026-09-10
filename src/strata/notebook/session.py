@@ -463,11 +463,15 @@ class NotebookSession:
         new_cell_id = uuid.uuid4().hex[:8]
         last_member_cell_id = resolved.members[-1].cell_id
 
+        # A new variant is a copy of the active one, so it inherits its
+        # authorship: the person or agent whose cell was cloned wrote what the
+        # clone contains, and attributing it to nobody would lose that.
         add_cell_to_notebook(
             self.path,
             new_cell_id,
             after_cell_id=last_member_cell_id,
             language=active_cell.language,
+            author=active_cell.updated_by or active_cell.created_by,
         )
         new_source = _rewrite_variant_annotation(active_cell.source, group, new_name)
         write_cell(self.path, new_cell_id, new_source)

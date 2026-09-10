@@ -1711,6 +1711,9 @@ async def _handle_cell_source_update(
         cell_in_session = session.notebook_state.get_cell(cell_id)
         if cell_in_session:
             cell_in_session.source = source
+            # Otherwise every broadcast until the next reload names the
+            # previous author, which is worse than naming nobody.
+            cell_in_session.updated_by = author
 
         # Re-analyze cell and rebuild DAG
         session.re_analyze_cell(cell_id)
