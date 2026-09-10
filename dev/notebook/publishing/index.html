@@ -2402,11 +2402,24 @@ paper outlives most servers, so there is a second form:</p>
 </code></pre></div>
 <p>Deposit the directory with Zenodo or OSF and cite the DOI. The archive's
 retention promise then stands behind the link instead of yours.</p>
+<p>A published artifact serves the same bundle as a zip:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>curl<span class="w"> </span>-O<span class="w"> </span>-J<span class="w"> </span>https://your-server/p/&lt;token&gt;/archive.zip
+</code></pre></div>
+<p>Same files, same code — the route and the command build the bundle from one
+implementation, because two implementations of a set of files that describe
+each other would drift and neither would stop producing a bundle. The response
+carries a <code>Content-Digest</code> of the zip. A withdrawn publication refuses here as
+it does for the bytes: the page still resolves and says "withdrawn", since a
+reader chasing a footnote deserves that answer, but handing over the archive
+anyway would undo the withdrawal.</p>
+<p>It needs no credentials, like the page, and contains nothing the page does not
+already show — the artifact's own bytes and the chain as rendered. Upstream
+bytes stay where they are.</p>
 <p>The page is the same document as the hosted one, with one difference: it points
 at the file beside it rather than at routes, and it tells the reader how to
 check the bytes themselves:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>sha256sum artifact.png
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a># 6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>sha256sum artifact.png
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a># 6803c74b80937b56ed0eb28f86995fbbe9559167ac6ce089525a1615afb0c6ca
 </code></pre></div>
 <p>Archiving is not publishing. It grants nobody access to a running server and
 mints no link — it writes files you choose who to hand to.</p>
