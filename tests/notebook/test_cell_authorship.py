@@ -143,3 +143,55 @@ class TestItReachesTheView:
         assert view["created_by"] == "agent:claude/sub"
         assert view["updated_by"] == "agent:claude/sub"
         assert _cells(nb)[view["id"]]["created_by"] == "agent:claude/sub"
+
+
+class TestTheBuiltInAssistant:
+    """The feature's stated purpose is telling agent cells from human ones, so
+    the assistant writing anonymously defeated it on the one surface a person
+    is most likely to be watching."""
+
+    def test_a_cell_it_creates_says_so(self, notebook, monkeypatch):
+        from strata.notebook.authorship import ASSISTANT_AUTHOR
+
+        add_cell_to_notebook(notebook, "c1", None, author=ASSISTANT_AUTHOR)
+
+        assert _cells(notebook)["c1"]["created_by"] == "assistant"
+
+    def test_it_takes_over_updated_by_when_it_edits_a_human_cell(self, notebook):
+        """Editing with no author leaves the previous one, so an assistant that
+        passed nothing would rewrite a person's cell and still name the person."""
+        from strata.notebook.authorship import ASSISTANT_AUTHOR
+
+        add_cell_to_notebook(notebook, "c1", None, author="local")
+
+        write_cell(notebook, "c1", "x = 1", author=ASSISTANT_AUTHOR)
+
+        cell = _cells(notebook)["c1"]
+        assert cell["created_by"] == "local"
+        assert cell["updated_by"] == "assistant"
+
+
+class TestRoundTrip:
+    def test_write_notebook_toml_keeps_the_fields(self, notebook):
+        """It rebuilds each cell entry field by field, so anything not listed
+        is erased rather than merely unwritten — a landmine for the next
+        caller, since only create_notebook reaches it today."""
+        from strata.notebook.models import CellMeta, NotebookToml
+        from strata.notebook.writer import write_notebook_toml
+
+        add_cell_to_notebook(notebook, "c1", None, author="agent:claude")
+
+        with open(notebook / "notebook.toml", "rb") as f:
+            raw = tomllib.load(f)
+        round_tripped = NotebookToml(
+            notebook_id=raw["notebook_id"],
+            name=raw["name"],
+            created_at=raw["created_at"],
+            updated_at=raw["updated_at"],
+            cells=[CellMeta(**c) for c in raw["cells"]],
+        )
+        write_notebook_toml(notebook, round_tripped)
+
+        cell = _cells(notebook)["c1"]
+        assert cell["created_by"] == "agent:claude"
+        assert cell["updated_by"] == "agent:claude"
