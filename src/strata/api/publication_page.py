@@ -31,7 +31,9 @@ main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
 h1 { font-size: 1.5rem; margin: 0 0 .35rem; }
 h2 { font-size: 1rem; margin: 2.25rem 0 .75rem; letter-spacing:.02em;
      text-transform: uppercase; color: var(--muted); }
-.sub { color: var(--muted); margin: 0 0 2rem; }
+.sub { color: var(--muted); margin: 0 0 0.5rem; }
+.sub .affil { color: var(--muted); font-size: 0.9em; }
+.cite { color: var(--muted); margin: 0 0 2rem; font-size: 0.95em; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:10px;
         padding:1rem 1.15rem; margin-bottom:1rem; }
 pre { background:var(--code); border:1px solid var(--line); border-radius:8px;
@@ -54,6 +56,60 @@ a { color:var(--accent); }
 .snippet:last-child { margin-bottom:0; }
 .snippet p { margin:0 0 .3rem; font-size:13px; color:var(--muted); }
 """
+
+
+_ID_LINKS = {
+    "doi": "https://doi.org/{}",
+    "arxiv": "https://arxiv.org/abs/{}",
+    "zenodo": "https://zenodo.org/record/{}",
+    "url": "{}",
+}
+
+
+def _byline(publication) -> str:
+    """ " by A, B and C", or the grant-maker when no authors were declared.
+
+    Author order is meaningful, so it is preserved rather than sorted, and an
+    ORCID becomes a link because that is the only form in which a name on a
+    page disambiguates one researcher from another.
+    """
+    if not publication.authors:
+        return f" by {escape(publication.published_by)}" if publication.published_by else ""
+
+    rendered: list[str] = []
+    for author in publication.authors:
+        name = escape(author["name"])
+        orcid = author.get("orcid")
+        if orcid:
+            url = f"https://orcid.org/{escape(orcid, quote=True)}"
+            name = f"<a href='{url}' rel='noopener'>{name}</a>"
+        affiliation = author.get("affiliation")
+        if affiliation:
+            name += f" <span class='affil'>({escape(affiliation)})</span>"
+        rendered.append(name)
+
+    if len(rendered) == 1:
+        return f" by {rendered[0]}"
+    return f" by {', '.join(rendered[:-1])} and {rendered[-1]}"
+
+
+def _citation_line(publication) -> str:
+    """The identifiers a reader cites this by, as links they can follow.
+
+    Empty when there are none: a citation line saying nothing is worse than no
+    citation line, because a reader reads it as "there is no DOI for this" when
+    the truth is that nobody has recorded one yet.
+    """
+    if not publication.external_ids:
+        return ""
+    links = []
+    for entry in publication.external_ids:
+        value = entry["value"]
+        template = _ID_LINKS.get(entry["scheme"], "{}")
+        url = value if value.startswith("http") else template.format(value)
+        label = value if entry["scheme"] == "url" else f"{entry['scheme'].upper()} {value}"
+        links.append(f"<a href='{escape(url, quote=True)}' rel='noopener'>{escape(label)}</a>")
+    return f"<p class='cite'>Cite as {' · '.join(links)}</p>"
 
 
 def _when(ts: float | None) -> str:
@@ -128,9 +184,8 @@ def render_publication(
     parts: list[str] = [
         f"<h1>{escape(title)}</h1>",
         f"<p class='sub'>{'Archived' if bundle_filename else 'Published'} "
-        f"{escape(_when(publication.published_at))}"
-        + (f" by {escape(publication.published_by)}" if publication.published_by else "")
-        + ".</p>",
+        f"{escape(_when(publication.published_at))}" + _byline(publication) + ".</p>",
+        _citation_line(publication),
         "<div class='banner'><strong>What this page shows.</strong> The code, "
         "inputs and environment recorded when these bytes were produced, and "
         "the chain of steps behind them. It does <em>not</em> claim the result "
@@ -387,6 +442,8 @@ def build_record(
         {
             "archived_at": publication.published_at,
             "archived_by": publication.published_by,
+            "authors": [dict(a) for a in publication.authors],
+            "external_ids": [dict(e) for e in publication.external_ids],
         }
         if archived
         else {
@@ -394,6 +451,8 @@ def build_record(
             "published_at": publication.published_at,
             "published_by": publication.published_by,
             "revoked_at": publication.revoked_at,
+            "authors": [dict(a) for a in publication.authors],
+            "external_ids": [dict(e) for e in publication.external_ids],
         }
     )
     return {

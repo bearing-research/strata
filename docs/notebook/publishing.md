@@ -257,12 +257,53 @@ authenticated identity to record, so that row usually reads "not recorded".
 not the same as the store attesting who produced it, and the page keeps them
 apart deliberately.
 
+**Who wrote the work** is a third thing, and a list rather than a string:
+authors have an order, an affiliation, and an ORCID that distinguishes one
+researcher from another. Pass them when publishing over HTTP:
+
+```json
+POST /v1/artifacts/fig/v/1/publish
+{
+  "title": "Figure 3",
+  "authors": [
+    {"name": "F. Li", "orcid": "0000-0002-1825-0097", "affiliation": "Somewhere"},
+    {"name": "B. Second"}
+  ]
+}
+```
+
+The byline then lists them in the order given, each ORCID as a link. Publishing
+without authors leaves `published_by` as the byline, so nothing published
+before this changes meaning.
+
+## Citing it: DOIs and other identifiers
+
+A DOI is registered against a deposit that already has to be reachable, so it
+almost always arrives *after* the token does:
+
+```json
+PATCH /v1/publications/{token}
+{"external_ids": [{"scheme": "doi", "value": "10.5281/zenodo.1234567"}]}
+```
+
+Schemes are `doi`, `zenodo`, `arxiv` and `url`; anything else is refused, since
+a record that accepted arbitrary scheme names would produce citation lines
+nobody can follow. The page grows a "Cite as" line of resolvable links, the
+JSON record and the archive `manifest.json` carry the entries, and the
+RO-Crate's root dataset gets the DOI as its `identifier` — which is what an
+ingesting repository indexes on.
+
+The patch cannot repoint the token. `artifact_id` and `version` are not fields
+of the request, because a citation whose target could change under the reader
+would be worthless.
+
 ## HTTP
 
 | Route | Auth | Purpose |
 | --- | --- | --- |
 | `POST /v1/artifacts/{id}/v/{n}/publish` | yes (`artifacts:publish`) | Mint a link. Idempotent — republishing returns the existing token. |
 | `DELETE /v1/publications/{token}` | yes (`artifacts:publish`) | Withdraw. |
+| `PATCH /v1/publications/{token}` | yes (`artifacts:publish`) | Set authors and external identifiers. Cannot change what the token points at. |
 | `GET /v1/publications` | yes | List this tenant's live links. |
 | `GET /p/{token}` | **no** | The page. |
 | `GET /p/{token}/data` | **no** | The published bytes. |

@@ -180,6 +180,7 @@ EXPECTED_ROUTES = [
     ("/v1/publications", "GET", 0),
     ("/v1/publications/{token}", "DELETE", 1),
     ("/v1/publications/{token}", "GET", 0),
+    ("/v1/publications/{token}", "PATCH", 1),
     ("/v1/registry/artifacts", "GET", 0),
     ("/v1/registry/audit", "GET", 0),
     ("/v1/registry/pending", "GET", 0),
