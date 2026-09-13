@@ -513,6 +513,36 @@ def test_team_attribution_survives_a_restart(tmp_path: Path):
     assert summary["team_contributors"] == ["carol"]
 
 
+def test_the_promotions_behind_team_hits_are_listed_and_survive_a_restart(tmp_path: Path):
+    """Which shared results a notebook drew on, when someone promoted them."""
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+    notebook_dir = create_notebook(tmp_path, "Promoted", initialize_environment=False)
+    add_cell_to_notebook(notebook_dir, "c1")
+    write_cell(notebook_dir, "c1", "x = 1")
+    add_cell_to_notebook(notebook_dir, "c2", "c1")
+    write_cell(notebook_dir, "c2", "y = 2")
+
+    first = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    first.record_execution(
+        "c1",
+        duration_ms=4.0,
+        cache_hit=True,
+        from_team=True,
+        team_principal="carol",
+        team_promotion="taxi/model",
+    )
+    # A hit on something a cache publish offered names no promotion.
+    first.record_execution(
+        "c2", duration_ms=3.0, cache_hit=True, from_team=True, team_principal="dan"
+    )
+
+    restarted = NotebookSession(parse_notebook(notebook_dir), notebook_dir)
+    assert restarted.get_profiling_summary()["team_promotions"] == ["taxi/model"]
+
+
 def test_a_solo_notebook_records_no_team_keys(tmp_path: Path):
     """The runtime file is rewritten on every execution, so two dead keys per
     sample is a cost every solo notebook would pay forever."""

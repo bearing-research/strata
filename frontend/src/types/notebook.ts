@@ -749,6 +749,8 @@ export interface ProfilingSummary {
   teamCacheHits: number
   /** Who published the results this notebook was served. */
   teamContributors: string[]
+  /** The promotions that put those results in the team store, when any did. */
+  teamPromotions: string[]
   totalArtifactBytes: number
   cellProfiles: CellProfile[]
 }

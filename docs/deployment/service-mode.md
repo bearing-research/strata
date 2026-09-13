@@ -447,7 +447,11 @@ strata artifact promote nb_taxi_cell_c2_var_model \
 The chain travels with it, and has to. The cache is keyed by provenance, so
 each ancestor that arrives is a hit for the next person whose cell computes the
 same thing - promoting the result alone would share the answer and none of the
-work. A protected alias (`registry_protected_aliases`) queues for approval
+work. Each row the promotion writes is stamped with its name (an `nb_promotion`
+tag, kept out of the registry's tag lists), so a colleague's hit on any of it
+says which promotion it came from: their profiling panel lists it under "Via
+promotions". A row the store already held, from a cache publish or an earlier
+promotion, keeps whatever it had. A protected alias (`registry_protected_aliases`) queues for approval
 rather than moving, and the command says so.
 
 The Registry tab and the per-cell strip describe that store too. They read the

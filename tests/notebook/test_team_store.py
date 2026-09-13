@@ -292,6 +292,8 @@ async def test_a_teammates_result_is_served_instead_of_running_the_cell(
         row_count=0,
         byte_size=len(alice_blob),
     )
+    # She shared it on purpose: it arrived as part of a promotion.
+    shared.set_tag(shared_id, version, "nb_promotion", "taxi/value")
 
     # --- Bob, on a cold notebook, points at the shared store ---
     bob_dir, bob = build("bob")
@@ -310,6 +312,7 @@ async def test_a_teammates_result_is_served_instead_of_running_the_cell(
     # Attribution, not just speed: a result that appears with no author is
     # indistinguishable from a bug.
     assert bob_result.team_cache_principal == "alice"
+    assert bob_result.team_cache_promotion == "taxi/value"
 
     # And it is a real local artifact afterwards, so Bob's downstream cell
     # resolves `value` without touching the network again.

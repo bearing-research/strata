@@ -196,6 +196,7 @@ export interface ProfilingSummaryPayload {
   team_cache_savings_ms: number
   team_cache_hits: number
   team_contributors: string[]
+  team_promotions: string[]
   total_artifact_bytes: number
   cell_profiles: CellProfileModel[]
 }

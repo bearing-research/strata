@@ -893,6 +893,10 @@ class ArtifactProvenanceMatchResponse(BaseModel):
             compared with a snapshot output by output — two machines can diff
             digests without either downloading the other's bytes. ``None`` on
             rows written before it was recorded.
+        promotion: The name of the promotion that brought this row to the
+            store, when one did. ``principal`` says who computed it; this says
+            why it is here to be hit — someone shared ``taxi/model`` and this
+            was part of its chain. ``None`` for rows a cache publish put here.
     """
 
     artifact_id: str
@@ -908,6 +912,7 @@ class ArtifactProvenanceMatchResponse(BaseModel):
     build_env: str = ""
     build_duration_ms: int = 0
     env_hash: str = ""
+    promotion: str | None = None
     content_sha256: str | None = None
 
 

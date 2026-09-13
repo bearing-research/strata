@@ -377,6 +377,8 @@ class CellExecutionResult:
     # last local run of the same cell, and someone served a teammate's result
     # never made one.
     team_cache_saved_ms: int = 0
+    # The promotion the team hit came from, when one put it in the store.
+    team_cache_promotion: str | None = None
 
     def __post_init__(self) -> None:
         # Legacy shim: accept either `display_outputs` or `display_output`
@@ -1428,6 +1430,7 @@ class CellExecutor:
                     team_cache_principal=team_pull.principal if team_pull else None,
                     team_cache_build_env=team_pull.build_env if team_pull else "",
                     team_cache_saved_ms=team_pull.saved_ms if team_pull else 0,
+                    team_cache_promotion=team_pull.promotion if team_pull else None,
                     from_team_cache=team_pull is not None,
                 ).apply_remote_metadata(**remote_metadata)
                 self.session.record_successful_execution_provenance(
@@ -1937,6 +1940,7 @@ class CellExecutor:
                     team_cache_principal=team_pull.principal if team_pull else None,
                     team_cache_build_env=team_pull.build_env if team_pull else "",
                     team_cache_saved_ms=team_pull.saved_ms if team_pull else 0,
+                    team_cache_promotion=team_pull.promotion if team_pull else None,
                     from_team_cache=team_pull is not None,
                 )
                 self.session.record_successful_execution_provenance(

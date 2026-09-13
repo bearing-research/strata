@@ -2147,6 +2147,7 @@ async def execute_cell_and_broadcast(
             result.cache_hit,
             from_team=result.from_team_cache,
             team_principal=result.team_cache_principal,
+            team_promotion=result.team_cache_promotion,
             team_saved_ms=result.team_cache_saved_ms,
         )
         session.apply_execution_result_metadata(cell_id, result)
@@ -2298,6 +2299,7 @@ async def _execute_cascade(
                     result.cache_hit,
                     from_team=result.from_team_cache,
                     team_principal=result.team_cache_principal,
+                    team_promotion=result.team_cache_promotion,
                     team_saved_ms=result.team_cache_saved_ms,
                 )
                 session.apply_execution_result_metadata(cell_id, result)
@@ -2724,6 +2726,7 @@ async def _run_partition_single_cell(
             result.cache_hit,
             from_team=result.from_team_cache,
             team_principal=result.team_cache_principal,
+            team_promotion=result.team_cache_promotion,
             team_saved_ms=result.team_cache_saved_ms,
         )
         session.apply_execution_result_metadata(cell_id, result)

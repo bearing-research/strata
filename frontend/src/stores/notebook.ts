@@ -2398,6 +2398,7 @@ function initializeWebSocket() {
         teamCacheSavingsMs: p.team_cache_savings_ms || 0,
         teamCacheHits: p.team_cache_hits || 0,
         teamContributors: p.team_contributors || [],
+        teamPromotions: p.team_promotions || [],
         totalArtifactBytes: p.total_artifact_bytes || 0,
         cellProfiles: (p.cell_profiles || []).map((cp: any) => ({
           cellId: cp.cell_id,

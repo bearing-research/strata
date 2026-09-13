@@ -588,7 +588,8 @@ def _publish(
         # A notebook writes to its own .strata/artifacts; the link resolves
         # from whatever store the server serves. Publishing without the copy
         # mints a token into a store the page route never reads.
-        copied, landed = copy_chain(store, served, artifact, 10)
+        written, landed = copy_chain(store, served, artifact, 10)
+        copied = len(written)
         published_id, _, landed_version = landed.partition("@v=")
         published_version = int(landed_version)
     else:
