@@ -1482,6 +1482,7 @@ class CellExecutor:
                     mutation_defines=list(getattr(cell, "mutation_defines", []) or []),
                     tables=manifest_tables,
                     cell_id=cell_id,
+                    cell_provenance_hash=provenance_hash,
                 )
                 if remote_build_id and remote_metadata.get("remote_transport") == "signed":
                     remote_metadata["remote_build_state"] = "ready"
@@ -2104,6 +2105,7 @@ class CellExecutor:
         mutation_defines: list[str] | None = None,
         tables: dict[str, dict[str, Any]] | None = None,
         cell_id: str | None = None,
+        cell_provenance_hash: str | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Dispatch one cell execution through the selected worker backend."""
         if worker_spec.backend == WorkerBackendType.LOCAL:
@@ -2145,6 +2147,7 @@ class CellExecutor:
                 timeout_seconds,
                 remote_build_id=remote_build_id,
                 cell_id=cell_id,
+                cell_provenance_hash=cell_provenance_hash,
             )
 
         raise RuntimeError(f"Unsupported worker backend: {worker_spec.backend.value}")
@@ -2248,6 +2251,7 @@ class CellExecutor:
         timeout_seconds: float,
         remote_build_id: str | None = None,
         cell_id: str | None = None,
+        cell_provenance_hash: str | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through an external notebook executor over HTTP."""
         for mount in mount_specs:
@@ -2273,6 +2277,7 @@ class CellExecutor:
                 timeout_seconds,
                 build_id=remote_build_id,
                 cell_id=cell_id,
+                cell_provenance_hash=cell_provenance_hash,
             )
 
         metadata_inputs: list[dict[str, Any]] = []
@@ -2434,6 +2439,7 @@ class CellExecutor:
         timeout_seconds: float,
         build_id: str | None = None,
         cell_id: str | None = None,
+        cell_provenance_hash: str | None = None,
     ) -> tuple[dict[str, Any], Path, str, dict[str, ResolvedMount]]:
         """Run a cell through the core build + signed-URL transport path."""
         from strata.auth import get_principal
@@ -2580,6 +2586,18 @@ class CellExecutor:
                     "version": artifact_version,
                     "executor_ref": NOTEBOOK_EXECUTOR_TRANSFORM_REF,
                     "params": build_params,
+                    # Who and what this dispatch is for, so a dispatcher can
+                    # attribute the job without a GET /v1/builds round trip and
+                    # recognise two submissions of one computation as one. Kept
+                    # out of ``params``, which is hashed into the transport
+                    # provenance: identity must not change what is cached.
+                    # ``cell_provenance_hash`` is the cell's own key, not that
+                    # transport hash.
+                    "principal": principal_id,
+                    "tenant": tenant_id,
+                    "notebook_id": self.session.notebook_state.id,
+                    "cell_id": cell_id,
+                    "cell_provenance_hash": cell_provenance_hash,
                 },
                 input_artifacts=input_artifacts,
                 max_output_bytes=state.config.max_transform_output_bytes,
