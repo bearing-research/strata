@@ -1435,6 +1435,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#importing-a-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Importing a snapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2397,6 +2408,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#importing-a-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Importing a snapshot
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2419,7 +2441,8 @@
 
 <h1 id="import">Import<a class="headerlink" href="#import" title="Permanent link">&para;</a></h1>
 <p><code>strata import</code> converts a Jupyter <code>.ipynb</code> file into a Strata
-notebook directory. The result is a normal Strata notebook, same
+notebook directory, or unpacks a <a href="#importing-a-snapshot">snapshot</a> back
+into one. Most of this page covers Jupyter. The result is a normal Strata notebook, same
 DAG analysis, same artifact store, same execution model, that you
 can open in the UI, run headlessly, edit, or export.</p>
 <h2 id="what-survives-what-doesnt">What survives, what doesn't<a class="headerlink" href="#what-survives-what-doesnt" title="Permanent link">&para;</a></h2>
@@ -2773,6 +2796,30 @@ verify the entry clears the bar you set, commit the manifest line.</p>
 import-lossy parts (Jupyter outputs, widget metadata, original
 magic text) would compromise the import itself. See
 <code>docs/internal/design-jupyter-import.md</code> if you're picking this up.</p>
+<h2 id="importing-a-snapshot">Importing a snapshot<a class="headerlink" href="#importing-a-snapshot" title="Permanent link">&para;</a></h2>
+<p>A snapshot is the bundle <code>strata export &lt;dir&gt; --to snapshot</code> writes (or
+<code>GET …/export?fmt=snapshot</code> serves): the committed files, the per-cell runtime
+state, and the records and bytes of whichever artifacts were included. The
+same verb reads it back, told apart by the file:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>strata<span class="w"> </span>import<span class="w"> </span>analysis.ipynb<span class="w">        </span><span class="c1"># Jupyter</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>strata<span class="w"> </span>import<span class="w"> </span>demo.snapshot.zip<span class="w">     </span><span class="c1"># a snapshot → ./demo/</span>
+</code></pre></div>
+<p>What you get:</p>
+<ul>
+<li><strong>Carried cells are cache hits</strong> before anything runs, with their outputs
+  and console restored.</li>
+<li><strong>Cells the snapshot only described open idle</strong>. They ran and their result is
+  current; it just isn't here. With a team store configured, running one pulls
+  it rather than recomputing, because the notebook computes the same provenance
+  the snapshot recorded.</li>
+<li><strong>A notebook id already in use</strong> under your storage root is replaced, and
+  every artifact id and lineage edge that embeds it is rewritten. That way two
+  copies of one notebook never share an id, which would collide as soon as both
+  publish to a shared store. A copy living outside the storage root can't be
+  seen, so it can't be detected.</li>
+</ul>
+<p>The import is built beside the destination and moved into place only once it's
+complete. A failure partway leaves nothing behind, and a retry works.</p>
 
 
 
