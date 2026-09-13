@@ -688,6 +688,29 @@ display(Markdown("# First"))
 
 
 @pytest.mark.asyncio
+async def test_run_all_on_a_host_that_refuses_says_so_on_every_cell(notebook_session, monkeypatch):
+    """Run-all batches consecutive cells into one harness. On a service-mode host
+    with no harness user that spawn is refused, and a refused batch would leave
+    the rest of the notebook idle with nothing said — so each cell goes through
+    single-cell instead, and each one reports why it did not run."""
+    from strata.notebook.harness_user import REFUSAL
+
+    _, session = notebook_session
+    monkeypatch.setattr(
+        "strata.server._state",
+        SimpleNamespace(
+            config=SimpleNamespace(deployment_mode="service", notebook_harness_user=None)
+        ),
+    )
+
+    fake = await _run_cell_to_terminal(session, "root", msg_type="notebook_run_all")
+
+    errors = {f["payload"]["cell_id"]: f["payload"]["error"] for f in fake.frames_of("cell_error")}
+    assert set(errors) == {"root", "middle", "leaf"}
+    assert all(REFUSAL in error for error in errors.values())
+
+
+@pytest.mark.asyncio
 async def test_cell_execute_cascade_emits_multiple_display_payloads_in_order(temp_notebook):
     """Cascade execution should preserve ordered display payloads for the target cell."""
     notebook_dir, _ = temp_notebook

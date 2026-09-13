@@ -29,6 +29,7 @@ from strata.notebook.executor import (
     CellExecutor,
     partition_batchable_runs,
 )
+from strata.notebook.harness_user import LocalExecutionRefused, resolve_harness_user
 from strata.notebook.impact import ImpactAnalyzer
 from strata.notebook.inspect_repl import InspectManager
 from strata.notebook.models import CellLanguage, CellStaleness, CellStatus, WorkerBackendType
@@ -2400,6 +2401,11 @@ async def _execute_run_all(
         if cell.id in requested_ids and cell.source.strip()
     ]
     partition = partition_batchable_runs(executor, runnable)
+    batching_allowed = True
+    try:
+        resolve_harness_user()
+    except LocalExecutionRefused:
+        batching_allowed = False
 
     logger.info(
         "Run all for notebook %s: %d cells, %d partitioned runs (force=%s, continue_on_error=%s)",
@@ -2417,8 +2423,11 @@ async def _execute_run_all(
                 break
 
             # Size-1 batches gain nothing from subprocess amortization;
-            # route them through single-cell.
-            if kind == "batch" and len(cells_in_run) >= 2:
+            # route them through single-cell. So does a host that will not
+            # start cell code: single-cell serves each cache hit and shows the
+            # refusal on each cell that would run, where a refused batch would
+            # leave the rest of the notebook idle with nothing said.
+            if kind == "batch" and len(cells_in_run) >= 2 and batching_allowed:
                 batch_result = await _run_partition_batch(
                     session=session,
                     executor=executor,

@@ -73,6 +73,21 @@ class InspectSession:
             ``"ready"`` on success, otherwise an error message.
         """
         from strata.notebook.executor import CellExecutor
+        from strata.notebook.harness_env import configured_allowlist, harness_env
+        from strata.notebook.harness_user import (
+            LocalExecutionRefused,
+            hand_over,
+            identity_env,
+            resolve_harness_user,
+            spawn_kwargs,
+        )
+
+        # An inspect process evaluates whatever is typed into it, so it is cell
+        # code in every sense that matters, and gets the same treatment.
+        try:
+            harness_user = resolve_harness_user()
+        except LocalExecutionRefused as exc:
+            return str(exc)
 
         # Create temp dir for input files (persists for the session lifetime).
         self._manifest_dir = Path(tempfile.mkdtemp(prefix="strata_inspect_"))
@@ -99,12 +114,16 @@ class InspectSession:
             str(manifest_path),
         ]
 
+        hand_over(self._manifest_dir, harness_user)
+        allowlist = configured_allowlist()
         self.process = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(session.path),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=identity_env(harness_env(allowlist) if allowlist else None, harness_user),
+            **spawn_kwargs(harness_user),
         )
 
         # Wait for the "ready" signal.

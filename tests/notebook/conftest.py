@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import shlex
 import shutil
 import subprocess
@@ -179,48 +177,18 @@ def fast_notebook_env(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRe
     monkeypatch.setattr("strata.notebook.writer._uv_sync", _fake_uv_sync)
     monkeypatch.setattr("strata.notebook.session._uv_sync", _fake_uv_sync)
 
-    async def _run_harness_direct(
-        self,
-        manifest_path: Path,
-        venv_python: Path,
-        timeout_seconds: float,
-    ) -> dict[str, object]:
-        """Run the harness directly with Python instead of ``uv run``."""
-        cmd = [str(venv_python), str(self.harness_path), str(manifest_path)]
+    def _harness_command_direct(self, manifest_path: Path, venv_python: Path, harness_user):
+        """The harness with Python directly instead of ``uv run``.
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(self.session.path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            # This stub exists to skip `uv run`, not to change what a cell can
-            # see. Inheriting here where production filters would make every
-            # notebook test agree with a spawn that is not the one shipping.
-            env=self._harness_env(),
-        )
+        Only the command. The spawn around it — environment, OS user, and the
+        service-mode refusal — is production's, so a notebook test cannot agree
+        with a spawn that is not the one shipping.
+        """
+        return [str(venv_python), str(self.harness_path), str(manifest_path)]
 
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout_seconds,
-            )
-        except asyncio.CancelledError:
-            proc.kill()
-            await asyncio.shield(proc.wait())
-            raise
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
-            raise
-
-        result_path = manifest_path.parent / "harness-result.json"
-        if not result_path.exists():
-            raise RuntimeError(f"Harness did not produce harness-result.json: {stderr.decode()}")
-
-        with open(result_path) as f:
-            return json.load(f)
-
-    monkeypatch.setattr("strata.notebook.executor.CellExecutor._run_harness", _run_harness_direct)
+    monkeypatch.setattr(
+        "strata.notebook.executor.CellExecutor._harness_command", _harness_command_direct
+    )
 
 
 @pytest.fixture

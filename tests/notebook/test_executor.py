@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -893,16 +895,24 @@ token = os.getenv("NOTEBOOK_TOKEN")
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(sys.platform == "win32", reason="harness users are POSIX")
     async def test_execute_allows_service_mode_server_worker(
         self,
         sample_notebook,
         monkeypatch,
     ):
-        """Service mode should resolve executor workers from the server registry."""
+        """Service mode should resolve executor workers from the server registry.
+
+        An ``embedded://`` worker runs on this host, which service mode refuses
+        without a harness user; the current user stands in for one here.
+        """
+        import pwd
+
         monkeypatch.setattr(
             "strata.server._state",
             SimpleNamespace(
                 config=SimpleNamespace(
+                    notebook_harness_user=pwd.getpwuid(os.getuid()).pw_name,
                     deployment_mode="service",
                     transforms_config={
                         "notebook_workers": [

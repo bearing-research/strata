@@ -457,6 +457,17 @@ class StrataConfig(BaseSettings):
     # process environment, so the list stays short.
     notebook_harness_env_allowlist: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
+    # The OS user a cell subprocess runs as. The allowlist above filters what a
+    # cell is given; this changes who it is. Without it a cell runs as the
+    # server's own user and can read /proc/<server pid>/environ and the
+    # server's files whatever the allowlist says.
+    #
+    # Service mode refuses to start cell code on its own host unless this is
+    # set — the other way to run a cell there is a server-managed worker on
+    # another machine. Setting it needs the server to run as root, so it can
+    # switch users. POSIX only.
+    notebook_harness_user: str | None = None
+
     # AI/LLM assistant settings (OpenAI-compatible API)
     ai_base_url: str | None = None
     ai_model: str | None = None

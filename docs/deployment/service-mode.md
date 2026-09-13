@@ -87,6 +87,11 @@ Both URLs route to the same Strata instance. Tenant header
 browser to use the notebook UI; hit `/v1/...` endpoints with curl
 to exercise the REST surface.
 
+Cells run on the demo's executor, not on the Strata container: assign a
+cell or notebook the `gpu-http` worker. A cell left on `local` is refused,
+because a service-mode server does not run cell code on its own host (see
+[What a cell can read](#what-a-cell-can-read)).
+
 The configuration is in `.docker/service-mode/`:
 
 - `pyproject.toml`, Strata's service-mode config (mounted into the
@@ -133,7 +138,9 @@ restart proxy`).
 Strata sits on a private network, only the auth proxy can reach it.
 Notebook execution dispatches to executors; the demo stack runs one
 locally, production typically uses HTTP executors on dedicated nodes
-or remote backends like Modal / Fly Machines.
+or remote backends like Modal / Fly Machines. Cells do not run on the
+Strata host itself unless you set `STRATA_NOTEBOOK_HARNESS_USER` (see
+[What a cell can read](#what-a-cell-can-read)).
 
 **The artifact store is two halves, and both have to be shared before
 you can run a second replica.** Blobs go to S3, GCS or Azure rather
@@ -476,7 +483,53 @@ shared server it means every member who can run a cell can read
 every data-source credential the server holds - from `os.environ`, from
 `/proc/<pid>/environ`, or from any file the server process can open.
 
-`STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST` narrows the first two:
+Two settings close this, and they only work together.
+
+### Who a cell is: `STRATA_NOTEBOOK_HARNESS_USER`
+
+A service-mode server **refuses to run cell code on its own host** unless you
+say how that is safe. There are two answers:
+
+1. **Run cells on another machine.** Assign cells a server-managed worker (a
+   pool machine or a remote worker). This is the recommended answer: a
+   different host is isolation that needs nothing arranged on this one.
+2. **Run cells as a separate OS user.** Set `STRATA_NOTEBOOK_HARNESS_USER` to a
+   user that exists on the server host. Cells then cannot read the server's
+   environment through `/proc`, its config, or other notebooks' files.
+
+Without either, a cell that would run on the server host fails with a message
+naming both. Cache hits are still served, since a hit starts no cell code.
+Personal mode is unaffected. An `embedded://` executor worker counts as this
+host: it runs the harness in place.
+
+Switching users needs the privilege to do it, so **the server runs as root**
+and drops to the harness user for every process that runs cell code: the cold
+and R harnesses, the batch harness behind Run All, the warm pool workers, the
+inspect REPL and cell tests. It is POSIX only. What the harness user needs:
+
+| Path | Access |
+| --- | --- |
+| notebook directories | read |
+| each notebook's `.venv` | read and execute |
+| the Python interpreter behind the venvs | read and execute |
+| each notebook's `.strata/` | traverse |
+
+The interpreter row is the one that catches people. uv installs managed Pythons
+under the installing user's home, which for a root server is `/root` and
+unreadable by anyone else, so every cell fails with `Permission denied` on the
+venv's `python`. Install them somewhere world-readable with
+`UV_PYTHON_INSTALL_DIR=/opt/uv-python`. Nothing else needs arranging: the
+per-run directories a cell writes into are handed to the harness user, the
+harness runs the venv's interpreter directly rather than through `uv run`, and
+the artifact store is never read by the cell.
+
+A cell run this way still shares the host's kernel and sees what any local user
+can. A notebook that needs more isolation than that wants a worker on another
+machine.
+
+### What a cell is given: `STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST`
+
+The allowlist narrows the environment a cell receives:
 
 ```bash
 # Only what cells actually need; everything else stays with the server.
@@ -486,18 +539,17 @@ STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST=AWS_*,HF_TOKEN
 Entries are exact names or a prefix with a trailing `*`. The essentials a
 subprocess cannot start without are always included, and `STRATA_*` is dropped
 unless named exactly - a prefix rule broad enough to catch a credential by
-accident is the failure the setting exists to prevent. It applies to all four
-spawns that run cell code: the cold harness, the R harness, the batch harness
-and the warm pool worker.
+accident is the failure the setting exists to prevent. It applies to every
+process that runs cell code, the same list as above.
 
 The list stays short because a cell's own configuration does not come through
 the process environment. `[env]` in `notebook.toml` and mount credentials
 travel in the cell manifest and are applied inside the harness.
 
-What this does **not** do is stop a cell reading the server's files, or its
-memory through `/proc`. That needs the harness to run as a different OS user,
-which is not implemented yet - until it is, "a member who runs a cell can read
-what the server process can read on disk" remains true of shared servers.
+On its own the allowlist is not isolation. A cell running as the server's user
+can still read the server's whole environment from `/proc/<server pid>/environ`,
+because it *is* that user. The allowlist decides what a cell is handed; the
+harness user is what stops it taking the rest.
 
 ## Migrating from personal mode
 
