@@ -453,8 +453,10 @@ rather than moving, and the command says so.
 The Registry tab and the per-cell strip describe that store too. They read the
 local one until a team store is configured, then forward to it with the server's
 remote-store headers — the notebook names things there, so describing the local
-store would show an empty registry. Approvals forward the same way, which is how
-a protected alias filed from one person's server gets approved from another's.
+store would show an empty registry. Every registry route forwards the same way
+(names, aliases, tags, lineage and approvals), so a promotion from the tab lands
+where the tab reads, and a protected alias filed from one person's server gets
+approved from another's.
 
 A cell can promote one of its own upstream results without leaving the
 notebook, naming it the way the cell reads it:

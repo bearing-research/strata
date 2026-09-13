@@ -9,6 +9,7 @@ point. Item 22.
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 
 import pytest
@@ -60,17 +61,29 @@ def pointed_at_team(team_store, monkeypatch):
     them here: the routes under test are called directly from the test thread,
     the team store answers on uvicorn's.
     """
+    return _point_at(team_store, monkeypatch)
+
+
+def _point_at(base_url: str, monkeypatch):
+    """Patch every module that decides whether to forward.
+
+    Each router imports ``remote_registry`` by name, so each needs its own
+    patch — and a router left out here is a router whose forwarding no test
+    exercises, which is how the names routes went unforwarded the first time.
+    """
     import strata.api.remote_registry as remote
+    import strata.api.routers.artifacts as artifacts_router
+    import strata.api.routers.names as names_router
     import strata.api.routers.registry as registry_router
 
-    target = (team_store.rstrip("/"), {})
+    target = (base_url.rstrip("/"), {})
     caller = threading.get_ident()
 
     def _target_for_the_caller():
         return target if threading.get_ident() == caller else None
 
-    monkeypatch.setattr(registry_router, "remote_registry", _target_for_the_caller)
-    monkeypatch.setattr(remote, "remote_registry", _target_for_the_caller)
+    for module in (remote, registry_router, names_router, artifacts_router):
+        monkeypatch.setattr(module, "remote_registry", _target_for_the_caller)
     return target
 
 
@@ -324,3 +337,134 @@ class TestArtifactsByTag:
         )
 
         assert rows == []
+
+
+class TestPromotingFromTheTab:
+    """The dashboard read the team's registry and wrote its promotions to the
+    local store, where the tab — reading the team's — never showed them. A user
+    clicked Promote, saw success, and nothing they could see changed."""
+
+    def test_promoting_moves_the_alias_in_the_team_store(
+        self, tmp_path, team_dir, team_registry, pointed_at_team
+    ):
+        from strata.api.routers.names import AliasSetRequest, set_alias
+        from strata.api.routers.registry import registry_summary
+
+        response = asyncio.run(
+            set_alias(
+                "taxi/model",
+                "champion",
+                AliasSetRequest(artifact_id="shared-model", version=1),
+                _local_store(tmp_path),
+                None,
+            )
+        )
+
+        assert response.status_code == 200
+        assert ArtifactStore(team_dir).resolve_alias("taxi/model", "champion") is not None
+        # And the tab, which reads the team's registry, now shows it.
+        body = asyncio.run(registry_summary(_local_store(tmp_path), None))
+        assert body["names"][0]["aliases"] == {"champion": 1}
+
+    def test_nothing_is_written_to_the_local_store(self, tmp_path, team_registry, pointed_at_team):
+        from strata.api.routers.names import AliasSetRequest, set_alias
+
+        local = _local_store(tmp_path)
+        asyncio.run(
+            set_alias(
+                "taxi/model",
+                "champion",
+                AliasSetRequest(artifact_id="shared-model", version=1),
+                local,
+                None,
+            )
+        )
+
+        assert local.resolve_alias("taxi/model", "champion") is None
+
+
+class TestTheStatusSurvivesTheForward:
+    @pytest.fixture
+    def protected_team(self, tmp_path, monkeypatch):
+        from tests.conftest import run_server_with_context
+
+        team_dir = tmp_path / "protected-team"
+        with run_server_with_context(
+            tmp_path / "cache", team_dir, "personal", registry_protected_aliases=["champion"]
+        ) as ctx:
+            store = ArtifactStore(team_dir)
+            store.create_artifact("shared-model", "aa" * 32)
+            store.finalize_artifact("shared-model", 1, '{"fields": []}', 3, 64)
+            store.set_name("taxi/model", "shared-model", 1)
+            _point_at(ctx.base_url, monkeypatch)
+            yield team_dir
+
+    def test_a_protected_alias_still_answers_202_pending(self, tmp_path, protected_team):
+        """The dashboard reads `status: pending` from the body, but a client that
+        decides by the status code — RemoteStore.set_alias does — would take a
+        queued change for an applied one if the forward flattened it to 200."""
+        from strata.api.routers.names import AliasSetRequest, set_alias
+
+        response = asyncio.run(
+            set_alias(
+                "taxi/model",
+                "champion",
+                AliasSetRequest(artifact_id="shared-model", version=1),
+                _local_store(tmp_path),
+                None,
+            )
+        )
+
+        assert response.status_code == 202
+        assert json.loads(response.body)["status"] == "pending"
+        assert [p["name"] for p in ArtifactStore(protected_team).list_pending_changes()] == [
+            "taxi/model"
+        ]
+
+
+class TestTheRestOfTheRegistrySurface:
+    """Names, aliases and tags are one registry. Forwarding only the route the
+    dashboard happened to call is what left this bug behind; the next button
+    that reaches for a sibling route would find it again."""
+
+    def test_tags_land_in_the_team_store(self, tmp_path, team_dir, team_registry, pointed_at_team):
+        from strata.api.routers.names import TagSetRequest, set_tag
+
+        asyncio.run(
+            set_tag(
+                "shared-model",
+                1,
+                TagSetRequest(key="reviewed", value="yes"),
+                _local_store(tmp_path),
+                None,
+            )
+        )
+
+        assert ArtifactStore(team_dir).get_tags("shared-model", 1)["reviewed"] == "yes"
+
+    def test_names_are_listed_from_the_team_store(self, tmp_path, team_registry, pointed_at_team):
+        from strata.api.routers.names import list_names
+
+        response = asyncio.run(list_names(_local_store(tmp_path), None))
+
+        names = [n["name"] for n in json.loads(response.body)["names"]]
+        assert "taxi/model" in names
+        assert "scratch/private" not in names
+
+    def test_a_name_with_a_slash_survives_the_path(self, tmp_path, team_registry, pointed_at_team):
+        from strata.api.routers.names import resolve_name
+
+        response = asyncio.run(resolve_name("taxi/model", _local_store(tmp_path), None))
+
+        assert json.loads(response.body)["artifact_uri"] == "strata://artifact/shared-model@v=1"
+
+    def test_lineage_is_read_from_the_team_store(self, tmp_path, team_registry, pointed_at_team):
+        """Opened from the tab or the strip, both of which list the team's
+        artifacts; the local store would 404 on the one just clicked."""
+        from strata.api.routers.artifacts import get_artifact_lineage
+
+        response = asyncio.run(
+            get_artifact_lineage("shared-model", 1, _local_store(tmp_path), None, max_depth=5)
+        )
+
+        assert json.loads(response.body)["artifact_uri"] == "strata://artifact/shared-model@v=1"

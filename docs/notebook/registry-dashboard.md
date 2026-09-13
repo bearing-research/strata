@@ -11,8 +11,9 @@ the same names / aliases / tags / audit / lineage that the
     than the local one - which is the point: a cell's `strata.put(name=...)`
     and every promotion land there, so reading the local store would show an
     empty registry on exactly the deployment where the registry matters.
-    Approvals go to the same place, so a protected alias filed from one
-    person's server can be approved from another's.
+    Everything the tab does goes to the same place: promotions, tags, the
+    lineage view, and approvals - so a protected alias filed from one person's
+    server can be approved from another's.
 
     The forwarding happens on the server, not in the page, because the
     credentials do: `notebook_remote_store_headers` is the trusted-proxy
