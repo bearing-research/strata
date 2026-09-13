@@ -221,6 +221,25 @@ def notebook_has_active_execution(notebook_id: str) -> bool:
     )
 
 
+async def cancel_notebook_execution(notebook_id: str) -> list[str]:
+    """Cancel whatever a notebook is running; return the cells that were.
+
+    For a quiesce whose timeout ran out: the hold cannot start while a cell is
+    still writing, and a caller that asked for a bounded wait gets one.
+    """
+    execution_state = _notebook_execution_state.get(notebook_id)
+    if execution_state is None:
+        return []
+    async with execution_state.control_lock:
+        task = execution_state.active_task()
+        cells = {c for c in (execution_state.running_cell, execution_state.requested_cell) if c}
+        if task is not None:
+            task.cancel()
+    if task is not None:
+        await asyncio.gather(task, return_exceptions=True)
+    return sorted(cells)
+
+
 async def broadcast_notebook_message(notebook_id: str, message: dict[str, Any]) -> None:
     """Public wrapper for broadcasting notebook protocol messages."""
     await _broadcast_message(notebook_id, message)

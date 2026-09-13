@@ -191,6 +191,47 @@ DELETE /v1/notebooks/{session_id}
 
 Deletes the notebook directory and closes the session.
 
+### Quiesce and Release
+
+```
+POST /v1/notebooks/{session_id}/quiesce
+POST /v1/notebooks/{session_id}/release
+POST /v1/projects/{path}/quiesce
+POST /v1/projects/{path}/release
+```
+
+Holds a notebook, or every notebook under a project directory, still so that a
+copy of the directory is consistent: sources, `runtime.json` and artifacts from
+the same moment.
+
+```json
+{"timeout_seconds": 30, "max_hold_seconds": 600}
+```
+
+Quiesce waits for running cells to finish. Any still running at
+`timeout_seconds` are cancelled and named in `cancelled_cells`. Then, until
+release, runs and edits are refused with **409** and `code: NOTEBOOK_QUIESCED`,
+over REST and the WebSocket alike, and so is any write that reaches the
+notebook's files another way (runtime state, a landing artifact). The hold
+ends on its own after `max_hold_seconds`, so a caller that dies mid-copy
+cannot freeze the notebook. A project hold also covers notebooks that are not
+open, and overlapping holds are refused with 409.
+
+```json
+{
+  "path": "/srv/notebooks/project",
+  "notebooks": ["/srv/notebooks/project/analysis"],
+  "cancelled_cells": {},
+  "hold_expires_in_seconds": 599.9
+}
+```
+
+Release answers `{"path", "released"}`, with `released: false` when there was
+no hold. Under principal auth both need the `admin:notebooks` scope (`admin:*`
+satisfies it); personal mode allows them. The project `{path}` is resolved
+inside the storage root like any other notebook path. Holds live in the server
+process and do not survive a restart.
+
 ### Discover Notebooks
 
 ```

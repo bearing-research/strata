@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from strata.artifact_store import ArtifactStore, TransformSpec
 from strata.notebook.models import ArtifactInfo
+from strata.notebook.quiesce import assert_writable
 
 if TYPE_CHECKING:
     from strata.artifact_store import ArtifactVersion
@@ -53,6 +54,7 @@ class NotebookArtifactManager:
 
         artifact_dir = Path(artifact_dir)
         artifact_dir.mkdir(parents=True, exist_ok=True)
+        self.artifact_dir = artifact_dir
 
         # Initialize artifact store with local blob storage
         self.artifact_store = ArtifactStore(artifact_dir)
@@ -249,6 +251,10 @@ class NotebookArtifactManager:
         Returns:
             The created ArtifactVersion
         """
+        # Artifacts live under the notebook directory, so a result landing
+        # during a copy would leave the copy's runtime.json and its artifacts
+        # describing different moments.
+        assert_writable(self.artifact_dir)
         artifact_id = self.cell_artifact_id(cell_id, variable_name, iteration, variant)
 
         # Create transform spec (for notebook cells, executor is "notebook/cell@v1")

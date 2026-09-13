@@ -1563,6 +1563,11 @@ class NotebookSession:
 
     def environment_execution_block_message(self) -> str | None:
         """Return the reason cell execution should be blocked, if any."""
+        from strata.notebook.quiesce import execution_block
+
+        held = execution_block(self.path)
+        if held is not None:
+            return held
         label = self._active_environment_mutation_label()
         if label is None:
             if self.environment_sync_state == "pending":
@@ -1587,6 +1592,11 @@ class NotebookSession:
 
     def _assert_environment_job_can_start(self, action_label: str) -> None:
         """Reject starting a new environment update when the notebook is busy."""
+        from strata.notebook.quiesce import execution_block
+
+        held = execution_block(self.path)
+        if held is not None:
+            raise RuntimeError(held)
         if self.has_active_environment_mutation():
             active_label = self._active_environment_mutation_label() or "environment update"
             raise RuntimeError(f"Another environment update is already in progress: {active_label}")

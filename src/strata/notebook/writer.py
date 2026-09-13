@@ -38,6 +38,7 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
     read_venv_runtime_python_version,
 )
+from strata.notebook.quiesce import refuses_while_held
 
 if TYPE_CHECKING:
     pass
@@ -284,6 +285,7 @@ def _sanitize_display_outputs_for_toml(
     return persisted_outputs
 
 
+@refuses_while_held
 def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None = None) -> None:
     """Write cell source to disk.
 
@@ -348,6 +350,7 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None
         _apply_notebook_toml_update(notebook_dir, _stamp, bump_updated_at=False)
 
 
+@refuses_while_held
 def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None:
     """Write (or clear) a cell's unit-test source.
 
@@ -383,6 +386,7 @@ def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None
         test_file.unlink()
 
 
+@refuses_while_held
 def write_notebook_toml(notebook_dir: Path, toml: NotebookToml) -> None:
     """Write notebook.toml to disk.
 
@@ -896,6 +900,7 @@ def _update_environment_metadata(notebook_dir: Path) -> None:
     save_runtime_state(notebook_dir, state)
 
 
+@refuses_while_held
 def update_environment_metadata(notebook_dir: Path) -> None:
     """Public API: refresh ``[environment]`` in ``notebook.toml``.
 
@@ -904,6 +909,7 @@ def update_environment_metadata(notebook_dir: Path) -> None:
     _update_environment_metadata(notebook_dir)
 
 
+@refuses_while_held
 def add_cell_to_notebook(
     notebook_dir: Path,
     cell_id: str,
@@ -994,6 +1000,7 @@ def add_cell_to_notebook(
     _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
+@refuses_while_held
 def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
     """Remove a cell from the notebook.
 
@@ -1039,6 +1046,7 @@ def remove_cell_from_notebook(notebook_dir: Path, cell_id: str) -> None:
     _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
+@refuses_while_held
 def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
     """Reorder cells in the notebook.
 
@@ -1086,6 +1094,7 @@ def reorder_cells(notebook_dir: Path, cell_ids: list[str]) -> None:
     _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
+@refuses_while_held
 def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
     """Rewrite ``requires-python`` in a notebook's pyproject.toml.
 
@@ -1127,6 +1136,7 @@ def update_requires_python(notebook_dir: Path, new_minor: str) -> str:
     return old_spec
 
 
+@refuses_while_held
 def rename_notebook(notebook_dir: Path, new_name: str) -> None:
     """Rename the notebook.
 
@@ -1155,6 +1165,7 @@ def rename_notebook(notebook_dir: Path, new_name: str) -> None:
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def delete_notebook_directory(notebook_dir: Path) -> None:
     """Delete a notebook directory and all notebook-owned runtime state."""
     notebook_dir = Path(notebook_dir).resolve()
@@ -1172,6 +1183,7 @@ def delete_notebook_directory(notebook_dir: Path) -> None:
     shutil.rmtree(notebook_dir)
 
 
+@refuses_while_held
 def _apply_notebook_toml_update(
     notebook_dir: Path,
     mutate: Callable[[dict[str, Any]], bool],
@@ -1205,6 +1217,7 @@ def _apply_notebook_toml_update(
     _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
+@refuses_while_held
 def update_notebook_mounts(notebook_dir: Path, mounts: list[MountSpec]) -> None:
     """Persist notebook-level mount defaults."""
     new_mounts = _serialize_mounts(mounts)
@@ -1218,6 +1231,7 @@ def update_notebook_mounts(notebook_dir: Path, mounts: list[MountSpec]) -> None:
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def update_notebook_connections(
     notebook_dir: Path,
     connections: list[ConnectionSpec],
@@ -1256,6 +1270,7 @@ def update_notebook_connections(
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def update_notebook_worker(notebook_dir: Path, worker: str | None) -> None:
     """Persist the notebook-level default worker."""
 
@@ -1271,6 +1286,7 @@ def update_notebook_worker(notebook_dir: Path, worker: str | None) -> None:
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def update_notebook_workers(notebook_dir: Path, workers: list[WorkerSpec]) -> None:
     """Persist notebook-scoped worker definitions."""
     new_workers = _serialize_workers(workers)
@@ -1284,6 +1300,7 @@ def update_notebook_workers(notebook_dir: Path, workers: list[WorkerSpec]) -> No
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def update_notebook_timeout(notebook_dir: Path, timeout: float | None) -> None:
     """Persist the notebook-level default timeout."""
 
@@ -1299,6 +1316,7 @@ def update_notebook_timeout(notebook_dir: Path, timeout: float | None) -> None:
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def update_notebook_env(notebook_dir: Path, env: dict[str, str]) -> None:
     """Persist notebook-level default environment variables.
 
@@ -1333,6 +1351,7 @@ def update_notebook_env(notebook_dir: Path, env: dict[str, str]) -> None:
     _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
+@refuses_while_held
 def update_cell_display_outputs(
     notebook_dir: Path,
     cell_id: str,
@@ -1365,6 +1384,7 @@ def update_cell_display_outputs(
 _SECRET_MANAGER_CONFIG_KEYS = ("provider", "project_id", "environment", "path", "base_url")
 
 
+@refuses_while_held
 def set_variant_active(
     notebook_dir: Path,
     group: str,
@@ -1401,6 +1421,7 @@ def set_variant_active(
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def set_variant_mode(notebook_dir: Path, group: str, mode: str) -> None:
     """Set the execution ``mode`` ('switch' | 'sweep') for ``group``.
 
@@ -1437,6 +1458,7 @@ def set_variant_mode(notebook_dir: Path, group: str, mode: str) -> None:
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def remove_variant_group_entry(notebook_dir: Path, group: str) -> None:
     """Drop the ``[[variant_group]]`` entry for ``group``, if any.
 
@@ -1464,6 +1486,7 @@ def remove_variant_group_entry(notebook_dir: Path, group: str) -> None:
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def update_notebook_secret_manager(notebook_dir: Path, config: dict[str, Any]) -> None:
     """Persist the [secret_manager] block in notebook.toml.
 
@@ -1498,6 +1521,7 @@ def update_notebook_secret_manager(notebook_dir: Path, config: dict[str, Any]) -
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def update_notebook_ai_model(notebook_dir: Path, model: str) -> None:
     """Update the notebook's default LLM model in [ai] section."""
 
@@ -1514,6 +1538,7 @@ def update_notebook_ai_model(notebook_dir: Path, model: str) -> None:
     _apply_notebook_toml_update(notebook_dir, mutate)
 
 
+@refuses_while_held
 def update_cell_console_output(
     notebook_dir: Path,
     cell_id: str,
@@ -1561,6 +1586,7 @@ def load_cell_console_output(notebook_dir: Path, cell_id: str) -> tuple[str, str
         return "", ""
 
 
+@refuses_while_held
 def update_cell_display_output(
     notebook_dir: Path,
     cell_id: str,
