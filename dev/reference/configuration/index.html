@@ -3747,6 +3747,16 @@ flag, and the flag wins.</p>
 <td>Agent confirm-prompt timeout; expiry counts as a decline</td>
 </tr>
 <tr>
+<td><code>STRATA_AI_APPROVAL_TOOLS</code></td>
+<td>unset (<code>delete_cell,add_package</code>)</td>
+<td>Which built-in assistant tools ask before running. A list replaces the default; a notebook's <code>[ai] approval_tools</code> can add to it but not remove from it. A shared server typically sets <code>delete_cell,add_package,run_cell</code>. Unknown tool names fail at startup.</td>
+</tr>
+<tr>
+<td><code>STRATA_AI_GATES_LOCKED</code></td>
+<td><code>[]</code></td>
+<td>Tools whose gate the Auto-approve toggle cannot skip. Always gated (added to the approval set), and declined when there is no one to ask.</td>
+</tr>
+<tr>
 <td><code>ANTHROPIC_API_KEY</code></td>
 <td><code>None</code></td>
 <td>Anthropic API key (auto-sets base URL + model)</td>

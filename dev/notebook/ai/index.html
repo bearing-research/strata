@@ -2367,8 +2367,18 @@
 <p>The agent works best for additive tasks (creating new cells, installing packages). For complex refactoring, use Chat mode to discuss the approach first.</p>
 <h3 id="safety-surface">Safety surface<a class="headerlink" href="#safety-surface" title="Permanent link">&para;</a></h3>
 <p>Before granting the assistant write access, understand what it can and can't do.</p>
-<p><strong>Approval-gated tools.</strong> <code>delete_cell</code> and <code>add_package</code> always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after <strong>120 s by default</strong> and is treated as a decline so a closed tab doesn't leave the loop hanging; configure it with <code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code> on the server or <code>approval_timeout_seconds</code> in the notebook's <code>[ai]</code> section. Approval can be skipped with the <strong>Auto-approve</strong> toggle in the AI panel footer - that suppresses the gate for the remainder of the session.</p>
-<p><strong>Non-gated mutating tools.</strong> <code>create_cell</code>, <code>edit_cell</code>, and <code>run_cell</code> execute without prompting. <code>edit_cell</code> overwrites the cell source; <code>run_cell</code> executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to <code>cells/*.py</code>, so git is the practical undo for <code>edit_cell</code> and <code>delete_cell</code>. Side effects of <code>run_cell</code> - files written, packages mutated, API calls made - are not reversible.)</p>
+<p><strong>Approval-gated tools.</strong> By default <code>delete_cell</code> and <code>add_package</code> go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after <strong>120 s by default</strong> and is treated as a decline so a closed tab doesn't leave the loop hanging; configure it with <code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code> on the server or <code>approval_timeout_seconds</code> in the notebook's <code>[ai]</code> section. Approval can be skipped with the <strong>Auto-approve</strong> toggle in the AI panel footer - that suppresses the gate for the remainder of the session, except for locked gates (below).</p>
+<p><strong>Choosing the gates.</strong> The server decides which tools are gated, and a notebook can only add to that:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Server: also ask before the assistant runs a cell, and never let Auto-approve skip it.</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">STRATA_AI_APPROVAL_TOOLS</span><span class="o">=</span>delete_cell,add_package,run_cell
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nv">STRATA_AI_GATES_LOCKED</span><span class="o">=</span>run_cell
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># notebook.toml: this notebook also wants edits confirmed.</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">[ai]</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">approval_tools</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;edit_cell&quot;</span><span class="p">]</span>
+</code></pre></div>
+<p>A locked gate still prompts with Auto-approve on, and where there is no one to prompt it declines. The server-level lists refuse unknown tool names at startup, since a typo would leave the tool ungated; a notebook's unknown names are logged and ignored.</p>
+<p><strong>Non-gated mutating tools.</strong> Unless configured above, <code>create_cell</code>, <code>edit_cell</code>, and <code>run_cell</code> execute without prompting. <code>edit_cell</code> overwrites the cell source; <code>run_cell</code> executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to <code>cells/*.py</code>, so git is the practical undo for <code>edit_cell</code> and <code>delete_cell</code>. Side effects of <code>run_cell</code> - files written, packages mutated, API calls made - are not reversible.)</p>
 <p><strong>Loop bounds.</strong></p>
 <table>
 <thead>
@@ -2388,6 +2398,16 @@
 <td>Approval timeout</td>
 <td><strong>120 s</strong></td>
 <td><code>STRATA_AI_APPROVAL_TIMEOUT_SECONDS</code> / <code>[ai] approval_timeout_seconds</code></td>
+</tr>
+<tr>
+<td>Gated tools</td>
+<td><code>delete_cell</code>, <code>add_package</code></td>
+<td><code>STRATA_AI_APPROVAL_TOOLS</code> (server) + <code>[ai] approval_tools</code> (adds)</td>
+</tr>
+<tr>
+<td>Locked gates</td>
+<td>none</td>
+<td><code>STRATA_AI_GATES_LOCKED</code></td>
 </tr>
 <tr>
 <td>Conversation memory</td>
