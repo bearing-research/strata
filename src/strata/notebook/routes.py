@@ -1251,7 +1251,7 @@ async def import_snapshot_bundle(
     stem = Path(upload_name).name.removesuffix(".zip").removesuffix(".snapshot")
 
     with timing.phase("validate"):
-        target_parent, _raw_name, candidate_dir = _resolve_import_target(
+        _parent, _raw_name, candidate_dir = _resolve_import_target(
             request, name=name, parent_path=parent_path, default_stem=stem
         )
 
@@ -1280,13 +1280,19 @@ async def import_snapshot_bundle(
         with timing.phase("import"):
             # Ids in use where this caller's notebooks are listed. A copy that
             # shares one collides the moment both publish to a shared store.
-            user_root = _get_user_storage_root(request)
-            scan_root = user_root or _get_notebook_storage_root() or target_parent
-            taken = {
-                entry["notebook_id"]
-                for entry in _discover_notebooks(scan_root)
-                if entry.get("notebook_id")
-            }
+            # The storage root, never the request's parent_path: which ids are
+            # taken is a question about this caller's notebooks, and a path the
+            # request names is not where those are listed.
+            scan_root = _get_user_storage_root(request)
+            taken = (
+                {
+                    entry["notebook_id"]
+                    for entry in _discover_notebooks(scan_root)
+                    if entry.get("notebook_id")
+                }
+                if scan_root is not None
+                else set()
+            )
             try:
                 result = await asyncio.to_thread(
                     import_snapshot,
