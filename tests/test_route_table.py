@@ -118,6 +118,7 @@ EXPECTED_ROUTES = [
     ("/v1/notebooks/delete-by-path", "POST", 0),
     ("/v1/notebooks/discover", "GET", 0),
     ("/v1/notebooks/import", "POST", 0),
+    ("/v1/notebooks/import-snapshot", "POST", 0),
     ("/v1/notebooks/open", "POST", 0),
     ("/v1/notebooks/recents/validate", "POST", 0),
     ("/v1/notebooks/sessions", "GET", 0),

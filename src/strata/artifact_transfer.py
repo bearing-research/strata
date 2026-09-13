@@ -27,6 +27,31 @@ from strata.artifact_store import (
     Publication,
 )
 
+# What another store needs to reconstruct an artifact version: everything but
+# the tenant, which the destination takes from whoever is authenticated rather
+# than from the record. One list, because the HTTP transfer and the snapshot
+# bundle both describe an artifact and must describe it the same way — a field
+# one of them forgot is a field the other's importer silently loses.
+RECORD_FIELDS = (
+    "id",
+    "version",
+    "state",
+    "provenance_hash",
+    "schema_json",
+    "row_count",
+    "byte_size",
+    "created_at",
+    "transform_spec",
+    "input_versions",
+    "principal",
+)
+
+
+def record_metadata(record: ArtifactVersion) -> dict[str, Any]:
+    """An artifact version as the portable dict :data:`RECORD_FIELDS` names."""
+    return {key: getattr(record, key) for key in RECORD_FIELDS}
+
+
 # One record and its bytes. Generous, because an artifact can be large and the
 # alternative to waiting is a half-copied chain.
 REMOTE_TIMEOUT_SECONDS = 300.0
@@ -77,22 +102,7 @@ class RemoteStore:
 
         from strata.artifact_store import ImportedArtifact
 
-        metadata = {
-            key: getattr(record, key)
-            for key in (
-                "id",
-                "version",
-                "state",
-                "provenance_hash",
-                "schema_json",
-                "row_count",
-                "byte_size",
-                "created_at",
-                "transform_spec",
-                "input_versions",
-                "principal",
-            )
-        }
+        metadata = record_metadata(record)
         if blob is not None:
             metadata["content_sha256"] = hashlib.sha256(blob).hexdigest()
 

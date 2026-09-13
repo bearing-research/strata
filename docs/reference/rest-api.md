@@ -154,6 +154,35 @@ warnings, full report markdown). See
 [Import from Jupyter](../notebook/import.md) for the magic
 translation table and limitations.
 
+### Import Snapshot
+
+```
+POST /v1/notebooks/import-snapshot
+Content-Type: multipart/form-data
+```
+
+Form fields as for the Jupyter import (`file`, `name`, `parent_path`), where
+`file` is a bundle from `GET …/export?fmt=snapshot`. The upload is streamed to
+disk and capped at 2 GiB, since an `include=all` snapshot is as large as the
+notebook's store.
+
+Turns the bundle into a notebook directory and opens a session on it. Cells
+whose artifacts the bundle carried are cache hits before anything runs; cells it
+only described open idle. With a team store configured, running one of those is
+a pull rather than a recompute. The caller is stamped as the notebook's owner,
+replacing whoever exported it.
+
+A notebook id already in use under the caller's storage root is replaced, and
+every artifact id and lineage edge that embeds it is rewritten to match. Two
+copies of one notebook sharing an id would collide as soon as both publish to a
+shared store.
+
+`import_report` carries `imported_artifacts`, `replaced_notebook_id` (the
+bundle's id when it was replaced, else `null`), and `by_reference_cells`.
+A zip that is not a snapshot is a 400; a snapshot exported before format 2,
+which lacked the artifact records an import needs, is refused with a request
+to export it again.
+
 ### Delete Notebook
 
 ```
@@ -562,9 +591,12 @@ artifacts/<id>@v=<n>             the bytes, for whichever were included
 | `selected` *(default)* | Only the cells named in `cells=a,b`; the rest are described in `artifacts.json` by id, version and digest. The form a review snapshot uses. |
 | `none`     | Description only. |
 
-`artifacts.json` names everything either way, and `carried` lists what is
-actually in the file — so an importer marks the cells whose artifacts came only
-by reference as stale rather than inferring it from what it failed to find.
+`artifacts.json` names everything either way, `carried` lists what is actually
+in the file, and `records` holds each carried artifact's full record: its
+transform spec (the content type a value is read back as) and its lineage
+edges. [Importing](#import-snapshot) the bundle needs all three. Cells whose
+artifacts were only described open idle rather than stale. They ran and their
+result is current; it just isn't here.
 
 The same bundle offline: `strata export <path> --to snapshot --out snap.zip
 --include all`.

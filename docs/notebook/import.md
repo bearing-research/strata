@@ -1,7 +1,8 @@
 # Import
 
 `strata import` converts a Jupyter `.ipynb` file into a Strata
-notebook directory. The result is a normal Strata notebook, same
+notebook directory, or unpacks a [snapshot](#importing-a-snapshot) back
+into one. Most of this page covers Jupyter. The result is a normal Strata notebook, same
 DAG analysis, same artifact store, same execution model, that you
 can open in the UI, run headlessly, edit, or export.
 
@@ -298,3 +299,32 @@ Out of scope today. Tracked as a follow-up because preserving the
 import-lossy parts (Jupyter outputs, widget metadata, original
 magic text) would compromise the import itself. See
 `docs/internal/design-jupyter-import.md` if you're picking this up.
+
+## Importing a snapshot
+
+A snapshot is the bundle `strata export <dir> --to snapshot` writes (or
+`GET …/export?fmt=snapshot` serves): the committed files, the per-cell runtime
+state, and the records and bytes of whichever artifacts were included. The
+same verb reads it back, told apart by the file:
+
+```bash
+strata import analysis.ipynb        # Jupyter
+strata import demo.snapshot.zip     # a snapshot → ./demo/
+```
+
+What you get:
+
+- **Carried cells are cache hits** before anything runs, with their outputs
+  and console restored.
+- **Cells the snapshot only described open idle**. They ran and their result is
+  current; it just isn't here. With a team store configured, running one pulls
+  it rather than recomputing, because the notebook computes the same provenance
+  the snapshot recorded.
+- **A notebook id already in use** under your storage root is replaced, and
+  every artifact id and lineage edge that embeds it is rewritten. That way two
+  copies of one notebook never share an id, which would collide as soon as both
+  publish to a shared store. A copy living outside the storage root can't be
+  seen, so it can't be detected.
+
+The import is built beside the destination and moved into place only once it's
+complete. A failure partway leaves nothing behind, and a retry works.
