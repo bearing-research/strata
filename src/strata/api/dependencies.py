@@ -56,10 +56,10 @@ def personal_mode_store() -> ArtifactStore:
 
     The bare gate (no ``allow_read``/``allow_write``): personal mode (always
     ``writes_enabled``) opens it, service mode 403s. Used by the deliberately
-    personal-only management endpoints — stats/usage/list, delete, GC — which
-    expose or mutate the whole store and have no tenant-scoped service-mode
-    semantics. (Whether any of these *should* gain a service-mode read path is
-    a separate policy question, not this refactor.)
+    personal-only management endpoints — list, delete, GC — which expose or
+    mutate the whole store and have no tenant-scoped service-mode semantics.
+    Stats and usage used to be among them; they gained a tenant-scoped service
+    path (``usage_scope`` in the artifacts router).
     """
     from strata.server import _get_artifact_store
 
