@@ -1456,7 +1456,8 @@ async def release_notebook(notebook_id: str, session: SessionDep) -> dict:
     from strata.notebook import quiesce
 
     _require_notebook_admin()
-    return {"path": str(session.path.resolve()), "released": quiesce.release(session.path)}
+    root = session.path.resolve()
+    return {"path": str(root), "released": quiesce.release(root)}
 
 
 projects_router = APIRouter(prefix="/v1/projects", tags=["notebooks"])

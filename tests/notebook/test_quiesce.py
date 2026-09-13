@@ -247,7 +247,7 @@ async def test_an_edit_over_the_websocket_is_refused_and_not_written(tmp_path):
 
     notebook_dir = _notebook(tmp_path)
     session = open_session(notebook_dir)
-    hold = quiesce.begin(notebook_dir, 60)
+    hold = quiesce.begin(notebook_dir.resolve(), 60)
     quiesce.settle(hold)
     fake, execution_state = _make_fake_ws(session)
 
@@ -274,7 +274,7 @@ class TestWritersThatBypassRoutes:
 
         notebook_dir = _notebook(tmp_path)
         state = load_runtime_state(notebook_dir)
-        quiesce.settle(quiesce.begin(notebook_dir, 60))
+        quiesce.settle(quiesce.begin(notebook_dir.resolve(), 60))
 
         with pytest.raises(NotebookQuiesced):
             save_runtime_state(notebook_dir, state)
@@ -284,7 +284,7 @@ class TestWritersThatBypassRoutes:
 
         notebook_dir = _notebook(tmp_path)
         manager = NotebookArtifactManager("nb", artifact_dir=notebook_dir / ".strata" / "artifacts")
-        quiesce.settle(quiesce.begin(notebook_dir, 60))
+        quiesce.settle(quiesce.begin(notebook_dir.resolve(), 60))
 
         with pytest.raises(NotebookQuiesced):
             manager.store_cell_output(

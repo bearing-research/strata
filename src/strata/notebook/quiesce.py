@@ -108,8 +108,13 @@ def refuses_while_held[**P, R](func: Callable[P, R]) -> Callable[P, R]:
 
 
 def begin(root: Path, max_hold_seconds: float) -> Hold:
-    """Start draining *root*. Refuses one that overlaps an existing hold."""
-    root = _resolve(root)
+    """Start draining *root*. Refuses one that overlaps an existing hold.
+
+    *root* must already be resolved. The routes hand in either a session's
+    path or one ``_validate_notebook_path`` resolved and confined to the
+    storage root, and resolving again here would touch the filesystem with a
+    request-supplied path for no gain.
+    """
     if _covering(root) is not None:
         raise NotebookQuiesced(f"{root} is already held")
     with _lock:
@@ -128,9 +133,9 @@ def settle(hold: Hold) -> None:
 
 
 def release(root: Path) -> bool:
-    """End the hold on exactly *root*. Returns whether there was one."""
+    """End the hold on exactly *root* (already resolved, as for :func:`begin`)."""
     with _lock:
-        return _holds.pop(_resolve(root), None) is not None
+        return _holds.pop(root, None) is not None
 
 
 def reset() -> None:
