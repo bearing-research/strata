@@ -3990,8 +3990,14 @@ class ArtifactStore:
             "cutoff_timestamp": cutoff,
         }
 
-    def get_usage(self, tenant: str | None = None) -> dict:
+    def get_usage(self, tenant: str | None = None, *, include_tenantless: bool = True) -> dict:
         """Get artifact store usage statistics.
+
+        Args:
+            tenant: Scope to one tenant; ``None`` for the whole store.
+            include_tenantless: Count legacy tenantless rows as the tenant's too,
+                which is right for visibility and wrong for a meter: every
+                tenant would be charged for the same shared rows.
 
         Returns:
             Dictionary with usage metrics
@@ -4013,7 +4019,11 @@ class ArtifactStore:
             """
             usage_params: list[str] = []
             if tenant is not None:
-                usage_query += " WHERE tenant = ? OR tenant = '' OR tenant IS NULL"
+                usage_query += (
+                    " WHERE tenant = ? OR tenant = '' OR tenant IS NULL"
+                    if include_tenantless
+                    else " WHERE tenant = ?"
+                )
                 usage_params.append(tenant)
 
             cursor = conn.execute(usage_query, usage_params)
@@ -4021,7 +4031,8 @@ class ArtifactStore:
 
             if tenant is not None:
                 cursor = conn.execute(
-                    "SELECT COUNT(*) as count FROM artifact_names WHERE tenant = ? OR tenant = ''",
+                    "SELECT COUNT(*) as count FROM artifact_names WHERE tenant = ?"
+                    + (" OR tenant = ''" if include_tenantless else ""),
                     (tenant,),
                 )
             else:
@@ -4037,7 +4048,11 @@ class ArtifactStore:
             """
             unreferenced_params: list[str] = []
             if tenant is not None:
-                unreferenced_query += " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
+                unreferenced_query += (
+                    " AND (av.tenant = ? OR av.tenant = '' OR av.tenant IS NULL)"
+                    if include_tenantless
+                    else " AND av.tenant = ?"
+                )
                 unreferenced_params.append(tenant)
             cursor = conn.execute(unreferenced_query, unreferenced_params)
             unreferenced_count = cursor.fetchone()["count"]
@@ -4245,8 +4260,10 @@ class ArtifactStore:
                 )
         return len(rows)
 
-    def stats(self, tenant: str | None = None) -> dict:
+    def stats(self, tenant: str | None = None, *, include_tenantless: bool = True) -> dict:
         """Get artifact store statistics.
+
+        ``include_tenantless`` as for :meth:`get_usage`.
 
         Returns:
             Dictionary with store statistics
@@ -4265,7 +4282,11 @@ class ArtifactStore:
             """
             stats_params: list[str] = []
             if tenant is not None:
-                stats_query += " WHERE tenant = ? OR tenant = '' OR tenant IS NULL"
+                stats_query += (
+                    " WHERE tenant = ? OR tenant = '' OR tenant IS NULL"
+                    if include_tenantless
+                    else " WHERE tenant = ?"
+                )
                 stats_params.append(tenant)
 
             cursor = conn.execute(stats_query, stats_params)
@@ -4273,7 +4294,8 @@ class ArtifactStore:
 
             if tenant is not None:
                 cursor = conn.execute(
-                    "SELECT COUNT(*) as count FROM artifact_names WHERE tenant = ? OR tenant = ''",
+                    "SELECT COUNT(*) as count FROM artifact_names WHERE tenant = ?"
+                    + (" OR tenant = ''" if include_tenantless else ""),
                     (tenant,),
                 )
             else:

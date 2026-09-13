@@ -751,11 +751,23 @@ web UI **Logs** page.
 ```
 GET /v1/artifacts
 GET /v1/artifacts/stats
+GET /v1/artifacts/usage
 ```
 
 `GET /v1/artifacts` lists stored artifacts with optional `since` (ISO timestamp),
 `sort`, and `order` query parameters; `GET /v1/artifacts/stats` returns summary
-counts and byte totals. Powers the web UI **Artifacts** page.
+counts and byte totals, and `GET /v1/artifacts/usage` adds unique-artifact,
+name and unreferenced counts. Powers the web UI **Artifacts** page.
+
+In personal mode, stats and usage cover the whole store. In service mode they
+cover **one tenant's holdings**: the caller's own, from the trusted-proxy
+identity, which is what a platform reads to meter storage per tenant. The
+tenant's figure counts only rows stamped with that tenant, so legacy tenantless
+rows are not charged to anyone. A caller with `admin:*` may pass
+`?tenant=<id>` to read another tenant (or omit it for the whole store). Service
+mode refuses a caller with no tenant (400), a non-admin naming another tenant
+(403), and a store with no principal auth configured (403), since without an
+authenticated caller the only possible answer is every tenant's at once.
 
 ## Core API
 

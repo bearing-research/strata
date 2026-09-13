@@ -23,10 +23,11 @@ import tempfile
 import uuid
 from dataclasses import replace
 from pathlib import Path
+from typing import Annotated, NamedTuple
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import Path as FastPath
 from fastapi.responses import StreamingResponse
 
@@ -38,6 +39,7 @@ from strata.api.dependencies import (
     WriteStore,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
+from strata.artifact_store import ArtifactStore
 from strata.artifact_transfer import PROMOTION_TAG
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.logging import get_logger
@@ -700,29 +702,88 @@ def _spec_int(artifact, key: str) -> int:
         return 0
 
 
+class UsageScope(NamedTuple):
+    """Whose usage a stats/usage call reports, and from which store."""
+
+    store: ArtifactStore
+    tenant: str | None
+    include_tenantless: bool
+
+
+def usage_scope(
+    tenant: str | None = Query(
+        default=None,
+        description="Tenant to report on. Service mode, admin:* only; others get their own.",
+    ),
+) -> UsageScope:
+    """Resolve the scope of a usage read.
+
+    Personal mode reports the whole store, as it always has. Service mode
+    reports one tenant's holdings and never another's: the caller's own, from
+    the trusted-proxy identity, or for ``admin:*`` a tenant named in the query
+    (the whole store when none is named). A tenant's figure there excludes
+    legacy tenantless rows, which belong to no one and would otherwise be
+    charged to every tenant at once.
+    """
+    from strata.auth import get_principal
+    from strata.server import _get_artifact_request_tenant, _get_artifact_store, get_state
+
+    config = get_state().config
+    if config.writes_enabled:
+        return UsageScope(_get_artifact_store(), _get_artifact_request_tenant(), True)
+
+    if not config.principal_auth_enabled:
+        # Without an authenticated caller there is no tenant to scope to, and
+        # an unscoped answer would be every tenant's usage at once.
+        raise HTTPException(
+            status_code=403,
+            detail="Usage in service mode is per tenant and needs trusted-proxy auth",
+        )
+    principal = get_principal()
+    if principal is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    store = _get_artifact_store(allow_read=True)
+    if principal.has_scope("admin:*"):
+        return UsageScope(store, tenant, tenant is None)
+    if principal.tenant is None:
+        raise HTTPException(status_code=400, detail="Tenant header required for artifact usage")
+    if tenant is not None and tenant != principal.tenant:
+        raise HTTPException(status_code=403, detail="Usage of another tenant requires admin:*")
+    return UsageScope(store, principal.tenant, False)
+
+
+UsageScopeDep = Annotated[UsageScope, Depends(usage_scope)]
+
+
 @router.get("/v1/artifacts/stats")
-async def get_artifact_stats(store: PersonalModeStore, tenant_filter: CurrentTenant):
-    """Get artifact store statistics (personal mode only).
+async def get_artifact_stats(scope: UsageScopeDep):
+    """Get artifact store statistics.
+
+    Whole store in personal mode; one tenant's in service mode (see
+    :func:`usage_scope`).
 
     Returns:
         Artifact store statistics
     """
-    return store.stats(tenant=tenant_filter)
+    return scope.store.stats(tenant=scope.tenant, include_tenantless=scope.include_tenantless)
 
 
 @router.get("/v1/artifacts/usage")
-async def get_artifact_usage(store: PersonalModeStore, tenant_filter: CurrentTenant):
-    """Get artifact store usage metrics (personal mode only).
+async def get_artifact_usage(scope: UsageScopeDep):
+    """Get artifact store usage metrics.
 
     Returns comprehensive usage statistics including:
     - Total bytes used
     - Number of artifacts and versions
     - Unreferenced artifact count (candidates for GC)
 
+    Whole store in personal mode; one tenant's in service mode, which is what
+    metering reads (see :func:`usage_scope`).
+
     Returns:
         Usage metrics dictionary
     """
-    return store.get_usage(tenant=tenant_filter)
+    return scope.store.get_usage(tenant=scope.tenant, include_tenantless=scope.include_tenantless)
 
 
 @router.get("/v1/artifacts")
