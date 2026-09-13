@@ -2302,7 +2302,7 @@
 
 <h1 id="notebooktoml-schema">notebook.toml Schema<a class="headerlink" href="#notebooktoml-schema" title="Permanent link">&para;</a></h1>
 <p><code>notebook.toml</code> is the <strong>committed</strong> configuration for a notebook. It declares the cells, their metadata, the per-notebook environment, mounts, workers, database connections, and any AI/secret-manager wiring. The file is human-editable and git-diffable; the matching backend writer round-trips it so external edits survive UI saves.</p>
-<p>Runtime state - display outputs, per-cell provenance hashes, console snapshots, <code>uv sync</code> timestamps - lives in <code>.strata/runtime.json</code>, <strong>not</strong> here. <code>notebook.toml</code> only changes on structural edits (add/remove/reorder a cell, change a worker/timeout/env/mounts/AI settings).</p>
+<p>Runtime state - display outputs, per-cell provenance hashes, console snapshots, <code>uv sync</code> timestamps - lives in <code>.strata/runtime.json</code>, <strong>not</strong> here. <code>notebook.toml</code> only changes on structural edits (add/remove/reorder a cell, change a worker/timeout/env/mounts/AI settings), plus one narrow exception for <a href="#cells-cell-registry">who last edited a cell</a>.</p>
 <p>The schema is defined in <code>src/strata/notebook/models.py::NotebookToml</code> and the round-tripping rules in <code>src/strata/notebook/writer.py</code>.</p>
 <h2 id="top-level-keys">Top-level keys<a class="headerlink" href="#top-level-keys" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">notebook_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;01HZJV4Y9G...&quot;</span><span class="w">       </span><span class="c1"># required; UUID-like, backend-generated on create</span>
@@ -2646,8 +2646,20 @@
 <td>array of <code>MountSpec</code></td>
 <td>Cell-level mounts. Supplement notebook-level mounts.</td>
 </tr>
+<tr>
+<td><code>created_by</code></td>
+<td>string | absent</td>
+<td>Who added the cell. Written by the server, not meant to be hand-edited.</td>
+</tr>
+<tr>
+<td><code>updated_by</code></td>
+<td>string | absent</td>
+<td>Who last changed it.</td>
+</tr>
 </tbody>
 </table>
+<p><code>created_by</code> and <code>updated_by</code> record who wrote a cell, so a reader can tell cells an agent wrote from cells a person did. The value is the authenticated principal where the server has one. Otherwise it is what the client declared: <code>local</code> for the browser, <code>assistant</code> for the built-in assistant (<code>assistant:&lt;principal&gt;</code> in service mode), or an external agent's own name sent through MCP or <code>--author</code>. In personal mode nothing checks that declaration, so treat it as a claim rather than an attestation. Both keys are absent on cells written before authorship was recorded.</p>
+<p>They are the one exception to the structural-edits-only rule above. An edit to a cell's source rewrites <code>notebook.toml</code> when it changes who last edited it, and at no other time. So one person editing their own cell never touches the file, and the first edit by someone else touches it once. That rewrite leaves <code>updated_at</code> alone, because who edited a cell is not a structural change.</p>
 <h2 id="annotation-precedence">Annotation precedence<a class="headerlink" href="#annotation-precedence" title="Permanent link">&para;</a></h2>
 <p>When the same piece of metadata is declared in multiple places, the most specific wins:</p>
 <ol>
