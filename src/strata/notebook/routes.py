@@ -1002,6 +1002,83 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
 _MAX_IPYNB_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
+def _resolve_import_target(
+    request: Request,
+    *,
+    name: str | None,
+    parent_path: str | None,
+    default_stem: str,
+) -> tuple[Path, str, Path]:
+    """Where an imported notebook lands: ``(parent, name, directory)``.
+
+    Shared by every route that turns an upload into a notebook directory. The
+    name flows into a filesystem path, so it passes the same traversal checks
+    whichever kind of file it came from — two copies of these checks is two
+    chances for one to miss an escape the other catches.
+
+    Raises:
+        HTTPException: 400 for an unconfigured root or a name that escapes it,
+            409 when a notebook already exists there.
+    """
+    if parent_path:
+        target_parent = _validate_notebook_path(parent_path, "parent path", request)
+    else:
+        user_root = _get_user_storage_root(request)
+        target_parent = user_root or _get_notebook_storage_root()
+        if target_parent is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Notebook storage root is not configured on this server",
+            )
+        target_parent.mkdir(parents=True, exist_ok=True)
+
+    # Pick the notebook name. Use the upload's filename stem unless the
+    # caller overrode it — same slugify rule as `create_notebook` so the
+    # resulting directory layout matches anything the user creates
+    # through the regular UI.
+    raw_name = name or default_stem or "imported"
+
+    # Reject path separators / traversal segments / NUL bytes — the
+    # name flows into a filesystem path, and `target_parent / "../x"`
+    # would otherwise escape the storage root entirely.
+    if "/" in raw_name or "\\" in raw_name or "\0" in raw_name or raw_name in ("..", "."):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid notebook name: must not contain path separators or traversal segments",
+        )
+    if ".." in Path(raw_name).parts:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid notebook name: must not contain '..' segments",
+        )
+
+    notebook_dir_name = raw_name.lower().replace(" ", "_")
+    candidate_dir = target_parent / notebook_dir_name
+    # Belt-and-braces: after building the path, verify it still resolves
+    # under target_parent. Catches any escape route the textual checks
+    # above might miss (e.g. platform-specific weirdness).
+    try:
+        candidate_resolved = candidate_dir.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid notebook name: {exc}")
+    target_resolved = target_parent.resolve()
+    if candidate_resolved != target_resolved and target_resolved not in candidate_resolved.parents:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid notebook name: resolves outside the configured storage root",
+        )
+
+    if (candidate_dir / "notebook.toml").exists():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A notebook already exists at {candidate_dir}. "
+                "Use Open to open it, or import with a different --name."
+            ),
+        )
+    return target_parent, raw_name, candidate_dir
+
+
 @router.post("/import")
 async def import_jupyter_notebook(
     request: Request,
@@ -1055,66 +1132,14 @@ async def import_jupyter_notebook(
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid .ipynb JSON: {exc}")
 
-    # Resolve target storage root. parent_path override goes through the
-    # same path-traversal guard as the other endpoints.
     with timing.phase("validate"):
-        if parent_path:
-            target_parent = _validate_notebook_path(parent_path, "parent path", request)
-        else:
-            user_root = _get_user_storage_root(request)
-            target_parent = user_root or _get_notebook_storage_root()
-            if target_parent is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Notebook storage root is not configured on this server",
-                )
-            target_parent.mkdir(parents=True, exist_ok=True)
-
-    # Pick the notebook name. Use the upload's filename stem unless the
-    # caller overrode it — same slugify rule as `create_notebook` so the
-    # resulting directory layout matches anything the user creates
-    # through the regular UI.
+        target_parent, raw_name, _candidate_dir = _resolve_import_target(
+            request,
+            name=name,
+            parent_path=parent_path,
+            default_stem=Path(file.filename or "imported.ipynb").stem,
+        )
     source_filename = file.filename or "imported.ipynb"
-    raw_name = name or Path(source_filename).stem or "imported"
-
-    # Reject path separators / traversal segments / NUL bytes — the
-    # name flows into a filesystem path, and `target_parent / "../x"`
-    # would otherwise escape the storage root entirely.
-    if "/" in raw_name or "\\" in raw_name or "\0" in raw_name or raw_name in ("..", "."):
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid notebook name: must not contain path separators or traversal segments",
-        )
-    if ".." in Path(raw_name).parts:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid notebook name: must not contain '..' segments",
-        )
-
-    notebook_dir_name = raw_name.lower().replace(" ", "_")
-    candidate_dir = target_parent / notebook_dir_name
-    # Belt-and-braces: after building the path, verify it still resolves
-    # under target_parent. Catches any escape route the textual checks
-    # above might miss (e.g. platform-specific weirdness).
-    try:
-        candidate_resolved = candidate_dir.resolve()
-    except (OSError, RuntimeError) as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid notebook name: {exc}")
-    target_resolved = target_parent.resolve()
-    if candidate_resolved != target_resolved and target_resolved not in candidate_resolved.parents:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid notebook name: resolves outside the configured storage root",
-        )
-
-    if (candidate_dir / "notebook.toml").exists():
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"A notebook already exists at {candidate_dir}. "
-                "Use Open to open it, or import with a different --name."
-            ),
-        )
 
     # Persist the upload to a tempdir with the user's original filename
     # — preserves the filename in the generated import report and in
@@ -1185,6 +1210,134 @@ async def import_jupyter_notebook(
         data,
         timing=timing,
         route_name="notebook_import",
+        log_context=str(result.notebook_dir),
+    )
+
+
+# A snapshot with every artifact's bytes is as large as the notebook's store,
+# which is the case `include=all` exists for — so it is streamed to disk rather
+# than read into memory against the .ipynb cap, and bounded far higher.
+_MAX_SNAPSHOT_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+@router.post("/import-snapshot")
+async def import_snapshot_bundle(
+    request: Request,
+    file: UploadFile = File(..., description="A snapshot .zip exported with fmt=snapshot."),
+    name: str | None = Form(
+        default=None,
+        description="Target notebook name. Defaults to the uploaded file's stem.",
+    ),
+    parent_path: str | None = Form(
+        default=None,
+        description=(
+            "Where the new notebook directory lands. Must be inside the "
+            "configured storage root. Defaults to the user's storage root."
+        ),
+    ),
+) -> JSONResponse:
+    """Turn an uploaded snapshot bundle into a notebook, and open it.
+
+    The carried cells are cache hits before anything runs; cells whose
+    artifacts the bundle described but did not carry open idle and are listed.
+    A notebook id already in use under the caller's storage root is replaced,
+    with every artifact id and lineage edge that embeds it rewritten to match.
+    """
+    from strata.notebook.snapshot_import import NotASnapshotError, import_snapshot
+
+    timing = NotebookTimingRecorder()
+    upload_name = file.filename or "snapshot.zip"
+    stem = Path(upload_name).name.removesuffix(".zip").removesuffix(".snapshot")
+
+    with timing.phase("validate"):
+        target_parent, _raw_name, candidate_dir = _resolve_import_target(
+            request, name=name, parent_path=parent_path, default_stem=stem
+        )
+
+    with tempfile.TemporaryDirectory(prefix="strata-snapshot-") as tmp_dir:
+        bundle_path = Path(tmp_dir) / "bundle.zip"
+        with timing.phase("read_upload"):
+            written = 0
+            try:
+                with open(bundle_path, "wb") as out:
+                    while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+                        written += len(chunk)
+                        if written > _MAX_SNAPSHOT_UPLOAD_BYTES:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=(
+                                    "Snapshot upload exceeds the "
+                                    f"{_MAX_SNAPSHOT_UPLOAD_BYTES // (1024**3)} GiB cap"
+                                ),
+                            )
+                        out.write(chunk)
+            finally:
+                await file.close()
+        if written == 0:
+            raise HTTPException(status_code=400, detail="Empty snapshot upload")
+
+        with timing.phase("import"):
+            # Ids in use where this caller's notebooks are listed. A copy that
+            # shares one collides the moment both publish to a shared store.
+            user_root = _get_user_storage_root(request)
+            scan_root = user_root or _get_notebook_storage_root() or target_parent
+            taken = {
+                entry["notebook_id"]
+                for entry in _discover_notebooks(scan_root)
+                if entry.get("notebook_id")
+            }
+            try:
+                result = await asyncio.to_thread(
+                    import_snapshot,
+                    bundle_path,
+                    candidate_dir,
+                    taken_ids=taken,
+                    owner=_caller_identity(request),
+                )
+            except zipfile.BadZipFile:
+                raise HTTPException(status_code=400, detail="Upload is not a zip file")
+            except NotASnapshotError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            except FileExistsError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+
+    with timing.phase("session_open"):
+        session = _session_manager.open_notebook(
+            result.notebook_dir,
+            defer_initial_venv_sync=True,
+            timing=timing,
+        )
+
+    with timing.phase("environment_job_submit"):
+        try:
+            await session.submit_environment_job(action="sync")
+        except Exception as exc:
+            logger.exception(
+                "Failed to start initial environment bootstrap for imported %s",
+                result.notebook_dir,
+            )
+            session.environment_sync_state = "failed"
+            session.environment_sync_error = (
+                f"Failed to start notebook environment initialization: {exc}"
+            )
+            session.environment_sync_notice = None
+
+    with timing.phase("serialize"):
+        data = session.serialize_notebook_state()
+        data["session_id"] = session.id
+        data["path"] = str(session.path)
+        data.update(_serialize_notebook_runtime_config(request))
+        data["import_report"] = {
+            "imported_artifacts": result.imported_artifacts,
+            "replaced_notebook_id": result.replaced_id,
+            "by_reference_cells": result.by_reference_cells,
+        }
+
+    return _timed_json_response(
+        data,
+        timing=timing,
+        route_name="notebook_import_snapshot",
         log_context=str(result.notebook_dir),
     )
 

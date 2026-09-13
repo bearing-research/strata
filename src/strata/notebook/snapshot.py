@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 IncludeMode = Literal["all", "selected", "none"]
 
+SNAPSHOT_FORMAT_VERSION = 2
+
 # Extension by content type, so an output file in the bundle can be opened by
 # double-clicking it. Mirrors the archive bundle's map for the same reason.
 _OUTPUT_EXTENSIONS = {
@@ -57,7 +59,9 @@ def write_committed_files(session: NotebookSession, archive: zipfile.ZipFile) ->
     from strata.notebook.routes import _format_dag
 
     nb_dir = session.path
-    for name in ("notebook.toml", "pyproject.toml", "uv.lock"):
+    # renv.lock too: it is part of the environment hash, so a bundle without it
+    # imports every R cell into a provenance that can never match its artifacts.
+    for name in ("notebook.toml", "pyproject.toml", "uv.lock", "renv.lock"):
         member = nb_dir / name
         if member.exists():
             archive.write(member, name)
@@ -199,13 +203,30 @@ def write_snapshot(
             "env_hash": cell_runtime.last_env_hash if cell_runtime else None,
             "execution_samples": list(cell_runtime.execution_samples) if cell_runtime else [],
             "outputs": outputs,
+            # The persisted form, verbatim, for an importer to write back. The
+            # `outputs` list above is for a reader; this is what the notebook
+            # needs to resolve its cached display outputs on open, which it
+            # does index by index and only when an entry exists for each.
+            "display_outputs": list(cell_runtime.display_outputs) if cell_runtime else [],
         }
 
+    from strata.artifact_transfer import record_metadata
+
     written = []
+    records: dict[str, Any] = {}
     for artifact_id, version in sorted(carry):
         reader_cm = store.open_blob_reader(artifact_id, version)
-        if reader_cm is None:
+        record = store.get_artifact(artifact_id, version)
+        if reader_cm is None or record is None:
             continue
+        # The record travels with the bytes. Without it an importer has the
+        # bytes and a provenance hash but not the transform spec — so not the
+        # content type the value is read back as — and not the lineage edges.
+        ref = f"{artifact_id}@v={version}"
+        records[ref] = {
+            **record_metadata(record),
+            "content_sha256": store.content_digest(artifact_id, version),
+        }
         # Streamed into the member rather than read whole. ``include=all``
         # exists for moving a project between servers, which is exactly the
         # case where the artifacts are large — reading each one into memory to
@@ -217,6 +238,11 @@ def write_snapshot(
         written.append(f"{artifact_id}@v={version}")
 
     manifest = {
+        # Bumped when an importer written against an older bundle would read
+        # this one wrong. 2 added `records`, per-cell `display_outputs` and
+        # renv.lock; a version-1 bundle carries bytes an importer cannot
+        # reconstruct artifacts from.
+        "format_version": SNAPSHOT_FORMAT_VERSION,
         "notebook_id": session.notebook_state.id,
         "include": include,
         "cells": per_cell,
@@ -226,6 +252,7 @@ def write_snapshot(
         # stale, and it needs to be told which those are rather than inferring
         # it from what it failed to find.
         "carried": written,
+        "records": records,
     }
     archive.writestr("artifacts.json", json.dumps(manifest, indent=2))
     return manifest

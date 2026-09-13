@@ -2425,6 +2425,173 @@ def test_import_endpoint_uses_custom_name_form_field(client, monkeypatch, tmp_pa
 
 
 # ---------------------------------------------------------------------------
+# POST /v1/notebooks/import-snapshot — snapshot bundle upload
+# ---------------------------------------------------------------------------
+
+
+def _snapshot_bytes(tmp_path: Path, owner: str | None = None) -> tuple[bytes, str]:
+    """A snapshot of a one-cell notebook with one stored artifact.
+
+    Built without running anything: route tests exercise the HTTP plumbing,
+    and the importer's own tests cover whether imported cells hit the cache.
+    """
+    import io
+    import zipfile
+
+    from strata.notebook.parser import parse_notebook
+    from strata.notebook.session import NotebookSession
+    from strata.notebook.snapshot import write_committed_files, write_snapshot
+
+    nb = create_notebook(tmp_path / "snapshot-src", "Snap Source", initialize_environment=False)
+    add_cell_to_notebook(nb, "c1", None)
+    write_cell(nb, "c1", "x = 1\n")
+    if owner is not None:
+        import tomllib
+
+        from strata.notebook.writer import _write_notebook_toml_atomic
+
+        with open(nb / "notebook.toml", "rb") as f:
+            data = tomllib.load(f)
+        data["owner"] = owner
+        _write_notebook_toml_atomic(nb / "notebook.toml", data)
+
+    session = NotebookSession(parse_notebook(nb), nb)
+    session.get_artifact_manager().store_cell_output(
+        cell_id="c1",
+        variable_name="x",
+        blob_data=b"1",
+        content_type="json/object",
+        provenance_hash="c1" * 32,
+        input_versions={},
+        source="x = 1",
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        write_committed_files(session, archive)
+        write_snapshot(session, archive, include="all")
+    return buffer.getvalue(), session.notebook_state.id
+
+
+def test_import_snapshot_opens_a_session_with_the_artifacts(client, monkeypatch, tmp_path):
+    storage = _import_storage(monkeypatch, tmp_path / "storage")
+    payload, source_id = _snapshot_bytes(tmp_path)
+
+    resp = client.post(
+        "/v1/notebooks/import-snapshot",
+        files={"file": ("demo.snapshot.zip", payload, "application/zip")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "session_id" in data
+    assert Path(data["path"]).parent == storage.resolve()
+    # The `.snapshot` infix is the export's naming, not part of the notebook's.
+    assert Path(data["path"]).name == "demo"
+    assert data["import_report"]["imported_artifacts"] == 1
+    assert data["import_report"]["replaced_notebook_id"] is None
+    assert data["id"] == source_id
+
+
+def test_import_snapshot_replaces_an_id_already_in_the_storage_root(client, monkeypatch, tmp_path):
+    """The second copy of one notebook gets its own id: two copies sharing one
+    collide the moment both publish to a shared store."""
+    _import_storage(monkeypatch, tmp_path / "storage")
+    payload, source_id = _snapshot_bytes(tmp_path)
+
+    first = client.post(
+        "/v1/notebooks/import-snapshot",
+        files={"file": ("one.zip", payload, "application/zip")},
+    )
+    second = client.post(
+        "/v1/notebooks/import-snapshot",
+        files={"file": ("two.zip", payload, "application/zip")},
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["id"] == source_id
+    assert second.json()["import_report"]["replaced_notebook_id"] == source_id
+    assert second.json()["id"] != source_id
+
+
+def test_import_snapshot_stamps_the_caller_not_the_exporter(client, monkeypatch, tmp_path):
+    """The bundle names whoever exported it. Discovery on a per-user server lists
+    by owner, so an import left under the original owner would vanish from the
+    importer's own list."""
+    import tomllib
+
+    set_server_state(
+        monkeypatch,
+        deployment_mode="personal",
+        notebook_storage_dir=tmp_path / "storage",
+        personal_mode_user_header="X-Notebook-User",
+    )
+    payload, _ = _snapshot_bytes(tmp_path, owner="bob@example.com")
+
+    resp = client.post(
+        "/v1/notebooks/import-snapshot",
+        files={"file": ("owned.zip", payload, "application/zip")},
+        headers={"X-Notebook-User": "alice@example.com"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    with (Path(resp.json()["path"]) / "notebook.toml").open("rb") as f:
+        assert tomllib.load(f).get("owner") == "alice@example.com"
+
+
+def test_import_snapshot_refuses_what_is_not_a_snapshot(client, monkeypatch, tmp_path):
+    import io
+    import zipfile
+
+    _import_storage(monkeypatch, tmp_path / "storage")
+    not_zip = client.post(
+        "/v1/notebooks/import-snapshot",
+        files={"file": ("a.zip", b"this is not a zip", "application/zip")},
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("notebook.toml", 'notebook_id = "x"\n')
+    no_manifest = client.post(
+        "/v1/notebooks/import-snapshot",
+        files={"file": ("b.zip", buffer.getvalue(), "application/zip")},
+    )
+
+    assert not_zip.status_code == 400
+    assert no_manifest.status_code == 400
+    assert "not a snapshot" in no_manifest.json()["detail"]
+
+
+def test_import_snapshot_enforces_its_upload_cap(client, monkeypatch, tmp_path):
+    _import_storage(monkeypatch, tmp_path / "storage")
+    monkeypatch.setattr("strata.notebook.routes._MAX_SNAPSHOT_UPLOAD_BYTES", 10)
+    payload, _ = _snapshot_bytes(tmp_path)
+
+    resp = client.post(
+        "/v1/notebooks/import-snapshot",
+        files={"file": ("big.zip", payload, "application/zip")},
+    )
+
+    assert resp.status_code == 413
+    assert not any((tmp_path / "storage").iterdir())
+
+
+def test_import_snapshot_rejects_path_traversal_in_name(client, monkeypatch, tmp_path):
+    """The name goes through the same checks as a Jupyter import's — one helper,
+    so one route cannot miss an escape the other catches."""
+    _import_storage(monkeypatch, tmp_path / "storage")
+    payload, _ = _snapshot_bytes(tmp_path)
+
+    resp = client.post(
+        "/v1/notebooks/import-snapshot",
+        files={"file": ("x.zip", payload, "application/zip")},
+        data={"name": "../escaped"},
+    )
+
+    assert resp.status_code == 400
+    assert not (tmp_path / "escaped").exists()
+
+
+# ---------------------------------------------------------------------------
 # PUT /v1/notebooks/{id}/python-version
 # ---------------------------------------------------------------------------
 

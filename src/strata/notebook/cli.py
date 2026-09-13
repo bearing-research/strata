@@ -816,7 +816,9 @@ def add_import_arguments(parser: argparse.ArgumentParser) -> None:
     """Attach ``import`` subcommand arguments to an existing parser."""
     parser.add_argument(
         "path",
-        help="Path to a Jupyter .ipynb file",
+        help=(
+            "A Jupyter .ipynb file, or a snapshot .zip exported with `strata export --to snapshot`"
+        ),
     )
     parser.add_argument(
         "--out",
@@ -824,7 +826,7 @@ def add_import_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "Target notebook directory. Defaults to a sibling directory "
-            "named after the .ipynb file stem."
+            "named after the file's stem."
         ),
     )
     parser.add_argument(
@@ -837,6 +839,43 @@ def add_import_arguments(parser: argparse.ArgumentParser) -> None:
             "PATH; seconds-slow on cold caches."
         ),
     )
+
+
+def _import_snapshot_bundle(path: Path, args: argparse.Namespace) -> int:
+    """``strata import <snapshot.zip>``: unpack a bundle into a notebook directory."""
+    from strata.config import StrataConfig
+    from strata.notebook.routes import _discover_notebooks
+    from strata.notebook.snapshot_import import NotASnapshotError, import_snapshot
+
+    stem = path.name.removesuffix(".zip").removesuffix(".snapshot")
+    dest = Path(args.output_path) if args.output_path else path.with_name(stem)
+
+    # A notebook id already in use where notebooks are looked for is replaced,
+    # so two copies never share one — that collides the moment both publish to
+    # a shared store. The storage root is the scope `strata` itself lists from;
+    # a copy living somewhere else entirely cannot be seen from here.
+    root = StrataConfig.load().notebook_storage_dir
+    taken = {e["notebook_id"] for e in _discover_notebooks(Path(root)) if e.get("notebook_id")}
+
+    try:
+        result = import_snapshot(path, dest, taken_ids=taken)
+    except (NotASnapshotError, FileExistsError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Imported {path} → {result.notebook_dir}")
+    print(f"  artifacts: {result.imported_artifacts} imported")
+    if result.replaced_id:
+        print(
+            f"  notebook id {result.replaced_id} was already in use, so this copy is "
+            f"{result.notebook_id}"
+        )
+    if result.by_reference_cells:
+        print(
+            f"  not carried (they open idle; run them, or pull from a team store): "
+            f"{', '.join(result.by_reference_cells)}"
+        )
+    return 0
 
 
 def import_main(args: argparse.Namespace) -> int:
@@ -852,6 +891,11 @@ def import_main(args: argparse.Namespace) -> int:
     if not path.is_file():
         print(f"error: {path} is not a file", file=sys.stderr)
         return 2
+    if path.suffix == ".zip":
+        # One verb for "turn a file into a notebook here", told apart by what
+        # the file is. The extension is unambiguous; a zip that turns out not
+        # to be a snapshot is refused by name rather than guessed at.
+        return _import_snapshot_bundle(path, args)
     if path.suffix != ".ipynb":
         print(
             f"warning: {path} does not have .ipynb extension; trying to parse anyway",
