@@ -849,14 +849,39 @@ class RemoteNotebookOps:
     """
 
     def __init__(
-        self, base_url: str, session_id: str, *, client: httpx.Client | None = None
+        self,
+        base_url: str,
+        session_id: str,
+        *,
+        client: httpx.Client | None = None,
+        author: str | None = None,
     ) -> None:
         import httpx
 
+        from strata.notebook.authorship import clean_author
+
         self._base_url = base_url.rstrip("/")
         self._session_id = session_id
+        # Sent on every write. Not resolved here the way LocalNotebookOps does
+        # it: the server is the one that decides, and it ignores this entirely
+        # when it can authenticate the caller.
+        # Trimmed and bounded here, as LocalNotebookOps does through
+        # resolve_author. The routes cap the field, so an over-long name would
+        # otherwise fail the write with a 422 the local path never produces —
+        # and in service mode it would be refused before the server could
+        # ignore it.
+        self._author = clean_author(author)
+
         self._owns_client = client is None
         self._client: httpx.Client = client if client is not None else httpx.Client(timeout=30.0)
+
+    def _credit(self) -> dict[str, str]:
+        """The author field, only when there is one.
+
+        Omitted rather than sent as null, so a caller that never set
+        ``--author`` sends the same body it always did.
+        """
+        return {"author": self._author} if self._author else {}
 
     def _send(
         self,
@@ -997,10 +1022,12 @@ class RemoteNotebookOps:
         source — the add endpoint creates an empty cell.
         """
         base = f"/v1/notebooks/{self._session_id}/cells"
-        created = self._cell_op("POST", base, json={"after_cell_id": after, "language": language})
+        created = self._cell_op(
+            "POST", base, json={"after_cell_id": after, "language": language, **self._credit()}
+        )
         cell_id = _require_field(created, "id")
         updated = self._cell_op(
-            "PUT", f"{base}/{cell_id}", cell_id=cell_id, json={"source": source}
+            "PUT", f"{base}/{cell_id}", cell_id=cell_id, json={"source": source, **self._credit()}
         )
         return _cell_view_from_wire(_require_field(updated, "cell"))
 
@@ -1010,7 +1037,7 @@ class RemoteNotebookOps:
             "PUT",
             f"/v1/notebooks/{self._session_id}/cells/{cell_id}",
             cell_id=cell_id,
-            json={"source": source},
+            json={"source": source, **self._credit()},
         )
         return _cell_view_from_wire(_require_field(updated, "cell"))
 

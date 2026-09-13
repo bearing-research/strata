@@ -978,7 +978,7 @@ def export_main(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _open_local_ops(notebook_dir_arg: str):
+def _open_local_ops(notebook_dir_arg: str, author: str | None = None):
     """Open a :class:`LocalNotebookOps` for *notebook_dir_arg*, or None on error.
 
     Prints the error to stderr; callers return exit 2 on None.
@@ -993,7 +993,7 @@ def _open_local_ops(notebook_dir_arg: str):
     from strata.notebook.ops import LocalNotebookOps
 
     try:
-        return LocalNotebookOps(notebook_dir)
+        return LocalNotebookOps(notebook_dir, author=author)
     except Exception as exc:  # noqa: BLE001 — surface any open failure as exit 2
         print(f"error: failed to open notebook: {exc}", file=sys.stderr)
         return None
@@ -1012,6 +1012,16 @@ def _add_target_args(parser: argparse.ArgumentParser) -> None:
         "--server", help="Server root for a live session, e.g. http://localhost:8765"
     )
     parser.add_argument("--session", help="Session id to drive on --server")
+    parser.add_argument(
+        "--author",
+        default=None,
+        help=(
+            "Who to credit for cells this command writes, e.g. your agent's "
+            "name. Recorded on the cell so a person can tell agent edits from "
+            "their own. Ignored by a server that authenticates its callers, "
+            "which uses the authenticated identity instead"
+        ),
+    )
 
 
 def _open_read_ops(args: argparse.Namespace):
@@ -1027,11 +1037,11 @@ def _open_read_ops(args: argparse.Namespace):
             return None
         from strata.notebook.ops import RemoteNotebookOps
 
-        return RemoteNotebookOps(args.server, args.session)
+        return RemoteNotebookOps(args.server, args.session, author=getattr(args, "author", None))
     if not args.notebook_dir:
         print("error: provide a notebook directory or --server/--session", file=sys.stderr)
         return None
-    return _open_local_ops(args.notebook_dir)
+    return _open_local_ops(args.notebook_dir, author=getattr(args, "author", None))
 
 
 def _close_ops(ops: object) -> None:

@@ -8,6 +8,7 @@ both write cells, "which of these did the agent write" had no answer. Item 31.
 
 from __future__ import annotations
 
+import pathlib
 import tomllib
 
 import pytest
@@ -195,3 +196,122 @@ class TestRoundTrip:
         cell = _cells(notebook)["c1"]
         assert cell["created_by"] == "agent:claude"
         assert cell["updated_by"] == "agent:claude"
+
+
+class TestAddingAVariant:
+    """Who added the variant, not who wrote the cell it was cloned from.
+
+    The first pass at this inherited the origin cell's author, reasoning that
+    the clone contains their code. But `created_by` records who *added* a cell,
+    and whoever asked for the variant added this one — so inheriting wrote one
+    principal's id as another's action, and reported a hand-made variant of an
+    assistant's cell as the assistant's.
+    """
+
+    def _variant_notebook(self, tmp_path, origin_author: str):
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import set_variant_mode
+
+        nb = create_notebook(tmp_path, "Variants", initialize_environment=False)
+        add_cell_to_notebook(nb, "m1", None, author=origin_author)
+        write_cell(nb, "m1", "# @variant model base\npreds = 1\n", author=origin_author)
+        set_variant_mode(nb, "model", "sweep")
+        return NotebookSession(parse_notebook(nb), nb)
+
+    def test_the_caller_is_credited_not_the_cloned_cell(self, tmp_path):
+        session = self._variant_notebook(tmp_path, "agent:claude")
+
+        _name, new_cell_id = session.add_variant("model", author="local")
+
+        cell = _cells(session.path)[new_cell_id]
+        assert cell["created_by"] == "local"
+        assert cell["updated_by"] == "local"
+
+    def test_a_human_variant_of_an_assistant_cell_reads_as_human(self, tmp_path):
+        """The inversion the old behaviour produced, stated as its own case."""
+        session = self._variant_notebook(tmp_path, "assistant")
+
+        _name, new_cell_id = session.add_variant("model", author="local")
+
+        assert _cells(session.path)[new_cell_id]["created_by"] != "assistant"
+
+    def test_the_origin_cell_is_left_alone(self, tmp_path):
+        session = self._variant_notebook(tmp_path, "agent:claude")
+
+        session.add_variant("model", author="local")
+
+        assert _cells(session.path)["m1"]["created_by"] == "agent:claude"
+
+
+class TestConcurrentStructuralEdit:
+    def test_a_cell_added_while_a_flush_is_in_flight_survives(self, notebook, monkeypatch):
+        """`write_cell` used to rewrite the whole file from a snapshot loaded
+        before it wrote the source, so a structural edit landing in between was
+        dropped — the added cell vanished from committed config and left an
+        orphaned source file.
+
+        The window is *inside* `write_cell`, between reading notebook.toml and
+        stamping the author, so the concurrent add has to land there. Doing it
+        before the call would leave the snapshot fresh and the test would pass
+        against the bug.
+        """
+        import builtins
+
+        add_cell_to_notebook(notebook, "c1", None, author="assistant")
+        cell_file = notebook / "cells" / "c1.py"
+        real_open = builtins.open
+        landed = []
+
+        def _open(file, mode="r", *args, **kwargs):
+            handle = real_open(file, mode, *args, **kwargs)
+            # Another process adds a cell just after the source write, while
+            # this call still holds its pre-write view of notebook.toml.
+            if not landed and "w" in mode and pathlib.Path(str(file)) == cell_file:
+                landed.append(True)
+                add_cell_to_notebook(notebook, "c2", "c1", author="local")
+            return handle
+
+        monkeypatch.setattr(builtins, "open", _open)
+        write_cell(notebook, "c1", "x = 1", author="local")
+        monkeypatch.undo()
+
+        assert landed, "the concurrent add never fired; the window was not opened"
+        cells = _cells(notebook)
+        assert set(cells) == {"c1", "c2"}
+        assert cells["c1"]["updated_by"] == "local"
+
+
+class TestTheAssistantInAServiceDeployment:
+    def test_it_records_both_itself_and_the_session(self, monkeypatch):
+        """Recording only the principal would make every assistant cell read as
+        the person's own; recording only `assistant` loses whose session it
+        was. Both, in the scheme-prefixed shape agent ids already use."""
+        from types import SimpleNamespace
+
+        import strata.auth as auth_module
+        from strata.notebook.authorship import resolve_assistant_author
+
+        monkeypatch.setattr(auth_module, "get_principal", lambda: SimpleNamespace(id="alice"))
+
+        assert resolve_assistant_author() == "assistant:alice"
+
+    def test_personal_mode_stays_plain(self):
+        from strata.notebook.authorship import resolve_assistant_author
+
+        assert resolve_assistant_author() == "assistant"
+
+
+class TestUpdatedAtStaysStructural:
+    def test_an_author_change_does_not_move_updated_at(self, notebook):
+        """`updated_at` moves on structural edits only. The discover list sorts
+        by it, so bumping it on an author change would reorder notebooks every
+        time the browser and an agent take turns on a cell."""
+        add_cell_to_notebook(notebook, "c1", None, author="local")
+        before = tomllib.load(open(notebook / "notebook.toml", "rb"))["updated_at"]
+
+        write_cell(notebook, "c1", "x = 1", author="agent:claude")
+
+        after = tomllib.load(open(notebook / "notebook.toml", "rb"))
+        assert after["cells"][0]["updated_by"] == "agent:claude"
+        assert after["updated_at"] == before

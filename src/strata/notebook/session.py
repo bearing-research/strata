@@ -428,10 +428,11 @@ class NotebookSession:
 
         self.reload()
 
-    def add_variant(self, group: str) -> tuple[str, str]:
+    def add_variant(self, group: str, author: str | None = None) -> tuple[str, str]:
         """Add a sibling variant to ``group``, cloning the active variant.
 
-        Returns ``(new_variant_name, new_cell_id)``. The new variant is
+        ``author`` credits whoever asked for it. Returns
+        ``(new_variant_name, new_cell_id)``. The new variant is
         placed immediately after the last existing member in source order,
         becomes active on creation, and starts as a copy of the active
         variant's body with the ``# @variant`` line rewritten to its name.
@@ -463,18 +464,21 @@ class NotebookSession:
         new_cell_id = uuid.uuid4().hex[:8]
         last_member_cell_id = resolved.members[-1].cell_id
 
-        # A new variant is a copy of the active one, so it inherits its
-        # authorship: the person or agent whose cell was cloned wrote what the
-        # clone contains, and attributing it to nobody would lose that.
+        # The caller's authorship, not the cloned cell's. `created_by` records
+        # who *added* a cell, and whoever clicked "add variant" added this one
+        # — inheriting the origin's author would write one principal's id as
+        # another's action in the mode where the field is supposed to be a
+        # fact, and would report a hand-made variant of an assistant's cell as
+        # the assistant's, inverting the question the field exists to answer.
         add_cell_to_notebook(
             self.path,
             new_cell_id,
             after_cell_id=last_member_cell_id,
             language=active_cell.language,
-            author=active_cell.updated_by or active_cell.created_by,
+            author=author,
         )
         new_source = _rewrite_variant_annotation(active_cell.source, group, new_name)
-        write_cell(self.path, new_cell_id, new_source)
+        write_cell(self.path, new_cell_id, new_source, author=author)
 
         # Switch active to the new variant. set_variant_active reloads,
         # so the DAG / staleness / variant flags refresh in one pass.

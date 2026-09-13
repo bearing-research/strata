@@ -2381,7 +2381,7 @@ async def add_variant_endpoint(
     """
 
     try:
-        new_name, new_cell_id = session.add_variant(group_id)
+        new_name, new_cell_id = session.add_variant(group_id, author=resolve_author())
         return {
             "new_variant_name": new_name,
             "new_cell_id": new_cell_id,

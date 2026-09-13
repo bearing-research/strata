@@ -332,9 +332,20 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None
         f.write(source)
 
     if author and cell_meta.get("updated_by") != author:
-        cell_meta["updated_by"] = author
-        toml_data["cells"] = cells_data
-        _write_notebook_toml_atomic(notebook_toml_path, toml_data)
+        # Through the helper, which re-reads: rewriting the snapshot loaded at
+        # the top of this function would drop a structural edit that landed
+        # while the source was being written (an offline `strata cell add`, a
+        # reorder) — the new cell would vanish from committed config and leave
+        # its source file orphaned. Without the `updated_at` bump, because an
+        # author change is not a structural edit.
+        def _stamp(data: dict[str, Any]) -> bool:
+            for entry in data.get("cells", []):
+                if entry.get("id") == cell_id and entry.get("updated_by") != author:
+                    entry["updated_by"] = author
+                    return True
+            return False
+
+        _apply_notebook_toml_update(notebook_dir, _stamp, bump_updated_at=False)
 
 
 def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None:
@@ -1164,6 +1175,8 @@ def delete_notebook_directory(notebook_dir: Path) -> None:
 def _apply_notebook_toml_update(
     notebook_dir: Path,
     mutate: Callable[[dict[str, Any]], bool],
+    *,
+    bump_updated_at: bool = True,
 ) -> None:
     """Load ``notebook.toml``, apply ``mutate``, rewrite only when the
     mutator reports a real change.
@@ -1172,6 +1185,11 @@ def _apply_notebook_toml_update(
     modified something worth persisting. When it returns ``False`` the
     file is left untouched — no rewrite, no ``updated_at`` bump — so
     ``updated_at`` keeps tracking actual structural edits.
+
+    ``bump_updated_at=False`` is for a change that belongs in committed
+    config but is not structural — recording who last edited a cell. The
+    discover list sorts by ``updated_at``, so bumping it there would reorder
+    notebooks every time two authors take turns on one cell.
     """
     notebook_dir = Path(notebook_dir)
     notebook_toml_path = notebook_dir / "notebook.toml"
@@ -1182,7 +1200,8 @@ def _apply_notebook_toml_update(
     if not mutate(toml_data):
         return
 
-    toml_data["updated_at"] = datetime.now(tz=UTC)
+    if bump_updated_at:
+        toml_data["updated_at"] = datetime.now(tz=UTC)
     _write_notebook_toml_atomic(notebook_toml_path, toml_data)
 
 
