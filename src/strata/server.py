@@ -829,6 +829,22 @@ async def lifespan(app: FastAPI):
             ),
         )
 
+    # Said at boot rather than to the first researcher whose cell is refused.
+    # Not an error: a service-mode server whose cells all run on server-managed
+    # workers never needs a harness user, and which workers notebooks will ask
+    # for is not known until they run.
+    if config.deployment_mode == "service" and not config.notebook_harness_user:
+        logger.warning(
+            "notebook_cells_refused_on_this_host",
+            detail=(
+                "Service mode with no notebook_harness_user: a notebook cell that "
+                "would run on this host is refused, because it could read this "
+                "server's credentials. Cells assigned a server-managed worker on "
+                "another machine run as normal. Set STRATA_NOTEBOOK_HARNESS_USER "
+                "to run cells here as a separate OS user."
+            ),
+        )
+
     # Configure structured logging first
     configure_logging()
 

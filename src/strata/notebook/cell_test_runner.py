@@ -21,6 +21,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from strata.notebook.harness_user import HarnessUser, hand_over, spawn_kwargs
+
 _CONFTEST_TEMPLATE = Path(__file__).parent / "cell_test_conftest.py"
 
 # Wall-clock ceiling for a single cell's test run. Cell tests are meant to be
@@ -58,11 +60,16 @@ def run_cell_tests_in_dir(
     test_source: str,
     inputs: dict[str, Any],
     timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+    env: dict[str, str] | None = None,
+    run_as: HarnessUser | None = None,
 ) -> dict[str, Any]:
     """Stage *rundir* and run pytest; return the parsed ``results.json`` dict.
 
     The result dict has totals (``passed``/``failed``/``errored``/``skipped``)
     plus a ``tests`` list of ``{name, nodeid, outcome, message}``.
+
+    ``env`` and ``run_as`` are the cell harness's environment and OS user: a
+    test run imports the cell's source, so it is cell code like any other.
 
     Raises:
         PytestUnavailableError: ``pytest`` is not importable in *venv_python*.
@@ -76,6 +83,7 @@ def run_cell_tests_in_dir(
     (rundir / "inputs.pkl").write_bytes(pickle.dumps(inputs))
     test_file = rundir / "test_cell.py"
     test_file.write_text(test_source, encoding="utf-8")
+    hand_over(rundir, run_as)
 
     proc = subprocess.run(
         [
@@ -93,6 +101,8 @@ def run_cell_tests_in_dir(
         capture_output=True,
         text=True,
         timeout=timeout_seconds,
+        env=env,
+        **spawn_kwargs(run_as),
     )
 
     results_path = rundir / "results.json"

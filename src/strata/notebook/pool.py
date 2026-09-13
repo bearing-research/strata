@@ -15,6 +15,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from strata.notebook.harness_env import configured_allowlist, harness_env
+from strata.notebook.harness_user import (
+    LocalExecutionRefused,
+    hand_over,
+    identity_env,
+    resolve_harness_user,
+    spawn_kwargs,
+)
 from strata.notebook.process_tree import (
     SUBPROCESS_LINE_LIMIT,
     kill_subprocess_tree_nowait,
@@ -117,6 +124,13 @@ class WarmProcessPool:
         4. Runs the harness logic
         5. Exits (one-shot)
         """
+        try:
+            harness_user = resolve_harness_user()
+        except LocalExecutionRefused as exc:
+            # Nothing to warm on a host that will not start cell code. The cold
+            # path is what tells the person running the cell why.
+            logger.debug("Not spawning a warm worker: %s", exc)
+            return
         self._warming += 1
         try:
             if self.worker_command is not None:
@@ -151,7 +165,8 @@ class WarmProcessPool:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.notebook_dir),
                 limit=SUBPROCESS_LINE_LIMIT,
-                env=harness_env(allowlist) if allowlist else None,
+                env=identity_env(harness_env(allowlist) if allowlist else None, harness_user),
+                **spawn_kwargs(harness_user),
                 **subprocess_kwargs_for_new_group(),
             )
 
@@ -294,10 +309,19 @@ class PooledCellExecutor:
                 worker — a real cell timeout, not a pool-availability miss;
                 the caller's timeout handler surfaces it (no cold re-run).
         """
+        try:
+            harness_user = resolve_harness_user()
+        except LocalExecutionRefused:
+            # Fall through to the cold path, which refuses with the reason.
+            return None
+
         # Try to acquire a warm process
         warm_proc = await pool.acquire()
         if warm_proc is None:
             return None
+        # The worker writes its outputs beside the manifest, in a run directory
+        # the server made private to itself.
+        hand_over(manifest_path.parent, harness_user)
 
         try:
             # Send manifest path to the warm process

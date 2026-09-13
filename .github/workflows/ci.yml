@@ -251,6 +251,28 @@ jobs:
             --ignore=tests/notebook/test_e2e_mounts_gcs.py \
             -n auto --dist loadscope --tb=short
 
+      # The one check that needs root and a second OS user, which the suite
+      # cannot arrange: a cell run as the harness user cannot read the server's
+      # environment through /proc (item 49). The user must be able to reach
+      # the interpreter behind the venv and the checkout it imports from, so
+      # every directory on both paths gets o+x.
+      - name: Harness-user isolation (Linux, root)
+        if: runner.os == 'Linux' && matrix.python-version == '3.13'
+        shell: bash
+        run: |
+          sudo useradd --create-home strata-cells
+          for target in "$(readlink -f .venv/bin/python)" "$PWD/src"; do
+            d="$target"
+            while [ "$d" != "/" ]; do sudo chmod o+rx "$d"; d="$(dirname "$d")"; done
+          done
+          set -o pipefail
+          sudo env "PATH=$PATH" STRATA_TEST_HARNESS_USER=strata-cells \
+            .venv/bin/python -m pytest tests/test_harness_isolation.py \
+            -k cannot_read_the_servers_environment \
+            -p no:cacheprovider --basetemp=/tmp/strata-harness-e2e -v | tee harness-e2e.log
+          # A skip passes pytest; here it would mean nothing was checked.
+          grep -q " 1 passed" harness-e2e.log
+
       - name: Run unit tests (Windows — notebook subsystem skipped)
         if: runner.os == 'Windows'
         shell: bash

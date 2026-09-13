@@ -73,6 +73,14 @@ from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_a
 from strata.notebook.dag import SweepProducer
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
+from strata.notebook.harness_user import (
+    HarnessUser,
+    LocalExecutionRefused,
+    hand_over,
+    identity_env,
+    resolve_harness_user,
+    spawn_kwargs,
+)
 from strata.notebook.immutability import MutationWarning
 from strata.notebook.models import (
     CellLanguage,
@@ -659,6 +667,23 @@ class CellExecutor:
         ).hexdigest()
         venv_python = Path(self.session.venv_python or "python")
 
+        # Tests import and run the cell's source, so they start cell code like
+        # any harness and are refused or dropped to the harness user the same.
+        refused: dict[str, Any] | None = None
+        harness_user = None
+        try:
+            harness_user = resolve_harness_user()
+        except LocalExecutionRefused as exc:
+            refused = {
+                "passed": 0,
+                "failed": 0,
+                "errored": 1,
+                "skipped": 0,
+                "tests": [
+                    {"name": "<refused>", "nodeid": "", "outcome": "error", "message": str(exc)}
+                ],
+            }
+
         pytest_unavailable = False
         auto_installed: list[str] = []
         with tempfile.TemporaryDirectory(prefix="strata_celltest_") as tmp:
@@ -682,6 +707,10 @@ class CellExecutor:
                         cell_id,
                     )
 
+            # The run directory is made inside this one, which is private to
+            # the server; a harness user has to be able to reach it.
+            hand_over(Path(tmp), harness_user)
+
             def _run(rundir_name: str) -> dict[str, Any]:
                 return run_cell_tests_in_dir(
                     rundir=Path(tmp) / rundir_name,
@@ -689,6 +718,8 @@ class CellExecutor:
                     cell_source=source,
                     test_source=test_source,
                     inputs=inputs,
+                    env=identity_env(self._harness_env(), harness_user),
+                    run_as=harness_user,
                 )
 
             empty_raw: dict[str, Any] = {
@@ -700,7 +731,7 @@ class CellExecutor:
             }
             raw: dict[str, Any]
             try:
-                raw = await asyncio.to_thread(_run, "run")
+                raw = refused if refused is not None else await asyncio.to_thread(_run, "run")
             except PytestUnavailableError:
                 # Auto-provision pytest into the notebook's dev group and retry
                 # once. Dev tools are excluded from the cell-provenance env hash,
@@ -4194,15 +4225,46 @@ class CellExecutor:
     # Harness helpers
     # ------------------------------------------------------------------
 
+    def _harness_command(
+        self, manifest_path: Path, venv_python: Path, harness_user: HarnessUser | None
+    ) -> list[str] | None:
+        """The argv that starts the cold Python harness; ``None`` without uv.
+
+        Its own method so a test can skip ``uv run`` without replacing the spawn
+        around it — the environment, the user and the refusal are the parts a
+        test must not route around.
+        """
+        if harness_user is not None:
+            # Straight to the notebook's interpreter. ``uv run`` wants a uv cache
+            # it can write, which a separate user would need arranged for it —
+            # and the venv is already synced by the time a cell runs.
+            return [str(venv_python), str(self.harness_path), str(manifest_path)]
+        uv = resolve_uv()
+        if uv is None:
+            return None
+        return [
+            uv,
+            "run",
+            "--directory",
+            str(self.session.path),
+            "python",
+            str(self.harness_path),
+            str(manifest_path),
+        ]
+
     async def _run_harness(
         self,
         manifest_path: Path,
         venv_python: Path,
         timeout_seconds: float,
     ) -> dict[str, Any]:
-        """Run the harness script via uv."""
-        uv = resolve_uv()
-        if uv is None:
+        """Run the harness script via uv, or as the harness user."""
+        try:
+            harness_user = resolve_harness_user()
+        except LocalExecutionRefused as exc:
+            return _refused_result(exc)
+        cmd = self._harness_command(manifest_path, venv_python, harness_user)
+        if cmd is None:
             # Without this, every cell dies with a bare ``[Errno 2] … 'uv'``
             # — common headless (ssh/cron) where ~/.local/bin isn't on PATH.
             # Mirror the Rscript guard in _run_r_harness.
@@ -4213,15 +4275,6 @@ class CellExecutor:
                 "stdout": "",
                 "variables": {},
             }
-        cmd = [
-            uv,
-            "run",
-            "--directory",
-            str(self.session.path),
-            "python",
-            str(self.harness_path),
-            str(manifest_path),
-        ]
 
         # Spawn the harness as the leader of a new process group so
         # SIGTERM / SIGKILL can target the entire descendant tree on
@@ -4233,12 +4286,14 @@ class CellExecutor:
             terminate_subprocess_tree,
         )
 
+        hand_over(manifest_path.parent, harness_user)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(self.session.path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=self._harness_env(),
+            env=identity_env(self._harness_env(), harness_user),
+            **spawn_kwargs(harness_user),
             **subprocess_kwargs_for_new_group(),
         )
 
@@ -4300,6 +4355,10 @@ class CellExecutor:
         the project's renv library (Phase 1: renv per notebook from
         ``_renv_sync`` in #55).
         """
+        try:
+            harness_user = resolve_harness_user()
+        except LocalExecutionRefused as exc:
+            return _refused_result(exc)
         rscript = shutil.which("Rscript")
         if rscript is None:
             return {
@@ -4320,12 +4379,14 @@ class CellExecutor:
             terminate_subprocess_tree,
         )
 
+        hand_over(manifest_path.parent, harness_user)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(self.session.path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=self._harness_env(),
+            env=identity_env(self._harness_env(), harness_user),
+            **spawn_kwargs(harness_user),
             **subprocess_kwargs_for_new_group(),
         )
 
@@ -4908,6 +4969,22 @@ class CellExecutor:
         # through the full env-sync flow).
         venv_python = self.session.venv_python or Path("python")
 
+        try:
+            harness_user = resolve_harness_user()
+        except LocalExecutionRefused as exc:
+            # The run-all dispatcher does not batch on a host that refuses (it
+            # sends each cell through single-cell, where a cache hit still
+            # serves), so this is reached only by calling the batch directly.
+            return BatchExecutionResult(
+                cell_results=[
+                    BatchCellResult(cell_id=spec["cell_id"], status="cell_error", error=str(exc))
+                    for spec in cell_specs
+                ],
+                completed=False,
+                failed_cell_id=cell_specs[0]["cell_id"] if cell_specs else None,
+                end_reason="cell_error",
+            )
+
         batch_tmpdir = Path(
             tempfile.mkdtemp(
                 prefix=f"strata_batch_{uuid.uuid4().hex[:8]}_",
@@ -4939,13 +5016,17 @@ class CellExecutor:
             }
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-            env = self._harness_env(
-                {
-                    "STRATA_BATCH_FRAME_FD": str(frame_w),
-                    "STRATA_BATCH_RESP_FD": str(resp_r),
-                    "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
-                }
+            env = identity_env(
+                self._harness_env(
+                    {
+                        "STRATA_BATCH_FRAME_FD": str(frame_w),
+                        "STRATA_BATCH_RESP_FD": str(resp_r),
+                        "STRATA_BATCH_OUTPUT_DIR": str(batch_tmpdir),
+                    }
+                ),
+                harness_user,
             )
+            hand_over(batch_tmpdir, harness_user)
 
             # Spawn the batch harness as the leader of a new process
             # group so a SIGKILL on timeout reaches every descendant
@@ -4961,6 +5042,7 @@ class CellExecutor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.session.path),
+                **spawn_kwargs(harness_user),
                 **subprocess_kwargs_for_new_group(),
             )
 
@@ -5583,6 +5665,11 @@ _ARTIFACT_EXT_BY_CONTENT_TYPE: dict[str, str] = {
     "module/cell": ".cell_module.json",
     "module/cell-instance": ".cell_instance.pickle",
 }
+
+
+def _refused_result(exc: LocalExecutionRefused) -> dict[str, Any]:
+    """A harness result for cell code this host would not start."""
+    return {"success": False, "error": str(exc), "stderr": "", "stdout": "", "variables": {}}
 
 
 async def _drain_stream(stream: asyncio.StreamReader) -> None:
