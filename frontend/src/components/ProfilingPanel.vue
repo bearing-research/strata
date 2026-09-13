@@ -65,6 +65,11 @@ function refresh() {
             </span>
           </span>
         </div>
+        <!-- Which shared results those hits drew on, when someone promoted them. -->
+        <div v-if="profilingSummary.teamPromotions.length" class="stat-row">
+          <span class="stat-label">Via promotions</span>
+          <span class="stat-value">{{ profilingSummary.teamPromotions.join(', ') }}</span>
+        </div>
         <div v-if="profilingSummary.totalArtifactBytes > 0" class="stat-row">
           <span class="stat-label">Artifact storage</span>
           <span class="stat-value">{{ formatBytes(profilingSummary.totalArtifactBytes) }}</span>

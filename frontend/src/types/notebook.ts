@@ -237,6 +237,8 @@ export interface Cell {
   output?: CellOutput
   /** Ordered visible outputs rendered for this cell */
   displayOutputs?: CellOutput[]
+  /** Each stored variable's artifact: `{var_name: strata://artifact/<id>@v=<n>}` */
+  artifactUris?: Record<string, string>
   /** Structured input status — each input with its artifact state */
   inputs: CellInput[]
   /** Cells this cell depends on (reads variables from) */
@@ -597,6 +599,8 @@ export interface NotebookRuntimeConfig {
   /** Registry UI gate — true only when the registry routes are reachable
    * (personal mode today). The dashboard hides itself when false. */
   registryEnabled: boolean
+  /** A team store is configured, so a cell's output can be promoted to it. */
+  teamStoreConfigured: boolean
 }
 
 // ``r_init`` and ``r_add`` reuse the same env-job UI surface as
@@ -749,6 +753,8 @@ export interface ProfilingSummary {
   teamCacheHits: number
   /** Who published the results this notebook was served. */
   teamContributors: string[]
+  /** The promotions that put those results in the team store, when any did. */
+  teamPromotions: string[]
   totalArtifactBytes: number
   cellProfiles: CellProfile[]
 }

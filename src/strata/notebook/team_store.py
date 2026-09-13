@@ -65,6 +65,7 @@ class TeamArtifact:
     build_env: str = ""
     build_duration_ms: int = 0
     env_hash: str = ""
+    promotion: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,10 @@ class TeamPull:
     # puller has no history for a cell they never ran, so without this the
     # savings estimate credits zero for exactly the case worth counting.
     saved_ms: int = 0
+    # The promotion that put the result in the store, when one did — someone
+    # shared ``taxi/model`` and this cell's result was part of its chain.
+    # ``None`` when it arrived by a cache publish.
+    promotion: str | None = None
 
 
 class TeamStore:
@@ -156,6 +161,7 @@ class TeamStore:
             build_env=str(match.get("build_env") or ""),
             build_duration_ms=int(match.get("build_duration_ms") or 0),
             env_hash=str(match.get("env_hash") or ""),
+            promotion=match.get("promotion") or None,
         )
 
     async def publish(
@@ -418,6 +424,10 @@ async def pull_cell_outputs(
     # the run — not the sum over variables, which would multiply it by the
     # number of things the cell happened to define.
     saved_ms = max(artifact.build_duration_ms for _, artifact in pulled)
+    # Variables of one cell can have arrived separately: one in a promoted
+    # chain, another offered by a cache publish. The hit came from a promotion
+    # if any of what it used did; sorted so which one is reported is stable.
+    promotion = min((a.promotion for _, a in pulled if a.promotion), default=None)
     logger.info(
         "Team store supplied cell %s (%s, %d bytes, computed by %s on %s); skipped running it",
         cell_id,
@@ -432,6 +442,7 @@ async def pull_cell_outputs(
         byte_size=total_bytes,
         build_env=build_env,
         saved_ms=saved_ms,
+        promotion=promotion,
     )
 
 

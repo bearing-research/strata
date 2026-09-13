@@ -307,6 +307,7 @@ class ProfilingSummaryPayload(WsPayload):
     team_cache_savings_ms: int = 0
     team_cache_hits: int = 0
     team_contributors: list[str] = Field(default_factory=list)
+    team_promotions: list[str] = Field(default_factory=list)
     total_artifact_bytes: int
     cell_profiles: list[CellProfileModel] = Field(default_factory=list)
 

@@ -38,6 +38,7 @@ from strata.api.dependencies import (
     WriteStore,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
+from strata.artifact_transfer import PROMOTION_TAG
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.logging import get_logger
 from strata.services.artifact import artifact_service
@@ -654,6 +655,9 @@ async def find_artifact_by_provenance(
         created_at=artifact.created_at or 0.0,
         principal=artifact.principal,
         content_sha256=artifact.content_sha256,
+        promotion=store.get_tags(artifact.id, artifact.version, tenant=artifact.tenant).get(
+            PROMOTION_TAG
+        ),
     )
 
 

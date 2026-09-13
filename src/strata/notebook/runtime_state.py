@@ -244,6 +244,7 @@ def persist_cell_execution_sample(
     from_team: bool = False,
     team_principal: str | None = None,
     team_saved_ms: int = 0,
+    team_promotion: str | None = None,
 ) -> None:
     """Append one execution timing to a cell's persisted history.
 
@@ -274,6 +275,8 @@ def persist_cell_execution_sample(
         sample["team_principal"] = team_principal
     if team_saved_ms:
         sample["team_saved_ms"] = int(team_saved_ms)
+    if team_promotion:
+        sample["team_promotion"] = team_promotion
     entry.execution_samples = [*entry.execution_samples, sample][-MAX_EXECUTION_SAMPLES:]
     save_runtime_state(notebook_dir, state)
 

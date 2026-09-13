@@ -39,10 +39,12 @@ import type {
   AliasMoveResult,
   AuditEntry,
   PendingChange,
+  PromotionResult,
   PublishedArtifact,
   RegistryName,
 } from '../composables/useStrata'
 import { useWebSocket } from '../composables/useWebSocket'
+import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
 import { shouldAdoptRemoteSource } from '../utils/cellSourceSync'
 import { flattenLineage, lineageToTree, type LineageTreeNode } from '../utils/lineage'
 import { markNotebookPerf, measureNotebookPerf } from '../utils/perf'
@@ -998,6 +1000,7 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
     ? serverCell.shadow_warnings
     : undefined
   localCell.widget = parseWidgetSpec(serverCell.widget)
+  localCell.artifactUris = parseArtifactUris(serverCell.artifact_uris)
   applyDisplayOutputsToCell(
     localCell,
     serverCell.display_outputs,
@@ -1145,6 +1148,7 @@ function parseBackendNotebookRuntimeConfig(raw: any): NotebookRuntimeConfig {
       raw?.python_selection_fixed === true || availablePythonVersions.length <= 1,
     // Fail closed: registry UI only shows when the backend explicitly enables it.
     registryEnabled: raw?.registry_enabled === true,
+    teamStoreConfigured: raw?.team_store_configured === true,
   }
 }
 
@@ -1321,6 +1325,7 @@ function loadNotebookStateFromBackend(data: any) {
   notebook.env = parseEnvMap(data.env)
   // Registry UI gate from the runtime config merged into the open response.
   registryEnabled.value = data?.registry_enabled === true
+  teamStoreConfigured.value = data?.team_store_configured === true
   // Populate the per-cell strips for already-published artifacts on open.
   scheduleRegistryRefresh()
   applyEnvSources(data)
@@ -1664,6 +1669,7 @@ const workerModeKnown = ref(false)
 // are reachable (personal mode today). Fail closed so the dashboard stays
 // hidden until the open response confirms it.
 const registryEnabled = ref(false)
+const teamStoreConfigured = ref(false)
 const workerHealthLoading = ref(false)
 const workerHealthCheckedAt = ref<number | null>(null)
 
@@ -1752,6 +1758,25 @@ async function setAliasAction(
   version: number,
 ): Promise<AliasMoveResult> {
   const result = await useStrata().setAlias(name, alias, artifactId, version)
+  await refreshRegistryAction()
+  return result
+}
+
+// Send one of a cell's outputs, and its chain, to the team store under a name.
+// Stamped with the cell so the strip lists it afterwards, like a result the
+// cell published itself.
+async function promoteToTeamAction(
+  cellId: CellId,
+  artifactUri: string,
+  name: string,
+): Promise<PromotionResult> {
+  const sid = sessionId()
+  const ref = parseArtifactRef(artifactUri)
+  if (!sid || !ref) throw new Error(`Cannot promote ${artifactUri}`)
+  const result = await useStrata().promoteArtifact(sid, ref.id, ref.version, {
+    name,
+    tags: { nb_cell: cellId },
+  })
   await refreshRegistryAction()
   return result
 }
@@ -2096,6 +2121,7 @@ function initializeWebSocket() {
         cell.streamAttempt = undefined
         cell.durationMs = p.duration_ms
         cell.displayOutputs = displayOutputs
+        if (p.artifact_uris !== undefined) cell.artifactUris = parseArtifactUris(p.artifact_uris)
         // If cell_output carries fresh stdout/stderr, overwrite.
         // Otherwise keep whatever earlier cell_console messages
         // streamed in (so the console doesn't disappear on cache
@@ -2398,6 +2424,7 @@ function initializeWebSocket() {
         teamCacheSavingsMs: p.team_cache_savings_ms || 0,
         teamCacheHits: p.team_cache_hits || 0,
         teamContributors: p.team_contributors || [],
+        teamPromotions: p.team_promotions || [],
         totalArtifactBytes: p.total_artifact_bytes || 0,
         cellProfiles: (p.cell_profiles || []).map((cp: any) => ({
           cellId: cp.cell_id,
@@ -3883,6 +3910,8 @@ export function useNotebook() {
     refreshRegistryAction,
     fetchRegistryAuditAction,
     setAliasAction,
+    promoteToTeamAction,
+    teamStoreConfigured,
     approvePendingAction,
     rejectPendingAction,
     fetchLineageAction,

@@ -255,7 +255,7 @@ def remap_input_versions(record: ArtifactVersion, remap: dict[str, str]) -> Arti
 
 def copy_chain(
     source: ArtifactStore, target: PublicationTarget, artifact: ArtifactVersion, max_depth: int
-) -> tuple[int, str]:
+) -> tuple[list[str], str]:
     """Copy an artifact and everything behind it into the served store.
 
     Notebook cells write to the notebook's own ``.strata/artifacts``; the server
@@ -275,8 +275,9 @@ def copy_chain(
     computation the target already holds under another id resolves to that row,
     and an edge still naming the source's id would resolve to nothing here.
 
-    Returns how many artifacts were newly written, and the ref the published
-    artifact itself landed on, which is not the caller's when it deduplicated.
+    Returns the refs this copy newly wrote on the target (in the order they
+    landed), and the ref the published artifact itself landed on, which is not
+    the caller's when it deduplicated.
     """
     from strata.services.artifact import ArtifactService
 
@@ -288,7 +289,7 @@ def copy_chain(
         tenant_filter=None,
         max_depth=max_depth,
     )
-    copied = 0
+    written: list[str] = []
     remap: dict[str, str] = {}
     published_ref = f"{artifact.id}@v={artifact.version}"
     landed_ref = published_ref
@@ -309,14 +310,19 @@ def copy_chain(
                 blob = reader.read()
         imported = target.import_artifact(record, blob)
         if imported.written:
-            copied += 1
+            written.append(imported.ref)
 
         source_ref = f"{node.artifact_id}@v={node.version}"
         if imported.ref != source_ref:
             remap[source_ref] = imported.ref
             if source_ref == published_ref:
                 landed_ref = imported.ref
-    return copied, landed_ref
+    return written, landed_ref
+
+
+# The ``nb_`` prefix keeps it out of the tag lists the registry shows: it is a
+# record of how an artifact arrived, not something anyone set on purpose.
+PROMOTION_TAG = "nb_promotion"
 
 
 @dataclass(frozen=True)
@@ -366,7 +372,7 @@ def promote_artifact(
             f"{artifact.id}@v={artifact.version} is not readable (state={artifact.state})"
         )
 
-    copied, landed_ref = copy_chain(source, target, artifact, max_depth)
+    written, landed_ref = copy_chain(source, target, artifact, max_depth)
     landed_id, _, landed_version = landed_ref.partition("@v=")
     version = int(landed_version)
 
@@ -376,11 +382,18 @@ def promote_artifact(
         alias_pending = not target.set_alias(name, alias, landed_id, version)
     for key, value in (tags or {}).items():
         target.set_tag(landed_id, version, key, value)
+    # Stamp what this promotion brought, so a colleague's team-cache hit on any
+    # of it can say which promotion it came from. Only what it wrote: a row the
+    # store already held arrived some other way (a cache publish, an earlier
+    # promotion), and restamping it would claim this one put it there.
+    for ref in written:
+        written_id, _, written_version = ref.partition("@v=")
+        target.set_tag(written_id, int(written_version), PROMOTION_TAG, name)
 
     return Promotion(
         name=name,
         ref=landed_ref,
-        copied=copied,
+        copied=len(written),
         alias=alias,
         alias_pending=alias_pending,
     )

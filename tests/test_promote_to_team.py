@@ -170,6 +170,114 @@ class TestPromote:
         assert payload["alias_pending"] is False
 
 
+class TestAHitSaysWhichPromotionItCameFrom:
+    """A colleague's team-cache hit on a promoted chain could say who computed
+    it and nothing about why it was there to hit. The stamp is what lets it say
+    "this came from taxi/model" — the reason someone promoted in the first
+    place, seen from the side that benefits."""
+
+    def test_everything_the_promotion_wrote_is_stamped(self, team_store, team_dir, chain):
+        _promote(chain, team_store)
+
+        store = ArtifactStore(team_dir)
+        for key in ("upstream", "figure"):
+            tags = store.get_tags(chain[key].id, chain[key].version)
+            assert tags.get("nb_promotion") == "taxi/model", key
+
+    def test_a_row_the_store_already_held_is_not_claimed(self, team_store, team_dir, chain):
+        """It arrived some other way — a cache publish, an earlier promotion —
+        and restamping it would say this promotion put it there."""
+        from strata.artifact_transfer import RemoteStore
+
+        manager = NotebookArtifactManager("nb", artifact_dir=chain["dir"])
+        upstream = chain["upstream"]
+        RemoteStore(team_store).import_artifact(
+            upstream, manager.load_artifact_data(upstream.id, upstream.version)
+        )
+
+        _promote(chain, team_store)
+
+        store = ArtifactStore(team_dir)
+        assert "nb_promotion" not in store.get_tags(upstream.id, upstream.version)
+        figure = chain["figure"]
+        assert store.get_tags(figure.id, figure.version).get("nb_promotion") == "taxi/model"
+
+    def test_the_stamp_is_not_shown_as_a_tag(self, team_store, chain):
+        """It records how an artifact arrived, not something anyone set."""
+        _promote(chain, team_store)
+
+        summary = httpx.get(f"{team_store}/v1/registry/summary", timeout=10).json()
+
+        row = next(r for r in summary["names"] if r["name"] == "taxi/model")
+        assert "nb_promotion" not in row["tags"]
+
+    def test_a_pull_reports_the_promotion(self, team_store, tmp_path):
+        from strata.artifact_transfer import RemoteStore, promote_artifact
+        from strata.notebook.provenance import derive_subkey
+        from strata.notebook.team_store import TeamStore, pull_cell_outputs
+
+        cell_provenance = "e5" * 32
+        mine = NotebookArtifactManager("nb", artifact_dir=tmp_path / "mine")
+        rows = mine.store_cell_output(
+            cell_id="c1",
+            variable_name="rows",
+            blob_data=b"[1, 2]",
+            content_type="json/object",
+            provenance_hash=derive_subkey(cell_provenance, "rows"),
+            input_versions={},
+            source="rows = [1, 2]",
+        )
+        promote_artifact(mine.artifact_store, RemoteStore(team_store), rows, name="taxi/rows")
+
+        theirs = NotebookArtifactManager("nb", artifact_dir=tmp_path / "theirs")
+
+        async def _pull():
+            store = TeamStore(team_store)
+            try:
+                return await pull_cell_outputs(
+                    store,
+                    theirs,
+                    cell_id="c1",
+                    provenance_hash=cell_provenance,
+                    consumed_vars={"rows"},
+                )
+            finally:
+                await store.aclose()
+
+        pull = asyncio.run(_pull())
+
+        assert pull is not None
+        assert pull.promotion == "taxi/rows"
+
+    def test_a_result_offered_by_a_cache_publish_names_no_promotion(self, team_store, tmp_path):
+        from strata.notebook.provenance import derive_subkey
+        from strata.notebook.team_store import TeamStore, pull_cell_outputs
+
+        cell_provenance = "f6" * 32
+        theirs = NotebookArtifactManager("nb", artifact_dir=tmp_path / "theirs")
+
+        async def _publish_then_pull():
+            store = TeamStore(team_store)
+            try:
+                assert await store.publish(
+                    derive_subkey(cell_provenance, "rows"), b"[3]", content_type="json/object"
+                )
+                return await pull_cell_outputs(
+                    store,
+                    theirs,
+                    cell_id="c1",
+                    provenance_hash=cell_provenance,
+                    consumed_vars={"rows"},
+                )
+            finally:
+                await store.aclose()
+
+        pull = asyncio.run(_publish_then_pull())
+
+        assert pull is not None
+        assert pull.promotion is None
+
+
 class TestRefusals:
     def test_an_unreachable_store_is_not_silently_a_success(self, chain):
         """It raises rather than returning 0.
@@ -388,6 +496,46 @@ class TestPromoteRoute:
             self._call(chain, "http://127.0.0.1:1", monkeypatch)
 
         assert caught.value.status_code == 502
+
+
+class TestEveryOutputIsOfferedForPromotion:
+    """The strip offered Promote only on a result a cell published itself with
+    ``put(name=...)``. Any stored output can be promoted, so the frontend has to
+    learn each one's artifact — ``artifact_uri`` names only one of them."""
+
+    @pytest.mark.asyncio
+    async def test_the_output_frame_names_every_stored_variable(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from strata.notebook.executor import CellExecutionResult
+        from strata.notebook.ws import _broadcast_execution_result
+
+        uris = {
+            "model": "strata://artifact/nb_x_cell_c1_var_model@v=2",
+            "scaler": "strata://artifact/nb_x_cell_c1_var_scaler@v=1",
+        }
+        cell = SimpleNamespace(artifact_uris=uris)
+        session = SimpleNamespace(
+            notebook_state=SimpleNamespace(get_cell=lambda cid: cell if cid == "c1" else None)
+        )
+        monkeypatch.setattr(
+            "strata.notebook.ws._get_session_manager",
+            lambda: SimpleNamespace(get_session=lambda nid: session if nid == "nb1" else None),
+        )
+        sent: list[dict] = []
+
+        async def _capture(notebook_id, message):
+            sent.append(message)
+
+        monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
+
+        result = CellExecutionResult(
+            cell_id="c1", success=True, artifact_uri=uris["scaler"], stdout="", stderr=""
+        )
+        await _broadcast_execution_result("nb1", 1, "c1", result)
+
+        (output,) = [m for m in sent if m["type"] == "cell_output"]
+        assert output["payload"]["artifact_uris"] == uris
 
 
 class TestAmbientPromoteWiring:

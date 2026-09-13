@@ -139,6 +139,7 @@ class ExecutionSample:
     from_team: bool = False
     team_principal: str | None = None
     team_saved_ms: int = 0
+    team_promotion: str | None = None
 
 
 @dataclass
@@ -1864,6 +1865,7 @@ class NotebookSession:
                     from_team=bool(sample.get("from_team")),
                     team_principal=sample.get("team_principal"),
                     team_saved_ms=int(sample.get("team_saved_ms") or 0),
+                    team_promotion=sample.get("team_promotion"),
                 )
                 for sample in entry.execution_samples
             ]
@@ -1880,6 +1882,7 @@ class NotebookSession:
         from_team: bool = False,
         team_principal: str | None = None,
         team_saved_ms: int = 0,
+        team_promotion: str | None = None,
     ) -> None:
         """Record a cell execution for profiling (v1.1).
 
@@ -1896,6 +1899,8 @@ class NotebookSession:
                 saved. Carried rather than inferred: the estimator prices a
                 local hit against the last local run of the same cell, and
                 someone served a teammate's result never made one.
+            team_promotion: The promotion that put the result in the team
+                store, when one did.
         """
         if cell_id not in self.execution_history:
             self.execution_history[cell_id] = []
@@ -1906,6 +1911,7 @@ class NotebookSession:
                 from_team=from_team,
                 team_principal=team_principal,
                 team_saved_ms=team_saved_ms,
+                team_promotion=team_promotion,
             )
         )
         # Mirror to disk so the profiling summary survives a restart. Trimmed
@@ -1920,6 +1926,7 @@ class NotebookSession:
             from_team=from_team,
             team_principal=team_principal,
             team_saved_ms=team_saved_ms,
+            team_promotion=team_promotion,
         )
 
     def get_estimated_duration(self, cell_id: str) -> int:
@@ -1981,6 +1988,7 @@ class NotebookSession:
         team_cache_savings_ms = 0
         team_cache_hits = 0
         team_contributors: set[str] = set()
+        team_promotions: set[str] = set()
         for cell in self.notebook_state.cells:
             history = self.execution_history.get(cell.id, [])
             last_non_cached_duration: int | None = None
@@ -1995,6 +2003,8 @@ class NotebookSession:
                         team_cache_hits += 1
                         if sample.team_principal:
                             team_contributors.add(sample.team_principal)
+                        if sample.team_promotion:
+                            team_promotions.add(sample.team_promotion)
                 else:
                     last_non_cached_duration = int(sample.duration_ms)
 
@@ -2009,6 +2019,10 @@ class NotebookSession:
             "team_cache_savings_ms": team_cache_savings_ms,
             "team_cache_hits": team_cache_hits,
             "team_contributors": sorted(team_contributors),
+            # What was shared on purpose that these hits drew on. Contributors
+            # say who; this says which promotion, which is what someone asks
+            # when deciding whether promoting is worth the trouble.
+            "team_promotions": sorted(team_promotions),
             "total_artifact_bytes": total_artifact_bytes,
             "cell_profiles": cell_profiles,
         }
