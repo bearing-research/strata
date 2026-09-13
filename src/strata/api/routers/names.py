@@ -8,6 +8,12 @@ table-ACL resolver used by name-status staleness is ``resolve_input_version``,
 imported from ``strata.api.dependencies`` (#295) — the same enforced unit
 materialize and explain call.
 
+With ``notebook_remote_store_url`` set, every route here answers from that
+store, as the registry routes do. These are the same registry — names, aliases
+and tags — and forwarding some of them and not others is how the dashboard came
+to read the team's registry and write its promotions to the local one, where the
+tab never showed them. See ``strata.api.remote_registry``.
+
 Route order matters: the greedy ``/v1/names/{name:path}`` resolver MUST stay
 registered AFTER the more specific ``/v1/names/{name:path}/aliases/...`` routes,
 or ``.../aliases/x`` URLs get swallowed as part of the name — so the alias
@@ -26,6 +32,7 @@ from strata.api.dependencies import (
     ReadStore,
     WriteStore,
 )
+from strata.api.remote_registry import quoted, relay, remote_registry
 from strata.types import (
     InputChangeInfo,
     NameResolveResponse,
@@ -56,6 +63,15 @@ async def set_alias(
     immediately: the change lands in the pending queue (202) and an
     explicit approve applies it.
     """
+    target = remote_registry()
+    if target is not None:
+        return await relay(
+            target,
+            "PUT",
+            f"/v1/names/{quoted(name, path=True)}/aliases/{quoted(alias)}",
+            json_body=request.model_dump(),
+        )
+
     from strata.server import get_state
 
     state = get_state()
@@ -113,6 +129,12 @@ async def set_alias(
 @router.get("/v1/names/{name:path}/aliases/{alias}")
 async def resolve_alias(name: str, alias: str, store: ReadStore, principal: CurrentPrincipal):
     """Resolve ``name @ alias`` to its artifact version."""
+    target = remote_registry()
+    if target is not None:
+        return await relay(
+            target, "GET", f"/v1/names/{quoted(name, path=True)}/aliases/{quoted(alias)}"
+        )
+
     tenant_id = principal.tenant if principal else None
 
     artifact = store.resolve_alias(name, alias, tenant=tenant_id)
@@ -133,6 +155,12 @@ async def delete_alias(
     name: str, alias: str, store: PersonalModeStore, principal: CurrentPrincipal
 ):
     """Delete ``name @ alias`` (pending queue for protected aliases)."""
+    target = remote_registry()
+    if target is not None:
+        return await relay(
+            target, "DELETE", f"/v1/names/{quoted(name, path=True)}/aliases/{quoted(alias)}"
+        )
+
     from strata.server import get_state
 
     state = get_state()
@@ -156,6 +184,10 @@ async def delete_alias(
 @router.get("/v1/names/{name:path}/aliases")
 async def list_aliases(name: str, store: ReadStore, principal: CurrentPrincipal):
     """List the aliases held by a name."""
+    target = remote_registry()
+    if target is not None:
+        return await relay(target, "GET", f"/v1/names/{quoted(name, path=True)}/aliases")
+
     tenant_id = principal.tenant if principal else None
 
     aliases = store.list_aliases(name, tenant=tenant_id)
@@ -187,6 +219,15 @@ async def set_tag(
     principal: CurrentPrincipal,
 ):
     """Set a key/value tag on an artifact version."""
+    target = remote_registry()
+    if target is not None:
+        return await relay(
+            target,
+            "PUT",
+            f"/v1/artifacts/{quoted(artifact_id)}/v/{version}/tags",
+            json_body=request.model_dump(),
+        )
+
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 
@@ -202,6 +243,10 @@ async def set_tag(
 @router.get("/v1/artifacts/{artifact_id}/v/{version}/tags")
 async def get_tags(artifact_id: str, version: int, store: ReadStore, principal: CurrentPrincipal):
     """Get the tags on an artifact version."""
+    target = remote_registry()
+    if target is not None:
+        return await relay(target, "GET", f"/v1/artifacts/{quoted(artifact_id)}/v/{version}/tags")
+
     tenant_id = principal.tenant if principal else None
 
     return {
@@ -216,6 +261,14 @@ async def delete_tag(
     artifact_id: str, version: int, key: str, store: WriteStore, principal: CurrentPrincipal
 ):
     """Delete one tag from an artifact version."""
+    target = remote_registry()
+    if target is not None:
+        return await relay(
+            target,
+            "DELETE",
+            f"/v1/artifacts/{quoted(artifact_id)}/v/{version}/tags/{quoted(key)}",
+        )
+
     tenant_id = principal.tenant if principal else None
     actor = principal.id if principal else None
 
@@ -237,6 +290,10 @@ async def resolve_name(name: str, store: ReadStore, principal: CurrentPrincipal)
     Returns:
         NameResolveResponse with resolved artifact URI
     """
+    target = remote_registry()
+    if target is not None:
+        return await relay(target, "GET", f"/v1/names/{quoted(name, path=True)}")
+
     # Get tenant from auth context for name isolation
     tenant_id = principal.tenant if principal else None
 
@@ -263,6 +320,10 @@ async def set_name(request: NameSetRequest, store: WriteStore, principal: Curren
     Returns:
         NameSetResponse with name and artifact URIs
     """
+    target = remote_registry()
+    if target is not None:
+        return await relay(target, "POST", "/v1/names", json_body=request.model_dump())
+
     # Get tenant + actor from auth context for name isolation and audit
     # attribution (who published this name).
     tenant_id = principal.tenant if principal else None
@@ -298,6 +359,10 @@ async def delete_name(name: str, store: PersonalModeStore, principal: CurrentPri
     Returns:
         Success status
     """
+    target = remote_registry()
+    if target is not None:
+        return await relay(target, "DELETE", f"/v1/names/{quoted(name, path=True)}")
+
     # Get tenant from auth context for name isolation
     tenant_id = principal.tenant if principal else None
 
@@ -314,6 +379,10 @@ async def list_names(store: ReadStore, principal: CurrentPrincipal):
     Returns:
         List of name entries with their artifact mappings
     """
+    target = remote_registry()
+    if target is not None:
+        return await relay(target, "GET", "/v1/names")
+
     # Get tenant from auth context for name isolation
     tenant_id = principal.tenant if principal else None
 
@@ -346,6 +415,10 @@ async def get_name_status(name: str, store: ReadStore, principal: CurrentPrincip
     Returns:
         NameStatusResponse with staleness information
     """
+    target = remote_registry()
+    if target is not None:
+        return await relay(target, "GET", f"/v1/artifacts/names/{quoted(name, path=True)}/status")
+
     from strata.api.dependencies import resolve_input_version
 
     # Get tenant from auth context for name isolation

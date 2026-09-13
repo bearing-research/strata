@@ -37,6 +37,7 @@ from strata.api.dependencies import (
     ReadStore,
     WriteStore,
 )
+from strata.api.remote_registry import quoted, relay, remote_registry
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.logging import get_logger
 from strata.services.artifact import artifact_service
@@ -953,6 +954,19 @@ async def get_artifact_lineage(
     Returns:
         ArtifactLineageResponse with nodes and edges representing the lineage graph
     """
+    # Answered by the team store when one is configured. The dashboard opens
+    # lineage from the Registry tab and the cell strip, both of which list what
+    # the team's registry holds — so asking the local store here would 404 on
+    # exactly the artifacts the reader just clicked.
+    target = remote_registry()
+    if target is not None:
+        return await relay(
+            target,
+            "GET",
+            f"/v1/artifacts/{quoted(artifact_id)}/v/{version}/lineage",
+            params={"max_depth": max_depth},
+        )
+
     from strata.server import _authorize_artifact_read, _ensure_artifact_access
 
     # Get the root artifact

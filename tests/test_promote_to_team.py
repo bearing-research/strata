@@ -318,6 +318,14 @@ class TestPromoteRoute:
         from strata.server import get_state
 
         monkeypatch.setattr(get_state().config, "notebook_remote_store_url", url)
+        # That setting belongs to the notebook's server, but in one process the
+        # team store reads the same config and its registry routes would forward
+        # every write back to themselves. The team store has no team store.
+        import strata.api.routers.artifacts as artifacts_router
+        import strata.api.routers.names as names_router
+
+        monkeypatch.setattr(names_router, "remote_registry", lambda: None)
+        monkeypatch.setattr(artifacts_router, "remote_registry", lambda: None)
         artifact_id = body.pop("artifact_id", chain["figure"].id)
         version = body.pop("version", chain["figure"].version)
         payload = {"name": "taxi/model"}
