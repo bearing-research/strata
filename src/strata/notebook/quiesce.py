@@ -54,7 +54,10 @@ def _resolve(path: Path) -> Path:
 
 
 def _covering(path: Path) -> Hold | None:
-    target = _resolve(path)
+    return _covering_resolved(_resolve(path))
+
+
+def _covering_resolved(target: Path) -> Hold | None:
     now = time.monotonic()
     with _lock:
         for root in [r for r, hold in _holds.items() if hold.expires_at <= now]:
@@ -115,7 +118,7 @@ def begin(root: Path, max_hold_seconds: float) -> Hold:
     storage root, and resolving again here would touch the filesystem with a
     request-supplied path for no gain.
     """
-    if _covering(root) is not None:
+    if _covering_resolved(root) is not None:
         raise NotebookQuiesced(f"{root} is already held")
     with _lock:
         for other in _holds:
