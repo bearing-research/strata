@@ -13,6 +13,7 @@ import {
   workerTransportLabel,
   workerWarningForEntry,
 } from '../utils/notebookWorkers'
+import { authorBadgeLabel, authorTitle } from '../utils/cellAuthorship'
 import { renderMarkdownToHtml } from '../utils/markdown'
 import { isStructuredStream, parsePartialJson } from '../utils/partialJson'
 
@@ -475,6 +476,9 @@ const mountSummary = computed(() =>
 const effectiveWorkerLabel = computed(
   () => props.cell.annotations?.worker || props.cell.worker || 'local',
 )
+
+const authorBadge = computed(() => authorBadgeLabel(props.cell.createdBy, props.cell.updatedBy))
+const authorTooltip = computed(() => authorTitle(props.cell.createdBy, props.cell.updatedBy))
 const effectiveWorkerEntry = computed(() =>
   resolveEffectiveWorkerEntry(availableWorkers.value, effectiveWorkerLabel.value),
 )
@@ -903,6 +907,9 @@ function outputKey(output: CellOutput, index: number): string {
         <div class="cell-meta-row cell-meta-runtime">
           <span class="worker-badge" :title="`Worker: ${effectiveWorkerLabel}`">
             worker: {{ effectiveWorkerLabel }}
+          </span>
+          <span v-if="authorBadge" class="author-badge" :title="authorTooltip">
+            {{ authorBadge }}
           </span>
           <span
             v-if="dispatchLabel"
@@ -1824,6 +1831,17 @@ function outputKey(output: CellOutput, index: number): string {
   padding: 1px 6px;
   border-radius: 3px;
   font-size: 10px;
+}
+.author-badge {
+  background: var(--tint-teal);
+  color: var(--accent-teal);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .dispatch-badge {
   background: var(--tint-warning);

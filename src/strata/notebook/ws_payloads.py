@@ -352,6 +352,11 @@ class CellAnalysisModel(WsPayload):
     variant_active: bool | None = None
     is_module_cell: bool = False
     module_exports: list[ModuleExportModel] | None = None
+    # Who added the cell and who last edited it. Carried here because this is
+    # the frame an edit produces: without it the browser keeps showing the
+    # previous author until the next full reload.
+    created_by: str | None = None
+    updated_by: str | None = None
 
 
 class DagUpdatePayload(WsPayload):

@@ -39,6 +39,8 @@ export interface CellAnalysisModel {
   variant_active?: boolean | null
   is_module_cell: boolean
   module_exports?: ModuleExportModel[] | null
+  created_by?: string | null
+  updated_by?: string | null
 }
 
 export interface CellConsolePayload {

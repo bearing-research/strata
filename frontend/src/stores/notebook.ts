@@ -958,6 +958,8 @@ function applyBackendCellState(localCell: Cell, serverCell: any) {
   localCell.upstreamIds = serverCell.upstream_ids || []
   localCell.downstreamIds = serverCell.downstream_ids || []
   localCell.isLeaf = serverCell.is_leaf || false
+  localCell.createdBy = typeof serverCell.created_by === 'string' ? serverCell.created_by : null
+  localCell.updatedBy = typeof serverCell.updated_by === 'string' ? serverCell.updated_by : null
   localCell.status = serverCell.status || 'idle'
   localCell.worker = serverCell.worker ?? null
   localCell.workerOverride = serverCell.worker_override ?? null
@@ -2268,6 +2270,14 @@ function initializeWebSocket() {
           if (Array.isArray(sc.upstream_ids)) cell.upstreamIds = sc.upstream_ids
           if (Array.isArray(sc.downstream_ids)) cell.downstreamIds = sc.downstream_ids
           if (typeof sc.is_leaf === 'boolean') cell.isLeaf = sc.is_leaf
+          // An edit moves updated_by, and this frame is the only thing that
+          // arrives after one — without it the header keeps the old author.
+          if (sc.created_by !== undefined) {
+            cell.createdBy = typeof sc.created_by === 'string' ? sc.created_by : null
+          }
+          if (sc.updated_by !== undefined) {
+            cell.updatedBy = typeof sc.updated_by === 'string' ? sc.updated_by : null
+          }
           if (Array.isArray(sc.annotation_diagnostics)) {
             cell.annotationDiagnostics = sc.annotation_diagnostics
               .filter((d: any) => d && typeof d.code === 'string')
