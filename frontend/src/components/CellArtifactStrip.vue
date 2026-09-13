@@ -9,6 +9,9 @@ const {
   registryArtifactsByCell,
   registryNames,
   setAliasAction,
+  promoteToTeamAction,
+  teamStoreConfigured,
+  cellMap,
   pushToast,
   openLineageAction,
 } = useNotebook()
@@ -62,6 +65,45 @@ async function promote(row: StripRow, alias: 'champion' | 'candidate') {
   }
 }
 
+// Any stored output of the cell can go to the team store, not only a result the
+// cell published itself with put(name=...). Offered only when a team store is
+// configured; without one the promote route has nowhere to send it.
+const shareable = computed<Record<string, string>>(() => {
+  if (!teamStoreConfigured.value) return {}
+  return cellMap.value.get(props.cellId)?.artifactUris || {}
+})
+const shareVariables = computed(() => Object.keys(shareable.value).sort())
+
+const sharing = ref(false)
+const shareVariable = ref('')
+const shareName = ref('')
+const shareBusy = ref(false)
+
+function openShare() {
+  sharing.value = true
+  if (!shareVariables.value.includes(shareVariable.value)) {
+    shareVariable.value = shareVariables.value[0] || ''
+  }
+  if (!shareName.value) shareName.value = shareVariable.value
+}
+
+async function share() {
+  const uri = shareable.value[shareVariable.value]
+  const name = shareName.value.trim()
+  if (!uri || !name) return
+  shareBusy.value = true
+  try {
+    const result = await promoteToTeamAction(props.cellId, uri, name)
+    const carried = result.copied === 1 ? '1 artifact' : `${result.copied} artifacts`
+    pushToast(`✓ ${result.name} in the team store (${carried} copied)`, 'success')
+    sharing.value = false
+  } catch (err) {
+    pushToast(err instanceof Error ? err.message : `Failed to promote ${name}`, 'error')
+  } finally {
+    shareBusy.value = false
+  }
+}
+
 function tagList(tags: Record<string, string>): string {
   return Object.entries(tags)
     .map(([k, v]) => `${k}=${v}`)
@@ -70,7 +112,7 @@ function tagList(tags: Record<string, string>): string {
 </script>
 
 <template>
-  <div v-if="registryEnabled && rows.length" class="cell-artifact-strip">
+  <div v-if="registryEnabled && (rows.length || shareVariables.length)" class="cell-artifact-strip">
     <div v-for="row in rows" :key="row.key" class="strip-row">
       <span class="glyph">⬡</span>
       <span class="name">{{ row.name }}</span>
@@ -104,6 +146,44 @@ function tagList(tags: Record<string, string>): string {
       >
         ⎘
       </button>
+    </div>
+    <div v-if="shareVariables.length" class="strip-row share-row">
+      <template v-if="sharing">
+        <span class="glyph">⇪</span>
+        <select
+          v-if="shareVariables.length > 1"
+          v-model="shareVariable"
+          class="share-input"
+          aria-label="Output to promote"
+        >
+          <option v-for="v in shareVariables" :key="v" :value="v">{{ v }}</option>
+        </select>
+        <span v-else class="name">{{ shareVariable }}</span>
+        <span>as</span>
+        <input
+          v-model="shareName"
+          class="share-input share-name"
+          placeholder="team/name"
+          aria-label="Team name"
+          @keydown.enter="share"
+          @keydown.esc="sharing = false"
+        />
+        <span class="spacer"></span>
+        <button class="promote-btn" :disabled="shareBusy || !shareName.trim()" @click="share">
+          {{ shareBusy ? 'Promoting…' : 'Promote' }}
+        </button>
+        <button class="promote-btn" :disabled="shareBusy" @click="sharing = false">Cancel</button>
+      </template>
+      <template v-else>
+        <span class="spacer"></span>
+        <button
+          class="share-open"
+          title="Copy this output and everything behind it to the team store, under a name"
+          @click="openShare"
+        >
+          ⇪ Promote to team…
+        </button>
+      </template>
     </div>
   </div>
 </template>
@@ -185,6 +265,31 @@ function tagList(tags: Record<string, string>): string {
 }
 .promote-menu button:hover {
   background: var(--bg-hover);
+}
+.share-open {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.share-open:hover {
+  color: var(--accent-primary, #3b82f6);
+  background: var(--bg-hover);
+}
+.share-input {
+  font-size: 11px;
+  padding: 1px 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+.share-name {
+  min-width: 0;
+  flex: 0 1 180px;
 }
 .lineage-btn {
   border: none;

@@ -498,6 +498,46 @@ class TestPromoteRoute:
         assert caught.value.status_code == 502
 
 
+class TestEveryOutputIsOfferedForPromotion:
+    """The strip offered Promote only on a result a cell published itself with
+    ``put(name=...)``. Any stored output can be promoted, so the frontend has to
+    learn each one's artifact — ``artifact_uri`` names only one of them."""
+
+    @pytest.mark.asyncio
+    async def test_the_output_frame_names_every_stored_variable(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from strata.notebook.executor import CellExecutionResult
+        from strata.notebook.ws import _broadcast_execution_result
+
+        uris = {
+            "model": "strata://artifact/nb_x_cell_c1_var_model@v=2",
+            "scaler": "strata://artifact/nb_x_cell_c1_var_scaler@v=1",
+        }
+        cell = SimpleNamespace(artifact_uris=uris)
+        session = SimpleNamespace(
+            notebook_state=SimpleNamespace(get_cell=lambda cid: cell if cid == "c1" else None)
+        )
+        monkeypatch.setattr(
+            "strata.notebook.ws._get_session_manager",
+            lambda: SimpleNamespace(get_session=lambda nid: session if nid == "nb1" else None),
+        )
+        sent: list[dict] = []
+
+        async def _capture(notebook_id, message):
+            sent.append(message)
+
+        monkeypatch.setattr("strata.notebook.ws._broadcast_message", _capture)
+
+        result = CellExecutionResult(
+            cell_id="c1", success=True, artifact_uri=uris["scaler"], stdout="", stderr=""
+        )
+        await _broadcast_execution_result("nb1", 1, "c1", result)
+
+        (output,) = [m for m in sent if m["type"] == "cell_output"]
+        assert output["payload"]["artifact_uris"] == uris
+
+
 class TestAmbientPromoteWiring:
     """What reaches a cell so ``strata.promote`` can work.
 

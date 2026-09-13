@@ -71,6 +71,7 @@ interface NotebookRuntimeConfigResponse {
   default_python_version?: string
   python_selection_fixed?: boolean
   registry_enabled?: boolean
+  team_store_configured?: boolean
 }
 
 interface CellUpdateResponse {
@@ -132,6 +133,16 @@ export interface AliasMoveResult {
   alias?: string
   detail?: string
   artifact_uri?: string
+}
+
+/** POST …/artifacts/{id}/v/{n}/promote: what landed in the team store. */
+export interface PromotionResult {
+  name: string
+  artifact_uri: string
+  copied: number
+  alias: string | null
+  alias_pending: boolean
+  store: string
 }
 
 /** Flat lineage graph (GET …/lineage): nodes + edges (see lineageToTree). */
@@ -649,6 +660,26 @@ async function setAlias(
     await throwApiError(resp, `Failed to set ${name}@${alias}`)
   }
   return readJson<AliasMoveResult>(resp)
+}
+
+async function promoteArtifact(
+  sessionId: string,
+  artifactId: string,
+  version: number,
+  body: { name: string; alias?: string; tags?: Record<string, string> },
+): Promise<PromotionResult> {
+  const resp = await fetchWithTimeout(
+    `${STRATA_BASE}/v1/notebooks/${sessionId}/artifacts/${encodeURIComponent(artifactId)}/v/${version}/promote`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  )
+  if (!resp.ok) {
+    await throwApiError(resp, `Failed to promote ${body.name}`)
+  }
+  return readJson<PromotionResult>(resp)
 }
 
 async function getPendingChanges(): Promise<PendingChangesResponse> {
@@ -1843,6 +1874,7 @@ export function useStrata() {
     getNotebookArtifacts,
     getRegistrySummary,
     setAlias,
+    promoteArtifact,
     getPendingChanges,
     approvePending,
     rejectPending,

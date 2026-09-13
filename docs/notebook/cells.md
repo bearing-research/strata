@@ -86,7 +86,7 @@ under `promoted`, nothing reaches the team on its own and this is how something
 does. It needs a team store configured (`STRATA_NOTEBOOK_REMOTE_STORE_URL`) and
 raises if there is none. Only *upstream* results can be promoted from inside a
 cell - a cell's own outputs are stored after it returns, so promoting one is a
-job for the strip or `strata artifact promote` once it has run.
+job for the strip's **Promote to team…** or `strata artifact promote` once it has run.
 
 When a cell publishes with a name - `strata.put(inputs=[], transform=…, data=…, name="taxi/tip-model")` - the artifact appears in the [registry dashboard](../core/registry.md#in-the-notebook-the-registry-dashboard): a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).
 

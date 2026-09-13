@@ -642,6 +642,7 @@ def test_get_notebook_runtime_config_endpoint(client, monkeypatch):
         "default_python_version": "3.12",
         "python_selection_fixed": False,
         "registry_enabled": True,
+        "team_store_configured": False,
     }
 
 
@@ -2694,6 +2695,20 @@ class TestRuntimeConfigRegistryFlag:
         cfg = _serialize_notebook_runtime_config()
         assert cfg["deployment_mode"] == mode
         assert cfg["registry_enabled"] is True
+
+    @pytest.mark.parametrize(("url", "offered"), [(None, False), ("https://store.example", True)])
+    def test_promotion_is_offered_only_with_a_team_store(self, url, offered, monkeypatch):
+        """Without one the promote route answers 409, so offering the button
+        would offer an error."""
+        from strata.notebook.routes import _serialize_notebook_runtime_config
+
+        monkeypatch.setattr(
+            "strata.server._state",
+            SimpleNamespace(
+                config=SimpleNamespace(deployment_mode="personal", notebook_remote_store_url=url)
+            ),
+        )
+        assert _serialize_notebook_runtime_config()["team_store_configured"] is offered
 
 
 # ---------------------------------------------------------------------------

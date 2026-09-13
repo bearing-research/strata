@@ -3305,12 +3305,21 @@ async def _broadcast_output_or_error(
     ts: str,
 ) -> None:
     """Emit the terminal ``cell_output`` / ``cell_error`` for one execution."""
+    payload = _execution_result_payload(cell_id, result)
+    if result.success:
+        # Every stored variable's artifact, not just the last one
+        # ``artifact_uri`` names: the strip offers each for promotion, and a
+        # cell that defines a model and its scaler has two worth sharing.
+        session = _get_session_manager().get_session(notebook_id)
+        cell = session.notebook_state.get_cell(cell_id) if session else None
+        if cell is not None:
+            payload["artifact_uris"] = dict(cell.artifact_uris)
     await _broadcast_message(
         notebook_id,
         _make_message(
             MessageType.CELL_OUTPUT if result.success else MessageType.CELL_ERROR,
             seq,
-            _execution_result_payload(cell_id, result),
+            payload,
             ts=ts,
         ),
     )

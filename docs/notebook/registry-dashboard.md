@@ -78,6 +78,13 @@ A compact strip appears **right below the cell** that published:
 
 Promote where you trained the model, without scrolling anywhere.
 
+A cell does not have to publish with a name to share a result. With a team
+store configured (`STRATA_NOTEBOOK_REMOTE_STORE_URL`), any cell with stored
+outputs gets a **`⇪ Promote to team…`** link on its strip. Pick the output,
+give it a team name, and **Promote** copies it and everything behind it to the
+team store, the same as `strata artifact promote`. The promoted result then
+shows on the strip like one the cell published itself.
+
 ![A published cell with the promote strip along its bottom edge: the
 taxi/tip-model v1 chip, a champion alias chip, the Promote menu and the lineage
 button.](../assets/registry-promote-strip-light.png#only-light)
