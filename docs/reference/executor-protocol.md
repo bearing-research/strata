@@ -51,11 +51,16 @@ Liveness + capabilities probe. No auth.
   },
   "version": "1.0.0",
   "uptime_seconds": 42.5,
-  "active_executions": 0
+  "active_executions": 0,
+  "max_concurrent": 2,
+  "gpu_slots": 2,
+  "free_gpu_slots": 2
 }
 ```
 
-`active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
+`active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. `max_concurrent` and `gpu_slots` are the worker's limits (`null` when unset), and `free_gpu_slots` how many GPUs are unassigned, so a caller can plan rather than discover the limit by being refused. The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
+
+**`503 Service Unavailable`** from any execution route means the worker is full: `max_concurrent` executions are in flight, or every GPU slot is taken. It carries `Retry-After` in seconds and is refused before any input is downloaded, so retrying costs the worker nothing.
 
 ## `POST /v1/execute` (push model - recommended)
 

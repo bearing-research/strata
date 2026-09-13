@@ -88,6 +88,19 @@ hostname = platform.node()
 
 When the cell runs, the UI shows a pulsing **"dispatching → local"** badge during execution. The `hostname` artifact is what the worker process saw, not your laptop - confirming the cell really ran remotely.
 
+### Sharing one machine: concurrency and GPUs
+
+A worker runs as many cells at once as it is sent. On a machine several people's cells reach, cap it, and let the worker hand out GPUs itself:
+
+```bash
+uv run strata-worker --port 9000 --max-concurrent 2 --gpu-slots 2
+```
+
+- **`--max-concurrent N`**: the worker refuses execution number N+1 with `503` and a `Retry-After` header, before downloading any inputs. Unset, it is unlimited.
+- **`--gpu-slots N`**: each execution gets a free GPU index from `0..N-1`, set as `CUDA_VISIBLE_DEVICES` for that cell and released when it finishes. The worker's choice overrides any `CUDA_VISIBLE_DEVICES` the cell asked for, so two concurrent cells never share a GPU on a caller's say-so. With every slot taken, the request is refused like any full worker.
+
+Both limits are enforced by the worker, not trusted to whatever dispatches to it, and both are advertised in `/health`. For `uvicorn --factory` deployments that cannot pass flags, set `STRATA_WORKER_MAX_CONCURRENT` and `STRATA_WORKER_GPU_SLOTS`.
+
 Once this works locally, the cloud deploys below just change `config.url` from `http://127.0.0.1:9000` to the worker's public URL.
 
 ## Run cells on a machine you can SSH to
