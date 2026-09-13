@@ -2820,8 +2820,10 @@ rather than moving, and the command says so.</p>
 <p>The Registry tab and the per-cell strip describe that store too. They read the
 local one until a team store is configured, then forward to it with the server's
 remote-store headers — the notebook names things there, so describing the local
-store would show an empty registry. Approvals forward the same way, which is how
-a protected alias filed from one person's server gets approved from another's.</p>
+store would show an empty registry. Every registry route forwards the same way
+(names, aliases, tags, lineage and approvals), so a promotion from the tab lands
+where the tab reads, and a protected alias filed from one person's server gets
+approved from another's.</p>
 <p>A cell can promote one of its own upstream results without leaving the
 notebook, naming it the way the cell reads it:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">strata</span><span class="o">.</span><span class="n">promote</span><span class="p">(</span><span class="s2">&quot;rows&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/rows&quot;</span><span class="p">,</span> <span class="n">alias</span><span class="o">=</span><span class="s2">&quot;champion&quot;</span><span class="p">)</span>
