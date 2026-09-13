@@ -2437,21 +2437,35 @@
 <a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">      </span><span class="p">},</span>
 <a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">      </span><span class="nt">&quot;mounts&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
 <a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">      </span><span class="nt">&quot;env&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span>
-<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">  </span><span class="p">},</span>
-<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">  </span><span class="nt">&quot;inputs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">    </span><span class="p">{</span>
-<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">      </span><span class="nt">&quot;artifact_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;abc123&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">      </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
-<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="w">      </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://s3.amazonaws.com/strata-artifacts/abc123-v4.arrow?X-Amz-Signature=...&quot;</span>
-<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="w">  </span><span class="p">],</span>
-<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="w">  </span><span class="nt">&quot;output&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="w">    </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://s3.amazonaws.com/strata-artifacts/build-01HZJV.tar?X-Amz-Signature=...&quot;</span>
-<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a><span class="w">  </span><span class="p">},</span>
-<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a><span class="w">  </span><span class="nt">&quot;finalize_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://strata.example.com/v1/builds/01HZJV/finalize&quot;</span>
-<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a><span class="p">}</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">    </span><span class="nt">&quot;principal&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;alice&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">    </span><span class="nt">&quot;tenant&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;team-a&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="w">    </span><span class="nt">&quot;notebook_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;9c7e22e3-8ed7-452c-885c-49574d7aa02f&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">    </span><span class="nt">&quot;cell_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ba3b7451&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">    </span><span class="nt">&quot;cell_provenance_hash&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;5f2c…&quot;</span>
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a><span class="w">  </span><span class="nt">&quot;inputs&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="w">      </span><span class="nt">&quot;artifact_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;abc123&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="w">      </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span>
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a><span class="w">      </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://s3.amazonaws.com/strata-artifacts/abc123-v4.arrow?X-Amz-Signature=...&quot;</span>
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a><span class="w">  </span><span class="nt">&quot;output&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a><span class="w">    </span><span class="nt">&quot;url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://s3.amazonaws.com/strata-artifacts/build-01HZJV.tar?X-Amz-Signature=...&quot;</span>
+<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a><span class="w">  </span><span class="p">},</span>
+<a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a><span class="w">  </span><span class="nt">&quot;finalize_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://strata.example.com/v1/builds/01HZJV/finalize&quot;</span>
+<a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a><span class="p">}</span>
 </code></pre></div>
+<p><code>principal</code>, <code>tenant</code>, <code>notebook_id</code>, <code>cell_id</code> and <code>cell_provenance_hash</code> say
+who ran the cell and which cell of which notebook the build is for, so a
+dispatcher can attribute and match a job from the manifest alone rather than
+calling <code>GET /v1/builds/{build_id}</code>. <code>principal</code> and <code>tenant</code> are <code>null</code> when no
+authenticated caller dispatched the cell, as on a personal server.
+<code>cell_provenance_hash</code> is the cell's own cache key: two submissions of the same
+computation share it. They sit outside <code>params</code> deliberately, since <code>params</code> is
+hashed into the build's transport provenance and who ran a cell must not change
+what is cached. A worker can ignore them.</p>
 <p><strong>Worker behavior:</strong></p>
 <ol>
 <li>For each entry in <code>metadata.params.input_specs</code>, look up its <code>uri</code> in <code>inputs[]</code> and stream-download from the signed URL. Inputs that exceed <code>STRATA_WORKER_MAX_INPUT_BYTES</code> (declared via <code>Content-Length</code> or measured during stream) are rejected with <code>413</code>.</li>
