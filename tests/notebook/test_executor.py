@@ -1168,6 +1168,139 @@ class Person:
         assert second.remote_build_state == "ready"
         assert second.remote_error_code is None
 
+    def _signed_worker(self, session, executor_server, build_server):
+        spec = {
+            "url": executor_server["execute_url"],
+            "transport": "signed",
+            "strata_url": build_server["base_url"],
+        }
+        build_server["config"].transforms_config["notebook_workers"] = [
+            {"name": "gpu-http-signed", "backend": "executor", "runtime_id": "a100", "config": spec}
+        ]
+        session.notebook_state.workers = [
+            WorkerSpec(
+                name="gpu-http-signed",
+                backend=WorkerBackendType.EXECUTOR,
+                runtime_id="a100",
+                config=spec,
+            )
+        ]
+        session.notebook_state.worker = "gpu-http-signed"
+        cell1 = next(c for c in session.notebook_state.cells if c.id == "cell1")
+        cell1.worker = "gpu-http-signed"
+        cell1.source = "x = 1"
+        session.re_analyze_cell("cell1")
+
+    def _capture_manifest_metadata(self, monkeypatch):
+        import strata.server as server_module
+
+        signer = server_module._state.url_signer
+        real = signer.generate_build_manifest
+        seen: list[dict] = []
+
+        def _capturing(*args, **kwargs):
+            seen.append(kwargs["metadata"])
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(signer, "generate_build_manifest", _capturing)
+        return seen
+
+    @pytest.mark.asyncio
+    async def test_the_signed_manifest_says_who_and_what_it_is_for(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+    ):
+        """A dispatcher attributes the job and matches it to a cell from the
+        manifest alone, without a GET /v1/builds round trip. Item 16."""
+        from strata.types import Principal
+
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        seen = self._capture_manifest_metadata(monkeypatch)
+        monkeypatch.setattr(
+            "strata.auth.get_principal", lambda: Principal(id="alice", tenant="team-a")
+        )
+
+        result = await CellExecutor(sample_notebook).execute_cell("cell1", "x = 1")
+
+        (metadata,) = seen
+        assert metadata["principal"] == "alice"
+        assert metadata["tenant"] == "team-a"
+        assert metadata["notebook_id"] == sample_notebook.notebook_state.id
+        assert metadata["cell_id"] == "cell1"
+        cell = next(c for c in sample_notebook.notebook_state.cells if c.id == "cell1")
+        # The cell's own key — the one a rerun of the same computation shares —
+        # not the transport hash the build row is keyed by.
+        assert metadata["cell_provenance_hash"]
+        assert metadata["cell_provenance_hash"] == cell.last_provenance_hash
+        build = notebook_build_server["build_store"].get_build(result.remote_build_id)
+        artifact = notebook_build_server["artifact_store"].get_artifact(
+            build.artifact_id, build.version
+        )
+        assert metadata["cell_provenance_hash"] != artifact.provenance_hash
+
+    @pytest.mark.asyncio
+    async def test_a_personal_server_says_what_but_not_who(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+    ):
+        """No proxy, no principal: its jobs are attributed to the owner from the
+        dispatch token. The notebook, cell and provenance are what only the
+        manifest can say."""
+        monkeypatch.setattr(notebook_build_server["config"], "deployment_mode", "personal")
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        seen = self._capture_manifest_metadata(monkeypatch)
+
+        result = await CellExecutor(sample_notebook).execute_cell("cell1", "x = 1")
+
+        assert result.success, result.error
+        (metadata,) = seen
+        assert (metadata["principal"], metadata["tenant"]) == (None, None)
+        assert metadata["notebook_id"] == sample_notebook.notebook_state.id
+        assert metadata["cell_id"] == "cell1"
+        assert metadata["cell_provenance_hash"]
+
+    @pytest.mark.asyncio
+    async def test_identity_does_not_change_what_is_cached(
+        self,
+        sample_notebook,
+        notebook_executor_server,
+        notebook_build_server,
+        monkeypatch,
+    ):
+        """The fields ride in the manifest metadata, not in ``params``, which is
+        hashed into the transport provenance: who ran a cell must not make the
+        same computation a different cache entry."""
+        from strata.types import Principal
+
+        self._signed_worker(sample_notebook, notebook_executor_server, notebook_build_server)
+        seen = self._capture_manifest_metadata(monkeypatch)
+        executor = CellExecutor(sample_notebook)
+
+        monkeypatch.setattr("strata.auth.get_principal", lambda: Principal(id="alice"))
+        first = await executor.execute_cell_force("cell1", "x = 1")
+        monkeypatch.setattr("strata.auth.get_principal", lambda: Principal(id="bob"))
+        second = await executor.execute_cell_force("cell1", "x = 1")
+
+        assert [m["principal"] for m in seen] == ["alice", "bob"]
+        for field in ("principal", "tenant", "notebook_id", "cell_id", "cell_provenance_hash"):
+            assert field not in seen[0]["params"]
+        store = notebook_build_server["artifact_store"]
+        builds = notebook_build_server["build_store"]
+        hashes = [
+            store.get_artifact(b.artifact_id, b.version).provenance_hash
+            for b in (
+                builds.get_build(first.remote_build_id),
+                builds.get_build(second.remote_build_id),
+            )
+        ]
+        assert hashes[0] == hashes[1]
+
     @pytest.mark.asyncio
     async def test_execute_supports_signed_http_executor_worker_with_class_instances(
         self,

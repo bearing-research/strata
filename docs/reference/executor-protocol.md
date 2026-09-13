@@ -171,7 +171,12 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
       },
       "mounts": [],
       "env": {}
-    }
+    },
+    "principal": "alice",
+    "tenant": "team-a",
+    "notebook_id": "9c7e22e3-8ed7-452c-885c-49574d7aa02f",
+    "cell_id": "ba3b7451",
+    "cell_provenance_hash": "5f2c…"
   },
   "inputs": [
     {
@@ -186,6 +191,16 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
   "finalize_url": "https://strata.example.com/v1/builds/01HZJV/finalize"
 }
 ```
+
+`principal`, `tenant`, `notebook_id`, `cell_id` and `cell_provenance_hash` say
+who ran the cell and which cell of which notebook the build is for, so a
+dispatcher can attribute and match a job from the manifest alone rather than
+calling `GET /v1/builds/{build_id}`. `principal` and `tenant` are `null` when no
+authenticated caller dispatched the cell, as on a personal server.
+`cell_provenance_hash` is the cell's own cache key: two submissions of the same
+computation share it. They sit outside `params` deliberately, since `params` is
+hashed into the build's transport provenance and who ran a cell must not change
+what is cached. A worker can ignore them.
 
 **Worker behavior:**
 
