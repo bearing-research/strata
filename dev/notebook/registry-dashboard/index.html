@@ -2286,6 +2286,12 @@ cell that produced it</strong>.</p>
 <li><code>⎘</code> - open its lineage.</li>
 </ul>
 <p>Promote where you trained the model, without scrolling anywhere.</p>
+<p>A cell does not have to publish with a name to share a result. With a team
+store configured (<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>), any cell with stored
+outputs gets a <strong><code>⇪ Promote to team…</code></strong> link on its strip. Pick the output,
+give it a team name, and <strong>Promote</strong> copies it and everything behind it to the
+team store, the same as <code>strata artifact promote</code>. The promoted result then
+shows on the strip like one the cell published itself.</p>
 <p><img alt="A published cell with the promote strip along its bottom edge: the
 taxi/tip-model v1 chip, a champion alias chip, the Promote menu and the lineage
 button." src="../../assets/registry-promote-strip-light.png#only-light" />

@@ -3366,7 +3366,7 @@ under <code>promoted</code>, nothing reaches the team on its own and this is how
 does. It needs a team store configured (<code>STRATA_NOTEBOOK_REMOTE_STORE_URL</code>) and
 raises if there is none. Only <em>upstream</em> results can be promoted from inside a
 cell - a cell's own outputs are stored after it returns, so promoting one is a
-job for the strip or <code>strata artifact promote</code> once it has run.</p>
+job for the strip's <strong>Promote to team…</strong> or <code>strata artifact promote</code> once it has run.</p>
 <p>When a cell publishes with a name - <code>strata.put(inputs=[], transform=…, data=…, name="taxi/tip-model")</code> - the artifact appears in the <a href="../../core/registry/#in-the-notebook-the-registry-dashboard">registry dashboard</a>: a promote strip under the cell, and the Registry tab in the bottom drawer (promote, approve, lineage - all in the UI).</p>
 <blockquote>
 <p>Calls through <code>strata</code> are <strong>side effects</strong>. On a cache hit the cell body doesn't re-run, so a <code>strata.set_alias(...)</code> won't re-fire - fine for idempotent calls (setting an alias to the version it already points at is a no-op), and side-effect-only cells (no stored output) re-run every time anyway.</p>
