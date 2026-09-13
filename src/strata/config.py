@@ -478,6 +478,14 @@ class StrataConfig(BaseSettings):
     # How long an agent destructive-tool confirmation waits for the user
     # before being treated as a decline.
     ai_approval_timeout_seconds: Annotated[float, Field(gt=0)] = 120.0
+    # Which assistant tools ask the user before running. Unset keeps the
+    # default (delete_cell, add_package); a list replaces it, and a notebook's
+    # [ai] approval_tools can add to it but never remove from it. A shared
+    # server typically adds run_cell.
+    ai_approval_tools: Annotated[list[str] | None, NoDecode] = None
+    # Tools whose gate the Auto-approve toggle cannot skip. Always gated, and
+    # declined when there is no one to ask.
+    ai_gates_locked: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # Artifact blob storage backend configuration
     # Metadata backend for the artifact store. Unset means SQLite in
@@ -639,6 +647,38 @@ class StrataConfig(BaseSettings):
         if not isinstance(v, list):
             raise ValueError("notebook_harness_env_allowlist must be a list")
         return [str(item) for item in v]
+
+    @field_validator("ai_approval_tools", "ai_gates_locked", mode="before")
+    @classmethod
+    def normalize_ai_gates(cls, v: Any, info: Any) -> list[str] | None:
+        """Accept list, JSON array, or comma-separated tool names; refuse unknown ones.
+
+        A gate naming a tool that does not exist gates nothing, and a typo in
+        ``run_cell`` would leave cells ungated on exactly the server that asked
+        for the gate — so that fails at startup rather than silently.
+        """
+        from strata.notebook.llm.config import AGENT_TOOL_NAMES
+
+        if v is None:
+            return None if info.field_name == "ai_approval_tools" else []
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped.startswith("["):
+                import json
+
+                v = json.loads(stripped)
+            else:
+                v = [part.strip() for part in stripped.split(",") if part.strip()]
+        if not isinstance(v, list):
+            raise ValueError(f"{info.field_name} must be a list of tool names")
+        names = [str(item) for item in v]
+        unknown = sorted(set(names) - AGENT_TOOL_NAMES)
+        if unknown:
+            raise ValueError(
+                f"{info.field_name} names unknown assistant tools {unknown}; "
+                f"known: {sorted(AGENT_TOOL_NAMES)}"
+            )
+        return names
 
     @field_validator("embed_frame_ancestors", mode="before")
     @classmethod

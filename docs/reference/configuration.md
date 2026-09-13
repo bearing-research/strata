@@ -481,6 +481,8 @@ These are read by `strata-worker`, not the main server. They have no effect on a
 | `STRATA_AI_MAX_OUTPUT_TOKENS`  | `4096`   | Max output tokens requested                                  |
 | `STRATA_AI_TIMEOUT_SECONDS`    | `60.0`   | AI request timeout                                           |
 | `STRATA_AI_APPROVAL_TIMEOUT_SECONDS` | `120.0` | Agent confirm-prompt timeout; expiry counts as a decline |
+| `STRATA_AI_APPROVAL_TOOLS` | unset (`delete_cell,add_package`) | Which built-in assistant tools ask before running. A list replaces the default; a notebook's `[ai] approval_tools` can add to it but not remove from it. A shared server typically sets `delete_cell,add_package,run_cell`. Unknown tool names fail at startup. |
+| `STRATA_AI_GATES_LOCKED` | `[]` | Tools whose gate the Auto-approve toggle cannot skip. Always gated (added to the approval set), and declined when there is no one to ask. |
 | `ANTHROPIC_API_KEY`            | `None`   | Anthropic API key (auto-sets base URL + model)               |
 | `OPENAI_API_KEY`               | `None`   | OpenAI API key (auto-sets base URL + model)                  |
 | `GEMINI_API_KEY`               | `None`   | Google Gemini API key (auto-sets base URL + model)           |

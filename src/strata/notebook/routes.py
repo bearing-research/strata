@@ -3969,7 +3969,8 @@ class AgentRequest(BaseModel):
     auto_approve: bool = Field(
         default=False,
         description=(
-            "Skip the user-approval gate for destructive tools (``delete_cell``, ``add_package``)."
+            "Skip the user-approval gate for gated tools (by default ``delete_cell``, "
+            "``add_package``), except those the server locked."
         ),
     )
 
