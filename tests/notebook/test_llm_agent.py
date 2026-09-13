@@ -225,7 +225,12 @@ class TestParallelSafeDispatch:
         both_in_flight = asyncio.Event()
 
         async def fake_execute_tool(
-            session, tool_name, arguments, notebook_id=None, approval_callback=None
+            session,
+            tool_name,
+            arguments,
+            notebook_id=None,
+            approval_callback=None,
+            gated_tools=None,
         ):
             nonlocal running, peak, call_count
             call_count += 1
@@ -271,7 +276,12 @@ class TestParallelSafeDispatch:
         order: list[str] = []
 
         async def fake_execute_tool(
-            session, tool_name, arguments, notebook_id=None, approval_callback=None
+            session,
+            tool_name,
+            arguments,
+            notebook_id=None,
+            approval_callback=None,
+            gated_tools=None,
         ):
             order.append(arguments["variable_name"])
             await asyncio.sleep(0.01)
@@ -318,7 +328,12 @@ class TestParallelSafeDispatch:
     @pytest.mark.asyncio
     async def test_returns_messages_in_original_call_order(self):
         async def fake_execute_tool(
-            session, tool_name, arguments, notebook_id=None, approval_callback=None
+            session,
+            tool_name,
+            arguments,
+            notebook_id=None,
+            approval_callback=None,
+            gated_tools=None,
         ):
             return f"{tool_name} result"
 

@@ -2600,10 +2600,10 @@ function initializeWebSocket() {
       }
     })
 
-    // Approval prompt for a destructive tool. The user must accept or
-    // decline before the agent loop continues. Auto-approve mode bypasses
-    // this on the backend, so this handler only fires when the user has
-    // opted into manual approval.
+    // Approval prompt for a gated tool. The user must accept or decline
+    // before the agent loop continues. Auto-approve mode bypasses the gate on
+    // the backend, except for gates the server locked, so this can fire with
+    // the toggle on — and must be shown, never answered automatically.
     wsInstance.onMessage('agent_confirm_request', (msg: WsMessage) => {
       const p = msg.payload as Record<string, any>
       if (typeof p.request_id !== 'string') return

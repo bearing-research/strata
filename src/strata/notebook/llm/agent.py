@@ -51,6 +51,7 @@ import httpx
 
 from strata.notebook.authorship import resolve_assistant_author
 from strata.notebook.llm.config import (
+    DEFAULT_APPROVAL_TOOLS,
     LlmConfig,
     max_output_tokens_param,
 )
@@ -69,10 +70,10 @@ logger = logging.getLogger(__name__)
 # Tools that don't mutate notebook state — safe to fan out in parallel.
 READ_ONLY_TOOLS: frozenset[str] = frozenset({"get_notebook_state"})
 
-# Tools that need explicit user approval before running. The frontend
-# can opt out of approval with an "auto-approve" toggle, in which case
-# the routes layer suppresses the gate by passing ``approval_callback=None``.
-DESTRUCTIVE_TOOLS: frozenset[str] = frozenset({"delete_cell", "add_package"})
+# Tools that need explicit user approval before running, unless the server
+# configures its own set (``LlmConfig.approval_tools``). The frontend can opt
+# out with an "auto-approve" toggle, except for the server's locked gates.
+DESTRUCTIVE_TOOLS: frozenset[str] = DEFAULT_APPROVAL_TOOLS
 
 
 AGENT_TOOLS: list[dict[str, Any]] = [
@@ -492,13 +493,13 @@ async def execute_tool(
     arguments: dict[str, Any],
     notebook_id: str | None = None,
     approval_callback: ApprovalCallback | None = None,
+    gated_tools: frozenset[str] = DESTRUCTIVE_TOOLS,
 ) -> str:
     """Execute a tool call and return a text result for the LLM.
 
-    When ``approval_callback`` is set and the tool is in
-    ``DESTRUCTIVE_TOOLS``, the callback is awaited before running. If
-    the user declines, the tool result reflects that and no mutation
-    occurs.
+    When ``approval_callback`` is set and the tool is in ``gated_tools``,
+    the callback is awaited before running. If the user declines, the tool
+    result reflects that and no mutation occurs.
     """
     from strata.notebook.executor import CellExecutor
     from strata.notebook.writer import (
@@ -507,7 +508,7 @@ async def execute_tool(
         write_cell,
     )
 
-    if approval_callback is not None and tool_name in DESTRUCTIVE_TOOLS:
+    if approval_callback is not None and tool_name in gated_tools:
         try:
             approved = await approval_callback(tool_name, arguments)
         except Exception as exc:
@@ -673,22 +674,37 @@ def make_approval_callback(
     progress_callback: Callable[[str, dict[str, Any]], Awaitable[None]] | None,
     auto_approve: bool,
     timeout_seconds: float = 120.0,
+    locked_tools: frozenset[str] = frozenset(),
 ) -> ApprovalCallback | None:
     """Build the approval callback used by ``execute_tool``.
 
-    * ``auto_approve=True`` → returns ``None``, skipping the gate.
+    * ``auto_approve=True`` → returns ``None``, skipping the gate — unless
+      the server locked some gates, in which case those still ask and the
+      rest pass.
     * Otherwise → returns a callback that emits an
       ``agent_confirm_request`` event and waits for
       ``resolve_approval(request_id, approved)`` to be called by the
       WebSocket layer when the user clicks Approve / Decline.
+    * No ``progress_callback`` means there is no one to ask: gates open as
+      before, but a locked gate declines, since nobody approved it.
 
     The future times out after ``timeout_seconds`` and is treated as a
     decline so the loop never hangs forever on a closed tab.
     """
-    if auto_approve or progress_callback is None:
+    if progress_callback is None:
+        if not locked_tools:
+            return None
+
+        async def _decline_locked(tool_name: str, _arguments: dict[str, Any]) -> bool:
+            return tool_name not in locked_tools
+
+        return _decline_locked
+    if auto_approve and not locked_tools:
         return None
 
     async def _ask(tool_name: str, arguments: dict[str, Any]) -> bool:
+        if auto_approve and tool_name not in locked_tools:
+            return True
         request_id = uuid.uuid4().hex[:12]
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[bool] = loop.create_future()
@@ -729,6 +745,7 @@ async def _run_tool_calls_in_safe_groups(
     approval_callback: ApprovalCallback | None,
     progress_callback: ProgressCallback | None,
     record: list[AgentToolCall],
+    gated_tools: frozenset[str] = DESTRUCTIVE_TOOLS,
 ) -> list[dict[str, Any]]:
     """Execute tool calls with read-only ones fanned out and mutations serial.
 
@@ -765,6 +782,7 @@ async def _run_tool_calls_in_safe_groups(
             args,
             notebook_id=notebook_id,
             approval_callback=approval_callback,
+            gated_tools=gated_tools,
         )
         duration_ms = (time.time() - start) * 1000
         results_by_id[tc.get("id") or ""] = result
@@ -866,6 +884,7 @@ async def run_agent_loop(
         progress_callback,
         auto_approve=auto_approve,
         timeout_seconds=config.approval_timeout_seconds,
+        locked_tools=config.locked_tools,
     )
 
     if progress_callback:
@@ -940,6 +959,7 @@ async def run_agent_loop(
             approval_callback=approval_callback,
             progress_callback=progress_callback,
             record=result.tool_calls,
+            gated_tools=config.approval_tools,
         )
         messages.extend(tool_messages)
 

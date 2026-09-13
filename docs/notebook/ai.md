@@ -106,9 +106,25 @@ The agent works best for additive tasks (creating new cells, installing packages
 
 Before granting the assistant write access, understand what it can and can't do.
 
-**Approval-gated tools.** `delete_cell` and `add_package` always go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after **120 s by default** and is treated as a decline so a closed tab doesn't leave the loop hanging; configure it with `STRATA_AI_APPROVAL_TIMEOUT_SECONDS` on the server or `approval_timeout_seconds` in the notebook's `[ai]` section. Approval can be skipped with the **Auto-approve** toggle in the AI panel footer - that suppresses the gate for the remainder of the session.
+**Approval-gated tools.** By default `delete_cell` and `add_package` go through a confirm prompt in the UI ("agent_confirm_request" WebSocket message) before running. The approval future times out after **120 s by default** and is treated as a decline so a closed tab doesn't leave the loop hanging; configure it with `STRATA_AI_APPROVAL_TIMEOUT_SECONDS` on the server or `approval_timeout_seconds` in the notebook's `[ai]` section. Approval can be skipped with the **Auto-approve** toggle in the AI panel footer - that suppresses the gate for the remainder of the session, except for locked gates (below).
 
-**Non-gated mutating tools.** `create_cell`, `edit_cell`, and `run_cell` execute without prompting. `edit_cell` overwrites the cell source; `run_cell` executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to `cells/*.py`, so git is the practical undo for `edit_cell` and `delete_cell`. Side effects of `run_cell` - files written, packages mutated, API calls made - are not reversible.)
+**Choosing the gates.** The server decides which tools are gated, and a notebook can only add to that:
+
+```bash
+# Server: also ask before the assistant runs a cell, and never let Auto-approve skip it.
+STRATA_AI_APPROVAL_TOOLS=delete_cell,add_package,run_cell
+STRATA_AI_GATES_LOCKED=run_cell
+```
+
+```toml
+# notebook.toml: this notebook also wants edits confirmed.
+[ai]
+approval_tools = ["edit_cell"]
+```
+
+A locked gate still prompts with Auto-approve on, and where there is no one to prompt it declines. The server-level lists refuse unknown tool names at startup, since a typo would leave the tool ungated; a notebook's unknown names are logged and ignored.
+
+**Non-gated mutating tools.** Unless configured above, `create_cell`, `edit_cell`, and `run_cell` execute without prompting. `edit_cell` overwrites the cell source; `run_cell` executes whatever is currently in the cell. Neither has an undo. (Cell source is autosaved to `cells/*.py`, so git is the practical undo for `edit_cell` and `delete_cell`. Side effects of `run_cell` - files written, packages mutated, API calls made - are not reversible.)
 
 **Loop bounds.**
 
@@ -116,6 +132,8 @@ Before granting the assistant write access, understand what it can and can't do.
 | --- | --- | --- |
 | Iterations (tool-use rounds) | **10** | `max_iterations` in `run_agent_loop` |
 | Approval timeout | **120 s** | `STRATA_AI_APPROVAL_TIMEOUT_SECONDS` / `[ai] approval_timeout_seconds` |
+| Gated tools | `delete_cell`, `add_package` | `STRATA_AI_APPROVAL_TOOLS` (server) + `[ai] approval_tools` (adds) |
+| Locked gates | none | `STRATA_AI_GATES_LOCKED` |
 | Conversation memory | **12 turns** (6 user/assistant pairs) | `HISTORY_MAX_TURNS` |
 | Per-call output tokens | `STRATA_AI_MAX_OUTPUT_TOKENS` (default 4096) | LLM config |
 | Per-call context tokens | `STRATA_AI_MAX_CONTEXT_TOKENS` (default 100000) | LLM config |
