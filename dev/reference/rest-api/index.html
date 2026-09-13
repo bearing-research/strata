@@ -4538,10 +4538,21 @@ web UI <strong>Logs</strong> page.</p>
 <h3 id="artifacts-listing">Artifacts listing<a class="headerlink" href="#artifacts-listing" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-72-1" name="__codelineno-72-1" href="#__codelineno-72-1"></a>GET /v1/artifacts
 <a id="__codelineno-72-2" name="__codelineno-72-2" href="#__codelineno-72-2"></a>GET /v1/artifacts/stats
+<a id="__codelineno-72-3" name="__codelineno-72-3" href="#__codelineno-72-3"></a>GET /v1/artifacts/usage
 </code></pre></div>
 <p><code>GET /v1/artifacts</code> lists stored artifacts with optional <code>since</code> (ISO timestamp),
 <code>sort</code>, and <code>order</code> query parameters; <code>GET /v1/artifacts/stats</code> returns summary
-counts and byte totals. Powers the web UI <strong>Artifacts</strong> page.</p>
+counts and byte totals, and <code>GET /v1/artifacts/usage</code> adds unique-artifact,
+name and unreferenced counts. Powers the web UI <strong>Artifacts</strong> page.</p>
+<p>In personal mode, stats and usage cover the whole store. In service mode they
+cover <strong>one tenant's holdings</strong>: the caller's own, from the trusted-proxy
+identity, which is what a platform reads to meter storage per tenant. The
+tenant's figure counts only rows stamped with that tenant, so legacy tenantless
+rows are not charged to anyone. A caller with <code>admin:*</code> may pass
+<code>?tenant=&lt;id&gt;</code> to read another tenant (or omit it for the whole store). Service
+mode refuses a caller with no tenant (400), a non-admin naming another tenant
+(403), and a store with no principal auth configured (403), since without an
+authenticated caller the only possible answer is every tenant's at once.</p>
 <h2 id="core-api">Core API<a class="headerlink" href="#core-api" title="Permanent link">&para;</a></h2>
 <h3 id="materialize">Materialize<a class="headerlink" href="#materialize" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-73-1" name="__codelineno-73-1" href="#__codelineno-73-1"></a>POST /v1/materialize
