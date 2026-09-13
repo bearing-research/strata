@@ -1912,7 +1912,7 @@ async def _handle_variant_add(
     seq = execution_state.next_sequence()
 
     try:
-        session.add_variant(group)
+        session.add_variant(group, author=resolve_author(payload.get("author")))
         staleness_map = session.compute_staleness()
 
         # variant_add creates a new cell, so the frontend store needs

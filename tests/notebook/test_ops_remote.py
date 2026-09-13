@@ -628,3 +628,27 @@ def test_cli_cell_test_file_sets_then_runs(monkeypatch, tmp_path, capsys):
     )
     assert rc == 0
     assert calls == ["set:c1:def test_x(cell): pass", "run:c1"]  # set first, then run
+
+
+def test_remote_writes_carry_the_author_when_one_is_given():
+    """`strata cell add --server … --author X` used to record `local`: the
+    remote backend never sent the field the routes accept, so an agent editing
+    a live session looked exactly like a person typing in the browser."""
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        if request.method == "POST":
+            return httpx.Response(200, json={"id": "new1"})
+        return httpx.Response(200, json={"cell": _wire_cell("new1", "z = 9"), "dag": {}})
+
+    ops = RemoteNotebookOps(
+        "http://test",
+        "s1",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        author="agent:claude",
+    )
+    ops.add_cell("z = 9")
+    ops.edit_cell("new1", "z = 10")
+
+    assert [body.get("author") for body in bodies] == ["agent:claude"] * 3

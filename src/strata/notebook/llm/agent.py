@@ -49,7 +49,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from strata.notebook.authorship import ASSISTANT_AUTHOR
+from strata.notebook.authorship import resolve_assistant_author
 from strata.notebook.llm.config import (
     LlmConfig,
     max_output_tokens_param,
@@ -542,10 +542,14 @@ async def execute_tool(
 
             cell_id = str(uuid.uuid4())[:8]
             add_cell_to_notebook(
-                session.path, cell_id, after_id, language=language, author=ASSISTANT_AUTHOR
+                session.path,
+                cell_id,
+                after_id,
+                language=language,
+                author=resolve_assistant_author(),
             )
             if source:
-                write_cell(session.path, cell_id, source, author=ASSISTANT_AUTHOR)
+                write_cell(session.path, cell_id, source, author=resolve_assistant_author())
             session.reload()
             await _sync_frontend()
 
@@ -563,7 +567,7 @@ async def execute_tool(
             if not cell_id:
                 valid = [v for c in session.notebook_state.cells for v in c.defines]
                 return f"Error: No cell defines '{var_name}'. Valid variables: {valid}"
-            write_cell(session.path, cell_id, new_source, author=ASSISTANT_AUTHOR)
+            write_cell(session.path, cell_id, new_source, author=resolve_assistant_author())
             session.reload()
             await _sync_frontend()
             return f"Edited cell {cell_id} (was defining: {var_name})"

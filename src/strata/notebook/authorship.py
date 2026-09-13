@@ -14,6 +14,12 @@ it is: the browser is ``local``, the built-in assistant is ``assistant``, and an
 external agent sends its own name on each tool call. That is a claim rather than
 a fact, which is the honest amount of trust available on a machine where anyone
 who can reach the server is already its owner.
+
+The built-in assistant is the one exception to "the principal wins", and
+deliberately: it runs inside an authenticated session, so taking the principal
+would record every assistant-written cell as the person's own and erase the
+distinction this field exists to draw. It records both — see
+:func:`resolve_assistant_author`.
 """
 
 from __future__ import annotations
@@ -42,6 +48,23 @@ def resolve_author(declared: str | None = None) -> str:
     if principal is not None:
         return principal
     return clean_author(declared) or LOCAL_AUTHOR
+
+
+def resolve_assistant_author() -> str:
+    """Who to record when the built-in assistant writes a cell.
+
+    Neither answer alone is right. Recording the principal loses the human /
+    agent distinction, which is the question the field exists to answer — every
+    cell in a session would read as the person's own. Recording only
+    ``assistant`` loses whose session produced it, which on a shared server is
+    the other half of an audit.
+
+    So both, in the scheme-prefixed shape the agent identities already use:
+    ``assistant`` alone in personal mode, ``assistant:<principal>`` where there
+    is one.
+    """
+    principal = _current_principal()
+    return f"{ASSISTANT_AUTHOR}:{principal}" if principal else ASSISTANT_AUTHOR
 
 
 def clean_author(declared: str | None) -> str | None:

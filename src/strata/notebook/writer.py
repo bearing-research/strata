@@ -332,9 +332,20 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None
         f.write(source)
 
     if author and cell_meta.get("updated_by") != author:
-        cell_meta["updated_by"] = author
-        toml_data["cells"] = cells_data
-        _write_notebook_toml_atomic(notebook_toml_path, toml_data)
+        # Re-read rather than rewriting the snapshot loaded at the top of this
+        # function. Writing the source file takes long enough for another
+        # process — an offline `strata cell add`, a reorder — to land a
+        # structural edit in between, and rewriting the stale copy would drop
+        # it: the added cell would vanish from committed config, leaving an
+        # orphaned file behind. Narrow window, but it is a silent loss.
+        def _stamp(data: dict[str, Any]) -> bool:
+            for entry in data.get("cells", []):
+                if entry.get("id") == cell_id and entry.get("updated_by") != author:
+                    entry["updated_by"] = author
+                    return True
+            return False
+
+        _apply_notebook_toml_update(notebook_dir, _stamp)
 
 
 def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None:
