@@ -652,3 +652,23 @@ def test_remote_writes_carry_the_author_when_one_is_given():
     ops.edit_cell("new1", "z = 10")
 
     assert [body.get("author") for body in bodies] == ["agent:claude"] * 3
+
+
+def test_an_over_long_author_is_bounded_before_it_is_sent():
+    """The routes cap `author`, so an unbounded name failed a remote write with
+    a 422 that the same command against a local directory never produced."""
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"cell": _wire_cell("c1", "x = 2"), "dag": {}})
+
+    ops = RemoteNotebookOps(
+        "http://test",
+        "s1",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        author="a" * 500,
+    )
+    ops.edit_cell("c1", "x = 2")
+
+    assert len(bodies[0]["author"]) <= 128

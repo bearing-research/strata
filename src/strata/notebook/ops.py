@@ -858,12 +858,19 @@ class RemoteNotebookOps:
     ) -> None:
         import httpx
 
+        from strata.notebook.authorship import clean_author
+
         self._base_url = base_url.rstrip("/")
         self._session_id = session_id
         # Sent on every write. Not resolved here the way LocalNotebookOps does
         # it: the server is the one that decides, and it ignores this entirely
         # when it can authenticate the caller.
-        self._author = author
+        # Trimmed and bounded here, as LocalNotebookOps does through
+        # resolve_author. The routes cap the field, so an over-long name would
+        # otherwise fail the write with a 422 the local path never produces —
+        # and in service mode it would be refused before the server could
+        # ignore it.
+        self._author = clean_author(author)
 
         self._owns_client = client is None
         self._client: httpx.Client = client if client is not None else httpx.Client(timeout=30.0)

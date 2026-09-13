@@ -300,3 +300,18 @@ class TestTheAssistantInAServiceDeployment:
         from strata.notebook.authorship import resolve_assistant_author
 
         assert resolve_assistant_author() == "assistant"
+
+
+class TestUpdatedAtStaysStructural:
+    def test_an_author_change_does_not_move_updated_at(self, notebook):
+        """`updated_at` moves on structural edits only. The discover list sorts
+        by it, so bumping it on an author change would reorder notebooks every
+        time the browser and an agent take turns on a cell."""
+        add_cell_to_notebook(notebook, "c1", None, author="local")
+        before = tomllib.load(open(notebook / "notebook.toml", "rb"))["updated_at"]
+
+        write_cell(notebook, "c1", "x = 1", author="agent:claude")
+
+        after = tomllib.load(open(notebook / "notebook.toml", "rb"))
+        assert after["cells"][0]["updated_by"] == "agent:claude"
+        assert after["updated_at"] == before

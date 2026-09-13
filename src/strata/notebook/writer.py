@@ -338,14 +338,21 @@ def write_cell(notebook_dir: Path, cell_id: str, source: str, author: str | None
         # structural edit in between, and rewriting the stale copy would drop
         # it: the added cell would vanish from committed config, leaving an
         # orphaned file behind. Narrow window, but it is a silent loss.
-        def _stamp(data: dict[str, Any]) -> bool:
-            for entry in data.get("cells", []):
-                if entry.get("id") == cell_id and entry.get("updated_by") != author:
-                    entry["updated_by"] = author
-                    return True
-            return False
-
-        _apply_notebook_toml_update(notebook_dir, _stamp)
+        # Re-read, then write without bumping `updated_at`. Two constraints,
+        # and _apply_notebook_toml_update satisfies only the first:
+        #  - rewriting the snapshot loaded at the top of this function would
+        #    drop a structural edit that landed while the source was being
+        #    written (an offline `strata cell add`, a reorder);
+        #  - `updated_at` moves on structural edits only, and an author change
+        #    is not one — bumping it would reorder the discover list every time
+        #    the browser and an agent take turns on a cell.
+        with open(notebook_toml_path, "rb") as f:
+            fresh = tomllib.load(f)
+        for entry in fresh.get("cells", []):
+            if entry.get("id") == cell_id and entry.get("updated_by") != author:
+                entry["updated_by"] = author
+                _write_notebook_toml_atomic(notebook_toml_path, fresh)
+                break
 
 
 def write_cell_tests(notebook_dir: Path, cell_id: str, test_source: str) -> None:
