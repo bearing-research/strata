@@ -1742,6 +1742,8 @@ async def _handle_cell_source_update(
                 "variant_group": cell.variant_group,
                 "variant_name": cell.variant_name,
                 "variant_active": cell.variant_active,
+                "created_by": cell.created_by,
+                "updated_by": cell.updated_by,
             }
             if cell.language == CellLanguage.PYTHON:
                 plan = build_module_export_plan(cell.source)
@@ -1842,6 +1844,8 @@ async def _handle_variant_set_active(
                 "variant_group": cell.variant_group,
                 "variant_name": cell.variant_name,
                 "variant_active": cell.variant_active,
+                "created_by": cell.created_by,
+                "updated_by": cell.updated_by,
             }
             if cell.language == CellLanguage.PYTHON:
                 plan = build_module_export_plan(cell.source)

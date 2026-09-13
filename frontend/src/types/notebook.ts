@@ -221,6 +221,14 @@ export interface Cell {
   widget?: WidgetSpec
   /** Display order in the notebook */
   order: number
+  /**
+   * Who added the cell and who last edited it: an authenticated principal,
+   * `local` for the browser, `assistant` / `assistant:<principal>` for the
+   * built-in assistant, or an external agent's own name. Absent for cells
+   * written before authorship was recorded.
+   */
+  createdBy?: string | null
+  updatedBy?: string | null
   /** Execution state */
   status: CellStatus
   /** Why the cell is stale (only present when status === 'stale') */

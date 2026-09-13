@@ -2,7 +2,7 @@
 
 `notebook.toml` is the **committed** configuration for a notebook. It declares the cells, their metadata, the per-notebook environment, mounts, workers, database connections, and any AI/secret-manager wiring. The file is human-editable and git-diffable; the matching backend writer round-trips it so external edits survive UI saves.
 
-Runtime state - display outputs, per-cell provenance hashes, console snapshots, `uv sync` timestamps - lives in `.strata/runtime.json`, **not** here. `notebook.toml` only changes on structural edits (add/remove/reorder a cell, change a worker/timeout/env/mounts/AI settings).
+Runtime state - display outputs, per-cell provenance hashes, console snapshots, `uv sync` timestamps - lives in `.strata/runtime.json`, **not** here. `notebook.toml` only changes on structural edits (add/remove/reorder a cell, change a worker/timeout/env/mounts/AI settings), plus one narrow exception for [who last edited a cell](#cells-cell-registry).
 
 The schema is defined in `src/strata/notebook/models.py::NotebookToml` and the round-tripping rules in `src/strata/notebook/writer.py`.
 
@@ -199,6 +199,12 @@ timeout = 600                 # cell-level override
 | `timeout` | float \| absent | Cell-level timeout override. Beaten by `# @timeout`. |
 | `env` | table | Cell-level env additions / overrides. Same sensitive-key blanking as the notebook-level `[env]`. |
 | `mounts` | array of `MountSpec` | Cell-level mounts. Supplement notebook-level mounts. |
+| `created_by` | string \| absent | Who added the cell. Written by the server, not meant to be hand-edited. |
+| `updated_by` | string \| absent | Who last changed it. |
+
+`created_by` and `updated_by` record who wrote a cell, so a reader can tell cells an agent wrote from cells a person did. The value is the authenticated principal where the server has one. Otherwise it is what the client declared: `local` for the browser, `assistant` for the built-in assistant (`assistant:<principal>` in service mode), or an external agent's own name sent through MCP or `--author`. In personal mode nothing checks that declaration, so treat it as a claim rather than an attestation. Both keys are absent on cells written before authorship was recorded.
+
+They are the one exception to the structural-edits-only rule above. An edit to a cell's source rewrites `notebook.toml` when it changes who last edited it, and at no other time. So one person editing their own cell never touches the file, and the first edit by someone else touches it once. That rewrite leaves `updated_at` alone, because who edited a cell is not a structural change.
 
 ## Annotation precedence
 

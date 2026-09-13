@@ -315,3 +315,27 @@ class TestUpdatedAtStaysStructural:
         after = tomllib.load(open(notebook / "notebook.toml", "rb"))
         assert after["cells"][0]["updated_by"] == "agent:claude"
         assert after["updated_at"] == before
+
+
+class TestTheEditFrameCarriesIt:
+    def test_dag_update_names_the_author(self):
+        """The browser only hears about an edit through `dag_update`. Without
+        the fields there, the header keeps the previous author until a full
+        reload — and the payload model drops keys it does not declare."""
+        from strata.notebook.ws_payloads import dag_update_payload
+
+        wire = dag_update_payload(
+            {
+                "cells": [
+                    {
+                        "id": "c1",
+                        "is_leaf": True,
+                        "created_by": "agent:claude",
+                        "updated_by": "local",
+                    }
+                ]
+            }
+        )
+
+        assert wire["cells"][0]["created_by"] == "agent:claude"
+        assert wire["cells"][0]["updated_by"] == "local"
