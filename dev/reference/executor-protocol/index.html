@@ -2266,10 +2266,14 @@
 <a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">  </span><span class="p">},</span>
 <a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">  </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1.0.0&quot;</span><span class="p">,</span>
 <a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="w">  </span><span class="nt">&quot;uptime_seconds&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">42.5</span><span class="p">,</span>
-<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span><span class="nt">&quot;active_executions&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span>
-<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="p">}</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="w">  </span><span class="nt">&quot;active_executions&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="w">  </span><span class="nt">&quot;max_concurrent&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="w">  </span><span class="nt">&quot;gpu_slots&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="w">  </span><span class="nt">&quot;free_gpu_slots&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="p">}</span>
 </code></pre></div>
-<p><code>active_executions</code> is the count of in-flight <code>/v1/*</code> calls - useful for autoscaler signals. The notebook UI polls this and shows the worker badge red if <code>/health</code> fails or times out.</p>
+<p><code>active_executions</code> is the count of in-flight <code>/v1/*</code> calls - useful for autoscaler signals. <code>max_concurrent</code> and <code>gpu_slots</code> are the worker's limits (<code>null</code> when unset), and <code>free_gpu_slots</code> how many GPUs are unassigned, so a caller can plan rather than discover the limit by being refused. The notebook UI polls this and shows the worker badge red if <code>/health</code> fails or times out.</p>
+<p><strong><code>503 Service Unavailable</code></strong> from any execution route means the worker is full: <code>max_concurrent</code> executions are in flight, or every GPU slot is taken. It carries <code>Retry-After</code> in seconds and is refused before any input is downloaded, so retrying costs the worker nothing.</p>
 <h2 id="post-v1execute-push-model-recommended"><code>POST /v1/execute</code> (push model - recommended)<a class="headerlink" href="#post-v1execute-push-model-recommended" title="Permanent link">&para;</a></h2>
 <p>The standard executor v1 envelope. Cells and inputs are pushed inline; the worker returns the output bundle directly in the response.</p>
 <p><strong>Content-Type</strong>: <code>multipart/form-data</code>.</p>
