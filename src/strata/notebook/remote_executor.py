@@ -293,6 +293,7 @@ async def _run_harness(
     in_flight: dict[str, Any] | None = None,
     build_id: str | None = None,
     log_url: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run the notebook harness with one manifest file.
 
@@ -316,6 +317,7 @@ async def _run_harness(
         str(manifest_path),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=env,
         **subprocess_kwargs_for_new_group(),
     )
     if in_flight is not None and build_id:
@@ -340,7 +342,25 @@ async def _run_harness(
         return json.load(f)
 
 
-def create_notebook_executor_app() -> FastAPI:
+# How long a caller refused for want of a slot is told to wait. A cell holds a
+# slot for as long as it runs, so this is a polling interval, not a promise.
+RETRY_AFTER_SECONDS = 5
+
+
+def _positive_int_env(name: str) -> int | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    value = int(raw)
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer, got {raw!r}")
+    return value
+
+
+def create_notebook_executor_app(
+    max_concurrent: int | None = None,
+    gpu_slots: int | None = None,
+) -> FastAPI:
     """Create a standalone notebook executor HTTP app.
 
     Optional bearer-token auth via ``STRATA_WORKER_TOKEN`` env var. When
@@ -348,9 +368,59 @@ def create_notebook_executor_app() -> FastAPI:
     ``Authorization: Bearer <token>``. ``/health`` stays open so platform
     health probes (Fly, Cloudflare, k8s liveness) don't need the secret.
     Unset = no auth, backward-compatible with existing deployments.
+
+    Args:
+        max_concurrent: Executions this worker runs at once; one more is
+            refused with 503 and ``Retry-After``. ``None`` is unlimited, as
+            before. Enforced here rather than trusted to a dispatcher, so a
+            shared machine cannot be overcommitted by a caller that skips it.
+            Falls back to ``STRATA_WORKER_MAX_CONCURRENT``.
+        gpu_slots: GPUs to hand out, one per execution. The worker picks a
+            free index and sets ``CUDA_VISIBLE_DEVICES`` for the cell,
+            overriding whatever the caller sent, so two concurrent cells never
+            share a GPU on the caller's say-so. When all are taken the request
+            is refused like any other full worker. Falls back to
+            ``STRATA_WORKER_GPU_SLOTS``.
     """
     started_at = time.time()
     active_executions = 0
+    if max_concurrent is None:
+        max_concurrent = _positive_int_env("STRATA_WORKER_MAX_CONCURRENT")
+    if gpu_slots is None:
+        gpu_slots = _positive_int_env("STRATA_WORKER_GPU_SLOTS")
+    free_gpus: list[int] = list(range(gpu_slots or 0))
+
+    def _admit() -> int | None:
+        """Reserve a slot for one execution, or refuse; returns its GPU, if any.
+
+        No ``await`` between the check and the reservation, so two requests
+        arriving together cannot both take the last slot.
+        """
+        nonlocal active_executions
+        if max_concurrent is not None and active_executions >= max_concurrent:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Worker is running {active_executions} of {max_concurrent} executions",
+                headers={"Retry-After": str(RETRY_AFTER_SECONDS)},
+            )
+        gpu: int | None = None
+        if gpu_slots:
+            if not free_gpus:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"All {gpu_slots} GPU slots are in use",
+                    headers={"Retry-After": str(RETRY_AFTER_SECONDS)},
+                )
+            gpu = free_gpus.pop(0)
+        active_executions += 1
+        return gpu
+
+    def _release(gpu: int | None) -> None:
+        nonlocal active_executions
+        active_executions -= 1
+        if gpu is not None:
+            free_gpus.append(gpu)
+            free_gpus.sort()
 
     # build_id -> the harness process running it, for cancel. Per app rather
     # than module-level so two workers in one test process cannot cancel each
@@ -433,8 +503,42 @@ def create_notebook_executor_app() -> FastAPI:
                     detail=(f"Remote execution does not support file:// mount '{mount.name}'"),
                 )
 
-        nonlocal active_executions
+        # Before any input is downloaded, so a refused request costs the worker
+        # nothing; held until the harness exits.
+        gpu = _admit()
+        try:
+            return await _stage_and_run(
+                source=source,
+                timeout_seconds=timeout_seconds,
+                raw_inputs=raw_inputs,
+                mount_specs=mount_specs,
+                runtime_env=runtime_env,
+                write_input_bytes=write_input_bytes,
+                build_id=build_id,
+                log_url=log_url,
+                gpu=gpu,
+            )
+        finally:
+            _release(gpu)
 
+    async def _stage_and_run(
+        *,
+        source: str,
+        timeout_seconds: float,
+        raw_inputs: dict[str, dict[str, Any]],
+        mount_specs: list[MountSpec],
+        runtime_env: dict[str, str],
+        write_input_bytes: Any,
+        build_id: str | None,
+        log_url: str | None,
+        gpu: int | None,
+    ) -> tuple[Path, Path] | JSONResponse:
+        if gpu is not None:
+            # Both the cell's environment and the process's: the manifest env
+            # is applied inside the harness, which is early enough for a cell's
+            # own CUDA init, and the process env covers anything the harness
+            # imports before it gets there.
+            runtime_env = {**runtime_env, "CUDA_VISIBLE_DEVICES": str(gpu)}
         tmpdir = Path(tempfile.mkdtemp(prefix="strata_notebook_executor_"))
         try:
             output_dir = tmpdir
@@ -506,7 +610,6 @@ def create_notebook_executor_app() -> FastAPI:
                 json.dump(manifest, f)
 
             harness_path = Path(__file__).parent / "harness.py"
-            active_executions += 1
             try:
                 result = await _run_harness(
                     harness_path,
@@ -515,6 +618,11 @@ def create_notebook_executor_app() -> FastAPI:
                     in_flight=in_flight,
                     build_id=build_id,
                     log_url=log_url,
+                    env=(
+                        {**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu)}
+                        if gpu is not None
+                        else None
+                    ),
                 )
                 if result.get("success", False):
                     await mount_resolver.sync_back(resolved_mounts)
@@ -537,8 +645,6 @@ def create_notebook_executor_app() -> FastAPI:
                     status_code=500,
                     content={"success": False, "error": str(exc)},
                 )
-            finally:
-                active_executions -= 1
 
             bundle_path = output_dir / "notebook-output-bundle.tar"
             pack_notebook_output_bundle(bundle_path, result, output_dir)
@@ -620,6 +726,11 @@ def create_notebook_executor_app() -> FastAPI:
             "version": "1.0.0",
             "uptime_seconds": max(0.0, time.time() - started_at),
             "active_executions": active_executions,
+            # So a caller can plan rather than discover the limit by 503.
+            # ``None`` means unlimited / no GPU pinning.
+            "max_concurrent": max_concurrent,
+            "gpu_slots": gpu_slots,
+            "free_gpu_slots": len(free_gpus) if gpu_slots else None,
         }
 
     @app.post("/v1/executions/{build_id}/cancel", dependencies=[Depends(require_worker_token)])
@@ -1017,7 +1128,28 @@ def main(argv: list[str] | None = None) -> int:
         choices=["debug", "info", "warning", "error"],
         help="Uvicorn log level",
     )
+    parser.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=None,
+        help=(
+            "Executions to run at once; more are refused with 503 and Retry-After "
+            "(default: unlimited, or STRATA_WORKER_MAX_CONCURRENT)"
+        ),
+    )
+    parser.add_argument(
+        "--gpu-slots",
+        type=int,
+        default=None,
+        help=(
+            "GPUs to hand out one per execution, via CUDA_VISIBLE_DEVICES set by the "
+            "worker (default: none, or STRATA_WORKER_GPU_SLOTS)"
+        ),
+    )
     args = parser.parse_args(argv)
+    for flag, value in (("--max-concurrent", args.max_concurrent), ("--gpu-slots", args.gpu_slots)):
+        if value is not None and value < 1:
+            parser.error(f"{flag} must be a positive integer")
 
     # The worker executes arbitrary cell source by design. Binding a
     # non-loopback interface without a bearer token means anyone who can
@@ -1036,7 +1168,7 @@ def main(argv: list[str] | None = None) -> int:
             args.port,
         )
 
-    app = create_notebook_executor_app()
+    app = create_notebook_executor_app(max_concurrent=args.max_concurrent, gpu_slots=args.gpu_slots)
     uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level)
     return 0
 
