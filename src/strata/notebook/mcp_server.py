@@ -529,9 +529,9 @@ def _promote(
         )
 
     store, artifact = _cell_output(session_manager, session_id, cell_id, variable)
-    target = RemoteStore(
-        str(base_url), dict(getattr(config, "notebook_remote_store_headers", {}) or {})
-    )
+    from strata.auth import remote_store_headers
+
+    target = RemoteStore(str(base_url), remote_store_headers(config))
     promotion = promote_artifact(
         store, target, artifact, name=name, alias=alias, tags=dict(tags or {})
     )

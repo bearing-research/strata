@@ -35,7 +35,7 @@ from __future__ import annotations
 import fnmatch
 import hmac
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from strata.config import AclConfig, AclRule, StrataConfig
@@ -57,6 +57,29 @@ def get_principal() -> Principal | None:
         Principal if authenticated, None if auth is disabled or not authenticated.
     """
     return _principal_ctx.get()
+
+
+_FORWARDED_PRINCIPAL = "X-Strata-Principal"
+
+
+def remote_store_headers(config: Any) -> dict[str, str]:
+    """What a request from this server to the team store carries.
+
+    ``notebook_remote_store_headers`` authenticates the server. With a caller
+    in context and ``notebook_remote_store_forward_principal`` on, the caller's
+    id replaces whatever principal those headers name, so a result offered,
+    a promotion or an approval from a shared server is attributed to the
+    member who made it rather than to the server. Personal mode has no caller
+    and sends the static headers unchanged.
+    """
+    headers = dict(getattr(config, "notebook_remote_store_headers", {}) or {})
+    principal = get_principal()
+    if principal is None or not getattr(config, "notebook_remote_store_forward_principal", True):
+        return headers
+    # Header names are case-insensitive, and the static set is operator-typed.
+    headers = {k: v for k, v in headers.items() if k.lower() != _FORWARDED_PRINCIPAL.lower()}
+    headers[_FORWARDED_PRINCIPAL] = principal.id
+    return headers
 
 
 def set_principal(principal: Principal | None) -> None:

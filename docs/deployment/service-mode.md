@@ -339,6 +339,17 @@ In a fully proxy-fronted setup the notebook's requests instead flow through the
 same auth proxy, which injects identity, and `notebook_remote_store_headers`
 can be omitted.
 
+On a **shared** notebook server several members run cells, and the static
+headers name one identity for all of them. When a request carries a principal,
+the server sends that caller's id as `X-Strata-Principal` to the remote store,
+replacing the one in the static headers. This covers results offered to the
+team cache, promotions, registry reads and approvals from the Registry tab, and
+a cell's own ambient client. The team cache's "computed by" and the registry
+audit then name the member. The remote store still has to accept that principal:
+the static headers are what authenticate the server to it. Set
+`STRATA_NOTEBOOK_REMOTE_STORE_FORWARD_PRINCIPAL=false` for a store that expects
+one fixed service identity. Personal mode has no principal and is unaffected.
+
 ### The team cache: sharing results nobody named
 
 Everything above is **explicit publish** - a researcher decides a dataset is
