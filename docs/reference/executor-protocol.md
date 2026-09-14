@@ -54,11 +54,17 @@ Liveness + capabilities probe. No auth.
   "active_executions": 0,
   "max_concurrent": 2,
   "gpu_slots": 2,
-  "free_gpu_slots": 2
+  "free_gpu_slots": 2,
+  "hardware": {
+    "cpus": 32,
+    "memory_mb": 257000,
+    "accelerators": [{"name": "NVIDIA A100-SXM4-80GB", "memory_mb": 81920, "driver": "535.104.05"}],
+    "cuda": "12.2"
+  }
 }
 ```
 
-`active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. `max_concurrent` and `gpu_slots` are the worker's limits (`null` when unset), and `free_gpu_slots` how many GPUs are unassigned, so a caller can plan rather than discover the limit by being refused. The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
+`active_executions` is the count of in-flight `/v1/*` calls - useful for autoscaler signals. `max_concurrent` and `gpu_slots` are the worker's limits (`null` when unset), and `free_gpu_slots` how many GPUs are unassigned, so a caller can plan rather than discover the limit by being refused. `hardware` is what the machine reports about itself: `cpus` (those this process may use) and `memory_mb` from the OS, and `accelerators` and `cuda` from `nvidia-smi` when it is on the worker's `PATH`. It lets a caller check a provider's machine against the class it was sold as without submitting a job. A field that could not be read is omitted, so a missing `accelerators` means unknown, not "no GPU". The notebook UI polls this and shows the worker badge red if `/health` fails or times out.
 
 **`503 Service Unavailable`** from any execution route means the worker is full: `max_concurrent` executions are in flight, or every GPU slot is taken. It carries `Retry-After` in seconds and is refused before any input is downloaded, so retrying costs the worker nothing.
 
@@ -265,9 +271,12 @@ error.json              - present only on failure
     {"file": "display/cell_default.png", "content_type": "image/png", "bytes": 18234}
   ],
   "console": "console.json",
+  "hardware": {"cpus": 32, "memory_mb": 257000, "accelerators": ["…"], "cuda": "12.2"},
   "error": null
 }
 ```
+
+`hardware` is the same object `/health` returns, echoed from the worker that ran the job. The notebook records it on each stored artifact's transform spec, beside `build_env`, and does not hash it: the machine type a cell asked for is part of its identity, while the exact accelerator and driver are kept for the record. That way identical machines of one class still share a cache.
 
 On cell errors, `error.json` is populated and `outputs` may be empty:
 

@@ -22,6 +22,7 @@ from starlette.background import BackgroundTask
 
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook.credentials import CredentialResolver
+from strata.notebook.hardware import hardware_report
 from strata.notebook.models import MountSpec
 from strata.notebook.mounts import MountResolver, parse_mount_uri
 from strata.notebook.remote_bundle import pack_notebook_output_bundle
@@ -534,6 +535,9 @@ def create_notebook_executor_app(
                 )
 
             bundle_path = output_dir / "notebook-output-bundle.tar"
+            # The hardware beside the interpreter the harness reported, so the
+            # artifact records what computed it and not only what was asked for.
+            result = {**result, "hardware": await asyncio.to_thread(hardware_report)}
             pack_notebook_output_bundle(bundle_path, result, output_dir)
             return bundle_path, tmpdir
         except BaseException:
@@ -618,6 +622,10 @@ def create_notebook_executor_app(
             "max_concurrent": max_concurrent,
             "gpu_slots": gpu_slots,
             "free_gpu_slots": len(free_gpus) if gpu_slots else None,
+            # What the machine is, from its driver and OS, so a caller can
+            # check a provider's machine against the class it was sold as
+            # without running a job. Missing fields mean unknown.
+            "hardware": await asyncio.to_thread(hardware_report),
         }
 
     @app.post("/v1/executions/{build_id}/cancel", dependencies=[Depends(require_worker_token)])
