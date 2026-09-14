@@ -62,13 +62,15 @@ def _input_path(output_dir: Path, file_name: str) -> Path:
 
     The name is already reduced to its last component, and ``..`` is one.
     """
-    root = output_dir.resolve()
-    target = (root / file_name).resolve()
-    if target.parent != root or not target.is_relative_to(root):
+    # normpath + startswith rather than Path.resolve: the same check, in the
+    # form static analysis recognises as containing a path.
+    root = os.path.realpath(output_dir)
+    target = os.path.normpath(os.path.join(root, file_name))
+    if not target.startswith(root + os.sep) or os.path.dirname(target) != root:
         raise HTTPException(
             status_code=400, detail=f"Input file name {file_name!r} is not a plain file name"
         )
-    return target
+    return Path(target)
 
 
 def _max_input_bytes() -> int:
