@@ -267,8 +267,9 @@ A few operations require a specific scope under trusted-proxy auth
 Registry **approval** additionally enforces separation of duty: the
 principal who requested a protected-alias move cannot approve it
 themselves unless they hold `admin:*`. The registry **audit** read
-(`GET /v1/registry/audit`) is tenant-scoped - a principal sees only its
-own tenant's history; `admin:*` sees the whole store.
+(`GET /v1/registry/audit`) and the events feed that follows it
+(`GET /v1/events`) are tenant-scoped - a principal sees only its own tenant's
+history; `admin:*` sees the whole store.
 
 ## Authenticated write-back: the shared research store
 

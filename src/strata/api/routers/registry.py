@@ -61,6 +61,33 @@ async def registry_audit(
     return {"entries": entries}
 
 
+@router.get("/v1/events")
+async def store_events(
+    store: ReadStore,
+    principal: CurrentPrincipal,
+    since: int = 0,
+    limit: int = 100,
+):
+    """Everything that changed on the store after ``since``, oldest first.
+
+    Registry moves, protected-alias requests and their outcomes, and
+    publications and withdrawals, in the one sequence the audit keeps. A
+    follower passes back ``next`` and never misses or repeats an event.
+    Scoped like the audit: a principal sees its tenant, ``admin:*`` and
+    personal mode see the whole store.
+    """
+    limit = max(1, min(limit, 1000))
+    target = remote_registry()
+    if target is not None:
+        return await forward(target, "GET", "/v1/events", params={"since": since, "limit": limit})
+
+    if principal is None or principal.has_scope("admin:*"):
+        events = store.read_events(since=since, limit=limit)
+    else:
+        events = store.read_events(since=since, limit=limit, tenant=principal.tenant)
+    return {"events": events, "next": events[-1]["seq"] if events else since}
+
+
 @router.get("/v1/registry/summary")
 async def registry_summary(store: ReadStore, principal: CurrentPrincipal):
     """Registry state for the dashboard names table: each name with its

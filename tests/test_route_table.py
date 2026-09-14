@@ -100,6 +100,7 @@ EXPECTED_ROUTES = [
     ("/v1/debug/memory", "GET", 0),
     ("/v1/debug/pools", "GET", 0),
     ("/v1/debug/rate-limits", "GET", 0),
+    ("/v1/events", "GET", 0),
     ("/v1/logs", "GET", 0),
     ("/v1/logs/stream", "GET", 0),
     ("/v1/materialize", "POST", 0),
