@@ -95,8 +95,43 @@ Each mount becomes a `pathlib.Path` variable in the cell namespace. Cells access
 | `mode` | `"ro"` \| `"rw"` | Default `"ro"`. |
 | `pin` | string \| absent | Pinned version/etag - disables auto-fingerprinting. |
 | `options` | table | Backend storage options passed through to fsspec. Common keys: `anon`, `endpoint_url`, `profile`. |
+| `credential` | string \| absent | Name of a server-defined credential ([Named credentials](#named-credentials)) whose fields become fsspec storage options, so no secret lives in this file. `options` still win on a shared key. |
 
 Cell-level mounts (under `[[cells.mounts]]`) supplement notebook-level ones.
+
+## Named credentials
+
+A mount or a connection can name a credential instead of carrying one:
+
+```toml
+[[mounts]]
+name = "raw"
+uri = "s3://lab-bucket/raw"
+credential = "lab-bucket"
+
+[connections.warehouse]
+driver = "postgresql"
+host = "db.internal"
+credential = "warehouse-ro"
+```
+
+The server defines what each name means, with `STRATA_NOTEBOOK_CREDENTIALS`:
+
+```bash
+STRATA_NOTEBOOK_CREDENTIALS='{
+  "lab-bucket":   {"key": "${LAB_AWS_KEY}", "secret": "${LAB_AWS_SECRET}"},
+  "warehouse-ro": {"user": "analyst", "password": "${WH_PASSWORD}"}
+}'
+```
+
+- A mount's fields become fsspec storage options; a connection's become driver `auth`.
+- `${VAR}` resolves against the notebook's environment first, which is where a configured [secret manager](#secret_manager-external-secret-manager-wiring) puts what it fetches, and then the server's.
+- The **name** is part of a cell's provenance, because a different credential can see different data. The **values** never are, so rotating a secret invalidates nothing.
+- A name the server does not define, or a reference that is not set, fails the cell with a message naming the credential.
+- `STRATA_NOTEBOOK_MOUNT_CREDENTIALS='{"s3": "org-bucket"}'` applies a credential to every mount of a scheme that names none, so the organization's primary store works without editing notebooks.
+- A remote worker resolves names against its own `STRATA_NOTEBOOK_CREDENTIALS`; only the name travels in the dispatch.
+
+The `@mount` annotation takes the name too: `# @mount raw s3://lab-bucket/raw ro credential=lab-bucket`.
 
 ## `[[workers]]` - Remote worker registry
 
@@ -143,6 +178,7 @@ SQL cells reference these by name via `# @sql connection=<name>`.
 | `<name>` | section header | Connection name - referenced by `# @sql connection=<name>`. Must match `[a-zA-Z_][a-zA-Z0-9_]*`. |
 | `driver` | string (required) | One of the shipped adapters: `duckdb`, `sqlite`, `postgresql`, `snowflake`, `bigquery`. MotherDuck and MySQL are planned but not yet implemented. |
 | `auth` | table | `${VAR}` indirections only. Resolved from the process environment at execute time; never hashed into provenance. |
+| `credential` | string \| absent | Name of a server-defined credential ([Named credentials](#named-credentials)) whose fields become driver auth, underneath this block's own `auth`. |
 | `options` | table | Driver-specific runtime tunables that don't change which objects the connection sees (`application_name`, `connect_timeout`, etc.). |
 | (driver-specific top-level keys) | varies | `uri`, `host`, `account`, `database`, `role`, `path`, ... - interpreted by the driver adapter. |
 

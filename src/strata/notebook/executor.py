@@ -70,6 +70,7 @@ from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
 from strata.notebook import console_relay
 from strata.notebook.analyzer import imported_names
 from strata.notebook.annotations import CellAnnotations, LoopAnnotation, parse_annotations
+from strata.notebook.credentials import CredentialResolver
 from strata.notebook.dag import SweepProducer
 from strata.notebook.dependencies import UV_NOT_FOUND_MESSAGE, resolve_uv
 from strata.notebook.env import compute_execution_env_hash, narrow_env_for_provenance
@@ -94,10 +95,9 @@ from strata.notebook.models import (
 from strata.notebook.module_export import build_module_export_plan, runtime_binding_names
 from strata.notebook.mounts import (
     MountCredentials,
-    MountFingerprinter,
     MountResolver,
     ResolvedMount,
-    parse_mount_uri,
+    mount_fingerprint,
     resolve_cell_mounts,
 )
 from strata.notebook.process_tree import (
@@ -2999,20 +2999,27 @@ class CellExecutor:
         mount_specs: list[MountSpec],
     ) -> tuple[list[str], bool]:
         """Compute mount fingerprints without preparing local materializations."""
+        self._mount_resolver.credential_resolver = self._credential_resolver()
         mount_fingerprints: list[str] = []
         has_rw_mount = False
-        credentials = self._mount_resolver.credentials
         for mount in sorted(mount_specs, key=lambda item: item.name):
-            scheme, _ = parse_mount_uri(mount.uri)
-            storage_options = {**credentials.get(scheme, {}), **mount.options} or None
-            fingerprint = await MountFingerprinter.fingerprint_mount(
-                mount, storage_options=storage_options
-            )
+            fingerprint = await mount_fingerprint(self._mount_resolver, mount)
             if fingerprint is None:
                 has_rw_mount = True
             else:
-                mount_fingerprints.append(f"{mount.name}:{fingerprint}")
+                mount_fingerprints.append(fingerprint)
         return mount_fingerprints, has_rw_mount
+
+    def _credential_resolver(self) -> CredentialResolver:
+        """Named credentials as this notebook sees them right now.
+
+        Rebuilt per use rather than once: a secret manager fills the notebook's
+        environment after the session opens, and a rotated value has to be the
+        one the next run reads.
+        """
+        return CredentialResolver.from_config(
+            self._lake_config(), env=dict(self.session.notebook_state.env)
+        )
 
     async def _prepare_mounts(
         self,
@@ -3021,6 +3028,7 @@ class CellExecutor:
         """Prepare local mount materializations for local execution paths."""
         if not mount_specs:
             return {}
+        self._mount_resolver.credential_resolver = self._credential_resolver()
         return await self._mount_resolver.prepare_mounts(mount_specs)
 
     async def _fingerprint_tables(
