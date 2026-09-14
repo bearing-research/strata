@@ -1911,8 +1911,24 @@ class CellExecutor:
             runtime_env = prov.runtime_env
             env_hash = prov.env_hash
             input_hashes = prov.input_hashes
-            mount_specs = prov.mount_specs
             provenance_hash = prov.provenance_hash
+            # As in a Python cell: a fetch that could not be checked fails the
+            # run, and each fetched file arrives as a read-only mount, which
+            # harness.R binds to its name as a path string.
+            if prov.fetch_error is not None:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=prov.fetch_error,
+                    execution_method="error",
+                )
+            mount_specs = [
+                *prov.mount_specs,
+                *(
+                    MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
+                    for name, path in prov.fetched.items()
+                ),
+            ]
 
             if prov.has_rw_mount:
                 use_cache = False
@@ -4581,6 +4597,21 @@ class CellExecutor:
 
         if materialize_upstreams:
             await self._materialize_upstreams(cell_id)
+
+        if annotations.fetches:
+            # An iteration is its own harness run with the mounts resolved
+            # here, and the fetch is checked only once the loop is over, so
+            # nothing would inject the name, and the digest recorded could
+            # differ from the bytes the iterations read.
+            return CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                error=(
+                    "@fetch is not supported on loop cells; fetch in an upstream "
+                    "cell and pass what the loop needs from it"
+                ),
+                execution_method="loop",
+            )
 
         mount_specs = self._resolve_cell_mount_specs(cell_id, source)
         _, has_rw_mount = await self._fingerprint_mounts(mount_specs)

@@ -217,7 +217,9 @@ lookup = pd.read_csv(zones)
 
 `<name>` is injected as a `pathlib.Path` to the downloaded file, which keeps the
 URL's file name, so code that looks at the extension still works. Like a mount
-variable it lives only in the declaring cell.
+variable it lives only in the declaring cell. In an R cell it is the path as a
+string. A `@loop` cell cannot declare a fetch, because each iteration is a
+separate run; fetch in an upstream cell instead.
 
 Format: `# @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]`.
 

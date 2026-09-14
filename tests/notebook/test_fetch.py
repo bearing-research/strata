@@ -374,3 +374,92 @@ class TestOnARemoteWorker:
         assert result.outputs["name"]["preview"].endswith("zones.csv")
         # The worker's own copy, not the server's cache: the bytes travelled.
         assert not result.outputs["where"]["preview"].startswith(str(nb.resolve()))
+
+
+class TestOtherCellKinds:
+    """Where the Python cell path is not the one that runs."""
+
+    async def test_an_r_cell_gets_the_file_as_a_read_only_mount(
+        self, tmp_path, origin, monkeypatch
+    ):
+        """No R in CI, so the harness is replaced and the manifest it would
+        have read is the evidence; harness.R binds each mount's local path."""
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.models import CellLanguage
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        monkeypatch.setattr(CellExecutor, "_fetch_allowed_hosts", lambda self: ("127.0.0.1",))
+        source = f"# @fetch zones {origin.url()}\nrows <- length(readLines(zones))"
+        nb = create_notebook(tmp_path, "R fetch", initialize_environment=False)
+        add_cell_to_notebook(nb, "c1", None, language="r")
+        write_cell(nb, "c1", source)
+        state = parse_notebook(nb)
+        state.cells[0].language = CellLanguage.R
+        session = NotebookSession(state, nb)
+        manifests: list[dict] = []
+
+        async def capture(self, manifest_path, timeout_seconds):
+            import json
+
+            manifests.append(json.loads(Path(manifest_path).read_text()))
+            return {"success": False, "error": "harness replaced"}
+
+        monkeypatch.setattr(CellExecutor, "_run_r_harness", capture)
+
+        await CellExecutor(session).execute_cell("c1", source)
+
+        (manifest,) = manifests
+        mount = manifest["mounts"]["zones"]
+        assert mount["mode"] == "ro"
+        assert Path(mount["local_path"]).read_bytes() == origin.body
+
+    async def test_an_r_cell_whose_pin_fails_does_not_run(self, tmp_path, origin, monkeypatch):
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.models import CellLanguage
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        monkeypatch.setattr(CellExecutor, "_fetch_allowed_hosts", lambda self: ("127.0.0.1",))
+        pin = "1" * 64
+        source = f"# @fetch zones {origin.url()} sha256={pin}\nrows <- 1"
+        nb = create_notebook(tmp_path, "R pin", initialize_environment=False)
+        add_cell_to_notebook(nb, "c1", None, language="r")
+        write_cell(nb, "c1", source)
+        state = parse_notebook(nb)
+        state.cells[0].language = CellLanguage.R
+        session = NotebookSession(state, nb)
+
+        async def must_not_run(self, manifest_path, timeout_seconds):
+            raise AssertionError("the harness ran despite a failed pin")
+
+        monkeypatch.setattr(CellExecutor, "_run_r_harness", must_not_run)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success is False
+        assert pin in result.error
+
+    async def test_a_loop_cell_refuses_a_fetch_rather_than_running_without_it(
+        self, tmp_path, origin, monkeypatch
+    ):
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        nb = create_notebook(tmp_path, "Loop fetch", initialize_environment=False)
+        add_cell_to_notebook(nb, "seed", None)
+        write_cell(nb, "seed", "state = 0")
+        source = f"# @loop max_iter=2 carry=state\n# @fetch zones {origin.url()}\nstate = state + 1"
+        add_cell_to_notebook(nb, "loop", "seed")
+        write_cell(nb, "loop", source)
+        session = NotebookSession(parse_notebook(nb), nb)
+
+        result = await CellExecutor(session).execute_cell("loop", source)
+
+        assert result.success is False
+        assert "@fetch" in result.error
+        assert origin.requests == []
