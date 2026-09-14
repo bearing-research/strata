@@ -25,6 +25,7 @@ the cell's output panel without special handling.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -32,6 +33,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from strata.notebook.annotations import parse_annotations
+from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.provenance import derive_subkey
 from strata.notebook.sql.analyzer import analyze_sql_cell, rewrite_named_to_positional
 from strata.notebook.sql.bind import BindError, resolve_bind_params
@@ -134,7 +136,10 @@ async def execute_sql_cell(
     # round-trips byte-for-byte); resolve them just before the
     # adapter sees them so the in-process call site stays
     # notebook-unaware.
-    runtime_spec = _resolve_runtime_spec(spec, session.path)
+    try:
+        runtime_spec = _resolve_runtime_spec(spec, session.path, _credentials(session))
+    except CredentialError as exc:
+        return _error_result(f"connection {spec.name!r}: {exc}", start_time)
 
     # ---- probes (optional) -----------------------------------------
     freshness = None
@@ -158,7 +163,9 @@ async def execute_sql_cell(
     # extraction can read the file when the path is relative on
     # disk.
     query_normalized = normalize_query(analysis.sql_body, adapter.sqlglot_dialect)
-    connection_id = adapter.canonicalize_connection_id(runtime_spec, read_only=True)
+    connection_id = _with_credential(
+        adapter.canonicalize_connection_id(runtime_spec, read_only=True), spec
+    )
     provenance_hash = compute_sql_provenance_hash(
         query_normalized=query_normalized,
         bind_params=params,
@@ -349,9 +356,14 @@ async def _execute_write_cell(
     # so credential-file principal extraction works for relative
     # paths. ``read_only=False`` so the write-side principal
     # joins the cache identity for write cells.
-    runtime_spec = _resolve_runtime_spec(spec, session.path)
+    try:
+        runtime_spec = _resolve_runtime_spec(spec, session.path, _credentials(session))
+    except CredentialError as exc:
+        return _error_result(f"connection {spec.name!r}: {exc}", start_time)
     query_normalized = normalize_query(analysis.sql_body, adapter.sqlglot_dialect)
-    connection_id = adapter.canonicalize_connection_id(runtime_spec, read_only=False)
+    connection_id = _with_credential(
+        adapter.canonicalize_connection_id(runtime_spec, read_only=False), spec
+    )
     provenance_hash = compute_sql_provenance_hash(
         query_normalized=query_normalized,
         bind_params=params,
@@ -658,8 +670,36 @@ def _synthesize_write_result_table(stats: dict[str, Any]) -> Any:
     )
 
 
-def _resolve_runtime_spec(spec: ConnectionSpec, notebook_dir: Any) -> ConnectionSpec:
+def _credentials(session: NotebookSession) -> CredentialResolver:
+    """Named credentials as this notebook sees them, secret-manager values included."""
+    return CredentialResolver.from_config(
+        session._lake_config(), env=dict(session.notebook_state.env)
+    )
+
+
+def _with_credential(connection_id: str, spec: ConnectionSpec) -> str:
+    """Fold the credential's name into the connection's identity.
+
+    A connection that reads through a different credential can see different
+    objects, so its cache entries must not be shared. The values stay out, so a
+    rotated secret keeps every entry.
+    """
+    identity = credential_identity(spec.credential)
+    if not identity:
+        return connection_id
+    return hashlib.sha256(f"{connection_id}|{identity}".encode()).hexdigest()
+
+
+def _resolve_runtime_spec(
+    spec: ConnectionSpec,
+    notebook_dir: Any,
+    credentials: CredentialResolver | None = None,
+) -> ConnectionSpec:
     """Return a spec copy with relative file paths resolved.
+
+    A ``credential`` is resolved here too, into ``auth`` underneath the block's
+    own entries, so the adapter receives ready values and never learns names.
+    ``CredentialError`` names the credential when it cannot be resolved.
 
     The on-disk ``[connections.<name>]`` block is round-tripped
     verbatim — relative paths stay relative so a notebook can move
@@ -709,6 +749,10 @@ def _resolve_runtime_spec(spec: ConnectionSpec, notebook_dir: Any) -> Connection
         new_value = _rebase(raw_value)
         if new_value != raw_value:
             update[key] = new_value
+
+    if spec.credential:
+        resolved = (credentials or CredentialResolver()).resolve(spec.credential)
+        update["auth"] = {**resolved, **spec.auth}
 
     if not update:
         return spec

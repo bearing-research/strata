@@ -211,6 +211,8 @@ def _serialize_connections(
             body.pop("auth", None)
         if not body.get("options"):
             body.pop("options", None)
+        if body.get("credential") is None:
+            body.pop("credential", None)
         out[conn.name] = body
 
     for mal in malformed or []:

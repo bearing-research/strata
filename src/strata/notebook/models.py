@@ -52,6 +52,14 @@ class MountSpec(BaseModel):
             "endpoint_url, profile). Merged with executor-level credentials."
         ),
     )
+    credential: str | None = Field(
+        default=None,
+        description=(
+            "Name of a server-defined credential whose fields become fsspec "
+            "storage options, so no secret lives in notebook.toml. The name is "
+            "part of provenance; its values never are."
+        ),
+    )
 
 
 class TableSpec(BaseModel):
@@ -121,6 +129,14 @@ class ConnectionSpec(BaseModel):
         default_factory=dict,
         description=(
             "Driver-specific runtime options that don't change which objects the connection sees."
+        ),
+    )
+    credential: str | None = Field(
+        default=None,
+        description=(
+            "Name of a server-defined credential whose fields become driver auth, "
+            "underneath this block's own ``auth``. Part of the connection's "
+            "identity; its values never are."
         ),
     )
 

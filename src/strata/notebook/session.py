@@ -49,7 +49,7 @@ from strata.notebook.models import (
     VariantGroupState,
     VariantMember,
 )
-from strata.notebook.mounts import MountFingerprinter, resolve_cell_mounts
+from strata.notebook.mounts import resolve_cell_mounts
 from strata.notebook.parser import parse_notebook
 from strata.notebook.protocol import MessageType
 from strata.notebook.provenance import (
@@ -1788,14 +1788,26 @@ class NotebookSession:
         annotations = parse_annotations(cell.source)
         merged_mounts = resolve_cell_mounts([], cell.mounts, annotations.mounts)
 
+        # The same storage options the executor fingerprints with — scheme
+        # credentials and named ones — or a mount reached through a credential
+        # lists differently here and the cell never matches its own artifacts.
+        from strata.notebook.credentials import CredentialResolver
+        from strata.notebook.mounts import MountResolver, mount_fingerprint_sync
+
+        resolver = MountResolver(
+            cache_dir=self.path / ".strata" / "mount_cache",
+            credential_resolver=CredentialResolver.from_config(
+                self._lake_config(), env=dict(self.notebook_state.env)
+            ),
+        )
         mount_fingerprints: list[str] = []
         has_rw_mount = False
         for mount in sorted(merged_mounts, key=lambda m: m.name):
-            fingerprint = MountFingerprinter.fingerprint_mount_sync(mount)
+            fingerprint = mount_fingerprint_sync(resolver, mount)
             if fingerprint is None:
                 has_rw_mount = True
             else:
-                mount_fingerprints.append(f"{mount.name}:{fingerprint}")
+                mount_fingerprints.append(fingerprint)
 
         return mount_fingerprints, has_rw_mount
 

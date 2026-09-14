@@ -647,12 +647,16 @@ def _parse_mount_annotation(value: str) -> MountSpec | None:
     name = parts[0]
     uri = parts[1]
     mode = MountMode.READ_ONLY
+    credential: str | None = None
 
-    if len(parts) >= 3 and parts[2] in ("ro", "rw"):
-        mode = MountMode(parts[2])
+    for extra in parts[2:]:
+        if extra in ("ro", "rw"):
+            mode = MountMode(extra)
+        elif extra.startswith("credential="):
+            credential = extra[len("credential=") :] or None
 
     # Validate name is a valid Python identifier
     if not name.isidentifier():
         return None
 
-    return MountSpec(name=name, uri=uri, mode=mode)
+    return MountSpec(name=name, uri=uri, mode=mode, credential=credential)

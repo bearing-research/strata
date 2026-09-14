@@ -198,7 +198,7 @@ resolved local path (the cached mirror for remote URIs, the URI's local
 filesystem path for `file://` URIs). Use standard `Path` operations: `/` for
 joining, `.read_text()`, `.iterdir()`, etc.
 
-Format: `# @mount <name> <uri> [ro|rw]`. Defaults to `ro` (read-only) if the mode is omitted. The mount name must be a valid Python identifier (it's an injected variable).
+Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (read-only) if the mode is omitted. `credential=` names a [server-defined credential](../reference/notebook-toml.md#named-credentials) instead of putting a secret in the cell. The mount name must be a valid Python identifier (it's an injected variable).
 
 ---
 

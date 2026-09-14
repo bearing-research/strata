@@ -24,6 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.background import BackgroundTask
 
 from strata.blob_store import BLOB_STREAM_CHUNK_BYTES
+from strata.notebook.credentials import CredentialResolver
 from strata.notebook.models import MountSpec
 from strata.notebook.mounts import MountResolver, parse_mount_uri
 from strata.notebook.remote_bundle import pack_notebook_output_bundle
@@ -357,6 +358,19 @@ def _positive_int_env(name: str) -> int | None:
     return value
 
 
+def _worker_credentials() -> CredentialResolver:
+    """Named credentials from the worker's environment.
+
+    Read from ``STRATA_NOTEBOOK_CREDENTIALS`` and
+    ``STRATA_NOTEBOOK_MOUNT_CREDENTIALS`` directly rather than a full server
+    config: a worker is not a Strata server and has none of its other settings.
+    """
+    return CredentialResolver(
+        json.loads(os.environ.get("STRATA_NOTEBOOK_CREDENTIALS") or "{}"),
+        scheme_defaults=json.loads(os.environ.get("STRATA_NOTEBOOK_MOUNT_CREDENTIALS") or "{}"),
+    )
+
+
 def create_notebook_executor_app(
     max_concurrent: int | None = None,
     gpu_slots: int | None = None,
@@ -587,6 +601,10 @@ def create_notebook_executor_app(
 
             mount_resolver = MountResolver(
                 cache_dir=output_dir / "mount_cache",
+                # A worker resolves a mount's credential name against its own
+                # configuration and environment; the name travels in the
+                # manifest and the secret never does.
+                credential_resolver=_worker_credentials(),
             )
             resolved_mounts = await mount_resolver.prepare_mounts(mount_specs)
             manifest_mounts = {

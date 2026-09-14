@@ -468,6 +468,19 @@ class StrataConfig(BaseSettings):
     # switch users. POSIX only.
     notebook_harness_user: str | None = None
 
+    # Named credentials, referenced from notebook.toml by name so no secret is
+    # committed: ``{name: {field: value}}``, where each value is usually a
+    # ``${VAR}`` resolved against the notebook's environment (which a secret
+    # manager fills) and then the server's. A mount's fields become fsspec
+    # storage options; a connection's become driver auth.
+    notebook_credentials: Annotated[dict[str, dict[str, str]], NoDecode] = Field(
+        default_factory=dict
+    )
+    # A default credential per mount URI scheme (``{"s3": "org-bucket"}``), for
+    # mounts that name none, so the organization's primary store works without
+    # any notebook change.
+    notebook_mount_credentials: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
+
     # AI/LLM assistant settings (OpenAI-compatible API)
     ai_base_url: str | None = None
     ai_model: str | None = None
@@ -679,6 +692,20 @@ class StrataConfig(BaseSettings):
                 f"known: {sorted(AGENT_TOOL_NAMES)}"
             )
         return names
+
+    @field_validator("notebook_credentials", "notebook_mount_credentials", mode="before")
+    @classmethod
+    def parse_credential_maps(cls, v: Any, info: Any) -> dict:
+        """Accept a dict or a JSON object string (the env-var form)."""
+        if v is None or v == "":
+            return {}
+        if isinstance(v, str):
+            import json
+
+            v = json.loads(v)
+        if not isinstance(v, dict):
+            raise ValueError(f"{info.field_name} must be a JSON object")
+        return v
 
     @field_validator("embed_frame_ancestors", mode="before")
     @classmethod

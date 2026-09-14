@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.models import MountMode, MountSpec
 
 logger = logging.getLogger(__name__)
@@ -146,6 +147,7 @@ class MountResolver:
         self,
         cache_dir: Path | None = None,
         credentials: MountCredentials | None = None,
+        credential_resolver: CredentialResolver | None = None,
     ):
         # Default to a user-scoped dir (matches ~/.strata/artifacts) instead
         # of the world-writable /tmp/strata_mounts that earlier versions
@@ -155,7 +157,19 @@ class MountResolver:
         # default just keeps ad-hoc REPL use from blowing up.
         self.cache_dir = cache_dir or Path.home() / ".strata" / "mount_cache"
         self.credentials = credentials or {}
+        # Resolves a mount's ``credential`` name. Empty by default, so a mount
+        # naming a credential nothing defines fails naming it rather than
+        # reaching the store anonymously.
+        self.credential_resolver = credential_resolver or CredentialResolver()
         self._fsspec_available: bool | None = None
+
+    def storage_options(self, mount: MountSpec) -> dict[str, Any]:
+        """Scheme credentials, then the scheme default and named credential, then options."""
+        scheme, _ = parse_mount_uri(mount.uri)
+        return {
+            **self.credentials.get(scheme, {}),
+            **self.credential_resolver.storage_options(scheme, mount.credential, mount.options),
+        }
 
     def _check_fsspec(self) -> bool:
         """Check if fsspec is available."""
@@ -265,7 +279,7 @@ class MountResolver:
         import fsspec
 
         protocol = _scheme_to_fsspec_protocol(scheme)
-        storage_options = {**self.credentials.get(scheme, {}), **mount.options}
+        storage_options = self.storage_options(mount)
         fingerprint = await MountFingerprinter.fingerprint_mount(
             mount, storage_options=storage_options
         )
@@ -323,7 +337,7 @@ class MountResolver:
         staging.mkdir(parents=True, exist_ok=True)
 
         protocol = _scheme_to_fsspec_protocol(scheme)
-        storage_options = {**self.credentials.get(scheme, {}), **mount.options}
+        storage_options = self.storage_options(mount)
 
         try:
             import fsspec
@@ -387,7 +401,7 @@ class MountResolver:
             import fsspec
 
             protocol = _scheme_to_fsspec_protocol(scheme)
-            storage_options = {**self.credentials.get(scheme, {}), **rm.spec.options}
+            storage_options = self.storage_options(rm.spec)
 
             try:
                 fs = fsspec.filesystem(protocol, **storage_options)
@@ -691,3 +705,34 @@ def resolve_cell_mounts(
         merged[m.name] = m
 
     return list(merged.values())
+
+
+def mount_fingerprint_sync(resolver: MountResolver, mount: MountSpec) -> str | None:
+    """The provenance component for one mount, shared by execution and staleness.
+
+    Both have to produce the same string or a mounted cell's artifacts are keyed
+    under a hash the staleness check never reproduces. The credential's name is
+    part of it, since which credential a mount reads through can change what it
+    sees; the values are not, so rotating a secret changes nothing here.
+
+    A credential that cannot be resolved gives a unique fingerprint, the same
+    stance as an unreachable store: the cell shows stale and runs, and the run
+    fails naming the credential.
+    """
+    try:
+        storage_options = resolver.storage_options(mount)
+    except CredentialError as exc:
+        logger.warning("mount %s: %s", mount.name, exc)
+        return f"{mount.name}:unresolved:{hashlib.sha256(os.urandom(32)).hexdigest()}"
+    fingerprint = MountFingerprinter.fingerprint_mount_sync(
+        mount, storage_options=storage_options or None
+    )
+    if fingerprint is None:
+        return None
+    identity = credential_identity(mount.credential)
+    return f"{mount.name}:{identity}:{fingerprint}" if identity else f"{mount.name}:{fingerprint}"
+
+
+async def mount_fingerprint(resolver: MountResolver, mount: MountSpec) -> str | None:
+    """Async form of :func:`mount_fingerprint_sync`, for the executor."""
+    return mount_fingerprint_sync(resolver, mount)
