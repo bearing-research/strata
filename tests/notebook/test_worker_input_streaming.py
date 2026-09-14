@@ -144,3 +144,17 @@ def test_an_input_over_the_cap_is_refused_at_the_cap(worker, monkeypatch):
     # The worker stopped reading at the cap; what the store got out before
     # the connection closed is socket buffers, not the input.
     assert store.sent < store.size // 4
+
+
+def test_an_input_named_to_leave_the_run_directory_is_refused(worker):
+    """The name comes from the request and is cut to its last component,
+    and ``..`` is a last component."""
+    store = _Store(1024)
+    manifest = _manifest(store, "x = 1")
+    manifest["metadata"]["params"]["input_specs"]["data"]["file"] = ".."
+
+    response = worker.post("/v1/execute-manifest", json=manifest)
+
+    assert response.status_code == 400
+    assert "not a plain file name" in response.json()["detail"]
+    assert store.sent == 0

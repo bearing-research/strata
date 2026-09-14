@@ -56,6 +56,21 @@ _DEFAULT_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
 _INPUT_CHUNK_BYTES = 1024 * 1024
 
 
+def _input_path(output_dir: Path, file_name: str) -> Path:
+    """Where an input named by the request is written, refused unless it is a
+    file directly in the run directory.
+
+    The name is already reduced to its last component, and ``..`` is one.
+    """
+    root = output_dir.resolve()
+    target = (root / file_name).resolve()
+    if target.parent != root or not target.is_relative_to(root):
+        raise HTTPException(
+            status_code=400, detail=f"Input file name {file_name!r} is not a plain file name"
+        )
+    return target
+
+
 def _max_input_bytes() -> int:
     raw = os.environ.get("STRATA_WORKER_MAX_INPUT_BYTES")
     if not raw:
@@ -438,7 +453,7 @@ def create_notebook_executor_app(
                 content_type = str(spec.get("content_type", "pickle/object"))
                 requested_file_name = Path(str(spec.get("file", ""))).name
                 file_name = requested_file_name or f"{var_name}{_input_extension(content_type)}"
-                await write_input(var_name, file_name, spec, output_dir / file_name)
+                await write_input(var_name, file_name, spec, _input_path(output_dir, file_name))
                 inputs[var_name] = {
                     "content_type": content_type,
                     "file": file_name,
