@@ -125,8 +125,13 @@ class TestTheCache:
         cache.resolve(spec)
         index_path = tmp_path / ".strata" / "fetch" / "index.json"
         index = json.loads(index_path.read_text())
-        index[origin.url()]["filename"] = "../../../../outside"
+        digest = index[origin.url()]["sha256"]
+        # A file where the tampered entry points, so following it would succeed.
+        outside = tmp_path / "outside"
+        outside.write_bytes(b"not the fetched bytes")
+        index[origin.url()]["filename"] = "../../outside"
         index_path.write_text(json.dumps(index))
+        assert (tmp_path / ".strata" / "fetch" / digest / "../../outside").resolve() == outside
 
         again = cache.resolve(spec)
 
