@@ -323,3 +323,54 @@ class TestInACell:
         cell = session.notebook_state.get_cell("c1")
 
         assert is_cell_batchable(CellExecutor(session), cell) is False
+
+
+class TestOnARemoteWorker:
+    """A worker gets a fetch's bytes with its other inputs and never sees the URL."""
+
+    @pytest.mark.parametrize("transport", ["direct", "signed"])
+    async def test_the_worker_receives_the_bytes_under_the_urls_file_name(
+        self,
+        tmp_path,
+        origin,
+        monkeypatch,
+        notebook_executor_server,
+        notebook_personal_server,
+        transport,
+    ):
+        from strata.notebook.executor import CellExecutor
+        from strata.notebook.models import WorkerBackendType, WorkerSpec
+        from strata.notebook.parser import parse_notebook
+        from strata.notebook.session import NotebookSession
+        from strata.notebook.writer import add_cell_to_notebook, create_notebook, write_cell
+
+        monkeypatch.setattr(CellExecutor, "_fetch_allowed_hosts", lambda self: ("127.0.0.1",))
+        source = (
+            f"# @fetch zones {origin.url()}\n"
+            "text = zones.read_text()\n"
+            "name = zones.name\n"
+            "where = str(zones.resolve())"
+        )
+        nb = create_notebook(tmp_path, "Fetching remotely")
+        add_cell_to_notebook(nb, "c1", None)
+        write_cell(nb, "c1", source)
+        session = NotebookSession(parse_notebook(nb), nb)
+        config = {"url": notebook_executor_server["execute_url"], "transport": transport}
+        if transport == "signed":
+            config["strata_url"] = notebook_personal_server["base_url"]
+        session.notebook_state.workers = [
+            WorkerSpec(
+                name="remote", backend=WorkerBackendType.EXECUTOR, runtime_id="r", config=config
+            )
+        ]
+        session.notebook_state.worker = "remote"
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success, result.error
+        assert result.execution_method == "executor"
+        assert result.remote_transport == transport
+        assert result.outputs["text"]["preview"] == origin.body.decode()
+        assert result.outputs["name"]["preview"].endswith("zones.csv")
+        # The worker's own copy, not the server's cache: the bytes travelled.
+        assert not result.outputs["where"]["preview"].startswith(str(nb.resolve()))
