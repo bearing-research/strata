@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +56,19 @@ MAX_FETCH_BYTES = 2 * 1024 * 1024 * 1024
 MAX_REDIRECTS = 5
 
 RefetchPolicy = Literal["never", "stale", "always"]
+
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def _safe_filename(name: str) -> str:
+    """The URL's own file name, reduced to something that can only name a file.
+
+    Kept at all so a cell that looks at the extension still can; reduced
+    because it comes from a URL, where ``..`` is a perfectly good last segment.
+    """
+    cleaned = _UNSAFE_NAME.sub("_", name).lstrip(".")[:128]
+    return cleaned or "data"
 
 
 class FetchError(RuntimeError):
@@ -217,15 +231,33 @@ class FetchCache:
         return digest.hexdigest()
 
     def _blob_path(self, sha: str, url: str) -> Path:
-        # The URL's own file name, so a cell that sniffs the extension still can.
-        name = Path(urlparse(url).path).name or "data"
-        return self.root / sha / name
+        return self._contained(sha, _safe_filename(Path(urlparse(url).path).name))
 
     def _cached(self, record: dict | None) -> FetchedBytes | None:
         if not record:
             return None
-        path = self.root / record["sha256"] / record["filename"]
-        return FetchedBytes(path=path, sha256=record["sha256"]) if path.is_file() else None
+        sha = str(record.get("sha256", ""))
+        if not _SHA256.fullmatch(sha):
+            return None
+        try:
+            path = self._contained(sha, _safe_filename(str(record.get("filename", ""))))
+        except FetchError:
+            return None
+        return FetchedBytes(path=path, sha256=sha) if path.is_file() else None
+
+    def _contained(self, sha: str, filename: str) -> Path:
+        """``<root>/<sha>/<filename>``, refused unless it stays under the root.
+
+        The name comes from a URL, and the index is a file on disk; neither is
+        trusted to keep the bytes where they belong.
+        """
+        if not _SHA256.fullmatch(sha):
+            raise FetchError(f"not a sha256 digest: {sha!r}")
+        root = self.root.resolve()
+        path = (root / sha / filename).resolve()
+        if not path.is_relative_to(root / sha):
+            raise FetchError(f"fetched file name {filename!r} leaves the fetch cache")
+        return path
 
     def _index_path(self) -> Path:
         return self.root / "index.json"

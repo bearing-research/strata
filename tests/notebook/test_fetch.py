@@ -109,6 +109,29 @@ class TestTheCache:
         assert fetched.path == tmp_path / ".strata" / "fetch" / fetched.sha256 / "zones.csv"
         assert fetched.path.read_bytes() == origin.body
 
+    @pytest.mark.parametrize("path", ["/..", "/a/%2e%2e", "/.hidden", "/"])
+    def test_a_hostile_file_name_stays_inside_its_digest_directory(self, tmp_path, origin, path):
+        fetched = _cache(tmp_path).resolve(FetchSpec(name="zones", url=origin.url(path)))
+
+        digest_dir = (tmp_path / ".strata" / "fetch" / fetched.sha256).resolve()
+        assert fetched.path.parent == digest_dir
+        assert fetched.path.read_bytes() == origin.body
+
+    def test_a_tampered_index_entry_is_not_followed(self, tmp_path, origin):
+        import json
+
+        cache = _cache(tmp_path)
+        spec = FetchSpec(name="zones", url=origin.url(), refetch="never")
+        cache.resolve(spec)
+        index_path = tmp_path / ".strata" / "fetch" / "index.json"
+        index = json.loads(index_path.read_text())
+        index[origin.url()]["filename"] = "../../../../outside"
+        index_path.write_text(json.dumps(index))
+
+        again = cache.resolve(spec)
+
+        assert again.path.is_relative_to((tmp_path / ".strata" / "fetch").resolve())
+
     def test_within_the_recheck_interval_the_url_is_not_asked_again(self, tmp_path, origin):
         """Staleness recomputes on every edit; a request per keystroke would be
         worse than the problem."""
