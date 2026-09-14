@@ -52,6 +52,8 @@ NOTEBOOK_EXECUTOR_MANIFEST_VERSION = "notebook-build-manifest@v1"
 
 # Per-input download cap. Override via STRATA_WORKER_MAX_INPUT_BYTES.
 _DEFAULT_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
+# One MiB, matching the server's streamed reads and writes.
+_INPUT_CHUNK_BYTES = 1024 * 1024
 
 
 def _max_input_bytes() -> int:
@@ -361,7 +363,7 @@ def create_notebook_executor_app(
         raw_inputs: dict[str, dict[str, Any]],
         raw_mounts: list[dict[str, Any]],
         runtime_env: dict[str, str],
-        write_input_bytes: Any,
+        write_input: Any,
         build_id: str | None = None,
         log_url: str | None = None,
     ) -> tuple[Path, Path] | JSONResponse:
@@ -396,7 +398,7 @@ def create_notebook_executor_app(
                 raw_inputs=raw_inputs,
                 mount_specs=mount_specs,
                 runtime_env=runtime_env,
-                write_input_bytes=write_input_bytes,
+                write_input=write_input,
                 build_id=build_id,
                 log_url=log_url,
                 gpu=gpu,
@@ -411,7 +413,7 @@ def create_notebook_executor_app(
         raw_inputs: dict[str, dict[str, Any]],
         mount_specs: list[MountSpec],
         runtime_env: dict[str, str],
-        write_input_bytes: Any,
+        write_input: Any,
         build_id: str | None,
         log_url: str | None,
         gpu: int | None,
@@ -436,9 +438,7 @@ def create_notebook_executor_app(
                 content_type = str(spec.get("content_type", "pickle/object"))
                 requested_file_name = Path(str(spec.get("file", ""))).name
                 file_name = requested_file_name or f"{var_name}{_input_extension(content_type)}"
-                data = await write_input_bytes(var_name, file_name, spec)
-                with open(output_dir / file_name, "wb") as f:
-                    f.write(data)
+                await write_input(var_name, file_name, spec, output_dir / file_name)
                 inputs[var_name] = {
                     "content_type": content_type,
                     "file": file_name,
@@ -460,10 +460,8 @@ def create_notebook_executor_app(
                         # (indices + a content-type-mapped extension) so no
                         # request-provided value ever reaches a filesystem path.
                         inj_lookup = Path(str(inj_spec.get("file", ""))).name
-                        inj_data = await write_input_bytes(inj_name, inj_lookup, inj_spec)
                         safe_file = f"__inj_{len(inputs)}_{inj_index}{_input_extension(inj_ct)}"
-                        with open(output_dir / safe_file, "wb") as f:
-                            f.write(inj_data)
+                        await write_input(inj_name, inj_lookup, inj_spec, output_dir / safe_file)
                         resolved_injected[inj_name] = {"content_type": inj_ct, "file": safe_file}
                     if resolved_injected:
                         inputs[var_name]["injected"] = resolved_injected
@@ -555,14 +553,19 @@ def create_notebook_executor_app(
             var_name: str,
             requested_file_name: str,
             _spec: dict[str, Any],
-        ) -> bytes:
+            target: Path,
+        ) -> None:
             upload = form.get(var_name) or form.get(requested_file_name)
             if upload is None or isinstance(upload, str):
                 raise HTTPException(
                     status_code=400,
                     detail=f"Missing uploaded input file: {var_name}",
                 )
-            return await upload.read()
+            # Copied in chunks: the form parser has already spooled the part to
+            # disk, and reading it whole would put it back in memory.
+            with open(target, "wb") as out:
+                while chunk := await upload.read(_INPUT_CHUNK_BYTES):
+                    out.write(chunk)
 
         result = await _execute_to_bundle(
             source=source,
@@ -570,7 +573,7 @@ def create_notebook_executor_app(
             raw_inputs=raw_inputs,
             raw_mounts=raw_mounts,
             runtime_env=runtime_env,
-            write_input_bytes=_write_uploaded_input,
+            write_input=_write_uploaded_input,
             build_id=build_id,
             log_url=log_url,
         )
@@ -833,7 +836,8 @@ def create_notebook_executor_app(
             var_name: str,
             _requested_file_name: str,
             spec: dict[str, Any],
-        ) -> bytes:
+            target: Path,
+        ) -> None:
             input_uri = str(spec.get("uri", "")).strip()
             if not input_uri:
                 raise HTTPException(
@@ -846,9 +850,10 @@ def create_notebook_executor_app(
                     status_code=400,
                     detail=f"Manifest does not include a signed URL for {input_uri}",
                 )
-            # Stream + cap so a misconfigured-or-malicious download
-            # can't OOM the worker. Content-Length (when present) lets
-            # us reject up front before reading any bytes.
+            # Streamed to the input file with the cap checked as bytes land,
+            # so the largest input is bounded by the worker's disk rather than
+            # its memory. Content-Length (when present) lets us reject up
+            # front before reading any bytes.
             max_bytes = _max_input_bytes()
             async with httpx.AsyncClient(timeout=max(timeout_seconds, 30.0)) as client:
                 async with client.stream("GET", download_url) as response:
@@ -874,18 +879,19 @@ def create_notebook_executor_app(
                                     f"{declared_bytes} bytes, exceeds {max_bytes}-byte cap"
                                 ),
                             )
-                    buf = bytearray()
-                    async for chunk in response.aiter_bytes():
-                        buf.extend(chunk)
-                        if len(buf) > max_bytes:
-                            raise HTTPException(
-                                status_code=413,
-                                detail=(
-                                    f"Notebook input {input_uri} exceeds "
-                                    f"{max_bytes}-byte cap during download"
-                                ),
-                            )
-            return bytes(buf)
+                    written = 0
+                    with open(target, "wb") as out:
+                        async for chunk in response.aiter_bytes(_INPUT_CHUNK_BYTES):
+                            written += len(chunk)
+                            if written > max_bytes:
+                                raise HTTPException(
+                                    status_code=413,
+                                    detail=(
+                                        f"Notebook input {input_uri} exceeds "
+                                        f"{max_bytes}-byte cap during download"
+                                    ),
+                                )
+                            out.write(chunk)
 
         bundle_result = await _execute_to_bundle(
             source=source,
@@ -893,7 +899,7 @@ def create_notebook_executor_app(
             raw_inputs=raw_inputs,
             raw_mounts=raw_mounts,
             runtime_env=runtime_env,
-            write_input_bytes=_download_input,
+            write_input=_download_input,
             build_id=str(metadata.get("build_id") or "") or None,
             log_url=log_url,
         )

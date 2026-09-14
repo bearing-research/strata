@@ -209,7 +209,7 @@ what is cached. A worker can ignore them.
 
 **Worker behavior:**
 
-1. For each entry in `metadata.params.input_specs`, look up its `uri` in `inputs[]` and stream-download from the signed URL. Inputs that exceed `STRATA_WORKER_MAX_INPUT_BYTES` (declared via `Content-Length` or measured during stream) are rejected with `413`.
+1. For each entry in `metadata.params.input_specs`, look up its `uri` in `inputs[]` and stream-download from the signed URL to the input file, so an input is bounded by the worker's disk rather than its memory. Inputs that exceed `STRATA_WORKER_MAX_INPUT_BYTES` (declared via `Content-Length` or measured during stream) are rejected with `413`.
 2. Run the cell in a subprocess (same as `/v1/execute`).
 3. Stream the resulting output bundle to `output.url` via `POST` with `Content-Type: application/x-tar`.
 4. `POST {"output_format": "notebook-output-bundle@v1"}` to `finalize_url`.
