@@ -233,6 +233,12 @@ Format: `# @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]`.
 - **`refetch=never`** uses the cached bytes once there are any.
 - **`refetch=always`** downloads again on every check, ignoring validators.
 
+Each artifact the cell stores records the URL and the digest of the bytes the
+run read as one of its inputs. That record is how a
+[publication](publishing.md) page and its RO-Crate list the URL under
+"External inputs". A snapshot export lists every fetch with whether it is
+pinned, so an unpinned one can be flagged before the snapshot is shared.
+
 Only `http` and `https` are fetched, and every redirect hop passes the same
 guard as a worker's URLs: no private, loopback or link-local address unless the
 host is listed in `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. A URL that cannot be

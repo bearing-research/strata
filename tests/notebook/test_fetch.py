@@ -315,6 +315,60 @@ class TestInACell:
         assert pin in result.error
         assert hashlib.sha256(origin.body).hexdigest() in result.error
 
+    @staticmethod
+    def _lineage_of(session, cell_id: str):
+        from strata.services.artifact import ArtifactService
+
+        manager = session.get_artifact_manager()
+        ((_, artifact),) = manager.list_cell_artifacts(cell_id)
+        return ArtifactService().build_lineage(
+            manager.artifact_store,
+            artifact=artifact,
+            artifact_id=artifact.id,
+            version=artifact.version,
+            tenant_filter=None,
+            max_depth=5,
+        )
+
+    async def test_the_artifact_records_the_url_and_the_digest_it_read(
+        self, tmp_path, origin, monkeypatch
+    ):
+        from strata.notebook.executor import CellExecutor
+
+        source = f"# @fetch zones {origin.url()}\nrows = len(zones.read_bytes())"
+        session = self._session(tmp_path, source, monkeypatch)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success, result.error
+        (node,) = [n for n in self._lineage_of(session, "c1").nodes if n.type == "fetch"]
+        assert node.uri == origin.url()
+        assert node.content_sha256 == hashlib.sha256(origin.body).hexdigest()
+
+    async def test_the_digest_recorded_is_the_one_the_run_read(self, tmp_path, origin, monkeypatch):
+        """A staleness check between the run and the store can record newer
+        bytes in the cache; the artifact must still name the bytes it was made
+        from."""
+        from strata.notebook.executor import CellExecutor
+
+        source = f"# @fetch zones {origin.url()}\nrows = len(zones.read_bytes())"
+        session = self._session(tmp_path, source, monkeypatch)
+        read = hashlib.sha256(origin.body).hexdigest()
+        original = CellExecutor._store_outputs
+
+        def moved_in_between(self, *args, **kwargs):
+            origin.body = b"zone,borough\n9,Elsewhere\n"
+            _cache(session.path).resolve(FetchSpec(name="zones", url=origin.url()), max_age=0)
+            return original(self, *args, **kwargs)
+
+        monkeypatch.setattr(CellExecutor, "_store_outputs", moved_in_between)
+
+        result = await CellExecutor(session).execute_cell("c1", source)
+
+        assert result.success, result.error
+        (node,) = [n for n in self._lineage_of(session, "c1").nodes if n.type == "fetch"]
+        assert node.content_sha256 == read
+
     def test_a_fetching_cell_is_not_batched(self, tmp_path, origin, monkeypatch):
         from strata.notebook.executor import CellExecutor, is_cell_batchable
 

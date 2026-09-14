@@ -565,6 +565,12 @@ class CellExecutor:
         # execute_cell() recursive tree. Each top-level call creates a fresh
         # CellExecutor, so the guard resets between independent executions.
         self._materializing: set[str] = set()
+        # The digest each cell's fetches resolved to when its provenance was
+        # last computed, as lineage inputs (``{url: "sha256:<hex>"}``). Kept
+        # from that moment rather than read back from the fetch cache at store
+        # time: a staleness check in between can record newer bytes than the
+        # run used, and the artifact would name bytes it was not made from.
+        self._fetch_refs: dict[str, dict[str, str]] = {}
         self._mount_resolver = MountResolver(
             cache_dir=session.path / ".strata" / "mount_cache",
             credentials=mount_credentials,
@@ -1055,7 +1061,10 @@ class CellExecutor:
         )
         input_hashes = self._collect_input_hashes(cell_id)
         table_fingerprints, table_snapshots = await self._fingerprint_tables(annotations.tables)
-        fetch_fingerprints, fetched, fetch_error = await self._resolve_fetches(annotations.fetches)
+        fetch_fingerprints, fetched, fetch_refs, fetch_error = await self._resolve_fetches(
+            annotations.fetches
+        )
+        self._fetch_refs[cell_id] = fetch_refs
         provenance_hash = compute_provenance_hash(
             input_hashes + mount_fingerprints + table_fingerprints + fetch_fingerprints,
             source_hash,
@@ -1316,7 +1325,7 @@ class CellExecutor:
                         source_hash=source_hash,
                         source=source,
                         env_hash=env_hash,
-                        input_versions=self.session._collect_input_refs(cell_id),
+                        input_versions=self._input_refs(cell_id),
                         variant=fanout_variant,
                     )
                     if team_pull is not None:
@@ -1988,7 +1997,7 @@ class CellExecutor:
                         source_hash=source_hash,
                         source=source,
                         env_hash=env_hash,
-                        input_versions=self.session._collect_input_refs(cell_id),
+                        input_versions=self._input_refs(cell_id),
                     )
                     if team_pull is not None:
                         cached_artifact = artifact_mgr.find_cached(
@@ -3112,20 +3121,22 @@ class CellExecutor:
 
     async def _resolve_fetches(
         self, fetch_specs: list[FetchSpec]
-    ) -> tuple[list[str], dict[str, Path], str | None]:
+    ) -> tuple[list[str], dict[str, Path], dict[str, str], str | None]:
         """Check every ``@fetch`` right before a run and fingerprint its bytes.
 
         Always checked here (``max_age=0``), whatever staleness last saw: what a
         run records has to be what the URL served when it ran. Returns the
-        fingerprints, a path per name, and the first failure, if any.
+        fingerprints, a path per name, the lineage input per URL, and the first
+        failure, if any.
         """
         if not fetch_specs:
-            return [], {}, None
+            return [], {}, {}, None
         from strata.notebook.fetch import FetchCache, FetchError
 
         cache = FetchCache(self.session.path, allowed_hosts=self._fetch_allowed_hosts())
         fingerprints: list[str] = []
         fetched: dict[str, Path] = {}
+        refs: dict[str, str] = {}
         error: str | None = None
         loop = asyncio.get_running_loop()
         for spec in sorted(fetch_specs, key=lambda item: item.name):
@@ -3139,7 +3150,13 @@ class CellExecutor:
                 continue
             fingerprints.append(result.fingerprint(spec))
             fetched[spec.name] = result.path
-        return fingerprints, fetched, error
+            refs[spec.url] = f"sha256:{result.sha256}"
+        return fingerprints, fetched, refs, error
+
+    def _input_refs(self, cell_id: str) -> dict[str, str]:
+        """What an artifact of *cell_id* records as its inputs: upstream
+        artifacts, and each fetched URL with the digest of the bytes read."""
+        return {**self.session._collect_input_refs(cell_id), **self._fetch_refs.get(cell_id, {})}
 
     def _fetch_allowed_hosts(self) -> tuple[str, ...]:
         return tuple(getattr(self._lake_config(), "notebook_fetch_allowed_hosts", None) or ())
@@ -3971,7 +3988,7 @@ class CellExecutor:
             return True
 
         artifact_mgr = self.session.get_artifact_manager()
-        input_versions = self.session._collect_input_refs(cell_id)
+        input_versions = self._input_refs(cell_id)
         consumed_vars = self.session.dag.consumed_variables.get(cell_id, set())
 
         try:
@@ -4114,7 +4131,7 @@ class CellExecutor:
         if not stdout and not stderr:
             return
         artifact_mgr = self.session.get_artifact_manager()
-        input_versions = self.session._collect_input_refs(cell_id)
+        input_versions = self._input_refs(cell_id)
         blob = json.dumps({"stdout": stdout, "stderr": stderr}).encode("utf-8")
         artifact_mgr.store_cell_output(
             cell_id=cell_id,
@@ -4145,7 +4162,7 @@ class CellExecutor:
             return []
 
         artifact_mgr = self.session.get_artifact_manager()
-        input_versions = self.session._collect_input_refs(cell_id)
+        input_versions = self._input_refs(cell_id)
         stored_displays: list[dict[str, Any]] = []
 
         for index, display_output in enumerate(display_outputs):
@@ -4875,7 +4892,7 @@ class CellExecutor:
         # no inputs at all — so the one artifact a research notebook most wants
         # to trace, the output of a training loop, had an empty lineage graph
         # rather than merely an opaque one.
-        loop_input_versions = self.session._collect_input_refs(cell_id)
+        loop_input_versions = self._input_refs(cell_id)
 
         canonical_artifact = artifact_mgr.store_cell_output(
             cell_id=cell_id,

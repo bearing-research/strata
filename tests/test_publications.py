@@ -1275,3 +1275,88 @@ class TestBadge:
 
         assert f"/p/{token}/badge.svg" in page
         assert "Putting it somewhere" in page
+
+
+class TestExternalInputs:
+    """Bytes a cell fetched from a URL, listed by URL, digest and time. Item 44."""
+
+    DIGEST = "d" * 64
+
+    def _published(self, tmp_path, url: str):
+        from strata.notebook.artifact_integration import NotebookArtifactManager
+        from strata.services.artifact import ArtifactService
+
+        manager = NotebookArtifactManager("nb", artifact_dir=tmp_path / "fetched")
+        figure = manager.store_cell_output(
+            cell_id="c1",
+            variable_name="__display__0",
+            blob_data=b"PNG",
+            content_type="image/png",
+            provenance_hash="a" * 64,
+            input_versions={url: f"sha256:{self.DIGEST}"},
+            source="plt.plot(pd.read_csv(zones))",
+        )
+        publication = manager.artifact_store.publish_artifact(figure.id, figure.version)
+        lineage = ArtifactService().build_lineage(
+            manager.artifact_store,
+            artifact=figure,
+            artifact_id=figure.id,
+            version=figure.version,
+            tenant_filter=None,
+            max_depth=10,
+        )
+        return publication, figure, lineage
+
+    @staticmethod
+    def _page(publication, figure, lineage) -> str:
+        from strata.api.publication_page import render_publication
+
+        return render_publication(
+            publication=publication,
+            artifact=figure,
+            lineage=lineage,
+            content_type="image/png",
+            image_src=None,
+        )
+
+    def test_the_page_lists_the_url_the_digest_and_the_step_that_read_it(self, tmp_path):
+        url = "https://example.org/taxi_zones.csv"
+        publication, figure, lineage = self._published(tmp_path, url)
+
+        html = self._page(publication, figure, lineage)
+        external = html.split("<h2>External inputs</h2>", 1)[1].split("<h2>", 1)[0]
+
+        assert url in external
+        assert self.DIGEST in external
+        assert f"{figure.id}@v={figure.version}" in external
+        # Named once, as an external input, not again as an upstream step.
+        assert html.count(url) == 1
+
+    def test_a_hostile_url_is_printed_not_linked(self, tmp_path):
+        """The record is the page's only source, and a record is not trusted to
+        hold only https."""
+        html = self._page(*self._published(tmp_path, "javascript:alert(1)//<script>x</script>"))
+
+        assert "<script>x</script>" not in html
+        assert "href='javascript:" not in html
+
+    def test_the_crate_declares_the_url_as_a_file_with_its_digest(self, tmp_path):
+        from strata.api.provenance_ld import build_crate
+
+        url = "https://example.org/taxi_zones.csv"
+        publication, figure, lineage = self._published(tmp_path, url)
+
+        crate = build_crate(
+            publication=publication,
+            artifact=figure,
+            lineage=lineage,
+            content_type="image/png",
+            payload_id="artifact.png",
+            include_descriptor=True,
+        )
+
+        entity = next(e for e in crate["@graph"] if e["@id"] == url)
+        assert entity["@type"] == "File"
+        assert entity["sha256"] == self.DIGEST
+        action = next(e for e in crate["@graph"] if e.get("@type") == "CreateAction")
+        assert {"@id": url} in action["object"]

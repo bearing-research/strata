@@ -639,6 +639,11 @@ edges. [Importing](#import-snapshot) the bundle needs all three. Cells whose
 artifacts were only described open idle rather than stale. They ran and their
 result is current; it just isn't here.
 
+`fetches` lists every `@fetch` with its cell, name, URL, `refetch` policy and
+`pinned`. `sha256` is the pin, or else the digest last read. An unpinned fetch
+is the input a snapshot cannot vouch for, since its bytes are whatever the URL
+serves at the next run, so a preflight can flag them from this list.
+
 The same bundle offline: `strata export <path> --to snapshot --out snap.zip
 --include all`.
 
