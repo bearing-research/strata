@@ -43,6 +43,7 @@ from strata.notebook.python_versions import (
     normalize_python_minor,
     read_requested_python_minor,
 )
+from strata.notebook.quiesce import NotebookQuiesced
 from strata.notebook.session import NotebookSession, SessionManager
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
@@ -587,6 +588,15 @@ def _serialize_operation_error_detail(message: str, result: object) -> dict:
     return detail
 
 
+def _quiesced_conflict(exc: NotebookQuiesced) -> HTTPException:
+    """The same 409 the app-level handler gives, for routes that wrap errors.
+
+    Those routes turn anything unexpected into a 500, which would report a
+    notebook held for a copy as a server fault.
+    """
+    return HTTPException(status_code=409, detail={"message": str(exc), "code": exc.code})
+
+
 def _raise_environment_busy(session: NotebookSession, message: str) -> None:
     """Raise a structured 409 conflict for competing env/runtime operations."""
     raise HTTPException(
@@ -904,6 +914,8 @@ async def open_notebook(req: OpenNotebookRequest, request: Request) -> JSONRespo
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -996,6 +1008,8 @@ async def create_new_notebook(req: CreateNotebookRequest, request: Request) -> J
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -1351,6 +1365,134 @@ async def import_snapshot_bundle(
         route_name="notebook_import_snapshot",
         log_context=str(result.notebook_dir),
     )
+
+
+class QuiesceRequest(BaseModel):
+    """Hold a notebook, or a project directory of them, still for a copy."""
+
+    timeout_seconds: float = Field(
+        default=30.0,
+        ge=0,
+        le=3600,
+        description="How long to wait for running cells before cancelling them.",
+    )
+    max_hold_seconds: float = Field(
+        default=600.0,
+        gt=0,
+        le=86400,
+        description="The hold ends on its own after this, so a caller that dies cannot "
+        "freeze the notebook.",
+    )
+
+
+def _require_notebook_admin() -> None:
+    """Quiescing freezes other people's work, so it is an admin action.
+
+    Under principal auth it needs ``admin:notebooks`` (``admin:*`` satisfies
+    it). Personal mode has one operator, who is allowed.
+    """
+    try:
+        from strata.server import get_state
+
+        state = get_state()
+    except RuntimeError:
+        return
+    if not state.config.principal_auth_enabled:
+        return
+    from strata.auth import get_principal
+
+    principal = get_principal()
+    if principal is None or not principal.has_scope("admin:notebooks"):
+        raise HTTPException(
+            status_code=403, detail="Insufficient scope: admin:notebooks required to quiesce"
+        )
+
+
+async def _quiesce(root: Path, sessions: list[NotebookSession], req: QuiesceRequest) -> dict:
+    """Drain *sessions*, cancel what outlives the timeout, then hold *root*."""
+    from strata.notebook import quiesce
+    from strata.notebook.ws import cancel_notebook_execution
+
+    try:
+        hold = quiesce.begin(root, req.max_hold_seconds)
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
+
+    deadline = time.monotonic() + req.timeout_seconds
+    while any(s._has_active_execution() for s in sessions) and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
+    cancelled: dict[str, list[str]] = {}
+    for session in sessions:
+        if session._has_active_execution():
+            cancelled[str(session.path)] = await cancel_notebook_execution(session.id)
+    # Every runtime write is synchronous, so once nothing is running there is
+    # nothing left to flush: runtime.json already says what the artifacts say.
+    quiesce.settle(hold)
+    return {
+        "path": str(hold.root),
+        "notebooks": sorted(str(s.path) for s in sessions),
+        "cancelled_cells": cancelled,
+        "hold_expires_in_seconds": hold.seconds_left(),
+    }
+
+
+@router.post("/{notebook_id}/quiesce")
+async def quiesce_notebook(
+    notebook_id: str, session: SessionDep, req: QuiesceRequest | None = None
+) -> dict:
+    """Hold a notebook still until released, so a copy of it is consistent.
+
+    Waits for running cells to finish (cancelling any still running at
+    ``timeout_seconds`` and naming them), then refuses runs and edits with a
+    409 until ``POST .../release`` or ``max_hold_seconds``.
+    """
+    _require_notebook_admin()
+    return await _quiesce(session.path.resolve(), [session], req or QuiesceRequest())
+
+
+@router.post("/{notebook_id}/release")
+async def release_notebook(notebook_id: str, session: SessionDep) -> dict:
+    """End a hold. ``released: false`` when there was none to end."""
+    from strata.notebook import quiesce
+
+    _require_notebook_admin()
+    root = session.path.resolve()
+    return {"path": str(root), "released": quiesce.release(root)}
+
+
+projects_router = APIRouter(prefix="/v1/projects", tags=["notebooks"])
+
+
+def _project_root(path: str, request: Request) -> tuple[Path, list[NotebookSession]]:
+    root = _validate_notebook_path(path, "project path", request)
+    sessions = [
+        session
+        for session_id in _session_manager.list_sessions()
+        if (session := _session_manager.get_session(session_id)) is not None
+        and session.path.resolve().is_relative_to(root)
+    ]
+    return root, sessions
+
+
+@projects_router.post("/{path:path}/quiesce")
+async def quiesce_project(path: str, request: Request, req: QuiesceRequest | None = None) -> dict:
+    """Hold every notebook under a directory still, for a project copy or move.
+
+    Covers notebooks that are not open too: the hold is on the directory, so a
+    notebook opened during it cannot run or be edited either.
+    """
+    _require_notebook_admin()
+    root, sessions = _project_root(path, request)
+    return await _quiesce(root, sessions, req or QuiesceRequest())
+
+
+@projects_router.post("/{path:path}/release")
+async def release_project(path: str, request: Request) -> dict:
+    from strata.notebook import quiesce
+
+    _require_notebook_admin()
+    root, _sessions = _project_root(path, request)
+    return {"path": str(root), "released": quiesce.release(root)}
 
 
 @router.delete("/{notebook_id}")
@@ -2041,6 +2183,8 @@ async def reorder_notebook_cells(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2119,6 +2263,8 @@ async def update_cell_source(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2145,6 +2291,8 @@ async def update_notebook_mounts_endpoint(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2211,6 +2359,8 @@ async def update_notebook_connections_endpoint(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2320,6 +2470,8 @@ async def update_notebook_workers_endpoint(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2369,6 +2521,8 @@ async def establish_ssh_worker_endpoint(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except (SshWorkerError, NotebookOpsError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2389,6 +2543,8 @@ async def teardown_ssh_worker_endpoint(
         existed = await asyncio.to_thread(
             teardown_ssh_worker, session, supervisor, worker_name, stop_remote=stop_remote
         )
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2420,6 +2576,8 @@ async def update_notebook_worker_endpoint(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2525,6 +2683,8 @@ async def update_notebook_timeout_endpoint(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2560,6 +2720,8 @@ async def add_variant_endpoint(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2601,6 +2763,8 @@ async def set_variant_active_endpoint(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2643,6 +2807,8 @@ async def update_notebook_env_endpoint(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2707,6 +2873,8 @@ async def update_notebook_secret_manager_config(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2736,6 +2904,8 @@ async def refresh_notebook_secret_manager(notebook_id: str, session: SessionDep)
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2791,6 +2961,8 @@ async def add_cell(notebook_id: str, session: SessionDep, req: AddCellRequest) -
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2848,6 +3020,8 @@ async def delete_cell(notebook_id: str, session: SessionDep, cell_id: str) -> di
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -2885,6 +3059,8 @@ async def rename_notebook_endpoint(
         raise HTTPException(status_code=403, detail=str(exc) or "Forbidden")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except NotebookQuiesced as exc:
+        raise _quiesced_conflict(exc) from exc
     except Exception:
         logger.exception("Internal server error")
         raise HTTPException(status_code=500, detail="Internal server error")

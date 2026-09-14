@@ -21,6 +21,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from strata.notebook.quiesce import refuses_while_held
+
 SCHEMA_VERSION = 1
 _RUNTIME_FILENAME = "runtime.json"
 
@@ -173,6 +175,7 @@ def load_runtime_state(notebook_dir: Path) -> RuntimeState:
     )
 
 
+@refuses_while_held
 def save_runtime_state(notebook_dir: Path, state: RuntimeState) -> None:
     """Atomically persist the runtime-state document."""
     path = runtime_state_path(notebook_dir)
