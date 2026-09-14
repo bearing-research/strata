@@ -2368,7 +2368,7 @@
 <tr>
 <td><code>inputs</code></td>
 <td>array of <code>{name, format}</code></td>
-<td>Each entry references a multipart field with the same <code>name</code>. <code>format</code> is the content type - <code>arrow/ipc</code>, <code>pickle/object</code>, <code>json/object</code>, <code>module/import</code>, <code>module/cell</code>, <code>module/cell-instance</code>.</td>
+<td>Each entry references a multipart field with the same <code>name</code>. <code>format</code> is the content type - <code>arrow/ipc</code>, <code>pickle/object</code>, <code>json/object</code>, <code>module/import</code>, <code>module/cell</code>, <code>module/cell-instance</code>, or <code>file/path</code> for an <code>@fetch</code>'s bytes, which the harness injects as a <code>pathlib.Path</code> to the written file instead of loading.</td>
 </tr>
 </tbody>
 </table>

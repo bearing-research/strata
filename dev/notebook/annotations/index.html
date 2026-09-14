@@ -3033,8 +3033,13 @@ variable it lives only in the declaring cell.</p>
 guard as a worker's URLs: no private, loopback or link-local address unless the
 host is listed in <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. A URL that cannot be
 checked shows the cell as stale, and running it fails with the reason. A cell
-with <code>@fetch</code> runs on its own in Run All rather than in a batch, and cannot yet
-be dispatched to a remote worker.</p>
+with <code>@fetch</code> runs on its own in Run All rather than in a batch.</p>
+<p>On a remote worker the server does the fetching: the bytes travel with the
+cell's other inputs, uploaded on the direct transport and staged behind a
+signed URL on the signed one, so the worker never contacts the URL and needs no
+route to it. The worker must be running this version of Strata or later. An
+older one does not recognise the input and the cell fails with a <code>NameError</code>
+on <code>&lt;name&gt;</code>.</p>
 <h2 id="table">@table<a class="headerlink" href="#table" title="Permanent link">&para;</a></h2>
 <p>Declare an Iceberg table input. The table's current snapshot id becomes part
 of the cell's provenance: <strong>when new data lands in the table, the cell goes
