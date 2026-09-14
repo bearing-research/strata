@@ -54,4 +54,5 @@ testpaths = ["tests"]
 markers = [
     "docker: needs a reachable Docker daemon (skipped automatically without one)",
     "runpod: starts a billed RunPod pod; opt-in only, never in CI",
+    "fly: starts a billed Fly machine; opt-in only, never in CI",
 ]

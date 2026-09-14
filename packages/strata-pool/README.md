@@ -15,7 +15,7 @@ Jobs arrive with a machine type. The pool hands each one to a warm worker of
 that type, starts a machine when there is none, forwards the payload over
 HTTP, records the result, and meters the execution. A backend provides start /
 stop / health and nothing else, so the pool does not know which it is talking
-to. Two ship: local Docker and RunPod. Anything satisfying the `Backend`
+to. Three ship: local Docker, RunPod, and Fly Machines. Anything satisfying the `Backend`
 protocol works.
 
 ```python
@@ -187,6 +187,50 @@ orphan is findable.
 A pod's port is published on the public internet through RunPod's proxy. The
 per-machine credential is what stands between that URL and anyone who finds
 it.
+
+## The Fly Machines backend
+
+Boots workers as machines in one Fly app and region. A machine is reachable
+only on the organization's private network, at
+`http://{machine_id}.vm.{app}.internal:{port}`, so a pool running beside its
+notebook servers on Fly hands them workers that never face the internet.
+
+```python
+FlyBackend(os.environ["FLY_API_TOKEN"], app="strata-workers", region="sjc")
+MachineType(
+    name="a100",
+    image="registry.fly.io/strata-worker:latest",
+    cpus=8,
+    memory_mb=65536,
+    gpu_type="a100-80gb",       # Fly's own gpu_kind string
+    cool_down_seconds=120,
+)
+```
+
+`start` creates the machine with the worker token and the machine type's
+`STRATA_WORKER_*` settings in its environment, with `restart: no` and
+`auto_destroy: false` so its lifetime stays the pool's. `stop` destroys it by
+force (a second destroy is a no-op). `health` needs Fly to report the machine
+`started` before it probes the worker's `/health`, because a stopped machine's
+private address can be reused.
+
+**Not yet verified against a live account.** The request shapes follow the
+Machines API documentation; every field lives in `_create_body` and is asserted
+by a test, `provider_options` overrides anything in the machine `config`, and
+`base_url` can be repointed. To verify:
+
+```bash
+export FLY_API_TOKEN=... STRATA_POOL_FLY_APP=... STRATA_POOL_FLY_REGION=sjc
+STRATA_POOL_FLY_LIVE=1 pytest packages/strata-pool/tests/test_fly_live.py -v -s
+```
+
+That **starts a billed machine**. Off the private network it proves create,
+start and destroy; add `STRATA_POOL_FLY_ON_NETWORK=1` where the `.internal`
+names resolve (a Fly machine, or a `fly wireguard` peer) to probe the worker
+too.
+
+The worker credential still matters here: every machine in the organization
+can reach every other.
 
 ## The worker contract
 
