@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useNotebook } from '../stores/notebook'
+import { promotableOutputs } from '../utils/artifactRef'
 
 const props = defineProps<{ cellId: string }>()
 
@@ -68,15 +69,22 @@ async function promote(row: StripRow, alias: 'champion' | 'candidate') {
 // Any stored output of the cell can go to the team store, not only a result the
 // cell published itself with put(name=...). Offered only when a team store is
 // configured; without one the promote route has nowhere to send it.
+// Only a ready cell, and only what it still defines: the backend's map keeps
+// every variable a cell has ever stored, so after a rename or an unrun edit it
+// would otherwise offer an outdated result for promotion under a team name.
 const shareable = computed<Record<string, string>>(() => {
   if (!teamStoreConfigured.value) return {}
-  return cellMap.value.get(props.cellId)?.artifactUris || {}
+  return promotableOutputs(cellMap.value.get(props.cellId))
 })
 const shareVariables = computed(() => Object.keys(shareable.value).sort())
 
 const sharing = ref(false)
 const shareVariable = ref('')
 const shareName = ref('')
+// Whether the person typed a name. Until they do, the name follows the chosen
+// output, so switching from `model` to `scaler` cannot promote the scaler as
+// "model" over the team's real model.
+const shareNameEdited = ref(false)
 const shareBusy = ref(false)
 
 function openShare() {
@@ -84,8 +92,13 @@ function openShare() {
   if (!shareVariables.value.includes(shareVariable.value)) {
     shareVariable.value = shareVariables.value[0] || ''
   }
-  if (!shareName.value) shareName.value = shareVariable.value
+  shareNameEdited.value = false
+  shareName.value = shareVariable.value
 }
+
+watch(shareVariable, (variable) => {
+  if (!shareNameEdited.value) shareName.value = variable
+})
 
 async function share() {
   const uri = shareable.value[shareVariable.value]
@@ -165,6 +178,7 @@ function tagList(tags: Record<string, string>): string {
           class="share-input share-name"
           placeholder="team/name"
           aria-label="Team name"
+          @input="shareNameEdited = true"
           @keydown.enter="share"
           @keydown.esc="sharing = false"
         />

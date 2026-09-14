@@ -376,19 +376,29 @@ def promote_artifact(
     landed_id, _, landed_version = landed_ref.partition("@v=")
     version = int(landed_version)
 
+    # Stamp what this promotion brought, so a colleague's team-cache hit on any
+    # of it can say which promotion it came from. Only what it wrote: a row the
+    # store already held arrived some other way (a cache publish, an earlier
+    # promotion), and restamping it would claim this one put it there. Before
+    # naming, because only this call knows what it wrote: if the name is then
+    # refused and the promotion retried, every row already exists and a retry
+    # would have nothing left to stamp.
+    for ref in written:
+        written_id, _, written_version = ref.partition("@v=")
+        target.set_tag(written_id, int(written_version), PROMOTION_TAG, name)
+
     target.set_name(name, landed_id, version)
     alias_pending = False
     if alias:
         alias_pending = not target.set_alias(name, alias, landed_id, version)
     for key, value in (tags or {}).items():
+        # An ``nb_`` stamp records where a row came from. On a row this
+        # promotion deduplicated onto, it already says that about someone
+        # else's notebook, and overwriting it would move their result off
+        # their cell's strip and onto this one.
+        if key.startswith("nb_") and landed_ref not in written:
+            continue
         target.set_tag(landed_id, version, key, value)
-    # Stamp what this promotion brought, so a colleague's team-cache hit on any
-    # of it can say which promotion it came from. Only what it wrote: a row the
-    # store already held arrived some other way (a cache publish, an earlier
-    # promotion), and restamping it would claim this one put it there.
-    for ref in written:
-        written_id, _, written_version = ref.partition("@v=")
-        target.set_tag(written_id, int(written_version), PROMOTION_TAG, name)
 
     return Promotion(
         name=name,

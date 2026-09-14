@@ -278,6 +278,61 @@ class TestAHitSaysWhichPromotionItCameFrom:
         assert pull.promotion is None
 
 
+class TestPromotionAfterAPartialFailure:
+    """Review follow-ups on #745."""
+
+    def test_a_refused_name_still_leaves_the_chain_stamped(self, team_store, team_dir, chain):
+        """The retry finds every row already there and writes nothing, so the
+        stamps have to land before the step that can be refused."""
+        from strata.artifact_transfer import RemoteStore
+
+        real = RemoteStore.set_name
+        calls = []
+
+        def _refuse_once(self, name, artifact_id, version):
+            calls.append(name)
+            if len(calls) == 1:
+                raise RuntimeError("The store refused to set the name")
+            return real(self, name, artifact_id, version)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(RemoteStore, "set_name", _refuse_once)
+            assert _promote(chain, team_store) != 0
+            assert _promote(chain, team_store) == 0
+
+        store = ArtifactStore(team_dir)
+        for key in ("upstream", "figure"):
+            assert store.get_tags(chain[key].id, chain[key].version).get("nb_promotion") == (
+                "taxi/model"
+            )
+
+    def test_a_colleagues_cell_stamp_survives_a_promotion_onto_their_row(
+        self, team_store, team_dir, chain
+    ):
+        """Deduplicating onto a row a colleague published must not move it off
+        their cell's strip; their own tags are theirs, other tags still apply."""
+        from strata.artifact_transfer import RemoteStore, promote_artifact
+
+        manager = NotebookArtifactManager("nb", artifact_dir=chain["dir"])
+        figure = chain["figure"]
+        remote = RemoteStore(team_store)
+        promote_artifact(
+            manager.artifact_store, remote, figure, name="their/model", tags={"nb_cell": "theirs"}
+        )
+
+        promote_artifact(
+            manager.artifact_store,
+            remote,
+            figure,
+            name="taxi/model",
+            tags={"nb_cell": "mine", "stage": "candidate"},
+        )
+
+        tags = ArtifactStore(team_dir).get_tags(figure.id, figure.version)
+        assert tags["nb_cell"] == "theirs"
+        assert tags["stage"] == "candidate"
+
+
 class TestRefusals:
     def test_an_unreachable_store_is_not_silently_a_success(self, chain):
         """It raises rather than returning 0.

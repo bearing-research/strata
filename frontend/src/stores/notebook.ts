@@ -1290,6 +1290,7 @@ function parseBackendCellPayload(raw: any): Cell {
     variantName: typeof raw.variant_name === 'string' ? raw.variant_name : null,
     variantActive: raw.variant_active !== false,
     widget: parseWidgetSpec(raw.widget),
+    artifactUris: parseArtifactUris(raw.artifact_uris),
   }
 
   applyDisplayOutputsToCell(
