@@ -3534,6 +3534,16 @@ deployment, not only in one that opted in to something.</p>
 <td>What the cache offers <em>outward</em>: <code>all</code> (every downstream-consumed variable of every successful cell), <code>promoted</code> (nothing automatically — <code>strata artifact promote</code> is how a result reaches the team; pulls are unchanged), or <code>off</code> (no offers and no pulls, without unsetting the URL a cell's ambient client still needs). Use <code>promoted</code> on a personal server, where offering everything means every intermediate a researcher computes lands in the team's store whether or not they meant to share it.</td>
 </tr>
 <tr>
+<td><code>STRATA_NOTEBOOK_CREDENTIALS</code></td>
+<td><code>{}</code></td>
+<td>Named credentials as a JSON object, <code>{name: {field: value}}</code>. A mount or connection in <code>notebook.toml</code> references one with <code>credential = "&lt;name&gt;"</code>, so no secret is committed. Values are usually <code>${VAR}</code>, resolved against the notebook's environment (where a secret manager puts fetched secrets) and then the server's. A mount's fields become fsspec storage options, a connection's become driver auth. The name is part of provenance; the values are not, so rotation invalidates nothing. See <a href="../notebook-toml/#named-credentials">Named credentials</a>.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_MOUNT_CREDENTIALS</code></td>
+<td><code>{}</code></td>
+<td>A default credential per mount URI scheme as JSON, e.g. <code>{"s3": "org-bucket"}</code>, applied to mounts that name none.</td>
+</tr>
+<tr>
 <td><code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code></td>
 <td><code>[]</code> (everything)</td>
 <td>Which of the server's environment variables a cell subprocess is given. A cell is arbitrary Python, so unset — the default, and right on a laptop — every member who can run a cell can read <code>STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</code>, <code>STRATA_PROXY_TOKEN</code>, worker tokens and every data-source credential the server holds. Entries are exact names or a prefix written with a trailing <code>*</code>; the essentials a subprocess cannot start without (<code>PATH</code>, <code>HOME</code>, <code>TMPDIR</code>, <code>UV_*</code>, …) are always included, and <code>STRATA_*</code> is dropped unless named exactly. A cell's own <code>[env]</code> and mount credentials travel in the manifest rather than the process environment, so the list stays short. Applies to every process that runs cell code: the cold, R and batch harnesses, the warm pool worker, the inspect REPL and cell tests. Not isolation on its own: a cell running as the server's user can read <code>/proc/&lt;server pid&gt;/environ</code>; see <code>STRATA_NOTEBOOK_HARNESS_USER</code>.</td>
