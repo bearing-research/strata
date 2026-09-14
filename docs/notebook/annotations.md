@@ -235,8 +235,14 @@ Only `http` and `https` are fetched, and every redirect hop passes the same
 guard as a worker's URLs: no private, loopback or link-local address unless the
 host is listed in `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. A URL that cannot be
 checked shows the cell as stale, and running it fails with the reason. A cell
-with `@fetch` runs on its own in Run All rather than in a batch, and cannot yet
-be dispatched to a remote worker.
+with `@fetch` runs on its own in Run All rather than in a batch.
+
+On a remote worker the server does the fetching: the bytes travel with the
+cell's other inputs, uploaded on the direct transport and staged behind a
+signed URL on the signed one, so the worker never contacts the URL and needs no
+route to it. The worker must be running this version of Strata or later. An
+older one does not recognise the input and the cell fails with a `NameError`
+on `<name>`.
 
 ## @table
 

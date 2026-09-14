@@ -84,6 +84,10 @@ class ContentType(StrEnum):
     # the user to re-export from R as a data.frame for cross-language
     # handoff.
     RDS_OBJECT = "application/x-r-rds"
+    # Bytes the cell reads as a file, not a value: an ``@fetch`` delivered to a
+    # remote worker. The worker writes them into the run directory like any
+    # other input, and the cell gets the ``Path``, as it does locally.
+    FILE_PATH = "file/path"
 
 
 class StrataRArtifactError(RuntimeError):
@@ -1985,6 +1989,10 @@ def _deserialize_markdown(file_path: Path) -> str:
     return file_path.read_text(encoding="utf-8")
 
 
+def _deserialize_file_path(file_path: Path) -> Path:
+    return file_path
+
+
 def _deserialize_rds(file_path: Path) -> Any:
     # RDS payloads are R's native binary format; Python has no reader.
     # Raise the structured error here so any Python caller that tries
@@ -2235,4 +2243,5 @@ _HANDLERS: dict[str, _Handler] = {
     # always written by harness.R. The deserializer raises rather
     # than returning a value.
     ContentType.RDS_OBJECT: _Handler(None, _deserialize_rds),
+    ContentType.FILE_PATH: _Handler(None, _deserialize_file_path),
 }

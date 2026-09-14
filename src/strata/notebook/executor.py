@@ -122,6 +122,7 @@ from strata.notebook.remote_executor import (
     NOTEBOOK_EXECUTOR_PROTOCOL_VERSION,
     NOTEBOOK_EXECUTOR_TRANSFORM_REF,
 )
+from strata.notebook.serializer import ContentType
 from strata.notebook.team_store import (
     TeamPull,
     TeamStore,
@@ -287,6 +288,28 @@ def _artifact_content_type(artifact: Any) -> str:
         return "pickle/object"
     ct = spec.get("params", {}).get("content_type")
     return str(ct) if isinstance(ct, str) and ct else "pickle/object"
+
+
+def _add_fetch_inputs(
+    input_specs: dict[str, dict[str, Any]], fetched: dict[str, Path], output_dir: Path
+) -> None:
+    """Put each ``@fetch``'s bytes in *output_dir* as an input a worker receives.
+
+    Every transport already ships ``{content_type, file}`` specs from this
+    directory, uploaded or staged for a signed URL, so a fetch rides along like
+    an upstream value; ``file/path`` tells the harness to inject the path
+    rather than load it. The name keeps the URL's file name for a cell that
+    looks at the extension, behind an index, since two fetch names can differ
+    only in case.
+    """
+    for index, (name, path) in enumerate(sorted(fetched.items())):
+        file_name = f"__fetch_{index}_{path.name}"
+        target = output_dir / file_name
+        try:
+            os.link(path, target)
+        except OSError:
+            shutil.copyfile(path, target)
+        input_specs[name] = {"content_type": ContentType.FILE_PATH.value, "file": file_name}
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -1211,32 +1234,19 @@ class CellExecutor:
                     error=prov.fetch_error,
                     execution_method="error",
                 )
-            # Each fetch reaches the cell as a read-only local mount of its
-            # bytes, which the harness already injects as a Path. That is a
-            # path on this machine, so a remote worker cannot receive it yet;
-            # say so rather than let it fail as an unsupported file:// mount.
-            fetch_worker = resolve_worker_spec(self.session.notebook_state, effective_worker)
-            if prov.fetched and not (
-                fetch_worker is None
-                or fetch_worker.backend == WorkerBackendType.LOCAL
-                or is_embedded_executor_worker(fetch_worker)
-            ):
-                return CellExecutionResult(
-                    cell_id=cell_id,
-                    success=False,
-                    error=(
-                        f"@fetch is not delivered to remote workers yet; run this cell on "
-                        f"a local worker, or mount the file instead (worker {effective_worker!r})"
+            # Here each fetch reaches the cell as a read-only mount of its
+            # cached bytes. A remote worker cannot see this machine's paths, so
+            # there the bytes travel as inputs instead (``_add_fetch_inputs``)
+            # and the worker never touches the URL.
+            fetches_as_inputs = bool(prov.fetched) and is_http_executor_worker(worker_spec)
+            if not fetches_as_inputs:
+                mount_specs = [
+                    *mount_specs,
+                    *(
+                        MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
+                        for name, path in prov.fetched.items()
                     ),
-                    execution_method="error",
-                )
-            mount_specs = [
-                *mount_specs,
-                *(
-                    MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
-                    for name, path in prov.fetched.items()
-                ),
-            ]
+                ]
 
             # Declared lake tables must resolve to concrete snapshots before
             # the cell can run (the namespace injection needs them).
@@ -1542,6 +1552,8 @@ class CellExecutor:
                     fanout_group=fanout_group,
                     fanout_variant=fanout_variant,
                 )
+                if fetches_as_inputs:
+                    _add_fetch_inputs(input_specs, prov.fetched, output_dir)
 
                 venv_path = self.session.venv_python or Path("python")
 
@@ -2982,6 +2994,10 @@ class CellExecutor:
             source_uri = str(spec.get("uri", "")).strip()
             staged_uri = _stage_blob(var_name, file_name, content_type, source_uri)
             staged_specs[var_name] = {"uri": staged_uri, "content_type": content_type}
+            if content_type == ContentType.FILE_PATH:
+                # The worker would otherwise name it ``<var>.bin``, and a cell
+                # reading a fetched file may go by its extension.
+                staged_specs[var_name]["file"] = file_name
 
             # A module/cell export ships injected values; stage each so the
             # worker can fetch them by signed URL and hydrate the module.
