@@ -2389,6 +2389,11 @@ inputs, made this".</p>
 <p>Upstream steps are <code>CreativeWork</code> entities, <strong>not</strong> files, and they are not
 listed under <code>hasPart</code>. Their bytes are deliberately not in the crate, and
 declaring files that are not there is a claim no validator would catch.</p>
+<p>A step that read a URL through <a href="../annotations/#fetch"><code>@fetch</code></a> names it as
+an input. On the page it appears under "External inputs" with the digest of the
+bytes read and when the reading step ran. In the crate it is a <code>File</code> whose
+<code>@id</code> is the URL, with that <code>sha256</code>. The digest describes what was read, and
+the URL may serve something else now.</p>
 <h2 id="embedding-it-elsewhere">Embedding it elsewhere<a class="headerlink" href="#embedding-it-elsewhere" title="Permanent link">&para;</a></h2>
 <p>Paste the link into a wiki, CMS or note-taking tool that speaks oEmbed and it
 unfurls into a card: the figure, what it is, how many steps are behind it, and

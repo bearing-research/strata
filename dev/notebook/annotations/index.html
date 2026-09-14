@@ -3031,6 +3031,11 @@ separate run; fetch in an upstream cell instead.</p>
 <li><strong><code>refetch=never</code></strong> uses the cached bytes once there are any.</li>
 <li><strong><code>refetch=always</code></strong> downloads again on every check, ignoring validators.</li>
 </ul>
+<p>Each artifact the cell stores records the URL and the digest of the bytes the
+run read as one of its inputs. That record is how a
+<a href="../publishing/">publication</a> page and its RO-Crate list the URL under
+"External inputs". A snapshot export lists every fetch with whether it is
+pinned, so an unpinned one can be flagged before the snapshot is shared.</p>
 <p>Only <code>http</code> and <code>https</code> are fetched, and every redirect hop passes the same
 guard as a worker's URLs: no private, loopback or link-local address unless the
 host is listed in <code>STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS</code>. A URL that cannot be

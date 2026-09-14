@@ -4499,6 +4499,10 @@ transform spec (the content type a value is read back as) and its lineage
 edges. <a href="#import-snapshot">Importing</a> the bundle needs all three. Cells whose
 artifacts were only described open idle rather than stale. They ran and their
 result is current; it just isn't here.</p>
+<p><code>fetches</code> lists every <code>@fetch</code> with its cell, name, URL, <code>refetch</code> policy and
+<code>pinned</code>. <code>sha256</code> is the pin, or else the digest last read. An unpinned fetch
+is the input a snapshot cannot vouch for, since its bytes are whatever the URL
+serves at the next run, so a preflight can flag them from this list.</p>
 <p>The same bundle offline: <code>strata export &lt;path&gt; --to snapshot --out snap.zip
 --include all</code>.</p>
 <h2 id="ai">AI<a class="headerlink" href="#ai" title="Permanent link">&para;</a></h2>
