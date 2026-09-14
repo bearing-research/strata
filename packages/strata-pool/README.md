@@ -125,9 +125,18 @@ deployment cannot forget the call that stops it paying for idle machines.
 | `GET /v1/jobs/{id}` | Status, without the payload or result |
 | `GET /v1/jobs/{id}/result` | The raw result bytes; 409 while the job is not finished |
 | `GET /v1/machine-types` | What a caller may ask for — the catalogue an annotation resolves against |
+| `PUT /v1/machine-types` | Replace the catalogue without a restart; persisted, so a restart serves it |
 | `GET /v1/workers` | The fleet, without machine credentials |
 | `GET /v1/usage` | The billing feed, filterable by tenant |
 | `GET /health` | Outside the token check, for load balancers |
+
+Replacing the catalogue takes effect at once. A new type accepts jobs straight
+away. A removed type accepts none: its queued jobs fail with the reason, and
+its machines finish what they are running, then retire once idle past the
+type's cool-down. A type whose `image` changed starts new machines on the new
+image. Machines already running the old image get no new jobs and retire the
+same way. The catalogue is stored with the pool's state, and on start it
+replaces the one the process was constructed with.
 
 A job that fails **on the worker** comes back as 502, and one that times out
 as 504 — the caller has to be able to tell "your code raised" from "we could

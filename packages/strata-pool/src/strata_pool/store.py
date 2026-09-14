@@ -9,12 +9,14 @@ artifact store's Postgres dialect when a deployment needs it.
 Timestamps are stored as REAL epoch seconds, matching the artifact store.
 """
 
+import json
 import sqlite3
 import threading
 from collections.abc import Iterable
+from dataclasses import asdict
 from pathlib import Path
 
-from strata_pool.types import Job, JobState, UsageEvent, Worker, WorkerState
+from strata_pool.types import Job, JobState, MachineType, UsageEvent, Worker, WorkerState
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS workers (
@@ -90,6 +92,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_job ON usage_events (job_id);
 
 CREATE INDEX IF NOT EXISTS idx_usage_tenant
     ON usage_events (tenant_id, started_at DESC);
+
+-- The machine-type catalogue last set over the API, so a restart serves the
+-- catalogue the operator set rather than the one the process was started with.
+-- One row; absent until a catalogue is set.
+CREATE TABLE IF NOT EXISTS catalogue (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    machine_types TEXT NOT NULL
+);
 """
 
 
@@ -107,6 +117,7 @@ def _to_worker(row: sqlite3.Row) -> Worker:
         session_id=row["session_id"],
         current_job_id=row["current_job_id"],
         last_active_at=row["last_active_at"],
+        image=row["image"],
         auth_token=row["auth_token"],
     )
 
@@ -145,6 +156,9 @@ class PoolStore:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.executescript(_SCHEMA_SQL)
+            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(workers)")}
+            if "image" not in columns:
+                self._conn.execute("ALTER TABLE workers ADD COLUMN image TEXT")
             self._conn.commit()
 
     def close(self) -> None:
@@ -159,8 +173,8 @@ class PoolStore:
                 """
                 INSERT INTO workers (id, machine_type, tenant_id, backend, backend_id,
                                      state, endpoint, region, session_id, current_job_id,
-                                     created_at, last_active_at, auth_token)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                     created_at, last_active_at, auth_token, image)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     backend_id = excluded.backend_id,
                     state = excluded.state,
@@ -185,6 +199,7 @@ class PoolStore:
                     worker.created_at,
                     worker.last_active_at,
                     worker.auth_token,
+                    worker.image,
                 ),
             )
             self._conn.commit()
@@ -226,6 +241,7 @@ class PoolStore:
         machine_type: str,
         tenant_id: str,
         session_id: str | None = None,
+        image: str | None = None,
     ) -> Worker | None:
         """The warm worker to hand the next job to.
 
@@ -237,9 +253,16 @@ class PoolStore:
         matches — the caller falls back to the tenant's other warm workers
         itself, so an affinity miss is a visible decision rather than a silent
         one.
+
+        With `image`, a machine booted with another image is not a match: it
+        is stale, and a job sent to it would run on what the catalogue no
+        longer names.
         """
         sql = "SELECT * FROM workers WHERE machine_type = ? AND tenant_id = ? AND state = 'warm'"
         params: list[object] = [machine_type, tenant_id]
+        if image is not None:
+            sql += " AND (image IS NULL OR image = ?)"
+            params.append(image)
         if session_id is not None:
             sql += " AND session_id = ?"
             params.append(session_id)
@@ -255,18 +278,26 @@ class PoolStore:
         machine_type: str,
         tenant_id: str,
         states: Iterable[WorkerState],
+        image: str | None = None,
     ) -> int:
         """Machines of this type belonging to this tenant. Capacity is
-        counted per tenant because `max_workers` is a per-tenant cap."""
+        counted per tenant because `max_workers` is a per-tenant cap.
+
+        With `image`, stale machines booted with another image are left out:
+        they take no new work, so they are not capacity."""
         state_values = [s.value for s in states]
         if not state_values:
             return 0
+        sql = (
+            "SELECT COUNT(*) FROM workers WHERE machine_type = ? AND tenant_id = ? "
+            f"AND state IN ({','.join('?' * len(state_values))})"
+        )
+        params: list[object] = [machine_type, tenant_id, *state_values]
+        if image is not None:
+            sql += " AND (image IS NULL OR image = ?)"
+            params.append(image)
         with self._lock:
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM workers WHERE machine_type = ? AND tenant_id = ? "
-                f"AND state IN ({','.join('?' * len(state_values))})",
-                [machine_type, tenant_id, *state_values],
-            ).fetchone()
+            row = self._conn.execute(sql, params).fetchone()
         return row[0]
 
     # --- jobs ---
@@ -376,6 +407,35 @@ class PoolStore:
                 (machine_type,),
             ).fetchall()
         return [row[0] for row in rows]
+
+    def queued_machine_types(self) -> list[str]:
+        """Machine types with work waiting, whether or not the catalogue
+        still names them."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT machine_type FROM jobs WHERE state = 'queued'"
+            ).fetchall()
+        return [row[0] for row in rows]
+
+    # --- catalogue ---
+
+    def save_machine_types(self, machine_types: Iterable[MachineType]) -> None:
+        payload = json.dumps([asdict(spec) for spec in machine_types])
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO catalogue (id, machine_types) VALUES (1, ?) "
+                "ON CONFLICT(id) DO UPDATE SET machine_types = excluded.machine_types",
+                (payload,),
+            )
+            self._conn.commit()
+
+    def load_machine_types(self) -> list[MachineType] | None:
+        """The last catalogue set, or None if none ever was."""
+        with self._lock:
+            row = self._conn.execute("SELECT machine_types FROM catalogue WHERE id = 1").fetchone()
+        if row is None:
+            return None
+        return [MachineType(**spec) for spec in json.loads(row[0])]
 
     # --- usage ---
 
