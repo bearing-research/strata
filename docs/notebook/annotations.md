@@ -202,6 +202,42 @@ Format: `# @mount <name> <uri> [ro|rw] [credential=<name>]`. Defaults to `ro` (r
 
 ---
 
+## @fetch
+
+Declare a URL the cell reads. The bytes are downloaded into the notebook's
+cache and **their digest becomes part of the cell's provenance**, so the cell
+goes stale when the URL starts serving something else - instead of the URL
+string being in the source hash and the bytes being in nothing.
+
+```python
+# @fetch zones https://example.org/taxi_zones.csv
+import pandas as pd
+lookup = pd.read_csv(zones)
+```
+
+`<name>` is injected as a `pathlib.Path` to the downloaded file, which keeps the
+URL's file name, so code that looks at the extension still works. Like a mount
+variable it lives only in the declaring cell.
+
+Format: `# @fetch <name> <url> [sha256=<digest>] [refetch=never|stale|always]`.
+
+- **`sha256=<digest>` pins the bytes.** The digest is the fingerprint, checked
+  without the network while the cached copy matches. If the URL serves anything
+  else, the cell fails with both digests.
+- **`refetch=stale`** (default) checks the URL with a conditional GET
+  (`ETag` / `Last-Modified`): at most once a minute while staleness is being
+  recomputed, and always right before the cell runs, so what a run records is
+  what the URL served then.
+- **`refetch=never`** uses the cached bytes once there are any.
+- **`refetch=always`** downloads again on every check, ignoring validators.
+
+Only `http` and `https` are fetched, and every redirect hop passes the same
+guard as a worker's URLs: no private, loopback or link-local address unless the
+host is listed in `STRATA_NOTEBOOK_FETCH_ALLOWED_HOSTS`. A URL that cannot be
+checked shows the cell as stale, and running it fails with the reason. A cell
+with `@fetch` runs on its own in Run All rather than in a batch, and cannot yet
+be dispatched to a remote worker.
+
 ## @table
 
 Declare an Iceberg table input. The table's current snapshot id becomes part

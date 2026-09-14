@@ -88,6 +88,8 @@ from strata.notebook.models import (
     CellOutput,
     CellTestCase,
     CellTestResult,
+    FetchSpec,
+    MountMode,
     MountSpec,
     TableSpec,
     WorkerBackendType,
@@ -313,6 +315,10 @@ class _CellProvenance:
     table_fingerprints: list[str]
     table_snapshots: dict[str, int]
     provenance_hash: str
+    # ``@fetch`` inputs: what each name resolved to, and why any did not.
+    fetch_fingerprints: list[str] = field(default_factory=list)
+    fetched: dict[str, Path] = field(default_factory=dict)
+    fetch_error: str | None = None
 
 
 @dataclass(kw_only=True)
@@ -1026,8 +1032,9 @@ class CellExecutor:
         )
         input_hashes = self._collect_input_hashes(cell_id)
         table_fingerprints, table_snapshots = await self._fingerprint_tables(annotations.tables)
+        fetch_fingerprints, fetched, fetch_error = await self._resolve_fetches(annotations.fetches)
         provenance_hash = compute_provenance_hash(
-            input_hashes + mount_fingerprints + table_fingerprints,
+            input_hashes + mount_fingerprints + table_fingerprints + fetch_fingerprints,
             source_hash,
             env_hash,
         )
@@ -1046,6 +1053,9 @@ class CellExecutor:
             table_fingerprints=table_fingerprints,
             table_snapshots=table_snapshots,
             provenance_hash=provenance_hash,
+            fetch_fingerprints=fetch_fingerprints,
+            fetched=fetched,
+            fetch_error=fetch_error,
         )
 
     # ------------------------------------------------------------------
@@ -1190,6 +1200,43 @@ class CellExecutor:
                 [fp[:40] for fp in prov.table_fingerprints],
                 provenance_hash[:12],
             )
+
+            # A fetch that could not be checked, or served bytes that differ
+            # from its pin, fails the cell before anything runs: a cache hit
+            # would claim the bytes had not moved, which nobody verified.
+            if prov.fetch_error is not None:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=prov.fetch_error,
+                    execution_method="error",
+                )
+            # Each fetch reaches the cell as a read-only local mount of its
+            # bytes, which the harness already injects as a Path. That is a
+            # path on this machine, so a remote worker cannot receive it yet;
+            # say so rather than let it fail as an unsupported file:// mount.
+            fetch_worker = resolve_worker_spec(self.session.notebook_state, effective_worker)
+            if prov.fetched and not (
+                fetch_worker is None
+                or fetch_worker.backend == WorkerBackendType.LOCAL
+                or is_embedded_executor_worker(fetch_worker)
+            ):
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=(
+                        f"@fetch is not delivered to remote workers yet; run this cell on "
+                        f"a local worker, or mount the file instead (worker {effective_worker!r})"
+                    ),
+                    execution_method="error",
+                )
+            mount_specs = [
+                *mount_specs,
+                *(
+                    MountSpec(name=name, uri=path.resolve().as_uri(), mode=MountMode.READ_ONLY)
+                    for name, path in prov.fetched.items()
+                ),
+            ]
 
             # Declared lake tables must resolve to concrete snapshots before
             # the cell can run (the namespace injection needs them).
@@ -3030,6 +3077,40 @@ class CellExecutor:
             return {}
         self._mount_resolver.credential_resolver = self._credential_resolver()
         return await self._mount_resolver.prepare_mounts(mount_specs)
+
+    async def _resolve_fetches(
+        self, fetch_specs: list[FetchSpec]
+    ) -> tuple[list[str], dict[str, Path], str | None]:
+        """Check every ``@fetch`` right before a run and fingerprint its bytes.
+
+        Always checked here (``max_age=0``), whatever staleness last saw: what a
+        run records has to be what the URL served when it ran. Returns the
+        fingerprints, a path per name, and the first failure, if any.
+        """
+        if not fetch_specs:
+            return [], {}, None
+        from strata.notebook.fetch import FetchCache, FetchError
+
+        cache = FetchCache(self.session.path, allowed_hosts=self._fetch_allowed_hosts())
+        fingerprints: list[str] = []
+        fetched: dict[str, Path] = {}
+        error: str | None = None
+        loop = asyncio.get_running_loop()
+        for spec in sorted(fetch_specs, key=lambda item: item.name):
+            try:
+                result = await loop.run_in_executor(
+                    None, lambda s=spec: cache.resolve(s, max_age=0)
+                )
+            except FetchError as exc:
+                error = error or str(exc)
+                fingerprints.append(cache.fingerprint(spec, max_age=float("inf")))
+                continue
+            fingerprints.append(result.fingerprint(spec))
+            fetched[spec.name] = result.path
+        return fingerprints, fetched, error
+
+    def _fetch_allowed_hosts(self) -> tuple[str, ...]:
+        return tuple(getattr(self._lake_config(), "notebook_fetch_allowed_hosts", None) or ())
 
     async def _fingerprint_tables(
         self,
@@ -5714,6 +5795,11 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
     """
     from strata.notebook.dag import SweepProducer
     from strata.notebook.languages import get_language_executor
+
+    # A batch resolves inputs itself and never sees a fetch's bytes; a fetching
+    # cell runs single-cell, where the fetch is checked and injected.
+    if parse_annotations(cell.source).fetches:
+        return False
 
     dag = executor.session.dag
     if dag is not None:

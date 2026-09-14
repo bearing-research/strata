@@ -848,9 +848,10 @@ class NotebookSession:
                 continue
 
             table_fingerprints = self._collect_table_fingerprints(cell)
+            fetch_fingerprints = self._collect_fetch_fingerprints(cell)
 
             provenance_hash = compute_provenance_hash(
-                input_hashes + mount_fingerprints + table_fingerprints,
+                input_hashes + mount_fingerprints + table_fingerprints + fetch_fingerprints,
                 source_hash,
                 env_hash,
             )
@@ -1829,6 +1830,28 @@ class NotebookSession:
 
         fingerprints, _ = fingerprint_tables(annotations.tables, self._lake_config())
         return fingerprints
+
+    def _collect_fetch_fingerprints(self, cell: Any) -> list[str]:
+        """``@fetch`` fingerprints for staleness, mirroring the executor's.
+
+        Checked at most every ``STALE_CHECK_SECONDS`` rather than on every
+        recompute: staleness runs on each source edit, and the executor checks
+        again before every run regardless. Never raises.
+        """
+        annotations = parse_annotations(cell.source)
+        if not annotations.fetches:
+            return []
+        from strata.notebook.fetch import FetchCache
+
+        cache = FetchCache(
+            self.path,
+            allowed_hosts=tuple(
+                getattr(self._lake_config(), "notebook_fetch_allowed_hosts", None) or ()
+            ),
+        )
+        return [
+            cache.fingerprint(spec) for spec in sorted(annotations.fetches, key=lambda s: s.name)
+        ]
 
     def _lake_config(self):
         """Server config when running inside the server, else loaded fresh."""
