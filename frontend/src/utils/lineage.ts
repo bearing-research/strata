@@ -8,7 +8,7 @@ import type { LineageGraph } from '../composables/useStrata'
 export interface LineageTreeNode {
   uri: string
   label: string
-  type: string // 'artifact' | 'table'
+  type: string // 'artifact' | 'table' | 'fetch'
   version: number | null
   children: LineageTreeNode[]
   /**
@@ -58,7 +58,10 @@ export function lineageToTree(graph: LineageGraph, rootUri: string): LineageTree
     seen.add(uri)
     const n = nodeByUri.get(uri)
     const type = n?.type ?? 'artifact'
-    const label = type === 'table' ? tableLabel(uri) : (n?.transform_ref ?? 'artifact')
+    // A fetch is named by its URL: it has no transform, and "artifact" would
+    // claim it came from this store.
+    const label =
+      type === 'table' ? tableLabel(uri) : type === 'fetch' ? uri : (n?.transform_ref ?? 'artifact')
     const children = (inputsOf.get(uri) ?? []).filter((u) => !seen.has(u)).map((u) => build(u))
     return {
       uri,

@@ -389,3 +389,48 @@ class TestASelectionThatNamesNothing:
         bundle = _bundle(session, include="selected", selected_cells=["total"])
 
         assert _manifest(bundle)["carried"] == []
+
+
+class TestFetches:
+    """Item 44: a preflight flags unpinned fetches from the snapshot alone."""
+
+    def test_every_fetch_is_listed_with_whether_it_is_pinned(self, tmp_path):
+        nb = create_notebook(tmp_path, "Fetches", initialize_environment=False)
+        pin = "b" * 64
+        read = "c" * 64
+        add_cell_to_notebook(nb, "loose", None)
+        write_cell(nb, "loose", "# @fetch zones https://example.org/zones.csv\nrows = 1")
+        add_cell_to_notebook(nb, "tight", "loose")
+        write_cell(
+            nb,
+            "tight",
+            f"# @fetch rates https://example.org/rates.csv sha256={pin} refetch=never\nr = 1",
+        )
+        # What the loose fetch last read, as the cache records it.
+        blob = nb / ".strata" / "fetch" / read / "zones.csv"
+        blob.parent.mkdir(parents=True)
+        blob.write_bytes(b"zone\n")
+        (nb / ".strata" / "fetch" / "index.json").write_text(
+            json.dumps({"https://example.org/zones.csv": {"sha256": read, "filename": "zones.csv"}})
+        )
+
+        manifest = _manifest(_bundle(NotebookSession(parse_notebook(nb), nb), include="none"))
+
+        assert manifest["fetches"] == [
+            {
+                "cell_id": "loose",
+                "name": "zones",
+                "url": "https://example.org/zones.csv",
+                "pinned": False,
+                "sha256": read,
+                "refetch": "stale",
+            },
+            {
+                "cell_id": "tight",
+                "name": "rates",
+                "url": "https://example.org/rates.csv",
+                "pinned": True,
+                "sha256": pin,
+                "refetch": "never",
+            },
+        ]

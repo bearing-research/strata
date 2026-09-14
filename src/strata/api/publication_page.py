@@ -142,6 +142,47 @@ def _artifact_label(node) -> str:
     return escape(f"{node.artifact_id}@v={node.version}")
 
 
+def _external_inputs(fetches, lineage) -> str:
+    """Bytes a step read from a URL, by URL, digest and when the step ran.
+
+    The URL is printed, never linked: it comes from the stored record, and a
+    record is not trusted to hold only ``https``. The time is the reading
+    step's, because the check before a run is what ties these bytes to that
+    URL at that moment.
+    """
+    by_uri = {node.uri: node for node in lineage.nodes}
+    parts = [
+        "<h2>External inputs</h2><div class='card'>",
+        "<p class='note'>Read from outside any store. The digest is of the bytes "
+        "the step read; the URL may serve something else now, which "
+        "<code>sha256sum</code> on a fresh download will show.</p>",
+    ]
+    for node in fetches:
+        readers = [
+            by_uri[edge.to_uri]
+            for edge in lineage.edges
+            if edge.from_uri == node.uri and edge.to_uri in by_uri
+        ]
+        parts.append(
+            _rows(
+                [
+                    ("URL", _code(node.uri)),
+                    ("Content digest (SHA-256)", _code(node.content_sha256 or "")),
+                    *(
+                        (
+                            "Read by",
+                            f"{_code(f'{reader.artifact_id}@v={reader.version}')} "
+                            f"at {escape(_when(reader.created_at))}",
+                        )
+                        for reader in readers
+                    ),
+                ]
+            )
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
 def render_publication(
     *,
     publication,
@@ -179,7 +220,8 @@ def render_publication(
         )
 
     root = next((n for n in lineage.nodes if n.artifact_id == artifact.id), None)
-    ancestors = [n for n in lineage.nodes if n is not root]
+    ancestors = [n for n in lineage.nodes if n is not root and n.type != "fetch"]
+    fetches = [n for n in lineage.nodes if n.type == "fetch"]
 
     parts: list[str] = [
         f"<h1>{escape(title)}</h1>",
@@ -284,6 +326,9 @@ def render_publication(
                     shown_sources[node.source] = f"{node.artifact_id}@v={node.version}"
                 parts.append(_source_block(node.source))
         parts.append("</div>")
+
+    if fetches:
+        parts.append(_external_inputs(fetches, lineage))
 
     if share is not None:
         parts.append("<h2>Putting it somewhere</h2><div class='card'>")

@@ -1064,10 +1064,12 @@ class LineageNode(BaseModel):
     """A node in the artifact lineage graph.
 
     Attributes:
-        uri: Artifact URI (strata://artifact/{id}@v={version}) or table URI
+        uri: Artifact URI (strata://artifact/{id}@v={version}), table URI, or
+            the URL a notebook cell fetched
         artifact_id: Artifact ID (if this is an artifact, not a table)
         version: Artifact version (if this is an artifact)
-        type: "artifact" or "table"
+        type: "artifact", "table", or "fetch" (bytes read from a URL, with
+            ``content_sha256`` the digest of what was read)
         transform_ref: Transform executor reference (if artifact)
         created_at: When artifact was created (if artifact)
         principal: Who computed it, when the store recorded an author.
@@ -1105,7 +1107,7 @@ class LineageNode(BaseModel):
     uri: str
     artifact_id: str | None = None
     version: int | None = None
-    type: str  # "artifact" | "table"
+    type: str  # "artifact" | "table" | "fetch"
     transform_ref: str | None = None
     created_at: float | None = None
     principal: str | None = None

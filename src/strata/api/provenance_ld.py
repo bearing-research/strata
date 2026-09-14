@@ -176,7 +176,23 @@ def build_crate(
     # the invariant this module claims to hold. They are Datasets rather than
     # Files: a table lives in a lake, not in this crate.
     for node in lineage.nodes:
-        if node.type != "artifact":
+        if node.type == "fetch":
+            # Unlike an upstream step, these bytes can be had: a web-based data
+            # entity is a File whose @id is its URL, which RO-Crate 1.1 allows
+            # outside the crate. The digest is what was read, not a promise
+            # about what the URL serves now.
+            graph.append(
+                _prune(
+                    {
+                        "@id": node.uri,
+                        "@type": "File",
+                        "name": node.uri,
+                        "sha256": node.content_sha256,
+                        "description": "Bytes read from this URL when the step ran.",
+                    }
+                )
+            )
+        elif node.type != "artifact":
             graph.append(
                 _prune(
                     {

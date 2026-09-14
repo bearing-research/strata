@@ -145,6 +145,10 @@ class FetchCache:
             raise FetchPinMismatch(spec, fetched.sha256)
         return fetched
 
+    def recorded(self, url: str) -> FetchedBytes | None:
+        """The bytes last read from *url*, if they are still cached. No network."""
+        return self._cached(self._index().get(url))
+
     def fingerprint(self, spec: FetchSpec, *, max_age: float | None = None) -> str:
         """The provenance component, for staleness. Never raises.
 
