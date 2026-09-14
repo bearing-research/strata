@@ -3016,7 +3016,9 @@ string being in the source hash and the bytes being in nothing.</p>
 </code></pre></div>
 <p><code>&lt;name&gt;</code> is injected as a <code>pathlib.Path</code> to the downloaded file, which keeps the
 URL's file name, so code that looks at the extension still works. Like a mount
-variable it lives only in the declaring cell.</p>
+variable it lives only in the declaring cell. In an R cell it is the path as a
+string. A <code>@loop</code> cell cannot declare a fetch, because each iteration is a
+separate run; fetch in an upstream cell instead.</p>
 <p>Format: <code># @fetch &lt;name&gt; &lt;url&gt; [sha256=&lt;digest&gt;] [refetch=never|stale|always]</code>.</p>
 <ul>
 <li><strong><code>sha256=&lt;digest&gt;</code> pins the bytes.</strong> The digest is the fingerprint, checked
