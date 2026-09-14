@@ -129,9 +129,9 @@ class TestTheCache:
         # A file where the tampered entry points, so following it would succeed.
         outside = tmp_path / "outside"
         outside.write_bytes(b"not the fetched bytes")
-        index[origin.url()]["filename"] = "../../outside"
+        index[origin.url()]["filename"] = "../../../outside"
         index_path.write_text(json.dumps(index))
-        assert (tmp_path / ".strata" / "fetch" / digest / "../../outside").resolve() == outside
+        assert (tmp_path / ".strata" / "fetch" / digest / "../../../outside").resolve() == outside
 
         again = cache.resolve(spec)
 
