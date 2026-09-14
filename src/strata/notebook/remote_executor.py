@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import hmac
-import ipaddress
 import json
 import logging
 import os
 import shutil
-import socket
 import sys
 import tempfile
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -29,6 +26,7 @@ from strata.notebook.models import MountSpec
 from strata.notebook.mounts import MountResolver, parse_mount_uri
 from strata.notebook.remote_bundle import pack_notebook_output_bundle
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
+from strata.url_safety import host_is_allowlisted, url_safety_problem
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +49,6 @@ NOTEBOOK_EXECUTOR_MANIFEST_VERSION = "notebook-build-manifest@v1"
 # point at internal services (SSRF) or unbounded streams (OOM). The
 # defenses below are cheap and don't depend on the orchestrator behaving
 # correctly.
-
-_ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 # Per-input download cap. Override via STRATA_WORKER_MAX_INPUT_BYTES.
 _DEFAULT_MAX_INPUT_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
@@ -96,144 +92,17 @@ def _allowed_hosts() -> tuple[str, ...]:
 
 
 def _host_is_allowlisted(host: str) -> bool:
-    """Whether *host* is named in the allowlist.
-
-    Matched on the name, never on the resolved address — that is the whole
-    point, since these hosts are trusted *because* an operator named them.
-
-    Suffixes are anchored on a dot, so ``.example.com`` matches
-    ``build.example.com`` and not ``evil-example.com``. Getting that wrong is
-    silent: the wrong host passes and nothing says so.
-    """
-    candidate = host.lower().rstrip(".")
-    for entry in _allowed_hosts():
-        if entry.startswith("."):
-            if candidate.endswith(entry) or candidate == entry[1:]:
-                return True
-        elif candidate == entry:
-            return True
-    return False
+    """Whether *host* is named in ``STRATA_WORKER_ALLOWED_HOSTS``."""
+    return host_is_allowlisted(host, _allowed_hosts())
 
 
 def _assert_url_safe(url: str, field: str) -> None:
-    """Reject manifest URLs that are scheme- or host-unsafe.
-
-    A compromised or buggy orchestrator could hand the worker URLs
-    that point at internal services. Two distinct defenses:
-
-    1. **Scheme allowlist** — only http and https. Blocks file://,
-       data:, javascript:, ftp:// and any other scheme httpx might
-       grow plugin support for.
-    2. **Host resolution + IP-range blocklist** — the resolved IP
-       must not be loopback, link-local (incl. cloud metadata
-       169.254.169.254 / fd00:ec2::254), private, multicast,
-       reserved, or unspecified. Hostnames are resolved via
-       getaddrinfo and every returned address is checked; a
-       hostname that resolves to multiple addresses must have all
-       of them in the public range to pass. This rules out both
-       direct internal-IP URLs and hostname-based variants
-       (e.g. metadata.google.internal). Set
-       ``STRATA_WORKER_ALLOW_LOCAL_HOSTS=1`` to bypass the IP check
-       (tests / local dev with 127.0.0.1 build servers); production
-       deployments leave it unset.
-
-    Allowlist-on-host instead of blocklist-on-host would be more
-    restrictive but breaks real signed-URL usage where S3/GCS
-    buckets resolve to public IPs across many regions. Blocklist
-    on internal ranges is the right tradeoff.
-
-    ``STRATA_WORKER_ALLOWED_HOSTS`` names specific hosts that pass
-    the address rule anyway -- for a server on a private address,
-    which is the ordinary shape of a managed worker talking to the
-    server that dispatched it. It supersedes
-    ``STRATA_WORKER_ALLOW_LOCAL_HOSTS``, which relaxes the same rule
-    for *every* host and remains for tests and local development
-    where 127.0.0.1 really is the target. A deployment that sets
-    both gets the wholesale bypass, because that is what it asked
-    for; prefer the allowlist in production.
-
-    Caveats:
-    * DNS rebinding race: the IP we resolved here may differ from
-      the IP httpx resolves at fetch time. Honest mitigation
-      requires resolving once and passing the IP to httpx; left as
-      a follow-up because the practical attacker who controls DNS
-      already has stronger primitives. An allowlisted host does not
-      resolve at all here, so the race does not apply to it -- but
-      that is not a stronger position: it means an allowlist entry
-      is trust in whoever controls that name's resolution, which is
-      what listing it says.
-    * IPv4-mapped IPv6 (``::ffff:127.0.0.1``) is caught — we
-      ``unmap()`` before checking.
-    """
-    parsed = urlparse(url)
-    scheme = parsed.scheme.lower()
-    if scheme not in _ALLOWED_URL_SCHEMES:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Manifest {field} URL uses disallowed scheme {scheme!r}; "
-                f"only {sorted(_ALLOWED_URL_SCHEMES)} are accepted."
-            ),
-        )
-
-    host = parsed.hostname
-    if not host:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Manifest {field} URL is missing a host: {url!r}",
-        )
-
-    # After the host check, not before it. The bypass used to return here and
-    # skipped both, so a URL with no host at all was accepted whenever it was
-    # set — which is on every managed worker, since that is the documented way
-    # to reach a server on a private address. Only the address rule is meant
-    # to be relaxed.
-    if _allow_local_hosts():
-        return
-
-    if _host_is_allowlisted(host):
-        # Named, therefore trusted. This is a statement about names the
-        # operator controls, not a general relaxation: the resolve-then-fetch
-        # race below stops mattering for these hosts, because whoever controls
-        # their resolution was already trusted by being listed.
-        return
-
-    try:
-        addrinfo = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Manifest {field} URL host {host!r} did not resolve: {exc}",
-        ) from exc
-
-    for entry in addrinfo:
-        sockaddr = entry[4]
-        try:
-            ip = ipaddress.ip_address(sockaddr[0])
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Manifest {field} URL host {host!r} resolved to non-IP address {sockaddr[0]!r}"
-                ),
-            ) from None
-        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-            ip = ip.ipv4_mapped
-        if (
-            ip.is_loopback
-            or ip.is_link_local
-            or ip.is_private
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Manifest {field} URL host {host!r} resolves to "
-                    f"non-routable address {ip}; refusing to fetch"
-                ),
-            )
+    """Reject manifest URLs that are scheme- or host-unsafe (see ``url_safety``)."""
+    problem = url_safety_problem(
+        url, f"Manifest {field}", allowed_hosts=_allowed_hosts(), allow_local=_allow_local_hosts()
+    )
+    if problem is not None:
+        raise HTTPException(status_code=400, detail=problem)
 
 
 async def _post_log_chunk(log_url: str, stream: str, text: str) -> None:

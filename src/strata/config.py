@@ -481,6 +481,12 @@ class StrataConfig(BaseSettings):
     # any notebook change.
     notebook_mount_credentials: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
 
+    # Hosts ``@fetch`` may reach even on a private address, e.g. an internal
+    # data server. Public hosts need no entry; private, loopback and link-local
+    # addresses are refused unless named here. Exact names, or a leading dot
+    # for a suffix (``.internal``). Same rule as STRATA_WORKER_ALLOWED_HOSTS.
+    notebook_fetch_allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
     # AI/LLM assistant settings (OpenAI-compatible API)
     ai_base_url: str | None = None
     ai_model: str | None = None
@@ -706,6 +712,16 @@ class StrataConfig(BaseSettings):
         if not isinstance(v, dict):
             raise ValueError(f"{info.field_name} must be a JSON object")
         return v
+
+    @field_validator("notebook_fetch_allowed_hosts", mode="before")
+    @classmethod
+    def normalize_fetch_allowed_hosts(cls, v: Any) -> list[str]:
+        """Accept a list or comma-separated host names."""
+        if v is None:
+            return []
+        if isinstance(v, str):
+            v = [part.strip() for part in v.split(",") if part.strip()]
+        return [str(item).lower() for item in v]
 
     @field_validator("embed_frame_ancestors", mode="before")
     @classmethod

@@ -93,6 +93,31 @@ class TableSpec(BaseModel):
     )
 
 
+class FetchSpec(BaseModel):
+    """A URL a cell reads, declared with ``@fetch`` so its bytes are an input.
+
+    The bytes are downloaded into the notebook's fetch cache, ``name`` is
+    injected as a local ``Path`` to them, and their digest joins the cell's
+    provenance. See ``strata.notebook.fetch``.
+    """
+
+    name: str = Field(
+        ...,
+        description="Variable name, injected as a Path to the fetched bytes",
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+    )
+    url: str = Field(..., description="http(s) URL to fetch")
+    sha256: str | None = Field(
+        default=None,
+        description="Pinned digest; bytes that differ fail the cell with both digests",
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    refetch: Literal["never", "stale", "always"] = Field(
+        default="stale",
+        description="When the URL is checked: never once cached, conditionally, or always",
+    )
+
+
 class ConnectionSpec(BaseModel):
     """A named database connection from ``[connections.<name>]``.
 
