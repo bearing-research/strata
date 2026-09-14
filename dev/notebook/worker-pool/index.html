@@ -1062,6 +1062,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-fly-machines-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Fly Machines backend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-worker-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2131,6 +2142,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-fly-machines-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Fly Machines backend
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#the-worker-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2209,7 +2231,7 @@ register a serverless executor as a Strata worker instead.</p>
 that type, starts a machine when there is none, forwards the payload over
 HTTP, records the result, and meters the execution. A backend provides start /
 stop / health and nothing else, so the pool does not know which it is talking
-to. Two ship: local Docker and RunPod. Anything satisfying the <code>Backend</code>
+to. Three ship: local Docker, RunPod, and Fly Machines. Anything satisfying the <code>Backend</code>
 protocol works.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">strata_pool</span><span class="w"> </span><span class="kn">import</span> <span class="n">DockerBackend</span><span class="p">,</span> <span class="n">MachineType</span><span class="p">,</span> <span class="n">Pool</span><span class="p">,</span> <span class="n">PoolStore</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
@@ -2401,11 +2423,45 @@ orphan is findable.</p>
 <p>A pod's port is published on the public internet through RunPod's proxy. The
 per-machine credential is what stands between that URL and anyone who finds
 it.</p>
+<h2 id="the-fly-machines-backend">The Fly Machines backend<a class="headerlink" href="#the-fly-machines-backend" title="Permanent link">&para;</a></h2>
+<p>Boots workers as machines in one Fly app and region. A machine is reachable
+only on the organization's private network, at
+<code>http://{machine_id}.vm.{app}.internal:{port}</code>, so a pool running beside its
+notebook servers on Fly hands them workers that never face the internet.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">FlyBackend</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;FLY_API_TOKEN&quot;</span><span class="p">],</span> <span class="n">app</span><span class="o">=</span><span class="s2">&quot;strata-workers&quot;</span><span class="p">,</span> <span class="n">region</span><span class="o">=</span><span class="s2">&quot;sjc&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">MachineType</span><span class="p">(</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;a100&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="n">image</span><span class="o">=</span><span class="s2">&quot;registry.fly.io/strata-worker:latest&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">cpus</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">memory_mb</span><span class="o">=</span><span class="mi">65536</span><span class="p">,</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>    <span class="n">gpu_type</span><span class="o">=</span><span class="s2">&quot;a100-80gb&quot;</span><span class="p">,</span>       <span class="c1"># Fly&#39;s own gpu_kind string</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    <span class="n">cool_down_seconds</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="p">)</span>
+</code></pre></div>
+<p><code>start</code> creates the machine with the worker token and the machine type's
+<code>STRATA_WORKER_*</code> settings in its environment, with <code>restart: no</code> and
+<code>auto_destroy: false</code> so its lifetime stays the pool's. <code>stop</code> destroys it by
+force (a second destroy is a no-op). <code>health</code> needs Fly to report the machine
+<code>started</code> before it probes the worker's <code>/health</code>, because a stopped machine's
+private address can be reused.</p>
+<p><strong>Not yet verified against a live account.</strong> The request shapes follow the
+Machines API documentation; every field lives in <code>_create_body</code> and is asserted
+by a test, <code>provider_options</code> overrides anything in the machine <code>config</code>, and
+<code>base_url</code> can be repointed. To verify:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">FLY_API_TOKEN</span><span class="o">=</span>...<span class="w"> </span><span class="nv">STRATA_POOL_FLY_APP</span><span class="o">=</span>...<span class="w"> </span><span class="nv">STRATA_POOL_FLY_REGION</span><span class="o">=</span>sjc
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">STRATA_POOL_FLY_LIVE</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>packages/strata-pool/tests/test_fly_live.py<span class="w"> </span>-v<span class="w"> </span>-s
+</code></pre></div>
+<p>That <strong>starts a billed machine</strong>. Off the private network it proves create,
+start and destroy; add <code>STRATA_POOL_FLY_ON_NETWORK=1</code> where the <code>.internal</code>
+names resolve (a Fly machine, or a <code>fly wireguard</code> peer) to probe the worker
+too.</p>
+<p>The worker credential still matters here: every machine in the organization
+can reach every other.</p>
 <h2 id="the-worker-contract">The worker contract<a class="headerlink" href="#the-worker-contract" title="Permanent link">&para;</a></h2>
 <p><code>strata-worker</code>, shipped in <code>strata-notebook</code>, satisfies this contract as of
 0.7.0 — build it with the Dockerfile in the Strata repo and the pool can drive
 it unmodified:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>worker.Dockerfile<span class="w"> </span>-t<span class="w"> </span>strata-worker:latest<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>worker.Dockerfile<span class="w"> </span>-t<span class="w"> </span>strata-worker:latest<span class="w"> </span>.
 </code></pre></div>
 <p>The image installs <code>strata-notebook</code> from PyPI and needs <strong>0.7.0 or newer</strong> —
 <code>POST /execute</code>, the path the pool dispatches to, ships in that release. It
@@ -2471,7 +2527,7 @@ host port Docker picked. It does not care what runs inside the container.</p>
 <p>It does not pull. An image that is not on the host fails with the daemon's own
 "No such image" message.</p>
 <h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pytest<span class="w"> </span>packages/strata-pool/tests<span class="w"> </span>-v
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>pytest<span class="w"> </span>packages/strata-pool/tests<span class="w"> </span>-v
 </code></pre></div>
 <p>The tests in <code>test_docker_live.py</code> run the whole path against real containers
 and skip when no daemon is reachable. Set <code>STRATA_POOL_DOCKER_SOCKET</code> if yours
