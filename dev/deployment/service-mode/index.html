@@ -2698,8 +2698,9 @@ for anyone extending the ACL engine.</p>
 <p>Registry <strong>approval</strong> additionally enforces separation of duty: the
 principal who requested a protected-alias move cannot approve it
 themselves unless they hold <code>admin:*</code>. The registry <strong>audit</strong> read
-(<code>GET /v1/registry/audit</code>) is tenant-scoped - a principal sees only its
-own tenant's history; <code>admin:*</code> sees the whole store.</p>
+(<code>GET /v1/registry/audit</code>) and the events feed that follows it
+(<code>GET /v1/events</code>) are tenant-scoped - a principal sees only its own tenant's
+history; <code>admin:*</code> sees the whole store.</p>
 <h2 id="authenticated-write-back-the-shared-research-store">Authenticated write-back: the shared research store<a class="headerlink" href="#authenticated-write-back-the-shared-research-store" title="Permanent link">&para;</a></h2>
 <div class="admonition warning">
 <p class="admonition-title">Preview</p>

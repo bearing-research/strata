@@ -1440,6 +1440,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Audit">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#following-the-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Following the store
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2112,6 +2129,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Audit">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#following-the-store" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Following the store
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2230,19 +2264,33 @@ land unrecorded. The audit answers "what did champion point to before?":</p>
 <p>Entries carry the actor (principal id when authenticated), the action, and
 the from → to versions. <code>GET /v1/registry/audit</code> serves the same data; the
 SDK exposes <code>get_registry_audit(name=..., artifact_id=...)</code>.</p>
+<p>Publishing an artifact and withdrawing a publication are recorded in the same
+log, as <code>publish</code> and <code>withdraw</code> with the token in <code>value</code>.</p>
+<h3 id="following-the-store">Following the store<a class="headerlink" href="#following-the-store" title="Permanent link">&para;</a></h3>
+<p>Something that reacts to changes, such as a platform mirroring a registry or a
+feed of promotions, reads <code>GET /v1/events?since=&lt;seq&gt;&amp;limit=&lt;n&gt;</code>. It returns
+the same entries <strong>oldest first</strong> after <code>since</code>, with <code>next</code> set to the last
+<code>seq</code> returned, so passing <code>next</code> back pages through every event exactly once,
+including those that land between two reads. <code>limit</code> is at most 1000. Scoping
+matches the audit: a principal sees its tenant, <code>admin:*</code> and personal mode see
+the whole store.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span><span class="nt">&quot;events&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="nt">&quot;seq&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">41</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;publish&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;artifact_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fig&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;to_version&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">             </span><span class="nt">&quot;key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;token&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;…&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;actor&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ana&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;tenant&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;at&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1757900000.0</span><span class="p">}],</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w"> </span><span class="nt">&quot;next&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">41</span><span class="p">}</span>
+</code></pre></div>
 <h2 id="approval-gates">Approval gates<a class="headerlink" href="#approval-gates" title="Permanent link">&para;</a></h2>
 <p>Protect aliases whose moves should require a human:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">STRATA_REGISTRY_PROTECTED_ALIASES</span><span class="o">=</span>champion,production
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">STRATA_REGISTRY_PROTECTED_ALIASES</span><span class="o">=</span>champion,production
 </code></pre></div>
 <p>Moves (and deletes) of protected aliases return <strong>202 pending</strong> instead of
 applying. The queue is visible, and approval applies the move with the
 approver as the audit actor - atomically with the pending-consumption, so
 a crash can never swallow an approval:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">client</span><span class="o">.</span><span class="n">list_pending_changes</span><span class="p">()</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">client</span><span class="o">.</span><span class="n">approve_alias_change</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;champion&quot;</span><span class="p">)</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">client</span><span class="o">.</span><span class="n">reject_alias_change</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;champion&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">client</span><span class="o">.</span><span class="n">list_pending_changes</span><span class="p">()</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">client</span><span class="o">.</span><span class="n">approve_alias_change</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;champion&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">client</span><span class="o">.</span><span class="n">reject_alias_change</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;champion&quot;</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>pending<span class="w">          </span><span class="c1"># the review queue, from the CLI</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>pending<span class="w">          </span><span class="c1"># the review queue, from the CLI</span>
 </code></pre></div>
 <p>If a pending change's target artifact disappears before approval, the
 approve fails cleanly and the pending entry stays for an explicit reject.
@@ -2260,20 +2308,20 @@ mode; <em>publishing</em> them (<code>set_name</code> / <code>set_alias</code>) 
 <h2 id="the-promotion-flow-end-to-end">The promotion flow, end to end<a class="headerlink" href="#the-promotion-flow-end-to-end" title="Permanent link">&para;</a></h2>
 <p>The shape this is designed for - a notebook training pipeline whose last
 cell promotes through the registry:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># promote cell</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">model_art</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">features_uri</span><span class="p">],</span> <span class="n">transform</span><span class="o">=...</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">)</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">client</span><span class="o">.</span><span class="n">set_tag</span><span class="p">(</span><span class="n">model_art</span><span class="o">.</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">model_art</span><span class="o">.</span><span class="n">version</span><span class="p">,</span> <span class="s2">&quot;mae&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">mae</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">move</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">set_alias</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;champion&quot;</span><span class="p">,</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>                        <span class="n">model_art</span><span class="o">.</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">model_art</span><span class="o">.</span><span class="n">version</span><span class="p">)</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="nb">print</span><span class="p">(</span><span class="n">move</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;applied&quot;</span><span class="p">))</span>   <span class="c1"># &quot;applied&quot; | &quot;pending&quot; | &quot;unchanged&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># promote cell</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">model_art</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">put</span><span class="p">(</span><span class="n">inputs</span><span class="o">=</span><span class="p">[</span><span class="n">features_uri</span><span class="p">],</span> <span class="n">transform</span><span class="o">=...</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">)</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">client</span><span class="o">.</span><span class="n">set_tag</span><span class="p">(</span><span class="n">model_art</span><span class="o">.</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">model_art</span><span class="o">.</span><span class="n">version</span><span class="p">,</span> <span class="s2">&quot;mae&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">mae</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">move</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">set_alias</span><span class="p">(</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span> <span class="s2">&quot;champion&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>                        <span class="n">model_art</span><span class="o">.</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">model_art</span><span class="o">.</span><span class="n">version</span><span class="p">)</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="nb">print</span><span class="p">(</span><span class="n">move</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;status&quot;</span><span class="p">,</span> <span class="s2">&quot;applied&quot;</span><span class="p">))</span>   <span class="c1"># &quot;applied&quot; | &quot;pending&quot; | &quot;unchanged&quot;</span>
 </code></pre></div>
 <p>New data lands in the lake → the <a href="../../notebook/annotations/#table"><code>@table</code> annotation</a>
 makes the training cells stale → the pipeline re-runs → promote proposes the
 challenger → a human approves → and the whole history is reconstructible:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>lineage<span class="w"> </span>taxi/tip-model@champion
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="c1"># model &lt;- features &lt;- scan &lt;- table file://...#nyc.trips @ snapshot 2558063...</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>strata<span class="w"> </span>artifact<span class="w"> </span>audit<span class="w"> </span>taxi/tip-model
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>strata<span class="w"> </span>artifact<span class="w"> </span>verify<span class="w">    </span><span class="c1"># store-wide blob/metadata consistency check</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>strata<span class="w"> </span>artifact<span class="w"> </span>lineage<span class="w"> </span>taxi/tip-model@champion
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="c1"># model &lt;- features &lt;- scan &lt;- table file://...#nyc.trips @ snapshot 2558063...</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>strata<span class="w"> </span>artifact<span class="w"> </span>audit<span class="w"> </span>taxi/tip-model
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>strata<span class="w"> </span>artifact<span class="w"> </span>verify<span class="w">    </span><span class="c1"># store-wide blob/metadata consistency check</span>
 </code></pre></div>
 <h2 id="in-the-notebook-the-registry-dashboard">In the notebook (the registry dashboard)<a class="headerlink" href="#in-the-notebook-the-registry-dashboard" title="Permanent link">&para;</a></h2>
 <p>Everything above also has a UI - the registry is a first-class surface in the
@@ -2289,12 +2337,12 @@ The rest of this section is the reference for what each piece does.</p>
 </div>
 <p><strong>Publishing.</strong> Inside a cell, the <a href="../../notebook/cells/#the-ambient-strata-client">ambient <code>strata</code>
 client</a> publishes with a name:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[],</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;ref&quot;</span><span class="p">:</span> <span class="s2">&quot;train-tip-model@v1&quot;</span><span class="p">},</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;coef&quot;</span><span class="p">:</span> <span class="n">model</span><span class="o">.</span><span class="n">coef_</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="s2">&quot;intercept&quot;</span><span class="p">:</span> <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">intercept_</span><span class="p">)]},</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">art</span> <span class="o">=</span> <span class="n">strata</span><span class="o">.</span><span class="n">put</span><span class="p">(</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[],</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="n">transform</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;ref&quot;</span><span class="p">:</span> <span class="s2">&quot;train-tip-model@v1&quot;</span><span class="p">},</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">data</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;coef&quot;</span><span class="p">:</span> <span class="n">model</span><span class="o">.</span><span class="n">coef_</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span> <span class="s2">&quot;intercept&quot;</span><span class="p">:</span> <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">intercept_</span><span class="p">)]},</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;taxi/tip-model&quot;</span><span class="p">,</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="p">)</span>
 </code></pre></div>
 <p><code>data</code> is stored as Arrow, so it takes a <code>dict</code>, a <code>pa.Table</code>, a pandas or
 polars DataFrame, or Arrow IPC <code>bytes</code>. An estimator object is not one of
