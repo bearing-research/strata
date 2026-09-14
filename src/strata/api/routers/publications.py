@@ -220,6 +220,7 @@ async def revoke_publication(
     token: str,
     store: ReadStore,
     tenant_filter: CurrentTenant,
+    principal: CurrentPrincipal,
 ):
     """Withdraw a grant.
 
@@ -227,7 +228,9 @@ async def revoke_publication(
     already printed in a paper has to fail closed rather than start resolving
     to something else.
     """
-    if not store.revoke_publication(token, tenant=tenant_filter):
+    if not store.revoke_publication(
+        token, tenant=tenant_filter, actor=principal.id if principal is not None else None
+    ):
         raise HTTPException(status_code=404, detail="No active publication with that token")
     return {"revoked": True, "token": token}
 

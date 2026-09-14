@@ -2571,6 +2571,19 @@ class ArtifactStore:
                     _json_or_none(publication.external_ids),
                 ),
             )
+            # In the registry audit rather than a table of its own, so one
+            # sequence orders publications and registry moves together and a
+            # follower needs one cursor (``read_events``).
+            self._audit_in_connection(
+                conn,
+                action="publish",
+                artifact_id=artifact_id,
+                to_version=version,
+                key="token",
+                value=publication.token,
+                actor=published_by,
+                tenant=effective_tenant,
+            )
             conn.commit()
             return publication
         finally:
@@ -2642,18 +2655,40 @@ class ArtifactStore:
         finally:
             conn.close()
 
-    def revoke_publication(self, token: str, tenant: str | None = None) -> bool:
-        """Withdraw a grant. Returns False if it was unknown or already gone."""
+    def revoke_publication(
+        self, token: str, tenant: str | None = None, actor: str | None = None
+    ) -> bool:
+        """Withdraw a grant (audited). Returns False if it was unknown or already gone."""
         effective_tenant = tenant if tenant is not None else ""
         conn = self._get_connection()
         try:
+            row = conn.execute(
+                "SELECT artifact_id, version FROM artifact_publications "
+                "WHERE token = ? AND tenant = ?",
+                (token, effective_tenant),
+            ).fetchone()
             cursor = conn.execute(
                 "UPDATE artifact_publications SET revoked_at = ? "
                 "WHERE token = ? AND tenant = ? AND revoked_at IS NULL",
                 (time.time(), token, effective_tenant),
             )
+            # Only the call that actually withdrew it records it: a second
+            # revoke of the same token changes nothing and is not an event.
+            if cursor.rowcount == 0 or row is None:
+                conn.commit()
+                return False
+            self._audit_in_connection(
+                conn,
+                action="withdraw",
+                artifact_id=row["artifact_id"],
+                to_version=row["version"],
+                key="token",
+                value=token,
+                actor=actor,
+                tenant=effective_tenant,
+            )
             conn.commit()
-            return cursor.rowcount > 0
+            return True
         finally:
             conn.close()
 
@@ -3069,6 +3104,36 @@ class ArtifactStore:
             params.append(limit)
             cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def read_events(
+        self,
+        since: int = 0,
+        limit: int = 100,
+        tenant: object = _AUDIT_ALL_TENANTS,
+    ) -> list[dict]:
+        """Audit entries after ``since``, oldest first: what a follower reads.
+
+        The same rows as ``read_audit`` in the opposite order. A follower
+        pages by passing the last ``seq`` it saw; reading newest first and
+        stopping at a known entry would skip whatever landed in between
+        pages. ``tenant`` scopes as in ``read_audit``.
+        """
+        conn = self._get_connection()
+        try:
+            query = (
+                "SELECT seq, at, actor, action, name, alias, artifact_id, "
+                "from_artifact_id, from_version, to_version, key, value, tenant "
+                "FROM registry_audit WHERE seq > ?"
+            )
+            params: list = [since]
+            if tenant is not _AUDIT_ALL_TENANTS:
+                query += " AND tenant = ?"
+                params.append(tenant if tenant is not None else "")
+            query += " ORDER BY seq ASC LIMIT ?"
+            params.append(limit)
+            return [dict(row) for row in conn.execute(query, params).fetchall()]
         finally:
             conn.close()
 
