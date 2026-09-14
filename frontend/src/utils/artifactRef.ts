@@ -29,3 +29,18 @@ export function parseArtifactUris(raw: unknown): Record<string, string> {
   }
   return out
 }
+
+/**
+ * The outputs a cell can offer for promotion: only while it is ready, and only
+ * variables it still defines. The backend keeps every variable a cell has ever
+ * stored, so after a rename or an unrun edit the full map would offer an
+ * outdated result under a team name.
+ */
+export function promotableOutputs(
+  cell: { status: string; defines: string[]; artifactUris?: Record<string, string> } | undefined,
+): Record<string, string> {
+  if (!cell || cell.status !== 'ready') return {}
+  return Object.fromEntries(
+    Object.entries(cell.artifactUris || {}).filter(([name]) => cell.defines.includes(name)),
+  )
+}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseArtifactRef, parseArtifactUris } from './artifactRef.ts'
+import { parseArtifactRef, parseArtifactUris, promotableOutputs } from './artifactRef.ts'
 
 test('a notebook artifact ref splits into id and version', () => {
   assert.deepEqual(parseArtifactRef('strata://artifact/nb_x_cell_c1_var_model@v=3'), {
@@ -26,4 +26,19 @@ test('a uri map keeps only real refs', () => {
     model: 'strata://artifact/m@v=1',
   })
   assert.deepEqual(parseArtifactUris(null), {})
+})
+
+test('a renamed variable is no longer offered for promotion', () => {
+  const cell = {
+    status: 'ready',
+    defines: ['frame'],
+    artifactUris: { df: 'strata://artifact/old@v=1', frame: 'strata://artifact/new@v=1' },
+  }
+  assert.deepEqual(promotableOutputs(cell), { frame: 'strata://artifact/new@v=1' })
+})
+
+test('a cell that is not ready offers nothing', () => {
+  const cell = { status: 'stale', defines: ['df'], artifactUris: { df: 'strata://artifact/a@v=1' } }
+  assert.deepEqual(promotableOutputs(cell), {})
+  assert.deepEqual(promotableOutputs(undefined), {})
 })
