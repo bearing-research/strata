@@ -196,6 +196,7 @@ class NotebookArtifactManager:
         build_duration_ms: float = 0.0,
         principal: str | None = None,
         hardware: dict[str, Any] | None = None,
+        extra_params: dict[str, str] | None = None,
     ) -> ArtifactVersion:
         """Store a cell output as an artifact.
 
@@ -286,6 +287,8 @@ class NotebookArtifactManager:
             params["build_duration_ms"] = str(int(build_duration_ms))
         if hardware:
             params["hardware"] = json.dumps(hardware, sort_keys=True)
+        if extra_params:
+            params.update(extra_params)
 
         transform_spec = TransformSpec(
             executor="notebook/cell@v1",
