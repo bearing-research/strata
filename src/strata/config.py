@@ -591,6 +591,11 @@ class StrataConfig(BaseSettings):
 
     # Pull model configuration
     signed_url_expiry_seconds: Annotated[float, Field(gt=0)] = 600.0
+    # Put object-store URLs in build manifests where the blob store can sign
+    # them (S3 with keys it can read), so a worker's inputs and output bypass
+    # this server. Off by default: the output then arrives as a form upload
+    # (url + fields), which a worker older than this does not send.
+    artifact_presigned_urls: bool = False
     # HMAC secret for signing pull-model build URLs (env STRATA_TRANSFORM_SIGNING_SECRET).
     # If unset, a random per-process secret is used — fine for single-instance dev,
     # but signed URLs then become invalid on restart and differ across replicas.

@@ -204,6 +204,15 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
 }
 ```
 
+With `STRATA_ARTIFACT_PRESIGNED_URLS` on and an S3 blob store the server can sign
+for, the input URLs and `output.url` point straight at the object store: SigV4
+query URLs for inputs, and for the output a POST policy URL with the form
+`fields` to send. The policy bounds the body with `content-length-range`, so S3
+refuses an oversized upload itself, and finalize checks the size again before
+publishing. `finalize_url` and `log_url` stay Strata routes. Without it, or when
+the store cannot sign (a local disk, or S3 credentials held only by an instance
+role inside PyArrow), every URL is a Strata route and `output` has no `fields`.
+
 `principal`, `tenant`, `notebook_id`, `cell_id` and `cell_provenance_hash` say
 who ran the cell and which cell of which notebook the build is for, so a
 dispatcher can attribute and match a job from the manifest alone rather than
@@ -227,7 +236,7 @@ carries the context in the request headers only.
 
 1. For each entry in `metadata.params.input_specs`, look up its `uri` in `inputs[]` and stream-download from the signed URL to the input file, so an input is bounded by the worker's disk rather than its memory. Inputs that exceed `STRATA_WORKER_MAX_INPUT_BYTES` (declared via `Content-Length` or measured during stream) are rejected with `413`.
 2. Run the cell in a subprocess (same as `/v1/execute`).
-3. Stream the resulting output bundle to `output.url` via `POST` with `Content-Type: application/x-tar`.
+3. Upload the resulting output bundle to `output.url`. Without `output.fields`, `POST` the bundle as the raw body with `Content-Type: application/x-tar` (a Strata route). With `output.fields`, it is a presigned object-store upload: `POST` a multipart form containing each field plus the bundle as the `file` part (S3 answers `204`).
 4. `POST {"output_format": "notebook-output-bundle@v1"}` to `finalize_url`.
 5. Return the `finalize` response body to the caller.
 
