@@ -34,6 +34,9 @@ from strata.notebook.impact import ImpactAnalyzer
 from strata.notebook.inspect_repl import InspectManager
 from strata.notebook.models import CellLanguage, CellStaleness, CellStatus, WorkerBackendType
 from strata.notebook.protocol import MessageType
+from strata.notebook.scopes import (
+    required_scope_for_frame,
+)
 from strata.notebook.session import CellStateSnapshot, SessionManager
 from strata.notebook.workers import resolve_worker_spec, worker_transport
 from strata.notebook.writer import write_cell, write_cell_tests
@@ -625,73 +628,6 @@ _VIEWER_ALLOWED_FRAMES = frozenset(
         MessageType.NOTEBOOK_SYNC,
     }
 )
-
-
-# --- Scope model for the WS frame vocabulary -------------------------------
-#
-# ``notebook:read`` / ``notebook:write`` / ``notebook:execute`` are the scopes
-# the service-mode proxy config and the deployment docs have always advertised.
-# Until now nothing in the codebase read them, so a principal holding only
-# ``notebook:read`` could execute arbitrary Python. Each C→S frame is mapped to
-# the least scope that covers what it can actually do; anything unlisted
-# defaults to ``notebook:execute`` (fail closed — a new frame is
-# privileged until someone classifies it).
-NOTEBOOK_SCOPE_READ = "notebook:read"
-NOTEBOOK_SCOPE_WRITE = "notebook:write"
-NOTEBOOK_SCOPE_EXECUTE = "notebook:execute"
-
-# Read-only: observe state, compute previews. No mutation, no code runs.
-_READ_FRAMES = frozenset(
-    {
-        MessageType.NOTEBOOK_SYNC,
-        MessageType.IMPACT_PREVIEW_REQUEST,
-        MessageType.PROFILING_REQUEST,
-    }
-)
-
-# Mutate committed notebook content, but don't themselves run code.
-_WRITE_FRAMES = frozenset(
-    {
-        MessageType.CELL_SOURCE_UPDATE,
-        MessageType.VARIANT_SET_ACTIVE,
-        MessageType.VARIANT_ADD,
-    }
-)
-
-# Everything else runs code or mutates the environment — cell execution, the
-# inspect REPL (evals arbitrary expressions), widget updates (re-run the
-# widget cell and cascade), dependency changes (invoke uv), and the agent
-# confirm/cancel controls. Listed explicitly for documentation value even
-# though the default is already ``notebook:execute``.
-_EXECUTE_FRAMES = frozenset(
-    {
-        MessageType.CELL_EXECUTE,
-        MessageType.CELL_EXECUTE_CASCADE,
-        MessageType.CELL_EXECUTE_FORCE,
-        MessageType.CELL_EXECUTE_RERUN,
-        MessageType.CELL_RUN_TESTS,
-        MessageType.NOTEBOOK_RUN_ALL,
-        MessageType.NOTEBOOK_RERUN_ALL,
-        MessageType.CELL_CANCEL,
-        MessageType.WIDGET_UPDATE,
-        MessageType.INSPECT_OPEN,
-        MessageType.INSPECT_EVAL,
-        MessageType.INSPECT_CLOSE,
-        MessageType.DEPENDENCY_ADD,
-        MessageType.DEPENDENCY_REMOVE,
-        MessageType.AGENT_CANCEL,
-        MessageType.AGENT_CONFIRM_RESPONSE,
-    }
-)
-
-
-def required_scope_for_frame(msg_type: str) -> str:
-    """Return the notebook scope a C→S frame requires (fail-closed default)."""
-    if msg_type in _READ_FRAMES:
-        return NOTEBOOK_SCOPE_READ
-    if msg_type in _WRITE_FRAMES:
-        return NOTEBOOK_SCOPE_WRITE
-    return NOTEBOOK_SCOPE_EXECUTE
 
 
 def _configured_auth_mode() -> str:
