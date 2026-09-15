@@ -2468,6 +2468,14 @@
 <a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a><span class="w">  </span><span class="nt">&quot;finalize_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://strata.example.com/v1/builds/01HZJV/finalize&quot;</span>
 <a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a><span class="p">}</span>
 </code></pre></div>
+<p>With <code>STRATA_ARTIFACT_PRESIGNED_URLS</code> on and an S3 blob store the server can sign
+for, the input URLs and <code>output.url</code> point straight at the object store: SigV4
+query URLs for inputs, and for the output a POST policy URL with the form
+<code>fields</code> to send. The policy bounds the body with <code>content-length-range</code>, so S3
+refuses an oversized upload itself, and finalize checks the size again before
+publishing. <code>finalize_url</code> and <code>log_url</code> stay Strata routes. Without it, or when
+the store cannot sign (a local disk, or S3 credentials held only by an instance
+role inside PyArrow), every URL is a Strata route and <code>output</code> has no <code>fields</code>.</p>
 <p><code>principal</code>, <code>tenant</code>, <code>notebook_id</code>, <code>cell_id</code> and <code>cell_provenance_hash</code> say
 who ran the cell and which cell of which notebook the build is for, so a
 dispatcher can attribute and match a job from the manifest alone rather than
@@ -2489,7 +2497,7 @@ carries the context in the request headers only.</p>
 <ol>
 <li>For each entry in <code>metadata.params.input_specs</code>, look up its <code>uri</code> in <code>inputs[]</code> and stream-download from the signed URL to the input file, so an input is bounded by the worker's disk rather than its memory. Inputs that exceed <code>STRATA_WORKER_MAX_INPUT_BYTES</code> (declared via <code>Content-Length</code> or measured during stream) are rejected with <code>413</code>.</li>
 <li>Run the cell in a subprocess (same as <code>/v1/execute</code>).</li>
-<li>Stream the resulting output bundle to <code>output.url</code> via <code>POST</code> with <code>Content-Type: application/x-tar</code>.</li>
+<li>Upload the resulting output bundle to <code>output.url</code>. Without <code>output.fields</code>, <code>POST</code> the bundle as the raw body with <code>Content-Type: application/x-tar</code> (a Strata route). With <code>output.fields</code>, it is a presigned object-store upload: <code>POST</code> a multipart form containing each field plus the bundle as the <code>file</code> part (S3 answers <code>204</code>).</li>
 <li><code>POST {"output_format": "notebook-output-bundle@v1"}</code> to <code>finalize_url</code>.</li>
 <li>Return the <code>finalize</code> response body to the caller.</li>
 </ol>
