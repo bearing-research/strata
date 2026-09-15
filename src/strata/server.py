@@ -785,6 +785,26 @@ async def _artifact_gc_loop(store, interval_seconds: float, max_age_days: float)
             )
 
 
+# Shared notebook environments are gigabytes and are removed on a TTL of days,
+# so an hourly look is plenty.
+_SHARED_ENV_GC_INTERVAL_SECONDS = 3600.0
+
+
+async def _shared_env_gc_loop(root: Path, ttl_days: float) -> None:
+    """Remove unlinked shared notebook environments every hour until cancelled."""
+    from strata.notebook.shared_env import collect
+
+    while True:
+        await asyncio.sleep(_SHARED_ENV_GC_INTERVAL_SECONDS)
+        try:
+            result = await asyncio.to_thread(collect, root, ttl_days=ttl_days)
+        except Exception:
+            logger.exception("shared_env_gc_failed")
+            continue
+        if result.removed:
+            logger.info("shared_env_gc_collected", removed=", ".join(result.removed))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize server state on startup, graceful shutdown on exit."""
@@ -1005,6 +1025,14 @@ async def lifespan(app: FastAPI):
                 )
             )
 
+    env_gc_task: asyncio.Task | None = None
+    if config.notebook_env_backend == "shared":
+        from strata.notebook.env_backend import shared_env_root
+
+        env_gc_task = asyncio.create_task(
+            _shared_env_gc_loop(shared_env_root(config), config.notebook_shared_env_ttl_days)
+        )
+
     # Initialize build QoS for server-mode transforms (quotas + backpressure)
     build_qos = None
     if config.server_transforms_enabled:
@@ -1099,10 +1127,11 @@ async def lifespan(app: FastAPI):
     else:
         yield
 
-    if gc_task is not None:
-        gc_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await gc_task
+    for task in (gc_task, env_gc_task):
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     # Reset build QoS
     from strata.transforms.build_qos import reset_build_qos
