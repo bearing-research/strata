@@ -182,6 +182,13 @@ class Worker:
     machine that runs arbitrary code.
     """
 
+    lease_owner: str | None = None
+    """The pool instance acting on this machine while it starts, runs a job or
+    stops. None while it is warm, when any instance may claim it."""
+
+    lease_expires_at: float | None = None
+    """Wall-clock time after which another instance may take the machine over."""
+
 
 @dataclass
 class Job:
@@ -208,6 +215,12 @@ class Job:
     trace_context: dict[str, str] = field(default_factory=dict)
     """W3C `traceparent` / `tracestate` the submitter sent, so the machine's
     work joins the submitter's trace. Opaque to the pool, like the payload."""
+
+    lease_owner: str | None = None
+    """The pool instance running this job, while it is dispatched or running."""
+
+    lease_expires_at: float | None = None
+    """Wall-clock time after which another instance may fail the job."""
 
 
 @dataclass(frozen=True)

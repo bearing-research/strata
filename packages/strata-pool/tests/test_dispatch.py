@@ -135,20 +135,13 @@ async def test_a_machine_we_cannot_write_down_is_stopped_rather_than_leaked(make
     backend = FakeBackend()
     pool = make_pool(backend=backend)
 
-    def refuse_second_write(worker):
+    def refuse(worker, owner, now):
         raise sqlite3.OperationalError("database is locked")
 
-    original = pool.store.save_worker
-
-    def save_once(worker):
-        pool.store.save_worker = refuse_second_write
-        original(worker)
-
-    pool.store.save_worker = save_once
+    pool.store.record_provisioned = refuse
 
     await pool.submit(tenant_id="acme", machine_type="cpu", payload=b"work")
 
-    pool.store.save_worker = original
     assert backend.stopped == ["machine-1"]
     assert pool.store.list_workers() == []
 

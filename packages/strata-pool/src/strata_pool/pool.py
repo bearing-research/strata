@@ -25,19 +25,27 @@ Nothing here can cancel remote work, so reuse would mean two jobs on
 hardware sized for one. That trades a cold start for a correctness
 guarantee, which is the right trade until the worker protocol grows a
 cancel.
+
+Several pool processes may share one store (`PostgresPoolStore`), each with
+its own `instance_id`. They never dispatch the same job or start a machine for
+the same demand, because every such change is a claim or a reservation in the
+store. Each holds a lease on the machines and jobs it is acting on and renews
+it while it works; when a process dies, the others fail its jobs and stop its
+machines once the lease runs out (`reclaim_expired_leases`, run by the
+scaler).
 """
 
 import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Callable, Coroutine, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Coroutine, Iterable, Iterator
 from typing import Any
 
 import httpx
 
 from strata_pool.backend import Backend
-from strata_pool.store import PoolStore
+from strata_pool.store import Store
 from strata_pool.types import (
     TERMINAL_JOB_STATES,
     WORKER_TOKEN_ENV,
@@ -54,6 +62,7 @@ from strata_pool.types import (
 logger = logging.getLogger(__name__)
 
 _HEALTH_POLL_SECONDS = 0.5
+_LEASE_SECONDS = 30.0
 
 __all__ = ["Pool", "WORKER_TOKEN_ENV"]
 
@@ -63,7 +72,7 @@ class Pool:
 
     def __init__(
         self,
-        store: PoolStore,
+        store: Store,
         backend: Backend,
         machine_types: Iterable[MachineType],
         *,
@@ -73,6 +82,8 @@ class Pool:
         health_poll_seconds: float = _HEALTH_POLL_SECONDS,
         max_workers_total: int | None = None,
         tracer: Any = None,
+        instance_id: str | None = None,
+        lease_seconds: float = _LEASE_SECONDS,
     ):
         """
         Args:
@@ -89,7 +100,17 @@ class Pool:
             tracer: OpenTelemetry tracer for the span around each execution.
                 None uses the global provider's, when OpenTelemetry is
                 installed; the pool does not require it.
+            instance_id: This process's name in the leases it holds. Required
+                when the store is shared: two processes under one name would
+                each take the other's machines and jobs for their own. A
+                process restarted under its old name takes back what it held
+                at once, without waiting for those leases to expire.
+            lease_seconds: How long a lease lasts without renewal, and so how
+                long a dead process's jobs and machines wait before another
+                takes them over. Renewed at a third of this.
         """
+        if store.shared and instance_id is None:
+            raise ValueError("a pool over a shared store needs its own instance_id")
         self.store = store
         self.backend = backend
         self.machine_types = {mt.name: mt for mt in machine_types}
@@ -103,6 +124,8 @@ class Pool:
         self._health_poll_seconds = health_poll_seconds
         self.max_workers_total = max_workers_total
         self._tracer = tracer
+        self.instance_id = instance_id or "pool"
+        self.lease_seconds = lease_seconds
         self._tasks: set[asyncio.Task] = set()
         # worker id -> consecutive failed probes. In memory rather than in the
         # store: it is a judgement about right now, and a pool that restarts
@@ -160,10 +183,15 @@ class Pool:
             for job in self.store.list_jobs([JobState.QUEUED]):
                 if job.machine_type != machine_type:
                     continue
-                job.state = JobState.FAILED
-                job.error = f"machine type {machine_type!r} was removed from the catalogue"
-                job.completed_at = self._wall()
-                self.store.save_job(job)
+                now = self._wall()
+                self.store.fail_job(
+                    job.id,
+                    f"machine type {machine_type!r} was removed from the catalogue",
+                    now,
+                    states=[JobState.QUEUED],
+                    owner=self.instance_id,
+                    now=now,
+                )
 
     def _is_stale(self, worker: Worker) -> bool:
         spec = self.machine_types.get(worker.machine_type)
@@ -236,31 +264,47 @@ class Pool:
     # --- dispatch ---
 
     async def _try_dispatch(self, job: Job) -> bool:
-        """Assign the job to a warm worker if one is available."""
+        """Assign the job to a warm worker if one is available.
+
+        True also when the job turns out to be placed already: another pool
+        process sharing the store claimed it first.
+        """
         spec = self.machine_types.get(job.machine_type)
         if spec is None:
             return False
-        worker = None
-        if job.session_id is not None:
-            worker = self.store.find_warm_worker(
-                job.machine_type, job.tenant_id, session_id=job.session_id, image=spec.image
-            )
-        if worker is None:
-            worker = self.store.find_warm_worker(job.machine_type, job.tenant_id, image=spec.image)
-        if worker is None:
-            return False
-        self._assign(worker, job)
-        return True
+        while True:
+            worker = None
+            if job.session_id is not None:
+                worker = self.store.find_warm_worker(
+                    job.machine_type, job.tenant_id, session_id=job.session_id, image=spec.image
+                )
+            if worker is None:
+                worker = self.store.find_warm_worker(
+                    job.machine_type, job.tenant_id, image=spec.image
+                )
+            if worker is None:
+                return False
+            if self._assign(worker, job):
+                return True
+            # Lost the race for this machine or this job. Which one decides
+            # whether there is anything left to do.
+            latest = self.store.get_job(job.id)
+            if latest is None or latest.state is not JobState.QUEUED:
+                return True
 
-    def _assign(self, worker: Worker, job: Job) -> None:
+    def _assign(self, worker: Worker, job: Job) -> bool:
+        expires = self._wall() + self.lease_seconds
+        if not self.store.claim_dispatch(worker, job, self.instance_id, expires):
+            return False
         worker.state = WorkerState.BUSY
         worker.current_job_id = job.id
         worker.session_id = job.session_id
+        worker.lease_owner = job.lease_owner = self.instance_id
+        worker.lease_expires_at = job.lease_expires_at = expires
         job.state = JobState.DISPATCHED
         job.worker_id = worker.id
-        self.store.save_worker(worker)
-        self.store.save_job(job)
         self._spawn(self._execute(worker, job))
+        return True
 
     async def _drain(self, machine_type: str, tenant_id: str) -> None:
         """Place this tenant's queued jobs onto its warm machines."""
@@ -281,32 +325,28 @@ class Pool:
         if spec is None:
             return
         queued = self.store.count_queued(machine_type, tenant_id)
-        # Stale machines (another image) are left out throughout: they take
-        # no new jobs, so counting them would hold work back from machines
-        # that could run it. They still count against the global fleet cap.
-        starting = self.store.count_workers(
-            machine_type, tenant_id, [WorkerState.STARTING], image=spec.image
-        )
-        warm = self.store.count_workers(
-            machine_type, tenant_id, [WorkerState.WARM], image=spec.image
-        )
-        total = self.store.count_workers(
-            machine_type,
-            tenant_id,
-            # STOPPING is deliberately absent: a machine being torn down is
-            # not capacity, and counting it would keep a tenant at its cap
-            # from starting the replacement.
-            [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY],
-            image=spec.image,
-        )
-        needed = min(queued - starting - warm, spec.max_workers - total)
 
-        for _ in range(max(needed, 0)):
-            # Re-read the fleet on every iteration: starting a machine awaits
-            # the backend, and another tenant's _ensure_capacity can start its
-            # own machines in that window. Deciding headroom once, up front,
-            # lets two callers each spend the same last slot.
-            if not self._has_fleet_headroom():
+        # One machine per reservation, each decided against the store as it is
+        # then: starting a machine awaits the backend, and in that window
+        # another tenant, or another pool process, can start its own. Bounded
+        # by the queue, so a backend that fails every start cannot spin here.
+        for _ in range(max(queued, 0)):
+            worker = Worker(
+                id=new_id("worker"),
+                machine_type=spec.name,
+                tenant_id=tenant_id,
+                backend=self.backend.name,
+                state=WorkerState.STARTING,
+                created_at=self._wall(),
+                auth_token=new_auth_token(),
+                image=spec.image,
+                lease_owner=self.instance_id,
+                lease_expires_at=self._wall() + self.lease_seconds,
+            )
+            outcome = self.store.reserve_worker(
+                worker, max_workers=spec.max_workers, max_workers_total=self.max_workers_total
+            )
+            if outcome == "fleet_cap":
                 # Saying so matters: a fleet at its ceiling looks exactly like
                 # a queue that is simply slow, and a silent stall is the kind
                 # of thing that gets debugged at 3am.
@@ -320,15 +360,9 @@ class Pool:
                     },
                 )
                 return
-            await self._start_worker(spec, tenant_id)
-
-    def _has_fleet_headroom(self) -> bool:
-        if self.max_workers_total is None:
-            return True
-        fleet = self.store.count_all_workers(
-            [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY]
-        )
-        return fleet < self.max_workers_total
+            if outcome != "reserved":
+                return
+            await self._start_worker(spec, worker)
 
     async def _offer_freed_capacity(self) -> None:
         """Hand headroom back to whoever is waiting for it.
@@ -343,33 +377,23 @@ class Pool:
             for tenant_id in self.store.queued_tenants(machine_type):
                 await self._ensure_capacity(machine_type, tenant_id)
 
-    async def _start_worker(self, spec: MachineType, tenant_id: str) -> None:
-        """Provision a machine and poll it to warm in the background.
+    async def _start_worker(self, spec: MachineType, worker: Worker) -> None:
+        """Provision the machine *worker* reserved, and poll it to warm in the
+        background.
 
         The row is written before the backend call so a crash mid-start
         leaves evidence. It leaves a machine leaked if the crash lands after
         the provider created one — reconciling that needs a backend that can
         list its own machines, which arrives with the first real backend.
         """
-        token = new_auth_token()
-        worker = Worker(
-            id=new_id("worker"),
-            machine_type=spec.name,
-            tenant_id=tenant_id,
-            backend=self.backend.name,
-            state=WorkerState.STARTING,
-            created_at=self._wall(),
-            auth_token=token,
-            image=spec.image,
-        )
-        self.store.save_worker(worker)
-
         # The token has to reach the machine before it can accept anything, so
         # it goes in the environment the backend boots it with. Minted per
         # worker: one machine's credential must not open another's.
-        env = {**spec.env, WORKER_TOKEN_ENV: token}
+        assert worker.auth_token is not None
+        env = {**spec.env, WORKER_TOKEN_ENV: worker.auth_token}
         try:
-            provisioned = await self.backend.start(spec, env)
+            async with self._holding(worker_id=worker.id):
+                provisioned = await self.backend.start(spec, env)
         except Exception:
             logger.exception(
                 "backend failed to start a worker",
@@ -382,7 +406,7 @@ class Pool:
         worker.endpoint = provisioned.endpoint
         worker.region = provisioned.region
         try:
-            self.store.save_worker(worker)
+            recorded = self.store.record_provisioned(worker, self.instance_id, self._wall())
         except Exception:
             # The machine exists but we could not write down its ID, so nothing
             # would ever be able to stop it. Stop it now, while the ID is still
@@ -394,21 +418,44 @@ class Pool:
             await self.backend.stop(provisioned.backend_id)
             self.store.delete_worker(worker.id)
             return
+        if not recorded:
+            # The start outlasted the lease and another process took the row
+            # over. It had no machine to stop, so this one stops its own.
+            logger.warning(
+                "lost a starting machine's row to another pool process; stopping it",
+                extra={"worker_id": worker.id, "backend_id": provisioned.backend_id},
+            )
+            await self.backend.stop(provisioned.backend_id)
+            return
         self._spawn(self._await_boot(worker, spec, provisioned.endpoint))
 
     async def _await_boot(self, worker: Worker, spec: MachineType, endpoint: str) -> None:
         deadline = self._monotonic() + spec.boot_timeout_seconds
-        while self._monotonic() < deadline:
-            if await self.backend.health(endpoint):
-                worker.state = WorkerState.WARM
-                self.store.save_worker(worker)
-                logger.info(
-                    "worker is warm",
+        healthy = warmed = False
+        async with self._holding(worker_id=worker.id):
+            while self._monotonic() < deadline:
+                if await self.backend.health(endpoint):
+                    healthy = True
+                    warmed = self.store.mark_warm(worker, self.instance_id, self._wall())
+                    break
+                await asyncio.sleep(self._health_poll_seconds)
+        if healthy:
+            if not warmed:
+                # Boot outlasted the lease and another process is stopping it.
+                logger.warning(
+                    "another pool process took over a machine while it booted",
                     extra={"worker_id": worker.id, "machine_type": spec.name},
                 )
-                await self._drain(spec.name, worker.tenant_id)
                 return
-            await asyncio.sleep(self._health_poll_seconds)
+            worker.state = WorkerState.WARM
+            worker.lease_owner = None
+            worker.lease_expires_at = None
+            logger.info(
+                "worker is warm",
+                extra={"worker_id": worker.id, "machine_type": spec.name},
+            )
+            await self._drain(spec.name, worker.tenant_id)
+            return
 
         logger.warning(
             "worker did not boot within its timeout; stopping it",
@@ -440,7 +487,10 @@ class Pool:
             # per phase (its read timeout is the gap between bytes, so a worker
             # dribbling output could outlive the budget the error text claims).
             with self._execution_span(job, worker) as trace_headers:
-                async with asyncio.timeout(timeout):
+                async with (
+                    self._holding(job_id=job.id, worker_id=worker.id),
+                    asyncio.timeout(timeout),
+                ):
                     response = await self._client.post(
                         f"{worker.endpoint}/execute",
                         content=job.payload,
@@ -488,8 +538,18 @@ class Pool:
         duration_ms = (self._monotonic() - started_at_mono) * 1000
         job.completed_at = self._wall()
 
+        taken_over = False
         try:
-            self.store.save_job(job)
+            if not self.store.finish_job(job, self.instance_id):
+                # This process stopped renewing for longer than a lease, and
+                # another one failed the job and is stopping the machine. Its
+                # answer stands; recording ours would bill a job twice.
+                taken_over = True
+                logger.warning(
+                    "another pool process took over a job before it finished",
+                    extra={"job_id": job.id, "worker_id": worker.id},
+                )
+                return
             self.store.record_usage(
                 UsageEvent(
                     id=new_id("usage"),
@@ -506,19 +566,23 @@ class Pool:
         finally:
             # Releasing the worker happens even if persistence just failed.
             # A store that rejects a write is a problem; a worker stuck BUSY
-            # with nothing left to release it is a permanent one.
-            if keep_worker:
-                worker.state = WorkerState.WARM
-                worker.current_job_id = None
-                worker.last_active_at = self._wall()
-                self.store.save_worker(worker)
-                await self._drain(job.machine_type, job.tenant_id)
-            else:
-                await self._stop_worker(worker)
-                # The queue may still hold work this machine was going to
-                # take — and the slot it just freed belongs to whoever is
-                # waiting, not only to this job's tenant.
-                await self._offer_freed_capacity()
+            # with nothing left to release it is a permanent one. A machine
+            # another process took over is that process's to stop.
+            if not taken_over:
+                if keep_worker:
+                    worker.last_active_at = self._wall()
+                    if self.store.release_worker(worker, self.instance_id):
+                        worker.state = WorkerState.WARM
+                        worker.current_job_id = None
+                        worker.lease_owner = None
+                        worker.lease_expires_at = None
+                    await self._drain(job.machine_type, job.tenant_id)
+                else:
+                    await self._stop_worker(worker)
+                    # The queue may still hold work this machine was going to
+                    # take — and the slot it just freed belongs to whoever is
+                    # waiting, not only to this job's tenant.
+                    await self._offer_freed_capacity()
 
     @contextlib.contextmanager
     def _execution_span(self, job: Job, worker: Worker) -> Iterator[dict[str, str]]:
@@ -549,7 +613,7 @@ class Pool:
             inject(carrier)
             yield carrier
 
-    async def _stop_worker(self, worker: Worker) -> None:
+    async def _stop_worker(self, worker: Worker) -> bool:
         """Deallocate a machine and forget it.
 
         The row goes away rather than becoming a tombstone: nothing in this
@@ -559,6 +623,8 @@ class Pool:
         The state flips to STOPPING first, synchronously. Everything below
         awaits, and in that window the dispatcher could otherwise find this
         machine warm and hand it a job we are about to kill.
+
+        Returns whether this process stopped it.
         """
         # Every path that ends a machine comes through here, so this is the
         # one place the probe counter can be dropped without leaking. A
@@ -568,20 +634,29 @@ class Pool:
         # would outlive the machine for the life of the process.
         self._probe_failures.pop(worker.id, None)
 
-        if worker.state is not WorkerState.STOPPING:
-            worker.state = WorkerState.STOPPING
-            worker.current_job_id = None
-            self.store.save_worker(worker)
+        # A claim, not a write: of two processes deciding to stop the same
+        # machine, or one stopping it while another hands it a job, one wins.
+        # A machine another live process holds is left to that process.
+        now = self._wall()
+        if not self.store.claim_for_stop(
+            worker.id, self.instance_id, now, now + self.lease_seconds
+        ):
+            return False
+        worker.state = WorkerState.STOPPING
+        worker.current_job_id = None
+        worker.lease_owner = self.instance_id
 
         if worker.backend_id is not None:
             try:
-                await self.backend.stop(worker.backend_id)
+                async with self._holding(worker_id=worker.id):
+                    await self.backend.stop(worker.backend_id)
             except Exception:
                 logger.exception(
                     "backend failed to stop a worker; it may still be billing",
                     extra={"worker_id": worker.id, "backend_id": worker.backend_id},
                 )
         self.store.delete_worker(worker.id)
+        return True
 
     # --- restart ---
 
@@ -597,7 +672,13 @@ class Pool:
         process, and the only remaining source is the wall clock — inventing a
         duration from it would bill a customer for our own crash. Undercharging
         is the right direction to be wrong in.
+
+        Over a shared store, only rows this instance may take over change: its
+        own from before the restart, and any whose lease has run out. A machine
+        or job another live process holds is that process's business, and the
+        store's conditional updates are what leave it alone.
         """
+        now = self._wall()
         for worker in self.store.list_workers():
             if worker.endpoint is None or not await self._health_or_false(worker.endpoint):
                 await self._stop_worker(worker)
@@ -620,20 +701,101 @@ class Pool:
                 # and no _await_boot task survived the restart to apply it.
                 # Left alone this machine bills forever and takes a slot
                 # against max_workers without ever accepting work.
-                worker.state = WorkerState.WARM
-                self.store.save_worker(worker)
+                self.store.mark_warm(worker, self.instance_id, now)
 
-        for job in self.store.list_jobs([JobState.DISPATCHED, JobState.RUNNING]):
-            job.state = JobState.FAILED
-            job.error = "pool restarted while the job was in flight"
-            job.completed_at = self._wall()
-            self.store.save_job(job)
+        in_flight = [JobState.DISPATCHED, JobState.RUNNING]
+        for job in self.store.list_jobs(in_flight):
+            self.store.fail_job(
+                job.id,
+                "pool restarted while the job was in flight",
+                self._wall(),
+                states=in_flight,
+                owner=self.instance_id,
+                now=now,
+            )
 
         self._fail_jobs_without_a_type()
         for machine_type in self.machine_types:
             for tenant_id in self.store.queued_tenants(machine_type):
                 await self._drain(machine_type, tenant_id)
                 await self._ensure_capacity(machine_type, tenant_id)
+
+    async def reclaim_expired_leases(self) -> int:
+        """Finish what a pool process that stopped renewing left behind.
+
+        Its in-flight jobs fail, since their results went to a process that is
+        gone, and its starting, busy and stopping machines are stopped, since
+        nothing can vouch for what is running on them. Returns how many
+        machines were stopped. Run by the scaler; a pool alone on its store
+        never has an expired lease that is not its own, and `recover` takes
+        those back at startup.
+        """
+        now = self._wall()
+        in_flight = [JobState.DISPATCHED, JobState.RUNNING]
+        # Another process's rows only: this one's own are live in this process,
+        # and a warm machine has no lease to expire. Whether the lease has run
+        # out is the store's call, made in the same statement that acts on it.
+        for job in self.store.list_jobs(in_flight):
+            if job.lease_owner is None or job.lease_owner == self.instance_id:
+                continue
+            if self.store.fail_job(
+                job.id,
+                f"pool instance {job.lease_owner!r} stopped renewing its lease "
+                "while the job was in flight",
+                now,
+                states=in_flight,
+                owner=self.instance_id,
+                now=now,
+            ):
+                logger.warning(
+                    "failed a job abandoned by another pool process",
+                    extra={"job_id": job.id, "lease_owner": job.lease_owner},
+                )
+
+        stopped = 0
+        for worker in self.store.list_workers():
+            if worker.lease_owner is None or worker.lease_owner == self.instance_id:
+                continue
+            if await self._stop_worker(worker):
+                logger.warning(
+                    "stopped a machine abandoned by another pool process",
+                    extra={"worker_id": worker.id, "lease_owner": worker.lease_owner},
+                )
+                stopped += 1
+        if stopped:
+            await self._offer_freed_capacity()
+        return stopped
+
+    @contextlib.asynccontextmanager
+    async def _holding(
+        self, *, job_id: str | None = None, worker_id: str | None = None
+    ) -> AsyncIterator[None]:
+        """Renew this process's lease on a job and a machine while the body
+        runs, so another process takes them over only if this one dies."""
+
+        async def renew() -> None:
+            while True:
+                await asyncio.sleep(self.lease_seconds / 3)
+                try:
+                    self.store.renew_lease(
+                        self.instance_id,
+                        self._wall() + self.lease_seconds,
+                        job_id=job_id,
+                        worker_id=worker_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "could not renew a lease",
+                        extra={"job_id": job_id, "worker_id": worker_id},
+                    )
+
+        renewal = asyncio.create_task(renew())
+        try:
+            yield
+        finally:
+            renewal.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await renewal
 
     async def _health_or_false(self, endpoint: str) -> bool:
         try:
@@ -791,8 +953,7 @@ class Pool:
                     "machine was last active in the future; clamping to now",
                     extra={"worker_id": worker.id, "skew_seconds": round(last_active - now, 1)},
                 )
-                worker.last_active_at = now
-                self.store.save_worker(worker)
+                self.store.touch_worker(worker.id, now)
                 continue
 
             idle_for = now - last_active
@@ -828,6 +989,7 @@ class Pool:
         while True:
             await asyncio.sleep(interval_seconds)
             try:
+                await self.reclaim_expired_leases()
                 await self.reap_idle_workers()
                 await self.probe_warm_workers()
             except Exception:
