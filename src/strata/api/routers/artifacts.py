@@ -336,6 +336,8 @@ async def get_artifact_info(
         byte_size=artifact.byte_size,
         created_at=artifact.created_at or 0,
         content_sha256=artifact.content_sha256,
+        provenance_hash=artifact.provenance_hash,
+        transform_spec=artifact.transform_spec,
     )
 
 

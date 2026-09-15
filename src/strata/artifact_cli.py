@@ -284,8 +284,15 @@ def _walk_lineage(
 
     input_versions = json.loads(artifact.input_versions) if artifact.input_versions else {}
     for uri, version in input_versions.items():
-        if uri.startswith("strata://artifact/") and _depth < max_depth:
+        # A name input (a notebook's ``@dataset``) records the version it
+        # resolved to, which is what the walk follows.
+        if uri.startswith("strata://artifact/"):
             ref = uri[len("strata://artifact/") :]
+        elif uri.startswith("strata://name/"):
+            ref = str(version)
+        else:
+            ref = ""
+        if "@v=" in ref and _depth < max_depth:
             artifact_id, _, version_str = ref.partition("@v=")
             try:
                 upstream = store.get_artifact(artifact_id, int(version_str))

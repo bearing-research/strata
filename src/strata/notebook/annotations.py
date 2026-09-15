@@ -20,6 +20,10 @@ Supported annotations::
                                   — Declare a URL the cell reads; its bytes are
                                     downloaded, injected as a Path, and their
                                     digest joins the cell's provenance.
+    # @dataset <name> <registry-name>[@<alias>|@v=<n>]
+                                  — Declare a registry name the cell reads; it
+                                    resolves to one artifact version, bound to
+                                    <name>, which joins the cell's provenance.
     # @env <KEY>=<value>          — Set an environment variable for this cell
     # @variant <group> <name>     — Mark this cell as a variant in <group>; siblings
                                     in the same group share a defines contract and
@@ -40,7 +44,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
-from strata.notebook.models import FetchSpec, MountMode, MountSpec, TableSpec
+from strata.notebook.models import DatasetSpec, FetchSpec, MountMode, MountSpec, TableSpec
 
 
 class LoopWirePayload(TypedDict):
@@ -227,7 +231,7 @@ def _line_sep(source: str) -> str:
 
 # Directives that may appear more than once in a cell; the single-line splice in
 # ``set_annotation_directive`` would silently collapse them, so it refuses them.
-_REPEATABLE_DIRECTIVES = frozenset({"env", "mount", "table", "fetch"})
+_REPEATABLE_DIRECTIVES = frozenset({"env", "mount", "table", "fetch", "dataset"})
 
 
 def set_annotation_directive(source: str, key: str, value: str) -> str:
@@ -291,6 +295,7 @@ class CellAnnotations:
     mounts: list[MountSpec] = field(default_factory=list)
     tables: list[TableSpec] = field(default_factory=list)
     fetches: list[FetchSpec] = field(default_factory=list)
+    datasets: list[DatasetSpec] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
 
     # Prompt cell annotations
@@ -410,6 +415,11 @@ def parse_annotations(source: str) -> CellAnnotations:
             fetch = _parse_fetch_annotation(value)
             if fetch is not None:
                 result.fetches.append(fetch)
+
+        elif key == "dataset":
+            dataset = _parse_dataset_annotation(value)
+            if dataset is not None:
+                result.datasets.append(dataset)
 
         elif key == "env":
             eq_idx = value.find("=")
@@ -626,6 +636,30 @@ def _parse_fetch_annotation(value: str) -> FetchSpec | None:
     try:
         return FetchSpec.model_validate(
             {"name": parts[0], "url": parts[1], "sha256": sha256, "refetch": refetch}
+        )
+    except ValueError:
+        return None
+
+
+def _parse_dataset_annotation(value: str) -> DatasetSpec | None:
+    """Parse ``<var> <name>[@<alias>|@v=<n>]``."""
+    parts = value.split()
+    if len(parts) != 2 or not parts[0].isidentifier():
+        return None
+    dataset, sep, selector = parts[1].rpartition("@")
+    if not sep:
+        dataset, selector = parts[1], ""
+    alias: str | None = None
+    version: str | None = None
+    if selector.startswith("v="):
+        version = selector.removeprefix("v=")
+    elif selector:
+        alias = selector
+    elif sep:
+        return None
+    try:
+        return DatasetSpec.model_validate(
+            {"name": parts[0], "dataset": dataset, "alias": alias, "version": version}
         )
     except ValueError:
         return None
