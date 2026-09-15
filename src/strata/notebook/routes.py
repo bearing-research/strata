@@ -3167,9 +3167,9 @@ async def promote_notebook_artifact(
             status_code=404, detail=f"{artifact_id}@v={version} is not in this notebook's store"
         )
 
-    target = RemoteStore(
-        str(base_url), dict(getattr(config, "notebook_remote_store_headers", {}) or {})
-    )
+    from strata.auth import remote_store_headers
+
+    target = RemoteStore(str(base_url), remote_store_headers(config))
     try:
         # The copy is a chain of blocking HTTP calls against another machine,
         # so it goes off the event loop: the notebook's WebSocket has to keep

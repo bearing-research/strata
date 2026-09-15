@@ -414,6 +414,11 @@ class StrataConfig(BaseSettings):
     # ambient client targets the local server as before.
     notebook_remote_store_url: str | None = None
     notebook_remote_store_headers: dict[str, str] = Field(default_factory=dict)
+    # Send the caller's principal to the remote store as X-Strata-Principal,
+    # replacing any the static headers name, so a shared server's results,
+    # promotions and approvals are attributed to the member and not the server.
+    # Off for a remote store that expects one fixed service identity.
+    notebook_remote_store_forward_principal: bool = True
     # Consult the remote store on a LOCAL cache miss, so a colleague's
     # expensive cell becomes your instant result. Distinct from the knob above,
     # which only redirects a cell's ambient client: that is explicit publish

@@ -3247,7 +3247,9 @@ class CellExecutor:
         config = self._lake_config()
         if not getattr(config, "notebook_remote_store_url", None):
             return {}
-        return dict(getattr(config, "notebook_remote_store_headers", {}) or {})
+        from strata.auth import remote_store_headers
+
+        return remote_store_headers(config)
 
     async def _pull_from_team_store(
         self,
