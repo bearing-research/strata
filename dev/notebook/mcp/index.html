@@ -2129,10 +2129,44 @@ and the <a href="../tui/">terminal viewer</a> double as a <strong>live view</str
 work - cells flip status, outputs render, and new cells appear as the agent
 edits them.</p>
 <h2 id="enable-it">Enable it<a class="headerlink" href="#enable-it" title="Permanent link">&para;</a></h2>
-<p>The endpoint is <strong>off by default</strong> and is <strong>personal-mode only</strong> - it has no
-per-request authentication, so it grants a caller full control of the session
-and is safe only behind a loopback, single-user deployment. (Starting the
-server in service mode with the flag set is rejected at startup.)</p>
+<p>The endpoint is <strong>off by default</strong>. On a personal server there is one user and
+nothing to check, so a caller has full control of the session. Keep it behind
+loopback.</p>
+<p>On a <strong>service-mode</strong> server it needs principal auth (<code>auth_mode</code> of
+<code>trusted_proxy</code> or <code>api_key</code>). Service mode without principal auth is rejected
+at startup when the flag is set. Each tool call then runs as the caller its HTTP
+request names. Authorship, team-store attribution and the registry audit record
+that caller, and the call is checked against the same notebook scopes as the
+REST routes and the WebSocket:</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Tools</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>notebook:read</code></td>
+<td><code>list_notebooks</code>, <code>get_notebook</code>, <code>get_cell</code>, <code>get_variable</code>, <code>dag</code>, <code>status</code>, <code>list_workers</code>, <code>lineage</code>, <code>publish_preflight</code></td>
+</tr>
+<tr>
+<td><code>notebook:write</code></td>
+<td><code>add_cell</code>, <code>edit_cell</code>, <code>remove_cell</code>, <code>move_cell</code>, <code>note</code>, <code>add_worker</code>, <code>set_default_worker</code>, <code>remove_worker</code>, <code>disconnect_ssh_worker</code>, <code>promote</code></td>
+</tr>
+<tr>
+<td><code>notebook:execute</code></td>
+<td><code>run_cell</code>, <code>run_tests</code>, <code>run_snippet</code>, <code>add_dependency</code>, <code>remove_dependency</code>, <code>connect_ssh_worker</code>, and any tool not listed</td>
+</tr>
+<tr>
+<td><code>artifacts:publish</code></td>
+<td><code>publish</code></td>
+</tr>
+</tbody>
+</table>
+<p>Every open session on the server is visible to any caller holding
+<code>notebook:read</code>: a server serves one organization, and the check is scopes, not
+ownership.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>mcp<span class="w">          </span><span class="c1"># or: uv tool install &quot;strata-notebook[mcp]&quot;</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">STRATA_MCP_ENABLED</span><span class="o">=</span><span class="nb">true</span><span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>-m<span class="w"> </span>strata
 </code></pre></div>

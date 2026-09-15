@@ -2675,7 +2675,7 @@ strings, numbers, booleans, and TOML arrays all work as expected.</p>
 <tr>
 <td><code>STRATA_MCP_ENABLED</code></td>
 <td><code>false</code></td>
-<td>Mount the MCP server at <code>/mcp</code> so a coding agent can drive the live session. <strong>Personal mode only</strong> (rejected at startup in service mode) and requires the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/">Notebook → MCP</a></td>
+<td>Mount the MCP server at <code>/mcp</code> so a coding agent can drive the live session. In service mode it requires principal auth (<code>trusted_proxy</code> or <code>api_key</code>); each tool call then runs as its caller and is checked against the notebook scopes. Requires the <code>[mcp]</code> extra. See <a href="../../notebook/mcp/">Notebook → MCP</a></td>
 </tr>
 <tr>
 <td><code>STRATA_ARROW_MEMORY_POOL</code></td>
