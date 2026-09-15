@@ -53,6 +53,12 @@ families include:
   breakdowns when multi-tenant is on
 - **Rate limiter**: request acceptance / rejection counts
 - **Server**: uptime, health-check status
+- **AI**: `strata_ai_calls_total`, `strata_ai_input_tokens_total` and
+  `strata_ai_output_tokens_total`, labelled by `tenant`, `principal` and
+  `model`. Counted from each provider response: the assistant's agent loop,
+  prompt cells, and the other AI routes. The labels are the caller the request
+  ran as, and are empty in personal mode. The series appear after the first
+  model call.
 
 For multi-tenant deployments the labels carry a `tenant` dimension
 so dashboards can split per-tenant usage.

@@ -140,6 +140,8 @@ A locked gate still prompts with Auto-approve on, and where there is no one to p
 
 There is **no aggregate token budget** across iterations - a 10-iteration run can consume up to 10× the per-call limits. If you're using a metered provider, expect costs roughly proportional to (notebook context size + conversation history + tool-call traces) × iterations.
 
+What was used is reported, even though it isn't capped. Each run's `agent_done` frame carries `tokens: {input, output}` totalled across its iterations. The server also counts every model call on [`/metrics/prometheus`](../deployment/observability.md#metrics-metricsprometheus), by tenant, principal and model.
+
 **What's NOT bounded.**
 
 - **Package allowlist.** `add_package` accepts any pip-compatible package spec. Approval-gated, so the user sees the spec before install, but there's no server-side allowlist or signature check. `pandas>=2.0` and `evil-package@git+https://...` both pass the same gate.

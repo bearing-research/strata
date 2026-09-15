@@ -844,6 +844,25 @@ async def metrics_prometheus():
             total_bytes = tm["bytes_from_cache"] + tm["bytes_from_storage"]
             lines.append(f'strata_tenant_bytes_total{{tenant="{tenant_id}"}} {total_bytes}')
 
+    # Model tokens, by who used them. Absent until the first model call.
+    from strata.notebook.llm.usage import llm_usage
+
+    usage = llm_usage()
+    if usage:
+        for field, name, help_text in (
+            ("calls", "strata_ai_calls_total", "Model calls"),
+            ("input_tokens", "strata_ai_input_tokens_total", "Model input (prompt) tokens"),
+            ("output_tokens", "strata_ai_output_tokens_total", "Model output (completion) tokens"),
+        ):
+            lines.extend(["", f"# HELP {name} {help_text}", f"# TYPE {name} counter"])
+            for row in usage:
+                labels = (
+                    f'tenant="{_prom_label(row.tenant)}",'
+                    f'principal="{_prom_label(row.principal)}",'
+                    f'model="{_prom_label(row.model)}"'
+                )
+                lines.append(f"{name}{{{labels}}} {getattr(row, field)}")
+
     # Add build metrics (if server transforms are enabled)
     try:
         from strata.transforms.build_metrics import get_build_metrics
