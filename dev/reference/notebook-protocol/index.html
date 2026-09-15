@@ -1638,6 +1638,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#presence-and-soft-locks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Presence and soft locks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-to-go-next" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2294,6 +2305,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#presence-and-soft-locks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Presence and soft locks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#where-to-go-next" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2368,8 +2390,9 @@ client can do - there's no internal API.</p>
    the same payload shape.
 2. <strong>Connect the WebSocket.</strong> <code>ws://.../v1/notebooks/ws/{session_id}</code>. The
    handler verifies the session exists and (if owned) that the caller is the
-   owner - refuses with close code <code>1008 Notebook not found</code> otherwise. No
-   initial frame is sent on accept.
+   owner - refuses with close code <code>1008 Notebook not found</code> otherwise. The
+   only frame sent on accept is <code>presence</code> (see
+   <a href="#presence-and-soft-locks">Presence and soft locks</a>).
 3. <strong>Send <code>notebook_sync</code></strong> as the first client → server message. The server
    answers with a <code>notebook_state</code> frame containing the same fields as the
    open response. This is your sole resync primitive on reconnects - there's
@@ -2612,7 +2635,12 @@ so a client has to handle it on every message it sends:</p>
 <tr>
 <td><code>cell_id</code></td>
 <td>no</td>
-<td>The cell concerned, on <code>cell_busy</code></td>
+<td>The cell concerned, on <code>cell_busy</code> and <code>cell_locked</code></td>
+</tr>
+<tr>
+<td><code>held_by</code></td>
+<td>no</td>
+<td>Who changed the cell, on <code>cell_locked</code></td>
 </tr>
 </tbody>
 </table>
@@ -2634,6 +2662,10 @@ so a client has to handle it on every message it sends:</p>
 <td>The cell is executing and its source cannot be edited yet</td>
 </tr>
 <tr>
+<td><code>cell_locked</code></td>
+<td><code>held_by</code> changed the cell moments ago; resend with <code>force</code> to take it over</td>
+</tr>
+<tr>
 <td><code>read_only</code></td>
 <td>The message is not allowed in app view</td>
 </tr>
@@ -2647,6 +2679,33 @@ so a client has to handle it on every message it sends:</p>
 the key is absent rather than null, so test for presence. The shape is defined
 by <code>ErrorPayload</code> in <code>strata.notebook.ws_payloads</code>, which every emit site
 builds through - a field that is not on that model cannot reach a client.</p>
+<h2 id="presence-and-soft-locks">Presence and soft locks<a class="headerlink" href="#presence-and-soft-locks" title="Permanent link">&para;</a></h2>
+<p>Several clients can be on one session: people in browser tabs, a TUI, an agent.
+The server tells each of them who else is there.</p>
+<p><strong>Identity.</strong> Under <code>trusted_proxy</code> and <code>api_key</code> it is the principal. With no
+authentication it is the <code>author</code> a client declares on its frames (<code>strata
+agent</code> and MCP clients name themselves), and <code>local</code> when it declares none.
+Several connections with one identity are one entry.</p>
+<p><strong><code>presence</code></strong> lists <code>{principal, focused_cell_id, since}</code> per identity, plus
+<code>you</code>, the receiving connection's own identity, so a client can leave itself
+out. It arrives on connect, whenever a connection joins, leaves or focuses a
+cell, and after a cell edit over REST. An identity editing over REST has no
+connection, so it is shown on the cell it edited for a minute after its last
+edit.</p>
+<p><strong><code>cell_focus</code></strong> <code>{cell_id}</code> (or <code>null</code>) tells the server which cell this
+connection is on. Editing a cell also focuses it.</p>
+<p><strong>Soft locks.</strong> The identity that last changed a cell holds it for
+<code>STRATA_NOTEBOOK_CELL_LOCK_SECONDS</code> (default 5). An edit by a different
+identity inside that window is not applied:</p>
+<ul>
+<li>over the WebSocket, <code>cell_source_update</code> is answered with an <code>error</code> frame,
+  <code>code: "cell_locked"</code>, <code>cell_id</code> and <code>held_by</code>;</li>
+<li>over REST, <code>PUT .../cells/{cell_id}</code> returns <code>409</code> with the same <code>code</code>,
+  <code>cell_id</code> and <code>held_by</code> in <code>detail</code>.</li>
+</ul>
+<p>Resend with <code>force: true</code> to take the cell over. An identity never contends
+with itself, so one person in several tabs, or a single-user personal session,
+edits exactly as before. <code>0</code> turns the lock off.</p>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="../rest-api/">REST API Reference</a> - every endpoint with request /

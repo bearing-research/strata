@@ -3574,6 +3574,11 @@ deployment, not only in one that opted in to something.</p>
 <td>Hosts <code>@fetch</code> may reach even on a private address (an internal data server). Public hosts need no entry; private, loopback and link-local addresses are refused unless listed. Comma-separated exact names, or a leading dot for a suffix (<code>.internal</code>). Same rule as <code>STRATA_WORKER_ALLOWED_HOSTS</code>, and applied to every redirect hop.</td>
 </tr>
 <tr>
+<td><code>STRATA_NOTEBOOK_CELL_LOCK_SECONDS</code></td>
+<td><code>5.0</code></td>
+<td>How long the last person to change a notebook cell holds it. An edit by someone else inside the window is refused with <code>cell_locked</code> and the holder's name, over the WebSocket and over REST, unless it sends <code>force</code>. One identity never contends with itself, so a single user in several tabs is unaffected. <code>0</code> turns the soft lock off. See the <a href="../notebook-protocol/#presence-and-soft-locks">client protocol</a>.</td>
+</tr>
+<tr>
 <td><code>STRATA_NOTEBOOK_HARNESS_ENV_ALLOWLIST</code></td>
 <td><code>[]</code> (everything)</td>
 <td>Which of the server's environment variables a cell subprocess is given. A cell is arbitrary Python, so unset — the default, and right on a laptop — every member who can run a cell can read <code>STRATA_NOTEBOOK_REMOTE_STORE_HEADERS</code>, <code>STRATA_PROXY_TOKEN</code>, worker tokens and every data-source credential the server holds. Entries are exact names or a prefix written with a trailing <code>*</code>; the essentials a subprocess cannot start without (<code>PATH</code>, <code>HOME</code>, <code>TMPDIR</code>, <code>UV_*</code>, …) are always included, and <code>STRATA_*</code> is dropped unless named exactly. A cell's own <code>[env]</code> and mount credentials travel in the manifest rather than the process environment, so the list stays short. Applies to every process that runs cell code: the cold, R and batch harnesses, the warm pool worker, the inspect REPL and cell tests. Not isolation on its own: a cell running as the server's user can read <code>/proc/&lt;server pid&gt;/environ</code>; see <code>STRATA_NOTEBOOK_HARNESS_USER</code>.</td>

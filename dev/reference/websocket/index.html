@@ -1760,6 +1760,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#presence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Presence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#errors" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2481,6 +2492,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#presence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Presence
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#errors" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2645,8 +2667,13 @@
 <tbody>
 <tr>
 <td><code>cell_source_update</code></td>
-<td><code>{ "cell_id": "...", "source": "..." }</code></td>
-<td>Source changed</td>
+<td><code>{ "cell_id": "...", "source": "...", "force": false }</code></td>
+<td>Source changed. Refused with <code>cell_locked</code> when someone else changed the cell moments ago, unless <code>force</code> is true</td>
+</tr>
+<tr>
+<td><code>cell_focus</code></td>
+<td><code>{ "cell_id": "..." }</code></td>
+<td>The cell this client is on, or <code>null</code>. Updates <code>presence</code> for everyone</td>
 </tr>
 </tbody>
 </table>
@@ -2994,6 +3021,23 @@
 <td><code>agent_done</code></td>
 <td><code>{ "job_id": "...", "content": "...", "model": "...", ... }</code></td>
 <td>Agent finished, failed, or was cancelled</td>
+</tr>
+</tbody>
+</table>
+<h3 id="presence">Presence<a class="headerlink" href="#presence" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Payload</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>presence</code></td>
+<td><code>{ "principals": [{ "principal": "alice", "focused_cell_id": "c1", "since": 1789455008.4 }], "you": "bob" }</code></td>
+<td>Who is on the session and which cell each is on. Sent on connect, disconnect and focus change, and after an edit over REST</td>
 </tr>
 </tbody>
 </table>
