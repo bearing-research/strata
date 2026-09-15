@@ -224,4 +224,4 @@ async def test_an_r_cell_runs_on_a_signed_transport_worker(
     assert ran.outputs["model"]["content_type"] == "application/x-r-rds"
     downstream = await executor.execute_cell("c2", r_c2)
     assert downstream.success is True, downstream.error
-    assert downstream.outputs["coef"]["preview"] == 3
+    assert downstream.outputs["coef"]["preview"] == "3"
