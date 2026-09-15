@@ -26,6 +26,7 @@ from strata.notebook.hardware import hardware_report
 from strata.notebook.models import MountSpec
 from strata.notebook.mounts import MountResolver, parse_mount_uri
 from strata.notebook.remote_bundle import pack_notebook_output_bundle
+from strata.tracing import trace_span_from
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 from strata.url_safety import host_is_allowlisted, url_safety_problem
 
@@ -384,6 +385,9 @@ def create_notebook_executor_app(
         write_input: Any,
         build_id: str | None = None,
         log_url: str | None = None,
+        trace_carrier: dict[str, Any] | None = None,
+        notebook_id: str | None = None,
+        cell_id: str | None = None,
     ) -> tuple[Path, Path] | JSONResponse:
         """Execute a cell and pack outputs into a bundle file.
 
@@ -410,17 +414,26 @@ def create_notebook_executor_app(
         # nothing; held until the harness exits.
         gpu = _admit()
         try:
-            return await _stage_and_run(
-                source=source,
-                timeout_seconds=timeout_seconds,
-                raw_inputs=raw_inputs,
-                mount_specs=mount_specs,
-                runtime_env=runtime_env,
-                write_input=write_input,
+            # A child of whatever dispatched this, when the dispatcher sent its
+            # trace context: the server's dispatch span, or a pool's in between.
+            with trace_span_from(
+                "worker.execute",
+                trace_carrier,
                 build_id=build_id,
-                log_url=log_url,
-                gpu=gpu,
-            )
+                notebook_id=notebook_id,
+                cell_id=cell_id,
+            ):
+                return await _stage_and_run(
+                    source=source,
+                    timeout_seconds=timeout_seconds,
+                    raw_inputs=raw_inputs,
+                    mount_specs=mount_specs,
+                    runtime_env=runtime_env,
+                    write_input=write_input,
+                    build_id=build_id,
+                    log_url=log_url,
+                    gpu=gpu,
+                )
         finally:
             _release(gpu)
 
@@ -569,6 +582,7 @@ def create_notebook_executor_app(
         form: Any,
         build_id: str | None = None,
         log_url: str | None = None,
+        trace_carrier: dict[str, Any] | None = None,
     ) -> Response:
         async def _write_uploaded_input(
             var_name: str,
@@ -597,6 +611,7 @@ def create_notebook_executor_app(
             write_input=_write_uploaded_input,
             build_id=build_id,
             log_url=log_url,
+            trace_carrier=trace_carrier,
         )
         if isinstance(result, JSONResponse):
             return result
@@ -709,6 +724,7 @@ def create_notebook_executor_app(
             runtime_env=runtime_env,
             form=form,
             build_id=str(metadata.get("build_id") or "") or None,
+            trace_carrier=dict(http_request.headers),
         )
 
     @app.post("/v1/execute", dependencies=[Depends(require_worker_token)])
@@ -783,6 +799,7 @@ def create_notebook_executor_app(
             runtime_env=runtime_env,
             form=form,
             build_id=str(metadata.get("build_id") or "") or None,
+            trace_carrier=dict(http_request.headers),
         )
 
     @app.post("/v1/execute-manifest", dependencies=[Depends(require_worker_token)])
@@ -927,6 +944,15 @@ def create_notebook_executor_app(
             write_input=_download_input,
             build_id=str(metadata.get("build_id") or "") or None,
             log_url=log_url,
+            # The headers first: a pool between here and the server forwards
+            # its own span's context there, which is the nearer parent. The
+            # manifest's copy is the server's, for a dispatcher that sends
+            # only the body.
+            trace_carrier=(
+                dict(http_request.headers) if "traceparent" in http_request.headers else metadata
+            ),
+            notebook_id=str(metadata.get("notebook_id") or "") or None,
+            cell_id=str(metadata.get("cell_id") or "") or None,
         )
         if isinstance(bundle_result, JSONResponse):
             return bundle_result

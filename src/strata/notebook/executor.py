@@ -138,6 +138,7 @@ from strata.notebook.workers import (
     worker_supports_notebook_execution,
     worker_transport,
 )
+from strata.tracing import current_trace_context, trace_span
 from strata.transforms.build_store import get_build_store
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
@@ -2257,18 +2258,28 @@ class CellExecutor:
             )
 
         if is_http_executor_worker(worker_spec):
-            return await self._dispatch_http_executor(
-                worker_spec,
-                source,
-                input_specs,
-                mount_specs,
-                output_dir,
-                runtime_env,
-                timeout_seconds,
-                remote_build_id=remote_build_id,
+            # The parent of everything the remote side records: its context
+            # travels in the request headers and the manifest, so a worker's
+            # spans (and a pool's in between) join this trace.
+            with trace_span(
+                "notebook.dispatch",
+                worker=worker_spec.name,
+                build_id=remote_build_id,
+                notebook_id=self.session.notebook_state.id,
                 cell_id=cell_id,
-                cell_provenance_hash=cell_provenance_hash,
-            )
+            ):
+                return await self._dispatch_http_executor(
+                    worker_spec,
+                    source,
+                    input_specs,
+                    mount_specs,
+                    output_dir,
+                    runtime_env,
+                    timeout_seconds,
+                    remote_build_id=remote_build_id,
+                    cell_id=cell_id,
+                    cell_provenance_hash=cell_provenance_hash,
+                )
 
         raise RuntimeError(f"Unsupported worker backend: {worker_spec.backend.value}")
 
@@ -2468,6 +2479,7 @@ class CellExecutor:
         timeout = max(timeout_seconds + 5.0, 30.0)
         headers = {
             EXECUTOR_PROTOCOL_HEADER: EXECUTOR_PROTOCOL_VERSION,
+            **current_trace_context(),
         }
         if worker_token:
             headers["Authorization"] = f"Bearer {worker_token}"
@@ -2598,6 +2610,7 @@ class CellExecutor:
 
         build_id = build_id or f"nbbuild-{uuid.uuid4().hex[:12]}"
         artifact_id = f"nb_remote_{self.session.notebook_state.id}_{build_id}"
+        trace_context = current_trace_context()
         artifact_version: int | None = None
         failure_recorded = False
 
@@ -2718,6 +2731,10 @@ class CellExecutor:
                     "notebook_id": self.session.notebook_state.id,
                     "cell_id": cell_id,
                     "cell_provenance_hash": cell_provenance_hash,
+                    # W3C trace context of the dispatch, for a worker reached
+                    # without the headers (a dispatcher that queues the
+                    # manifest and forwards only the body).
+                    **trace_context,
                 },
                 input_artifacts=input_artifacts,
                 max_output_bytes=state.config.max_transform_output_bytes,
@@ -2726,7 +2743,9 @@ class CellExecutor:
 
             manifest_execute_url = self._manifest_execute_url(executor_url)
             worker_token = _resolve_worker_token(worker_spec)
-            headers = {"Authorization": f"Bearer {worker_token}"} if worker_token else None
+            headers = {**trace_context}
+            if worker_token:
+                headers["Authorization"] = f"Bearer {worker_token}"
             # Say where this build's console chunks should be delivered before
             # the worker can send any. Registered around the request rather
             # than for the session, so a chunk arriving late for a finished

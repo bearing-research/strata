@@ -205,6 +205,9 @@ class Job:
     error: str | None = None
     started_at: float | None = None
     completed_at: float | None = None
+    trace_context: dict[str, str] = field(default_factory=dict)
+    """W3C `traceparent` / `tracestate` the submitter sent, so the machine's
+    work joins the submitter's trace. Opaque to the pool, like the payload."""
 
 
 @dataclass(frozen=True)

@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     error TEXT,
     submitted_at REAL NOT NULL,
     started_at REAL,
-    completed_at REAL
+    completed_at REAL,
+    trace_context TEXT
 );
 
 -- No foreign key to workers(id): a worker row is deleted when its machine
@@ -138,6 +139,7 @@ def _to_job(row: sqlite3.Row) -> Job:
         error=row["error"],
         started_at=row["started_at"],
         completed_at=row["completed_at"],
+        trace_context=json.loads(row["trace_context"]) if row["trace_context"] else {},
     )
 
 
@@ -159,6 +161,9 @@ class PoolStore:
             columns = {row[1] for row in self._conn.execute("PRAGMA table_info(workers)")}
             if "image" not in columns:
                 self._conn.execute("ALTER TABLE workers ADD COLUMN image TEXT")
+            job_columns = {row[1] for row in self._conn.execute("PRAGMA table_info(jobs)")}
+            if "trace_context" not in job_columns:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN trace_context TEXT")
             self._conn.commit()
 
     def close(self) -> None:
@@ -308,8 +313,9 @@ class PoolStore:
                 """
                 INSERT INTO jobs (id, tenant_id, machine_type, priority, state,
                                   session_id, worker_id, timeout_seconds, payload,
-                                  result, error, submitted_at, started_at, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  result, error, submitted_at, started_at, completed_at,
+                                  trace_context)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     state = excluded.state,
                     worker_id = excluded.worker_id,
@@ -333,6 +339,7 @@ class PoolStore:
                     job.submitted_at,
                     job.started_at,
                     job.completed_at,
+                    json.dumps(job.trace_context) if job.trace_context else None,
                 ),
             )
             self._conn.commit()
