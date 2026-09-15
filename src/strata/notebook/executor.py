@@ -54,7 +54,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 
@@ -508,6 +508,14 @@ class BatchExecutionResult:
     completed: bool  # True if batch_end with reason=complete
     failed_cell_id: str | None = None
     end_reason: str = "complete"  # "complete" | "cell_error" | "persist_failed" | "subprocess_died"
+
+
+# How often an accepted job's status is read. Module-level so a test can make
+# polling immediate rather than wait on it.
+_JOB_POLL_SECONDS = 1.0
+
+# The clock deadlines are measured on, patchable for the same reason.
+_monotonic = time.monotonic
 
 
 class RemoteExecutionError(RuntimeError):
@@ -2760,8 +2768,23 @@ class CellExecutor:
                     response = await client.post(
                         manifest_execute_url, json=manifest, headers=headers
                     )
+                if response.status_code == 202:
+                    response = await self._await_accepted_job(
+                        response,
+                        manifest_execute_url=manifest_execute_url,
+                        headers=headers,
+                        timeout_seconds=timeout_seconds,
+                        cancel=lambda: self._cancel_remote_execution(
+                            executor_url, build_id, worker_token
+                        ),
+                        worker_spec=worker_spec,
+                        cell_id=cell_id,
+                    )
             finally:
                 console_relay.unregister(build_id)
+        except RemoteExecutionError as exc:
+            _mark_failed(str(exc), exc.remote_error_code or "EXECUTOR_ERROR")
+            raise
         except asyncio.CancelledError:
             _mark_failed("Notebook manifest execution cancelled", "CANCELLED")
             # Shielded: this runs inside a cancellation, so an unshielded await
@@ -2946,6 +2969,129 @@ class CellExecutor:
                 )
         except Exception as exc:
             logger.info("Could not cancel build %s on the worker: %s", build_id, exc)
+
+    async def _await_accepted_job(
+        self,
+        accepted: httpx.Response,
+        *,
+        manifest_execute_url: str,
+        headers: dict[str, str],
+        timeout_seconds: float,
+        cancel: Callable[[], Awaitable[None]],
+        worker_spec: Any,
+        cell_id: str | None,
+    ) -> httpx.Response:
+        """Follow a job a worker accepted with 202 until it finishes.
+
+        A synchronous answer spends the cell's timeout on queueing, booting and
+        pulling an environment as well as on the cell. Here those count against
+        ``worker_provisioning_timeout_seconds`` instead, and the cell's own
+        timeout starts when the job reports ``running``. Whichever deadline
+        passes first cancels the job, since otherwise the machine keeps
+        computing for a caller that has left.
+
+        The job URL answers ``{"state": ...}``: ``queued``, ``provisioning`` or
+        ``starting`` before the cell runs; ``running``; then ``finished`` or
+        ``failed``, with ``status_code`` and ``result`` (or ``error``) standing
+        for the response a synchronous worker would have given. That response
+        is returned, and handled exactly as a synchronous one.
+        """
+        try:
+            body = accepted.json()
+        except ValueError:
+            body = {}
+        job_url = body.get("job_url") if isinstance(body, dict) else None
+        if not isinstance(job_url, str) or not job_url:
+            raise RemoteExecutionError(
+                f"Remote executor '{worker_spec.name}' accepted the job without a job_url",
+                remote_build_state="failed",
+                remote_error_code="PROTOCOL_ERROR",
+            )
+        job_url = urljoin(manifest_execute_url, job_url)
+        provisioning_limit = float(
+            getattr(self._lake_config(), "worker_provisioning_timeout_seconds", 600.0)
+        )
+
+        await self._broadcast_remote_phase(cell_id, worker_spec, "starting")
+        started = _monotonic()
+        running_since: float | None = None
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            while True:
+                reply = await client.get(job_url, headers=headers)
+                if reply.status_code != 200:
+                    await cancel()
+                    raise RemoteExecutionError(
+                        f"Remote executor '{worker_spec.name}' job status returned "
+                        f"{reply.status_code}: {self._extract_remote_error(reply)}",
+                        remote_build_state="failed",
+                        remote_error_code="JOB_STATUS_FAILED",
+                    )
+                job = reply.json()
+                state = str(job.get("state", ""))
+                if state in ("finished", "failed"):
+                    status_code = int(
+                        job.get("status_code") or (200 if state == "finished" else 502)
+                    )
+                    content = job.get("result")
+                    if content is None:
+                        content = {"detail": job.get("error") or f"job {state}"}
+                    return httpx.Response(status_code, json=content)
+
+                now = _monotonic()
+                if state == "running":
+                    if running_since is None:
+                        running_since = now
+                        await self._broadcast_remote_phase(cell_id, worker_spec, "running")
+                    if now - running_since > timeout_seconds:
+                        await cancel()
+                        raise RemoteExecutionError(
+                            cell_timeout_message(timeout_seconds),
+                            remote_build_state="failed",
+                            remote_error_code="TIMEOUT",
+                        )
+                elif now - started > provisioning_limit:
+                    await cancel()
+                    raise RemoteExecutionError(
+                        f"Remote executor '{worker_spec.name}' did not start the job within "
+                        f"{provisioning_limit:g}s (last state: {state or 'unknown'}); set "
+                        "STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS, or keep a machine warm",
+                        remote_build_state="failed",
+                        remote_error_code="PROVISIONING_TIMEOUT",
+                    )
+                await asyncio.sleep(_JOB_POLL_SECONDS)
+
+    async def _broadcast_remote_phase(
+        self, cell_id: str | None, worker_spec: Any, phase: str
+    ) -> None:
+        """Move the cell's badge between ``starting`` (provisioning) and ``running``.
+
+        Best effort: a notebook with nobody watching, or a broadcast that fails,
+        must not fail the run.
+        """
+        if not cell_id:
+            return
+        try:
+            from strata.notebook.protocol import MessageType
+            from strata.notebook.ws import _broadcast_message, _make_message, next_notebook_sequence
+            from strata.notebook.ws_payloads import cell_status_payload
+
+            notebook_id = self.session.notebook_state.id
+            await _broadcast_message(
+                notebook_id,
+                _make_message(
+                    MessageType.CELL_STATUS,
+                    next_notebook_sequence(notebook_id),
+                    cell_status_payload(
+                        cell_id,
+                        "running",
+                        remote_worker=worker_spec.name,
+                        remote_transport=worker_transport(worker_spec),
+                        remote_build_state=phase,
+                    ),
+                ),
+            )
+        except Exception:
+            logger.debug("remote phase broadcast failed", exc_info=True)
 
     def _manifest_execute_url(self, executor_url: str) -> str:
         """Map an executor base URL to the notebook manifest execution endpoint."""

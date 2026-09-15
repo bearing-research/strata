@@ -223,12 +223,16 @@ const statusClass = computed(() => `status-${props.cell.status}`)
 // Live dispatch badge: shows "dispatching → gpu-fly" when a remote cell
 // is in-flight. The backend includes remote_worker on the cell_status
 // running message precisely so this badge can appear without waiting for
-// the cell to finish.
+// the cell to finish. A worker that runs jobs asynchronously reports
+// "starting" while its machine is provisioned, before the cell's own
+// timeout begins.
 const dispatchLabel = computed(() => {
   if (props.cell.status !== 'running') return null
   const worker = props.cell.remoteWorkerName
   if (!worker) return null
-  return `dispatching → ${worker}`
+  return props.cell.remoteBuildState === 'starting'
+    ? `starting → ${worker}`
+    : `dispatching → ${worker}`
 })
 
 const statusLabel = computed(() => {

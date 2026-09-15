@@ -64,6 +64,9 @@ class CellStatusPayload(WsPayload):
     status: str
     remote_worker: str | None = None
     remote_transport: str | None = None
+    # ``starting`` while a remote job is being provisioned, ``running`` once
+    # it is, for a worker that runs cells asynchronously.
+    remote_build_state: str | None = None
     staleness_reasons: list[str] | None = None
     causality: dict[str, Any] | None = None
 
@@ -74,6 +77,7 @@ def cell_status_payload(
     *,
     remote_worker: str | None = None,
     remote_transport: str | None = None,
+    remote_build_state: str | None = None,
     staleness_reasons: list[str] | None = None,
     causality: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -89,6 +93,7 @@ def cell_status_payload(
         status=str(status),
         remote_worker=remote_worker,
         remote_transport=remote_transport,
+        remote_build_state=remote_build_state,
         staleness_reasons=staleness_reasons,
         causality=causality,
     ).model_dump(mode="json", exclude_none=True)
