@@ -8,7 +8,6 @@ MinIO container. Each test reads a table by catalog name the way a notebook's
 
 from __future__ import annotations
 
-import os
 import socket
 import time
 
@@ -89,17 +88,20 @@ def test_a_rest_catalog_table_is_read_by_name(tmp_path):
     # client, and then the scan, reads them.
     container.with_volume_mapping(str(warehouse), str(warehouse), "rw")
     container.with_env("CATALOG_WAREHOUSE", warehouse.as_uri())
-    # Both processes create directories the other writes into, as different
-    # users, so both run with an open umask. (Running the container as this
-    # uid instead fails: Hadoop cannot log in a user the image has no name for.)
-    container.with_command(["sh", "-c", "umask 0000 && exec java -jar iceberg-rest-adapter.jar"])
+    # The catalog (root in the container) writes table metadata where this
+    # process then writes data files and manifests. Hadoop creates directories
+    # 0755 whatever the umask, so the table's directories exist, open, first.
+    # (Running the container as this uid instead fails: Hadoop cannot log in a
+    # user the image has no name for.)
+    for directory in ("taxi", "taxi/trips", "taxi/trips/data", "taxi/trips/metadata"):
+        (warehouse / directory).mkdir()
+        (warehouse / directory).chmod(0o777)
     container.with_bind_ports(8181, port)
     start_container_or_skip(
         container,
         label="iceberg-rest-fixture",
         ready=lambda c: wait_for_logs(c, "Started", timeout=120),
     )
-    previous_umask = os.umask(0)
     try:
         properties = {"type": "rest", "uri": f"http://127.0.0.1:{port}"}
         catalog = load_catalog("rest", **properties)
@@ -108,7 +110,6 @@ def test_a_rest_catalog_table_is_read_by_name(tmp_path):
 
         _reads_by_name_and_pin(config, "rest", catalog, first)
     finally:
-        os.umask(previous_umask)
         container.stop()
 
 
