@@ -2315,6 +2315,15 @@ over OTLP-gRPC to <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> (default
 plus child spans for the planner, cache lookup, Parquet read,
 serialize-to-Arrow IPC, and stream write. The <code>service.name</code>
 attribute is set via <code>OTEL_SERVICE_NAME=strata</code>.</p>
+<p>A cell sent to a remote worker is one trace across processes. The
+server opens <code>notebook.dispatch</code> with <code>worker</code>, <code>build_id</code>,
+<code>notebook_id</code> and <code>cell_id</code>, and sends its W3C <code>traceparent</code> in
+the request headers and the build manifest. The worker's
+<code>worker.execute</code> span is its child. When the job goes through
+<code>strata-pool</code>, the pool's own span sits between the two if the pool
+has OpenTelemetry installed. Each process exports to its own
+<code>OTEL_EXPORTER_OTLP_ENDPOINT</code>, and the backend joins the spans by
+trace id.</p>
 <p>In Jaeger:</p>
 <ol>
 <li>Pick the <code>strata</code> service.</li>
