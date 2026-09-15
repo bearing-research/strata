@@ -262,6 +262,7 @@ jobs:
             --ignore=tests/test_lineage.py \
             --ignore=tests/test_s3_integration.py \
             --ignore=tests/test_presigned_urls_minio.py \
+            --ignore=tests/test_lake_catalogs_integration.py \
             --ignore=tests/test_artifact_store_postgres.py \
             --ignore=tests/test_migrate_to_postgres.py \
             --ignore=tests/notebook/test_e2e_mounts_s3.py \
@@ -300,6 +301,7 @@ jobs:
             --ignore=tests/test_lineage.py \
             --ignore=tests/test_s3_integration.py \
             --ignore=tests/test_presigned_urls_minio.py \
+            --ignore=tests/test_lake_catalogs_integration.py \
             --ignore=tests/test_artifact_store_postgres.py \
             --ignore=tests/test_migrate_to_postgres.py \
             --ignore=tests/notebook \

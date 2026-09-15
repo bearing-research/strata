@@ -246,6 +246,11 @@ class StrataConfig(BaseSettings):
     # Catalog settings (for pyiceberg)
     catalog_name: str = "default"
     catalog_properties: dict[str, str] = Field(default_factory=dict)
+    # Named catalogs, each a set of pyiceberg catalog properties (``type`` =
+    # ``rest``, ``glue``, ``sql``, ... plus that type's settings). A table in
+    # one is addressed as ``<name>:<namespace>.<table>``, by ``@table`` and by
+    # scans alike.
+    catalogs: dict[str, dict[str, str]] = Field(default_factory=dict)
 
     # Resource limits (backpressure)
     max_concurrent_scans: Annotated[int, Field(ge=1)] = 100

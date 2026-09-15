@@ -98,18 +98,10 @@ class PyArrowFetcher:
         # concurrent open of the same path just means one redundant handle,
         # which the insert below resolves.
 
-        # Open new file (with S3 filesystem if needed)
-        if file_path.startswith("s3://"):
-            if self._s3_filesystem is None:
-                # Create default S3 filesystem on demand
-                import pyarrow.fs as pafs
+        # Open new file, on whichever store the path names
+        from strata.lake_files import open_parquet
 
-                self._s3_filesystem = pafs.S3FileSystem()
-            # Strip s3:// prefix for PyArrow filesystem
-            s3_path = file_path[5:]
-            pf = pq.ParquetFile(s3_path, filesystem=self._s3_filesystem)
-        else:
-            pf = pq.ParquetFile(file_path)
+        pf = open_parquet(file_path, self._s3_filesystem)
         with self._file_cache_lock:
             existing = self._file_cache.get(file_path)
             if existing is not None:

@@ -313,9 +313,23 @@ URI string - and `<name>_snapshot` - the snapshot id resolved when the cell's
 provenance was computed. Passing `<name>_snapshot` to the scan makes the cell
 fully deterministic: it reads exactly the snapshot its provenance recorded.
 
-Format: `# @table <name> <uri> [snapshot=<id>]`. The URI is
-`<warehouse>#<namespace>.<table>` - the same format `client.materialize`
-accepts. The name must be a valid Python identifier.
+Format: `# @table <name> <uri> [snapshot=<id>]`. The URI is one of the forms
+`client.materialize` accepts:
+
+- `<catalog>:<namespace>.<table>`, a table in a catalog the server names under
+  `STRATA_CATALOGS` (REST, Glue, SQL or any other PyIceberg catalog type), e.g.
+  `# @table orders lake:sales.orders`;
+- `<warehouse>#<namespace>.<table>`, a table in a SQL catalog kept in that
+  warehouse;
+- `<namespace>.<table>`, a table in the server's default catalog.
+
+The warehouse may be local or on S3, GCS (`gs://`) or Azure (`abfs://`,
+`abfss://`, `az://`); files on GCS and Azure are read with the same
+`STRATA_GCS_*` and `STRATA_AZURE_*` settings the artifact blob store uses. The
+name must be a valid Python identifier.
+
+Catalogs are named on the server, not in `notebook.toml`, because the scan the
+cell runs happens in the server and has to resolve the same name.
 
 `snapshot=<id>` pins the table: the cell reads that snapshot forever and never
 goes stale on new data (the lake-side analog of a mount `pin`). Without a pin,
