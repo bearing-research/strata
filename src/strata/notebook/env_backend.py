@@ -267,6 +267,14 @@ def get_backend(notebook_dir: Path) -> EnvironmentBackend:
     return UvBackend(notebook_dir)
 
 
+def shared_root() -> Path | None:
+    """The shared store's root when ``notebook_env_backend`` is ``shared``."""
+    config = _config()
+    if getattr(config, "notebook_env_backend", "uv") != "shared":
+        return None
+    return shared_env_root(config)
+
+
 def shared_env_root(config: Any) -> Path:
     """Where shared environments live: ``notebook_shared_env_dir``, or ``envs``
     beside the notebook storage directory."""

@@ -133,5 +133,28 @@ my_notebook/
   hourly sweep in the server or by `strata env gc`. An environment a notebook
   links to is never removed.
 
-Provenance still follows the lockfile, as with a `.venv` per notebook. POSIX
-only, since the link is a symlink.
+R libraries are shared the same way. A notebook with an `renv.lock` restores
+it once per server into `r/` in the same store, keyed by the raw `renv.lock`
+bytes and the exact R build, and its `renv/library` is a link there:
+
+```
+~/.strata/envs/
+├── r/
+│   ├── 8a41…/        # one library per renv.lock + R build
+│   ├── cache/        # renv's package cache (RENV_PATHS_CACHE)
+│   └── refs/8a41…/
+my_notebook/
+└── renv/library -> ~/.strata/envs/r/8a41…
+```
+
+A second notebook with the same `renv.lock` links to the library without
+running `renv::restore()`, and every Rscript (cells, the warm pool, the
+environment panel) reads it through renv's project path. Installing a package
+from the environment panel first moves the notebook onto a private library
+restored from the package cache, and once `renv.lock` is written that library
+is kept under the new lock's key, so the other notebooks keep theirs. The R and
+Python keys are separate: changing one lock rebuilds only that language's
+environment. The same sweep removes libraries no notebook links to.
+
+Provenance still follows the lockfiles, as with a `.venv` and `renv/library`
+per notebook. POSIX only, since the link is a symlink.

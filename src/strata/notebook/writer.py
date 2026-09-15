@@ -778,12 +778,27 @@ def _renv_sync(notebook_dir: Path, *, timeout: int = 600) -> bool:
         return False
 
     try:
+        from strata.notebook.env_backend import shared_root
+
+        root = shared_root()
+        if root is not None:
+            # One library per renv.lock: restored into the shared store once,
+            # linked by every notebook with the same lock.
+            from strata.notebook.shared_env import restore_r_library
+
+            return restore_r_library(
+                notebook_dir,
+                root,
+                lambda env: _renv_restore_locked(notebook_dir, timeout=timeout, env=env),
+            )
         return _renv_restore_locked(notebook_dir, timeout=timeout)
     finally:
         process_lock.release()
 
 
-def _renv_restore_locked(notebook_dir: Path, *, timeout: int) -> bool:
+def _renv_restore_locked(
+    notebook_dir: Path, *, timeout: int, env: dict[str, str] | None = None
+) -> bool:
     """Run ``renv::restore()`` with the cross-process lock already held."""
     rscript = shutil.which("Rscript")
     if rscript is None:
@@ -803,6 +818,7 @@ def _renv_restore_locked(notebook_dir: Path, *, timeout: int) -> bool:
             timeout=timeout,
             capture_output=True,
             check=True,
+            env={**os.environ, **env} if env else None,
         )
         _logger.debug("renv::restore() succeeded in %s", notebook_dir)
         return True
