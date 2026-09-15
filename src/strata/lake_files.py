@@ -70,11 +70,12 @@ def register_vended_credentials(location: str, properties: dict[str, str]) -> bo
 
 def _vended_for(file_path: str) -> pafs.FileSystem | None:
     with _lock:
-        matches = [prefix for prefix in _vended if file_path.startswith(prefix)]
-        if not matches:
-            return None
-        # The most specific location wins.
-        return _vended[sorted(matches, key=len)[-1]]
+        best: str | None = None
+        for prefix in _vended:
+            # The most specific location wins.
+            if file_path.startswith(prefix) and (best is None or len(prefix) > len(best)):
+                best = prefix
+        return _vended[best] if best is not None else None
 
 
 def _gcs_filesystem() -> pafs.FileSystem:
