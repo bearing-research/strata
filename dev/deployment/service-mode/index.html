@@ -2759,6 +2759,16 @@ provenance stay local; only what a cell explicitly publishes
 <p>In a fully proxy-fronted setup the notebook's requests instead flow through the
 same auth proxy, which injects identity, and <code>notebook_remote_store_headers</code>
 can be omitted.</p>
+<p>On a <strong>shared</strong> notebook server several members run cells, and the static
+headers name one identity for all of them. When a request carries a principal,
+the server sends that caller's id as <code>X-Strata-Principal</code> to the remote store,
+replacing the one in the static headers. This covers results offered to the
+team cache, promotions, registry reads and approvals from the Registry tab, and
+a cell's own ambient client. The team cache's "computed by" and the registry
+audit then name the member. The remote store still has to accept that principal:
+the static headers are what authenticate the server to it. Set
+<code>STRATA_NOTEBOOK_REMOTE_STORE_FORWARD_PRINCIPAL=false</code> for a store that expects
+one fixed service identity. Personal mode has no principal and is unaffected.</p>
 <h3 id="the-team-cache-sharing-results-nobody-named">The team cache: sharing results nobody named<a class="headerlink" href="#the-team-cache-sharing-results-nobody-named" title="Permanent link">&para;</a></h3>
 <p>Everything above is <strong>explicit publish</strong> - a researcher decides a dataset is
 worth sharing and names it. That leaves out the expensive middle of a pipeline,
