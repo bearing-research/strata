@@ -777,6 +777,7 @@ export type WsClientMessageType =
   | 'cell_execute_rerun' // Force re-execute target cell, refresh upstreams from cache
   | 'cell_cancel' // Cancel a running cell
   | 'cell_source_update' // Cell source changed (debounced)
+  | 'cell_focus' // The cell this client is on, or null
   | 'cell_run_tests' // Persist + run a cell's unit tests (Python only)
   | 'notebook_run_all' // Run all cells (or just stale ones)
   | 'notebook_rerun_all' // Force re-execute every cell (cache off)
@@ -811,6 +812,7 @@ export type WsServerMessageType =
   | 'cascade_progress' // During cascade, reports which cell is running
   | 'impact_preview' // Run impact preview (upstream + downstream effects)
   | 'profiling_summary' // Notebook profiling summary (v1.1)
+  | 'presence' // Who is on the session and which cell each is on
   | 'inspect_result' // Result of an inspect REPL evaluation
   | 'notebook_status' // Batch status update (e.g., after open or env change)
   | 'notebook_state' // Full state sync (reconnection)

@@ -33,6 +33,7 @@ from strata.notebook.harness_user import LocalExecutionRefused, resolve_harness_
 from strata.notebook.impact import ImpactAnalyzer
 from strata.notebook.inspect_repl import InspectManager
 from strata.notebook.models import CellLanguage, CellStaleness, CellStatus, WorkerBackendType
+from strata.notebook.presence import lock_window_seconds
 from strata.notebook.protocol import MessageType
 from strata.notebook.scopes import (
     required_scope_for_frame,
@@ -49,6 +50,7 @@ from strata.notebook.ws_payloads import (
     CellTestResultsPayload,
     CellTestStatusPayload,
     CellVariantProgressPayload,
+    PresencePayload,
     cell_status_payload,
     dag_update_payload,
     error_payload,
@@ -531,6 +533,10 @@ async def _cleanup_notebook_websocket(
         # repeated disconnect) can race here. The removal is idempotent.
         pass
 
+    session = _get_session_manager().get_session(notebook_id)
+    if session is not None and session.presence.leave(websocket):
+        await broadcast_presence(notebook_id, session)
+
     if connections:
         return
 
@@ -734,6 +740,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     - notebook_rerun_all        Force re-execute every cell (cache off)
     - cell_cancel               Cancel execution
     - cell_source_update        Source code changed (debounced flush)
+    - cell_focus                The cell this client is on, or null
     - notebook_sync             Request full state
     - impact_preview_request    Compute upstream + downstream impact
     - profiling_request         Compute per-cell duration summary
@@ -761,6 +768,7 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     - impact_preview            Upstream + downstream impact
     - inspect_result            Result of an inspect_eval
     - profiling_summary         Per-cell duration summary
+    - presence                  Who is on the session, and on which cell
     - error                     Generic error frame
     """
     # Trusted-proxy gate. No HTTP middleware runs for a WS upgrade, so this
@@ -814,6 +822,8 @@ async def notebook_websocket(websocket: WebSocket, notebook_id: str):
     if notebook_id not in _notebook_connections:
         _notebook_connections[notebook_id] = []
     _notebook_connections[notebook_id].append(websocket)
+    session.presence.join(websocket, resolve_author())
+    await broadcast_presence(notebook_id, session)
 
     execution_state = _ensure_execution_state(notebook_id)
 
@@ -1657,11 +1667,35 @@ async def _handle_cell_source_update(
         )
         return
 
+    # Someone else changed this cell moments ago: say so rather than
+    # overwrite them, unless the client has decided to take it over.
+    held_by = session.presence.holder(cell_id, author, lock_window_seconds())
+    if held_by is not None and not payload.get("force"):
+        await websocket.send_text(
+            _json_encode(
+                _make_message(
+                    MessageType.ERROR,
+                    execution_state.sequence,
+                    error_payload(
+                        f"{held_by} changed cell {cell_id} moments ago; "
+                        "resend with force to take it over",
+                        code="cell_locked",
+                        cell_id=cell_id,
+                        held_by=held_by,
+                    ),
+                )
+            )
+        )
+        return
+
     seq = execution_state.next_sequence()
 
     try:
         # Write to disk
         write_cell(session.path, cell_id, source, author=author)
+        session.presence.record_edit(cell_id, author)
+        if session.presence.focus(websocket, author, cell_id):
+            await broadcast_presence(notebook_id, session)
 
         # Update source in session (must happen before re-analysis)
         cell_in_session = session.notebook_state.get_cell(cell_id)
@@ -3289,6 +3323,46 @@ async def _broadcast_output_or_error(
     )
 
 
+async def broadcast_presence(notebook_id: str, session: NotebookSession) -> None:
+    """Send every connection on the session who is on it.
+
+    Sent per connection rather than broadcast, because each frame names the
+    receiver's own identity in ``you``.
+    """
+    connections = _notebook_connections.get(notebook_id, [])
+    if not connections:
+        return
+    principals = session.presence.snapshot()
+    for ws in list(connections):
+        you = session.presence.principal_of(ws) or resolve_author()
+        message = _make_message(
+            MessageType.PRESENCE,
+            _ensure_execution_state(notebook_id).sequence,
+            PresencePayload.model_validate({"principals": principals, "you": you}).model_dump(
+                mode="json"
+            ),
+        )
+        try:
+            await ws.send_text(_json_encode(message))
+        except Exception:
+            logger.debug("Presence frame not delivered to a closing connection")
+
+
+async def _handle_cell_focus(
+    websocket: WebSocket,
+    session: NotebookSession,
+    payload: dict[str, Any],
+    notebook_id: str,
+) -> None:
+    """Handle cell_focus: the cell this connection is on, or null."""
+    cell_id = payload.get("cell_id")
+    if cell_id is not None and session.notebook_state.get_cell(str(cell_id)) is None:
+        return
+    author = resolve_author(payload.get("author"))
+    if session.presence.focus(websocket, author, cell_id):
+        await broadcast_presence(notebook_id, session)
+
+
 async def _broadcast_message(notebook_id: str, message: dict[str, Any]) -> None:
     """Broadcast a message to all connected clients for a notebook."""
     connections = _notebook_connections.get(notebook_id, [])
@@ -3495,6 +3569,7 @@ _C2S_HANDLERS: dict[str, _C2SHandler] = {
     MessageType.NOTEBOOK_RUN_ALL: _handle_notebook_run_all,
     MessageType.NOTEBOOK_RERUN_ALL: _handle_notebook_rerun_all,
     MessageType.CELL_SOURCE_UPDATE: _handle_cell_source_update,
+    MessageType.CELL_FOCUS: _handle_cell_focus,
     MessageType.CELL_RUN_TESTS: _handle_cell_run_tests,
     MessageType.NOTEBOOK_SYNC: _handle_notebook_sync,
     MessageType.IMPACT_PREVIEW_REQUEST: _handle_impact_preview_request,

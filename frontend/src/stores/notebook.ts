@@ -44,8 +44,10 @@ import type {
   RegistryName,
 } from '../composables/useStrata'
 import { useWebSocket } from '../composables/useWebSocket'
+import type { PresenceEntryModel, PresencePayload } from '../types/ws-payloads.generated'
 import { parseArtifactRef, parseArtifactUris } from '../utils/artifactRef'
 import { shouldAdoptRemoteSource } from '../utils/cellSourceSync'
+import { othersOnCell as othersOnCellIn } from '../utils/presence'
 import { flattenLineage, lineageToTree, type LineageTreeNode } from '../utils/lineage'
 import { markNotebookPerf, measureNotebookPerf } from '../utils/perf'
 import { consumePrefetchedNotebookSession } from '../utils/notebookSessionPrefetch'
@@ -1645,6 +1647,11 @@ const dependencyLoading = ref(false)
 const dependencyError = ref<string | null>(null)
 const environmentLoading = ref(false)
 const environmentError = ref<string | null>(null)
+// Who else is on the session (``presence`` frames), this tab's own identity,
+// and the cells whose last edit from here was refused: cell id -> who holds it.
+const presence = ref<PresenceEntryModel[]>([])
+const presenceYou = ref<string | null>(null)
+const cellLocks = ref<Record<string, string>>({})
 const environmentWarnings = ref<string[]>([])
 const environmentLastAction = ref<EnvironmentActionSummary | null>(null)
 const environmentOperation = ref<EnvironmentOperation | null>(null)
@@ -2596,6 +2603,15 @@ function initializeWebSocket() {
       if (p.code === 'ENVIRONMENT_BUSY' && typeof p.error === 'string') {
         environmentError.value = p.error
       }
+      if (p.code === 'cell_locked' && typeof p.cell_id === 'string') {
+        cellLocks.value[p.cell_id] = typeof p.held_by === 'string' ? p.held_by : 'someone'
+      }
+    })
+
+    wsInstance.onMessage('presence', (msg: WsMessage) => {
+      const p = msg.payload as PresencePayload
+      presence.value = p.principals
+      presenceYou.value = p.you
     })
 
     wsInstance.onMessage('agent_progress', (msg: WsMessage) => {
@@ -3586,6 +3602,24 @@ function updateSourceWebSocket(cellId: CellId, source: string) {
   }
 }
 
+/** Overwrite a cell someone else changed moments ago with this tab's source. */
+function takeOverCell(cellId: CellId) {
+  const cell = cellMap.value.get(cellId)
+  if (!cell || !wsInstance || !wsInstance.connected()) return
+  wsInstance.updateCellSource(cellId, cell.source, true)
+  delete cellLocks.value[cellId]
+}
+
+function focusCellPresence(cellId: CellId | null) {
+  if (wsInstance && wsInstance.connected()) {
+    wsInstance.focusCell(cellId)
+  }
+}
+
+function othersOnCell(cellId: CellId): string[] {
+  return othersOnCellIn(presence.value, cellId, presenceYou.value)
+}
+
 function requestImpactPreview(cellId: CellId) {
   if (wsInstance && wsInstance.connected()) {
     wsInstance.send('impact_preview_request', { cell_id: cellId })
@@ -3932,6 +3966,10 @@ export function useNotebook() {
     updateSource,
     flushDirtyCells,
     flushCellSource,
+    takeOverCell,
+    focusCellPresence,
+    othersOnCell,
+    cellLocks,
     setCellStatus,
     setCellOutput,
     moveCell,

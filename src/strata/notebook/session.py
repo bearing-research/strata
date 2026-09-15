@@ -52,6 +52,7 @@ from strata.notebook.models import (
 )
 from strata.notebook.mounts import resolve_cell_mounts
 from strata.notebook.parser import parse_notebook
+from strata.notebook.presence import SessionPresence
 from strata.notebook.protocol import MessageType
 from strata.notebook.provenance import (
     compute_provenance_hash,
@@ -262,6 +263,9 @@ class NotebookSession:
 
         # v1.1: Causality chains for stale cells
         self.causality_map: dict[str, CausalityChain] = {}
+
+        # Who is on the session and which cell each last changed.
+        self.presence = SessionPresence()
 
         # What each ``@dataset`` last resolved to, keyed by (variable,
         # reference), with when: staleness re-asks the registry at most every

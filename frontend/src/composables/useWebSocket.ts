@@ -276,8 +276,19 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
   /**
    * Update cell source code.
    */
-  function updateCellSource(cellId: string, source: string): void {
-    send('cell_source_update', { cell_id: cellId, source })
+  function updateCellSource(cellId: string, source: string, force = false): void {
+    send(
+      'cell_source_update',
+      force ? { cell_id: cellId, source, force } : { cell_id: cellId, source },
+    )
+  }
+
+  /**
+   * Tell the server which cell this client is on (null for none), so the
+   * others on the session see it in presence.
+   */
+  function focusCell(cellId: string | null): void {
+    send('cell_focus', { cell_id: cellId })
   }
 
   /**
@@ -420,6 +431,7 @@ export function useWebSocket(notebookId: string, options: { role?: string } = {}
     executeNotebookRerunAll,
     cancelCell,
     updateCellSource,
+    focusCell,
     debounceSourceUpdate,
     inspectOpen,
     inspectEval,

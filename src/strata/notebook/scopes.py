@@ -27,6 +27,7 @@ NOTEBOOK_SCOPE_EXECUTE = "notebook:execute"
 _READ_FRAMES = frozenset(
     {
         MessageType.NOTEBOOK_SYNC,
+        MessageType.CELL_FOCUS,
         MessageType.IMPACT_PREVIEW_REQUEST,
         MessageType.PROFILING_REQUEST,
     }
