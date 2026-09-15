@@ -3291,7 +3291,7 @@ has no anchor when the cell mutates state.</p>
 </tr>
 <tr>
 <td><code>snapshot</code></td>
-<td>Probe MUST return a durable snapshot ID. Errors at execute time when the driver can't (SQLite/Postgres can't; Iceberg-via-engine can).</td>
+<td>The result is pinned to one queryable state of the warehouse. Snowflake and BigQuery only; refused on other drivers.</td>
 </tr>
 </tbody>
 </table>
@@ -3299,21 +3299,37 @@ has no anchor when the cell mutates state.</p>
 <a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">cache</span><span class="w"> </span><span class="n">forever</span>
 <a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">dim_country</span>
 </code></pre></div>
-<p><code># @cache snapshot</code> requires <code>AdapterCapabilities.supports_snapshot = True</code>
-on the driver; otherwise the resolver fails fast before any connection is
-opened. <strong>No shipped driver sets it today</strong> -- DuckDB, SQLite, PostgreSQL,
-Snowflake and BigQuery all report <code>supports_snapshot = False</code> -- so
-<code># @cache snapshot</code> is currently refused on every SQL cell. Snowflake and
-BigQuery both have time travel underneath and are where support would come
-from first. Per-driver freshness probe details are in
-<a href="../cells/#per-driver-freshness">SQL Cells</a>.</p>
+<p><code># @cache snapshot</code> needs a driver whose warehouse can query a table as it
+stood at a moment in time. <strong>Snowflake</strong> (<code>AT (TIMESTAMP =&gt; ...)</code>) and
+<strong>BigQuery</strong> (<code>FOR SYSTEM_TIME AS OF ...</code>) can. DuckDB, SQLite and PostgreSQL
+cannot, and the cell is refused before any connection is opened.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">cache</span><span class="w"> </span><span class="n">snapshot</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">region</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">revenue</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">region</span>
+</code></pre></div>
+<p>The first run reads the warehouse clock and runs the query with every table
+pinned to that moment. The timestamp is the cell's cache key and is recorded on
+its artifact. Running the cell again finds it there and hits the cache, even
+after new rows land, because the cell still names the same state. The
+timestamp moves only when the cell changes (its query, binds, connection or
+upstream inputs) or when you rerun it (<code>↻</code>), which pins to now.</p>
+<p>Time travel only reaches back so far, so each run reports how long its state
+stays queryable:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>State as of 2026-09-15T10:05:00+00:00; queryable until 2026-09-16T10:05:00+00:00.
+</code></pre></div>
+<p>On Snowflake the horizon is the shortest <code>DATA_RETENTION_TIME_IN_DAYS</code> among
+the tables the query reads. On BigQuery it is 48 hours, the shortest time travel
+window a dataset can be configured with, since a dataset's own setting lives in
+a region-scoped view the connection does not name. After the horizon, a rerun
+works, but the recorded state can no longer be queried again. Per-driver
+freshness probe details are in <a href="../cells/#per-driver-freshness">SQL Cells</a>.</p>
 <h3 id="name_1"><code>@name</code><a class="headerlink" href="#name_1" title="Permanent link">&para;</a></h3>
 <p>For SQL cells, <code>@name</code> sets the output variable name (default <code>result</code>),
 the same way it does for prompt cells.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="n">name</span><span class="w"> </span><span class="n">top_customers</span>
-<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">customer</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span>
-<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">DESC</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">5</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="n">name</span><span class="w"> </span><span class="n">top_customers</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">customer</span><span class="p">,</span><span class="w"> </span><span class="k">SUM</span><span class="p">(</span><span class="n">amount</span><span class="p">)</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">total</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="k">FROM</span><span class="w"> </span><span class="n">orders</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">customer</span><span class="w"> </span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">total</span><span class="w"> </span><span class="k">DESC</span><span class="w"> </span><span class="k">LIMIT</span><span class="w"> </span><span class="mi">5</span>
 </code></pre></div>
 <p>A downstream Python cell can then reference <code>top_customers</code> directly as a
 pandas DataFrame.</p>
@@ -3324,13 +3340,13 @@ same DAG slot side by side and switch between them. The canonical use
 case is "we want to try three models for this experiment": three
 training cells all produce a <code>model</code> variable, and downstream cells
 reference <code>model</code> without caring which variant produced it.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="c1"># @variant classifier logreg</span>
-<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogisticRegression</span>
-<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="n">model</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">max_iter</span><span class="o">=</span><span class="mi">1000</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="c1"># @variant classifier logreg</span>
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.linear_model</span><span class="w"> </span><span class="kn">import</span> <span class="n">LogisticRegression</span>
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="n">model</span> <span class="o">=</span> <span class="n">LogisticRegression</span><span class="p">(</span><span class="n">max_iter</span><span class="o">=</span><span class="mi">1000</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
 </code></pre></div>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="c1"># @variant classifier rf</span>
-<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.ensemble</span><span class="w"> </span><span class="kn">import</span> <span class="n">RandomForestClassifier</span>
-<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="n">model</span> <span class="o">=</span> <span class="n">RandomForestClassifier</span><span class="p">(</span><span class="n">n_estimators</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="c1"># @variant classifier rf</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.ensemble</span><span class="w"> </span><span class="kn">import</span> <span class="n">RandomForestClassifier</span>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="n">model</span> <span class="o">=</span> <span class="n">RandomForestClassifier</span><span class="p">(</span><span class="n">n_estimators</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
 </code></pre></div>
 <p>Both cells declare <code># @variant &lt;group&gt; &lt;name&gt;</code> with the same group
 (<code>classifier</code>) and different names (<code>logreg</code>, <code>rf</code>). At any given time
@@ -3340,9 +3356,9 @@ the group renders as a tab strip, clicking a tab switches the active
 variant, and the cell editor shows that variant's source.</p>
 <h3 id="switching-variants">Switching variants<a class="headerlink" href="#switching-variants" title="Permanent link">&para;</a></h3>
 <p>The active variant per group is persisted in <code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="k">[[variant_group]]</span>
-<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;classifier&quot;</span>
-<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="n">active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;rf&quot;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="k">[[variant_group]]</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;classifier&quot;</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="n">active</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;rf&quot;</span>
 </code></pre></div>
 <p>Switching is a one-line diff. Each variant carries its own provenance
 hash, so re-running a variant you've already trained is a cache hit:
@@ -3359,16 +3375,16 @@ the toml entry).</p>
 "how do all three compare on the same downstream pipeline?" - it runs
 <strong>every</strong> variant on each group execution and hands a downstream cell the
 whole set as a <code>{variant_name: value}</code> dict.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="k">[[variant_group]]</span>
-<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;classifier&quot;</span>
-<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;sweep&quot;</span><span class="w">        </span><span class="c1"># default is &quot;switch&quot;; `active` is ignored in sweep</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="k">[[variant_group]]</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="n">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;classifier&quot;</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;sweep&quot;</span><span class="w">        </span><span class="c1"># default is &quot;switch&quot;; `active` is ignored in sweep</span>
 </code></pre></div>
 <p>The variant cells are <strong>unchanged</strong> - same <code># @variant &lt;group&gt; &lt;name&gt;</code>
 annotation, same defines contract. Only the consumer changes: instead of
 seeing one <code>model</code>, a downstream cell receives a dict keyed by variant
 name and can compare them in one pass:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="c1"># downstream cell - `preds` is {&quot;logreg&quot;: ..., &quot;rf&quot;: ..., &quot;gbm&quot;: ...}</span>
-<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="n">scores</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">accuracy</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">y_test</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">preds</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="c1"># downstream cell - `preds` is {&quot;logreg&quot;: ..., &quot;rf&quot;: ..., &quot;gbm&quot;: ...}</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="n">scores</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">accuracy</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">y_test</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">preds</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
 </code></pre></div>
 <p>Migrating switch → sweep is a one-line toml edit (no cell changes). In
 the UI, the tab strip becomes a <strong>display selector</strong> (clicking a tab just
@@ -3389,10 +3405,10 @@ provenance, so sweep trades the batch speedup for per-variant isolation.</p>
 you'd rather run the <em>downstream work itself</em> once per variant - score each
 model on its own, tune each independently, dispatch each to its own GPU worker.
 That's <code># @per_variant</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="c1"># @per_variant</span>
-<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="c1"># Runs once per model variant. `preds` is bound to THAT variant&#39;s list</span>
-<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="c1"># (a scalar), not the whole dict - so this cell computes one accuracy.</span>
-<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="n">accuracy</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">==</span> <span class="n">t</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">preds</span><span class="p">,</span> <span class="n">y_true</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="c1"># @per_variant</span>
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="c1"># Runs once per model variant. `preds` is bound to THAT variant&#39;s list</span>
+<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="c1"># (a scalar), not the whole dict - so this cell computes one accuracy.</span>
+<a id="__codelineno-35-4" name="__codelineno-35-4" href="#__codelineno-35-4"></a><span class="n">accuracy</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">==</span> <span class="n">t</span> <span class="k">for</span> <span class="n">p</span><span class="p">,</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">preds</span><span class="p">,</span> <span class="n">y_true</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
 </code></pre></div>
 <p>The cell runs N times (once per variant of its upstream sweep group), each
 instance with the variant's scalar value bound. Its own output becomes
@@ -3403,8 +3419,8 @@ per-variant too, so a <strong>downstream cell decides how to consume it</strong>
 <li>A plain cell <strong>collapses</strong> it back to a <code>{variant: value}</code> dict - the same v1
   sweep machinery:</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="c1"># plain downstream - `accuracy` is {&quot;logreg&quot;: 0.9, &quot;rf&quot;: 0.88, ...}</span>
-<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="n">best</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">accuracy</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">accuracy</span><span class="o">.</span><span class="n">get</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="c1"># plain downstream - `accuracy` is {&quot;logreg&quot;: 0.9, &quot;rf&quot;: 0.88, ...}</span>
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="n">best</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">accuracy</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="n">accuracy</span><span class="o">.</span><span class="n">get</span><span class="p">)</span>
 </code></pre></div>
 <p>Each instance is an independent <code>materialize</code>: its own provenance, its own
 cache entry, its own worker dispatch - so <code># @per_variant</code> + <code># @worker gpu</code>
@@ -3456,9 +3472,9 @@ exist.)</p>
 dependency is on a side effect, e.g. a SQL <code>seed</code> cell creates the database
 state that subsequent SQL cells query, and no Python variable flows
 between them.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
-<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
-<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">sql</span><span class="w"> </span><span class="k">connection</span><span class="o">=</span><span class="n">warehouse</span>
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="o">#</span><span class="w"> </span><span class="o">@</span><span class="k">after</span><span class="w"> </span><span class="n">seed</span>
+<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="k">SELECT</span><span class="w"> </span><span class="n">category</span><span class="p">,</span><span class="w"> </span><span class="k">COUNT</span><span class="p">(</span><span class="o">*</span><span class="p">)</span><span class="w"> </span><span class="k">FROM</span><span class="w"> </span><span class="n">products</span><span class="w"> </span><span class="k">GROUP</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">category</span>
 </code></pre></div>
 <p>Multiple <code>@after</code> lines stack; each cell ID adds one edge. Whitespace-
 separated IDs on a single line work too: <code># @after seed migrate</code>. Self-
@@ -3542,9 +3558,9 @@ doesn't affect per-variable provenance hashes.</p>
 <p>Environment variables with names containing KEY, SECRET, TOKEN, PASSWORD, or CREDENTIAL have their values blanked from <code>notebook.toml</code> when saving. The key names are preserved as a "which vars are configured" reminder <em>only</em> when something real is configured alongside them. A notebook whose <code>[env]</code> would contain nothing but blanked sensitive slots is persisted without an <code>[env]</code> block at all, so typing an API key in the Runtime panel doesn't churn the committed notebook.</p>
 </div>
 <p>Notebook env vars are stored in the <code>[env]</code> section of <code>notebook.toml</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="k">[env]</span>
-<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="n">DATABASE_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;postgres://localhost/mydb&quot;</span>
-<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a><span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">  </span><span class="c1"># value blanked; name kept because DATABASE_URL above is real config</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="k">[env]</span>
+<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="n">DATABASE_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;postgres://localhost/mydb&quot;</span>
+<a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="n">OPENAI_API_KEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="w">  </span><span class="c1"># value blanked; name kept because DATABASE_URL above is real config</span>
 </code></pre></div>
 
 
