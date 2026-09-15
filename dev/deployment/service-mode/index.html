@@ -2693,8 +2693,24 @@ for anyone extending the ACL engine.</p>
 <td><code>artifacts:write</code></td>
 <td>Publishing in service mode (<code>put</code> / <code>set_name</code> / <code>set_alias</code> / tags) when <code>service_writes_enabled=true</code>. See <a href="#authenticated-write-back-the-shared-research-store">below</a>.</td>
 </tr>
+<tr>
+<td><code>notebook:read</code></td>
+<td>Every notebook <code>GET</code> over REST, and observing a notebook over its WebSocket (sync, previews, profiling)</td>
+</tr>
+<tr>
+<td><code>notebook:write</code></td>
+<td>Changing a notebook without running anything: creating, editing, reordering and deleting cells, and setting mounts, connections, workers, env, timeout, name and variants. REST and WebSocket alike.</td>
+</tr>
+<tr>
+<td><code>notebook:execute</code></td>
+<td>Running code or changing its environment: executing a cell or its tests, run-all, dependency changes and environment sync, requirements imports, the Python version, SSH workers, the inspect REPL, widget updates and the assistant. REST and WebSocket alike.</td>
+</tr>
 </tbody>
 </table>
+<p>The notebook scopes are checked against one table for both transports
+(<code>strata.notebook.scopes</code>), so a viewer holding only <code>notebook:read</code> can't run a
+cell over REST any more than over the socket. An operation the table doesn't
+classify requires <code>notebook:execute</code>.</p>
 <p>Registry <strong>approval</strong> additionally enforces separation of duty: the
 principal who requested a protected-alias move cannot approve it
 themselves unless they hold <code>admin:*</code>. The registry <strong>audit</strong> read
