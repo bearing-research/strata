@@ -649,6 +649,36 @@ def build_worker_catalog(notebook_state: NotebookState) -> list[dict[str, Any]]:
     return catalog
 
 
+# Features a worker's /health advertises, by health URL, with when they were
+# read. Dispatch asks on every cell, so the answer is kept for a minute.
+_FEATURES_TTL_SECONDS = 60.0
+_advertised_features: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+async def worker_advertises(worker: WorkerSpec, feature: str) -> bool:
+    """Whether *worker*'s ``/health`` lists *feature* as true.
+
+    A worker that cannot be asked is taken not to: it gets what every worker
+    got before the feature existed.
+    """
+    health_url = _health_url_for_worker(worker)
+    if health_url is None:
+        return False
+    cached = _advertised_features.get(health_url)
+    if cached is None or time.monotonic() - cached[0] >= _FEATURES_TTL_SECONDS:
+        features: dict[str, Any] = {}
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(health_url)
+            if response.status_code == 200:
+                features = response.json().get("capabilities", {}).get("features", {}) or {}
+        except (httpx.HTTPError, ValueError, AttributeError):
+            features = {}
+        cached = (time.monotonic(), features)
+        _advertised_features[health_url] = cached
+    return cached[1].get(feature) is True
+
+
 def _health_url_for_worker(worker: WorkerSpec) -> str | None:
     """Map a worker config URL to its health endpoint."""
     if not is_http_executor_worker(worker):

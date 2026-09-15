@@ -185,8 +185,12 @@ async def _run_harness(
     build_id: str | None = None,
     log_url: str | None = None,
     env: dict[str, str] | None = None,
+    python: Path | None = None,
 ) -> dict[str, Any]:
     """Run the notebook harness with one manifest file.
+
+    With *python*, the harness runs under that interpreter: the notebook's
+    locked environment (``worker_env``) rather than the worker's own.
 
     Registers the process in *in_flight* under *build_id* for the duration, so
     the cancel route can reach it. Both are optional: a caller with no build id
@@ -203,7 +207,7 @@ async def _run_harness(
     )
 
     proc = await asyncio.create_subprocess_exec(
-        sys.executable,
+        str(python) if python is not None else sys.executable,
         str(harness_path),
         str(manifest_path),
         stdout=asyncio.subprocess.PIPE,
@@ -388,6 +392,7 @@ def create_notebook_executor_app(
         trace_carrier: dict[str, Any] | None = None,
         notebook_id: str | None = None,
         cell_id: str | None = None,
+        environment: Any = None,
     ) -> tuple[Path, Path] | JSONResponse:
         """Execute a cell and pack outputs into a bundle file.
 
@@ -433,6 +438,7 @@ def create_notebook_executor_app(
                     build_id=build_id,
                     log_url=log_url,
                     gpu=gpu,
+                    environment=environment,
                 )
         finally:
             _release(gpu)
@@ -448,6 +454,7 @@ def create_notebook_executor_app(
         build_id: str | None,
         log_url: str | None,
         gpu: int | None,
+        environment: Any = None,
     ) -> tuple[Path, Path] | JSONResponse:
         if gpu is not None:
             # Both the cell's environment and the process's: the manifest env
@@ -526,6 +533,18 @@ def create_notebook_executor_app(
                 json.dump(manifest, f)
 
             harness_path = Path(__file__).parent / "harness.py"
+            prepared = None
+            if environment is not None:
+                from strata.notebook.worker_env import WorkerEnvironmentError, ensure_environment
+
+                try:
+                    prepared = await ensure_environment(environment)
+                except WorkerEnvironmentError as exc:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    return JSONResponse(
+                        status_code=500,
+                        content={"success": False, "error": f"locked environment: {exc}"},
+                    )
             try:
                 result = await _run_harness(
                     harness_path,
@@ -539,6 +558,7 @@ def create_notebook_executor_app(
                         if gpu is not None
                         else None
                     ),
+                    python=prepared.python if prepared is not None else None,
                 )
                 if result.get("success", False):
                     await mount_resolver.sync_back(resolved_mounts)
@@ -566,6 +586,8 @@ def create_notebook_executor_app(
             # The hardware beside the interpreter the harness reported, so the
             # artifact records what computed it and not only what was asked for.
             result = {**result, "hardware": await asyncio.to_thread(hardware_report)}
+            if prepared is not None:
+                result["environment"] = {"key": prepared.key, "installed": prepared.installed}
             pack_notebook_output_bundle(bundle_path, result, output_dir)
             return bundle_path, tmpdir
         except BaseException:
@@ -583,6 +605,7 @@ def create_notebook_executor_app(
         build_id: str | None = None,
         log_url: str | None = None,
         trace_carrier: dict[str, Any] | None = None,
+        environment: Any = None,
     ) -> Response:
         async def _write_uploaded_input(
             var_name: str,
@@ -612,6 +635,7 @@ def create_notebook_executor_app(
             build_id=build_id,
             log_url=log_url,
             trace_carrier=trace_carrier,
+            environment=environment,
         )
         if isinstance(result, JSONResponse):
             return result
@@ -647,6 +671,9 @@ def create_notebook_executor_app(
                     "output_format": "notebook-output-bundle@v1",
                     "pull_model": True,
                     "cancel": True,
+                    # Runs a cell in the notebook's locked environment when the
+                    # request carries one (``worker_env``).
+                    "locked_environments": True,
                 },
             },
             "version": "1.0.0",
@@ -725,6 +752,7 @@ def create_notebook_executor_app(
             form=form,
             build_id=str(metadata.get("build_id") or "") or None,
             trace_carrier=dict(http_request.headers),
+            environment=metadata.get("environment"),
         )
 
     @app.post("/v1/execute", dependencies=[Depends(require_worker_token)])
@@ -800,6 +828,7 @@ def create_notebook_executor_app(
             form=form,
             build_id=str(metadata.get("build_id") or "") or None,
             trace_carrier=dict(http_request.headers),
+            environment=params.get("environment"),
         )
 
     @app.post("/v1/execute-manifest", dependencies=[Depends(require_worker_token)])
@@ -953,6 +982,7 @@ def create_notebook_executor_app(
             ),
             notebook_id=str(metadata.get("notebook_id") or "") or None,
             cell_id=str(metadata.get("cell_id") or "") or None,
+            environment=params.get("environment"),
         )
         if isinstance(bundle_result, JSONResponse):
             return bundle_result
