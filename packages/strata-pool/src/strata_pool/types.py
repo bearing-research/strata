@@ -168,6 +168,11 @@ class Worker:
 
     current_job_id: str | None = None
     last_active_at: float | None = None
+    image: str | None = None
+    """The image this machine booted with. A catalogue change that moves its
+    type to another image leaves it stale: it takes no new jobs and retires
+    once idle past its cool-down. None for machines recorded before this was
+    kept, which are treated as current."""
 
     auth_token: str | None = field(default=None, repr=False)
     """Bearer credential the pool presents to this machine.

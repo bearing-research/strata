@@ -88,6 +88,9 @@ class Pool:
         self.store = store
         self.backend = backend
         self.machine_types = {mt.name: mt for mt in machine_types}
+        # Types dropped from the catalogue while machines of them still run,
+        # kept only for the cool-down those machines retire on.
+        self._retired_types: dict[str, MachineType] = {}
         self._client = client if client is not None else httpx.AsyncClient()
         self._owns_client = client is None
         self._wall = wall
@@ -114,6 +117,51 @@ class Pool:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         if self._owns_client:
             await self._client.aclose()
+
+    # --- catalogue ---
+
+    async def replace_machine_types(self, machine_types: Iterable[MachineType]) -> None:
+        """Swap the catalogue without restarting.
+
+        A new type accepts jobs at once. A removed type accepts no more: its
+        queued jobs fail with a reason, and its machines finish what they are
+        running and retire once idle past their cool-down. A type whose image
+        changed starts new machines with the new image; the machines already
+        running the old one take no new jobs and retire the same way. A
+        machine on the old image is never handed work, because a caller who
+        changed the image wants the next job to run on the new one.
+        """
+        updated = {mt.name: mt for mt in machine_types}
+        for name, spec in self.machine_types.items():
+            if name not in updated:
+                self._retired_types[name] = spec
+        for name in updated:
+            self._retired_types.pop(name, None)
+        self.machine_types = updated
+        self._fail_jobs_without_a_type()
+        # Stale machines are not capacity, so work queued behind them needs
+        # machines on the current image.
+        for machine_type in self.machine_types:
+            for tenant_id in self.store.queued_tenants(machine_type):
+                await self._drain(machine_type, tenant_id)
+                await self._ensure_capacity(machine_type, tenant_id)
+
+    def _fail_jobs_without_a_type(self) -> None:
+        """Queued work for a type the catalogue no longer names can never run."""
+        for machine_type in self.store.queued_machine_types():
+            if machine_type in self.machine_types:
+                continue
+            for job in self.store.list_jobs([JobState.QUEUED]):
+                if job.machine_type != machine_type:
+                    continue
+                job.state = JobState.FAILED
+                job.error = f"machine type {machine_type!r} was removed from the catalogue"
+                job.completed_at = self._wall()
+                self.store.save_job(job)
+
+    def _is_stale(self, worker: Worker) -> bool:
+        spec = self.machine_types.get(worker.machine_type)
+        return spec is None or (worker.image is not None and worker.image != spec.image)
 
     # --- submission ---
 
@@ -181,13 +229,16 @@ class Pool:
 
     async def _try_dispatch(self, job: Job) -> bool:
         """Assign the job to a warm worker if one is available."""
+        spec = self.machine_types.get(job.machine_type)
+        if spec is None:
+            return False
         worker = None
         if job.session_id is not None:
             worker = self.store.find_warm_worker(
-                job.machine_type, job.tenant_id, session_id=job.session_id
+                job.machine_type, job.tenant_id, session_id=job.session_id, image=spec.image
             )
         if worker is None:
-            worker = self.store.find_warm_worker(job.machine_type, job.tenant_id)
+            worker = self.store.find_warm_worker(job.machine_type, job.tenant_id, image=spec.image)
         if worker is None:
             return False
         self._assign(worker, job)
@@ -218,10 +269,19 @@ class Pool:
         Counted per tenant, because a machine belonging to another tenant is
         not capacity this one can use.
         """
-        spec = self.machine_types[machine_type]
+        spec = self.machine_types.get(machine_type)
+        if spec is None:
+            return
         queued = self.store.count_queued(machine_type, tenant_id)
-        starting = self.store.count_workers(machine_type, tenant_id, [WorkerState.STARTING])
-        warm = self.store.count_workers(machine_type, tenant_id, [WorkerState.WARM])
+        # Stale machines (another image) are left out throughout: they take
+        # no new jobs, so counting them would hold work back from machines
+        # that could run it. They still count against the global fleet cap.
+        starting = self.store.count_workers(
+            machine_type, tenant_id, [WorkerState.STARTING], image=spec.image
+        )
+        warm = self.store.count_workers(
+            machine_type, tenant_id, [WorkerState.WARM], image=spec.image
+        )
         total = self.store.count_workers(
             machine_type,
             tenant_id,
@@ -229,6 +289,7 @@ class Pool:
             # not capacity, and counting it would keep a tenant at its cap
             # from starting the replacement.
             [WorkerState.STARTING, WorkerState.WARM, WorkerState.BUSY],
+            image=spec.image,
         )
         needed = min(queued - starting - warm, spec.max_workers - total)
 
@@ -291,6 +352,7 @@ class Pool:
             state=WorkerState.STARTING,
             created_at=self._wall(),
             auth_token=token,
+            image=spec.image,
         )
         self.store.save_worker(worker)
 
@@ -526,6 +588,7 @@ class Pool:
             job.completed_at = self._wall()
             self.store.save_job(job)
 
+        self._fail_jobs_without_a_type()
         for machine_type in self.machine_types:
             for tenant_id in self.store.queued_tenants(machine_type):
                 await self._drain(machine_type, tenant_id)
@@ -658,47 +721,55 @@ class Pool:
         """
         now = self._wall()
         stopped = 0
-        for name, spec in self.machine_types.items():
-            for candidate in self.store.list_workers(name, [WorkerState.WARM]):
-                # Stopping a machine awaits the backend, and the list was read
-                # before that. Re-read: a machine further down it may have
-                # taken a job in the meantime, and stopping a busy machine
-                # kills the job running on it.
-                worker = self.store.get_worker(candidate.id)
-                if worker is None or worker.state is not WorkerState.WARM:
-                    continue
+        # Every warm machine, not only those of types still in the catalogue:
+        # a removed type's machines retire here too.
+        for candidate in self.store.list_workers(states=[WorkerState.WARM]):
+            # Its type's cool-down, or the one it had when the type was
+            # removed. A type forgotten across a restart has none to honour.
+            spec = self.machine_types.get(candidate.machine_type) or self._retired_types.get(
+                candidate.machine_type
+            )
+            cool_down = spec.cool_down_seconds if spec is not None else 0.0
+            # Stopping a machine awaits the backend, and the list was read
+            # before that. Re-read: a machine further down it may have
+            # taken a job in the meantime, and stopping a busy machine
+            # kills the job running on it.
+            worker = self.store.get_worker(candidate.id)
+            if worker is None or worker.state is not WorkerState.WARM:
+                continue
 
-                # A machine that never ran a job ages from when it booted, so
-                # one started for a job that then failed still gets reaped.
-                last_active = worker.last_active_at or worker.created_at
+            # A machine that never ran a job ages from when it booted, so
+            # one started for a job that then failed still gets reaped.
+            last_active = worker.last_active_at or worker.created_at
 
-                if last_active > now:
-                    # The wall clock moved backwards. Left alone this machine
-                    # is unreapable until the clock catches up, which is
-                    # unbounded idle billing; clamping makes it age from now.
-                    logger.warning(
-                        "machine was last active in the future; clamping to now",
-                        extra={"worker_id": worker.id, "skew_seconds": round(last_active - now, 1)},
-                    )
-                    worker.last_active_at = now
-                    self.store.save_worker(worker)
-                    continue
-
-                idle_for = now - last_active
-                if idle_for < spec.cool_down_seconds:
-                    continue
-
-                logger.info(
-                    "stopping an idle machine",
-                    extra={
-                        "worker_id": worker.id,
-                        "machine_type": spec.name,
-                        "tenant_id": worker.tenant_id,
-                        "idle_seconds": round(idle_for, 1),
-                    },
+            if last_active > now:
+                # The wall clock moved backwards. Left alone this machine
+                # is unreapable until the clock catches up, which is
+                # unbounded idle billing; clamping makes it age from now.
+                logger.warning(
+                    "machine was last active in the future; clamping to now",
+                    extra={"worker_id": worker.id, "skew_seconds": round(last_active - now, 1)},
                 )
-                await self._stop_worker(worker)
-                stopped += 1
+                worker.last_active_at = now
+                self.store.save_worker(worker)
+                continue
+
+            idle_for = now - last_active
+            if idle_for < cool_down:
+                continue
+
+            logger.info(
+                "stopping an idle machine",
+                extra={
+                    "worker_id": worker.id,
+                    "machine_type": worker.machine_type,
+                    "stale": self._is_stale(worker),
+                    "tenant_id": worker.tenant_id,
+                    "idle_seconds": round(idle_for, 1),
+                },
+            )
+            await self._stop_worker(worker)
+            stopped += 1
 
         if stopped:
             await self._offer_freed_capacity()
