@@ -252,6 +252,35 @@ carries the context in the request headers only.
 }
 ```
 
+**Asynchronous execution (202).** A worker, or a pool or dispatcher in front of
+one, may instead answer `202 Accepted` right away:
+
+```json
+{"job_url": "/v1/jobs/01HZJV"}
+```
+
+`job_url` may be relative to the manifest URL. The server then polls
+`GET {job_url}`, with the same `Authorization` header, for:
+
+```json
+{"state": "provisioning"}
+{"state": "running"}
+{"state": "finished", "status_code": 200, "result": { "...the 200 body above..." }}
+{"state": "failed", "status_code": 502, "error": "..."}
+```
+
+Before the cell runs, the state is `queued`, `provisioning` or `starting`.
+That wait is bounded by `STRATA_WORKER_PROVISIONING_TIMEOUT_SECONDS` (default
+600). The cell's own timeout starts only when the job first reports `running`,
+so a machine that takes 45 s to boot doesn't spend a 60 s cell's budget. At
+`finished` or `failed`, `status_code` and `result` (or `error`) stand for the
+response a synchronous worker would have given, and are handled the same way.
+If either deadline passes, the server cancels the job through
+`/v1/executions/{build_id}/cancel` and fails the cell with
+`PROVISIONING_TIMEOUT` or `TIMEOUT`. While the job is being provisioned, the
+cell's badge reads "starting". A worker that answers synchronously needs no
+change.
+
 **SSRF defenses on signed URLs:** Before fetching/posting, the worker validates each URL:
 
 - **Scheme allowlist**: only `http://` and `https://`. Blocks `file://`, `data:`, `javascript:`, etc.

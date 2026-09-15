@@ -81,6 +81,7 @@ export interface CellStatusPayload {
   status: string
   remote_worker?: string | null
   remote_transport?: string | null
+  remote_build_state?: string | null
   staleness_reasons?: string[] | null
   causality?: Record<string, unknown> | null
 }
