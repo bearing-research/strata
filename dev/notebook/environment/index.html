@@ -2404,8 +2404,27 @@ lockfile instead:</p>
   hourly sweep in the server or by <code>strata env gc</code>. An environment a notebook
   links to is never removed.</li>
 </ul>
-<p>Provenance still follows the lockfile, as with a <code>.venv</code> per notebook. POSIX
-only, since the link is a symlink.</p>
+<p>R libraries are shared the same way. A notebook with an <code>renv.lock</code> restores
+it once per server into <code>r/</code> in the same store, keyed by the raw <code>renv.lock</code>
+bytes and the exact R build, and its <code>renv/library</code> is a link there:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>~/.strata/envs/
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── r/
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>│   ├── 8a41…/        # one library per renv.lock + R build
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>│   ├── cache/        # renv&#39;s package cache (RENV_PATHS_CACHE)
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>│   └── refs/8a41…/
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>my_notebook/
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>└── renv/library -&gt; ~/.strata/envs/r/8a41…
+</code></pre></div>
+<p>A second notebook with the same <code>renv.lock</code> links to the library without
+running <code>renv::restore()</code>, and every Rscript (cells, the warm pool, the
+environment panel) reads it through renv's project path. Installing a package
+from the environment panel first moves the notebook onto a private library
+restored from the package cache, and once <code>renv.lock</code> is written that library
+is kept under the new lock's key, so the other notebooks keep theirs. The R and
+Python keys are separate: changing one lock rebuilds only that language's
+environment. The same sweep removes libraries no notebook links to.</p>
+<p>Provenance still follows the lockfiles, as with a <code>.venv</code> and <code>renv/library</code>
+per notebook. POSIX only, since the link is a symlink.</p>
 
 
 

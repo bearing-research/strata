@@ -3531,7 +3531,7 @@ deployment, not only in one that opted in to something.</p>
 <tr>
 <td><code>STRATA_NOTEBOOK_ENV_BACKEND</code></td>
 <td><code>uv</code></td>
-<td>How notebook Python environments are kept. <code>uv</code>: each notebook has its own <code>.venv</code>. <code>shared</code>: notebooks with the same <code>uv.lock</code> and interpreter build share one environment, and each notebook's <code>.venv</code> is a symlink to it, so a second notebook with that lock installs nothing. Adding or removing a package moves only that notebook to another environment. POSIX only. See <a href="../../notebook/environment/#shared-environments">Shared environments</a>.</td>
+<td>How notebook Python environments are kept. <code>uv</code>: each notebook has its own <code>.venv</code>. <code>shared</code>: notebooks with the same <code>uv.lock</code> and interpreter build share one environment, and each notebook's <code>.venv</code> is a symlink to it, so a second notebook with that lock installs nothing. Adding or removing a package moves only that notebook to another environment. R libraries are shared the same way, one per <code>renv.lock</code> and R build, with <code>renv/library</code> a symlink. POSIX only. See <a href="../../notebook/environment/#shared-environments">Shared environments</a>.</td>
 </tr>
 <tr>
 <td><code>STRATA_NOTEBOOK_SHARED_ENV_DIR</code></td>
