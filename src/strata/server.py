@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
 import os
 import re
@@ -763,6 +764,27 @@ def _should_warn_unset_signing_secret(config: StrataConfig) -> bool:
     return not config.transform_signing_secret and config.deployment_mode == "service"
 
 
+async def _artifact_gc_loop(store, interval_seconds: float, max_age_days: float) -> None:
+    """Run ``garbage_collect`` every ``interval_seconds`` until cancelled.
+
+    A pass that raises is logged and the loop carries on: one bad sweep must not
+    turn scheduled collection off for the life of the server.
+    """
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            result = await asyncio.to_thread(store.garbage_collect, max_age_days=max_age_days)
+        except Exception:
+            logger.exception("artifact_gc_failed")
+            continue
+        if result.get("deleted_count"):
+            logger.info(
+                "artifact_gc_collected",
+                deleted_count=result["deleted_count"],
+                deleted_bytes=result["deleted_bytes"],
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize server state on startup, graceful shutdown on exit."""
@@ -967,6 +989,22 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass  # Don't fail startup if sweep fails
 
+    # Scheduled garbage collection, when configured. The whole store in one
+    # pass: garbage_collect already treats every tenant's roots as roots.
+    gc_task: asyncio.Task | None = None
+    if config.artifact_gc_interval_seconds and config.artifact_dir is not None:
+        from strata.artifact_store import get_artifact_store as _get_store_for_gc
+
+        gc_store = _get_store_for_gc(config.artifact_dir)
+        if gc_store is not None:
+            gc_task = asyncio.create_task(
+                _artifact_gc_loop(
+                    gc_store,
+                    config.artifact_gc_interval_seconds,
+                    config.artifact_gc_max_age_days,
+                )
+            )
+
     # Initialize build QoS for server-mode transforms (quotas + backpressure)
     build_qos = None
     if config.server_transforms_enabled:
@@ -1060,6 +1098,11 @@ async def lifespan(app: FastAPI):
             yield
     else:
         yield
+
+    if gc_task is not None:
+        gc_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await gc_task
 
     # Reset build QoS
     from strata.transforms.build_qos import reset_build_qos
