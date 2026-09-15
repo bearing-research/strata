@@ -819,6 +819,10 @@ class ArtifactInfoResponse(BaseModel):
         content_sha256: SHA-256 of the stored bytes, so a caller can compare
             two machines' outputs without downloading either. ``None`` on rows
             written before the digest was recorded.
+        provenance_hash: What the artifact deduplicates by, which a store
+            copying it (a notebook's ``@dataset``) has to keep.
+        transform_spec: The stored transform specification, as JSON. Its
+            ``params.content_type`` says how a notebook reads the bytes.
     """
 
     artifact_id: str
@@ -829,6 +833,8 @@ class ArtifactInfoResponse(BaseModel):
     byte_size: int | None = None
     created_at: float
     content_sha256: str | None = None
+    provenance_hash: str | None = None
+    transform_spec: str | None = None
 
 
 #: Marks a by-provenance 404 as a genuine "nobody has computed this", as

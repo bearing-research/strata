@@ -252,6 +252,45 @@ route to it. The worker must be running this version of Strata or later. An
 older one does not recognise the input and the cell fails with a `NameError`
 on `<name>`.
 
+## @dataset
+
+Declare a registry name the cell reads. The name resolves to one artifact
+version, and **that version becomes part of the cell's provenance**, so a cell
+that reads the team's champion model goes stale when `champion` moves. Resolving
+the name with the `strata` client inside the cell records nothing: the name is
+in the source hash and the version is in nothing.
+
+```python
+# @dataset model taxi/model@champion
+predictions = model.predict(features)
+```
+
+Format: `# @dataset <name> <registry-name>[@<alias>|@v=<n>]`.
+
+- **`taxi/model@champion`** follows the alias. The cell goes stale when the
+  alias points somewhere else.
+- **`taxi/model`** follows the name pointer the same way.
+- **`taxi/model@v=3`** pins version 3 of the artifact the name points at. A
+  pinned dataset never makes the cell stale, as `snapshot=` does for `@table`.
+
+The name resolves in the registry the cell's `strata` client uses: the
+server's own store, or the team store when `STRATA_NOTEBOOK_REMOTE_STORE_URL`
+is set. The version is copied into the notebook's own store, keeping its id and
+version, and `<name>` is bound to its value like an upstream variable: a
+table as a DataFrame, a JSON value or a pickled object as itself. Artifacts
+written outside a notebook (a core transform, `strata.put`) are Arrow tables.
+Anything else, such as an image, arrives as a `pathlib.Path` to its bytes.
+
+Each artifact the cell stores records the name and the version it resolved to
+as an input, so lineage, in the dashboard and in `strata artifact lineage`,
+walks from a downstream result through the cell to the named version.
+
+The registry is asked at most once a minute while staleness is being
+recomputed, and always right before the cell runs. A name that does not
+resolve shows the cell as stale, and running it fails with the reason. A cell
+with `@dataset` runs on its own in Run All rather than in a batch. `@loop` and
+R cells cannot declare one; read the dataset in an upstream Python cell.
+
 ## @table
 
 Declare an Iceberg table input. The table's current snapshot id becomes part

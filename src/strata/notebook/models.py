@@ -118,6 +118,35 @@ class FetchSpec(BaseModel):
     )
 
 
+class DatasetSpec(BaseModel):
+    """A registry name a cell reads, declared with ``@dataset`` so it is an input.
+
+    The name resolves to one artifact version, which is copied into the
+    notebook's store, bound to ``name``, and folded into the cell's provenance.
+    See ``strata.notebook.datasets``.
+    """
+
+    name: str = Field(
+        ...,
+        description="Variable name, bound to the artifact's value",
+        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+    )
+    dataset: str = Field(..., description="Registry name, e.g. taxi/model", min_length=1)
+    alias: str | None = Field(default=None, description="Follow this alias, e.g. champion")
+    version: int | None = Field(
+        default=None, ge=1, description="Pin this version; the cell never goes stale when set"
+    )
+
+    @property
+    def reference(self) -> str:
+        """The declaration as written: ``name``, ``name@alias`` or ``name@v=N``."""
+        if self.alias is not None:
+            return f"{self.dataset}@{self.alias}"
+        if self.version is not None:
+            return f"{self.dataset}@v={self.version}"
+        return self.dataset
+
+
 class ConnectionSpec(BaseModel):
     """A named database connection from ``[connections.<name>]``.
 

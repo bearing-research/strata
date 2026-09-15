@@ -88,6 +88,7 @@ from strata.notebook.models import (
     CellOutput,
     CellTestCase,
     CellTestResult,
+    DatasetSpec,
     FetchSpec,
     MountMode,
     MountSpec,
@@ -143,6 +144,7 @@ from strata.transforms.build_store import get_build_store
 from strata.types import EXECUTOR_PROTOCOL_HEADER, EXECUTOR_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
+    from strata.notebook.datasets import DatasetInput
     from strata.notebook.pool import WarmProcessPool
     from strata.notebook.session import NotebookSession
 
@@ -343,6 +345,11 @@ class _CellProvenance:
     fetch_fingerprints: list[str] = field(default_factory=list)
     fetched: dict[str, Path] = field(default_factory=dict)
     fetch_error: str | None = None
+    # ``@dataset`` inputs: the version each name resolved to, already in the
+    # notebook's store, and why any did not resolve.
+    dataset_fingerprints: list[str] = field(default_factory=list)
+    datasets: dict[str, DatasetInput] = field(default_factory=dict)
+    dataset_error: str | None = None
 
 
 @dataclass(kw_only=True)
@@ -580,6 +587,9 @@ class CellExecutor:
         # time: a staleness check in between can record newer bytes than the
         # run used, and the artifact would name bytes it was not made from.
         self._fetch_refs: dict[str, dict[str, str]] = {}
+        # The same for ``@dataset``: ``{strata://name/<reference>: <id>@v=<n>}``
+        # as resolved when provenance was computed.
+        self._dataset_refs: dict[str, dict[str, str]] = {}
         self._mount_resolver = MountResolver(
             cache_dir=session.path / ".strata" / "mount_cache",
             credentials=mount_credentials,
@@ -1074,8 +1084,18 @@ class CellExecutor:
             annotations.fetches
         )
         self._fetch_refs[cell_id] = fetch_refs
+        dataset_fingerprints, datasets, dataset_error = await self._resolve_datasets(
+            annotations.datasets
+        )
+        self._dataset_refs[cell_id] = {
+            dataset.resolved.lineage_uri: dataset.local_ref for dataset in datasets.values()
+        }
         provenance_hash = compute_provenance_hash(
-            input_hashes + mount_fingerprints + table_fingerprints + fetch_fingerprints,
+            input_hashes
+            + mount_fingerprints
+            + table_fingerprints
+            + fetch_fingerprints
+            + dataset_fingerprints,
             source_hash,
             env_hash,
         )
@@ -1097,6 +1117,9 @@ class CellExecutor:
             fetch_fingerprints=fetch_fingerprints,
             fetched=fetched,
             fetch_error=fetch_error,
+            dataset_fingerprints=dataset_fingerprints,
+            datasets=datasets,
+            dataset_error=dataset_error,
         )
 
     # ------------------------------------------------------------------
@@ -1250,6 +1273,14 @@ class CellExecutor:
                     cell_id=cell_id,
                     success=False,
                     error=prov.fetch_error,
+                    execution_method="error",
+                )
+            # Likewise a dataset the registry could not resolve or hand over.
+            if prov.dataset_error is not None:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error=prov.dataset_error,
                     execution_method="error",
                 )
             # Here each fetch reaches the cell as a read-only mount of its
@@ -1572,6 +1603,7 @@ class CellExecutor:
                 )
                 if fetches_as_inputs:
                     _add_fetch_inputs(input_specs, prov.fetched, output_dir)
+                self._add_dataset_inputs(input_specs, prov.datasets, output_dir)
 
                 venv_path = self.session.venv_python or Path("python")
 
@@ -1931,6 +1963,14 @@ class CellExecutor:
             env_hash = prov.env_hash
             input_hashes = prov.input_hashes
             provenance_hash = prov.provenance_hash
+            if prov.annotations.datasets:
+                return CellExecutionResult(
+                    cell_id=cell_id,
+                    success=False,
+                    error="@dataset is not supported on R cells; read the dataset in a "
+                    "Python cell upstream",
+                    execution_method="error",
+                )
             # As in a Python cell: a fetch that could not be checked fails the
             # run, and each fetched file arrives as a read-only mount, which
             # harness.R binds to its name as a path string.
@@ -3322,10 +3362,76 @@ class CellExecutor:
             refs[spec.url] = f"sha256:{result.sha256}"
         return fingerprints, fetched, refs, error
 
+    async def _resolve_datasets(
+        self, dataset_specs: list[DatasetSpec]
+    ) -> tuple[list[str], dict[str, DatasetInput], str | None]:
+        """Resolve every ``@dataset`` right before a run and copy what it names
+        into the notebook's store.
+
+        Always resolved here, whatever staleness last saw, and the answer is
+        handed to the session so staleness agrees with what the run recorded.
+        Returns the fingerprints, the input per variable, and the first failure.
+        """
+        if not dataset_specs:
+            return [], {}, None
+        from strata.notebook.datasets import (
+            DatasetError,
+            copy_into,
+            registry_for,
+            unresolved_fingerprint,
+        )
+
+        store = self.session.get_artifact_manager().artifact_store
+        fingerprints: list[str] = []
+        datasets: dict[str, DatasetInput] = {}
+        error: str | None = None
+        for spec in sorted(dataset_specs, key=lambda item: item.name):
+            try:
+                registry = registry_for(self._lake_config())
+                resolved = await asyncio.to_thread(registry.resolve, spec)
+                dataset = await asyncio.to_thread(copy_into, registry, resolved, store)
+            except DatasetError as exc:
+                error = error or str(exc)
+                fingerprint = unresolved_fingerprint(spec)
+            else:
+                fingerprint = resolved.fingerprint
+                datasets[spec.name] = dataset
+            self.session.remember_dataset_fingerprint(spec, fingerprint)
+            fingerprints.append(fingerprint)
+        return fingerprints, datasets, error
+
+    def _add_dataset_inputs(
+        self,
+        input_specs: dict[str, Any],
+        datasets: dict[str, DatasetInput],
+        output_dir: Path,
+    ) -> None:
+        """Write each dataset's bytes into *output_dir* as an input the harness
+        binds, from the copy in the notebook's store."""
+        store = self.session.get_artifact_manager().artifact_store
+        for name, dataset in sorted(datasets.items()):
+            artifact_id, _, version = dataset.local_ref.partition("@v=")
+            blob = store.read_blob(artifact_id, int(version))
+            if blob is None:
+                continue
+            ext = _ARTIFACT_EXT_BY_CONTENT_TYPE.get(dataset.content_type, "")
+            file_name = f"__dataset_{name}{ext}"
+            (output_dir / file_name).write_bytes(blob)
+            input_specs[name] = {
+                "content_type": dataset.content_type,
+                "file": file_name,
+                "uri": f"strata://artifact/{dataset.local_ref}",
+            }
+
     def _input_refs(self, cell_id: str) -> dict[str, str]:
         """What an artifact of *cell_id* records as its inputs: upstream
-        artifacts, and each fetched URL with the digest of the bytes read."""
-        return {**self.session._collect_input_refs(cell_id), **self._fetch_refs.get(cell_id, {})}
+        artifacts, each fetched URL with the digest of the bytes read, and each
+        dataset with the version it resolved to."""
+        return {
+            **self.session._collect_input_refs(cell_id),
+            **self._fetch_refs.get(cell_id, {}),
+            **self._dataset_refs.get(cell_id, {}),
+        }
 
     def _fetch_allowed_hosts(self) -> tuple[str, ...]:
         return tuple(getattr(self._lake_config(), "notebook_fetch_allowed_hosts", None) or ())
@@ -4788,6 +4894,17 @@ class CellExecutor:
         if materialize_upstreams:
             await self._materialize_upstreams(cell_id)
 
+        if annotations.datasets:
+            return CellExecutionResult(
+                cell_id=cell_id,
+                success=False,
+                error=(
+                    "@dataset is not supported on loop cells; read the dataset in an "
+                    "upstream cell and pass what the loop needs from it"
+                ),
+                execution_method="loop",
+            )
+
         if annotations.fetches:
             # An iteration is its own harness run with the mounts resolved
             # here, and the fetch is checked only once the loop is over, so
@@ -6035,7 +6152,8 @@ def is_cell_batchable(executor: CellExecutor, cell: Any) -> bool:
 
     # A batch resolves inputs itself and never sees a fetch's bytes; a fetching
     # cell runs single-cell, where the fetch is checked and injected.
-    if parse_annotations(cell.source).fetches:
+    annotations = parse_annotations(cell.source)
+    if annotations.fetches or annotations.datasets:
         return False
 
     dag = executor.session.dag

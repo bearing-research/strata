@@ -44,6 +44,7 @@ from strata.notebook.models import (
     CellStaleness,
     CellState,
     CellStatus,
+    DatasetSpec,
     NotebookState,
     StalenessReason,
     VariantGroupState,
@@ -261,6 +262,11 @@ class NotebookSession:
 
         # v1.1: Causality chains for stale cells
         self.causality_map: dict[str, CausalityChain] = {}
+
+        # What each ``@dataset`` last resolved to, keyed by (variable,
+        # reference), with when: staleness re-asks the registry at most every
+        # ``datasets.STALE_CHECK_SECONDS``, and a run's resolution lands here.
+        self._dataset_checks: dict[tuple[str, str], tuple[float, str]] = {}
 
         # Environment/runtime sync state for the current notebook venv.
         self.environment_sync_state: str = "unknown"
@@ -849,9 +855,14 @@ class NotebookSession:
 
             table_fingerprints = self._collect_table_fingerprints(cell)
             fetch_fingerprints = self._collect_fetch_fingerprints(cell)
+            dataset_fingerprints = self._collect_dataset_fingerprints(cell)
 
             provenance_hash = compute_provenance_hash(
-                input_hashes + mount_fingerprints + table_fingerprints + fetch_fingerprints,
+                input_hashes
+                + mount_fingerprints
+                + table_fingerprints
+                + fetch_fingerprints
+                + dataset_fingerprints,
                 source_hash,
                 env_hash,
             )
@@ -1852,6 +1863,41 @@ class NotebookSession:
         return [
             cache.fingerprint(spec) for spec in sorted(annotations.fetches, key=lambda s: s.name)
         ]
+
+    def _collect_dataset_fingerprints(self, cell: Any) -> list[str]:
+        """``@dataset`` fingerprints for staleness, mirroring the executor's.
+
+        The registry is asked at most every ``STALE_CHECK_SECONDS`` per
+        declaration, since staleness runs on each source edit and the registry
+        may be across a network; the executor resolves again before every run
+        and records the answer here. Never raises: a name that cannot be
+        resolved fingerprints as stale.
+        """
+        annotations = parse_annotations(cell.source)
+        if not annotations.datasets:
+            return []
+        from strata.notebook import datasets
+
+        fingerprints: list[str] = []
+        for spec in sorted(annotations.datasets, key=lambda s: s.name):
+            checked = self._dataset_checks.get((spec.name, spec.reference))
+            if (
+                checked is not None
+                and _time.monotonic() - checked[0] < datasets.STALE_CHECK_SECONDS
+            ):
+                fingerprints.append(checked[1])
+                continue
+            try:
+                fingerprint = datasets.registry_for(self._lake_config()).resolve(spec).fingerprint
+            except datasets.DatasetError:
+                fingerprint = datasets.unresolved_fingerprint(spec)
+            self.remember_dataset_fingerprint(spec, fingerprint)
+            fingerprints.append(fingerprint)
+        return fingerprints
+
+    def remember_dataset_fingerprint(self, spec: DatasetSpec, fingerprint: str) -> None:
+        """Record what *spec* resolved to now, for staleness to reuse."""
+        self._dataset_checks[(spec.name, spec.reference)] = (_time.monotonic(), fingerprint)
 
     def _lake_config(self):
         """Server config when running inside the server, else loaded fresh."""
