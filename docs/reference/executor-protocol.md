@@ -187,7 +187,8 @@ For workloads where streaming inputs through Strata is a bandwidth bottleneck (l
     "tenant": "team-a",
     "notebook_id": "9c7e22e3-8ed7-452c-885c-49574d7aa02f",
     "cell_id": "ba3b7451",
-    "cell_provenance_hash": "5f2c…"
+    "cell_provenance_hash": "5f2c…",
+    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
   },
   "inputs": [
     {
@@ -212,6 +213,15 @@ authenticated caller dispatched the cell, as on a personal server.
 computation share it. They sit outside `params` deliberately, since `params` is
 hashed into the build's transport provenance and who ran a cell must not change
 what is cached. A worker can ignore them.
+
+`traceparent` and `tracestate` are the W3C trace context of the server's
+`notebook.dispatch` span, present when the server has tracing on. The same
+values go in the request's headers. A worker opens its `worker.execute` span as
+a child of the header context if there is one, and otherwise of the manifest's.
+The header wins because a dispatcher in between, such as a pool, forwards its
+own span there. A dispatcher that queues the manifest and sends only the body
+still leaves the manifest's copy to link the trace. The direct transport
+carries the context in the request headers only.
 
 **Worker behavior:**
 

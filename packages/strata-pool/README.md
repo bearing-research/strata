@@ -138,6 +138,12 @@ image. Machines already running the old image get no new jobs and retire the
 same way. The catalogue is stored with the pool's state, and on start it
 replaces the one the process was constructed with.
 
+A job submitted with W3C `traceparent` / `tracestate` headers keeps them, and
+the pool forwards them to the machine it runs on. With OpenTelemetry installed
+(it is not a dependency) the pool also opens a `pool.execute` span for the job's
+time on the machine. The machine's work then sits under that span, which sits
+under the caller's.
+
 A job that fails **on the worker** comes back as 502, and one that times out
 as 504 — the caller has to be able to tell "your code raised" from "we could
 not run it".

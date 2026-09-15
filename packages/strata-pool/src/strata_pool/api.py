@@ -128,6 +128,7 @@ def create_app(
             priority=priority,
             session_id=session_id,
             timeout_seconds=timeout_seconds,
+            trace_context=_trace_context(request),
         )
         return JSONResponse(_job_json(job), status_code=202)
 
@@ -156,6 +157,7 @@ def create_app(
             priority=priority,
             session_id=session_id,
             timeout_seconds=timeout_seconds,
+            trace_context=_trace_context(request),
         )
         try:
             done = await pool.wait(job.id, timeout=wait_seconds)
@@ -224,6 +226,13 @@ def create_app(
         return [_usage_json(event) for event in pool.store.list_usage(tenant_id)]
 
     return app
+
+
+def _trace_context(request: Request) -> dict[str, str]:
+    """The caller's W3C trace headers, carried with the job to the machine."""
+    return {
+        key: value for key in ("traceparent", "tracestate") if (value := request.headers.get(key))
+    }
 
 
 async def _submit(pool: Pool, **kwargs) -> Job:

@@ -28,9 +28,10 @@ cancel.
 """
 
 import asyncio
+import contextlib
 import logging
 import time
-from collections.abc import Callable, Coroutine, Iterable
+from collections.abc import Callable, Coroutine, Iterable, Iterator
 from typing import Any
 
 import httpx
@@ -71,6 +72,7 @@ class Pool:
         monotonic: Callable[[], float] = time.monotonic,
         health_poll_seconds: float = _HEALTH_POLL_SECONDS,
         max_workers_total: int | None = None,
+        tracer: Any = None,
     ):
         """
         Args:
@@ -84,6 +86,9 @@ class Pool:
                 many tenants show up. None means no ceiling, which is the
                 right default for a single-tenant pool and the wrong one for
                 a hosted deployment.
+            tracer: OpenTelemetry tracer for the span around each execution.
+                None uses the global provider's, when OpenTelemetry is
+                installed; the pool does not require it.
         """
         self.store = store
         self.backend = backend
@@ -97,6 +102,7 @@ class Pool:
         self._monotonic = monotonic
         self._health_poll_seconds = health_poll_seconds
         self.max_workers_total = max_workers_total
+        self._tracer = tracer
         self._tasks: set[asyncio.Task] = set()
         # worker id -> consecutive failed probes. In memory rather than in the
         # store: it is a judgement about right now, and a pool that restarts
@@ -174,6 +180,7 @@ class Pool:
         priority: int = 0,
         session_id: str | None = None,
         timeout_seconds: float | None = None,
+        trace_context: dict[str, str] | None = None,
     ) -> Job:
         """Queue a job and place it, without waiting for it to run.
 
@@ -200,6 +207,7 @@ class Pool:
             priority=priority,
             session_id=session_id,
             timeout_seconds=timeout_seconds,
+            trace_context=dict(trace_context or {}),
         )
         self.store.save_job(job)
 
@@ -431,13 +439,17 @@ class Pool:
             # asyncio.timeout is the wall-clock bound; httpx's own timeout is
             # per phase (its read timeout is the gap between bytes, so a worker
             # dribbling output could outlive the budget the error text claims).
-            async with asyncio.timeout(timeout):
-                response = await self._client.post(
-                    f"{worker.endpoint}/execute",
-                    content=job.payload,
-                    headers={"Authorization": f"Bearer {worker.auth_token}"},
-                    timeout=timeout,
-                )
+            with self._execution_span(job, worker) as trace_headers:
+                async with asyncio.timeout(timeout):
+                    response = await self._client.post(
+                        f"{worker.endpoint}/execute",
+                        content=job.payload,
+                        headers={
+                            **trace_headers,
+                            "Authorization": f"Bearer {worker.auth_token}",
+                        },
+                        timeout=timeout,
+                    )
         except (httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
             # These are timeouts that never reached the worker. A machine that
             # black-holes packets looks exactly like this, and calling it a slow
@@ -507,6 +519,35 @@ class Pool:
                 # take — and the slot it just freed belongs to whoever is
                 # waiting, not only to this job's tenant.
                 await self._offer_freed_capacity()
+
+    @contextlib.contextmanager
+    def _execution_span(self, job: Job, worker: Worker) -> Iterator[dict[str, str]]:
+        """A span for this job's time on the machine, and the headers that
+        make the machine's work its child.
+
+        Without OpenTelemetry the submitter's context is forwarded as it came,
+        so the trace still joins up one level higher.
+        """
+        try:
+            from opentelemetry import trace
+            from opentelemetry.propagate import extract, inject
+        except ImportError:
+            yield dict(job.trace_context)
+            return
+        tracer = self._tracer or trace.get_tracer("strata_pool")
+        with tracer.start_as_current_span(
+            "pool.execute",
+            context=extract(job.trace_context),
+            attributes={
+                "job_id": job.id,
+                "machine_type": job.machine_type,
+                "tenant_id": job.tenant_id,
+                "worker_id": worker.id,
+            },
+        ):
+            carrier: dict[str, str] = {}
+            inject(carrier)
+            yield carrier
 
     async def _stop_worker(self, worker: Worker) -> None:
         """Deallocate a machine and forget it.
