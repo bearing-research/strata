@@ -3100,6 +3100,16 @@ credential.</p>
 <td>Builds stuck in <code>building</code> longer than this are demoted to <code>failed</code> at startup</td>
 </tr>
 <tr>
+<td><code>STRATA_ARTIFACT_GC_INTERVAL_SECONDS</code></td>
+<td>unset (off)</td>
+<td>Run artifact garbage collection on this interval. Never collects anything named, latest, published or pinned, or anything those depend on. See <a href="../../deployment/lifecycle/#cleaning-up-the-core-artifact-store">Lifecycle</a></td>
+</tr>
+<tr>
+<td><code>STRATA_ARTIFACT_GC_MAX_AGE_DAYS</code></td>
+<td><code>7.0</code></td>
+<td>Minimum age of a version the scheduled sweep may collect</td>
+</tr>
+<tr>
 <td><code>STRATA_REGISTRY_PROTECTED_ALIASES</code></td>
 <td><em>(empty)</em></td>
 <td>Comma-separated alias names (e.g. <code>champion,production</code>) whose moves/deletes queue for approval instead of applying</td>

@@ -1853,6 +1853,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Cleaning up the Core artifact store">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pins
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2123,6 +2140,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Cleaning up the Core artifact store">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pins" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pins
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2276,7 +2310,7 @@
 </table>
 <p>Deleting a notebook also deletes its <code>.strata/artifacts/</code> - there's no shared artifact store across notebooks, so nothing leaks.</p>
 <h2 id="cleaning-up-the-core-artifact-store">Cleaning up the Core artifact store<a class="headerlink" href="#cleaning-up-the-core-artifact-store" title="Permanent link">&para;</a></h2>
-<p>The <strong>server-side</strong> artifact store (driven by <code>StrataClient.materialize</code>) accumulates blobs that may no longer be referenced by any name pointer. There's no automatic cap on it; you GC manually:</p>
+<p>The <strong>server-side</strong> artifact store (driven by <code>StrataClient.materialize</code>) accumulates blobs that may no longer be referenced by any name pointer. GC it on demand, or on a timer with <code>STRATA_ARTIFACT_GC_INTERVAL_SECONDS</code> (off by default) and <code>STRATA_ARTIFACT_GC_MAX_AGE_DAYS</code> (default 7):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/artifacts/gc?max_age_days=7&#39;</span>
 </code></pre></div>
 <p>Or from Python:</p>
@@ -2285,17 +2319,32 @@
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">client</span><span class="o">.</span><span class="n">garbage_collect</span><span class="p">(</span><span class="n">max_age_days</span><span class="o">=</span><span class="mf">7.0</span><span class="p">)</span>
 <a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># {&quot;deleted&quot;: 14, &quot;bytes_freed&quot;: 8429283, ...}</span>
 </code></pre></div>
-<p>The GC pass:</p>
+<p>The GC pass deletes a version only when all of these hold:</p>
 <ul>
-<li>Walks the metadata SQLite for artifacts older than <code>max_age_days</code></li>
-<li>Filters to "unreferenced" - no <code>[name]</code> pointer references them</li>
-<li>Deletes only artifacts in <code>ready</code> or <code>failed</code> state (in-flight artifacts are safe)</li>
-<li>Returns counts + bytes freed</li>
+<li>it is older than <code>max_age_days</code>;</li>
+<li>no name or alias points at it, and it is not the latest version of its id;</li>
+<li>it is <code>ready</code>, <code>superseded</code> or <code>failed</code> (in-flight artifacts are safe);</li>
+<li>it is not published or pinned, and nothing published or pinned depends on it.</li>
 </ul>
-<p>Personal mode only - service-mode deployments need the <code>admin:cache</code> scope and should usually GC per-tenant.</p>
+<p>A publication (withdrawn ones included) or a pin protects its whole lineage, not
+only the version. A page or a snapshot needs every step behind the result.</p>
+<p>It returns counts and bytes freed. In service mode the route needs a principal
+holding <code>admin:*</code>.</p>
+<h3 id="pins">Pins<a class="headerlink" href="#pins" title="Permanent link">&para;</a></h3>
+<p>A pin holds a version and its chain for a reason the store has no other way to
+know, such as a snapshot that must stay restorable or a review that's still
+open:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/artifacts/figure/v/3/pin&#39;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;Content-Type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;reason&quot;: &quot;snapshot:s1&quot;}&#39;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>curl<span class="w"> </span>-X<span class="w"> </span>DELETE<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/artifacts/figure/v/3/pin?reason=snapshot:s1&#39;</span>
+</code></pre></div>
+<p>There is one pin per reason: two holders use two reasons and release them
+independently, and pinning again under the same reason only refreshes it. In
+service mode pins need the <code>artifacts:pin</code> scope (or <code>admin:*</code>) and are scoped to
+the caller's tenant.</p>
 <p>GC the <strong>per-notebook</strong> artifact store by deleting the notebook (or by deleting <code>.strata/artifacts/</code> while the server isn't running). There's no per-notebook GC endpoint - cell-output artifacts are content-addressed and pruning them would defeat the cache.</p>
 <h2 id="cleaning-up-the-iceberg-row-group-cache">Cleaning up the Iceberg row-group cache<a class="headerlink" href="#cleaning-up-the-iceberg-row-group-cache" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/cache/clear&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s1">&#39;http://localhost:8765/v1/cache/clear&#39;</span>
 </code></pre></div>
 <p>Clears the in-memory + on-disk Iceberg cache. Personal mode is unrestricted; service mode requires the <code>admin:cache</code> scope. Safe to run at any time - the worst case is the next read repopulates from Parquet.</p>
 <h2 id="disk-usage-budgeting">Disk-usage budgeting<a class="headerlink" href="#disk-usage-budgeting" title="Permanent link">&para;</a></h2>
@@ -2318,9 +2367,9 @@
 </tr>
 <tr>
 <td>Artifact GC <code>max_age_days</code></td>
-<td>(no automatic run)</td>
-<td>The Core artifact store, by age, when you run GC</td>
-<td>The notebook-scoped artifact stores</td>
+<td>no automatic run unless <code>STRATA_ARTIFACT_GC_INTERVAL_SECONDS</code> is set</td>
+<td>The Core artifact store, by age, when GC runs</td>
+<td>The notebook-scoped artifact stores, and anything published or pinned</td>
 </tr>
 </tbody>
 </table>
@@ -2332,7 +2381,7 @@
 </ul>
 <p>Practical guidance:</p>
 <ul>
-<li>Run <code>POST /v1/artifacts/gc</code> weekly (or on a cron) if you use the Core SDK.</li>
+<li>Set <code>STRATA_ARTIFACT_GC_INTERVAL_SECONDS</code> (for example <code>604800</code>, weekly), or run <code>POST /v1/artifacts/gc</code> on a cron, if you use the Core SDK.</li>
 <li>The Iceberg cache is self-managing under its byte cap - leave it.</li>
 <li>If a single notebook's <code>.strata/artifacts/</code> gets uncomfortably large, the cleanest reset is to delete the notebook's <code>.strata/</code> directory while the server isn't running. Cell source survives; provenance cache resets.</li>
 <li>For <code>.venv/</code> sprawl: <code>du -sh ~/.strata/notebooks/*/.venv</code> is the quickest audit. Old notebooks you don't open anymore can have their <code>.venv/</code> deleted - <code>uv sync</code> will recreate it next time.</li>
@@ -2344,8 +2393,8 @@
 <p>Earlier Strata versions defaulted to <code>/tmp/strata-notebooks</code>, which
 most Linux distros wipe on reboot. If your notebooks are there,
 move them once:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.strata
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>mv<span class="w"> </span>/tmp/strata-notebooks<span class="w"> </span>~/.strata/notebooks
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.strata
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>mv<span class="w"> </span>/tmp/strata-notebooks<span class="w"> </span>~/.strata/notebooks
 </code></pre></div>
 <p>or set <code>STRATA_NOTEBOOK_STORAGE_DIR=/tmp/strata-notebooks</code> if you
 intentionally want the legacy path (e.g. you're already mounting a
