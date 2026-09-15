@@ -2603,6 +2603,16 @@
 <td>varies</td>
 <td><code>uri</code>, <code>host</code>, <code>account</code>, <code>database</code>, <code>role</code>, <code>path</code>, ... - interpreted by the driver adapter.</td>
 </tr>
+<tr>
+<td><code>catalog</code> (DuckDB)</td>
+<td>string | absent</td>
+<td>A server-configured REST catalog to attach under its name; the query reads each of its tables at the snapshot the cell's provenance folds. See <a href="../../notebook/cells/#duckdb-over-the-lake">DuckDB over the lake</a>.</td>
+</tr>
+<tr>
+<td><code>mounts</code> (DuckDB)</td>
+<td>list of strings | absent</td>
+<td>Mounts declared for the cell to expose as views by name over their Parquet, CSV or JSON files.</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Malformed connection preservation.</strong> If a <code>[connections.&lt;name&gt;]</code> block fails validation (bad name, missing <code>driver</code>, etc.), its body is written back verbatim under the same <code>[connections.&lt;name&gt;]</code> table on save, so a typo doesn't get silently erased by an unrelated edit. The annotation-validation layer surfaces a user-visible diagnostic.</p>
