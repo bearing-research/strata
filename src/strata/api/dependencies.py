@@ -69,6 +69,32 @@ def personal_mode_store() -> ArtifactStore:
 PersonalModeStore = Annotated[ArtifactStore, Depends(personal_mode_store)]
 
 
+def store_for_scope(scope: str):
+    """Artifact store for a retention endpoint, in either mode.
+
+    Personal mode opens it, as ``PersonalModeStore`` does. Service mode opens it
+    only for a principal holding ``scope`` (``admin:*`` grants it), so not at
+    all without principal auth, where there is no one to hold it: these
+    endpoints delete data or decide what may never be deleted. The handler
+    still scopes the work to the caller's tenant.
+    """
+
+    def _store() -> ArtifactStore:
+        from strata.auth import get_principal
+        from strata.server import _get_artifact_store, get_state
+
+        config = get_state().config
+        if config.deployment_mode == "personal":
+            return _get_artifact_store()
+        # Without principal auth there is no principal, so this refuses too.
+        principal = get_principal()
+        if principal is None or not principal.has_scope(scope):
+            raise HTTPException(status_code=403, detail="Insufficient scope")
+        return _get_artifact_store(allow_read=True)
+
+    return Depends(_store)
+
+
 def write_store() -> ArtifactStore:
     """Artifact store for a write endpoint (put / set_name / set_alias / tags).
 

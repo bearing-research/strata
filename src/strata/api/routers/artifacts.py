@@ -30,6 +30,7 @@ import pyarrow.ipc as ipc
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi import Path as FastPath
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from strata.api.dependencies import (
     CurrentPrincipal,
@@ -37,6 +38,7 @@ from strata.api.dependencies import (
     PersonalModeStore,
     ReadStore,
     WriteStore,
+    store_for_scope,
 )
 from strata.api.remote_registry import quoted, relay, remote_registry
 from strata.artifact_store import ArtifactStore
@@ -890,20 +892,73 @@ async def delete_artifact(
     return {"deleted": True, "artifact_uri": f"strata://artifact/{artifact_id}@v={version}"}
 
 
+class PinRequest(BaseModel):
+    reason: str
+
+
+@router.post("/v1/artifacts/{artifact_id}/v/{version}/pin")
+async def pin_artifact(
+    artifact_id: str,
+    version: int,
+    request: PinRequest,
+    tenant_filter: CurrentTenant,
+    principal: CurrentPrincipal,
+    store: ArtifactStore = store_for_scope("artifacts:pin"),
+):
+    """Hold a version and every ancestor against garbage collection.
+
+    For a chain the store has no other reason to keep — a snapshot that must
+    stay restorable, a review still open. One pin per reason; pinning again
+    under the same reason refreshes it.
+    """
+    from strata.server import _ensure_artifact_access
+
+    _ensure_artifact_access(store.get_artifact(artifact_id, version), tenant_filter)
+    try:
+        return store.pin_artifact(
+            artifact_id,
+            version,
+            request.reason,
+            tenant=tenant_filter,
+            pinned_by=principal.id if principal is not None else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/v1/artifacts/{artifact_id}/v/{version}/pin")
+async def unpin_artifact(
+    artifact_id: str,
+    version: int,
+    reason: str,
+    tenant_filter: CurrentTenant,
+    store: ArtifactStore = store_for_scope("artifacts:pin"),
+):
+    """Release the pin placed under ``reason``."""
+    if not store.unpin_artifact(artifact_id, version, reason, tenant=tenant_filter):
+        raise HTTPException(status_code=404, detail="No pin with that reason on this version")
+    return {"unpinned": True, "artifact_id": artifact_id, "version": version, "reason": reason}
+
+
 @router.post("/v1/artifacts/gc")
 async def garbage_collect_artifacts(
-    store: PersonalModeStore,
     tenant_filter: CurrentTenant,
     max_age_days: float = 7.0,
     collect_latest: bool = False,
+    store: ArtifactStore = store_for_scope("admin:*"),
 ):
-    """Garbage collect unreachable artifacts (personal mode only).
+    """Garbage collect unreachable artifacts.
+
+    Personal mode, or service mode for a principal holding ``admin:*``, scoped
+    to the caller's tenant.
 
     Deletes artifact versions that:
     1. Have no name **or alias** pointing at them
     2. Are not the latest version of their id (unless ``collect_latest``)
     3. Are older than ``max_age_days``
     4. Are in "ready", "superseded" or "failed" state
+    5. Are not published or pinned, and nothing published or pinned depends
+       on them
 
     The latest version of an id is spared because that is the artifact's
     *current value*: ``get_latest_version(id)`` is how the store resolves it,

@@ -77,7 +77,7 @@ Deleting a notebook also deletes its `.strata/artifacts/` - there's no shared ar
 
 ## Cleaning up the Core artifact store
 
-The **server-side** artifact store (driven by `StrataClient.materialize`) accumulates blobs that may no longer be referenced by any name pointer. There's no automatic cap on it; you GC manually:
+The **server-side** artifact store (driven by `StrataClient.materialize`) accumulates blobs that may no longer be referenced by any name pointer. GC it on demand, or on a timer with `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` (off by default) and `STRATA_ARTIFACT_GC_MAX_AGE_DAYS` (default 7):
 
 ```bash
 curl -X POST 'http://localhost:8765/v1/artifacts/gc?max_age_days=7'
@@ -92,14 +92,35 @@ client.garbage_collect(max_age_days=7.0)
 # {"deleted": 14, "bytes_freed": 8429283, ...}
 ```
 
-The GC pass:
+The GC pass deletes a version only when all of these hold:
 
-- Walks the metadata SQLite for artifacts older than `max_age_days`
-- Filters to "unreferenced" - no `[name]` pointer references them
-- Deletes only artifacts in `ready` or `failed` state (in-flight artifacts are safe)
-- Returns counts + bytes freed
+- it is older than `max_age_days`;
+- no name or alias points at it, and it is not the latest version of its id;
+- it is `ready`, `superseded` or `failed` (in-flight artifacts are safe);
+- it is not published or pinned, and nothing published or pinned depends on it.
 
-Personal mode only - service-mode deployments need the `admin:cache` scope and should usually GC per-tenant.
+A publication (withdrawn ones included) or a pin protects its whole lineage, not
+only the version. A page or a snapshot needs every step behind the result.
+
+It returns counts and bytes freed. In service mode the route needs a principal
+holding `admin:*`.
+
+### Pins
+
+A pin holds a version and its chain for a reason the store has no other way to
+know, such as a snapshot that must stay restorable or a review that's still
+open:
+
+```bash
+curl -X POST 'http://localhost:8765/v1/artifacts/figure/v/3/pin' \
+  -H 'Content-Type: application/json' -d '{"reason": "snapshot:s1"}'
+curl -X DELETE 'http://localhost:8765/v1/artifacts/figure/v/3/pin?reason=snapshot:s1'
+```
+
+There is one pin per reason: two holders use two reasons and release them
+independently, and pinning again under the same reason only refreshes it. In
+service mode pins need the `artifacts:pin` scope (or `admin:*`) and are scoped to
+the caller's tenant.
 
 GC the **per-notebook** artifact store by deleting the notebook (or by deleting `.strata/artifacts/` while the server isn't running). There's no per-notebook GC endpoint - cell-output artifacts are content-addressed and pruning them would defeat the cache.
 
@@ -118,7 +139,7 @@ This is the part most people get bitten by. There are **two** caps to understand
 | Knob | Default | What it caps | What it doesn't cap |
 | --- | --- | --- | --- |
 | `STRATA_MAX_CACHE_SIZE_BYTES` | 10 GB | The Iceberg row-group cache (`~/.strata/cache/`) - LRU-evicted to stay under the cap | Anything else |
-| Artifact GC `max_age_days` | (no automatic run) | The Core artifact store, by age, when you run GC | The notebook-scoped artifact stores |
+| Artifact GC `max_age_days` | no automatic run unless `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` is set | The Core artifact store, by age, when GC runs | The notebook-scoped artifact stores, and anything published or pinned |
 
 Things with **no built-in size limit**:
 
@@ -128,7 +149,7 @@ Things with **no built-in size limit**:
 
 Practical guidance:
 
-- Run `POST /v1/artifacts/gc` weekly (or on a cron) if you use the Core SDK.
+- Set `STRATA_ARTIFACT_GC_INTERVAL_SECONDS` (for example `604800`, weekly), or run `POST /v1/artifacts/gc` on a cron, if you use the Core SDK.
 - The Iceberg cache is self-managing under its byte cap - leave it.
 - If a single notebook's `.strata/artifacts/` gets uncomfortably large, the cleanest reset is to delete the notebook's `.strata/` directory while the server isn't running. Cell source survives; provenance cache resets.
 - For `.venv/` sprawl: `du -sh ~/.strata/notebooks/*/.venv` is the quickest audit. Old notebooks you don't open anymore can have their `.venv/` deleted - `uv sync` will recreate it next time.

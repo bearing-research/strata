@@ -71,6 +71,8 @@ EXPECTED_ROUTES = [
     ("/v1/artifacts/{artifact_id}/v/{version}/data", "GET", 0),
     ("/v1/artifacts/{artifact_id}/v/{version}/dependents", "GET", 0),
     ("/v1/artifacts/{artifact_id}/v/{version}/lineage", "GET", 0),
+    ("/v1/artifacts/{artifact_id}/v/{version}/pin", "DELETE", 0),
+    ("/v1/artifacts/{artifact_id}/v/{version}/pin", "POST", 0),
     ("/v1/artifacts/{artifact_id}/v/{version}/publish", "POST", 1),
     ("/v1/artifacts/{artifact_id}/v/{version}/tags", "GET", 0),
     ("/v1/artifacts/{artifact_id}/v/{version}/tags", "PUT", 0),

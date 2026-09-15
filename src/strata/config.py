@@ -396,6 +396,13 @@ class StrataConfig(BaseSettings):
     # startup (zombie sweep) — they can never serve data and would otherwise
     # linger in the store forever.
     artifact_zombie_build_timeout_seconds: Annotated[float, Field(gt=0)] = 3600.0
+    # Collect unreachable artifacts on a timer: unnamed, not the latest version
+    # of their id, not published or pinned, nothing published or pinned
+    # depending on them, and older than artifact_gc_max_age_days. Off (None)
+    # by default: a store that has never been collected should not start
+    # losing data because a server was upgraded.
+    artifact_gc_interval_seconds: Annotated[float, Field(gt=0)] | None = None
+    artifact_gc_max_age_days: Annotated[float, Field(ge=0)] = 7.0
     # Registry aliases that require approval: moves/deletes of these aliases
     # (e.g. "champion") land in a pending queue instead of applying, and an
     # explicit approve applies them. Empty (the default) = no gating.

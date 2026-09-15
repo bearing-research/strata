@@ -448,9 +448,32 @@ def _add_publication_credits(conn: StoreConnection, dialect: SqlDialect) -> None
             conn.execute(f"ALTER TABLE artifact_publications ADD COLUMN {column} TEXT")
 
 
+def _add_pins(conn: StoreConnection, dialect: SqlDialect) -> None:
+    """Give a platform a way to hold a chain the store has no other reason to keep."""
+    conn.execute(
+        dialect.adapt_ddl(
+            """
+            CREATE TABLE IF NOT EXISTS artifact_pins (
+                artifact_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                tenant TEXT NOT NULL DEFAULT '',
+                pinned_by TEXT,
+                pinned_at REAL NOT NULL,
+                PRIMARY KEY (artifact_id, version, reason)
+            )
+            """
+        )
+    )
+    conn.execute(
+        dialect.adapt_ddl("CREATE INDEX IF NOT EXISTS idx_pins_tenant ON artifact_pins(tenant)")
+    )
+
+
 _MIGRATIONS: list[_Migration] = [
     _Migration(1, "artifact_versions.content_sha256", _add_content_sha256),
     _Migration(2, "artifact_publications.authors + external_ids", _add_publication_credits),
+    _Migration(3, "artifact_pins", _add_pins),
 ]
 
 _LATEST_SCHEMA_VERSION = max((m.version for m in _MIGRATIONS), default=_BASELINE_SCHEMA_VERSION)
@@ -599,6 +622,21 @@ CREATE TABLE IF NOT EXISTS artifact_publications (
 CREATE INDEX IF NOT EXISTS idx_publications_artifact
 ON artifact_publications(artifact_id, version);
 CREATE INDEX IF NOT EXISTS idx_publications_tenant ON artifact_publications(tenant);
+
+-- A hold on an artifact version and everything behind it, for a reason the
+-- store has no other way to know: a snapshot a platform must be able to
+-- restore, a review still open. A root for garbage collection, as a
+-- publication is. One row per reason, so two holders release independently.
+CREATE TABLE IF NOT EXISTS artifact_pins (
+    artifact_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    tenant TEXT NOT NULL DEFAULT '',
+    pinned_by TEXT,
+    pinned_at REAL NOT NULL,
+    PRIMARY KEY (artifact_id, version, reason)
+);
+CREATE INDEX IF NOT EXISTS idx_pins_tenant ON artifact_pins(tenant);
 """
 
 # Migration SQL to add tenant columns to existing tables
@@ -3848,8 +3886,11 @@ class ArtifactStore:
                 (artifact_id, version),
             )
 
-    def _publication_reachable(self, conn: StoreConnection) -> set[tuple[str, int]]:
-        """Every artifact version a publication depends on, roots included.
+    def _protected_reachable(self, conn: StoreConnection) -> set[tuple[str, int]]:
+        """Every artifact version a publication or a pin depends on, roots included.
+
+        A pin is a root for the same reason a publication is: whoever placed it
+        needs the chain, not only the version, to restore or explain it.
 
         A published page shows the code and environment of every step behind
         the result, so the chain is part of what was published: collecting an
@@ -3865,7 +3906,10 @@ class ArtifactStore:
         chain can cross tenants — is the kind of proof this store's pruning
         rules refuse to rely on elsewhere.
         """
-        roots = conn.execute("SELECT artifact_id, version FROM artifact_publications").fetchall()
+        roots = conn.execute(
+            "SELECT artifact_id, version FROM artifact_publications "
+            "UNION SELECT artifact_id, version FROM artifact_pins"
+        ).fetchall()
 
         reachable: set[tuple[str, int]] = set()
         pending = [(row["artifact_id"], row["version"]) for row in roots]
@@ -3891,6 +3935,106 @@ class ArtifactStore:
                     continue
                 pending.append((artifact_id, int(version)))
         return reachable
+
+    def pin_artifact(
+        self,
+        artifact_id: str,
+        version: int,
+        reason: str,
+        *,
+        tenant: str | None = None,
+        pinned_by: str | None = None,
+    ) -> dict:
+        """Hold a version and its chain against garbage collection.
+
+        Idempotent per reason: pinning again under the same reason refreshes
+        who and when rather than stacking a second hold that one release would
+        not lift.
+
+        Raises:
+            ValueError: If the version does not exist or belongs to another
+                tenant, or the reason is empty.
+        """
+        reason = reason.strip()
+        if not reason:
+            raise ValueError("a pin needs a reason")
+        effective_tenant = tenant if tenant is not None else ""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT tenant FROM artifact_versions WHERE id = ? AND version = ?",
+                (artifact_id, version),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            if tenant is not None and (row["tenant"] or "") not in (effective_tenant, ""):
+                raise ValueError(f"Artifact {artifact_id}@v={version} not found")
+            pinned_at = time.time()
+            conn.execute(
+                "INSERT INTO artifact_pins "
+                "(artifact_id, version, reason, tenant, pinned_by, pinned_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (artifact_id, version, reason) DO UPDATE SET "
+                "pinned_by = excluded.pinned_by, pinned_at = excluded.pinned_at",
+                (artifact_id, version, reason, effective_tenant, pinned_by, pinned_at),
+            )
+            conn.commit()
+            return {
+                "artifact_id": artifact_id,
+                "version": version,
+                "reason": reason,
+                "tenant": effective_tenant,
+                "pinned_by": pinned_by,
+                "pinned_at": pinned_at,
+            }
+        finally:
+            conn.close()
+
+    def unpin_artifact(
+        self, artifact_id: str, version: int, reason: str, *, tenant: str | None = None
+    ) -> bool:
+        """Release one hold. Returns False if there was no such pin."""
+        sql = "DELETE FROM artifact_pins WHERE artifact_id = ? AND version = ? AND reason = ?"
+        params: list[Any] = [artifact_id, version, reason]
+        if tenant is not None:
+            sql += " AND tenant = ?"
+            params.append(tenant)
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(sql, params)
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def list_pins(
+        self,
+        artifact_id: str | None = None,
+        version: int | None = None,
+        *,
+        tenant: str | None = None,
+    ) -> list[dict]:
+        """Pins, oldest first, optionally for one version and one tenant."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if artifact_id is not None:
+            clauses.append("artifact_id = ?")
+            params.append(artifact_id)
+        if version is not None:
+            clauses.append("version = ?")
+            params.append(version)
+        if tenant is not None:
+            clauses.append("tenant = ?")
+            params.append(tenant)
+        sql = "SELECT artifact_id, version, reason, tenant, pinned_by, pinned_at FROM artifact_pins"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY pinned_at ASC"
+        conn = self._get_connection()
+        try:
+            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+        finally:
+            conn.close()
 
     def garbage_collect(
         self,
@@ -3941,7 +4085,7 @@ class ArtifactStore:
             #   upstream missing. Collecting superseded versions is still fine —
             #   that is what makes GC useful — but never the current one.
             #
-            # Publications and everything behind them are excluded below,
+            # Publications, pins and everything behind them are excluded below,
             # after the SELECT, by a lineage walk rather than by a clause here.
             # ``input_versions`` is JSON in a TEXT column, so expressing the
             # walk in SQL means ``json_each`` on one dialect and ``jsonb_each``
@@ -3981,7 +4125,7 @@ class ArtifactStore:
             cursor = conn.execute(query, params)
             rows = cursor.fetchall()
 
-            protected = self._publication_reachable(conn)
+            protected = self._protected_reachable(conn)
 
             deleted_count = 0
             deleted_bytes = 0
