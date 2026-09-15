@@ -3613,7 +3613,7 @@ flag, and the flag wins.</p>
 <tr>
 <td><code>STRATA_WORKER_MAX_INPUT_BYTES</code></td>
 <td><code>2147483648</code> (2 GiB)</td>
-<td>Per-input download cap for the pull-model (<code>/v1/execute-manifest</code>). Reject inputs larger than this with 413.</td>
+<td>Per-input download cap for the pull-model (<code>/v1/execute-manifest</code>). Reject inputs larger than this with 413, as soon as the count passes it. Inputs stream to disk, so this bounds disk use, not memory.</td>
 </tr>
 <tr>
 <td><code>STRATA_WORKER_ALLOWED_HOSTS</code></td>

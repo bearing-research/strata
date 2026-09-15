@@ -2964,7 +2964,7 @@ The worker image is missing the dependency the cell needs. Add it to the Dockerf
 <p><strong>Cells dispatched to a Modal worker hang for 30+ seconds before output.</strong>
 Cold start. Modal scales the function to zero after <code>scaledown_window</code> seconds idle; the first request after a scale-down has to provision a fresh container. Either bump <code>scaledown_window</code>, set <code>min_containers=1</code> on the <code>@app.function</code>, or just expect the latency on the first cell after idle.</p>
 <p><strong><code>413 Payload Too Large</code> from the worker.</strong>
-A cell input is larger than the worker's max-input limit. Default is 256 MB; override with <code>STRATA_WORKER_MAX_INPUT_BYTES=&lt;bytes&gt;</code> on the worker. Better: shrink the input by selecting columns / filtering rows in an upstream cell.</p>
+A cell input is larger than the worker's max-input limit. Default is 2 GiB; override with <code>STRATA_WORKER_MAX_INPUT_BYTES=&lt;bytes&gt;</code> on the worker. Inputs are written to disk as they arrive, so the limit to size against is the worker's disk, not its memory. Better: shrink the input by selecting columns / filtering rows in an upstream cell.</p>
 <p><strong>Fly build fails with <code>error: failed to fetch wheel</code> from a workload dep.</strong>
 Some Python deps (torch, sentence-transformers) don't ship abi3 wheels and fall back to building from source. If your worker needs one, add <code>build-essential</code> (plus the dep-specific toolchain) to the Dockerfile via <code>RUN apt-get install -y --no-install-recommends build-essential &amp;&amp; rm -rf /var/lib/apt/lists/*</code> before the <code>uv pip install</code> step.</p>
 <p><strong>Modal redeploy hangs at "Building image".</strong>

@@ -2472,7 +2472,7 @@ hashed into the build's transport provenance and who ran a cell must not change
 what is cached. A worker can ignore them.</p>
 <p><strong>Worker behavior:</strong></p>
 <ol>
-<li>For each entry in <code>metadata.params.input_specs</code>, look up its <code>uri</code> in <code>inputs[]</code> and stream-download from the signed URL. Inputs that exceed <code>STRATA_WORKER_MAX_INPUT_BYTES</code> (declared via <code>Content-Length</code> or measured during stream) are rejected with <code>413</code>.</li>
+<li>For each entry in <code>metadata.params.input_specs</code>, look up its <code>uri</code> in <code>inputs[]</code> and stream-download from the signed URL to the input file, so an input is bounded by the worker's disk rather than its memory. Inputs that exceed <code>STRATA_WORKER_MAX_INPUT_BYTES</code> (declared via <code>Content-Length</code> or measured during stream) are rejected with <code>413</code>.</li>
 <li>Run the cell in a subprocess (same as <code>/v1/execute</code>).</li>
 <li>Stream the resulting output bundle to <code>output.url</code> via <code>POST</code> with <code>Content-Type: application/x-tar</code>.</li>
 <li><code>POST {"output_format": "notebook-output-bundle@v1"}</code> to <code>finalize_url</code>.</li>
