@@ -1217,6 +1217,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#shared-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared environments
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2241,6 +2252,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#shared-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Shared environments
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2356,6 +2378,34 @@
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>└── .venv/            # Virtual environment (auto-created, not committed)
 </code></pre></div>
 <p>The <code>pyproject.toml</code> and <code>uv.lock</code> are the source of truth. The <code>.venv/</code> is recreated by <code>uv sync</code> when needed.</p>
+<h2 id="shared-environments">Shared environments<a class="headerlink" href="#shared-environments" title="Permanent link">&para;</a></h2>
+<p>On a server with many notebooks built from the same few lockfiles, a <code>.venv</code>
+per notebook installs the same packages again and again. With
+<code>STRATA_NOTEBOOK_ENV_BACKEND=shared</code>, notebooks share one environment per
+lockfile instead:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>~/.strata/envs/
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>├── 3f9c…/            # one environment per uv.lock + interpreter build
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>├── 3f9c….lock        # held while that environment is installed
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>└── refs/3f9c…/       # one file per notebook linked to it
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>my_notebook/
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>└── .venv -&gt; ~/.strata/envs/3f9c…
+</code></pre></div>
+<ul>
+<li><strong>The key</strong> is the SHA-256 of the raw <code>uv.lock</code> bytes together with the exact
+  interpreter build and platform. Two notebooks with the same lock on the same
+  interpreter get the same environment, and the second one's sync is only the
+  link.</li>
+<li><strong>A shared environment is never changed in place.</strong> Adding or removing a
+  package updates that notebook's <code>pyproject.toml</code> and <code>uv.lock</code> without
+  syncing, then syncs, which lands in another environment and moves only that
+  notebook's link. The other notebooks keep theirs.</li>
+<li><strong>Clean-up.</strong> An environment no notebook links to is removed once it has
+  gone unused for <code>STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS</code> (default 7), by an
+  hourly sweep in the server or by <code>strata env gc</code>. An environment a notebook
+  links to is never removed.</li>
+</ul>
+<p>Provenance still follows the lockfile, as with a <code>.venv</code> per notebook. POSIX
+only, since the link is a symlink.</p>
 
 
 

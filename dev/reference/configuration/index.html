@@ -3529,6 +3529,21 @@ deployment, not only in one that opted in to something.</p>
 <td>Available Python versions (JSON array or comma-separated list)</td>
 </tr>
 <tr>
+<td><code>STRATA_NOTEBOOK_ENV_BACKEND</code></td>
+<td><code>uv</code></td>
+<td>How notebook Python environments are kept. <code>uv</code>: each notebook has its own <code>.venv</code>. <code>shared</code>: notebooks with the same <code>uv.lock</code> and interpreter build share one environment, and each notebook's <code>.venv</code> is a symlink to it, so a second notebook with that lock installs nothing. Adding or removing a package moves only that notebook to another environment. POSIX only. See <a href="../../notebook/environment/#shared-environments">Shared environments</a>.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_SHARED_ENV_DIR</code></td>
+<td><code>envs</code> beside <code>STRATA_NOTEBOOK_STORAGE_DIR</code></td>
+<td>Where shared environments live, one directory per lockfile and interpreter.</td>
+</tr>
+<tr>
+<td><code>STRATA_NOTEBOOK_SHARED_ENV_TTL_DAYS</code></td>
+<td><code>7.0</code></td>
+<td>A shared environment no notebook links to is removed once unused this long, by an hourly sweep in the server or <code>strata env gc</code>. One a notebook links to is never removed.</td>
+</tr>
+<tr>
 <td><code>STRATA_PERSONAL_MODE_USER_HEADER</code></td>
 <td><code>None</code></td>
 <td>Request header carrying caller identity. When set in personal mode, notebooks are stamped with the caller's identity on create and <code>discover</code>/<code>delete</code> scope to it. Intended for proxy-fronted personal deployments.</td>
