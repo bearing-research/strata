@@ -461,6 +461,7 @@ jobs:
             tests/notebook/test_r_cells.py \
             tests/notebook/test_language_r_executor.py \
             tests/notebook/test_language_r_analyzer.py \
+            tests/notebook/test_shared_renv.py \
             -v --tb=short
 
   notebook-browser-smoke:

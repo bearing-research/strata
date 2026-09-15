@@ -747,6 +747,7 @@ async def run_rscript_command_streaming(
     timeout: int,
     display_name: str,
     on_update: Callable[[str, str, bool], Awaitable[None] | None] | None = None,
+    env: dict[str, str] | None = None,
 ) -> _RscriptCommandResult:
     """Run an Rscript ``-e`` snippet asynchronously with streamed stdout/stderr.
 
@@ -788,6 +789,7 @@ async def run_rscript_command_streaming(
             cwd=str(notebook_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, **env} if env else None,
         )
     except FileNotFoundError:
         return _RscriptCommandResult(
@@ -898,6 +900,53 @@ def _renv_lockfile_hash(notebook_dir: Path) -> str:
     return hasher.hexdigest()
 
 
+async def _run_renv_mutation(
+    notebook_dir: Path,
+    snippet: str,
+    *,
+    timeout: int,
+    display_name: str,
+    on_update: Callable[[str, str, bool], Awaitable[None] | None] | None,
+) -> _RscriptCommandResult:
+    """Run a snippet that installs into the notebook's R library.
+
+    With the shared backend the library is shared, so it is never installed
+    into: the notebook first moves onto a private library restored from the
+    package cache, and once the snippet has written ``renv.lock`` that library
+    is adopted under the new lock's key. A failed snippet links the notebook
+    back to the library for the lock it still has.
+    """
+    from strata.notebook.env_backend import shared_root
+
+    root = shared_root()
+    if root is None:
+        return await run_rscript_command_streaming(
+            notebook_dir, snippet, timeout=timeout, display_name=display_name, on_update=on_update
+        )
+    from strata.notebook.shared_env import (
+        adopt_r_library,
+        detach_r_library,
+        r_env,
+        restore_r_library,
+    )
+
+    if await asyncio.to_thread(detach_r_library, notebook_dir, root):
+        snippet = "renv::restore(prompt = FALSE)\n" + snippet
+    result = await run_rscript_command_streaming(
+        notebook_dir,
+        snippet,
+        timeout=timeout,
+        display_name=display_name,
+        on_update=on_update,
+        env=r_env(root),
+    )
+    if result.success:
+        await asyncio.to_thread(adopt_r_library, notebook_dir, root)
+    elif (notebook_dir / "renv.lock").exists():
+        await asyncio.to_thread(restore_r_library, notebook_dir, root, lambda env: False)
+    return result
+
+
 async def renv_init(
     notebook_dir: Path,
     *,
@@ -976,7 +1025,7 @@ async def _renv_init_locked(
             'renv::snapshot(type = "all", prompt = FALSE)',
         ]
     )
-    result = await run_rscript_command_streaming(
+    result = await _run_renv_mutation(
         notebook_dir,
         snippet,
         timeout=timeout,
@@ -1069,7 +1118,7 @@ async def _renv_add_locked(
     # already rejected anything but [A-Za-z0-9.] so escape concerns are moot —
     # ``ggplot2`` becomes ``renv::install("ggplot2"); renv::snapshot(type = "all")``.
     snippet = f'renv::install("{package}"); renv::snapshot(type = "all", prompt = FALSE)'
-    result = await run_rscript_command_streaming(
+    result = await _run_renv_mutation(
         notebook_dir,
         snippet,
         timeout=timeout,

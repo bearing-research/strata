@@ -20,6 +20,9 @@ removes a key no notebook links to once it has gone unused for
 ``notebook_shared_env_ttl_days``. A reference whose notebook now links
 elsewhere, or no longer exists, does not keep a key alive.
 
+R libraries are shared the same way, one per ``renv.lock`` (see the R section
+below).
+
 POSIX only: the link is a symlink.
 """
 
@@ -32,6 +35,7 @@ import shutil
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -352,6 +356,148 @@ class SharedEnvBackend:
         )
 
 
+# --- R: one renv library per renv.lock ------------------------------------
+#
+# The same store holds R libraries under ``r/``, one per key of the raw
+# ``renv.lock`` bytes and the exact R build, apart from the Python keys so a
+# change to one lock does not rebuild the other language's environment. A
+# notebook's ``renv/library`` is a link to its key's directory: every Rscript
+# (the harness, the warm pool, a restore) reads the library through renv's
+# project path with nothing to configure. renv's package cache
+# (``RENV_PATHS_CACHE``) lives on the same volume, under ``r/cache``, so a
+# library built for a changed lock links the packages it already has.
+#
+# A shared library is never changed in place either. Installing a package
+# first detaches the notebook onto a private library restored from the cache,
+# and once ``renv.lock`` is written the library is adopted under its new key.
+
+R_DIR = "r"
+R_CACHE = "cache"
+_R_PROBE = 'cat(R.version$version.string, R.version$platform, sep = " ")'
+
+
+def r_build() -> str | None:
+    """The R build a restore would use, or None without Rscript."""
+    rscript = shutil.which("Rscript")
+    if rscript is None:
+        return None
+    try:
+        return subprocess.run(
+            [rscript, "--vanilla", "-e", _R_PROBE],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+
+
+def r_key(notebook_dir: Path, build: str) -> str:
+    lock = hashlib.sha256((notebook_dir / "renv.lock").read_bytes()).hexdigest()
+    return hashlib.sha256(f"{lock}\n{build}".encode()).hexdigest()[:32]
+
+
+def r_env(root: Path) -> dict[str, str]:
+    """Environment for an Rscript that installs: the package cache in the store."""
+    return {"RENV_PATHS_CACHE": str(Path(root).resolve() / R_DIR / R_CACHE)}
+
+
+def _r_library(notebook_dir: Path) -> Path:
+    return notebook_dir / "renv" / "library"
+
+
+def _link_r_library(notebook_dir: Path, r_root: Path, key: str) -> None:
+    """Point the notebook's ``renv/library`` at *key*, and move its reference."""
+    library = _r_library(notebook_dir)
+    ref = _ref_name(notebook_dir)
+    if library.is_symlink():
+        previous = Path(os.readlink(library))
+        if previous.parent == r_root and previous.name != key:
+            (r_root / _REFS / previous.name / ref).unlink(missing_ok=True)
+    elif library.exists():
+        # A per-notebook library from before the switch, or a private one
+        # already adopted.
+        shutil.rmtree(library)
+    refs = r_root / _REFS / key
+    refs.mkdir(parents=True, exist_ok=True)
+    (refs / ref).write_text(str(notebook_dir.resolve()))
+    library.parent.mkdir(parents=True, exist_ok=True)
+    staged = library.parent / f"library.link-{uuid.uuid4().hex[:8]}"
+    staged.symlink_to(r_root / key, target_is_directory=True)
+    os.replace(staged, library)
+
+
+def restore_r_library(
+    notebook_dir: Path, root: Path, restore: Callable[[dict[str, str]], bool]
+) -> bool:
+    """Link the notebook to the library for its ``renv.lock``, restoring it once.
+
+    *restore* runs ``renv::restore()`` in the notebook with the environment it
+    is given; it writes through the link into the keyed directory. A second
+    notebook with the same lock and R build only links.
+    """
+    notebook_dir = Path(notebook_dir)
+    r_root = Path(root).resolve() / R_DIR
+    build = r_build()
+    if build is None:
+        return False
+    key = r_key(notebook_dir, build)
+    r_root.mkdir(parents=True, exist_ok=True)
+    with _key_lock(r_root, key):
+        target = r_root / key
+        if not (target / COMPLETE_MARKER).exists():
+            target.mkdir(exist_ok=True)
+            _link_r_library(notebook_dir, r_root, key)
+            if not restore(r_env(root)):
+                return False
+            (target / COMPLETE_MARKER).touch()
+        _link_r_library(notebook_dir, r_root, key)
+        os.utime(target / COMPLETE_MARKER)
+    return True
+
+
+def detach_r_library(notebook_dir: Path, root: Path) -> bool:
+    """Give the notebook a private, empty library in place of a shared one.
+
+    Returns whether it was linked, in which case the caller restores the lock
+    into the private library (from the cache) before changing it.
+    """
+    library = _r_library(Path(notebook_dir))
+    if not library.is_symlink():
+        return False
+    r_root = Path(root).resolve() / R_DIR
+    previous = Path(os.readlink(library))
+    if previous.parent == r_root:
+        (r_root / _REFS / previous.name / _ref_name(Path(notebook_dir))).unlink(missing_ok=True)
+    library.unlink()
+    library.mkdir()
+    return True
+
+
+def adopt_r_library(notebook_dir: Path, root: Path) -> bool:
+    """Move a private library under the key of the ``renv.lock`` it was built
+    for, or drop it for the one already there, and link the notebook to it."""
+    notebook_dir = Path(notebook_dir)
+    library = _r_library(notebook_dir)
+    build = r_build()
+    if build is None or not (notebook_dir / "renv.lock").exists():
+        return False
+    if library.is_symlink() or not library.is_dir():
+        return False
+    r_root = Path(root).resolve() / R_DIR
+    key = r_key(notebook_dir, build)
+    r_root.mkdir(parents=True, exist_ok=True)
+    with _key_lock(r_root, key):
+        target = r_root / key
+        if not (target / COMPLETE_MARKER).exists():
+            shutil.rmtree(target, ignore_errors=True)
+            shutil.move(str(library), str(target))
+            (target / COMPLETE_MARKER).touch()
+        _link_r_library(notebook_dir, r_root, key)
+    return True
+
+
 @dataclass
 class Collection:
     """What one sweep removed and what it kept because a notebook links to it."""
@@ -362,27 +508,40 @@ class Collection:
 
 def collect(root: Path, *, ttl_days: float, now: float | None = None) -> Collection:
     """Remove environments no notebook links to that have gone unused for
-    *ttl_days*. A key some notebook still links to is never removed."""
+    *ttl_days*. A key some notebook still links to is never removed.
+
+    Python environments and R libraries alike; an R key is reported as
+    ``r/<key>``.
+    """
     root = Path(root).resolve()
     now = time.time() if now is None else now
     result = Collection()
+    _collect(root, Path(".venv"), ttl_days, now, result, prefix="")
+    _collect(root / R_DIR, Path("renv") / "library", ttl_days, now, result, prefix=f"{R_DIR}/")
+    return result
+
+
+def _collect(
+    root: Path, link: Path, ttl_days: float, now: float, result: Collection, *, prefix: str
+) -> None:
     if not root.is_dir():
-        return result
+        return
+    skipped = {_REFS, R_DIR} if not prefix else {_REFS, R_CACHE}
     for env_dir in sorted(path for path in root.iterdir() if path.is_dir()):
-        if env_dir.name == _REFS or env_dir.name.startswith("."):
+        if env_dir.name in skipped or env_dir.name.startswith("."):
             continue
         key = env_dir.name
         with _key_lock(root, key):
             refs = root / _REFS / key
             live = False
             for ref in list(refs.iterdir()) if refs.is_dir() else []:
-                venv = Path(ref.read_text()) / ".venv"
+                venv = Path(ref.read_text()) / link
                 if venv.is_symlink() and Path(os.readlink(venv)) == env_dir:
                     live = True
                 else:
                     ref.unlink()
             if live:
-                result.referenced.append(key)
+                result.referenced.append(prefix + key)
                 continue
             marker = env_dir / COMPLETE_MARKER
             last_used = marker.stat().st_mtime if marker.exists() else env_dir.stat().st_mtime
@@ -391,5 +550,4 @@ def collect(root: Path, *, ttl_days: float, now: float | None = None) -> Collect
             shutil.rmtree(env_dir)
             if refs.is_dir():
                 shutil.rmtree(refs)
-            result.removed.append(key)
-    return result
+            result.removed.append(prefix + key)
