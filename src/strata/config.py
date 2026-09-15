@@ -499,6 +499,11 @@ class StrataConfig(BaseSettings):
     # for a suffix (``.internal``). Same rule as STRATA_WORKER_ALLOWED_HOSTS.
     notebook_fetch_allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
+    # How long the last person to change a notebook cell holds it: an edit by
+    # someone else inside the window is refused with ``cell_locked`` unless it
+    # is forced. 0 turns the soft lock off.
+    notebook_cell_lock_seconds: Annotated[float, Field(ge=0)] = 5.0
+
     # AI/LLM assistant settings (OpenAI-compatible API)
     ai_base_url: str | None = None
     ai_model: str | None = None

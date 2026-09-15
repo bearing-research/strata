@@ -675,6 +675,8 @@ class UpdateCellSourceRequest(BaseModel):
 
     source: str = Field(..., max_length=1_000_000)  # 1M characters (~1-4 MB UTF-8)
     author: str | None = Field(default=None, max_length=MAX_AUTHOR_LENGTH)
+    # Overwrite a cell someone else changed moments ago (see ``cell_locked``).
+    force: bool = False
 
 
 class UpdateCellTestsRequest(BaseModel):
@@ -2260,10 +2262,28 @@ async def update_cell_source(
         Updated cell state and DAG
     """
 
+    from strata.notebook.presence import lock_window_seconds
+    from strata.notebook.ws import broadcast_presence
+
+    author = resolve_author(req.author)
+    held_by = session.presence.holder(cell_id, author, lock_window_seconds())
+    if held_by is not None and not req.force:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "cell_locked",
+                "cell_id": cell_id,
+                "held_by": held_by,
+                "message": f"{held_by} changed cell {cell_id} moments ago; retry in a "
+                "few seconds, or send force to take it over",
+            },
+        )
+
     try:
         # Write to disk
-        author = resolve_author(req.author)
         write_cell(session.path, cell_id, req.source, author=author)
+        session.presence.record_edit(cell_id, author)
+        session.presence.api_edit(author, cell_id)
 
         # Update source in session
         cell_in_session = session.notebook_state.get_cell(cell_id)
@@ -2290,6 +2310,7 @@ async def update_cell_source(
         # Return cell and updated DAG — include all cells so the
         # frontend can sync staleness/status changes.
         await _broadcast_state(notebook_id, session)
+        await broadcast_presence(notebook_id, session)
         return {
             "cell": session.serialize_cell(cell),
             "dag": _format_dag(session),
