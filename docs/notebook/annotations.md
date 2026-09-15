@@ -532,7 +532,7 @@ Override the default `fingerprint` cache policy on a SQL cell.
 | `forever`         | Static salt; never invalidates from DB-side state.           |
 | `session`         | Session-unique salt; invalidates across sessions.            |
 | `ttl=<seconds>`   | `floor(now / ttl)` bucketed time-based salt.                 |
-| `snapshot`        | Probe MUST return a durable snapshot ID. Errors at execute time when the driver can't (SQLite/Postgres can't; Iceberg-via-engine can). |
+| `snapshot`        | The result is pinned to one queryable state of the warehouse. Snowflake and BigQuery only; refused on other drivers. |
 
 ```sql
 # @sql connection=warehouse
@@ -540,14 +540,37 @@ Override the default `fingerprint` cache policy on a SQL cell.
 SELECT * FROM dim_country
 ```
 
-`# @cache snapshot` requires `AdapterCapabilities.supports_snapshot = True`
-on the driver; otherwise the resolver fails fast before any connection is
-opened. **No shipped driver sets it today** -- DuckDB, SQLite, PostgreSQL,
-Snowflake and BigQuery all report `supports_snapshot = False` -- so
-`# @cache snapshot` is currently refused on every SQL cell. Snowflake and
-BigQuery both have time travel underneath and are where support would come
-from first. Per-driver freshness probe details are in
-[SQL Cells](cells.md#per-driver-freshness).
+`# @cache snapshot` needs a driver whose warehouse can query a table as it
+stood at a moment in time. **Snowflake** (`AT (TIMESTAMP => ...)`) and
+**BigQuery** (`FOR SYSTEM_TIME AS OF ...`) can. DuckDB, SQLite and PostgreSQL
+cannot, and the cell is refused before any connection is opened.
+
+```sql
+# @sql connection=warehouse
+# @cache snapshot
+SELECT region, SUM(amount) AS revenue FROM orders GROUP BY region
+```
+
+The first run reads the warehouse clock and runs the query with every table
+pinned to that moment. The timestamp is the cell's cache key and is recorded on
+its artifact. Running the cell again finds it there and hits the cache, even
+after new rows land, because the cell still names the same state. The
+timestamp moves only when the cell changes (its query, binds, connection or
+upstream inputs) or when you rerun it (`↻`), which pins to now.
+
+Time travel only reaches back so far, so each run reports how long its state
+stays queryable:
+
+```
+State as of 2026-09-15T10:05:00+00:00; queryable until 2026-09-16T10:05:00+00:00.
+```
+
+On Snowflake the horizon is the shortest `DATA_RETENTION_TIME_IN_DAYS` among
+the tables the query reads. On BigQuery it is 48 hours, the shortest time travel
+window a dataset can be configured with, since a dataset's own setting lives in
+a region-scoped view the connection does not name. After the horizon, a rerun
+works, but the recorded state can no longer be queried again. Per-driver
+freshness probe details are in [SQL Cells](cells.md#per-driver-freshness).
 
 ### `@name`
 

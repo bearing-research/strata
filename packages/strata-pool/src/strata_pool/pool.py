@@ -647,9 +647,12 @@ class Pool:
         worker.lease_owner = self.instance_id
 
         if worker.backend_id is not None:
+            # No lease renewal around the stop: it is one provider call, well
+            # inside the lease just claimed, and a renewal task would put an
+            # extra suspension between the machine stopping and its row going,
+            # where a caller could see a stopped machine still listed.
             try:
-                async with self._holding(worker_id=worker.id):
-                    await self.backend.stop(worker.backend_id)
+                await self.backend.stop(worker.backend_id)
             except Exception:
                 logger.exception(
                     "backend failed to stop a worker; it may still be billing",

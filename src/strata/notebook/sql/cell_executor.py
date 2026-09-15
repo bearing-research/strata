@@ -30,11 +30,12 @@ import io
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from strata.notebook.annotations import parse_annotations
 from strata.notebook.credentials import CredentialError, CredentialResolver, credential_identity
 from strata.notebook.provenance import derive_subkey
+from strata.notebook.sql.adapter import FreshnessToken
 from strata.notebook.sql.analyzer import analyze_sql_cell, rewrite_named_to_positional
 from strata.notebook.sql.bind import BindError, resolve_bind_params
 from strata.notebook.sql.provenance import (
@@ -44,6 +45,14 @@ from strata.notebook.sql.provenance import (
     resolve_cache_policy,
 )
 from strata.notebook.sql.registry import get_adapter
+from strata.notebook.sql.time_travel import (
+    PARAM_AT,
+    PARAM_BASIS,
+    PARAM_VALID_UNTIL,
+    SnapshotPin,
+    TimeTravelAdapter,
+    supports_time_travel,
+)
 
 if TYPE_CHECKING:
     from strata.notebook.models import ConnectionSpec
@@ -141,10 +150,41 @@ async def execute_sql_cell(
     except CredentialError as exc:
         return _error_result(f"connection {spec.name!r}: {exc}", start_time)
 
+    query_normalized = normalize_query(analysis.sql_body, adapter.sqlglot_dialect)
+    connection_id = _with_credential(
+        adapter.canonicalize_connection_id(runtime_spec, read_only=True), spec
+    )
+
     # ---- probes (optional) -----------------------------------------
     freshness = None
     schema_fp = None
-    if policy.freshness_required or policy.schema_required:
+    pin: SnapshotPin | None = None
+    basis: str | None = None
+    artifact_mgr = session.get_artifact_manager()
+    notebook_id = session.notebook_state.id
+    output_name = analysis.name
+    canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{output_name}"
+    if policy.snapshot_required and supports_time_travel(adapter):
+        # Everything that identifies the query except the moment it reads. A
+        # previous run of the same query left its timestamp on the artifact;
+        # reusing it is what makes a snapshot a snapshot.
+        basis = compute_sql_provenance_hash(
+            query_normalized=query_normalized,
+            bind_params=params,
+            connection_id=connection_id,
+            upstream_input_hashes=upstream_input_hashes,
+            cache_salt=policy.salt,
+            freshness_token=None,
+            schema_fingerprint=None,
+        )
+        pin = _previous_pin(artifact_mgr, canonical_id, basis) if use_cache else None
+        if pin is None:
+            try:
+                pin = _take_pin(adapter, runtime_spec, analysis.tables)
+            except Exception as exc:  # noqa: BLE001
+                return _error_result(f"snapshot probe failed: {exc}", start_time)
+        freshness = FreshnessToken(value=f"at:{pin.at}".encode(), is_snapshot=True)
+    elif policy.freshness_required or policy.schema_required:
         try:
             freshness, schema_fp = _run_probes(adapter, runtime_spec, analysis.tables, policy)
         except Exception as exc:  # noqa: BLE001
@@ -162,10 +202,6 @@ async def execute_sql_cell(
     # it for canonicalize too so credential-file principal
     # extraction can read the file when the path is relative on
     # disk.
-    query_normalized = normalize_query(analysis.sql_body, adapter.sqlglot_dialect)
-    connection_id = _with_credential(
-        adapter.canonicalize_connection_id(runtime_spec, read_only=True), spec
-    )
     provenance_hash = compute_sql_provenance_hash(
         query_normalized=query_normalized,
         bind_params=params,
@@ -175,20 +211,16 @@ async def execute_sql_cell(
         freshness_token=freshness,
         schema_fingerprint=schema_fp,
     )
-    output_name = analysis.name
     var_provenance = derive_subkey(provenance_hash, output_name)
 
     # ---- cache check -----------------------------------------------
-    artifact_mgr = session.get_artifact_manager()
-    notebook_id = session.notebook_state.id
-    canonical_id = f"nb_{notebook_id}_cell_{cell_id}_var_{output_name}"
 
     if use_cache:
         cached = artifact_mgr.find_cached(var_provenance)
         if cached is not None:
             canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
             if canonical is not None and canonical.provenance_hash == var_provenance:
-                return _cache_hit_result(
+                hit = _cache_hit_result(
                     artifact_mgr,
                     canonical,
                     output_name,
@@ -196,10 +228,13 @@ async def execute_sql_cell(
                     session=session,
                     cell_id=cell_id,
                 )
+                return _report_pin(hit, pin)
 
     # ---- execute query ---------------------------------------------
     try:
-        table = _execute_query(adapter, runtime_spec, analysis, params)
+        table = _execute_query(
+            adapter, runtime_spec, analysis, params, at=pin.at if pin is not None else None
+        )
     except Exception as exc:  # noqa: BLE001
         return _error_result(
             f"SQL execution failed: {_exception_message(exc)}",
@@ -215,6 +250,15 @@ async def execute_sql_cell(
         provenance_hash=var_provenance,
         source_hash=provenance_hash,  # cell-level provenance for staleness
         source=source,
+        extra_params=(
+            {
+                PARAM_BASIS: basis,
+                PARAM_AT: pin.at,
+                **({PARAM_VALID_UNTIL: pin.valid_until} if pin.valid_until else {}),
+            }
+            if pin is not None and basis is not None
+            else None
+        ),
     )
     uri = f"strata://artifact/{artifact.id}@v={artifact.version}"
 
@@ -236,26 +280,29 @@ async def execute_sql_cell(
     # Read path: query results can be huge, keep the default cap.
     # Write-path display passes its own larger cap below.
     display_output = _table_display(table)
-    return {
-        "success": True,
-        "outputs": {
-            output_name: {
-                "content_type": "arrow/ipc",
-                "bytes": len(blob),
-                "preview": display_output["preview"],
-            }
+    return _report_pin(
+        {
+            "success": True,
+            "outputs": {
+                output_name: {
+                    "content_type": "arrow/ipc",
+                    "bytes": len(blob),
+                    "preview": display_output["preview"],
+                }
+            },
+            "display_outputs": [display_output],
+            "display_output": display_output,
+            "stdout": "",
+            "stderr": "",
+            "error": None,
+            "cache_hit": False,
+            "duration_ms": int(duration_ms),
+            "execution_method": "sql",
+            "artifact_uri": uri,
+            "mutation_warnings": [],
         },
-        "display_outputs": [display_output],
-        "display_output": display_output,
-        "stdout": "",
-        "stderr": "",
-        "error": None,
-        "cache_hit": False,
-        "duration_ms": int(duration_ms),
-        "execution_method": "sql",
-        "artifact_uri": uri,
-        "mutation_warnings": [],
-    }
+        pin,
+    )
 
 
 # --- helpers --------------------------------------------------------------
@@ -874,14 +921,58 @@ def _run_probes(
     return freshness, schema_fp
 
 
+def _previous_pin(artifact_mgr: Any, canonical_id: str, basis: str) -> SnapshotPin | None:
+    """The timestamp the last run of this same query was pinned to, if any."""
+    canonical = artifact_mgr.artifact_store.get_latest_version(canonical_id)
+    if canonical is None or not canonical.transform_spec:
+        return None
+    try:
+        params = json.loads(canonical.transform_spec).get("params") or {}
+    except ValueError:
+        return None
+    if params.get(PARAM_BASIS) != basis or not params.get(PARAM_AT):
+        return None
+    return SnapshotPin(at=params[PARAM_AT], valid_until=params.get(PARAM_VALID_UNTIL))
+
+
+def _take_pin(adapter: Any, spec: ConnectionSpec, tables: list[Any]) -> SnapshotPin:
+    """A new pin at the warehouse's current time, with its retention horizon."""
+    conn = adapter.open(spec, read_only=True)
+    try:
+        at = adapter.snapshot_timestamp(conn)
+        return SnapshotPin(at=at, valid_until=adapter.retention_until(conn, tables, at))
+    finally:
+        _safely_close(conn)
+
+
+def _report_pin(result: dict[str, Any], pin: SnapshotPin | None) -> dict[str, Any]:
+    """Say which moment a snapshot cell shows, and how long it stays queryable."""
+    if pin is None:
+        return result
+    horizon = pin.valid_until or "unknown"
+    result["stdout"] = (
+        result.get("stdout") or ""
+    ) + f"State as of {pin.at}; queryable until {horizon}.\n"
+    result["snapshot_at"] = pin.at
+    result["snapshot_valid_until"] = pin.valid_until
+    return result
+
+
 def _execute_query(
     adapter: DriverAdapter,
     spec: ConnectionSpec,
     analysis: Any,
     params: tuple[Any, ...],
+    *,
+    at: str | None = None,
 ) -> Any:
-    """Open a read-only connection, run the rewritten query, fetch Arrow."""
+    """Open a read-only connection, run the rewritten query, fetch Arrow.
+
+    With *at*, every table is read as of that timestamp (a snapshot cell).
+    """
     rewritten = rewrite_named_to_positional(analysis.sql_body, adapter.sqlglot_dialect)
+    if at is not None:
+        rewritten = cast("TimeTravelAdapter", adapter).pin_query(rewritten, at)
     conn = adapter.open(spec, read_only=True)
     try:
         cursor = conn.cursor()

@@ -1,15 +1,19 @@
 """Iceberg snapshot resolution using pyiceberg."""
 
+import contextlib
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 from typing import Protocol
 
+import pyarrow as pa
 from pyiceberg.catalog import Catalog, load_catalog
 from pyiceberg.catalog.sql import SqlCatalog
-from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError
+from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError, ValidationError
 from pyiceberg.schema import Schema
 from pyiceberg.table import Table
+from pyiceberg.table.snapshots import Operation
 
 from strata.config import StrataConfig
 
@@ -323,3 +327,117 @@ class PyIcebergCatalog:
             return catalog.load_table(table_id)
         except NoSuchTableError:
             return catalog.create_table(table_id, schema)
+
+
+# Snapshot summary properties naming the artifact a snapshot was written from.
+SUMMARY_ARTIFACT_ID = "strata.artifact_id"
+SUMMARY_VERSION = "strata.version"
+SUMMARY_PROVENANCE = "strata.provenance_hash"
+SUMMARY_PROMOTED_BY = "strata.promoted_by"
+
+
+@dataclass(frozen=True)
+class TableWrite:
+    """What writing an artifact into a table produced."""
+
+    table: str
+    snapshot_id: int
+    created: bool
+
+
+class IcebergWriter:
+    """Writes artifacts into Iceberg tables as snapshots that name them.
+
+    The first write to a table appends; a later one overwrites, so the table's
+    current snapshot is always one artifact version and its history is the
+    sequence of versions written. A new version may add columns or widen a
+    type; a change Iceberg cannot evolve to is refused before anything is
+    written. Each snapshot's summary carries the artifact id, version,
+    provenance hash and who wrote it, and an alias is an Iceberg tag on the
+    snapshot of the version it names.
+    """
+
+    def __init__(self, catalogs: PyIcebergCatalog) -> None:
+        self._catalogs = catalogs
+
+    def _table_id(self, table_uri: str) -> tuple[Catalog, str]:
+        warehouse_path, table_id = self._catalogs.parse_table_uri(table_uri)
+        if "." not in table_id:
+            raise ValueError(f"{table_uri!r} names no namespace; expected <namespace>.<table>")
+        if warehouse_path and "://" not in warehouse_path:
+            # A local warehouse is where its SQLite catalog lives, so the first
+            # write to it has to be able to create it.
+            Path(warehouse_path).mkdir(parents=True, exist_ok=True)
+        return self._catalogs._get_catalog(warehouse_path), table_id
+
+    def write(
+        self,
+        table_uri: str,
+        data: pa.Table,
+        *,
+        artifact_id: str,
+        version: int,
+        provenance_hash: str,
+        promoted_by: str | None,
+        alias: str | None = None,
+    ) -> TableWrite:
+        catalog, table_id = self._table_id(table_uri)
+        properties = {
+            SUMMARY_ARTIFACT_ID: artifact_id,
+            SUMMARY_VERSION: str(version),
+            SUMMARY_PROVENANCE: provenance_hash,
+        }
+        if promoted_by:
+            properties[SUMMARY_PROMOTED_BY] = promoted_by
+        # Schema metadata is the writer's (pandas index layout, Strata's shape
+        # tags) and means nothing to a table.
+        data = data.replace_schema_metadata(None)
+
+        created = False
+        try:
+            table = catalog.load_table(table_id)
+        except NoSuchTableError:
+            with contextlib.suppress(NamespaceAlreadyExistsError):
+                catalog.create_namespace(table_id.rsplit(".", 1)[0])
+            table = catalog.create_table(table_id, schema=data.schema)
+            created = True
+
+        if table.current_snapshot() is None:
+            table.append(data, snapshot_properties=properties)
+        else:
+            try:
+                with table.update_schema() as update:
+                    update.union_by_name(data.schema)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"{artifact_id}@v={version} cannot be written to {table_uri}: "
+                    f"its schema is not compatible with the table's ({exc})"
+                ) from exc
+            table.overwrite(data, snapshot_properties=properties)
+
+        snapshot = table.current_snapshot()
+        assert snapshot is not None
+        if alias:
+            table.manage_snapshots().create_tag(snapshot.snapshot_id, alias).commit()
+        return TableWrite(table=table_uri, snapshot_id=snapshot.snapshot_id, created=created)
+
+    def tag(self, table_uri: str, alias: str, *, artifact_id: str, version: int) -> int | None:
+        """Point tag *alias* at the latest snapshot written from
+        ``artifact_id@v=version``; its id, or None if the table has none."""
+        catalog, table_id = self._table_id(table_uri)
+        table = catalog.load_table(table_id)
+        # An overwrite commits a delete and then an append, both carrying the
+        # properties; the append is the snapshot that holds the data.
+        written = [
+            snapshot
+            for snapshot in table.snapshots()
+            if snapshot.summary is not None
+            and snapshot.summary.operation == Operation.APPEND
+            and snapshot.summary.get(SUMMARY_ARTIFACT_ID) == artifact_id
+            and snapshot.summary.get(SUMMARY_VERSION) == str(version)
+        ]
+        if not written:
+            return None
+        snapshot_id = max(written, key=lambda s: s.timestamp_ms).snapshot_id
+        table.manage_snapshots().create_tag(snapshot_id, alias).commit()
+        return snapshot_id
