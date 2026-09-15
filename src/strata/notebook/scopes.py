@@ -143,3 +143,66 @@ def required_scope_for_route(method: str, path: str) -> str:
     if (method, path) in _WRITE_ROUTES:
         return NOTEBOOK_SCOPE_WRITE
     return NOTEBOOK_SCOPE_EXECUTE
+
+
+# --- MCP tools ---------------------------------------------------------------
+#
+# The same three scopes, per tool. Reading a notebook, its lineage or what a
+# publish would expose is read; authoring cells, notes, worker registrations and
+# promotion is write; running cells or tests, changing dependencies and
+# connecting an SSH worker is execute, as is any tool nobody classified.
+# Publishing mints a public link, the ``artifacts:publish`` scope the REST
+# publish route requires.
+_READ_TOOLS = frozenset(
+    {
+        "list_notebooks",
+        "get_notebook",
+        "get_cell",
+        "get_variable",
+        "dag",
+        "status",
+        "list_workers",
+        "lineage",
+        "publish_preflight",
+    }
+)
+
+_WRITE_TOOLS = frozenset(
+    {
+        "add_cell",
+        "edit_cell",
+        "remove_cell",
+        "move_cell",
+        "note",
+        "add_worker",
+        "set_default_worker",
+        "remove_worker",
+        "disconnect_ssh_worker",
+        "promote",
+    }
+)
+
+_EXECUTE_TOOLS = frozenset(
+    {
+        "run_cell",
+        "run_tests",
+        "run_snippet",
+        "add_dependency",
+        "remove_dependency",
+        "connect_ssh_worker",
+    }
+)
+
+_OTHER_TOOL_SCOPES = {"publish": "artifacts:publish"}
+
+CLASSIFIED_TOOLS = _READ_TOOLS | _WRITE_TOOLS | _EXECUTE_TOOLS | set(_OTHER_TOOL_SCOPES)
+"""Every tool the table was written against; a test holds the MCP server to it."""
+
+
+def required_scope_for_tool(name: str) -> str:
+    """Return the scope an MCP tool requires (fail-closed default)."""
+    if name in _READ_TOOLS:
+        return NOTEBOOK_SCOPE_READ
+    if name in _WRITE_TOOLS:
+        return NOTEBOOK_SCOPE_WRITE
+    return _OTHER_TOOL_SCOPES.get(name, NOTEBOOK_SCOPE_EXECUTE)

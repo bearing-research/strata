@@ -1041,15 +1041,15 @@ class StrataConfig(BaseSettings):
                     "artifacts and require an artifact store; set artifact_dir)"
                 )
 
-            # The MCP endpoint exposes the warm-session read/run/author surface
-            # with no per-request auth — safe only behind a loopback personal
-            # deployment. In service mode it would hand every reachable client
-            # full notebook control, so refuse the combination outright.
-            if self.mcp_enabled:
+            # The MCP endpoint exposes the warm-session read/run/author surface.
+            # With principal auth each tool call runs as its caller and is
+            # checked against the notebook scopes; without it, it would hand
+            # every reachable client full notebook control.
+            if self.mcp_enabled and not self.principal_auth_enabled:
                 conflicts.append(
-                    "mcp_enabled=True with deployment_mode='service' (the MCP "
-                    "endpoint has no per-request auth and grants full session "
-                    "control; it is personal-mode only)"
+                    "mcp_enabled=True with deployment_mode='service' and no principal "
+                    "auth (the MCP endpoint grants session control and would have no "
+                    "caller to check; set auth_mode='trusted_proxy' or 'api_key')"
                 )
 
             if conflicts:
