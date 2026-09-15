@@ -44,6 +44,7 @@ from strata.notebook.python_versions import (
     read_requested_python_minor,
 )
 from strata.notebook.quiesce import NotebookQuiesced
+from strata.notebook.scopes import required_scope_for_route
 from strata.notebook.session import NotebookSession, SessionManager
 from strata.notebook.timing import NotebookTimingRecorder
 from strata.notebook.workers import (
@@ -79,7 +80,40 @@ _session_manager = SessionManager()
 # lives here for the server's lifetime and is torn down in the lifespan.
 _worker_supervisor: RemoteWorkerSupervisor | None = None
 
-router = APIRouter(prefix="/v1/notebooks", tags=["notebooks"])
+
+def _require_notebook_scope(request: Request) -> None:
+    """Router-level gate: the caller must hold the scope this route needs.
+
+    The same ``notebook:read`` / ``notebook:write`` / ``notebook:execute`` table
+    the WebSocket frames are checked against (``strata.notebook.scopes``), so a
+    principal that cannot run a cell over the socket cannot run it over REST
+    either. Keyed on the matched route's path template rather than a decorator
+    on each route, so a route added later is covered without anyone remembering
+    to gate it. No principal auth means no principal to check, as with
+    ``require_scope``.
+    """
+    from strata.auth import get_principal
+    from strata.server import get_state
+
+    try:
+        config = get_state().config
+    except RuntimeError:
+        return
+    if not getattr(config, "principal_auth_enabled", False):
+        return
+    route = request.scope.get("route")
+    path = getattr(route, "path", request.url.path)
+    required = required_scope_for_route(request.method, path)
+    principal = get_principal()
+    if principal is None or not principal.has_scope(required):
+        raise HTTPException(status_code=403, detail=f"This route requires the {required} scope")
+
+
+router = APIRouter(
+    prefix="/v1/notebooks",
+    tags=["notebooks"],
+    dependencies=[Depends(_require_notebook_scope)],
+)
 
 
 def get_session_manager() -> SessionManager:
@@ -1460,7 +1494,11 @@ async def release_notebook(notebook_id: str, session: SessionDep) -> dict:
     return {"path": str(root), "released": quiesce.release(root)}
 
 
-projects_router = APIRouter(prefix="/v1/projects", tags=["notebooks"])
+projects_router = APIRouter(
+    prefix="/v1/projects",
+    tags=["notebooks"],
+    dependencies=[Depends(_require_notebook_scope)],
+)
 
 
 def _project_root(path: str, request: Request) -> tuple[Path, list[NotebookSession]]:
